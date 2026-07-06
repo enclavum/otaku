@@ -1,0 +1,76 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "otaku"
+version = "0.1.1"
+description = "A terminal chat client for local LLMs — Ollama, LM Studio, MLX, and any OpenAI-compatible server."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "enclavum", email = "293312193+enclavum@users.noreply.github.com" }]
+requires-python = ">=3.11"
+keywords = ["llm", "ollama", "lm-studio", "mlx", "terminal", "tui", "cli", "chat", "local"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "click>=8.1,<9.0",
+    "cryptography>=43,<50.0",
+    "httpx>=0.24,<1.0",
+    "prompt_toolkit>=3.0.30,<4.0",
+    "psutil>=5.9,<8.0",
+    "pygments>=2.0,<3.0",
+    "typer>=0.12,<1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "mypy>=2.1.0",
+    "pre-commit>=4.6.0",
+    "pytest>=8.0",
+    "respx>=0.21",
+    "ruff>=0.15.17",
+]
+
+[project.urls]
+Homepage = "https://github.com/enclavum/otaku"
+Repository = "https://github.com/enclavum/otaku"
+Issues = "https://github.com/enclavum/otaku/issues"
+
+[project.scripts]
+otaku = "otaku.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["otaku"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+module = ["pygments.*"]
+ignore_missing_imports = true
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "N", "RUF", "SIM", "UP", "W"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+build/
+dist/
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.idea/
+.claude/
+# private project notes — kept local, never committed
+CLAUDE.md
+.DS_Store
+notes/

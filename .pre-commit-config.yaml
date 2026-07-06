@@ -1,0 +1,46 @@
+repos:
+  # Lint + format — keep rev in sync with the `ruff` dev dependency
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.17
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  # General hygiene
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: debug-statements
+      - id: detect-private-key
+      - id: check-added-large-files
+        args: [--maxkb=512]
+
+  # Local: type-check against installed deps, plus project guards
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: mypy otaku
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      - id: pytest
+        name: pytest
+        entry: pytest
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      - id: no-personal-paths
+        name: no /Users/ or /home/ paths in source
+        description: catch absolute home-dir paths leaking into committed files
+        entry: bash -c '! git diff --cached --name-only --diff-filter=ACM | xargs -I{} grep -Hn "/Users/\|/home/" "{}" 2>/dev/null'
+        language: system
+        pass_filenames: false
