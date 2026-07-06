@@ -32,6 +32,7 @@ class CliHarness:
         self.defaults = Settings()
         self.model_defaults: dict[str, Settings] = {}
         self.no_record_default = False
+        self.verbose_default = False
         self.create_summaries_default = True
         self.last_state = None
 
@@ -52,6 +53,7 @@ def harness(monkeypatch: pytest.MonkeyPatch, tmp_path) -> CliHarness:
             defaults=h.defaults,
             model_defaults=h.model_defaults,
             no_record=h.no_record_default,
+            verbose=h.verbose_default,
             create_summaries=h.create_summaries_default,
         )
 
@@ -81,9 +83,11 @@ def _ollama(**kw) -> FakeClient:
 
 class TestVersionHelp:
     def test_version(self) -> None:
+        from otaku import __version__
+
         result = runner.invoke(cli.app, ["--version"])
         assert result.exit_code == 0
-        assert "otaku 0.1.1" in result.output
+        assert f"otaku {__version__}" in result.output
 
     def test_help_lists_commands(self) -> None:
         result = runner.invoke(cli.app, ["--help"])
@@ -346,6 +350,13 @@ class TestConfigDefaults:
         assert st.think == "high"
         assert st.params == {"temperature": 0.2}
 
+    def test_verbose_default_applied_at_launch(self, harness: CliHarness) -> None:
+        harness.setup({"ollama": _ollama(models=["llama3"])})
+        harness.verbose_default = True
+        runner.invoke(cli.app, ["ollama/llama3"])
+        assert harness.last_state is not None
+        assert harness.last_state.verbose is True
+
     def test_per_model_override_wins(self, harness: CliHarness) -> None:
         harness.setup({"ollama": _ollama(models=["llama3"])})
         harness.defaults = Settings(think="high")
@@ -402,6 +413,30 @@ class TestBareInvocation:
         result = runner.invoke(cli.app, [])
         assert result.exit_code == 0
         assert harness.repl_calls == []
+
+    def test_crypto_unlocked_once_before_picker(
+        self, harness: CliHarness, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Interactive KEK ceremonies (passphrase, slow `command` providers)
+        # must run up front, not after the model is chosen — and only once.
+        harness.setup({"ollama": _ollama(models=["llama3"])})
+        harness.picker_result = "ollama/llama3"
+        order: list[str] = []
+        real_unlock = cli.crypto.unlock
+
+        def spy_unlock(enc):
+            order.append("unlock")
+            return real_unlock(enc)
+
+        def spy_pick(providers, initial_spec=None):
+            order.append("picker")
+            return harness.picker_result
+
+        monkeypatch.setattr(cli.crypto, "unlock", spy_unlock)
+        monkeypatch.setattr(model_mod, "pick_model", spy_pick)
+        result = runner.invoke(cli.app, [])
+        assert result.exit_code == 0
+        assert order == ["unlock", "picker"]
 
 
 class TestResolveSpecAmbiguity:

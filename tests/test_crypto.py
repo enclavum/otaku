@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import re
+from pathlib import Path
 
 import pytest
 
@@ -113,10 +114,12 @@ class TestUnlockFirstRun:
         with pytest.raises(CryptoError, match="unknown encryption provider"):
             unlock(Encryption(provider="bogus"))
 
-    def test_removes_legacy_keyfile(self) -> None:
-        crypto.LEGACY_KEYFILE.write_bytes(b"old key")
+    def test_leaves_legacy_keyfile_alone(self) -> None:
+        # Pre-envelope key material: dead to the app, but never deleted.
+        legacy = crypto.KEYSTORE_PATH.parent / "history.key"
+        legacy.write_bytes(b"old key")
         unlock(Encryption(provider="disk"))
-        assert not crypto.LEGACY_KEYFILE.exists()
+        assert legacy.read_bytes() == b"old key"
 
 
 class TestUnlockReopen:
@@ -131,6 +134,58 @@ class TestUnlockReopen:
         ct, nonce = c1.seal(b"payload")
         c2 = unlock(Encryption(provider="keychain"))
         assert c2.unseal(ct, nonce) == b"payload"
+
+
+class TestProvisionNeverOverwrites:
+    def test_reprovision_reuses_keychain_kek(self) -> None:
+        # Losing keys.json and relaunching must not burn the KEK: a restored
+        # backup of keys.json has to keep unlocking the original DEK.
+        c1 = unlock(Encryption(provider="keychain"))
+        ct, nonce = c1.seal(b"survives re-provisioning")
+        backup = crypto.KEYSTORE_PATH.read_bytes()
+        crypto.KEYSTORE_PATH.unlink()
+        unlock(Encryption(provider="keychain"))  # re-provisions; must reuse the KEK
+        crypto.KEYSTORE_PATH.unlink()
+        crypto.KEYSTORE_PATH.write_bytes(backup)
+        c2 = unlock(Encryption(provider="keychain"))
+        assert c2.unseal(ct, nonce) == b"survives re-provisioning"
+
+    def test_invalid_existing_keychain_item_refused(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(crypto, "_keychain_get", lambda: b"short")
+        with pytest.raises(CryptoError, match="refusing to overwrite"):
+            unlock(Encryption(provider="keychain"))
+
+    def test_command_provision_reuses_retrievable_kek(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        b64 = base64.b64encode(b"K" * 32).decode()
+        enc = Encryption(provider="command", retrieve_command=f"printf %s {b64}")
+        c1 = unlock(enc)
+        assert "store this key" not in capsys.readouterr().err
+        ct, nonce = c1.seal(b"cmd-data")
+        c2 = unlock(enc)
+        assert c2.unseal(ct, nonce) == b"cmd-data"
+
+    def test_command_provision_mints_when_command_has_no_key_yet(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        unlock(Encryption(provider="command", retrieve_command="false"))
+        assert "store this key" in capsys.readouterr().err
+
+    def test_write_keystore_refuses_overwrite(self) -> None:
+        crypto.KEYSTORE_PATH.write_text("{}")
+        with pytest.raises(CryptoError, match="refusing to overwrite"):
+            crypto._write_keystore({"version": 1, "slots": []})
+        assert crypto.KEYSTORE_PATH.read_text() == "{}"
+
+
+class TestKeychainService:
+    def test_default_dir_keeps_legacy_name(self) -> None:
+        assert crypto._kc_service(Path.home() / ".otaku") == "otaku"
+
+    def test_custom_dir_gets_own_item(self, tmp_path: Path) -> None:
+        alt = tmp_path / "alt"
+        assert crypto._kc_service(alt) == f"otaku:{alt}"
 
 
 class TestPassphraseProvider:
@@ -244,11 +299,31 @@ class TestMultiSlot:
 
     def test_all_slots_fail_raises(self) -> None:
         self._write_keystore([{"provider": "keychain", **_wrap_dek(b"D" * 32, b"Z" * 32)}])
-        # in-memory keychain is empty → keychain_get returns None → CryptoError
-        with pytest.raises(CryptoError, match="could not unlock"):
+        # in-memory keychain is empty → keychain_get returns None → CryptoError.
+        # A single slot reports its reason bare — no provider label, no
+        # "could not unlock" headline (the CLI adds that).
+        with pytest.raises(CryptoError, match=r"^key not found in OS keychain$"):
             unlock(Encryption(provider="keychain"))
 
     def test_unknown_provider_in_slot_raises(self) -> None:
         self._write_keystore([{"provider": "martian", **_wrap_dek(b"D" * 32, b"Z" * 32)}])
-        with pytest.raises(CryptoError, match="could not unlock"):
+        with pytest.raises(CryptoError, match="unknown provider in keystore"):
             unlock(Encryption(provider="martian"))
+
+    def test_key_mismatch_gets_spelled_out(self) -> None:
+        # InvalidTag stringifies to "" — the message must explain the mismatch.
+        crypto._keychain_put(b"A" * 32)  # keychain holds a key…
+        self._write_keystore([{"provider": "keychain", **_wrap_dek(b"D" * 32, b"Z" * 32)}])
+        with pytest.raises(CryptoError, match="wrong or replaced KEK"):
+            unlock(Encryption(provider="keychain"))
+
+    def test_multi_slot_failures_are_labelled_per_provider(self) -> None:
+        crypto._keychain_put(b"A" * 32)
+        self._write_keystore(
+            [
+                {"provider": "keychain", **_wrap_dek(b"D" * 32, b"Z" * 32)},
+                {"provider": "martian", **_wrap_dek(b"D" * 32, b"Z" * 32)},
+            ]
+        )
+        with pytest.raises(CryptoError, match=r"keychain: .*; martian: "):
+            unlock(Encryption(provider="keychain"))

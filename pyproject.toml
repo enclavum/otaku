@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "otaku"
-version = "0.1.1"
+version = "0.1.2"
 description = "A terminal chat client for local LLMs — Ollama, LM Studio, MLX, and any OpenAI-compatible server."
 readme = "README.md"
 license = "MIT"

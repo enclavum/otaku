@@ -10,6 +10,7 @@ from uuid import UUID, uuid4
 
 from cryptography.exceptions import InvalidTag
 
+from otaku.config import CONFIG_DIR
 from otaku.storage.crypto import Cipher
 
 # Hoisted out of the `except (...)` clause: ruff format strips the parens,
@@ -41,6 +42,15 @@ CREATE TABLE IF NOT EXISTS messages (
 
 CREATE INDEX IF NOT EXISTS idx_conversations_updated_at ON conversations (updated_at DESC);
 """
+
+
+def _default_url(config_dir: Path) -> str:
+    """Default history.db location inside `config_dir`, rendered ~-relative
+    when under home so the first-run config.toml stays portable."""
+    path = config_dir / "history.db"
+    if path.is_relative_to(Path.home()):
+        path = Path("~") / path.relative_to(Path.home())
+    return f"sqlite:///{path}"
 
 
 def _db_path(database_url: str) -> Path:
@@ -80,8 +90,9 @@ class Store:
     """Persistence handle. Single sqlite3 connection in WAL mode."""
 
     # Default database config — owned by the storage layer so config.py can
-    # assemble the first-run config without hardcoding the backend.
-    DEFAULT_URL = "sqlite:///~/.otaku/history.db"
+    # assemble the first-run config without hardcoding the backend. Derived
+    # from CONFIG_DIR so OTAKU_CONFIG_DIR relocates the DB too.
+    DEFAULT_URL = _default_url(CONFIG_DIR)
     DEFAULT_CONFIG = f'[database]\nurl = "{DEFAULT_URL}"'
 
     read_only: bool = False  # `ReadOnlyStore` flips this; callers check it

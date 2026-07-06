@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -149,6 +153,60 @@ class TestConfigDir:
         monkeypatch.setenv(config.CONFIG_DIR_ENV, "")
         assert config._default_config_dir() == Path.home() / ".otaku"
 
+    def test_custom_dir_is_fully_isolated(self, tmp_path: Path) -> None:
+        """End-to-end in a child process (the path constants are computed at
+        import): with OTAKU_CONFIG_DIR set, the default DB, the keystore, and
+        the keychain item name must all land inside the custom dir, and
+        nothing may be created under ~/.otaku."""
+        home = tmp_path / "child_home"  # the fixture's "home" pre-creates .otaku
+        home.mkdir()
+        alt = tmp_path / "alt"
+        env = os.environ.copy()
+        env["HOME"] = str(home)
+        env[config.CONFIG_DIR_ENV] = str(alt)
+        env.pop(config.DATABASE_URL_ENV, None)
+        script = (
+            "import json\n"
+            "from pathlib import Path\n"
+            "from otaku import config\n"
+            "from otaku.storage import crypto\n"
+            "from otaku.storage.store import _db_path\n"
+            "cfg = config.load()\n"
+            "print(json.dumps({\n"
+            "    'db': str(_db_path(cfg.database_url)),\n"
+            "    'service': crypto._KC_SERVICE,\n"
+            "    'keystore': str(crypto.KEYSTORE_PATH),\n"
+            "    'home_otaku_exists': (Path.home() / '.otaku').exists(),\n"
+            "}))\n"
+        )
+        r = subprocess.run([sys.executable, "-c", script], env=env, capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr
+        out = json.loads(r.stdout)
+        assert out["db"] == str(alt / "history.db")
+        assert out["service"] == f"otaku:{alt}"
+        assert out["keystore"] == str(alt / "keys.json")
+        assert out["home_otaku_exists"] is False
+
+
+class TestRememberRefusesCorruptFile:
+    def test_corrupt_json_raises_and_preserves_file(self) -> None:
+        config.MODEL_DEFAULTS_PATH.write_text("{not json")
+        with pytest.raises(ValueError, match="unreadable"):
+            config.remember_model_settings("m", config.Settings(think="low"))
+        assert config.MODEL_DEFAULTS_PATH.read_text() == "{not json"
+
+    def test_non_object_json_raises_and_preserves_file(self) -> None:
+        config.MODEL_DEFAULTS_PATH.write_text("[1, 2]")
+        with pytest.raises(ValueError, match="not a JSON object"):
+            config.remember_model_settings("m", config.Settings(think="low"))
+        assert config.MODEL_DEFAULTS_PATH.read_text() == "[1, 2]"
+
+    def test_write_leaves_no_tmp_file(self) -> None:
+        config.remember_model_settings("m", config.Settings(think="low"))
+        leftovers = list(config.MODEL_DEFAULTS_PATH.parent.glob("*.tmp"))
+        assert leftovers == []
+        assert "m" in config._read_model_defaults()
+
 
 class TestDatabaseUrl:
     def test_env_var_overrides_file(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -183,12 +241,13 @@ class TestDefaults:
         p = tmp_path / "c.toml"
         p.write_text(
             '[providers.x]\nurl = "http://x/v1"\n'
-            '[defaults]\nsystem = "Be brief."\nthink = "medium"\nno_record = true\n'
+            '[defaults]\nsystem = "Be brief."\nthink = "medium"\nverbose = true\nno_record = true\n'
             "[defaults.parameters]\ntemperature = 0.3\n"
         )
         cfg = config.load(p)
         assert cfg.defaults.system == "Be brief."
         assert cfg.defaults.think == "medium"
+        assert cfg.verbose is True  # Config-level, like no_record — not part of Settings
         assert cfg.defaults.parameters == {"temperature": 0.3}
         assert cfg.no_record is True
 
@@ -198,6 +257,7 @@ class TestDefaults:
         cfg = config.load(p)
         assert cfg.defaults == config.Settings()
         assert cfg.no_record is False
+        assert cfg.verbose is False
         assert cfg.model_defaults == {}
 
     def test_defaults_not_a_table_raises(self, tmp_path: Path) -> None:

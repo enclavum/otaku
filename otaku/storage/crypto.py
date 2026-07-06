@@ -16,6 +16,10 @@ by a Key Encryption Key (KEK) and the wrapped form lives in
 
 Several slots can wrap the same DEK, so providers coexist and swapping one is a
 re-wrap with no data re-encryption.
+
+Provisioning (a missing ``keys.json``) is strictly additive: a KEK the provider
+already holds is reused, and nothing — keychain item or keystore — is ever
+overwritten, so a first run can never destroy existing keys.
 """
 
 from __future__ import annotations
@@ -29,6 +33,7 @@ import secrets
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any
 
 from cryptography.exceptions import InvalidTag
@@ -40,12 +45,20 @@ KEY_LEN = 32
 
 KEYSTORE_PATH = CONFIG_DIR / "keys.json"
 DISK_KEK_PATH = CONFIG_DIR / "kek.key"
-LEGACY_KEYFILE = CONFIG_DIR / "history.key"  # pre-envelope; ~/.otaku only
 
 # scrypt cost (~tens of ms, ~32 MB to derive).
 _SCRYPT = {"n": 2**15, "r": 8, "p": 1}
 
-_KC_SERVICE = "otaku"
+
+def _kc_service(config_dir: Path) -> str:
+    """Keychain service name for `config_dir`. The default dir keeps the
+    legacy name (existing installs keep unlocking); a custom OTAKU_CONFIG_DIR
+    gets its own item so parallel setups never share — or, worse, clobber via
+    `_keychain_put`'s update-in-place — each other's KEK."""
+    return "otaku" if config_dir == Path.home() / ".otaku" else f"otaku:{config_dir}"
+
+
+_KC_SERVICE = _kc_service(CONFIG_DIR)
 _KC_ACCOUNT = "kek"
 
 # Default config section, owned here so config.default_config() can assemble it.
@@ -103,7 +116,11 @@ def _read_keystore() -> dict[str, Any] | None:
 def _write_keystore(keystore: dict[str, Any]) -> None:
     KEYSTORE_PATH.parent.mkdir(parents=True, exist_ok=True)
     os.chmod(KEYSTORE_PATH.parent, 0o700)
-    KEYSTORE_PATH.write_text(json.dumps(keystore, indent=2) + "\n")
+    try:
+        with KEYSTORE_PATH.open("x") as f:
+            f.write(json.dumps(keystore, indent=2) + "\n")
+    except FileExistsError as e:
+        raise CryptoError(f"{KEYSTORE_PATH} already exists; refusing to overwrite") from e
     os.chmod(KEYSTORE_PATH, 0o600)
 
 
@@ -137,11 +154,11 @@ def _keychain_put(kek: bytes) -> None:
     if sys.platform == "darwin":
         # `security` only takes the secret as a -w argv arg (visible briefly in
         # the user's own `ps`); acceptable for a same-user, momentary store.
+        # No -U: add-only, so an existing item can never be updated in place.
         r = subprocess.run(
             [
                 "security",
                 "add-generic-password",
-                "-U",
                 "-s",
                 _KC_SERVICE,
                 "-a",
@@ -157,7 +174,7 @@ def _keychain_put(kek: bytes) -> None:
             [
                 "secret-tool",
                 "store",
-                "--label=otaku",
+                f"--label={_KC_SERVICE}",
                 "service",
                 _KC_SERVICE,
                 "account",
@@ -219,7 +236,9 @@ def _command_get(retrieve_command: str) -> bytes:
 
 
 def _provision(enc: Encryption) -> dict[str, Any]:
-    """Create a fresh slot (provider params + KEK) for first-run setup. Returns
+    """Create a slot (provider params + KEK) for first-run setup. Strictly
+    additive: a KEK the provider already holds is reused (so a restored
+    keys.json backup keeps unlocking), and nothing is ever overwritten. Returns
     the slot dict augmented with an internal ``_kek`` for the caller to wrap with."""
     provider = enc.provider
     if provider == "keychain":
@@ -230,8 +249,15 @@ def _provision(enc: Encryption) -> dict[str, Any]:
                 file=sys.stderr,
             )
             return {"provider": "disk", "_kek": _disk_get_or_create()}
-        kek = secrets.token_bytes(KEY_LEN)
-        _keychain_put(kek)
+        kek = _keychain_get()
+        if kek is not None and len(kek) != KEY_LEN:
+            raise CryptoError(
+                f"keychain item {_KC_SERVICE!r} holds {len(kek)} bytes, want {KEY_LEN}; "
+                "refusing to overwrite it"
+            )
+        if kek is None:
+            kek = secrets.token_bytes(KEY_LEN)
+            _keychain_put(kek)
         return {"provider": "keychain", "_kek": kek}
     if provider == "disk":
         return {"provider": "disk", "_kek": _disk_get_or_create()}
@@ -245,6 +271,11 @@ def _provision(enc: Encryption) -> dict[str, Any]:
             "_kek": kek,
         }
     if provider == "command":
+        if enc.retrieve_command:
+            try:
+                return {"provider": "command", "_kek": _command_get(enc.retrieve_command)}
+            except CryptoError:
+                pass  # nothing stored yet — a true first run; mint below
         kek = secrets.token_bytes(KEY_LEN)
         print(
             "otaku: store this key where your retrieve_command will read it "
@@ -284,18 +315,22 @@ def unlock(enc: Encryption) -> Cipher:
         kek = slot.pop("_kek")
         slot.update(_wrap_dek(dek, kek))
         _write_keystore({"version": 1, "slots": [slot]})
-        LEGACY_KEYFILE.unlink(missing_ok=True)  # ~/.otaku only
         return Cipher(dek)
 
     slots: list[dict[str, Any]] = keystore.get("slots", [])
     # Try the configured provider's slot first, then any other.
     slots.sort(key=lambda s: 0 if s.get("provider") == enc.provider else 1)
+    # The message carries only the failure details — callers (cli._unlock_cipher)
+    # add the "could not unlock" headline, so repeating it here would stutter.
+    # Slot errors get a provider label only when there are several to tell apart.
     errors: list[str] = []
     for slot in slots:
         try:
             dek = _unwrap_dek(slot, _kek_for_slot(slot, enc))
         except (CryptoError, InvalidTag, ValueError) as e:
-            errors.append(f"{slot.get('provider')}: {e}")
+            # InvalidTag stringifies to "" — spell out what it means instead.
+            reason = str(e) or "retrieved key does not unwrap this keystore (wrong or replaced KEK)"
+            errors.append(f"{slot.get('provider')}: {reason}" if len(slots) > 1 else reason)
             continue
         return Cipher(dek)
-    raise CryptoError("could not unlock encryption key (" + "; ".join(errors) + ")")
+    raise CryptoError("; ".join(errors) or "keystore has no slots")

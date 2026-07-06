@@ -208,10 +208,11 @@ class TestListLabel:
     def test_summary_only(self) -> None:
         assert _list_label(_conv(summary="S")) == "S"
 
-    def test_placeholder_when_neither(self) -> None:
-        # first_user is not used as a fallback here — placeholder when no
-        # title and no summary
-        assert _list_label(_conv(first_user="a question")) == "(untitled)"
+    def test_first_prompt_when_no_title_or_summary(self) -> None:
+        assert _list_label(_conv(first_user="a question")) == "a question"
+
+    def test_placeholder_when_nothing_at_all(self) -> None:
+        assert _list_label(_conv()) == "(untitled)"
 
 
 class TestTitleRendering:
@@ -223,9 +224,16 @@ class TestTitleRendering:
         text = "".join(t for _, t in picker._items_text())
         assert "MyTitle" in text
 
-    def test_items_row_placeholder(self, store: Store) -> None:
+    def test_items_row_falls_back_to_first_prompt(self, store: Store) -> None:
         cid = store.create_conversation("ollama/llama3")
         store.snapshot_messages(cid, [Message("user", "hello")])  # no title, no summary
+        picker = HistoryPicker(store, store.list_conversations())
+        text = "".join(t for _, t in picker._items_text())
+        assert "hello" in text
+
+    def test_items_row_placeholder(self, store: Store) -> None:
+        cid = store.create_conversation("ollama/llama3")
+        store.snapshot_messages(cid, [Message("system", "be brief")])  # nothing to label with
         picker = HistoryPicker(store, store.list_conversations())
         text = "".join(t for _, t in picker._items_text())
         assert "(untitled)" in text

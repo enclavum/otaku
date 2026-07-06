@@ -2,9 +2,19 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from otaku.text import flatten, format_context, format_size, truncate
+from otaku.text import flatten, format_context, format_size, pretty_path, truncate
+
+
+class TestPrettyPath:
+    def test_under_home_renders_tilde(self) -> None:
+        assert pretty_path(Path.home() / ".otaku" / "config.toml") == "~/.otaku/config.toml"
+
+    def test_outside_home_stays_absolute(self) -> None:
+        assert pretty_path(Path("/etc/hosts")) == "/etc/hosts"
 
 
 class TestFlatten:

@@ -2,6 +2,16 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+
+def pretty_path(p: Path) -> str:
+    """Render a path with `~` substitution when it's under $HOME."""
+    try:
+        return f"~/{p.relative_to(Path.home())}"
+    except ValueError:
+        return str(p)
+
 
 def flatten(s: str) -> str:
     """Collapse newlines/tabs into spaces and strip — for one-line previews."""

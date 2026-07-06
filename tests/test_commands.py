@@ -151,17 +151,20 @@ class TestModel:
         cmd_model(state, store, ["test/qwen"])
         assert state.model == "qwen"
         assert state.full_model == "test/qwen"
+        assert config.read_last_model() == "test/qwen"  # remembered as last used
 
     def test_unknown_provider(self, store: Store, capsys: pytest.CaptureFixture[str]) -> None:
         state = make_state()
         cmd_model(state, store, ["nope/x"])
         assert "Use PROVIDER/MODEL" in capsys.readouterr().out
         assert state.full_model == "test/m"  # unchanged
+        assert config.read_last_model() is None  # failed switch is not remembered
 
     def test_already_using(self, store: Store, capsys: pytest.CaptureFixture[str]) -> None:
         state = make_state()
         cmd_model(state, store, ["test/m"])
         assert "Already using" in capsys.readouterr().out
+        assert config.read_last_model() is None  # no-op switch is not remembered
 
     def test_picker_switch(self, store: Store, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
@@ -170,6 +173,7 @@ class TestModel:
         state = make_state()
         cmd_model(state, store, [])
         assert state.full_model == "test/qwen"
+        assert config.read_last_model() == "test/qwen"
 
     def test_picker_cancel_keeps_model(self, store: Store, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(commands, "pick_model", lambda providers, initial_spec=None: None)
@@ -606,6 +610,14 @@ class TestRemember:
         assert md[st.model].system == "Be terse."
         assert md[st.model].think == "high"
         assert md[st.model].parameters == {"temperature": 0.5}
+
+    def test_verbose_is_not_remembered_per_model(self, store: Store) -> None:
+        # verbose is a session-wide UI preference ([defaults].verbose), not a
+        # model setting — /remember must not pin it.
+        st = make_state()
+        st.verbose = True
+        cmd_remember(st, store, [])
+        assert "verbose" not in config.MODEL_DEFAULTS_PATH.read_text()
 
     def test_think_off_stored_as_default(self, store: Store) -> None:
         st = make_state()

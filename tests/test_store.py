@@ -17,6 +17,7 @@ from otaku.storage.store import (
     ReadOnlyStore,
     Store,
     _db_path,
+    _default_url,
 )
 
 
@@ -42,6 +43,21 @@ class TestDbPath:
     def test_postgres_url_rejected(self) -> None:
         with pytest.raises(ValueError, match="Postgres is no longer supported"):
             _db_path("postgres://localhost/db")
+
+
+class TestDefaultUrl:
+    def test_default_dir_renders_tilde(self) -> None:
+        assert _default_url(Path.home() / ".otaku") == "sqlite:///~/.otaku/history.db"
+
+    def test_custom_dir_inside_home_renders_tilde(self) -> None:
+        assert _default_url(Path.home() / ".xyz") == "sqlite:///~/.xyz/history.db"
+
+    def test_dir_outside_home_stays_absolute(self) -> None:
+        assert _default_url(Path("/srv/otaku")) == "sqlite:////srv/otaku/history.db"
+
+    def test_roundtrips_through_db_path(self) -> None:
+        d = Path.home() / ".alt"
+        assert _db_path(_default_url(d)) == d / "history.db"
 
 
 class TestCreateAndSnapshot:

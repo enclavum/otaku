@@ -115,7 +115,7 @@ class TestUnreachableHelp:
         assert "not responding" in msg
         assert "✓ lmstudio → http://localhost:1234/v1" in msg
         assert "responding, but exposes no models" in msg
-        assert "config.toml" in msg  # tells the user where to fix it
+        assert "~/.otaku/config.toml" in msg  # tells the user where to fix it, ~-shortened
 
 
 class _FakeStderr:
@@ -142,8 +142,8 @@ class TestProbingNotice:
         with probing_notice(provs):
             pass
         out = "".join(fake.buf)
-        assert "Looking for local providers" in out
-        assert "ollama" in out and "omlx" in out  # lists the configured providers
+        assert "Looking for providers" in out
+        assert "~/.otaku/config.toml" in out  # config path, ~-shortened
         assert "\x1b[2m" in out and "\x1b[0m" in out  # dim + reset
         assert out.endswith("\r\x1b[2K")  # transient — erased when done
 

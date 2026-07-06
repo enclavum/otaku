@@ -92,7 +92,7 @@ def run(state: State, store: Store, summary: SummaryWorker | None = None) -> Non
     sys.stdout.write("\x1b[?12h")
     sys.stdout.flush()
 
-    record_tag = " (not recorded — nothing saved)" if store.read_only else ""
+    record_tag = " (not recorded)" if store.read_only else ""
     print(f"Connected to {state.full_model}{record_tag} — type /help for commands.")
 
     # A shortcut key (Ctrl+T etc.) stashes the in-progress input here before

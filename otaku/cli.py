@@ -12,7 +12,6 @@ is routed to the hidden `chat` command by `CompactHelpGroup.resolve_command`.
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
 import click
 import typer
@@ -27,21 +26,13 @@ from otaku.client import client_for, map_providers, probing_notice, unreachable_
 from otaku.config import CONFIG_PATH, Config, Provider
 from otaku.storage import crypto
 from otaku.storage.store import Store
-from otaku.text import format_context, format_size
+from otaku.text import format_context, format_size, pretty_path
 
 DESCRIPTION = "Multi-provider chat client for OpenAI-compatible servers."
 
 # Hidden command that a bare `otaku <model> [prompt]` invocation is routed to
 # (see CompactHelpGroup.resolve_command). There is no visible `run` subcommand.
 _DEFAULT_CMD = "chat"
-
-
-def _pretty_path(p: Path) -> str:
-    """Render a path with `~` substitution when it's under $HOME."""
-    try:
-        return f"~/{p.relative_to(Path.home())}"
-    except ValueError:
-        return str(p)
 
 
 def _format_opt_decl(opt: click.Option) -> str:
@@ -106,7 +97,7 @@ class CompactHelpGroup(TyperGroup):
             "  -nr, --no-record  Don't save conversation to the database",
             "  -v, --version     Show version information",
             "",
-            f"Config: {_pretty_path(CONFIG_PATH)}",
+            f"Config: {pretty_path(CONFIG_PATH)}",
             f'Use "{prog} [command] --help" for more information about a command.',
         ]
         return "\n".join(lines)
@@ -262,7 +253,23 @@ def _compose_oneshot(prompt: str, stdin_text: str) -> str | None:
     return "\n\n".join(parts).strip()
 
 
-def _run_chat(spec: str, *, no_record: bool = False, oneshot: str | None = None) -> None:
+def _unlock_cipher(cfg: Config) -> crypto.Cipher:
+    """Unlock the encryption key, exiting with a friendly error on failure."""
+    try:
+        return crypto.unlock(cfg.encryption)
+    except crypto.CryptoError as e:
+        typer.echo(f"Could not unlock encryption key: {e}", err=True)
+        raise typer.Exit(1) from e
+
+
+def _run_chat(
+    spec: str,
+    *,
+    no_record: bool = False,
+    oneshot: str | None = None,
+    cfg: Config | None = None,
+    cipher: crypto.Cipher | None = None,
+) -> None:
     """Chat against `<provider>/<model>`. Enters the interactive REPL, or runs a
     single `oneshot` prompt (print + exit) when one is given. Exits with a typer
     error if the spec is malformed or the provider isn't configured.
@@ -270,8 +277,13 @@ def _run_chat(spec: str, *, no_record: bool = False, oneshot: str | None = None)
     `no_record=True` (from `otaku -nr` / `otaku <model> -nr`, or
     `[defaults].no_record`) opens the store in read-only mode: the session's
     turns, summaries, and any /history-picker deletes are silently skipped.
+
+    `cfg` / `cipher` let the bare-`otaku` path pass in the already-loaded config
+    and already-unlocked cipher; omitted, both are created here (spec resolution
+    first, so a bad spec fails fast without a key ceremony).
     """
-    cfg = config.load()
+    if cfg is None:
+        cfg = config.load()
     no_record = no_record or cfg.no_record  # [defaults].no_record → every session read-only
     try:
         provider_name, model = _resolve_spec(cfg, spec)
@@ -279,11 +291,8 @@ def _run_chat(spec: str, *, no_record: bool = False, oneshot: str | None = None)
         typer.echo(str(e), err=True)
         raise typer.Exit(2) from e
 
-    try:
-        cipher = crypto.unlock(cfg.encryption)
-    except crypto.CryptoError as e:
-        typer.echo(f"Could not unlock encryption key: {e}", err=True)
-        raise typer.Exit(1) from e
+    if cipher is None:
+        cipher = _unlock_cipher(cfg)
 
     try:
         store = Store.open(cfg.database_url, cipher, read_only=no_record)
@@ -297,6 +306,7 @@ def _run_chat(spec: str, *, no_record: bool = False, oneshot: str | None = None)
         provider=provider,
         model=model,
         full_model=f"{provider_name}/{model}",
+        verbose=cfg.verbose,
     )
     apply_settings(state, config.settings_for(cfg, model))
     try:
@@ -341,11 +351,15 @@ def _root(
         return
     # Bare `otaku` (no MODEL): open the model picker, then start a chat with
     # the chosen model. Cancel in the picker exits without launching the REPL.
+    # Crypto is unlocked *before* the picker so interactive KEK ceremonies
+    # (passphrase prompt, a slow `command` provider) happen up front instead of
+    # after the model is chosen.
     cfg = config.load()
+    cipher = _unlock_cipher(cfg)
     spec = _pick_model_spec(cfg)
     if spec is None:
         return
-    _run_chat(spec, no_record=no_record)
+    _run_chat(spec, no_record=no_record, cfg=cfg, cipher=cipher)
 
 
 @app.command(name="chat", hidden=True, cls=CompactHelpCommand)

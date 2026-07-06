@@ -41,7 +41,6 @@ def _isolate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
     monkeypatch.setattr(crypto, "CONFIG_DIR", otaku_dir)
     monkeypatch.setattr(crypto, "KEYSTORE_PATH", otaku_dir / "keys.json")
     monkeypatch.setattr(crypto, "DISK_KEK_PATH", otaku_dir / "kek.key")
-    monkeypatch.setattr(crypto, "LEGACY_KEYFILE", otaku_dir / "history.key")
 
     # Database goes to a throwaway file, overriding whatever config.toml says.
     monkeypatch.setenv(config.DATABASE_URL_ENV, f"sqlite:///{tmp_path / 'history.db'}")

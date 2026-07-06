@@ -18,7 +18,7 @@ from otaku.chat import clipboard
 from otaku.chat.inference import DIM, RESET, State, _has_real_turn, persist, run_inference
 from otaku.chat.mdstream import MarkdownStreamer
 from otaku.client import client_for
-from otaku.config import Settings, remember_model_settings
+from otaku.config import Settings, remember_model_settings, write_last_model
 from otaku.pickers.history import pick_history
 from otaku.pickers.model import pick_model
 from otaku.storage.store import Message, Store
@@ -219,6 +219,7 @@ def _switch_model(state: State, provider_name: str, model: str) -> None:
     state.provider = state.config.providers[provider_name]
     state.model = model
     state.full_model = f"{provider_name}/{model}"
+    write_last_model(state.full_model)
     print(f"Switched to {state.full_model}.")
 
 
@@ -226,7 +227,8 @@ def cmd_model(state: State, store: Store, args: list[str]) -> None:
     """Switch the model for the rest of this session, keeping the conversation
     context (handy for comparing models on the same prompt — switch, then
     /regenerate). `/model` opens the picker; `/model PROVIDER/MODEL` switches
-    directly."""
+    directly. A successful switch is remembered as the last-used model
+    (preselected next time the model picker opens)."""
     providers = state.config.providers
     if args:
         head, _, rest = " ".join(args).partition("/")
@@ -331,7 +333,8 @@ def cmd_remember(state: State, store: Store, args: list[str]) -> None:
     """Persist the current system prompt, think effort, and parameters as the
     defaults for this model (written to ~/.otaku/model_defaults.json, keyed by
     the bare model name). Applied automatically on the next launch of this
-    model, under the global [defaults]."""
+    model, under the global [defaults]. Verbose is deliberately not included —
+    it's a session-wide UI preference ([defaults].verbose), not per-model."""
     sys_msg = _system_message(state)
     think = "default" if state.think is None else state.think
     settings = Settings(
@@ -341,7 +344,7 @@ def cmd_remember(state: State, store: Store, args: list[str]) -> None:
     )
     try:
         remember_model_settings(state.model, settings)
-    except OSError as e:
+    except (OSError, ValueError) as e:
         print(f"Could not save defaults: {e}")
         return
     bits = [f"think={think}"]
@@ -537,7 +540,8 @@ HELP_TEXT = """\
 Commands:
   /clear                       Clear context, stay in the same conversation
   /new                         Clear context and start a new conversation
-  /model [PROVIDER/MODEL]      Switch model in-place (opens the picker with no arg)
+  /model [PROVIDER/MODEL]      Switch model in-place (opens the picker with no arg);
+                               remembered as last used
   /undo                        Discard the last prompt and response (Ctrl+U)
   /regenerate                  Re-run the last prompt (Ctrl+R)
   /history                     Browse saved conversations and resume any turn (Ctrl+T)

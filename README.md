@@ -172,7 +172,8 @@ otaku stop --all             # unload everything in every provider
 ```
 /clear                       Clear context, stay in the same conversation
 /new                         Clear context and start a new conversation
-/model [PROVIDER/MODEL]      Switch model in-place (opens the picker with no arg)
+/model [PROVIDER/MODEL]      Switch model in-place (opens the picker with no arg);
+                             remembered as last used
 /undo                        Discard the last prompt and response (Ctrl+U)
 /regenerate                  Re-run the last prompt (Ctrl+R)
 /history                     Browse saved conversations and resume any turn (Ctrl+T)
@@ -218,9 +219,10 @@ fenced code blocks, syntax-highlighted via
 
 **Ctrl+T** (or `/history`) opens a two-stage picker:
 
-1. **Conversation list** — each row shows `title / summary` (`(untitled)` if
-   neither is set). Press `/` to filter — the filter matches **full message
-   content**, not just titles, so you can find a chat by anything said in it.
+1. **Conversation list** — each row shows `title / summary`, falling back to
+   the first prompt when neither is set. Press `/` to filter — the filter
+   matches **full message content**, not just titles, so you can find a chat
+   by anything said in it.
    The preview pane shows the model, timestamp, title, summary, and first
    prompt. `Del` deletes (with confirmation).
 2. **Turn list** — pick the turn to resume from; the conversation loads up to
@@ -242,9 +244,9 @@ pick, leaving the original intact; `n` resumes destructively.
 
 ### Persistent defaults
 
-`/set system`, `/set think`, and parameters normally reset when you exit. To
-make settings stick, otaku reads **declarative defaults** at launch (no
-surprising "sticky" auto-save):
+`/set system`, `/set think`, `/set verbose`, and parameters normally reset
+when you exit. To make settings stick, otaku reads **declarative defaults** at
+launch (no surprising "sticky" auto-save):
 
 - **Global** — a `[defaults]` section in `~/.otaku/config.toml`:
 
@@ -252,6 +254,7 @@ surprising "sticky" auto-save):
   [defaults]
   system = "Be concise."
   think = "none"           # none | low | medium | high | max | default
+  verbose = false          # stats line after each reply (global only — not per-model)
   no_record = false        # open every session in --no-record mode
   create_summaries = true  # generate conversation summaries in the background
   summary_idle_seconds = 5 # summarize after this many seconds idle at the prompt
@@ -278,9 +281,8 @@ unaffected. Precedence, low to high: built-in → `[defaults]` → per-model →
 
 Opens the database read-only for the session: nothing is written, existing
 history stays browsable, deletes are blocked. Accepted before or after the
-model (`otaku -nr`, `otaku llama3 -nr`); the banner shows
-`(not recorded — nothing saved)`. Set `[defaults].no_record = true` to make it
-every session's default.
+model (`otaku -nr`, `otaku llama3 -nr`); the banner shows `(not recorded)`.
+Set `[defaults].no_record = true` to make it every session's default.
 
 ## Configuration
 
@@ -321,7 +323,7 @@ never slows the others; when nothing is reachable, otaku lists each provider,
 whether it answered, and points at the config file to fix.
 
 <details>
-<summary>Provider option reference — <code>keep_alive</code>, <code>smoothen_streaming</code>, port auto-detection, <code>OTAKU_DATABASE_URL</code></summary>
+<summary>Provider option reference — <code>keep_alive</code>, <code>smoothen_streaming</code>, port auto-detection, <code>OTAKU_DATABASE_URL</code>, <code>OTAKU_CONFIG_DIR</code></summary>
 
 **`keep_alive`** (default `"24h"`, Ollama only) is forwarded to Ollama on the
 explicit load action from the model picker — how long the model stays in
@@ -349,6 +351,17 @@ for a throwaway DB:
 OTAKU_DATABASE_URL="sqlite:////tmp/otaku-test.db" otaku
 ```
 
+**`OTAKU_CONFIG_DIR`** relocates otaku's entire state directory —
+`config.toml`, `keys.json`, `model_defaults.json`, `last_model`, and the
+default `history.db` location. A custom dir also gets its own OS-keychain
+entry, so it is a **fully isolated** setup: nothing is shared with (or can
+touch) `~/.otaku`, which makes it safe for throwaway experiments or parallel
+installs:
+
+```bash
+OTAKU_CONFIG_DIR=~/.otaku-work otaku
+```
+
 </details>
 
 ## Privacy and storage
@@ -368,6 +381,15 @@ the wrapped form is stored (`~/.otaku/keys.json`, mode 0600):
 | `command`    | fetched by `[encryption].retrieve_command` — 1Password `op`, `pass`, `gpg`, … (must print base64 of 32 bytes to stdout). |
 | `passphrase` | derived from a passphrase via scrypt; prompted each launch, nothing stored.    |
 | `disk`       | plaintext `~/.otaku/kek.key` (0600); the automatic fallback when no keychain tool is found. |
+
+Key setup is strictly additive: if a key already exists — a keychain item from
+an earlier install, or one your `retrieve_command` returns — otaku reuses it
+rather than minting a new one, and it never overwrites an existing key or
+`keys.json`. Restoring a backed-up `keys.json` therefore keeps working.
+
+With an interactive key provider (`passphrase`, or a `command` that prompts —
+a hardware token, say), bare `otaku` asks for the key up front, before the
+model picker opens.
 
 > [!IMPORTANT]
 > Back up `~/.otaku/keys.json` **together with** your KEK (the keychain item,

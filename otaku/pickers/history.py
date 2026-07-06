@@ -90,20 +90,18 @@ PREVIEW_OUTER_GAP = 3  # cols between items pane and preview border
 PREVIEW_INNER_PAD = 2  # cols inside the border, both sides
 MIN_PREVIEW_WIDTH = 60  # bound items width so the preview never collapses
 
-# Shown when a conversation has neither a title (/title) nor a summary yet.
+# Shown when a conversation has no title (/title), no summary, and no user
+# message to fall back to (e.g. system-only snapshots).
 _UNTITLED = "(untitled)"
 
 
 def _list_label(conv: Conversation) -> str:
     """One-line label for a conversation row: '<title> / <summary>' when both
-    exist, else whichever is present, else a placeholder."""
+    exist, else whichever is present, else the first prompt, else a
+    placeholder."""
     if conv.title and conv.summary:
         return f"{conv.title} / {conv.summary}"
-    if conv.title:
-        return conv.title
-    if conv.summary:
-        return conv.summary
-    return _UNTITLED
+    return conv.title or conv.summary or conv.first_user or _UNTITLED
 
 
 class HistoryPicker:

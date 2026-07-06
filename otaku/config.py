@@ -14,11 +14,12 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# Undocumented escape hatch: OTAKU_CONFIG_DIR points otaku at an alternate
-# config/state directory (config.toml, keys.json, model_defaults.json,
-# last_model); empty/unset falls back to ~/.otaku. crypto.py derives its key
-# paths from CONFIG_DIR at import, so this relocates the whole state dir at once
-# — handy for throwaway or parallel setups without touching $HOME.
+# OTAKU_CONFIG_DIR points otaku at an alternate config/state directory
+# (config.toml, keys.json, model_defaults.json, last_model); empty/unset falls
+# back to ~/.otaku. crypto.py (key paths, keychain item name) and store.py (the
+# default history.db location) derive from CONFIG_DIR at import, so this
+# relocates the whole state dir at once — a fully isolated setup for throwaway
+# or parallel installs without touching ~/.otaku.
 CONFIG_DIR_ENV = "OTAKU_CONFIG_DIR"
 
 
@@ -45,6 +46,7 @@ DEFAULTS_CONFIG = """\
 [defaults]
 # system = "You are concise."
 # think = "none"           # none | low | medium | high | max | default
+# verbose = false          # show the stats line after each reply
 # no_record = false        # open every session in --no-record (read-only) mode
 # create_summaries = true  # generate conversation summaries in the background
 # summary_idle_seconds = 5 # summarize after this many seconds idle at the prompt
@@ -119,6 +121,10 @@ class Config:
     defaults: Settings = field(default_factory=Settings)
     model_defaults: dict[str, Settings] = field(default_factory=dict)
     no_record: bool = False  # [defaults].no_record — open every session read-only
+    # [defaults].verbose — show the stats line after each reply. A session-wide
+    # UI preference like no_record, deliberately NOT part of Settings (it has
+    # nothing to do with any particular model, so /remember doesn't touch it).
+    verbose: bool = False
     # [defaults].create_summaries — generate conversation summaries in a
     # background worker (idle-debounced). summary_idle_seconds is the pause at
     # the prompt after which the current conversation is summarized.
@@ -178,6 +184,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
         defaults=_parse_settings(defaults_raw),
         model_defaults=_read_model_defaults(),
         no_record=bool(defaults_raw.get("no_record", False)),
+        verbose=bool(defaults_raw.get("verbose", False)),
         create_summaries=bool(defaults_raw.get("create_summaries", True)),
         summary_idle_seconds=float(defaults_raw.get("summary_idle_seconds", 5.0)),
     )
@@ -231,15 +238,18 @@ def settings_for(cfg: Config, model: str) -> Settings:
 def remember_model_settings(model: str, settings: Settings) -> None:
     """Persist per-model defaults for `model` (bare name) to
     model_defaults.json, preserving other models' entries. An all-empty
-    `settings` clears the model's entry."""
+    `settings` clears the model's entry. Refuses to rewrite a file it cannot
+    parse — starting over from empty would silently discard every other
+    model's saved defaults."""
     data: dict[str, object] = {}
     if MODEL_DEFAULTS_PATH.exists():
         try:
             loaded = json.loads(MODEL_DEFAULTS_PATH.read_text())
-            if isinstance(loaded, dict):
-                data = loaded
-        except (json.JSONDecodeError, OSError):
-            data = {}
+        except (json.JSONDecodeError, OSError) as e:
+            raise ValueError(f"{MODEL_DEFAULTS_PATH} is unreadable ({e}); fix or move it") from e
+        if not isinstance(loaded, dict):
+            raise ValueError(f"{MODEL_DEFAULTS_PATH} is not a JSON object; fix or move it")
+        data = loaded
     entry: dict[str, object] = {}
     if settings.system is not None:
         entry["system"] = settings.system
@@ -252,4 +262,6 @@ def remember_model_settings(model: str, settings: Settings) -> None:
     else:
         data.pop(model, None)
     MODEL_DEFAULTS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    MODEL_DEFAULTS_PATH.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+    tmp = MODEL_DEFAULTS_PATH.with_name(MODEL_DEFAULTS_PATH.name + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+    tmp.replace(MODEL_DEFAULTS_PATH)  # atomic: a crash mid-write can't corrupt the file

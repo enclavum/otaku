@@ -28,6 +28,7 @@ from otaku.client.lmstudio import LMStudioClient
 from otaku.client.ollama import OllamaClient
 from otaku.client.omlx import OmlxClient
 from otaku.config import Provider
+from otaku.text import pretty_path
 
 _T = TypeVar("_T")
 
@@ -79,9 +80,8 @@ def probing_notice(providers: Mapping[str, Provider]) -> Iterator[None]:
     No-op when stderr isn't a TTY, so it never pollutes piped/redirected output."""
     active = sys.stderr.isatty()
     if active:
-        names = ", ".join(providers) or "none configured"
         sys.stderr.write(
-            f"\x1b[2mLooking for local providers ({names} — see {config.CONFIG_PATH})…\x1b[0m"
+            f"\x1b[2mLooking for providers (see {pretty_path(config.CONFIG_PATH)})…\x1b[0m"
         )
         sys.stderr.flush()
     try:
@@ -98,7 +98,7 @@ def unreachable_help(providers: Mapping[str, Provider], reachable: set[str]) -> 
     lines = [
         "No models reachable.",
         "",
-        f"Checked these providers (configured in {config.CONFIG_PATH}):",
+        f"Checked these providers (configured in {pretty_path(config.CONFIG_PATH)}):",
     ]
     for name in sorted(providers):
         if name in reachable:
@@ -109,7 +109,7 @@ def unreachable_help(providers: Mapping[str, Provider], reachable: set[str]) -> 
     lines += [
         "",
         "Start your model server (e.g. `ollama serve`, or launch LM Studio), or edit",
-        f"{config.CONFIG_PATH} to add or fix a [providers.NAME] `url`.",
+        f"{pretty_path(config.CONFIG_PATH)} to add or fix a [providers.NAME] `url`.",
     ]
     return "\n".join(lines)
 
