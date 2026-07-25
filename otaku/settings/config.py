@@ -4,15 +4,14 @@ Read-only for the app — bootstrap writes it once at first run, the user edits
 it thereafter. Everything the app itself changes lives in state.toml
 (`settings.state`) or models.toml instead.
 
-This module owns the whole config surface: the dataclasses, the reader, and
-the rendering — `Config.default()` is the built-in configuration and
-`Config.to_toml()` renders any instance as the file, so the first-run write
-is `Config.default().to_toml()` and every key has one source of truth.
+This module owns the config surface: the dataclasses, the reader, and the
+rendering — `Config.to_toml()` renders any instance as the file. The
+provider sections come from the backend classes (each backend's
+`autoconfigure`), assembled at the first-run write by the CLI.
 """
 
 import tomllib
 from dataclasses import dataclass, field
-from typing import Self
 
 from otaku.paths import Paths
 from otaku.settings.files import row, toml_key, toml_scalar
@@ -30,6 +29,18 @@ class Provider:
     url: str
     api_key: str = ""
     supports_thinking: bool = False
+    keep_alive: str = ""  # how long an explicitly loaded model stays resident (ollama)
+
+    @property
+    def base_url(self) -> str:
+        """The URL without a trailing /v1 — where a backend's native
+        management endpoints live."""
+        return self.url[: -len("/v1")] if self.url.endswith("/v1") else self.url
+
+    @property
+    def headers(self) -> dict[str, str]:
+        """Auth headers for every request to this provider."""
+        return {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
 
 
 @dataclass(frozen=True)
@@ -59,13 +70,6 @@ class Config:
     settle_messages: int = 20
     # [database]
     backups: int = 7
-
-    @classmethod
-    def default(cls) -> Self:
-        """The built-in configuration, provider included — what a first run
-        writes to disk."""
-        ollama = Provider(name="ollama", url="http://localhost:11434/v1", supports_thinking=True)
-        return cls(providers={"ollama": ollama})
 
     def to_toml(self) -> str:
         """This configuration rendered as config.toml text: every key present
@@ -138,6 +142,8 @@ class Config:
                 f"api_key = {toml_scalar(provider.api_key)}",
                 f"supports_thinking = {toml_scalar(provider.supports_thinking)}",
             ]
+            if provider.keep_alive:
+                lines.append(f"keep_alive = {toml_scalar(provider.keep_alive)}")
         return "\n".join(lines) + "\n"
 
 
@@ -164,6 +170,7 @@ def load(paths: Paths) -> Config:
             url=str(entry["url"]).rstrip("/"),
             api_key=str(entry.get("api_key", "")),
             supports_thinking=bool(entry.get("supports_thinking", False)),
+            keep_alive=str(entry.get("keep_alive", "")),
         )
 
     enc_raw = _table(raw, "encryption", path)
