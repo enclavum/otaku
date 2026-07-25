@@ -18,13 +18,22 @@ between. The database is encrypted.
 
 Python 3.14 in the `otaku2` conda environment:
 
-    conda run -n otaku2 otaku                 # run the app
-    conda run -n otaku2 ruff check otaku/     # lint
-    conda run -n otaku2 ruff format otaku/    # format
-    conda run -n otaku2 mypy                  # type-check (strict)
+    conda run -n otaku2 otaku    # run the app
+    make lint                    # ruff check
+    make format                  # ruff format
+    make typecheck               # mypy (strict)
 
 The state dir is `~/.otaku-v2`, relocatable via the `OTAKU_CONFIG_DIR` env
 var.
+
+## Configuration ownership
+
+`configs/config.toml` is user-owned: the app writes it once at first run and
+never touches it again. Every setting changed from inside the app persists in
+app-owned files instead — `configs/state.toml` for session-wide values (the
+resumed model and story, `/set` toggles) and `configs/models.toml` for
+per-model overrides. App-owned files are rewritten wholesale; user-owned
+files are never rewritten.
 
 ## Temporary limitations
 
@@ -50,8 +59,20 @@ var.
 
 ## Architecture
 
-Imports point down only:
+Each package may import only the packages listed after its arrow (plus the
+standard library and the declared dependencies); everything else is
+forbidden:
 
-    term → paths/crypto/settings/logs → providers/store → lore → chat/tui → bootstrap/cli
+    cli        → chat, tui, lore, store, providers, settings, crypto, logs, paths, term
+    chat       → lore, store, providers, settings, logs, paths, term
+    tui        → store, providers, settings, term
+    lore       → store, providers, settings, logs, term
+    store      → crypto, logs, paths, term
+    providers  → settings, logs, term
+    logs       → crypto, paths, term
+    crypto     → settings, paths
+    settings   → paths
+    paths      → (nothing)
+    term       → (nothing)
 
 The data model lives in `notes/schema.md`.

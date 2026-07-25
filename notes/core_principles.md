@@ -47,8 +47,8 @@ After importing messages, the lore extraction is automatically triggered in the 
 
 ## Database encryption
 
-By default, messages and lore in the database are encrypted; you can disable encryption by setting a parameter in
-config.toml.
+By default, messages and lore in the database are stored as plain text, but you can enable encryption by setting a
+parameter in config.toml.
 
 ## Environment separation
 

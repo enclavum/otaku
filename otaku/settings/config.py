@@ -1,0 +1,216 @@
+"""The user's configuration: configs/config.toml.
+
+Read-only for the app — bootstrap writes it once at first run, the user edits
+it thereafter. Everything the app itself changes lives in state.toml
+(`settings.state`) or models.toml instead.
+
+This module owns the whole config surface: the dataclasses, the reader, and
+the rendering — `Config.default()` is the built-in configuration and
+`Config.to_toml()` renders any instance as the file, so the first-run write
+is `Config.default().to_toml()` and every key has one source of truth.
+"""
+
+import tomllib
+from dataclasses import dataclass, field
+from typing import Self
+
+from otaku.paths import Paths
+from otaku.settings.files import row, toml_key, toml_scalar
+
+
+class ConfigError(Exception):
+    pass
+
+
+@dataclass(frozen=True)
+class Provider:
+    """One [providers.NAME] section: an OpenAI-compatible server."""
+
+    name: str
+    url: str
+    api_key: str = ""
+    supports_thinking: bool = False
+
+
+@dataclass(frozen=True)
+class Encryption:
+    """The [encryption] section. Provider "none" (the default) stores content
+    as readable plain text; the others name where the key-encryption key
+    comes from — see `otaku.crypto`."""
+
+    provider: str = "none"
+    retrieve_command: str | None = None
+
+
+@dataclass(frozen=True)
+class Config:
+    providers: dict[str, Provider]
+    encryption: Encryption = field(default_factory=Encryption)
+    # [settings]
+    show_banner: bool = True
+    smooth_streaming: bool = True
+    # [context]
+    head_messages: int = 20
+    tail_messages: int = 150
+    # [lore_extraction]
+    idle_seconds: float = 300.0
+    scene_chars: int = 6000
+    scene_min_messages: int = 20
+    settle_messages: int = 20
+    # [database]
+    backups: int = 7
+
+    @classmethod
+    def default(cls) -> Self:
+        """The built-in configuration, provider included — what a first run
+        writes to disk."""
+        ollama = Provider(name="ollama", url="http://localhost:11434/v1", supports_thinking=True)
+        return cls(providers={"ollama": ollama})
+
+    def to_toml(self) -> str:
+        """This configuration rendered as config.toml text: every key present
+        with an aligned comment, so the whole surface is discoverable and
+        editable in place."""
+        lines = [
+            "[settings]",
+            row(
+                f"show_banner = {toml_scalar(self.show_banner)}",
+                "the session header shown when a chat opens",
+            ),
+            row(
+                f"smooth_streaming = {toml_scalar(self.smooth_streaming)}",
+                "re-time bursty model output into an even stream",
+            ),
+            "",
+            "[context]",
+            row(
+                f"head_messages = {self.head_messages}",
+                "opening messages kept verbatim in the prompt",
+            ),
+            row(f"tail_messages = {self.tail_messages}", "recent messages kept verbatim"),
+            "",
+            "[lore_extraction]",
+            row(
+                f"idle_seconds = {toml_scalar(self.idle_seconds)}",
+                "extraction runs after this long idle at the prompt",
+            ),
+            row(
+                f"scene_chars = {self.scene_chars}",
+                "a scene's target size in characters — and its trigger",
+            ),
+            row(
+                f"scene_min_messages = {self.scene_min_messages}",
+                "fewest messages that can form a scene",
+            ),
+            row(
+                f"settle_messages = {self.settle_messages}",
+                "newest messages a scene never closes over",
+            ),
+            "",
+            "[database]",
+            row(
+                f"backups = {self.backups}",
+                "daily snapshots kept in database/backups/ (0 disables)",
+            ),
+            "",
+            "[encryption]",
+            row(
+                f'provider = "{self.encryption.provider}"',
+                "none — content stored as readable plain text",
+            ),
+            row("", "keychain — key in the OS keychain"),
+            row("", "command — key from retrieve_command's stdout"),
+            row("", "passphrase — key derived from a passphrase, asked every launch"),
+            row("", "disk — key in configs/kek.key"),
+        ]
+        if self.encryption.retrieve_command is not None:
+            command = toml_scalar(self.encryption.retrieve_command)
+            lines.append(row(f"retrieve_command = {command}", 'only for provider = "command"'))
+        else:
+            lines.append(
+                row('# retrieve_command = "pass otaku/kek"', 'only for provider = "command"')
+            )
+        for provider in self.providers.values():
+            lines += [
+                "",
+                f"[providers.{toml_key(provider.name)}]",
+                f"url = {toml_scalar(provider.url)}",
+                f"api_key = {toml_scalar(provider.api_key)}",
+                f"supports_thinking = {toml_scalar(provider.supports_thinking)}",
+            ]
+        return "\n".join(lines) + "\n"
+
+
+def load(paths: Paths) -> Config:
+    """Read and validate config.toml. Raises ConfigError with a message that
+    names the file — the config is hand-edited, so errors must be human."""
+    path = paths.config_file
+    try:
+        raw = tomllib.loads(path.read_text())
+    except FileNotFoundError as e:
+        raise ConfigError(f"{path} does not exist") from e
+    except tomllib.TOMLDecodeError as e:
+        raise ConfigError(f"{path}: invalid TOML — {e}") from e
+
+    providers_raw = raw.get("providers")
+    if not isinstance(providers_raw, dict) or not providers_raw:
+        raise ConfigError(f"{path}: at least one [providers.NAME] section is required")
+    providers: dict[str, Provider] = {}
+    for name, entry in providers_raw.items():
+        if not isinstance(entry, dict) or "url" not in entry:
+            raise ConfigError(f"{path}: [providers.{name}] must be a table with a 'url' key")
+        providers[name] = Provider(
+            name=str(name),
+            url=str(entry["url"]).rstrip("/"),
+            api_key=str(entry.get("api_key", "")),
+            supports_thinking=bool(entry.get("supports_thinking", False)),
+        )
+
+    enc_raw = _table(raw, "encryption", path)
+    command = enc_raw.get("retrieve_command")
+    encryption = Encryption(
+        provider=str(enc_raw.get("provider", "none")),
+        retrieve_command=str(command) if command is not None else None,
+    )
+
+    settings = _table(raw, "settings", path)
+    context = _table(raw, "context", path)
+    lore = _table(raw, "lore_extraction", path)
+    database = _table(raw, "database", path)
+    try:
+        return Config(
+            providers=providers,
+            encryption=encryption,
+            show_banner=bool(settings.get("show_banner", True)),
+            smooth_streaming=bool(settings.get("smooth_streaming", True)),
+            head_messages=max(0, _int(context, "head_messages", 20)),
+            tail_messages=max(1, _int(context, "tail_messages", 150)),
+            idle_seconds=_float(lore, "idle_seconds", 300.0),
+            scene_chars=max(1, _int(lore, "scene_chars", 6000)),
+            scene_min_messages=max(1, _int(lore, "scene_min_messages", 20)),
+            settle_messages=max(0, _int(lore, "settle_messages", 20)),
+            backups=max(0, _int(database, "backups", 7)),
+        )
+    except ValueError as e:
+        raise ConfigError(f"{path}: {e}") from e
+
+
+def _table(raw: dict[str, object], name: str, path: object) -> dict[str, object]:
+    section = raw.get(name, {})
+    if not isinstance(section, dict):
+        raise ConfigError(f"{path}: [{name}] must be a table")
+    return section
+
+
+def _int(section: dict[str, object], key: str, default: int) -> int:
+    value = section.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"'{key}' must be an integer")
+    return value
+
+
+def _float(section: dict[str, object], key: str, default: float) -> float:
+    value = section.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise ValueError(f"'{key}' must be a number")
+    return float(value)
