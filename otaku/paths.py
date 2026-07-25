@@ -14,8 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Self
 
-ENV_VAR = "OTAKU_CONFIG_DIR"
-DEFAULT_ROOT = "~/.otaku-v2"  # TODO: switch to ~/.otaku
+_ENV_VAR = "OTAKU_CONFIG_DIR"
+_DEFAULT_ROOT = "~/.otaku-v2"  # TODO: switch to ~/.otaku
 
 
 @dataclass(frozen=True)
@@ -26,7 +26,7 @@ class Paths:
     def resolve(cls, root: str | Path | None = None) -> Self:
         """The state dir: `root` when given, else $OTAKU_CONFIG_DIR, else
         the default."""
-        raw = root or os.environ.get(ENV_VAR, "").strip() or DEFAULT_ROOT
+        raw = root or os.environ.get(_ENV_VAR, "").strip() or _DEFAULT_ROOT
         return cls(root=Path(raw).expanduser())
 
     def ensure_tree(self) -> None:

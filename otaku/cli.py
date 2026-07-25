@@ -1,4 +1,10 @@
-"""otaku command-line entry point."""
+"""otaku command-line entry point.
+
+`otaku` resumes the model and story the last session left off on and opens
+the chat; on a first run — or when the remembered model's provider is gone
+— it opens the model picker instead. `otaku logs` prints a day's
+model-request log.
+"""
 
 import json
 import re
@@ -8,14 +14,18 @@ from datetime import datetime
 import click
 
 from otaku import __version__, crypto
+from otaku.chat import repl
+from otaku.chat.state import Session
+from otaku.formatting import pretty_path
 from otaku.logs.requests import RequestLog
 from otaku.paths import Paths
 from otaku.providers.registry import Registry, autoconfigure_providers
 from otaku.settings import config as config_mod
+from otaku.settings import prompts as prompts_file
 from otaku.settings import state as state_mod
 from otaku.settings.files import write_atomic
 from otaku.store import DatabaseError, Store, is_encrypted
-from otaku.term.text import pretty_path
+from otaku.tui import models as model_picker
 
 
 @click.group(invoke_without_command=True)
@@ -27,32 +37,40 @@ def main(ctx: click.Context) -> None:
         return
     paths = Paths.resolve()
     cfg = _load_config(ctx, paths)
+    prompts_file.write_stub(paths)
     cipher = _unlock(ctx, cfg, paths)
+    state = state_mod.load(paths)
+    request_log = RequestLog(paths, cipher)
+    provider_registry = Registry(
+        cfg.providers, request_log=request_log, smooth=cfg.smooth_streaming
+    )
+
+    # A remembered model whose provider is still configured resumes straight
+    # into the chat; anything else opens the picker. The picker runs before
+    # the store: cancelling it exits without touching the database, and the
+    # key ceremony above is done, so a passphrase prompt never lands after
+    # the model is chosen.
+    remembered = state.model if cfg.serves(state.model) else None
+    spec = remembered or model_picker.pick(provider_registry)
+    if spec is None:
+        return
+
     try:
         store = Store.open(paths, cipher, backups=cfg.backups)
     except DatabaseError as e:
         click.echo(str(e), err=True)
         ctx.exit(1)
-    state = state_mod.load(paths)
-    request_log = RequestLog(paths, cipher)
-    registry = Registry(cfg.providers, request_log=request_log, smooth=cfg.smooth_streaming)
-
-    # Session preflight, shown until the chat client exists.
     try:
-        plain = isinstance(cipher, crypto.PlainCipher)
-        encryption = "none (plain text)" if plain else cfg.encryption.provider
-        click.echo(f"State dir:  {pretty_path(paths.root)}")
-        click.echo(f"Encryption: {encryption}")
-        click.echo(f"Stories:    {len(store.stories.list())}")
-        click.echo(f"Resume:     model={state.model or '(none)'} story={state.story or '(none)'}")
-        rows, reachable = registry.inventory()
-        for row in rows:
-            client = registry.get_client(row.provider.name)
-            loaded = sum(1 for model in row.models if model.is_loaded)
-            note = f"{len(row.models)} models, {loaded} loaded"
-            click.echo(f"Provider:   {row.provider.name} ({client.kind}) — {note}")
-        for name in sorted(set(cfg.providers) - reachable):
-            click.echo(f"Provider:   {name} — not responding")
+        session = Session.start(
+            config=cfg,
+            paths=paths,
+            providers=provider_registry,
+            spec=spec,
+            state=state,
+            store=store,
+            pick_model=lambda current: model_picker.pick(provider_registry, initial_spec=current),
+        )
+        repl.run(session, store)
     finally:
         store.close()
 
@@ -69,7 +87,7 @@ def logs(day: str | None, list_days: bool) -> None:
     request_log = RequestLog(paths, cipher)
 
     if list_days:
-        days = request_log.days()
+        days = request_log.get_days()
         if not days:
             click.echo("no request logs yet")
             return
@@ -81,7 +99,7 @@ def logs(day: str | None, list_days: bool) -> None:
         click.echo("DAY must be YYYYMMDD, e.g. otaku logs 20260725", err=True)
         ctx.exit(2)
     stamp = day or datetime.now().astimezone().strftime("%Y%m%d")
-    if not request_log.path_for(stamp).exists():
+    if not request_log.get_path_for(stamp).exists():
         click.echo(f"no request log for {stamp}", err=True)
         ctx.exit(1)
 

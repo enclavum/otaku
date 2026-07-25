@@ -71,6 +71,12 @@ class Config:
     # [database]
     backups: int = 7
 
+    def serves(self, spec: str) -> bool:
+        """Whether `spec` ("provider/model") names a configured provider —
+        what the launcher asks before resuming a remembered model."""
+        provider_name, _, model = spec.partition("/")
+        return bool(model) and provider_name in self.providers
+
     def to_toml(self) -> str:
         """This configuration rendered as config.toml text: every key present
         with an aligned comment, so the whole surface is discoverable and

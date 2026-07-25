@@ -22,6 +22,7 @@ Python 3.14 in the `otaku2` conda environment:
     make lint                    # ruff check
     make format                  # ruff format
     make typecheck               # mypy (strict)
+    make test                    # pytest
 
 The state dir is `~/.otaku-v2`, relocatable via the `OTAKU_CONFIG_DIR` env
 var.
@@ -35,9 +36,18 @@ resumed model and story, `/set` toggles) and `configs/models.toml` for
 per-model overrides. App-owned files are rewritten wholesale; user-owned
 files are never rewritten.
 
+## Tests
+
+Tests are written test-first, from the module's documented contract —
+never by reading its code, so they check what the module promises rather
+than what it happens to do. A failure means the implementation is wrong
+until proven otherwise.
+
+`tests/` mirrors the package tree: `tests/lore/test_assembler.py` covers
+`otaku/lore/assembler.py`.
+
 ## Temporary limitations
 
-- There are no tests; do not write any.
 - The app is tested with local backends only; remote OpenAI-compatible
   backends should work but are untested (see the core principles).
 
@@ -63,17 +73,19 @@ Each package may import only the packages listed after its arrow (plus the
 standard library and the declared dependencies); everything else is
 forbidden:
 
-    cli        → chat, tui, lore, store, providers, settings, crypto, logs, paths, term
-    chat       → lore, store, providers, settings, logs, paths, term
-    tui        → store, providers, settings, term
-    lore       → store, providers, settings, logs, term
-    store      → crypto, logs, paths, term
-    providers  → settings, logs, term
-    logs       → crypto, paths, term
+    cli        → chat, tui, lore, store, providers, settings, crypto, logs,
+                 paths, term, formatting
+    chat       → lore, store, providers, settings, logs, paths, term, formatting
+    tui        → store, providers, settings, term, formatting
+    lore       → store, providers, settings, logs, formatting
+    store      → crypto, logs, paths
+    providers  → settings, logs
+    logs       → crypto, paths
     crypto     → settings, paths
     settings   → paths
+    term       → formatting
     paths      → (nothing)
-    term       → (nothing)
+    formatting → (nothing)
 
 The data model lives in `otaku/store/schema.py` (the DDL, its semantics,
 and the row types).
@@ -81,6 +93,18 @@ and the row types).
 `created_at` / `updated_at` columns are audit fields: no business logic may
 ever rely on them. UI display use (e.g. ordering the story list by recency)
 is allowed.
+
+## Module conventions
+
+Order within a module: constants, then classes, then functions — public
+before protected. Logical grouping wins over the order: a private helper
+that belongs to a public function stays beside it, and a section comment
+names each group when a module has several.
+
+A name is protected (`_leading_underscore`) when nothing outside its module
+uses it — constants included. That is the whole rule: the underscore marks
+what is not part of the module's surface, so a reader knows what they may
+use and a rename stays local.
 
 ## Store conventions
 

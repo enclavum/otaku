@@ -4,7 +4,7 @@ Some servers merge tokens before flushing, so their stream arrives in
 bursts — chunky typing even when the generation rate is fine. `smooth` is a
 jitter buffer: a pump thread drains the source stream at full speed (so the
 final `Stats` timing stays real) while the wrapper emits characters at the
-stream's own measured arrival rate, holding roughly LAG to 2x LAG seconds
+stream's own measured arrival rate, holding roughly _LAG to 2x _LAG seconds
 of text. Below that band it decelerates proportionally instead of stalling;
 above it, it catches up boundedly — so the held lag self-stabilizes, which
 is the classic jitter-buffer tradeoff: smoothness beyond the held lag is
@@ -25,9 +25,9 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from otaku.providers.base import Chunk
 
-LAG = 0.25  # target display lag; flush gaps up to ~2x this are absorbed fully
-RATE_WINDOW = 3.0  # sliding window (seconds) for the arrival-rate estimate
-TICK = 0.02  # emit cadence
+_LAG = 0.25  # target display lag; flush gaps up to ~2x this are absorbed fully
+_RATE_WINDOW = 3.0  # sliding window (seconds) for the arrival-rate estimate
+_TICK = 0.02  # emit cadence
 
 
 def smooth(chunks: Iterator[Chunk]) -> Iterator[Chunk]:
@@ -81,7 +81,7 @@ def smooth(chunks: Iterator[Chunk]) -> Iterator[Chunk]:
                     if not samples:
                         samples.append((now - elapsed, 0))
                     samples.append((now, arrived))
-                    while len(samples) > 2 and samples[0][0] < now - RATE_WINDOW:
+                    while len(samples) > 2 and samples[0][0] < now - _RATE_WINDOW:
                         samples.popleft()
                     t0, c0 = samples[0]
                     rate = (arrived - c0) / max(now - t0, 1e-9)
@@ -101,7 +101,7 @@ def smooth(chunks: Iterator[Chunk]) -> Iterator[Chunk]:
                 yield Text(out_text)
             if finished:
                 break
-            time.sleep(TICK)
+            time.sleep(_TICK)
         if error[0] is not None:
             raise error[0]
         if final[0] is not None:
@@ -112,6 +112,6 @@ def smooth(chunks: Iterator[Chunk]) -> Iterator[Chunk]:
 
 def _pace(backlog: int, rate: float) -> float:
     """Characters per second to emit this tick: the arrival rate while the
-    buffer holds 1-2x LAG of text (the steady regime), proportionally slower
+    buffer holds 1-2x _LAG of text (the steady regime), proportionally slower
     as it runs low, boundedly faster when the producer surges ahead."""
-    return min(max(rate, backlog / (2 * LAG)), backlog / LAG)
+    return min(max(rate, backlog / (2 * _LAG)), backlog / _LAG)

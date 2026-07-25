@@ -39,8 +39,8 @@ from otaku.paths import Paths
 from otaku.settings.config import Encryption
 from otaku.settings.files import toml_scalar
 
-KEY_LEN = 32
-NONCE_LEN = 12
+_KEY_LEN = 32
+_NONCE_LEN = 12
 
 _SCRYPT = {"n": 2**15, "r": 8, "p": 1}
 
@@ -53,18 +53,18 @@ class Cipher:
     """AES-256-GCM sealing keyed by the DEK."""
 
     def __init__(self, key: bytes) -> None:
-        if len(key) != KEY_LEN:
-            raise CryptoError(f"key is {len(key)} bytes, want {KEY_LEN}")
+        if len(key) != _KEY_LEN:
+            raise CryptoError(f"key is {len(key)} bytes, want {_KEY_LEN}")
         self._aead = AESGCM(key)
 
     def seal(self, plaintext: bytes) -> bytes:
-        nonce = secrets.token_bytes(NONCE_LEN)
+        nonce = secrets.token_bytes(_NONCE_LEN)
         return nonce + self._aead.encrypt(nonce, plaintext, None)
 
     def unseal(self, sealed: bytes) -> bytes:
-        if len(sealed) < NONCE_LEN:
+        if len(sealed) < _NONCE_LEN:
             raise ValueError("sealed value is too short to hold a nonce")
-        return self._aead.decrypt(sealed[:NONCE_LEN], sealed[NONCE_LEN:], None)
+        return self._aead.decrypt(sealed[:_NONCE_LEN], sealed[_NONCE_LEN:], None)
 
 
 class PlainCipher(Cipher):
@@ -72,7 +72,7 @@ class PlainCipher(Cipher):
     readable plain text, and the database opens in any sqlite browser."""
 
     def __init__(self) -> None:
-        super().__init__(b"\x00" * KEY_LEN)
+        super().__init__(b"\x00" * _KEY_LEN)
 
     def seal(self, plaintext: bytes) -> bytes:
         return plaintext
@@ -93,7 +93,7 @@ def unlock(enc: Encryption, paths: Paths) -> Cipher:
 
     keystore = Keystore(paths.keys_file)
     if not keystore.exists():
-        dek = secrets.token_bytes(KEY_LEN)
+        dek = secrets.token_bytes(_KEY_LEN)
         slot, kek = KEK_PROVIDERS[enc.provider](enc, paths).provision()
         slot.update(_wrap_dek(dek, kek))
         keystore.write([slot])
@@ -123,7 +123,7 @@ def unlock(enc: Encryption, paths: Paths) -> Cipher:
 
 
 def _wrap_dek(dek: bytes, kek: bytes) -> dict[str, str]:
-    nonce = secrets.token_bytes(NONCE_LEN)
+    nonce = secrets.token_bytes(_NONCE_LEN)
     wrapped = AESGCM(kek).encrypt(nonce, dek, None)
     return {
         "wrapped_dek": base64.b64encode(wrapped).decode(),
@@ -230,13 +230,13 @@ class KeychainKek(KekProvider):
                 'use provider = "passphrase", "command", or "disk"'
             )
         kek = self._get()
-        if kek is not None and len(kek) != KEY_LEN:
+        if kek is not None and len(kek) != _KEY_LEN:
             raise CryptoError(
                 f"keychain item {self._service()!r} holds {len(kek)} bytes, "
-                f"want {KEY_LEN}; refusing to overwrite it"
+                f"want {_KEY_LEN}; refusing to overwrite it"
             )
         if kek is None:
-            kek = secrets.token_bytes(KEY_LEN)
+            kek = secrets.token_bytes(_KEY_LEN)
             self._put(kek)
         return {"provider": self.name}, kek
 
@@ -296,7 +296,7 @@ class CommandKek(KekProvider):
                 return {"provider": self.name}, self._run()
             except CryptoError:
                 pass  # nothing stored yet — a true first enable; mint below
-        kek = secrets.token_bytes(KEY_LEN)
+        kek = secrets.token_bytes(_KEY_LEN)
         print(
             "otaku: store this key where your retrieve_command will read it "
             f"(base64):\n  {base64.b64encode(kek).decode()}",
@@ -320,8 +320,8 @@ class CommandKek(KekProvider):
             kek = base64.b64decode(result.stdout.strip(), validate=True)
         except Exception as e:
             raise CryptoError("retrieve_command output is not valid base64") from e
-        if len(kek) != KEY_LEN:
-            raise CryptoError(f"retrieve_command returned {len(kek)} bytes, want {KEY_LEN}")
+        if len(kek) != _KEY_LEN:
+            raise CryptoError(f"retrieve_command returned {len(kek)} bytes, want {_KEY_LEN}")
         return kek
 
 
@@ -359,7 +359,7 @@ class PassphraseKek(KekProvider):
             n=params["n"],
             r=params["r"],
             p=params["p"],
-            dklen=KEY_LEN,
+            dklen=_KEY_LEN,
             maxmem=128 * params["n"] * params["r"] * 2,
         )
 
@@ -380,12 +380,12 @@ class DiskKek(KekProvider):
         path = self._paths.kek_file
         if path.exists():
             kek = path.read_bytes()
-            if len(kek) != KEY_LEN:
-                raise CryptoError(f"{path}: expected {KEY_LEN} bytes, found {len(kek)}")
+            if len(kek) != _KEY_LEN:
+                raise CryptoError(f"{path}: expected {_KEY_LEN} bytes, found {len(kek)}")
             return kek
         path.parent.mkdir(parents=True, exist_ok=True)
         os.chmod(path.parent, 0o700)
-        kek = secrets.token_bytes(KEY_LEN)
+        kek = secrets.token_bytes(_KEY_LEN)
         path.write_bytes(kek)
         os.chmod(path, 0o600)
         return kek

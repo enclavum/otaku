@@ -21,7 +21,9 @@ otaku = "otaku.cli:main"
 [dependency-groups]
 dev = [
     "mypy>=1.15",
+    "pytest>=8",
     "ruff>=0.15",
+    "types-psutil>=6",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -41,3 +43,7 @@ select = ["B", "E", "F", "I", "N", "RUF", "SIM", "UP", "W"]
 [tool.mypy]
 strict = true
 files = ["otaku"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

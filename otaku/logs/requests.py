@@ -52,7 +52,7 @@ class RequestLog:
             sealed = self._cipher.seal(json.dumps(body, ensure_ascii=False).encode("utf-8"))
             entry["body_sealed"] = base64.b64encode(sealed).decode()
         try:
-            path = self.path_for(now.strftime("%Y%m%d"))
+            path = self.get_path_for(now.strftime("%Y%m%d"))
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(entry, ensure_ascii=False) + "\n")
@@ -63,7 +63,7 @@ class RequestLog:
         """The day's entries, in order. A body the cipher cannot open (or a
         corrupt line) yields an Entry with body=None rather than failing
         the whole day."""
-        for line in self.path_for(day).read_text(encoding="utf-8").splitlines():
+        for line in self.get_path_for(day).read_text(encoding="utf-8").splitlines():
             try:
                 raw = json.loads(line)
             except json.JSONDecodeError:
@@ -76,7 +76,7 @@ class RequestLog:
                 body=self._body_of(raw),
             )
 
-    def days(self) -> builtins.list[tuple[str, int]]:
+    def get_days(self) -> builtins.list[tuple[str, int]]:
         """The available log days as (YYYYMMDD, file size), oldest first."""
         if not self._paths.logs_dir.exists():
             return []
@@ -85,7 +85,7 @@ class RequestLog:
             out.append((path.name[len(_PREFIX) : -len(_SUFFIX)], path.stat().st_size))
         return out
 
-    def path_for(self, day: str) -> Path:
+    def get_path_for(self, day: str) -> Path:
         return self._paths.logs_dir / f"{_PREFIX}{day}{_SUFFIX}"
 
     def _body_of(self, raw: dict[str, object]) -> dict[str, object] | None:

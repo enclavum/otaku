@@ -4,7 +4,7 @@ from pathlib import Path
 
 # Written config lines align their comments to one column, so the values read
 # as a column instead of a wall of prose.
-COMMENT_COLUMN = 30
+_COMMENT_COLUMN = 30
 
 
 def toml_key(name: str) -> str:
@@ -26,12 +26,12 @@ def toml_scalar(value: object) -> str:
 
 
 def row(setting: str, comment: str) -> str:
-    """One config line with its comment aligned to COMMENT_COLUMN. A setting
+    """One config line with its comment aligned to _COMMENT_COLUMN. A setting
     longer than the column still gets two spaces before the `#`."""
     if not comment:
         return setting
-    if len(setting) < COMMENT_COLUMN:
-        return f"{setting:<{COMMENT_COLUMN}}# {comment}"
+    if len(setting) < _COMMENT_COLUMN:
+        return f"{setting:<{_COMMENT_COLUMN}}# {comment}"
     return f"{setting}  # {comment}"
 
 

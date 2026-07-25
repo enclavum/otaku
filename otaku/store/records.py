@@ -10,7 +10,7 @@ from dataclasses import dataclass
 
 from otaku.store.database import Database
 
-HISTORY_LIMIT = 20
+_HISTORY_LIMIT = 20
 
 
 @dataclass(frozen=True)
@@ -88,7 +88,7 @@ class HistoryOps:
     def __init__(self, db: Database) -> None:
         self._db = db
 
-    def add(self, text: str, *, limit: int = HISTORY_LIMIT) -> None:
+    def add(self, text: str, *, limit: int = _HISTORY_LIMIT) -> None:
         """Record one submitted line, then prune to the newest `limit`.
         Blank lines and an immediate repeat of the last entry are skipped."""
         text = text.strip("\n")
@@ -109,7 +109,7 @@ class HistoryOps:
             )
             # fmt: on
 
-    def get_recent(self, limit: int = HISTORY_LIMIT) -> builtins.list[str]:
+    def get_recent(self, limit: int = _HISTORY_LIMIT) -> builtins.list[str]:
         """Up to `limit` submitted lines, most recent first."""
         # fmt: off
         rows = self._db.conn.execute(
