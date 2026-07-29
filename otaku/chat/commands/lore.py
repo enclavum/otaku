@@ -41,8 +41,9 @@ def cmd_extract(session: Session, store: Store, args: list[str]) -> None:
     Runs through the background worker (one path into a pass, so a forced
     close can never race an automatic one) while the command waits in the
     foreground, echoing the worker's progress on one updating line. Ctrl+C
-    stops the WAITING, not the close — the scene finishes in the background
-    and the activity line carries on."""
+    CANCELS the pass: the in-flight extraction is abandoned mid-stream and
+    nothing half-done commits; scenes it already closed stay, and the rest
+    of the tail waits for the next pass."""
     if session.story_id is None:
         print("No story yet — send a message first.")
         return
@@ -67,7 +68,8 @@ def cmd_extract(session: Session, store: Store, args: list[str]) -> None:
                 shown = line
                 show(line)
     except KeyboardInterrupt:
-        show("Still working — the scene closes in the background; watch the activity line.")
+        session.worker.cancel()
+        show("Cancelled — nothing half-done commits; already-closed scenes stay.")
         print()
         return
     print(f"\r{ERASE_LINE}", end="")

@@ -154,6 +154,18 @@ class LoreWorker:
             if self._pending is not None and self._deadline is not None:
                 self._deadline = time.monotonic() + self._idle
 
+    def cancel(self) -> None:
+        """Abort the RUNNING pass mid-stream and drop anything queued — the
+        user said stop (Ctrl+C on a foreground wait). Unlike `defer`, this
+        kills in-flight work; nothing half-done commits, and scenes the
+        pass already closed stay."""
+        with self._cond:
+            self._pending = None
+            self._deadline = None
+            if self._abort is not None:
+                self._abort.set()
+            self._cond.notify_all()
+
     def defer(self) -> None:
         """The user submitted: drop the queued job and skip the warm-up,
         but leave a running pass alone. Non-blocking, and deliberately

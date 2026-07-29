@@ -30,7 +30,6 @@ from typing import Any
 from prompt_toolkit.application import Application
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.buffer import Buffer
-from prompt_toolkit.data_structures import Point
 from prompt_toolkit.document import Document
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import StyleAndTextTuples
@@ -39,29 +38,15 @@ from prompt_toolkit.key_binding import (
     KeyBindings,
     merge_key_bindings,
 )
-from prompt_toolkit.keys import Keys
-from prompt_toolkit.layout import Layout
-from prompt_toolkit.layout.containers import (
-    ConditionalContainer,
-    HSplit,
-    VSplit,
-    Window,
-)
-from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
+from prompt_toolkit.layout.containers import VSplit, Window
+from prompt_toolkit.layout.controls import BufferControl
 from prompt_toolkit.layout.dimension import D
 from prompt_toolkit.styles import Style
 
 from otaku.formatting import flatten, truncate
 from otaku.store import Store
 from otaku.store.schema import Character, Scene
-from otaku.tui.widgets import (
-    BASE_STYLE,
-    bordered_box,
-    page_step,
-    term_cols,
-    text_line,
-    wrap_text,
-)
+from otaku.tui.screen import BASE_STYLE, ListScreen, wrap_text
 
 _STYLE = Style.from_dict(
     {
@@ -77,12 +62,9 @@ _STYLE = Style.from_dict(
     }
 )
 
-_PREVIEW_OUTER_GAP = 3
-_PREVIEW_INNER_PAD = 2
-
 
 @dataclass
-class JRow:
+class JournalRow:
     """One journal row, mutable so an edit updates the view in place."""
 
     id: int
@@ -108,8 +90,9 @@ class Field:
     scene_no: int | None = None  # journal rows in the char view carry their scene's number
 
 
-class LoreBrowser:
+class LoreBrowser(ListScreen):
     def __init__(self, store: Store, story_id: int, lens: str = "scenes") -> None:
+        super().__init__()
         self.store = store
         ids = store.stories.get_messages_ids(story_id)
         self.scenes: list[Scene] = store.scenes.get_current(story_id, ids)
@@ -119,13 +102,13 @@ class LoreBrowser:
             store.characters.list(story_id), key=lambda c: c.name.casefold()
         )
         current = {s.id for s in self.scenes}
-        self.jrows: list[JRow] = [
-            JRow(j.id, j.scene_id, j.character_id, j.state, j.history, j.entry)
+        self.jrows: list[JournalRow] = [
+            JournalRow(j.id, j.scene_id, j.character_id, j.state, j.history, j.entry)
             for j in store.journals.list(story_id)
             if j.scene_id in current
         ]
-        self.by_scene: dict[int, list[JRow]] = {}
-        self.by_char: dict[int, list[JRow]] = {}
+        self.by_scene: dict[int, list[JournalRow]] = {}
+        self.by_char: dict[int, list[JournalRow]] = {}
         for r in self.jrows:
             self.by_scene.setdefault(r.scene_id, []).append(r)
             self.by_char.setdefault(r.character_id, []).append(r)
@@ -137,11 +120,8 @@ class LoreBrowser:
         self.scene_cursor: int = 0
         self.cast_cursor: int = 0
         self.field_cursor: int = 0
-        self.in_filter: bool = False
-        self.query: str = ""
         self.scenes_f: list[int] = list(range(len(self.scenes)))
         self.cast_f: list[int] = list(range(len(self.cast)))
-        self.notice: str = ""
 
         # Inline editing: while True the right panel is the edit buffer and
         # every navigation binding is suspended — keystrokes belong to it.
@@ -178,7 +158,7 @@ class LoreBrowser:
             return ""
         return f"{start}-{end}"
 
-    def _vintage(self, r: JRow) -> str:
+    def _vintage(self, r: JournalRow) -> str:
         """Where a journal row's text is from: its scene, and how far the
         story has moved past it."""
         scene = self._scene_by_id(r.scene_id)
@@ -189,7 +169,7 @@ class LoreBrowser:
         title = f" '{scene.title}'" if scene.title else ""
         return f"scene {no}{title}, {ago} msgs ago"
 
-    def _current_history(self, cid: int) -> tuple[str, JRow | None]:
+    def _current_history(self, cid: int) -> tuple[str, JournalRow | None]:
         """The character's newest non-empty rollup, as the store's
         `get_current` would pick it."""
         for r in reversed(self.by_char.get(cid, [])):
@@ -291,17 +271,6 @@ class LoreBrowser:
             return [("class:header", f" Scenes ({len(self.scenes_f)})")]
         return [("class:header", f" Cast ({len(self.cast_f)})")]
 
-    def _filter_text(self) -> StyleAndTextTuples:
-        if not self.in_filter:
-            return [("", "")]
-        return [
-            ("class:filter", "  filter: "),
-            ("class:filter.query", self.query),
-        ]
-
-    def _notice_text(self) -> StyleAndTextTuples:
-        return [("class:notice", "  " + self.notice if self.notice else "")]
-
     def _items_text(self) -> StyleAndTextTuples:
         out: StyleAndTextTuples = []
         if self.detail is not None:
@@ -350,13 +319,6 @@ class LoreBrowser:
             row = f"{truncate(c.name, name_w):<{name_w}} · {truncate(flatten(snippet), avail)}"
             self._emit_row(out, row_i == self._cursor(), row)
         return out
-
-    @staticmethod
-    def _emit_row(out: StyleAndTextTuples, selected: bool, row: str, *, dim: bool = False) -> None:
-        prefix = "  > " if selected else "    "
-        base = "row.dim" if dim else "row"
-        style = f"class:{base}.selected" if selected else f"class:{base}"
-        out.append((style, prefix + row + "\n"))
 
     def _panel_header_text(self) -> StyleAndTextTuples:
         """The fixed header above the focused field's text. It lives in its
@@ -444,20 +406,6 @@ class LoreBrowser:
         other = "cast" if self.lens == "scenes" else "scenes"
         return [("class:help", f" ↑/↓ navigate · tab {other} · enter open · / filter · esc quit")]
 
-    # ---------- width helpers ----------
-
-    def _pane_cols(self) -> tuple[int, int]:
-        avail = max(24, term_cols() - _PREVIEW_OUTER_GAP)
-        left = max(12, avail // 2)
-        preview_inner = max(10, (avail - left) - 2 - _PREVIEW_INNER_PAD * 2)
-        return left, preview_inner
-
-    def _max_row_content_width(self) -> int:
-        return self._pane_cols()[0]
-
-    def _preview_inner_width(self) -> int:
-        return self._pane_cols()[1]
-
     # ---------- behavior ----------
 
     def _rows_count(self) -> int:
@@ -480,7 +428,7 @@ class LoreBrowser:
 
     def _move_cursor(self, delta: int) -> None:
         self.notice = ""
-        self._set_cursor(max(0, min(self._rows_count() - 1, self._cursor() + delta)))
+        super()._move_cursor(delta)
 
     def _refilter(self) -> None:
         q = self.query.strip().casefold()
@@ -517,7 +465,7 @@ class LoreBrowser:
         if self.query:
             self._refilter()
 
-    def _enter(self) -> None:
+    def _open(self) -> None:
         self.notice = ""
         if self.detail is not None:
             return  # editing goes through _start_edit
@@ -553,18 +501,32 @@ class LoreBrowser:
         else:
             self.field_cursor = 0
 
-    def _escape(self) -> None:
+    def _on_enter(self) -> None:
+        if self.detail is not None:
+            self._start_edit()
+        else:
+            self._open()
+
+    def _on_escape(self) -> None:
         self.notice = ""
-        if self.in_filter:
-            self.in_filter = False
-            self.query = ""
-            self._refilter()
+        if self._clear_filter():
             return
         if self.detail is not None:
             self.detail = None
             self.fields = []
             return
         get_app().exit()
+
+    def _type(self, data: str) -> None:
+        """The base behavior, except that `/` opens the filter only on the
+        top-level lists — a detail view has nothing to filter."""
+        if self.in_filter:
+            self.query += data
+            self._refilter()
+            return
+        self.notice = ""
+        if self.detail is None and data == "/":
+            self._open_filter()
 
     # ---------- editing ----------
 
@@ -701,77 +663,15 @@ class LoreBrowser:
 
     def _build_app(self) -> Application[None]:
         kb = KeyBindings()
-
-        @kb.add("up")
-        def _up(event: Any) -> None:
-            self._move_cursor(-1)
-
-        @kb.add("down")
-        def _down(event: Any) -> None:
-            self._move_cursor(1)
-
-        @kb.add("pageup")
-        def _pgup(event: Any) -> None:
-            self._move_cursor(-page_step())
-
-        @kb.add("pagedown")
-        def _pgdn(event: Any) -> None:
-            self._move_cursor(page_step())
-
-        @kb.add("home")
-        def _home(event: Any) -> None:
-            self._move_cursor(-self._rows_count())
-
-        @kb.add("end")
-        def _end(event: Any) -> None:
-            self._move_cursor(self._rows_count())
+        self._standard_keys(kb)
 
         @kb.add("tab")
         def _tab_key(event: Any) -> None:
             self._tab()
 
-        @kb.add("enter")
-        def _enter_key(event: Any) -> None:
-            if self.detail is not None:
-                self._start_edit()
-            else:
-                self._enter()
-
         @kb.add("right")
         def _right(event: Any) -> None:
             self._pivot()
-
-        @kb.add("escape", eager=True)
-        def _esc(event: Any) -> None:
-            self._escape()
-
-        @kb.add("backspace")
-        def _bs(event: Any) -> None:
-            if not self.in_filter:
-                return
-            if not self.query:
-                self.in_filter = False
-                self._refilter()
-                return
-            self.query = self.query[:-1]
-            self._refilter()
-
-        @kb.add(Keys.Any)
-        def _any(event: Any) -> None:
-            data = event.data
-            if not data or len(data) != 1 or not data.isprintable():
-                return
-            if self.in_filter:
-                self.query += data
-                self._refilter()
-                return
-            self.notice = ""
-            if self.detail is not None:
-                return
-            if data == "/":
-                self.in_filter = True
-                self.query = ""
-                self._refilter()
 
         # While the buffer owns the panel, every binding above is suspended —
         # keystrokes are the buffer's (the app's default bindings edit it).
@@ -793,57 +693,18 @@ class LoreBrowser:
         def _ctrlc(event: Any) -> None:
             event.app.exit()
 
-        bindings = merge_key_bindings(
-            [
-                ConditionalKeyBindings(kb, ~editing),
-                edit_kb,
-                always_kb,
-            ]
-        )
+        bindings = merge_key_bindings([ConditionalKeyBindings(kb, ~editing), edit_kb, always_kb])
 
         # Focusable so focus has somewhere to return to when editing ends.
-        self._items_control = FormattedTextControl(
-            text=self._items_text,
-            get_cursor_position=lambda: Point(0, self._cursor()),
-            show_cursor=False,
-            focusable=True,
-        )
+        self._items_control = self._make_items_control(focusable=True)
         items_window = Window(
             content=self._items_control,
             wrap_lines=False,
             always_hide_cursor=True,
             style="class:row",
         )
+        left_pane = self._list_pane(items_window, width=D(weight=1), notice=True)
 
-        left_pane = HSplit(
-            [
-                text_line(self._header_text, style="class:header"),
-                Window(height=1, char=" ", always_hide_cursor=True),
-                text_line(self._filter_text, filter=Condition(lambda: self.in_filter)),
-                items_window,
-                text_line(self._notice_text, filter=Condition(lambda: bool(self.notice))),
-                Window(height=1, char=" ", always_hide_cursor=True),
-                text_line(self._help_text, style="class:help"),
-            ],
-            width=D(weight=1),
-        )
-
-        gap = Window(width=_PREVIEW_OUTER_GAP, char=" ", always_hide_cursor=True)
-
-        # ONE box for the right panel: a fixed header (the field's label, in
-        # detail views) above a body that is the preview text — or, while
-        # editing, the live buffer in the same spot. The header never moves,
-        # so Enter starts editing exactly where the text already is.
-        panel_header = ConditionalContainer(
-            Window(
-                FormattedTextControl(text=self._panel_header_text, show_cursor=False),
-                wrap_lines=True,
-                dont_extend_height=True,
-                always_hide_cursor=True,
-                style="class:preview.body",
-            ),
-            filter=Condition(lambda: self.detail is not None and bool(self.fields)),
-        )
         # Motion inside the editor, attached to the control itself so it only
         # exists while the buffer has focus — and outranks the default
         # logical-line motion, which sticks on wrapped prose.
@@ -861,41 +722,14 @@ class LoreBrowser:
             buffer=self.edit_buffer, focusable=True, key_bindings=edit_motion
         )
         self._edit_window = Window(self._edit_control, wrap_lines=True, style="class:preview.body")
-        panel_body = HSplit(
-            [
-                panel_header,
-                ConditionalContainer(
-                    Window(
-                        FormattedTextControl(text=self._preview_text, show_cursor=False),
-                        wrap_lines=True,
-                        always_hide_cursor=True,
-                        style="class:preview.body",
-                    ),
-                    filter=~editing,
-                ),
-                ConditionalContainer(self._edit_window, filter=editing),
-            ]
-        )
-        preview_pane = bordered_box(
-            panel_body,
-            width=D(weight=1),
-            style="class:preview.body",
-            inner_pad=_PREVIEW_INNER_PAD,
+        preview_pane = self._preview_panel(
+            header_filter=Condition(lambda: self.detail is not None and bool(self.fields)),
+            editing=editing,
+            edit_window=self._edit_window,
         )
 
-        layout = Layout(VSplit([left_pane, gap, preview_pane]))
-
-        app: Application[None] = Application(
-            layout=layout,
-            key_bindings=bindings,
-            style=_STYLE,
-            mouse_support=False,
-            full_screen=True,
-            enable_page_navigation_bindings=False,
-        )
-        app.timeoutlen = 0.05
-        app.ttimeoutlen = 0.05
-        return app
+        root = VSplit([left_pane, self._preview_gap(), preview_pane])
+        return self._finish_app(root, bindings, _STYLE, floats=[])
 
 
 def browse(store: Store, story_id: int, lens: str = "scenes") -> None:

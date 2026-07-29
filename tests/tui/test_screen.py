@@ -5,7 +5,7 @@ paragraph breaks the previews rely on — and never returns fewer lines
 than the input has.
 """
 
-from otaku.tui.widgets import wrap_text
+from otaku.tui.screen import wrap_text
 
 
 class TestWrapText:

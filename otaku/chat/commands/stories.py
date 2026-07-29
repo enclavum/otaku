@@ -22,6 +22,10 @@ def cmd_stories(session: Session, store: Store, args: list[str]) -> None:
         return
     result = session.tui.pick_story(store, rows, session.story_id)
     if result is None:
+        # No selection — but the browser edits messages in place, so the
+        # session must not keep a stale copy of the story it is on.
+        if session.story_id is not None:
+            session.messages = store.stories.get_messages(session.story_id)
         return
     story_id, messages, total = result
 

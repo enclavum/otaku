@@ -24,16 +24,12 @@ from typing import Any
 import psutil
 from prompt_toolkit.application import Application
 from prompt_toolkit.application.current import get_app
-from prompt_toolkit.data_structures import Point
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import StyleAndTextTuples
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
-from prompt_toolkit.layout import Layout
 from prompt_toolkit.layout.containers import (
     ConditionalContainer,
-    Float,
-    FloatContainer,
     HSplit,
     VSplit,
     Window,
@@ -47,13 +43,7 @@ from otaku.providers.base import ManagedClient
 from otaku.providers.registry import Registry as ProviderRegistry
 from otaku.terminal import latin_key
 from otaku.terminal.spinner import FRAMES as SPINNER_FRAMES
-from otaku.tui.widgets import (
-    BASE_STYLE,
-    bordered_box,
-    page_step,
-    term_cols,
-    text_line,
-)
+from otaku.tui.screen import BASE_STYLE, ListScreen, bordered_box, term_cols, text_line
 
 _STYLE = Style.from_dict(
     {
@@ -80,19 +70,18 @@ class ModelEntry:
     size_bytes: int | None = None  # None when the provider doesn't expose it
 
 
-class ModelPicker:
+class ModelPicker(ListScreen):
     def __init__(
         self,
         providers: ProviderRegistry,
         entries: list[ModelEntry],
         initial_spec: str | None = None,
     ) -> None:
+        super().__init__()
         self.providers = providers
         self.all: list[ModelEntry] = list(entries)
         self.filtered: list[ModelEntry] = list(entries)
         self.cursor: int = 0
-        self.in_filter: bool = False
-        self.query: str = ""
 
         if initial_spec is not None:
             for i, entry in enumerate(self.all):
@@ -151,14 +140,6 @@ class ModelPicker:
         width = min(self._table_width(), term_cols())
         gap = " " * max(2, width - len(left) - len(ram))
         return [("class:header", left + gap + ram)]
-
-    def _filter_text(self) -> StyleAndTextTuples:
-        if not self.in_filter:
-            return [("", "")]
-        return [
-            ("class:filter", "  filter: "),
-            ("class:filter.query", self.query),
-        ]
 
     def _items_text(self) -> StyleAndTextTuples:
         if not self.filtered:
@@ -249,6 +230,15 @@ class ModelPicker:
 
     # ---------- behavior ----------
 
+    def _rows_count(self) -> int:
+        return len(self.filtered)
+
+    def _cursor(self) -> int:
+        return self.cursor
+
+    def _set_cursor(self, value: int) -> None:
+        self.cursor = value
+
     def _refilter(self) -> None:
         q = self.query.strip().lower()
         if not q:
@@ -257,13 +247,6 @@ class ModelPicker:
             self.filtered = [e for e in self.all if q in e.full_spec.lower()]
         if self.cursor >= len(self.filtered):
             self.cursor = max(0, len(self.filtered) - 1)
-
-    def _move_cursor(self, delta: int) -> None:
-        n = len(self.filtered)
-        if n == 0:
-            self.cursor = 0
-            return
-        self.cursor = max(0, min(n - 1, self.cursor + delta))
 
     def _start_action(self, entry: ModelEntry, *, load: bool, exit_on_success: bool) -> None:
         with self._lock:
@@ -370,12 +353,15 @@ class ModelPicker:
         self.confirming_entry = None
 
     def _on_escape(self) -> None:
-        if self.in_filter:
-            self.in_filter = False
-            self.query = ""
-            self._refilter()
-            return
-        get_app().exit()
+        if not self._clear_filter():
+            get_app().exit()
+
+    def _on_key(self, data: str) -> None:
+        key = latin_key(data)
+        if key == "l":
+            self._request_load()
+        elif key == "u":
+            self._request_unload()
 
     # ---------- application wiring ----------
 
@@ -406,83 +392,15 @@ class ModelPicker:
             elif key == "n":
                 self._confirm_no()
 
-        @kb.add("up", filter=idle)
-        def _up(event: Any) -> None:
-            self._move_cursor(-1)
-
-        @kb.add("down", filter=idle)
-        def _down(event: Any) -> None:
-            self._move_cursor(1)
-
-        @kb.add("pageup", filter=idle)
-        def _pgup(event: Any) -> None:
-            self._move_cursor(-page_step())
-
-        @kb.add("pagedown", filter=idle)
-        def _pgdn(event: Any) -> None:
-            self._move_cursor(page_step())
-
-        @kb.add("home", filter=idle)
-        def _home(event: Any) -> None:
-            self.cursor = 0
-
-        @kb.add("end", filter=idle)
-        def _end(event: Any) -> None:
-            self.cursor = max(0, len(self.filtered) - 1)
-
-        @kb.add("enter", filter=idle)
-        def _enter(event: Any) -> None:
-            self._on_enter()
-
-        @kb.add("escape", eager=True, filter=idle)
-        def _esc(event: Any) -> None:
-            self._on_escape()
+        self._standard_keys(kb, when=idle)
 
         @kb.add("c-c")
         def _ctrlc(event: Any) -> None:
             self.result = None
             event.app.exit()
 
-        @kb.add("backspace", filter=idle)
-        def _bs(event: Any) -> None:
-            if not self.in_filter:
-                return
-            if not self.query:
-                self.in_filter = False
-                self._refilter()
-                return
-            self.query = self.query[:-1]
-            self._refilter()
-
-        @kb.add(Keys.Any, filter=idle)
-        def _any(event: Any) -> None:
-            data = event.data
-            if not data or len(data) != 1 or not data.isprintable():
-                return
-            if not self.in_filter:
-                if data == "/":
-                    self.in_filter = True
-                    self.query = ""
-                    self._refilter()
-                    return
-                key = latin_key(data)
-                if key == "l":
-                    self._request_load()
-                    return
-                if key == "u":
-                    self._request_unload()
-                    return
-                return
-            # filter mode: append
-            self.query += data
-            self._refilter()
-
         items_window = Window(
-            content=FormattedTextControl(
-                text=self._items_text,
-                get_cursor_position=lambda: Point(0, self._cursor_line()),
-                show_cursor=False,
-            ),
+            content=self._make_items_control(cursor_line=self._cursor_line),
             wrap_lines=False,
             always_hide_cursor=True,
             dont_extend_width=True,
@@ -537,20 +455,7 @@ class ModelPicker:
         )
 
         dialog = HSplit([busy_dialog, confirm_dialog])
-
-        root = FloatContainer(content=left_pane, floats=[Float(content=dialog)])
-
-        app: Application[None] = Application(
-            layout=Layout(root),
-            key_bindings=kb,
-            style=_STYLE,
-            mouse_support=False,
-            full_screen=True,
-            enable_page_navigation_bindings=False,
-        )
-        app.timeoutlen = 0.05
-        app.ttimeoutlen = 0.05
-        return app
+        return self._finish_app(left_pane, kb, _STYLE, floats=[dialog])
 
 
 def pick(providers: ProviderRegistry, initial_spec: str | None = None) -> str | None:

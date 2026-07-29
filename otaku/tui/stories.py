@@ -37,7 +37,6 @@ from typing import Any
 from prompt_toolkit.application import Application
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.buffer import Buffer
-from prompt_toolkit.data_structures import Point
 from prompt_toolkit.document import Document
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import StyleAndTextTuples
@@ -47,15 +46,7 @@ from prompt_toolkit.key_binding import (
     merge_key_bindings,
 )
 from prompt_toolkit.keys import Keys
-from prompt_toolkit.layout import Layout
-from prompt_toolkit.layout.containers import (
-    ConditionalContainer,
-    Float,
-    FloatContainer,
-    HSplit,
-    VSplit,
-    Window,
-)
+from prompt_toolkit.layout.containers import ConditionalContainer, VSplit, Window
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import D
 from prompt_toolkit.styles import Style
@@ -65,14 +56,7 @@ from otaku.store import Store
 from otaku.store.schema import Message
 from otaku.store.stories import StoryListing
 from otaku.terminal import latin_key
-from otaku.tui.widgets import (
-    BASE_STYLE,
-    bordered_box,
-    page_step,
-    term_cols,
-    text_line,
-    wrap_text,
-)
+from otaku.tui.screen import BASE_STYLE, ListScreen, bordered_box, wrap_text
 
 # Light palette — shared chrome from BASE_STYLE plus the row + preview
 # overrides this browser needs.
@@ -84,11 +68,10 @@ _STYLE = Style.from_dict(
         "preview.title": "bold fg:#303030 bg:#ffffff",
         "preview.muted": "fg:#767676 bg:#ffffff",
         "preview.body": "fg:#000000 bg:#ffffff",
+        "notice": "fg:#767676 bg:#ffffff",
     }
 )
 
-_PREVIEW_OUTER_GAP = 3  # cols between items pane and preview border
-_PREVIEW_INNER_PAD = 2  # cols inside the border, both sides
 # List-to-preview split, list:preview. The story list gets an even split so
 # the preview has room for the arc; the message view gives the list twice the
 # preview, since the rows carry the content and the preview only echoes one.
@@ -102,21 +85,20 @@ def _label(row: StoryListing) -> str:
     return row.title or row.story_so_far or row.first_user
 
 
-class StoryPicker:
+class StoryPicker(ListScreen):
     def __init__(
         self,
         store: Store,
         rows: list[StoryListing],
         initial_story: int | None = None,
     ) -> None:
+        super().__init__()
         self.store = store
         self.all: list[StoryListing] = list(rows)
         self.filtered: list[StoryListing] = list(rows)
         # Full message text per story, built lazily on the first search
         # keystroke so filtering matches buried content, not just the labels.
         self._texts: dict[int, str] | None = None
-        self.in_filter: bool = False
-        self.query: str = ""
         # in_filter/query are shared by both views; stash the story-list filter
         # while drilled into messages so returning restores it verbatim.
         self._story_filter: tuple[bool, str] = (False, "")
@@ -143,7 +125,6 @@ class StoryPicker:
         # preview body is the edit buffer and navigation is suspended.
         self.editing: bool = False
         self.edit_buffer = Buffer(multiline=True)
-        self.notice: str = ""
 
         self.result: tuple[int, list[Message], int] | None = None
         self.app = self._build_app()
@@ -165,14 +146,6 @@ class StoryPicker:
         n, total = len(self.filtered), len(self.all)
         label = f"Stories ({n} of {total})" if n != total else f"Stories ({n})"
         return [("class:header", " " + label)]
-
-    def _filter_text(self) -> StyleAndTextTuples:
-        if not self.in_filter:
-            return [("", "")]
-        return [
-            ("class:filter", "  filter: "),
-            ("class:filter.query", self.query),
-        ]
 
     def _confirm_text(self) -> StyleAndTextTuples:
         return [
@@ -222,12 +195,6 @@ class StoryPicker:
                 line = f"{ts} · {listing.num_messages:>4} msg · {head}"
                 self._emit_row(out, i == self.list_cursor, line)
         return out
-
-    @staticmethod
-    def _emit_row(out: StyleAndTextTuples, selected: bool, row: str) -> None:
-        prefix = "  > " if selected else "    "
-        style = "class:row.selected" if selected else "class:row"
-        out.append((style, prefix + row + "\n"))
 
     def _panel_header_text(self) -> StyleAndTextTuples:
         """The fixed header above the message text — its own window, so it
@@ -323,29 +290,11 @@ class StoryPicker:
             )
         ]
 
-    # ---------- width helpers ----------
+    # ---------- behavior ----------
 
     def _split(self) -> tuple[int, int]:
         """(left weight, preview weight) for the current view."""
         return _TURN_SPLIT if self.in_turns else _STORY_SPLIT
-
-    def _pane_cols(self) -> tuple[int, int]:
-        """(left pane cols, preview inner cols) for the current split — kept
-        in step with the VSplit weights so rows and the preview wrap to the
-        widths they actually get."""
-        avail = max(24, term_cols() - _PREVIEW_OUTER_GAP)
-        lw, pw = self._split()
-        left = max(12, avail * lw // (lw + pw))
-        preview_inner = max(10, (avail - left) - 2 - _PREVIEW_INNER_PAD * 2)
-        return left, preview_inner
-
-    def _max_row_content_width(self) -> int:
-        return self._pane_cols()[0]
-
-    def _preview_inner_width(self) -> int:
-        return self._pane_cols()[1]
-
-    # ---------- behavior ----------
 
     def _refilter(self) -> None:
         if self.in_turns:
@@ -379,19 +328,21 @@ class StoryPicker:
         if self.turn_cursor >= len(self.turn_filtered):
             self.turn_cursor = max(0, len(self.turn_filtered) - 1)
 
-    def _items_count(self) -> int:
+    def _rows_count(self) -> int:
         return len(self.turn_filtered) if self.in_turns else len(self.filtered)
 
     def _cursor(self) -> int:
         return self.turn_cursor if self.in_turns else self.list_cursor
 
+    def _set_cursor(self, value: int) -> None:
+        if self.in_turns:
+            self.turn_cursor = value
+        else:
+            self.list_cursor = value
+
     def _move_cursor(self, delta: int) -> None:
         self.notice = ""
-        new = max(0, min(self._items_count() - 1, self._cursor() + delta))
-        if self.in_turns:
-            self.turn_cursor = new
-        else:
-            self.list_cursor = new
+        super()._move_cursor(delta)
 
     def _request_delete(self) -> None:
         if self.in_turns or self.confirming_delete or not self.filtered:
@@ -414,7 +365,7 @@ class StoryPicker:
         self._refilter()
         self.confirming_delete = False
 
-    def _enter(self) -> None:
+    def _on_enter(self) -> None:
         if self.in_turns:
             if not self.turn_filtered or self.selected_story is None:
                 return
@@ -444,13 +395,10 @@ class StoryPicker:
         self.turn_cursor = max(0, len(self.turn_filtered) - 1)
         self.in_turns = True
 
-    def _escape(self) -> None:
+    def _on_escape(self) -> None:
         self.notice = ""
         # In either view an active filter clears first; a second Esc backs out.
-        if self.in_filter:
-            self.in_filter = False
-            self.query = ""
-            self._refilter()
+        if self._clear_filter():
             return
         if self.in_turns:
             self.in_turns = False
@@ -461,6 +409,10 @@ class StoryPicker:
             self.list_cursor = self.list_cursor_saved
             return
         get_app().exit()
+
+    def _on_key(self, data: str) -> None:
+        if latin_key(data) == "e" and self.in_turns:
+            self._start_edit()
 
     # ---------- inline message editing ----------
 
@@ -505,101 +457,28 @@ class StoryPicker:
 
     def _build_app(self) -> Application[None]:
         kb = KeyBindings()
+        confirming = Condition(lambda: self.confirming_delete)
 
-        @kb.add("up")
-        def _up(event: Any) -> None:
-            if self.confirming_delete:
-                return
-            self._move_cursor(-1)
+        # While the confirm dialog is up: only y/n/esc do anything.
+        @kb.add("escape", eager=True, filter=confirming)
+        def _confirm_esc(event: Any) -> None:
+            self.confirming_delete = False
 
-        @kb.add("down")
-        def _down(event: Any) -> None:
-            if self.confirming_delete:
-                return
-            self._move_cursor(1)
-
-        @kb.add("pageup")
-        def _pgup(event: Any) -> None:
-            if self.confirming_delete:
-                return
-            self._move_cursor(-page_step())
-
-        @kb.add("pagedown")
-        def _pgdn(event: Any) -> None:
-            if self.confirming_delete:
-                return
-            self._move_cursor(page_step())
-
-        @kb.add("home")
-        def _home(event: Any) -> None:
-            if self.confirming_delete:
-                return
-            if self.in_turns:
-                self.turn_cursor = 0
-            else:
-                self.list_cursor = 0
-
-        @kb.add("end")
-        def _end(event: Any) -> None:
-            if self.confirming_delete:
-                return
-            if self.in_turns:
-                self.turn_cursor = max(0, len(self.turn_filtered) - 1)
-            else:
-                self.list_cursor = max(0, len(self.filtered) - 1)
-
-        @kb.add("enter")
-        def _enter_key(event: Any) -> None:
-            if self.confirming_delete:
-                return  # require explicit y to confirm
-            self._enter()
-
-        @kb.add("escape", eager=True)
-        def _esc(event: Any) -> None:
-            if self.confirming_delete:
+        @kb.add(Keys.Any, filter=confirming, eager=True)
+        def _confirm_any(event: Any) -> None:
+            key = latin_key(event.data) if event.data else ""
+            if key == "y":
+                self._do_delete()
+            elif key == "n":
                 self.confirming_delete = False
-                return
-            self._escape()
 
-        @kb.add("backspace")
-        def _bs(event: Any) -> None:
-            if self.confirming_delete or not self.in_filter:
-                return
-            if not self.query:
-                self.in_filter = False
-                self._refilter()
-                return
-            self.query = self.query[:-1]
-            self._refilter()
+        self._standard_keys(kb, when=~confirming)
 
         @kb.add("delete")
         def _delete_key(event: Any) -> None:
             self._request_delete()
 
-        @kb.add(Keys.Any)
-        def _any(event: Any) -> None:
-            data = event.data
-            if self.confirming_delete:
-                key = latin_key(data) if data else ""
-                if key == "y":
-                    self._do_delete()
-                elif key == "n":
-                    self.confirming_delete = False
-                return
-            if not data or len(data) != 1 or not data.isprintable():
-                return
-            if not self.in_filter:
-                if data == "/":
-                    self.in_filter = True
-                    self.query = ""
-                    self._refilter()
-                elif latin_key(data) == "e" and self.in_turns:
-                    self._start_edit()
-                return
-            self.query += data
-            self._refilter()
-
-        # While the buffer owns the panel, navigation is suspended —
+        # While the buffer owns the panel, every binding above is suspended —
         # keystrokes belong to it. Only save/cancel and quit stay live.
         editing = Condition(lambda: self.editing)
         edit_kb = KeyBindings()
@@ -622,81 +501,25 @@ class StoryPicker:
         bindings = merge_key_bindings([ConditionalKeyBindings(kb, ~editing), edit_kb, always_kb])
 
         # Focusable so focus has somewhere to return to when editing ends.
-        self._items_control = FormattedTextControl(
-            text=self._items_text,
-            get_cursor_position=lambda: Point(0, self._cursor()),
-            show_cursor=False,
-            focusable=True,
-        )
+        self._items_control = self._make_items_control(focusable=True)
         items_window = Window(
             content=self._items_control,
             wrap_lines=False,
             always_hide_cursor=True,
             style="class:row",
         )
-
-        # Left pane is the chrome around the items list. Its width is a
-        # weighted share of the row against the preview's weight — 50/50 in
-        # the story list, 2:1 in the message view (re-evaluated each render,
-        # so the split flips when the view does).
-        left_pane = HSplit(
-            [
-                text_line(self._header_text, style="class:header"),
-                Window(height=1, char=" ", always_hide_cursor=True),
-                text_line(
-                    self._filter_text,
-                    filter=Condition(lambda: self.in_filter),
-                ),
-                items_window,
-                text_line(
-                    lambda: [("class:muted", "  " + self.notice)],
-                    filter=Condition(lambda: bool(self.notice)),
-                ),
-                Window(height=1, char=" ", always_hide_cursor=True),
-                text_line(self._help_text, style="class:help"),
-            ],
-            width=lambda: D(weight=self._split()[0]),
+        # The left pane's width is a weighted share against the preview's —
+        # 50/50 in the story list, 2:1 in the message view (re-evaluated
+        # each render, so the split flips when the view does).
+        left_pane = self._list_pane(
+            items_window, width=lambda: D(weight=self._split()[0]), notice=True
         )
 
-        gap = Window(width=_PREVIEW_OUTER_GAP, char=" ", always_hide_cursor=True)
-
-        # ONE box for the preview: a fixed header (the message's number and
-        # role, in the message view) above a body that is the preview text —
-        # or, while editing, the live buffer in the same spot.
-        panel_header = ConditionalContainer(
-            Window(
-                FormattedTextControl(text=self._panel_header_text, show_cursor=False),
-                wrap_lines=True,
-                dont_extend_height=True,
-                always_hide_cursor=True,
-                style="class:preview.body",
-            ),
-            filter=Condition(lambda: self.in_turns and bool(self.turn_filtered)),
-        )
         self._edit_control = BufferControl(buffer=self.edit_buffer, focusable=True)
-        panel_body = HSplit(
-            [
-                panel_header,
-                ConditionalContainer(
-                    Window(
-                        FormattedTextControl(text=self._preview_text, show_cursor=False),
-                        wrap_lines=True,
-                        always_hide_cursor=True,
-                        style="class:preview.body",
-                    ),
-                    filter=~editing,
-                ),
-                ConditionalContainer(
-                    Window(self._edit_control, wrap_lines=True, style="class:preview.body"),
-                    filter=editing,
-                ),
-            ]
-        )
-        preview_pane = bordered_box(
-            panel_body,
-            width=D(weight=1),
-            style="class:preview.body",
-            inner_pad=_PREVIEW_INNER_PAD,
+        preview_pane = self._preview_panel(
+            header_filter=Condition(lambda: self.in_turns and bool(self.turn_filtered)),
+            editing=editing,
+            edit_window=Window(self._edit_control, wrap_lines=True, style="class:preview.body"),
         )
 
         confirm_dialog = ConditionalContainer(
@@ -707,27 +530,11 @@ class StoryPicker:
                 style="class:dialog.body",
                 border_style="class:dialog.border",
             ),
-            filter=Condition(lambda: self.confirming_delete),
+            filter=confirming,
         )
 
-        root = FloatContainer(
-            content=VSplit([left_pane, gap, preview_pane]),
-            floats=[Float(content=confirm_dialog)],
-        )
-        layout = Layout(root)
-
-        app: Application[None] = Application(
-            layout=layout,
-            key_bindings=bindings,
-            style=_STYLE,
-            mouse_support=False,
-            full_screen=True,
-            enable_page_navigation_bindings=False,
-        )
-        # Snappy ESC: defaults are 1.0s/0.5s and feel laggy.
-        app.timeoutlen = 0.05
-        app.ttimeoutlen = 0.05
-        return app
+        root = VSplit([left_pane, self._preview_gap(), preview_pane])
+        return self._finish_app(root, bindings, _STYLE, floats=[confirm_dialog])
 
 
 def pick(
