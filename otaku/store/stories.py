@@ -342,7 +342,12 @@ class StoryOps:
         untitled."""
         if not base:
             return None
-        taken = {item.title for item in self.list()}
+        # Titles only — the full listing would decrypt every story's labels
+        # just to number one fork.
+        # fmt: off
+        rows = self._db.conn.execute("SELECT title FROM stories").fetchall()
+        # fmt: on
+        taken = {self._db.unseal(title) for (title,) in rows}
         n = 2
         while f"{base} - {n}" in taken:
             n += 1

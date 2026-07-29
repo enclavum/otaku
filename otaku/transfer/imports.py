@@ -9,7 +9,6 @@ calls.
 import json
 import re
 
-from otaku.lore.extraction import Cast
 from otaku.store import Store
 from otaku.store.schema import Message
 from otaku.transfer import (
@@ -140,7 +139,16 @@ def write_story(store: Store, export: StoryExport) -> int:
     story_id = store.stories.add(export.title or None)
     if export.system:
         store.stories.set_system(story_id, export.system)
-    cast = Cast.load(store, story_id)
+
+    def character(name: str, aliases: tuple[str, ...] = (), description: str | None = None) -> int:
+        # Resolve-or-create by name; an existing row is enriched, never
+        # overwritten (the store's own additive rule).
+        found = store.characters.find(story_id, name)
+        if found is not None:
+            if aliases or description:
+                store.characters.update(found.id, aliases=aliases, description=description)
+            return found.id
+        return store.characters.add(story_id, name, aliases=aliases, description=description)
 
     ids: list[int] = []
     for message in export.messages:
@@ -154,17 +162,11 @@ def write_story(store: Store, export: StoryExport) -> int:
             ),
         )
         if message.speaker:
-            store.messages.set_speaker(
-                message_id, cast.get_or_add(message.speaker), message.speaker
-            )
+            store.messages.set_speaker(message_id, character(message.speaker), message.speaker)
         ids.append(message_id)
 
-    for character in export.cast:
-        cast.get_or_add(
-            character.name,
-            aliases=character.aliases,
-            description=character.description or None,
-        )
+    for member in export.cast:
+        character(member.name, aliases=member.aliases, description=member.description or None)
 
     newest_with_history = len(export.scenes) - 1 if export.story_so_far else None
     for i, scene in enumerate(export.scenes):
@@ -183,7 +185,7 @@ def write_story(store: Store, export: StoryExport) -> int:
             journal_id = store.journals.add(
                 story_id,
                 scene_id,
-                cast.get_or_add(journal.character),
+                character(journal.character),
                 entry=journal.entry,
                 state=journal.state,
             )

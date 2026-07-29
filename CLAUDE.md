@@ -78,7 +78,7 @@ forbidden:
     chat       → transfer, lore, store, providers, settings, logs, paths,
                  terminal, formatting
     tui        → store, providers, settings, terminal, formatting
-    transfer   → lore, store
+    transfer   → store
     lore       → store, providers, settings, logs, formatting
     store      → crypto, logs, paths
     providers  → settings, logs

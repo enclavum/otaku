@@ -64,10 +64,7 @@ def cmd_import(session: Session, store: Store, args: list[str]) -> None:
     applied = f", {len(export.scenes)} scene(s) applied verbatim" if export.scenes else ""
     print(f"Imported {len(export.messages)} message(s) → story {story_id}{applied}.")
 
-    session.story_id = story_id
-    session.system = store.stories.get_system(story_id)
-    session.messages = store.stories.get_messages(story_id)
-    session.save_state()
+    session.switch_to(store, story_id)
     # The memory the file didn't carry is built by the extraction — the
     # same forced pass, waited on the same way, as typing /extract.
     lore.cmd_extract(session, store, [])

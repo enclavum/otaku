@@ -15,7 +15,7 @@ import click
 
 from otaku import __version__, crypto
 from otaku.chat import repl
-from otaku.chat.state import Session
+from otaku.chat.state import TUI, Session
 from otaku.formatting import pretty_path
 from otaku.logs.requests import RequestLog
 from otaku.logs.system import SystemLog
@@ -64,17 +64,17 @@ def main(ctx: click.Context) -> None:
     except DatabaseError as e:
         click.echo(str(e), err=True)
         ctx.exit(1)
-    worker = None
-    if cfg.lore_enabled:
-        # The worker's own store connection (WAL makes the concurrent write
-        # safe), opened lazily on its thread; backups=0 — the session's
-        # open above owns the daily snapshot.
-        worker = LoreWorker(
-            lambda: Store.open(paths, cipher, backups=0),
-            provider_registry,
-            SystemLog(paths),
-            idle_seconds=cfg.idle_seconds,
-        )
+    # The worker's own store connection (WAL makes the concurrent write
+    # safe), opened lazily on its thread; backups=0 — the session's open
+    # above owns the daily snapshot. It exists whatever [lore_extraction]
+    # says: `enabled` only gates the idle scheduling, so /extract always
+    # has its one path into a pass.
+    worker = LoreWorker(
+        lambda: Store.open(paths, cipher, backups=0),
+        provider_registry,
+        SystemLog(paths),
+        idle_seconds=cfg.idle_seconds,
+    )
     try:
         session = Session.start(
             config=cfg,
@@ -83,15 +83,18 @@ def main(ctx: click.Context) -> None:
             spec=spec,
             state=state,
             store=store,
-            pick_model=lambda current: model_picker.pick(provider_registry, initial_spec=current),
-            pick_story=story_picker.pick,
-            browse_lore=lore_browser.browse,
+            tui=TUI(
+                pick_model=lambda current: model_picker.pick(
+                    provider_registry, initial_spec=current
+                ),
+                pick_story=story_picker.pick,
+                browse_lore=lore_browser.browse,
+            ),
             worker=worker,
         )
         repl.run(session, store)
     finally:
-        if worker is not None:
-            worker.shutdown()
+        worker.shutdown()
         store.close()
 
 

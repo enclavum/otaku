@@ -48,6 +48,7 @@ from otaku.lore import assembler
 from otaku.lore.extraction import Extractor, PassResult, Report
 from otaku.providers.base import OpenAIClient
 from otaku.providers.registry import Registry as ProviderRegistry
+from otaku.settings.config import Config
 from otaku.settings.prompts import Prompts
 from otaku.store import Store
 from otaku.store.schema import Message
@@ -71,20 +72,25 @@ class Job:
     model: str
     story_id: int
     prompts: Prompts
+    config: Config  # frozen — as snapshot-safe as copying its fields out
     system: str = ""
     messages: list[Message] = field(default_factory=list)
-    head_messages: int = 20
-    tail_messages: int = 150
-    settle: int = 20
-    min_chars: int = 6000
-    min_messages: int = 20
     force: bool = False  # the manual close: gate and settle dropped
     on_done: Callable[[PassResult, Report], None] | None = None
 
+    # `assembler.StoryView` — the warm-up assembles from the job.
+
     @property
     def recap_header(self) -> str:
-        """`assembler.StoryView` — the warm-up assembles from the job."""
         return self.prompts.recap_header
+
+    @property
+    def head_messages(self) -> int:
+        return self.config.head_messages
+
+    @property
+    def tail_messages(self) -> int:
+        return self.config.tail_messages
 
 
 class LoreWorker:
@@ -212,9 +218,9 @@ class LoreWorker:
                             log=self._log.record,
                         )
                         result, report = extractor.run(
-                            settle=job.settle,
-                            min_chars=job.min_chars,
-                            min_messages=job.min_messages,
+                            settle=job.config.settle_messages,
+                            min_chars=job.config.scene_min_chars,
+                            min_messages=job.config.scene_min_messages,
                             force=job.force,
                         )
                         if result is PassResult.FAILED:

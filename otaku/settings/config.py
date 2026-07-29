@@ -101,7 +101,10 @@ class Config:
             row(f"tail_messages = {self.tail_messages}", "recent messages kept verbatim"),
             "",
             "[lore_extraction]",
-            row(f"enabled = {toml_scalar(self.lore_enabled)}", "the background lore extraction"),
+            row(
+                f"enabled = {toml_scalar(self.lore_enabled)}",
+                "extract lore on idle (/extract always works)",
+            ),
             row(
                 f"idle_seconds = {toml_scalar(self.idle_seconds)}",
                 "extraction runs after this long idle at the prompt",

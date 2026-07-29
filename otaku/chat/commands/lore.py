@@ -9,7 +9,7 @@ import threading
 from dataclasses import replace
 
 from otaku.chat.state import Session
-from otaku.lore.extraction import Extractor, PassResult, Report
+from otaku.lore.extraction import PassResult, Report
 from otaku.lore.worker import Job
 from otaku.store import Store
 from otaku.terminal import DIM, ERASE_LINE, RESET
@@ -24,13 +24,9 @@ def build_job(session: Session) -> Job:
         model=session.model,
         story_id=session.story_id,
         prompts=session.prompts,
+        config=session.config,
         system=session.system,
         messages=list(session.messages),
-        head_messages=session.config.head_messages,
-        tail_messages=session.config.tail_messages,
-        settle=session.config.settle_messages,
-        min_chars=session.config.scene_min_chars,
-        min_messages=session.config.scene_min_messages,
     )
 
 
@@ -51,19 +47,6 @@ def cmd_extract(session: Session, store: Store, args: list[str]) -> None:
         print("No story yet — send a message first.")
         return
     forced = replace(build_job(session), force=True)
-    if session.worker is None:
-        # No worker ([lore_extraction] off): nothing else can be running,
-        # so the pass is safe to drive here — still the one way to force
-        # a scene.
-        print("Extracting…")
-        client = session.providers.get_client(session.provider.name)
-        extractor = Extractor(store, client, session.model, session.story_id, session.prompts)
-        result, report = extractor.run(
-            settle=0, min_chars=forced.min_chars, min_messages=forced.min_messages, force=True
-        )
-        _report_pass(store, session.story_id, result, report)
-        return
-
     done = threading.Event()
     outcome: list[tuple[PassResult, Report]] = []
 
@@ -142,10 +125,10 @@ def _open_lore(session: Session, store: Store, lens: str) -> None:
     ):
         print("No lore yet — it builds as scenes close (see /extract).")
         return
-    if session.browse_lore is None:
+    if session.tui.browse_lore is None:
         print("No lore browser available.")
         return
-    session.browse_lore(store, session.story_id, lens)
+    session.tui.browse_lore(store, session.story_id, lens)
 
 
 def _report_pass(store: Store, story_id: int, result: PassResult, report: Report) -> None:
@@ -159,7 +142,8 @@ def _report_pass(store: Store, story_id: int, result: PassResult, report: Report
         print("Extraction failed (bad reply or request error) — the tail stays open; try again.")
     elif result is PassResult.CLOSED:
         rolled = f", {report.histories} history rollup(s)" if report.histories else ""
-        journals = f"{report.journals} journal(s) written{rolled}; story-so-far refreshed."
+        refreshed = "; story-so-far refreshed" if report.scene_histories else ""
+        journals = f"{report.journals} journal(s) written{rolled}{refreshed}."
         if report.scenes > 1:
             print(f"{report.scenes} scenes closed: {journals}")
         else:

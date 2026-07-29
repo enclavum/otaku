@@ -24,10 +24,10 @@ def cmd_model(session: Session, store: Store, args: list[str]) -> None:
             known = ", ".join(sorted(providers))
             print(f"Use PROVIDER/MODEL (providers: {known}), or /model with no args to pick.")
         return
-    if session.pick_model is None:
+    if session.tui.pick_model is None:
         print("No picker available; use /model PROVIDER/MODEL.")
         return
-    spec = session.pick_model(session.full_model_name)
+    spec = session.tui.pick_model(session.full_model_name)
     if spec is None:
         return  # cancelled — keep the current model
     head, _, rest = spec.partition("/")

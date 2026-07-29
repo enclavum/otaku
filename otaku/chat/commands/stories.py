@@ -6,11 +6,9 @@ at that point, and declining rewinds the head instead (the later turns
 stay in the tree as siblings — nothing is deleted either way).
 """
 
-from otaku.chat.state import Session
+from otaku.chat.state import RESUME_TURNS, Session
 from otaku.store import Store
 from otaku.terminal import NO_ANSWERS, YES_ANSWERS, latin_key
-
-_RESUMED_TURNS = 3  # turns echoed after a resume, so the scene is on screen
 
 
 def cmd_stories(session: Session, store: Store, args: list[str]) -> None:
@@ -19,10 +17,10 @@ def cmd_stories(session: Session, store: Store, args: list[str]) -> None:
     if not rows:
         print("No saved stories yet.")
         return
-    if session.pick_story is None:
+    if session.tui.pick_story is None:
         print("No story browser available.")
         return
-    result = session.pick_story(store, rows, session.story_id)
+    result = session.tui.pick_story(store, rows, session.story_id)
     if result is None:
         return
     story_id, messages, total = result
@@ -57,13 +55,10 @@ def cmd_stories(session: Session, store: Store, args: list[str]) -> None:
             print("Cancelled.")
             return
 
-    session.story_id = story_id
-    session.system = store.stories.get_system(story_id)
-    session.messages = messages
-    session.save_state()
+    session.switch_to(store, story_id, messages)
     print(f"Resumed at message {len(messages)}.")
     print()
-    print(session.render_last_turns(_RESUMED_TURNS))
+    print(session.render_last_turns(RESUME_TURNS))
 
 
 def cmd_rename(session: Session, store: Store, args: list[str]) -> None:

@@ -37,7 +37,7 @@ from otaku.chat.commands import dispatch
 from otaku.chat.commands.lore import build_job
 from otaku.chat.completer import SlashCompleter
 from otaku.chat.inference import run_inference
-from otaku.chat.state import Session
+from otaku.chat.state import RESUME_TURNS, Session
 from otaku.formatting import flatten, truncate
 from otaku.store import Store
 from otaku.store.schema import Message
@@ -85,8 +85,6 @@ _SHORTCUTS = {
 _SLASH_LINE = Condition(lambda: get_app().current_buffer.text.lstrip().startswith("/"))
 
 _TRIPLE = '"""'
-
-_RESUME_TURNS = 3  # turns shown under the banner when a story is resumed
 
 
 class LineAssembler:
@@ -163,31 +161,33 @@ def run(session: Session, store: Store) -> None:
     carry: dict[str, str] = {}
     prompt_session = _build_prompt(session, store, carry)
     worker = session.worker
-    if worker is not None:
-        # One status callback, two surfaces: the prompt's toolbar while the
-        # prompt is up, the pinned bottom row while a reply streams. Each is
-        # a no-op when it isn't the live one; `invalidate()` is
-        # prompt_toolkit's thread-safe repaint trigger.
-        session.status_line = StatusLine(worker.get_status)
+    # One status callback, two surfaces: the prompt's toolbar while the
+    # prompt is up, the pinned bottom row while a reply streams. Each is a
+    # no-op when it isn't the live one; `invalidate()` is prompt_toolkit's
+    # thread-safe repaint trigger.
+    session.status_line = StatusLine(worker.get_status)
 
-        def repaint() -> None:
-            if session.status_line is not None:
-                session.status_line.refresh()
-            if prompt_session.app.is_running:
-                prompt_session.app.invalidate()
+    def repaint() -> None:
+        if session.status_line is not None:
+            session.status_line.refresh()
+        if prompt_session.app.is_running:
+            prompt_session.app.invalidate()
 
-        worker.on_status = repaint
-        # Typing is activity: every buffer change pushes a pending pass back
-        # a full idle window, so it starts on REAL idle, not mid-composition.
-        prompt_session.default_buffer.on_text_changed += lambda _buf: worker.touch()
-        worker.start()
+    worker.on_status = repaint
+    # Typing is activity: every buffer change pushes a pending pass back a
+    # full idle window, so it starts on REAL idle, not mid-composition.
+    prompt_session.default_buffer.on_text_changed += lambda _buf: worker.touch()
+    worker.start()
 
     def maybe_schedule(last_before: Message | None) -> None:
         """Arm an idle-debounced pass when a NEW model turn just landed —
         plain messages, /regen, /ooc, /you, and /me all produce them.
         Identity (not length) detects it: regenerate swaps the last message
-        without changing the count."""
-        if worker is None or session.story_id is None or not session.messages:
+        without changing the count. [lore_extraction].enabled gates THIS —
+        the automatic scheduling — and nothing else; /extract still works."""
+        if not session.config.lore_enabled:
+            return
+        if session.story_id is None or not session.messages:
             return
         last = session.messages[-1]
         if last is not last_before and last.role == "assistant":
@@ -214,8 +214,7 @@ def run(session: Session, store: Store) -> None:
         # is always a command — even mid-"""-block, where feeding it to the
         # assembler would paste "/regen" into the user's text.
         if carry.pop("shortcut", None) is not None:
-            if worker is not None:
-                worker.defer()
+            worker.defer()
             last_before = session.messages[-1] if session.messages else None
             try:
                 dispatch(line, session, store)
@@ -237,8 +236,7 @@ def run(session: Session, store: Store) -> None:
         # already in flight is left to finish — killing it would discard
         # work already paid for, and with a short think-time, the same work
         # every time (see lore/worker.py).
-        if worker is not None:
-            worker.defer()
+        worker.defer()
 
         try:
             last_before = session.messages[-1] if session.messages else None
@@ -255,8 +253,7 @@ def run(session: Session, store: Store) -> None:
             # ^C during streaming or a picker: return to the prompt cleanly.
             print()
 
-    if worker is not None:
-        worker.shutdown()  # non-blocking: exit is immediate
+    worker.shutdown()  # non-blocking: exit is immediate
 
 
 # ---------- session chrome ----------
@@ -292,20 +289,17 @@ def _show_resumed(session: Session, store: Store) -> None:
     else:
         print(f"Resumed at message {len(session.messages)}.")
     print()
-    print(session.render_last_turns(_RESUME_TURNS))
+    print(session.render_last_turns(RESUME_TURNS))
 
 
-def _activity_toolbar(session: Session) -> Callable[[], FormattedText] | None:
+def _activity_toolbar(session: Session) -> Callable[[], FormattedText]:
     """The prompt's activity line: what the background worker is doing, or
-    blank when idle. Always-present once a worker exists — the row is
-    reserved for the whole prompt, so it never reflows the screen; None
-    (no worker) means no toolbar at all rather than a permanently blank
-    row. `statusline.render`, not a local format string: the pinned row
-    draws the same line on the same terminal row, and any difference shows
-    as a twitch when a reply starts streaming."""
+    blank when idle. Always present — the row is reserved for the whole
+    prompt, so it never reflows the screen. `statusline.render`, not a
+    local format string: the pinned row draws the same line on the same
+    terminal row, and any difference shows as a twitch when a reply starts
+    streaming."""
     worker = session.worker
-    if worker is None:
-        return None
 
     def render() -> FormattedText:
         return FormattedText(

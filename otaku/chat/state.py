@@ -57,6 +57,27 @@ THINK_ALIASES = {"on": "medium", "off": "none"}
 # mid-story pick is recognizable).
 PickedStory = tuple[int, list[Message], int]
 
+# Turns echoed when a story (re)opens — launch resume, a browser pick, an
+# import — so the scene is on screen before the prompt.
+RESUME_TURNS = 3
+
+
+@dataclass(frozen=True)
+class TUI:
+    """The full-screen surfaces, injected by the CLI. The tui package is
+    the adapter; THIS is the port — chat defines what it needs and may not
+    import the implementation. Each is None when unavailable."""
+
+    # Opens the model picker on the current "provider/model" and returns
+    # the chosen spec — None on cancel.
+    pick_model: Callable[[str], str | None] | None = None
+    # Opens the story browser over the given listings (the current story
+    # pre-selected) and returns a PickedStory — None on cancel.
+    pick_story: Callable[[Store, list[StoryListing], int | None], PickedStory | None] | None = None
+    # Opens the lore browser on a story, on the given lens ("scenes" or
+    # "cast").
+    browse_lore: Callable[[Store, int, str], None] | None = None
+
 
 @dataclass
 class Session:
@@ -83,20 +104,12 @@ class Session:
     # Set by the in-stream Ctrl+R watcher to request an immediate regenerate
     # after the current reply is cancelled; drained by run_inference.
     regen_after: bool = False
-    # Opens the model picker and returns the chosen "provider/model" (None
-    # on cancel). Injected by the CLI: the picker is a UI package, which
-    # chat may not import.
-    pick_model: Callable[[str], str | None] | None = None
-    # Opens the story browser over the given listings (the current story
-    # pre-selected) and returns (story id, its messages up to the picked
-    # turn, total turns) — None on cancel. Injected like pick_model.
-    pick_story: Callable[[Store, list[StoryListing], int | None], PickedStory | None] | None = None
-    # Opens the lore browser on a story, on the given lens ("scenes" or
-    # "cast"). Injected like the pickers.
-    browse_lore: Callable[[Store, int, str], None] | None = None
-    # The background lore worker (None when [lore_extraction] is off): the
-    # REPL schedules passes through it, the manual close waits on it.
-    worker: LoreWorker | None = None
+    # The full-screen surfaces the CLI wires in.
+    tui: TUI = field(default_factory=TUI)
+    # The background lore worker — the REPL schedules passes through it,
+    # the manual close waits on it. [lore_extraction].enabled gates only
+    # the idle scheduling; the worker itself always exists.
+    worker: LoreWorker = field(kw_only=True)
     # The pinned bottom-row activity line, alive while a reply streams —
     # built by the REPL together with its toolbar twin.
     status_line: StatusLine | None = None
@@ -111,11 +124,8 @@ class Session:
         spec: str,
         state: state_file.AppState,
         store: Store,
-        pick_model: Callable[[str], str | None] | None = None,
-        pick_story: Callable[[Store, list[StoryListing], int | None], PickedStory | None]
-        | None = None,
-        browse_lore: Callable[[Store, int, str], None] | None = None,
-        worker: LoreWorker | None = None,
+        tui: TUI | None = None,
+        worker: LoreWorker,
     ) -> Self:
         """The session for a launch on `spec` ("provider/model"): the
         model's saved parameters, the persisted toggles, and the remembered
@@ -130,14 +140,15 @@ class Session:
             provider=config.providers[provider_name],
             model=model,
             verbose=state.verbose,
-            pick_model=pick_model,
-            pick_story=pick_story,
-            browse_lore=browse_lore,
+            tui=tui or TUI(),
             worker=worker,
         )
         session._apply_think(state.think)
         session._apply_params(models_file.load(paths).get(model, {}))
-        session._resume_story(store, state.story)
+        # Reattach the story the previous session was on, so bare `otaku`
+        # reopens it mid-scene; one deleted since simply starts fresh.
+        if state.story and store.stories.exists(state.story):
+            session.switch_to(store, state.story)
         return session
 
     @property
@@ -176,6 +187,16 @@ class Session:
         if story_so_far:
             return story_so_far
         return next((m.body for m in self.messages if m.role == "user"), "")
+
+    def switch_to(self, store: Store, story_id: int, messages: list[Message] | None = None) -> None:
+        """Attach the session to a story — its system prompt, its messages
+        (or the given, already-truncated list), and the remembered state.
+        The ONE way a session changes stories, so none of the doors (launch
+        resume, the browser, an import) can forget a piece."""
+        self.story_id = story_id
+        self.system = store.stories.get_system(story_id)
+        self.messages = store.stories.get_messages(story_id) if messages is None else messages
+        self.save_state()
 
     def ensure_story(self, store: Store) -> int:
         """The session's story id, creating the story on the first real turn
@@ -283,19 +304,6 @@ class Session:
                 self.params[name] = coerce(value)
             except TypeError, ValueError:
                 print(f"Ignoring invalid {name} value {value!r} saved for {self.model}.")
-
-    def _resume_story(self, store: Store, story_id: int) -> None:
-        """Reattach the story the previous session was on, so bare `otaku`
-        reopens it mid-scene. A story deleted since simply doesn't reattach
-        and the session starts fresh."""
-        if not story_id:
-            return
-        story = store.stories.get(story_id)
-        if story is None:
-            return
-        self.story_id = story_id
-        self.system = story.system
-        self.messages = store.stories.get_messages(story_id)
 
     def _move_head(self, store: Store) -> None:
         """Point the story at the session's last message (None when empty)."""
