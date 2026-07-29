@@ -5,11 +5,12 @@ The package owns the story document so the round-trip is a law:
 document is one Markdown file, readable as prose and parseable as data —
 a metadata comment (recognition + versions), the optional `# title`
 heading, a `## Story` section (story so far, system, cast), `## Scenes`
-(span, summary, per-character journals), and `## Messages` (`### n ·
-role`, with `(ooc)`/`(narration)` kinds in the header and the speaker and
-verbatim framing as bullets; framing is JSON-encoded to survive its
-newlines). Empty parts are simply absent, an untitled story has no
-heading, and message bodies keep their interior blank lines.
+(span, summary, per-character journals), and `## Messages` — one
+`### n · role (kind) · speaker · "framing"` header per message, the kind,
+speaker, and JSON-quoted framing present only when they exist, with the
+verbatim body starting on the very next line. Empty parts are simply
+absent, an untitled story has no heading, and message bodies keep their
+interior blank lines.
 
 Importing accepts exactly two shapes: this document and a SillyTavern
 chat (.jsonl), both parsed into the same `StoryExport`. Prose files go

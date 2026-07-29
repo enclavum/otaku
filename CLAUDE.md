@@ -38,13 +38,24 @@ files are never rewritten.
 
 ## Tests
 
-Tests are written test-first, from the module's documented contract —
-never by reading its code, so they check what the module promises rather
-than what it happens to do. A failure means the implementation is wrong
-until proven otherwise.
-
-`tests/` mirrors the package tree: `tests/lore/test_assembler.py` covers
+Unit tests (`tests/`, `make test`) are written test-first, from the
+module's documented contract — never by reading its code, so they check
+what the module promises rather than what it happens to do — and ONLY for
+pure functions: no disk, network, database, or terminal. A failure means
+the implementation is wrong until proven otherwise. `tests/` mirrors the
+package tree: `tests/lore/test_assembler.py` covers
 `otaku/lore/assembler.py`.
+
+Scenario tests (`scenarios/`, `make scenarios`) play user stories against
+the real application: `support/harness.py` assembles it the way
+`cli.main` does, wired to the scripted OpenAI-compatible server in
+`support/server.py` over a throwaway state dir built fresh per test —
+commands go through the real dispatch, and a few stories drive the real
+binary in a pty (`support/driver.py`). Deterministic and offline; the
+wire is asserted against the server's recorded requests. The `live`-marked
+smokes talk to a real local model (ollama, OTAKU_TEST_MODEL, default
+ollama/gemma3) and skip themselves when it is absent; deselect with
+`-m "not live"`.
 
 ## Temporary limitations
 

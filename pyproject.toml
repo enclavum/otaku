@@ -40,6 +40,7 @@ select = ["B", "E", "F", "I", "N", "RUF", "SIM", "UP", "W"]
 # the width (see the store modules' `# fmt: off` blocks).
 "otaku/store/*" = ["E501"]
 "tests/*" = ["RUF001"]
+"scenarios/*" = ["RUF001"]
 
 [tool.mypy]
 strict = true
@@ -47,4 +48,7 @@ files = ["otaku"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "live: talks to a real local model (skips itself when ollama or the model is absent)",
+]
 addopts = "-q"

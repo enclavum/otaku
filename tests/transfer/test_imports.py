@@ -95,3 +95,44 @@ class TestParseExport:
         parsed = parse_story(render(FULL))
         assert parsed is not None
         assert parsed.title == "Болотная часовня"
+
+
+class TestMessageHeaders:
+    """The header's trailing fields — a bare speaker, a JSON-quoted
+    framing, or both, in that order; anything unparseable degrades to
+    absent rather than corrupting the message."""
+
+    def parse_one(self, header: str) -> ExportedMessage:
+        doc = f"<!-- otaku export\n-->\n\n## Messages\n\n### {header}\nBody.\n"
+        parsed = parse_story(doc)
+        assert parsed is not None and len(parsed.messages) == 1
+        return parsed.messages[0]
+
+    def test_a_bare_header(self) -> None:
+        message = self.parse_one("1 · user")
+        assert (message.speaker, message.framing) == (None, None)
+
+    def test_a_speaker_alone(self) -> None:
+        message = self.parse_one("1 · user · Рин")
+        assert (message.speaker, message.framing) == ("Рин", None)
+
+    def test_a_framing_alone(self) -> None:
+        message = self.parse_one('1 · user · "((OOC: x))\\n{body}"')
+        assert message.speaker is None
+        assert message.framing == "((OOC: x))\n{body}"
+
+    def test_a_speaker_and_a_framing(self) -> None:
+        message = self.parse_one('1 · user (ooc) · Рин · "((OOC: y))"')
+        assert message.kind == "ooc"
+        assert message.speaker == "Рин"
+        assert message.framing == "((OOC: y))"
+
+    def test_an_unterminated_framing_degrades_to_absent(self) -> None:
+        message = self.parse_one('1 · user · Рин · "unterminated')
+        assert message.speaker == "Рин"
+        assert message.framing is None
+        assert message.body == "Body."
+
+    def test_a_non_string_after_the_quote_degrades_to_absent(self) -> None:
+        assert self.parse_one('1 · user · "123"').framing == "123"
+        assert self.parse_one("1 · user · [1]").speaker == "[1]"

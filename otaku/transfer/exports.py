@@ -121,10 +121,12 @@ def render_story(export: StoryExport, *, otaku_version: str, model: str, exporte
     out += ["## Messages", ""]
     for n, message in enumerate(export.messages, 1):
         kind = f" ({message.kind})" if message.kind != "dialogue" else ""
-        out.append(f"### {n} · {message.role}{kind}")
+        header = f"### {n} · {message.role}{kind}"
         if message.speaker:
-            out.append(f"- **Speaker:** {message.speaker}")
+            header += f" · {message.speaker}"
         if message.framing is not None:
-            out.append(f"- **Framing:** {json.dumps(message.framing, ensure_ascii=False)}")
-        out += ["", message.body, ""]
+            # JSON-quoted: newlines survive, and the quotes tell it apart
+            # from a speaker name.
+            header += f" · {json.dumps(message.framing, ensure_ascii=False)}"
+        out += [header, message.body, ""]
     return "\n".join(out).rstrip() + "\n"

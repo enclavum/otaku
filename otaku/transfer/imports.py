@@ -21,13 +21,15 @@ from otaku.transfer import (
 )
 
 _FENCE = re.compile(r"^(```|~~~)")
-# `### 3 · user (ooc)` — a message header in the `## Messages` section.
-_MSG_HEADER = re.compile(r"^(\d+)\s*·\s*(user|assistant)(?:\s*\((ooc|narration)\))?$")
+# A message header: `### 3 · user (ooc) · Speaker · "framing"` — the
+# speaker and the JSON-quoted framing optional, in that order.
+_MSG_HEADER = re.compile(
+    r"^(\d+)\s*·\s*(user|assistant)(?:\s*\((ooc|narration)\))?(?:\s*·\s*(.+))?$"
+)
 # `### 2 · The Crossing` / `### 2` — a scene header in `## Scenes`.
 _SCENE_HEADER = re.compile(r"^(\d+)(?:\s*·\s*(.+))?$")
 _CAST_BULLET = re.compile(r"^-\s*\*\*(.+?)\*\*(?:\s*\(aka\s*(.+?)\))?(?:\s*—\s*(.+))?$")
 _SPAN_BULLET = re.compile(r"^-\s*\*\*Messages:\*\*\s*(\d+)(?:-(\d+))?$")
-_MSG_BULLET = re.compile(r"^-\s*\*\*(Speaker|Framing):\*\*\s?(.*)$")
 _FIELD = re.compile(r"^\*\*([A-Za-z ]+):\*\*\s?(.*)$")  # **State:** / **History:** / **Entry:**
 
 
@@ -94,25 +96,11 @@ def parse_story(text: str) -> StoryExport | None:
         m = _MSG_HEADER.match(header)
         if m is None:
             continue
-        speaker: str | None = None
-        framing: str | None = None
-        body_lines: list[str] = []
-        for line in mbody:
-            if (bm := _MSG_BULLET.match(line.strip())) is not None and not body_lines:
-                if bm.group(1) == "Speaker":
-                    speaker = bm.group(2).strip() or None
-                else:
-                    try:
-                        decoded = json.loads(bm.group(2))
-                    except json.JSONDecodeError:
-                        decoded = None
-                    framing = decoded if isinstance(decoded, str) else None
-            else:
-                body_lines.append(line)
+        speaker, framing = _speaker_and_framing(m.group(4) or "")
         messages.append(
             ExportedMessage(
                 role=m.group(2),
-                body=_strip_edges(body_lines),
+                body=_strip_edges(mbody),
                 kind=m.group(3) or "dialogue",
                 speaker=speaker,
                 framing=framing,
@@ -221,6 +209,29 @@ def _split_by_header(
     if header is not None:
         sections.append((header, body))
     return preamble, sections
+
+
+def _speaker_and_framing(extra: str) -> tuple[str | None, str | None]:
+    """The header's trailing fields: an optional bare speaker, then an
+    optional JSON-quoted framing — the quote is what tells them apart. (A
+    speaker name containing ` · ` is the one thing this cannot carry.)"""
+    extra = extra.strip()
+    if not extra:
+        return None, None
+    if extra.startswith('"'):
+        return None, _json_string(extra)
+    speaker, sep, quoted = extra.partition(' · "')
+    if sep:
+        return speaker.strip() or None, _json_string('"' + quoted)
+    return extra, None
+
+
+def _json_string(text: str) -> str | None:
+    try:
+        decoded = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    return decoded if isinstance(decoded, str) else None
 
 
 def _strip_edges(lines: list[str]) -> str:
