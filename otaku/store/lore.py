@@ -132,6 +132,23 @@ class SceneOps:
                 return scene.history
         return ""
 
+    def get_rollups_due(self, story_id: int, message_ids: builtins.list[int]) -> builtins.list[int]:
+        """The scenes the next story-so-far rollups belong on: the newest
+        current scene, when its history is missing — freshly closed, or
+        invalidated by a summary edit (at most one today; the shape matches
+        the journals' counterpart). Id-only; nothing is decrypted."""
+        current = set(message_ids)
+        # fmt: off
+        rows = self._db.conn.execute(
+            "SELECT id, end_message_id, history IS NULL FROM scenes WHERE story_id = ? ORDER BY id",
+            (story_id,),
+        ).fetchall()
+        # fmt: on
+        live = [(int(sid), bool(missing)) for sid, end, missing in rows if end in current]
+        if live and live[-1][1]:
+            return [live[-1][0]]
+        return []
+
     def set_history(self, scene_id: int, history: str) -> None:
         """Attach a freshly composed story-so-far rollup to the scene it was
         generated at."""
@@ -331,6 +348,26 @@ class JournalOps:
             # fmt: on
         return int(cur.lastrowid or 0)
 
+    def list(self, story_id: int) -> builtins.list[Journal]:
+        """Every journal row of the story, oldest first."""
+        # fmt: off
+        rows = self._db.conn.execute(
+            "SELECT id, scene_id, character_id, entry, state, history FROM journals WHERE story_id = ? ORDER BY id",
+            (story_id,),
+        ).fetchall()
+        # fmt: on
+        return [
+            Journal(
+                id=int(jid),
+                scene_id=int(sid),
+                character_id=int(cid),
+                entry=self._db.unseal(entry),
+                state=self._db.unseal(state),
+                history=self._db.unseal(history),
+            )
+            for jid, sid, cid, entry, state, history in rows
+        ]
+
     # ---------- getters and setters ----------
 
     def get_current(self, story_id: int) -> dict[int, CharacterMemory]:
@@ -389,6 +426,22 @@ class JournalOps:
             )
             for jid, sid, cid, entry, state, history in rows
         ]
+
+    def get_rollups_due(self, story_id: int) -> builtins.list[tuple[int, int]]:
+        """(character id, journal row id) pairs the next history rollups
+        belong on: each character whose NEWEST journal row lacks a history —
+        freshly written at a scene close, or invalidated by an entry edit.
+        A character absent from the latest scenes has a rollup on their
+        newest row already and is not due. Id-only; nothing is decrypted."""
+        # fmt: off
+        rows = self._db.conn.execute(
+            "SELECT character_id, id FROM journals WHERE story_id = ? AND history IS NULL AND id IN ("
+            "    SELECT MAX(id) FROM journals WHERE story_id = ? GROUP BY character_id) "
+            "ORDER BY character_id",
+            (story_id, story_id),
+        ).fetchall()
+        # fmt: on
+        return [(int(cid), int(jid)) for cid, jid in rows]
 
     def get_entries(self, story_id: int, character_id: int) -> builtins.list[str]:
         """Every entry this character has written, oldest first — the whole

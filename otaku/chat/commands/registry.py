@@ -7,7 +7,7 @@ subtree; the completer derives its tree from it and the descriptions from
 
 from collections.abc import Callable
 
-from otaku.chat.commands import inspect, playing, settings, stories
+from otaku.chat.commands import inspect, lore, playing, settings, stories
 from otaku.chat.state import KNOWN_PARAMS, Session
 from otaku.store import Store
 
@@ -42,6 +42,11 @@ _HELP_ROWS: list[tuple[str | None, str, str] | tuple[str | None, str, str, str]]
     ("/system <text>", "", "Set the system prompt (for this story)"),
     ("/rename NEW", "", "Title this story (shown in /stories)"),
     ("/new", "", "Clear context and start a new story"),
+    (None, "", "Lore:"),
+    ("/lore", "Ctrl+L", "Browse and edit the memory: scenes, cast, journals"),
+    ("/cast", "", "The same browser, opened directly on the cast"),
+    ("/scene", "", "Close a scene now: summarize it + write character journals"),
+    ("/merge A into B", "", "Fold a duplicate character into the real one"),
     (None, "", "Inspect:"),
     ("/context", "", "Preview the next request (assembled prompt + budgets)"),
     ("/usage [all]", "", "Tokens spent on this story (or everything)"),
@@ -68,7 +73,7 @@ _HELP_ROWS: list[tuple[str | None, str, str] | tuple[str | None, str, str, str]]
     ("/set verbose on|off", "", "Show the stats line after each reply"),
     ("", "", ""),
     ("/bye", "Ctrl+D", "Exit"),
-    ("/?, /help", "", "Show this help"),
+    ("/help", "", "Show this help"),
     (None, "", "Keys at the prompt:"),
     ('"""', "", 'Begin a multiline message; close it with """'),
     ("/", "", "Open the command menu; it filters as you type"),
@@ -120,6 +125,10 @@ COMMANDS: dict[str, tuple[CommandHandler, CompletionTree | None]] = {
     "/system": (stories.cmd_system, None),
     "/rename": (stories.cmd_rename, None),
     "/new": (stories.cmd_new, None),
+    "/lore": (lore.cmd_lore, None),
+    "/cast": (lore.cmd_cast, None),
+    "/scene": (lore.cmd_scene, None),
+    "/merge": (lore.cmd_merge, None),
     "/context": (inspect.cmd_context, None),
     "/usage": (inspect.cmd_usage, {"all": None}),
     "/info": (inspect.cmd_info, None),
@@ -136,7 +145,6 @@ COMMANDS: dict[str, tuple[CommandHandler, CompletionTree | None]] = {
     ),
     "/bye": (cmd_bye, None),
     "/help": (cmd_help, None),
-    "/?": (cmd_help, None),
 }
 
 

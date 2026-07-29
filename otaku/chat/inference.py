@@ -15,13 +15,14 @@ from typing import Any, Self
 import httpx
 
 from otaku.chat.markdown import MarkdownStreamer
-from otaku.chat.state import DIM, RESET, Session
+from otaku.chat.state import Session
 from otaku.formatting import format_context
 from otaku.lore import assembler
 from otaku.providers.base import Stats, Text, Thinking
 from otaku.settings.config import Provider
 from otaku.store import Store
 from otaku.store.schema import Message
+from otaku.term.ansi import DIM, RESET
 from otaku.term.spinner import Spinner
 
 # POSIX-only raw-terminal control for the in-stream Ctrl+R watcher. Absent
@@ -134,10 +135,12 @@ def _run_step(session: Session, store: Store, ooc: bool) -> None:
     watcher = _StreamWatcher()
     renderer = MarkdownStreamer()
     client = session.providers.get_client(session.provider.name)
-    wire = assembler.assemble(
-        session.system, session.messages, client.get_context_size(session.model)
-    ).messages
-    with watcher:
+    wire = assembler.assemble_story(store, session, client.get_context_size(session.model)).messages
+    # The activity line survives the prompt's absence: entering `status_row`
+    # reserves the bottom terminal row and paints the worker's status there
+    # for the whole stream; leaving it releases the row.
+    status_row = session.status_line.pinned() if session.status_line else contextlib.nullcontext()
+    with status_row, watcher:
         try:
             for chunk in client.chat_stream(
                 session.model, wire, session.params, think=session.think, purpose="chat"

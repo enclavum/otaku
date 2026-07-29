@@ -4,24 +4,20 @@ Appends to logs/requests-YYYYMMDD.jsonl. The envelope — timestamp,
 provider, purpose — is plaintext; the body is sealed with the session
 cipher, or stored as readable inline JSON when encryption is off, so the
 log protects exactly what the database protects. Always on; read back with
-`otaku logs`. No pruning — the log is the audit trail of what the models
-were actually sent.
+`otaku logs requests`. No pruning — the log is the audit trail of what the
+models were actually sent.
 """
 
 import base64
-import builtins
 import json
 import sys
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 
 from otaku.crypto import Cipher, PlainCipher
+from otaku.logs.daily import DailyLog
 from otaku.paths import Paths
-
-_PREFIX = "requests-"
-_SUFFIX = ".jsonl"
 
 
 @dataclass(frozen=True)
@@ -32,9 +28,12 @@ class Entry:
     body: dict[str, object] | None  # None when the body cannot be read back
 
 
-class RequestLog:
+class RequestLog(DailyLog):
+    _prefix = "requests-"
+    _suffix = ".jsonl"
+
     def __init__(self, paths: Paths, cipher: Cipher) -> None:
-        self._paths = paths
+        super().__init__(paths)
         self._cipher = cipher
 
     def record(self, provider: str, purpose: str, body: dict[str, object]) -> None:
@@ -52,7 +51,7 @@ class RequestLog:
             sealed = self._cipher.seal(json.dumps(body, ensure_ascii=False).encode("utf-8"))
             entry["body_sealed"] = base64.b64encode(sealed).decode()
         try:
-            path = self.get_path_for(now.strftime("%Y%m%d"))
+            path = self.get_path(now.strftime("%Y%m%d"))
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(entry, ensure_ascii=False) + "\n")
@@ -63,7 +62,7 @@ class RequestLog:
         """The day's entries, in order. A body the cipher cannot open (or a
         corrupt line) yields an Entry with body=None rather than failing
         the whole day."""
-        for line in self.get_path_for(day).read_text(encoding="utf-8").splitlines():
+        for line in self.get_path(day).read_text(encoding="utf-8").splitlines():
             try:
                 raw = json.loads(line)
             except json.JSONDecodeError:
@@ -73,22 +72,12 @@ class RequestLog:
                 ts=str(raw.get("ts", "?")),
                 provider=str(raw.get("provider", "?")),
                 purpose=str(raw.get("purpose", "?")),
-                body=self._body_of(raw),
+                body=self.get_body(raw),
             )
 
-    def get_days(self) -> builtins.list[tuple[str, int]]:
-        """The available log days as (YYYYMMDD, file size), oldest first."""
-        if not self._paths.logs_dir.exists():
-            return []
-        out: builtins.list[tuple[str, int]] = []
-        for path in sorted(self._paths.logs_dir.glob(f"{_PREFIX}????????{_SUFFIX}")):
-            out.append((path.name[len(_PREFIX) : -len(_SUFFIX)], path.stat().st_size))
-        return out
-
-    def get_path_for(self, day: str) -> Path:
-        return self._paths.logs_dir / f"{_PREFIX}{day}{_SUFFIX}"
-
-    def _body_of(self, raw: dict[str, object]) -> dict[str, object] | None:
+    def get_body(self, raw: dict[str, object]) -> dict[str, object] | None:
+        """One raw JSON line's body, opened with the session cipher — None
+        when it cannot be read back (wrong key, corrupt line)."""
         body = raw.get("body")
         if isinstance(body, dict):
             return body

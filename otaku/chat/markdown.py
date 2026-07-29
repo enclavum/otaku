@@ -20,10 +20,7 @@ import shutil
 import sys
 from typing import Any, TextIO
 
-_BOLD = "\x1b[1m"
-_ITALIC = "\x1b[3m"
-_DIM = "\x1b[2m"
-_RESET = "\x1b[0m"
+from otaku.term.ansi import BOLD, DIM, ITALIC, RESET
 
 _MORE: Any = object()  # verdict: keep buffering, block type not yet known
 
@@ -83,7 +80,7 @@ class MarkdownStreamer:
             else:
                 self._out.write("*")
         if styled:
-            self._out.write(_RESET)
+            self._out.write(RESET)
         self._bold = self._italic = self._code = self._header = False
         self._out.flush()
 
@@ -174,11 +171,11 @@ class MarkdownStreamer:
             self._header = True
             self._restyle()
         elif kind == "ulist":
-            self._out.write(f"{verdict[1]}{_DIM}•{_RESET} ")
+            self._out.write(f"{verdict[1]}{DIM}•{RESET} ")
         elif kind == "olist":
-            self._out.write(f"{verdict[1]}{_DIM}{verdict[2]}.{_RESET} ")
+            self._out.write(f"{verdict[1]}{DIM}{verdict[2]}.{RESET} ")
         elif kind == "quote":
-            self._out.write(f"{verdict[1]}{_DIM}│{_RESET} ")
+            self._out.write(f"{verdict[1]}{DIM}│{RESET} ")
             self._eat_space = True  # drop the space after `>`
 
     def _flush_text(self, text: str) -> None:
@@ -196,7 +193,7 @@ class MarkdownStreamer:
         self._fence_lang = tokens[0] if tokens else ""
         self._code_line = ""
         if self._fence_lang:
-            self._out.write(f"{_DIM}{self._fence_lang}{_RESET}\n")
+            self._out.write(f"{DIM}{self._fence_lang}{RESET}\n")
 
     def _fence_consume(self, ch: str) -> None:
         if ch != "\n":
@@ -219,7 +216,7 @@ class MarkdownStreamer:
         )
 
     def _render_code_line(self, line: str) -> None:
-        self._out.write(f"{_DIM}{line}{_RESET}")
+        self._out.write(f"{DIM}{line}{RESET}")
 
     # ---------- horizontal rule ----------
 
@@ -228,7 +225,7 @@ class MarkdownStreamer:
             width = shutil.get_terminal_size((80, 24)).columns
         except OSError:
             width = 80
-        self._out.write(f"{_DIM}{'─' * min(width, 80)}{_RESET}\n")
+        self._out.write(f"{DIM}{'─' * min(width, 80)}{RESET}\n")
         self._at_bol = True
 
     # ---------- inline emphasis / code (within a line) ----------
@@ -268,15 +265,15 @@ class MarkdownStreamer:
         self._out.write(ch)
 
     def _restyle(self) -> None:
-        """Emit _RESET then the currently-active style escapes — cheaper than
+        """Emit RESET then the currently-active style escapes — cheaper than
         toggling attributes off, which terminals do inconsistently."""
-        self._out.write(_RESET)
+        self._out.write(RESET)
         if self._bold or self._header:
-            self._out.write(_BOLD)
+            self._out.write(BOLD)
         if self._italic:
-            self._out.write(_ITALIC)
+            self._out.write(ITALIC)
         if self._code:
-            self._out.write(_DIM)
+            self._out.write(DIM)
 
     def _end_line(self) -> None:
         """Close the current line: resolve a dangling `*`, reset open spans,
@@ -290,7 +287,7 @@ class MarkdownStreamer:
             else:
                 self._out.write("*")
         if styled:
-            self._out.write(_RESET)
+            self._out.write(RESET)
         self._bold = self._italic = self._code = self._header = False
         self._escape = self._eat_space = False
         self._out.write("\n")

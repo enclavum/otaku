@@ -4,6 +4,7 @@ Keybindings:
   Ctrl+R -> /regen
   Ctrl+U -> /undo
   Ctrl+T -> /stories
+  Ctrl+L -> /lore      (shadows clear-screen, which a chat never needs)
   Ctrl+O -> /model      (Ctrl+M is unusable — the terminal sends it as Enter)
   Ctrl+D -> /bye
 
@@ -32,6 +33,7 @@ from prompt_toolkit.layout.controls import BufferControl
 from prompt_toolkit.styles import Style
 
 from otaku import __version__
+from otaku.chat.commands.lore import build_job
 from otaku.chat.commands.registry import dispatch
 from otaku.chat.completer import SlashCompleter
 from otaku.chat.inference import run_inference
@@ -39,7 +41,9 @@ from otaku.chat.state import Session
 from otaku.formatting import flatten, truncate
 from otaku.store import Store
 from otaku.store.schema import Message
-from otaku.term import banner
+from otaku.term import banner, statusline
+from otaku.term.ansi import CURSOR_BLINK_ON
+from otaku.term.statusline import StatusLine
 
 _PLACEHOLDER = FormattedText([("class:placeholder", "Send a message")])
 _PROMPT_STYLE = Style.from_dict(
@@ -59,6 +63,11 @@ _PROMPT_STYLE = Style.from_dict(
         "completion-menu.meta.completion.current": "bg:default fg:ansiblue noreverse",
         "scrollbar.background": "bg:default",
         "scrollbar.button": "bg:ansibrightblack",
+        # prompt_toolkit styles the bottom toolbar `reverse` by default — a
+        # full-width grey bar; noreverse leaves it plain, dim like the
+        # pinned row it hands off to.
+        "bottom-toolbar": "noreverse",
+        "bottom-toolbar.text": "noreverse fg:ansibrightblack",
     }
 )
 
@@ -67,6 +76,7 @@ _SHORTCUTS = {
     "c-r": "/regen",
     "c-u": "/undo",
     "c-t": "/stories",
+    "c-l": "/lore",
     "c-o": "/model",  # Ctrl+M would have been the mnemonic, but that IS Enter
     "c-d": "/bye",
 }
@@ -140,9 +150,9 @@ class StoreHistory(History):
 def run(session: Session, store: Store) -> None:
     """The chat loop: banner, then prompt → command or model turn, until
     /bye, Ctrl+D, or EOF."""
-    # CSI ?12 h opts into cursor blinking — some terminals (Ghostty) require
-    # this on top of the DECSCUSR shape escape prompt_toolkit emits.
-    sys.stdout.write("\x1b[?12h")
+    # Some terminals (Ghostty) need the explicit blink opt-in on top of the
+    # DECSCUSR shape escape prompt_toolkit emits.
+    sys.stdout.write(CURSOR_BLINK_ON)
     sys.stdout.flush()
 
     if session.config.show_banner:
@@ -152,7 +162,38 @@ def run(session: Session, store: Store) -> None:
     # A shortcut key stashes the in-progress input here before exiting the
     # prompt with its command, so the next prompt restores it.
     carry: dict[str, str] = {}
-    prompt_session = _build_prompt(store, carry)
+    prompt_session = _build_prompt(session, store, carry)
+    worker = session.worker
+    if worker is not None:
+        # One status callback, two surfaces: the prompt's toolbar while the
+        # prompt is up, the pinned bottom row while a reply streams. Each is
+        # a no-op when it isn't the live one; `invalidate()` is
+        # prompt_toolkit's thread-safe repaint trigger.
+        session.status_line = StatusLine(worker.get_status)
+
+        def repaint() -> None:
+            if session.status_line is not None:
+                session.status_line.refresh()
+            if prompt_session.app.is_running:
+                prompt_session.app.invalidate()
+
+        worker.on_status = repaint
+        # Typing is activity: every buffer change pushes a pending pass back
+        # a full idle window, so it starts on REAL idle, not mid-composition.
+        prompt_session.default_buffer.on_text_changed += lambda _buf: worker.touch()
+        worker.start()
+
+    def maybe_schedule(last_before: Message | None) -> None:
+        """Arm an idle-debounced pass when a NEW model turn just landed —
+        plain messages, /regen, /ooc, /you, and /me all produce them.
+        Identity (not length) detects it: regenerate swaps the last message
+        without changing the count."""
+        if worker is None or session.story_id is None or not session.messages:
+            return
+        last = session.messages[-1]
+        if last is not last_before and last.role == "assistant":
+            worker.schedule(build_job(session))
+
     assembler = LineAssembler()
 
     while not session.should_quit:
@@ -174,8 +215,12 @@ def run(session: Session, store: Store) -> None:
         # is always a command — even mid-"""-block, where feeding it to the
         # assembler would paste "/regen" into the user's text.
         if carry.pop("shortcut", None) is not None:
+            if worker is not None:
+                worker.defer()
+            last_before = session.messages[-1] if session.messages else None
             try:
                 dispatch(line, session, store)
+                maybe_schedule(last_before)
             except KeyboardInterrupt:
                 print()
             continue
@@ -189,15 +234,30 @@ def run(session: Session, store: Store) -> None:
         if not message:
             continue
 
+        # The user is active again: drop any queued background work. A pass
+        # already in flight is left to finish — killing it would discard
+        # work already paid for, and with a short think-time, the same work
+        # every time (see lore/worker.py).
+        if worker is not None:
+            worker.defer()
+
         try:
+            last_before = session.messages[-1] if session.messages else None
             # A """-wrapped message is always a literal prompt, never a command.
             if not is_raw and dispatch(message, session, store):
+                maybe_schedule(last_before)
                 continue
             session.record_turn(store, Message(role="user", body=message))
             run_inference(session, store)
+            # Arm an idle-debounced pass over the just-finished turn; it
+            # fires while the user reads and dies the moment they type.
+            maybe_schedule(last_before)
         except KeyboardInterrupt:
             # ^C during streaming or a picker: return to the prompt cleanly.
             print()
+
+    if worker is not None:
+        worker.shutdown()  # non-blocking: exit is immediate
 
 
 # ---------- session chrome ----------
@@ -236,7 +296,27 @@ def _show_resumed(session: Session, store: Store) -> None:
     print(session.render_last_turns(_RESUME_TURNS))
 
 
-def _build_prompt(store: Store, carry: dict[str, str]) -> PromptSession[str]:
+def _activity_toolbar(session: Session) -> Callable[[], FormattedText] | None:
+    """The prompt's activity line: what the background worker is doing, or
+    blank when idle. Always-present once a worker exists — the row is
+    reserved for the whole prompt, so it never reflows the screen; None
+    (no worker) means no toolbar at all rather than a permanently blank
+    row. `statusline.render`, not a local format string: the pinned row
+    draws the same line on the same terminal row, and any difference shows
+    as a twitch when a reply starts streaming."""
+    worker = session.worker
+    if worker is None:
+        return None
+
+    def render() -> FormattedText:
+        return FormattedText(
+            [("class:bottom-toolbar.text", statusline.render(worker.get_status()))]
+        )
+
+    return render
+
+
+def _build_prompt(session: Session, store: Store, carry: dict[str, str]) -> PromptSession[str]:
     """The prompt: store-backed history, the slash-command menu, and the
     keybindings.
 
@@ -257,6 +337,7 @@ def _build_prompt(store: Store, carry: dict[str, str]) -> PromptSession[str]:
         enable_history_search=False,
         style=_PROMPT_STYLE,
         cursor=CursorShape.BLINKING_BEAM,
+        bottom_toolbar=_activity_toolbar(session),
     )
     # Snappy Esc for closing the command menu — the 0.5s default delay makes
     # the close feel broken.

@@ -64,8 +64,9 @@ class Config:
     head_messages: int = 20
     tail_messages: int = 150
     # [lore_extraction]
+    lore_enabled: bool = True
     idle_seconds: float = 300.0
-    scene_chars: int = 6000
+    scene_min_chars: int = 6000
     scene_min_messages: int = 20
     settle_messages: int = 20
     # [database]
@@ -100,17 +101,18 @@ class Config:
             row(f"tail_messages = {self.tail_messages}", "recent messages kept verbatim"),
             "",
             "[lore_extraction]",
+            row(f"enabled = {toml_scalar(self.lore_enabled)}", "the background lore extraction"),
             row(
                 f"idle_seconds = {toml_scalar(self.idle_seconds)}",
                 "extraction runs after this long idle at the prompt",
             ),
             row(
-                f"scene_chars = {self.scene_chars}",
-                "a scene's target size in characters — and its trigger",
+                f"scene_min_chars = {self.scene_min_chars}",
+                "a scene closes once it holds this much text…",
             ),
             row(
                 f"scene_min_messages = {self.scene_min_messages}",
-                "fewest messages that can form a scene",
+                "…and at least this many messages",
             ),
             row(
                 f"settle_messages = {self.settle_messages}",
@@ -198,8 +200,9 @@ def load(paths: Paths) -> Config:
             smooth_streaming=bool(settings.get("smooth_streaming", True)),
             head_messages=max(0, _int(context, "head_messages", 20)),
             tail_messages=max(1, _int(context, "tail_messages", 150)),
+            lore_enabled=bool(lore.get("enabled", True)),
             idle_seconds=_float(lore, "idle_seconds", 300.0),
-            scene_chars=max(1, _int(lore, "scene_chars", 6000)),
+            scene_min_chars=max(1, _int(lore, "scene_min_chars", 6000)),
             scene_min_messages=max(1, _int(lore, "scene_min_messages", 20)),
             settle_messages=max(0, _int(lore, "settle_messages", 20)),
             backups=max(0, _int(database, "backups", 7)),

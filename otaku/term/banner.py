@@ -13,6 +13,7 @@ import sys
 from dataclasses import dataclass
 
 from otaku.formatting import format_context
+from otaku.term.ansi import BOLD, DEFAULT_BG, DIM, RESET, bg, fg
 
 # A girl with long violet hair — the face reads at 16x12 because the eyes
 # get two cells each (dark iris + a white shine pixel).
@@ -52,12 +53,12 @@ class _Style:
 
 
 _COLOUR = _Style(
-    accent="\x1b[38;5;180m",
-    bold="\x1b[1m",
-    dim="\x1b[2m",
-    gray="\x1b[38;5;242m",
-    rule="\x1b[38;5;238m",
-    reset="\x1b[0m",
+    accent=fg(180),
+    bold=BOLD,
+    dim=DIM,
+    gray=fg(242),
+    rule=fg(238),
+    reset=RESET,
 )
 _PLAIN = _Style()
 
@@ -114,14 +115,12 @@ def _sprite_rows() -> list[str]:
         bottom = _SPRITE[y + 1] if y + 1 < len(_SPRITE) else "." * len(top)
         row = ""
         for x in range(len(top)):
-            fg, bg = _PALETTE.get(top[x]), _PALETTE.get(bottom[x])
-            if fg is None and bg is None:
-                row += "\x1b[0m "
-            elif fg is not None and bg is None:
-                row += f"\x1b[38;5;{fg}m\x1b[49m▀"
-            elif fg is None and bg is not None:
-                row += f"\x1b[38;5;{bg}m\x1b[49m▄"
+            upper, lower = _PALETTE.get(top[x]), _PALETTE.get(bottom[x])
+            if upper is None:
+                row += RESET + " " if lower is None else f"{fg(lower)}{DEFAULT_BG}▄"
+            elif lower is None:
+                row += f"{fg(upper)}{DEFAULT_BG}▀"
             else:
-                row += f"\x1b[38;5;{fg}m\x1b[48;5;{bg}m▀"
-        rows.append(row + "\x1b[0m")
+                row += f"{fg(upper)}{bg(lower)}▀"
+        rows.append(row + RESET)
     return rows

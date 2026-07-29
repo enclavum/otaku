@@ -2,10 +2,11 @@
 
 import click
 
-from otaku.chat.state import DIM, RESET, Session
+from otaku.chat.state import Session
 from otaku.formatting import flatten, format_size, pretty_path, truncate
 from otaku.lore import assembler
 from otaku.store import Store
+from otaku.term.ansi import DIM, RESET
 
 
 def cmd_context(session: Session, store: Store, args: list[str]) -> None:
@@ -13,9 +14,7 @@ def cmd_context(session: Session, store: Store, args: list[str]) -> None:
     (yours alone), and the transcript exactly as it will be sent. `otaku
     logs` shows what was actually sent; this shows what is about to be."""
     client = session.providers.get_client(session.provider.name)
-    prompt = assembler.assemble(
-        session.system, session.messages, client.get_context_size(session.model)
-    )
+    prompt = assembler.assemble_story(store, session, client.get_context_size(session.model))
     preview = assembler.render_preview(prompt, dim=DIM, reset=RESET)
     # Long stories make this thousands of lines; page it like `otaku logs`.
     # color=True keeps the dim markers through less (-R).

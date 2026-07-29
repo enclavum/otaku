@@ -48,7 +48,11 @@ def cmd_stories(session: Session, store: Store, args: list[str]) -> None:
             print("Cancelled.")
             return
         if ans in _YES:
-            story_id = store.stories.fork(story_id, from_message_id=messages[-1].id)
+            story_id = store.stories.fork(
+                story_id,
+                from_message_id=messages[-1].id,
+                settle=session.config.settle_messages,
+            )
             messages = store.stories.get_messages(story_id)
             story = store.stories.get(story_id)
             print(f"Forked to '{story.title}'." if story and story.title else "Forked.")
@@ -90,7 +94,9 @@ def cmd_fork(session: Session, store: Store, args: list[str]) -> None:
         print("Nothing to fork yet — send a message first.")
         return
     title = session.raw_args.strip() or None
-    session.story_id = store.stories.fork(session.story_id, title=title)
+    session.story_id = store.stories.fork(
+        session.story_id, title=title, settle=session.config.settle_messages
+    )
     session.messages = store.stories.get_messages(session.story_id)
     session.save_state()
     story = store.stories.get(session.story_id)

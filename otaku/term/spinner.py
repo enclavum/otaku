@@ -7,6 +7,8 @@ chunk path without bookkeeping.
 import sys
 import threading
 
+from otaku.term.ansi import ERASE_LINE
+
 # The 6-dot set: light enough to sit beside regular text.
 FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 _INTERVAL = 0.1
@@ -30,7 +32,7 @@ class Spinner:
         self._thread.join()
         self._thread = None
         # Erase the spinner row so streaming output starts at column 0.
-        sys.stdout.write("\r\x1b[2K")
+        sys.stdout.write(f"\r{ERASE_LINE}")
         sys.stdout.flush()
 
     def _run(self) -> None:

@@ -21,6 +21,7 @@ from dataclasses import dataclass, field, replace
 from typing import Self
 
 from otaku.chat.markdown import render_markdown
+from otaku.lore.worker import LoreWorker
 from otaku.paths import Paths
 from otaku.providers.registry import Registry as ProviderRegistry
 from otaku.settings import models as models_file
@@ -31,9 +32,8 @@ from otaku.settings.prompts import Prompts
 from otaku.store import Store
 from otaku.store.schema import Message
 from otaku.store.stories import StoryListing
-
-DIM = "\x1b[2m"
-RESET = "\x1b[0m"
+from otaku.term.ansi import DIM, RESET
+from otaku.term.statusline import StatusLine
 
 # The inference parameters otaku understands, and how each is read from the
 # saved file or a `/set parameter` argument.
@@ -91,6 +91,15 @@ class Session:
     # pre-selected) and returns (story id, its messages up to the picked
     # turn, total turns) — None on cancel. Injected like pick_model.
     pick_story: Callable[[Store, list[StoryListing], int | None], PickedStory | None] | None = None
+    # Opens the lore browser on a story, on the given lens ("scenes" or
+    # "cast"). Injected like the pickers.
+    browse_lore: Callable[[Store, int, str], None] | None = None
+    # The background lore worker (None when [lore_extraction] is off): the
+    # REPL schedules passes through it, the manual close waits on it.
+    worker: LoreWorker | None = None
+    # The pinned bottom-row activity line, alive while a reply streams —
+    # built by the REPL together with its toolbar twin.
+    status_line: StatusLine | None = None
 
     @classmethod
     def start(
@@ -105,6 +114,8 @@ class Session:
         pick_model: Callable[[str], str | None] | None = None,
         pick_story: Callable[[Store, list[StoryListing], int | None], PickedStory | None]
         | None = None,
+        browse_lore: Callable[[Store, int, str], None] | None = None,
+        worker: LoreWorker | None = None,
     ) -> Self:
         """The session for a launch on `spec` ("provider/model"): the
         model's saved parameters, the persisted toggles, and the remembered
@@ -121,6 +132,8 @@ class Session:
             verbose=state.verbose,
             pick_model=pick_model,
             pick_story=pick_story,
+            browse_lore=browse_lore,
+            worker=worker,
         )
         session._apply_think(state.think)
         session._apply_params(models_file.load(paths).get(model, {}))
@@ -132,6 +145,21 @@ class Session:
         """ "<provider>/<model>" for display — derived, so a model switch can
         never leave it stale."""
         return f"{self.provider.name}/{self.model}"
+
+    # The assembler's StoryView: the shaping settings, read off the session
+    # so every assemble_story call sees the same values.
+
+    @property
+    def recap_header(self) -> str:
+        return self.prompts.recap_header
+
+    @property
+    def head_messages(self) -> int:
+        return self.config.head_messages
+
+    @property
+    def tail_messages(self) -> int:
+        return self.config.tail_messages
 
     def story_label(self, store: Store) -> str:
         """The loaded story's display label: its title, else the newest
