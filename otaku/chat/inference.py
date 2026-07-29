@@ -22,8 +22,8 @@ from otaku.providers.base import Stats, Text, Thinking
 from otaku.settings.config import Provider
 from otaku.store import Store
 from otaku.store.schema import Message
-from otaku.term.ansi import DIM, RESET
-from otaku.term.spinner import Spinner
+from otaku.terminal import DIM, RESET
+from otaku.terminal.spinner import Spinner
 
 # POSIX-only raw-terminal control for the in-stream Ctrl+R watcher. Absent
 # on Windows — the watcher degrades to a no-op there; Ctrl+C cancellation

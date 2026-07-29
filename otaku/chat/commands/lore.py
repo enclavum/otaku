@@ -1,4 +1,4 @@
-"""Lore commands: /scene, /lore, /cast, /merge — and the worker's jobs.
+"""Lore commands: /extract, /lore, /cast, /merge — and the worker's jobs.
 
 `build_job` is the one place a session snapshot becomes a worker `Job`, so
 the REPL's idle scheduling and the manual close can never disagree on what
@@ -12,7 +12,7 @@ from otaku.chat.state import Session
 from otaku.lore.extraction import Extractor, PassResult, Report
 from otaku.lore.worker import Job
 from otaku.store import Store
-from otaku.term.ansi import DIM, ERASE_LINE, RESET
+from otaku.terminal import DIM, ERASE_LINE, RESET
 
 
 def build_job(session: Session) -> Job:
@@ -34,8 +34,9 @@ def build_job(session: Session) -> Job:
     )
 
 
-def cmd_scene(session: Session, store: Store, args: list[str]) -> None:
-    """`/scene` — close a scene over the unextracted tail right now:
+def cmd_extract(session: Session, store: Store, args: list[str]) -> None:
+    """`/extract` — run the lore extraction right now: close a scene over
+    the unextracted tail,
     summarize it, write each character's journal entry, rebuild the
     rollups. The background pass does this automatically once the story
     holds enough settled new play; this drops the gate and the settle
@@ -139,7 +140,7 @@ def _open_lore(session: Session, store: Store, lens: str) -> None:
     if not store.scenes.get_current_ends(session.story_id, ids) and not store.characters.list(
         session.story_id
     ):
-        print("No lore yet — it builds as scenes close (see /scene).")
+        print("No lore yet — it builds as scenes close (see /extract).")
         return
     if session.browse_lore is None:
         print("No lore browser available.")

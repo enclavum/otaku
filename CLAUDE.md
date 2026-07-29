@@ -74,16 +74,18 @@ standard library and the declared dependencies); everything else is
 forbidden:
 
     cli        → chat, tui, lore, store, providers, settings, crypto, logs,
-                 paths, term, formatting
-    chat       → lore, store, providers, settings, logs, paths, term, formatting
-    tui        → store, providers, settings, term, formatting
+                 paths, terminal, formatting
+    chat       → transfer, lore, store, providers, settings, logs, paths,
+                 terminal, formatting
+    tui        → store, providers, settings, terminal, formatting
+    transfer   → lore, store
     lore       → store, providers, settings, logs, formatting
     store      → crypto, logs, paths
     providers  → settings, logs
     logs       → crypto, paths
     crypto     → settings, paths
     settings   → paths
-    term       → formatting
+    terminal   → formatting
     paths      → (nothing)
     formatting → (nothing)
 

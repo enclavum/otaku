@@ -32,8 +32,8 @@ from otaku.settings.prompts import Prompts
 from otaku.store import Store
 from otaku.store.schema import Message
 from otaku.store.stories import StoryListing
-from otaku.term.ansi import DIM, RESET
-from otaku.term.statusline import StatusLine
+from otaku.terminal import DIM, RESET
+from otaku.terminal.statusline import StatusLine
 
 # The inference parameters otaku understands, and how each is read from the
 # saved file or a `/set parameter` argument.
@@ -172,9 +172,9 @@ class Session:
             return ""
         if story.title:
             return story.title
-        arc = store.scenes.get_arc(self.story_id, [m.id for m in self.messages])
-        if arc:
-            return arc
+        story_so_far = store.scenes.get_story_so_far(self.story_id, [m.id for m in self.messages])
+        if story_so_far:
+            return story_so_far
         return next((m.body for m in self.messages if m.role == "user"), "")
 
     def ensure_story(self, store: Store) -> int:

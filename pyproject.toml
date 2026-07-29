@@ -39,6 +39,7 @@ select = ["B", "E", "F", "I", "N", "RUF", "SIM", "UP", "W"]
 # SQL statements are kept on two rows with their parameters on one, whatever
 # the width (see the store modules' `# fmt: off` blocks).
 "otaku/store/*" = ["E501"]
+"tests/*" = ["RUF001"]
 
 [tool.mypy]
 strict = true

@@ -6,19 +6,19 @@ comes back lowercased and otherwise untouched. It works per character, so
 a whole typed word folds too.
 """
 
-from otaku.term.keys import latin_key
+from otaku.terminal import latin_key
 
 
 class TestLatinKey:
     def test_maps_a_cyrillic_letter_to_its_physical_twin(self) -> None:
         assert latin_key("н") == "y"
         assert latin_key("т") == "n"
-        assert latin_key("у") == "e"  # noqa: RUF001
+        assert latin_key("у") == "e"
         assert latin_key("д") == "l"
-        assert latin_key("г") == "u"  # noqa: RUF001
+        assert latin_key("г") == "u"
 
     def test_lowercases_before_mapping(self) -> None:
-        assert latin_key("Н") == "y"  # noqa: RUF001
+        assert latin_key("Н") == "y"
         assert latin_key("E") == "e"
 
     def test_leaves_latin_untouched(self) -> None:

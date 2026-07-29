@@ -13,7 +13,7 @@ import sys
 from dataclasses import dataclass
 
 from otaku.formatting import format_context
-from otaku.term.ansi import BOLD, DEFAULT_BG, DIM, RESET, bg, fg
+from otaku.terminal import BOLD, DEFAULT_BG, DIM, RESET, bg, fg
 
 # A girl with long violet hair — the face reads at 16x12 because the eyes
 # get two cells each (dark iris + a white shine pixel).

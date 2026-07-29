@@ -64,7 +64,7 @@ from otaku.formatting import combine_framing, flatten, human_age, truncate
 from otaku.store import Store
 from otaku.store.schema import Message
 from otaku.store.stories import StoryListing
-from otaku.term.keys import latin_key
+from otaku.terminal import latin_key
 from otaku.tui.widgets import (
     BASE_STYLE,
     bordered_box,
@@ -97,8 +97,9 @@ _TURN_SPLIT = (2, 1)
 
 
 def _label(row: StoryListing) -> str:
-    """A story's one-line label: title, else arc, else first prompt."""
-    return row.title or row.arc or row.first_user
+    """A story's one-line label: title, else the story so far, else the
+    first prompt."""
+    return row.title or row.story_so_far or row.first_user
 
 
 class StoryPicker:
@@ -286,9 +287,9 @@ class StoryPicker:
             out.append(("class:preview.body", "\n"))
             for line in wrap_text(flatten(row.title), width):
                 out.append(("class:preview.title", line + "\n"))
-        if row.arc:
+        if row.story_so_far:
             out.append(("class:preview.body", "\n"))
-            for line in wrap_text(row.arc, width):
+            for line in wrap_text(row.story_so_far, width):
                 out.append(("class:preview.body", line + "\n"))
         if row.first_user:
             out.append(("class:preview.body", "\n"))
@@ -363,7 +364,7 @@ class StoryPicker:
             self.filtered = [
                 row
                 for row in self.all
-                if q in f"{row.title} {row.arc} {row.first_user} {row.model}".lower()
+                if q in f"{row.title} {row.story_so_far} {row.first_user} {row.model}".lower()
                 or q in texts.get(row.id, "")
             ]
         if self.list_cursor >= len(self.filtered):

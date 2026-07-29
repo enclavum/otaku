@@ -2,7 +2,7 @@
 
 A small custom Completer that walks the command tree by whitespace-split
 tokens, matching the literal current token against the keys at the current
-node. The tree derives from `commands.registry.COMMANDS`, and each row
+node. The tree derives from `commands.COMMANDS`, and each row
 carries its /help line as the menu's meta column.
 
 It fires ONLY on lines that start with `/`: the REPL completes while
@@ -19,7 +19,7 @@ from typing import Any, Self
 from prompt_toolkit.completion import CompleteEvent, Completer, Completion
 from prompt_toolkit.document import Document
 
-from otaku.chat.commands.registry import (
+from otaku.chat.commands import (
     PATH_LEAF,
     CompletionTree,
     completion_tree,

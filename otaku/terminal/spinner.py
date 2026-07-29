@@ -7,7 +7,7 @@ chunk path without bookkeeping.
 import sys
 import threading
 
-from otaku.term.ansi import ERASE_LINE
+from otaku.terminal import ERASE_LINE
 
 # The 6-dot set: light enough to sit beside regular text.
 FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"

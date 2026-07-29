@@ -105,7 +105,7 @@ Rules:
 {entries}
 """
 
-ARC_DEFAULT = """\
+STORY_SO_FAR_DEFAULT = """\
 Combine the scene summaries below into one running "story so far" summary
 (4-8 sentences, chronological, no headings). Output the summary only.
 
@@ -128,7 +128,7 @@ _DEFAULTS = {
     ),
     "extract_prompt": EXTRACT_DEFAULT,
     "history_prompt": HISTORY_DEFAULT,
-    "arc_prompt": ARC_DEFAULT,
+    "story_so_far_prompt": STORY_SO_FAR_DEFAULT,
     "recap_header": "[The story so far — the scenes between these moments:]",
 }
 
@@ -142,7 +142,7 @@ _REQUIRED = {
     "ooc_framing": ("body",),
     "extract_prompt": ("cast", "journals", "chunk"),
     "history_prompt": ("name", "entries"),
-    "arc_prompt": ("summaries",),
+    "story_so_far_prompt": ("summaries",),
 }
 
 _HEADER = [
@@ -160,7 +160,7 @@ class Prompts:
     ooc_framing: str = _DEFAULTS["ooc_framing"]
     extract_prompt: str = _DEFAULTS["extract_prompt"]
     history_prompt: str = _DEFAULTS["history_prompt"]
-    arc_prompt: str = _DEFAULTS["arc_prompt"]
+    story_so_far_prompt: str = _DEFAULTS["story_so_far_prompt"]
     recap_header: str = _DEFAULTS["recap_header"]
 
 

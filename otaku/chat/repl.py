@@ -33,17 +33,16 @@ from prompt_toolkit.layout.controls import BufferControl
 from prompt_toolkit.styles import Style
 
 from otaku import __version__
+from otaku.chat.commands import dispatch
 from otaku.chat.commands.lore import build_job
-from otaku.chat.commands.registry import dispatch
 from otaku.chat.completer import SlashCompleter
 from otaku.chat.inference import run_inference
 from otaku.chat.state import Session
 from otaku.formatting import flatten, truncate
 from otaku.store import Store
 from otaku.store.schema import Message
-from otaku.term import banner, statusline
-from otaku.term.ansi import CURSOR_BLINK_ON
-from otaku.term.statusline import StatusLine
+from otaku.terminal import CURSOR_BLINK_ON, banner, statusline
+from otaku.terminal.statusline import StatusLine
 
 _PLACEHOLDER = FormattedText([("class:placeholder", "Send a message")])
 _PROMPT_STYLE = Style.from_dict(

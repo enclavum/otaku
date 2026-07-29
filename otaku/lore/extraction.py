@@ -91,7 +91,7 @@ class Report:
     scenes: int = 0
     journals: int = 0  # journal entries written
     histories: int = 0  # character history rollups rebuilt
-    arc_updated: bool = False  # the story-so-far rollup rebuilt
+    scene_histories: int = 0  # story-so-far rollups rebuilt
     characters: list[str] = field(default_factory=list)  # new cast members
     attributed: int = 0  # messages given a speaker by the extraction
     skipped: int = 0  # malformed extraction items dropped
@@ -223,7 +223,7 @@ class Extractor:
         # rollups, if any — nulled by a /lore edit, or lost to a failure or
         # cancel — so they heal on the next pass whatever the gate said. They
         # self-gate on id-only queries, so a current story costs nothing.
-        self._refresh_arc(report)
+        self._refresh_scene_history(report)
         self._refresh_histories(report)
         return result, report
 
@@ -317,6 +317,12 @@ class Extractor:
                 f"scene closed (story {self._story_id}): "
                 f"{len(span)} messages, {report.journals - journals_before} journal entries"
             )
+            # The rollups follow each scene immediately — summary and entries
+            # land, then the histories composed from them — so the journals
+            # block fed to the NEXT span stays one-history-sized instead of
+            # accumulating every entry across a long backlog.
+            self._refresh_scene_history(report)
+            self._refresh_histories(report)
         return PassResult.CLOSED
 
     def _close_scene(
@@ -417,11 +423,12 @@ class Extractor:
             self._store.messages.set_speaker(row.id, cid, name)
             report.attributed += 1
 
-    def _refresh_arc(self, report: Report) -> None:
-        """Rebuild the story-so-far rollup when the newest current scene
-        lacks one — composed from the scene summaries, never from the
-        previous rollup (a photocopy of a photocopy). Best-effort: a
-        failure leaves the row NULL and the next pass retries."""
+    def _refresh_scene_history(self, report: Report) -> None:
+        """Rebuild the newest current scene's history — the story so far
+        through it, which is all "the arc" ever is — when it lacks one:
+        composed from the scene summaries, never from the previous rollup
+        (a photocopy of a photocopy). Best-effort: a failure leaves the row
+        NULL and the next pass retries."""
         ids = self._store.stories.get_messages_ids(self._story_id)
         due = self._store.scenes.get_rollups_due(self._story_id, ids)
         if not due or self._cancel.is_set():
@@ -433,17 +440,18 @@ class Extractor:
         self._progress(f"composing the story so far from {len(summaries)} scene summaries…")
         started = time.monotonic()
         try:
-            arc = self.complete(
-                self._prompts.arc_prompt.format(summaries="\n\n".join(summaries)), "rollup"
+            story_so_far = self.complete(
+                self._prompts.story_so_far_prompt.format(summaries="\n\n".join(summaries)),
+                "rollup",
             ).strip()
         except httpx.HTTPError as e:
             self._log(f"story-so-far rollup failed (story {self._story_id}): {type(e).__name__}")
             self._progress(f"story-so-far rollup failed ({e})")
             return
-        if not arc or self._cancel.is_set():
+        if not story_so_far or self._cancel.is_set():
             return
-        self._store.scenes.set_history(due[-1], arc)
-        report.arc_updated = True
+        self._store.scenes.set_history(due[-1], story_so_far)
+        report.scene_histories += 1
         self._log(
             f"story-so-far rebuilt (story {self._story_id}) from {len(summaries)} scene "
             f"summaries in {_fmt_duration(time.monotonic() - started)}"

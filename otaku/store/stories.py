@@ -21,12 +21,13 @@ from otaku.store.schema import Message, Story
 
 @dataclass(frozen=True)
 class StoryListing:
-    """One row of the story browser. `title`, `arc`, and `first_user` are
-    the row's label fallbacks, in that order; each is "" when absent."""
+    """One row of the story browser. `title`, `story_so_far`, and
+    `first_user` are the row's label fallbacks, in that order; each is ""
+    when absent."""
 
     id: int
     title: str
-    arc: str  # the newest story-so-far rollup among current scenes
+    story_so_far: str  # the newest history rollup among current scenes
     first_user: str  # the first user message of the current chain
     model: str  # "provider/model" behind the newest reply
     updated_at: datetime
@@ -68,7 +69,7 @@ class StoryOps:
     def list(self) -> builtins.list[StoryListing]:
         """Every story, most recently played first. One flat read of the
         message trees serves every chain walk; per story, only the label
-        fields decrypt — one arc, one first message, the title."""
+        fields decrypt — one rollup, one first message, the title."""
         # fmt: off
         rows = self._db.conn.execute(
             "SELECT id, title, updated_at, head_id FROM stories",
@@ -95,12 +96,12 @@ class StoryOps:
             lengths[story_id] = len(chain)
 
         first_users = self._get_bodies(first_user_ids)
-        arcs = self._get_arcs(chains)
+        so_far = self._get_stories_so_far(chains)
         listings = [
             StoryListing(
                 id=int(story_id),
                 title=self._db.unseal(title),
-                arc=arcs.get(int(story_id), ""),
+                story_so_far=so_far.get(int(story_id), ""),
                 first_user=first_users.get(int(story_id), ""),
                 model=models.get(int(story_id), ""),
                 updated_at=datetime.fromisoformat(updated_at),
@@ -396,9 +397,10 @@ class StoryOps:
         # fmt: on
         return {by_message[int(mid)]: self._db.unseal(body) for mid, body in rows}
 
-    def _get_arcs(self, chains: dict[int, set[int]]) -> dict[int, str]:
+    def _get_stories_so_far(self, chains: dict[int, set[int]]) -> dict[int, str]:
         """story id → its newest story-so-far rollup among current scenes
-        (the `get_arc` rule, across all stories, decrypting one per story)."""
+        (the `get_story_so_far` rule, across all stories, decrypting one
+        per story)."""
         # fmt: off
         rows = self._db.conn.execute(
             "SELECT story_id, end_message_id, history FROM scenes WHERE history IS NOT NULL ORDER BY id",

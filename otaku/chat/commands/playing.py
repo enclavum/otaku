@@ -11,7 +11,7 @@ from otaku.chat.inference import run_inference
 from otaku.chat.state import Session
 from otaku.store import Store
 from otaku.store.schema import Message
-from otaku.term.ansi import DIM, RESET
+from otaku.terminal import DIM, RESET
 
 
 def cmd_me(session: Session, store: Store, args: list[str]) -> None:

@@ -8,13 +8,7 @@ stay in the tree as siblings — nothing is deleted either way).
 
 from otaku.chat.state import Session
 from otaku.store import Store
-from otaku.term.keys import latin_key
-
-# Answers to the fork question, matched after `latin_key` folds the typed
-# layout — so the physical y/n keys answer on ЙЦУКЕН too. Empty = the
-# [Y/n] default.
-_YES = {"", "y", "yes"}
-_NO = {"n", "no"}
+from otaku.terminal import NO_ANSWERS, YES_ANSWERS, latin_key
 
 _RESUMED_TURNS = 3  # turns echoed after a resume, so the scene is on screen
 
@@ -47,7 +41,7 @@ def cmd_stories(session: Session, store: Store, args: list[str]) -> None:
         except EOFError, KeyboardInterrupt:
             print("Cancelled.")
             return
-        if ans in _YES:
+        if not ans or ans in YES_ANSWERS:  # empty = the [Y/n] default
             story_id = store.stories.fork(
                 story_id,
                 from_message_id=messages[-1].id,
@@ -56,7 +50,7 @@ def cmd_stories(session: Session, store: Store, args: list[str]) -> None:
             messages = store.stories.get_messages(story_id)
             story = store.stories.get(story_id)
             print(f"Forked to '{story.title}'." if story and story.title else "Forked.")
-        elif ans in _NO:
+        elif ans in NO_ANSWERS:
             store.stories.set_head(story_id, messages[-1].id)
             print("Resuming here — later messages stay in the tree as siblings.")
         else:

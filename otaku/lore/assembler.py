@@ -253,9 +253,9 @@ def _compose_recap(
         used -= estimate_tokens(kept.pop(0))
     count = len(kept)
     if count < len(summaries):
-        arc = next((s.history for s in reversed(scenes) if s.history), "")
-        if arc:
-            kept.insert(0, arc)
+        story_so_far = next((s.history for s in reversed(scenes) if s.history), "")
+        if story_so_far:
+            kept.insert(0, story_so_far)
     parts = [recap_header] if recap_header else []
     return "\n\n".join(parts + kept), count
 

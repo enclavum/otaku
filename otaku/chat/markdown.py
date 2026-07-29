@@ -20,7 +20,7 @@ import shutil
 import sys
 from typing import Any, TextIO
 
-from otaku.term.ansi import BOLD, DIM, ITALIC, RESET
+from otaku.terminal import BOLD, DIM, ITALIC, RESET
 
 _MORE: Any = object()  # verdict: keep buffering, block type not yet known
 

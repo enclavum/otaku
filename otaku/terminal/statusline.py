@@ -30,7 +30,7 @@ import sys
 import threading
 from collections.abc import Callable, Iterator
 
-from otaku.term.ansi import (
+from otaku.terminal import (
     DIM,
     ERASE_LINE,
     GOTO_ROW,

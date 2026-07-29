@@ -125,7 +125,7 @@ class SceneOps:
         # fmt: on
         return [int(end) for (end,) in rows if end in current]
 
-    def get_arc(self, story_id: int, message_ids: builtins.list[int]) -> str:
+    def get_story_so_far(self, story_id: int, message_ids: builtins.list[int]) -> str:
         """The story so far: the newest history rollup among current scenes."""
         for scene in reversed(self.get_current(story_id, message_ids)):
             if scene.history:

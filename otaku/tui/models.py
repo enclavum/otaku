@@ -45,8 +45,8 @@ from prompt_toolkit.styles import Style
 from otaku.formatting import format_size, truncate
 from otaku.providers.base import ManagedClient
 from otaku.providers.registry import Registry as ProviderRegistry
-from otaku.term.keys import latin_key
-from otaku.term.spinner import FRAMES as SPINNER_FRAMES
+from otaku.terminal import latin_key
+from otaku.terminal.spinner import FRAMES as SPINNER_FRAMES
 from otaku.tui.widgets import (
     BASE_STYLE,
     bordered_box,

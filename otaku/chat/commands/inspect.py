@@ -6,7 +6,7 @@ from otaku.chat.state import Session
 from otaku.formatting import flatten, format_size, pretty_path, truncate
 from otaku.lore import assembler
 from otaku.store import Store
-from otaku.term.ansi import DIM, RESET
+from otaku.terminal import DIM, RESET
 
 
 def cmd_context(session: Session, store: Store, args: list[str]) -> None:
