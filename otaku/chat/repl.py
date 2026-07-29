@@ -3,6 +3,7 @@
 Keybindings:
   Ctrl+R -> /regen
   Ctrl+U -> /undo
+  Ctrl+T -> /stories
   Ctrl+O -> /model      (Ctrl+M is unusable — the terminal sends it as Enter)
   Ctrl+D -> /bye
 
@@ -65,6 +66,7 @@ _PROMPT_STYLE = Style.from_dict(
 _SHORTCUTS = {
     "c-r": "/regen",
     "c-u": "/undo",
+    "c-t": "/stories",
     "c-o": "/model",  # Ctrl+M would have been the mnemonic, but that IS Enter
     "c-d": "/bye",
 }
@@ -210,11 +212,7 @@ def _banner(session: Session, store: Store) -> str:
         context = client.get_context_size(session.model)
     except Exception:
         context = None
-    story = ""
-    if session.story_id is not None:
-        row = store.stories.get(session.story_id)
-        if row is not None and row.title:
-            story = flatten(truncate(row.title, 40))
+    story = flatten(truncate(session.story_label(store), 40))
     return banner.render(
         __version__,
         session.full_model_name,
@@ -229,11 +227,12 @@ def _show_resumed(session: Session, store: Store) -> None:
     last turns, so the scene is on screen before the prompt."""
     if not session.messages:
         return
-    story = store.stories.get(session.story_id or 0)
-    if story is not None:
-        label = flatten(truncate(story.title or "untitled", 40))
+    label = flatten(truncate(session.story_label(store), 40))
+    if label:
         print(f"Story: {label}. Resumed at message {len(session.messages)}.")
-        print()
+    else:
+        print(f"Resumed at message {len(session.messages)}.")
+    print()
     print(session.render_last_turns(_RESUME_TURNS))
 
 

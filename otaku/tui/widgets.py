@@ -38,10 +38,6 @@ BASE_STYLE: dict[str, str] = {
     "dialog.muted": "fg:#767676 bg:#ffffff",
 }
 
-# Confirm-dialog answers without switching layouts (Latin + Cyrillic keys).
-KEY_YES = {"y", "н"}
-KEY_NO = {"n", "т"}
-
 
 def term_cols() -> int:
     """Terminal width for layout math, with a narrow-terminal fallback."""

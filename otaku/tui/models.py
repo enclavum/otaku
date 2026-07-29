@@ -45,11 +45,10 @@ from prompt_toolkit.styles import Style
 from otaku.formatting import format_size, truncate
 from otaku.providers.base import ManagedClient
 from otaku.providers.registry import Registry as ProviderRegistry
+from otaku.term.keys import latin_key
 from otaku.term.spinner import FRAMES as SPINNER_FRAMES
 from otaku.tui.widgets import (
     BASE_STYLE,
-    KEY_NO,
-    KEY_YES,
     bordered_box,
     page_step,
     term_cols,
@@ -69,9 +68,6 @@ _STYLE = Style.from_dict(
 )
 
 _ROW_HEAD_LIMIT = 100
-
-_KEY_LOAD = {"l", "д"}
-_KEY_UNLOAD = {"u", "г"}  # noqa: RUF001
 
 
 @dataclass
@@ -404,10 +400,10 @@ class ModelPicker:
 
         @kb.add(Keys.Any, filter=confirming, eager=True)
         def _confirm_any(event: Any) -> None:
-            key = event.data.lower() if event.data else ""
-            if key in KEY_YES:
+            key = latin_key(event.data) if event.data else ""
+            if key == "y":
                 self._confirm_yes()
-            elif key in KEY_NO:
+            elif key == "n":
                 self._confirm_no()
 
         @kb.add("up", filter=idle)
@@ -469,11 +465,11 @@ class ModelPicker:
                     self.query = ""
                     self._refilter()
                     return
-                key = data.lower()
-                if key in _KEY_LOAD:
+                key = latin_key(data)
+                if key == "l":
                     self._request_load()
                     return
-                if key in _KEY_UNLOAD:
+                if key == "u":
                     self._request_unload()
                     return
                 return

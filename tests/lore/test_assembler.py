@@ -1,12 +1,12 @@
 """The prompt assembler.
 
 Its contract is the wire promise: the model sees the stored messages and
-nothing the code invented. Framing joins its body only here, consecutive
+nothing the code invented. Framing joins its body at wire time, consecutive
 same-role rows become one turn, and an overlong transcript loses its
 oldest messages rather than its shape.
 """
 
-from otaku.lore.assembler import assemble, combine_framing, render_preview
+from otaku.lore.assembler import assemble, render_preview
 from otaku.store.schema import Message
 
 
@@ -16,28 +16,6 @@ def user(body: str, framing: str | None = None) -> Message:
 
 def assistant(body: str) -> Message:
     return Message(role="assistant", body=body)
-
-
-class TestCombineFraming:
-    def test_a_turn_without_framing_is_its_body(self) -> None:
-        assert combine_framing("I open the door.", None) == "I open the door."
-
-    def test_a_placeholder_slots_the_body_in(self) -> None:
-        framing = "((OOC: as Ryn.))\n{body}"
-        assert combine_framing("I wait.", framing) == "((OOC: as Ryn.))\nI wait."
-
-    def test_framing_without_a_placeholder_precedes_the_body(self) -> None:
-        assert combine_framing("I wait.", "((OOC: note.))") == "((OOC: note.))\n\nI wait."
-
-    def test_framing_alone_when_there_is_no_body(self) -> None:
-        assert combine_framing("", "((OOC: you play Anna.))") == "((OOC: you play Anna.))"
-
-    def test_other_braces_survive(self) -> None:
-        framing = "((OOC: roll {2d6} for {name}.))\n{body}"
-        assert combine_framing("I roll.", framing) == "((OOC: roll {2d6} for {name}.))\nI roll."
-
-    def test_a_body_with_braces_survives(self) -> None:
-        assert combine_framing("I say {hello}.", "note\n{body}") == "note\nI say {hello}."
 
 
 class TestAssemble:

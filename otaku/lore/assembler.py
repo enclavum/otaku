@@ -5,7 +5,7 @@ exactly as stored — never rewritten, no `Name:` prefixes, no turn-taking
 guards: prose carries its own attribution, and the wire promise is that the
 code adds NOTHING (`/context` and the request log show it holding). The
 `/me`, `/you`, and `/ooc` directions live in a turn's `framing` column and
-are joined to its body only here, at wire time.
+are joined to its body (`formatting.combine_framing`) only at wire time.
 
 The wire unit is the exchange: consecutive same-role rows (a `/me`
 direction beside its line) merge into one turn, blank-line separated, so
@@ -19,6 +19,7 @@ messages drop first.
 
 from dataclasses import dataclass
 
+from otaku.formatting import combine_framing
 from otaku.store.schema import Message
 
 _DEFAULT_CONTEXT = 8_192  # when the backend doesn't expose the loaded window
@@ -70,22 +71,6 @@ def assemble(system: str, messages: list[Message], context_max: int | None) -> A
         transcript_kept=len(kept),
         transcript_total=len(messages),
     )
-
-
-def combine_framing(body: str, framing: str | None) -> str:
-    """The wire text for one turn: its body plus the framing a command wrote,
-    stored in separate columns and joined only here so the body stays
-    verbatim. No framing → the bare body. A `{body}` placeholder in the
-    framing → the body slotted there (via `str.replace`, never `str.format`,
-    so other braces stay literal). Otherwise framing, a blank line, then the
-    body — or the framing alone when there is no body (a `/you` turn)."""
-    if not framing:
-        return body
-    if "{body}" in framing:
-        return framing.replace("{body}", body)
-    if not body:
-        return framing
-    return f"{framing}\n\n{body}"
 
 
 def _wire_turns(kept: list[Message]) -> list[Message]:

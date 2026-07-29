@@ -1,6 +1,24 @@
 """Small text helpers for terminal output."""
 
+from datetime import UTC, datetime
 from pathlib import Path
+
+
+def combine_framing(body: str, framing: str | None) -> str:
+    """The composed text of one turn: its body plus the framing a command
+    wrote, stored in separate columns and joined only on demand so the body
+    stays verbatim. No framing → the bare body. A `{body}` placeholder in
+    the framing → the body slotted there (via `str.replace`, never
+    `str.format`, so other braces stay literal). Otherwise framing, a blank
+    line, then the body — or the framing alone when there is no body (a
+    `/you` turn)."""
+    if not framing:
+        return body
+    if "{body}" in framing:
+        return framing.replace("{body}", body)
+    if not body:
+        return framing
+    return f"{framing}\n\n{body}"
 
 
 def pretty_path(path: Path) -> str:
@@ -33,6 +51,20 @@ def format_size(size: int | None) -> str:
     if size is None or size <= 0:
         return "—"
     return f"{size / 1024**3:.1f} GB"
+
+
+def human_age(t: datetime) -> str:
+    """How long ago an aware timestamp was, the way a human says it: "just
+    now" under a minute, then the largest fitting unit ("7m ago", "3h ago",
+    "12d ago")."""
+    sec = (datetime.now(UTC) - t.astimezone(UTC)).total_seconds()
+    if sec < 60:
+        return "just now"
+    if sec < 3600:
+        return f"{int(sec // 60)}m ago"
+    if sec < 86400:
+        return f"{int(sec // 3600)}h ago"
+    return f"{int(sec // 86400)}d ago"
 
 
 def format_context(tokens: int | None) -> str:

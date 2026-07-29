@@ -1,7 +1,100 @@
-"""Story commands: /system and /new."""
+"""Story commands: /stories, /fork, /system, /rename, and /new.
+
+`/stories` opens the browser and owns what a selection means: picking the
+last turn resumes the story as-is; picking an earlier turn offers a fork
+at that point, and declining rewinds the head instead (the later turns
+stay in the tree as siblings — nothing is deleted either way).
+"""
 
 from otaku.chat.state import Session
 from otaku.store import Store
+from otaku.term.keys import latin_key
+
+# Answers to the fork question, matched after `latin_key` folds the typed
+# layout — so the physical y/n keys answer on ЙЦУКЕН too. Empty = the
+# [Y/n] default.
+_YES = {"", "y", "yes"}
+_NO = {"n", "no"}
+
+_RESUMED_TURNS = 3  # turns echoed after a resume, so the scene is on screen
+
+
+def cmd_stories(session: Session, store: Store, args: list[str]) -> None:
+    """`/stories` — browse every story, preview its turns, resume anywhere."""
+    rows = store.stories.list()
+    if not rows:
+        print("No saved stories yet.")
+        return
+    if session.pick_story is None:
+        print("No story browser available.")
+        return
+    result = session.pick_story(store, rows, session.story_id)
+    if result is None:
+        return
+    story_id, messages, total = result
+
+    # Picking an earlier message offers a fork at that point — the
+    # playthrough mechanism. Declining resumes on this story with the head
+    # moved back (the later messages stay in the tree as siblings).
+    if len(messages) < total:
+        try:
+            ans = latin_key(
+                input(
+                    f"Resume at message {len(messages)} of {total}: "
+                    f"continue in a fork from here? [Y/n] "
+                ).strip()
+            )
+        except EOFError, KeyboardInterrupt:
+            print("Cancelled.")
+            return
+        if ans in _YES:
+            story_id = store.stories.fork(story_id, from_message_id=messages[-1].id)
+            messages = store.stories.get_messages(story_id)
+            story = store.stories.get(story_id)
+            print(f"Forked to '{story.title}'." if story and story.title else "Forked.")
+        elif ans in _NO:
+            store.stories.set_head(story_id, messages[-1].id)
+            print("Resuming here — later messages stay in the tree as siblings.")
+        else:
+            print("Cancelled.")
+            return
+
+    session.story_id = story_id
+    session.system = store.stories.get_system(story_id)
+    session.messages = messages
+    session.save_state()
+    print(f"Resumed at message {len(messages)}.")
+    print()
+    print(session.render_last_turns(_RESUMED_TURNS))
+
+
+def cmd_rename(session: Session, store: Store, args: list[str]) -> None:
+    """`/rename <title>` — title this story (shown in /stories and the banner);
+    no text prints the current title. The one way a story gets a
+    title by hand."""
+    title = session.raw_args.strip()
+    if not title:
+        story = store.stories.get(session.story_id) if session.story_id is not None else None
+        current = story.title if story else ""
+        print(f'Title: "{current}"' if current else "Usage: /rename NEW-TITLE")
+        return
+    store.stories.rename(session.ensure_story(store), title)
+    print(f'Renamed to "{title}".')
+
+
+def cmd_fork(session: Session, store: Store, args: list[str]) -> None:
+    """`/fork [TITLE]` — continue in a copy of this story from here; the
+    original stays as it is. Without TITLE the copy inherits a numbered
+    title ("<title> - N") — or none, when the story has none."""
+    if session.story_id is None or not session.messages:
+        print("Nothing to fork yet — send a message first.")
+        return
+    title = session.raw_args.strip() or None
+    session.story_id = store.stories.fork(session.story_id, title=title)
+    session.messages = store.stories.get_messages(session.story_id)
+    session.save_state()
+    story = store.stories.get(session.story_id)
+    print(f"Forked to '{story.title}'." if story and story.title else "Forked.")
 
 
 def cmd_system(session: Session, store: Store, args: list[str]) -> None:

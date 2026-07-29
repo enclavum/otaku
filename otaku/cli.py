@@ -26,6 +26,7 @@ from otaku.settings import state as state_mod
 from otaku.settings.files import write_atomic
 from otaku.store import DatabaseError, Store, is_encrypted
 from otaku.tui import models as model_picker
+from otaku.tui import stories as story_picker
 
 
 @click.group(invoke_without_command=True)
@@ -69,6 +70,7 @@ def main(ctx: click.Context) -> None:
             state=state,
             store=store,
             pick_model=lambda current: model_picker.pick(provider_registry, initial_spec=current),
+            pick_story=story_picker.pick,
         )
         repl.run(session, store)
     finally:

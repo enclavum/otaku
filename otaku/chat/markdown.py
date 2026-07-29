@@ -14,6 +14,7 @@ the closing fence). State survives chunk boundaries; `flush()` closes any
 open span or unterminated fence so the terminal is never left styled.
 """
 
+import io
 import re
 import shutil
 import sys
@@ -295,3 +296,14 @@ class MarkdownStreamer:
         self._out.write("\n")
         self._at_bol = True
         self._pending = ""
+
+
+def render_markdown(text: str) -> str:
+    """`text` rendered in one pass, returned as a string: exactly what the
+    streamer would have printed — for echoing stored messages the way they
+    looked when they streamed."""
+    out = io.StringIO()
+    streamer = MarkdownStreamer(out)
+    streamer.feed(text)
+    streamer.flush()
+    return out.getvalue()

@@ -1,11 +1,15 @@
-"""Display formatting: paths, one-line previews, sizes, context windows."""
+"""Display formatting: framing composition, paths, one-line previews,
+sizes, context windows."""
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from otaku.formatting import (
+    combine_framing,
     flatten,
     format_context,
     format_size,
+    human_age,
     pretty_path,
     truncate,
 )
@@ -84,3 +88,45 @@ class TestFormatContext:
     def test_is_empty_when_unknown(self) -> None:
         assert format_context(None) == ""
         assert format_context(0) == ""
+
+
+class TestCombineFraming:
+    def test_a_turn_without_framing_is_its_body(self) -> None:
+        assert combine_framing("I open the door.", None) == "I open the door."
+
+    def test_a_placeholder_slots_the_body_in(self) -> None:
+        framing = "((OOC: as Ryn.))\n{body}"
+        assert combine_framing("I wait.", framing) == "((OOC: as Ryn.))\nI wait."
+
+    def test_framing_without_a_placeholder_precedes_the_body(self) -> None:
+        assert combine_framing("I wait.", "((OOC: note.))") == "((OOC: note.))\n\nI wait."
+
+    def test_framing_alone_when_there_is_no_body(self) -> None:
+        assert combine_framing("", "((OOC: you play Anna.))") == "((OOC: you play Anna.))"
+
+    def test_other_braces_survive(self) -> None:
+        framing = "((OOC: roll {2d6} for {name}.))\n{body}"
+        assert combine_framing("I roll.", framing) == "((OOC: roll {2d6} for {name}.))\nI roll."
+
+    def test_a_body_with_braces_survives(self) -> None:
+        assert combine_framing("I say {hello}.", "note\n{body}") == "note\nI say {hello}."
+
+
+class TestHumanAge:
+    """Ages read like a human would say them, in the largest fitting unit."""
+
+    def test_under_a_minute_is_just_now(self) -> None:
+        assert human_age(datetime.now(UTC) - timedelta(seconds=5)) == "just now"
+
+    def test_minutes(self) -> None:
+        assert human_age(datetime.now(UTC) - timedelta(minutes=7)) == "7m ago"
+
+    def test_hours(self) -> None:
+        assert human_age(datetime.now(UTC) - timedelta(hours=3)) == "3h ago"
+
+    def test_days(self) -> None:
+        assert human_age(datetime.now(UTC) - timedelta(days=12)) == "12d ago"
+
+    def test_accepts_an_aware_local_timestamp(self) -> None:
+        local = (datetime.now(UTC) - timedelta(hours=2)).astimezone()
+        assert human_age(local) == "2h ago"

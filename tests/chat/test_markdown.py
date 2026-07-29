@@ -9,7 +9,7 @@ and that how the input is split into chunks changes nothing.
 import io
 import re
 
-from otaku.chat.markdown import MarkdownStreamer
+from otaku.chat.markdown import MarkdownStreamer, render_markdown
 
 _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 _BOLD = "\x1b[1m"
@@ -149,3 +149,21 @@ def _open_style(rendered: str) -> bool:
         if code in (_BOLD, _ITALIC, "\x1b[2m"):
             return True
     return False
+
+
+class TestRenderMarkdown:
+    """`render_markdown` returns as a string exactly what the streamer
+    would have printed for the same text."""
+
+    def test_matches_the_streamers_output(self) -> None:
+        text = "# Scene\nShe *waits*.\n**Bold** move, `run()`.\n> said so\n"
+        assert render_markdown(text) == render(text)
+
+    def test_returns_plain_prose_unchanged(self) -> None:
+        assert render_markdown("The door opens.") == "The door opens."
+
+    def test_returns_empty_for_empty_input(self) -> None:
+        assert render_markdown("") == ""
+
+    def test_closes_styles_at_the_end(self) -> None:
+        assert render_markdown("**unclosed").endswith(_RESET)

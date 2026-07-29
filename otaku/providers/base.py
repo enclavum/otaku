@@ -18,6 +18,7 @@ is on (see `providers.streaming`); calls nobody watches pass smooth=False
 and skip it.
 """
 
+import contextlib
 import json
 import time
 from abc import ABC, abstractmethod
@@ -134,6 +135,11 @@ class OpenAIClient:
             headers=self.provider.headers,
             timeout=timeout,
         ) as response:
+            if response.status_code >= 400:
+                # Drain now, while the stream is open — the error body (the
+                # server's explanation) must stay readable after close.
+                with contextlib.suppress(httpx.HTTPError):
+                    response.read()
             response.raise_for_status()
             for raw in response.iter_lines():
                 line = raw.strip()

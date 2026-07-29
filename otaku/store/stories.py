@@ -21,10 +21,14 @@ from otaku.store.schema import Message, Story
 
 @dataclass(frozen=True)
 class StoryListing:
-    """One row of the story browser: most recently played first."""
+    """One row of the story browser. `title`, `arc`, and `first_user` are
+    the row's label fallbacks, in that order; each is "" when absent."""
 
     id: int
     title: str
+    arc: str  # the newest story-so-far rollup among current scenes
+    first_user: str  # the first user message of the current chain
+    model: str  # "provider/model" behind the newest reply
     updated_at: datetime
     num_messages: int  # length of the current chain, not the tree
 
@@ -62,17 +66,43 @@ class StoryOps:
         )
 
     def list(self) -> builtins.list[StoryListing]:
-        """Every story, most recently played first."""
+        """Every story, most recently played first. One flat read of the
+        message trees serves every chain walk; per story, only the label
+        fields decrypt — one arc, one first message, the title."""
         # fmt: off
         rows = self._db.conn.execute(
             "SELECT id, title, updated_at, head_id FROM stories",
         ).fetchall()
         # fmt: on
-        lengths = self._get_path_lengths({int(r[0]): r[3] for r in rows})
+        tree = self._get_tree_rows([int(r[0]) for r in rows if r[3] is not None])
+
+        chains: dict[int, set[int]] = {}
+        lengths: dict[int, int] = {}
+        first_user_ids: dict[int, int] = {}
+        models: dict[int, str] = {}
+        for story_row in rows:
+            story_id = int(story_row[0])
+            chain = chains[story_id] = set()
+            node = story_row[3]
+            while node is not None and node in tree:  # head → root; finite via the parent CHECK
+                chain.add(node)
+                parent, role, provider, model = tree[node]
+                if role == "user":
+                    first_user_ids[story_id] = node  # last user seen = root-most
+                if role == "assistant" and model and story_id not in models:
+                    models[story_id] = f"{provider}/{model}" if provider else model
+                node = parent
+            lengths[story_id] = len(chain)
+
+        first_users = self._get_bodies(first_user_ids)
+        arcs = self._get_arcs(chains)
         listings = [
             StoryListing(
                 id=int(story_id),
                 title=self._db.unseal(title),
+                arc=arcs.get(int(story_id), ""),
+                first_user=first_users.get(int(story_id), ""),
+                model=models.get(int(story_id), ""),
                 updated_at=datetime.fromisoformat(updated_at),
                 num_messages=lengths[int(story_id)],
             )
@@ -198,26 +228,41 @@ class StoryOps:
         decrypted, so callers that need boundaries pay nothing."""
         return self._get_chain_ids(self.get_head(story_id))
 
-    def fork(self, story_id: int, *, from_message_id: int | None = None) -> int:
-        """A new story branched off at `from_message_id` (default: the head),
-        titled "<source title> - N". Deep copy through the cut: the message
-        chain, the cast, the scenes that lie fully inside it (a scene cut
-        mid-span is not copied — its span becomes unextracted tail), and
-        those scenes' journals. Returns the new story id."""
+    def get_texts(self) -> dict[int, str]:
+        """Each story's full current-chain text, lowercased — the browser's
+        content-filter index, built lazily on the first search keystroke
+        (it decrypts every story)."""
+        ids = [int(row[0]) for row in self._db.conn.execute("SELECT id FROM stories")]
+        return {
+            story_id: " ".join(m.body for m in self.get_messages(story_id)).lower()
+            for story_id in ids
+        }
+
+    def fork(
+        self, story_id: int, *, from_message_id: int | None = None, title: str | None = None
+    ) -> int:
+        """A new story branched off at `from_message_id` (default: the head).
+        An explicit `title` is used verbatim; otherwise the source's title
+        gains a number ("<title> - N"), and an untitled source forks
+        untitled. Deep copy through the cut: the message chain, the cast,
+        the scenes that lie fully inside it (a scene cut mid-span is not
+        copied — its span becomes unextracted tail), and those scenes'
+        journals. Returns the new story id."""
         source = self.get(story_id)
         if source is None:
             raise ValueError(f"no story {story_id}")
         cut = from_message_id if from_message_id is not None else source.head_id
         chain = self._get_chain_ids(cut)
         copied = set(chain)
-        title = self._fork_title(source.title)
+        if title is None:
+            title = self._fork_title(source.title)
         now = self._db.now()
 
         with self._db.conn as conn:
             # fmt: off
             cur = conn.execute(
                 "INSERT INTO stories (forked_from_id, title, system, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-                (story_id, self._db.seal(title), self._db.seal_opt(source.system or None), now, now),
+                (story_id, self._db.seal_opt(title or None), self._db.seal_opt(source.system or None), now, now),
             )
             new_story = int(cur.lastrowid or 0)
 
@@ -283,9 +328,11 @@ class StoryOps:
 
     # ---------- internals ----------
 
-    def _fork_title(self, base: str) -> str:
-        """The first free "<base> - N", N from 2 — the user renames at will."""
-        base = base or "story"
+    def _fork_title(self, base: str) -> str | None:
+        """The first free "<base> - N", N from 2; an untitled source forks
+        untitled."""
+        if not base:
+            return None
         taken = {item.title for item in self.list()}
         n = 2
         while f"{base} - {n}" in taken:
@@ -308,29 +355,52 @@ class StoryOps:
         # fmt: on
         return [int(row[0]) for row in rows]
 
-    def _get_path_lengths(self, heads: dict[int, int | None]) -> dict[int, int]:
-        """Message count per story by walking parent links in one flat read —
-        the tree's `parent_id < id` CHECK makes the walk finite."""
-        live = [story_id for story_id, head in heads.items() if head is not None]
-        if not live:
-            return dict.fromkeys(heads, 0)
-        placeholders = ",".join("?" * len(live))
+    def _get_tree_rows(
+        self, story_ids: builtins.list[int]
+    ) -> dict[int, tuple[int | None, str, str | None, str | None]]:
+        """id → (parent_id, role, provider, model) for every message of these
+        stories — the flat, nothing-decrypted read behind the chain walks."""
+        if not story_ids:
+            return {}
+        placeholders = ",".join("?" * len(story_ids))
         # fmt: off
-        parents: dict[int, int | None] = dict(
-            self._db.conn.execute(
-                f"SELECT id, parent_id FROM messages WHERE story_id IN ({placeholders})",
-                tuple(live),
-            )
-        )
+        rows = self._db.conn.execute(
+            f"SELECT id, parent_id, role, provider, model FROM messages WHERE story_id IN ({placeholders})",
+            tuple(story_ids),
+        ).fetchall()
         # fmt: on
-        lengths: dict[int, int] = {}
-        for story_id, head in heads.items():
-            node, count = head, 0
-            while node is not None:
-                count += 1
-                node = parents.get(node)
-            lengths[story_id] = count
-        return lengths
+        return {
+            int(mid): (parent, str(role), provider, model)
+            for mid, parent, role, provider, model in rows
+        }
+
+    def _get_bodies(self, wanted: dict[int, int]) -> dict[int, str]:
+        """story id → decrypted body, for one chosen message per story."""
+        if not wanted:
+            return {}
+        by_message = {mid: story_id for story_id, mid in wanted.items()}
+        placeholders = ",".join("?" * len(by_message))
+        # fmt: off
+        rows = self._db.conn.execute(
+            f"SELECT id, body FROM messages WHERE id IN ({placeholders})",
+            tuple(by_message),
+        ).fetchall()
+        # fmt: on
+        return {by_message[int(mid)]: self._db.unseal(body) for mid, body in rows}
+
+    def _get_arcs(self, chains: dict[int, set[int]]) -> dict[int, str]:
+        """story id → its newest story-so-far rollup among current scenes
+        (the `get_arc` rule, across all stories, decrypting one per story)."""
+        # fmt: off
+        rows = self._db.conn.execute(
+            "SELECT story_id, end_message_id, history FROM scenes WHERE history IS NOT NULL ORDER BY id",
+        ).fetchall()
+        # fmt: on
+        newest: dict[int, bytes] = {}
+        for story_id, end, history in rows:  # id order — the last write wins
+            if end in chains.get(int(story_id), ()):
+                newest[int(story_id)] = history
+        return {story_id: self._db.unseal(sealed) for story_id, sealed in newest.items()}
 
 
 class MessagesOps:

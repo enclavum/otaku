@@ -1,9 +1,9 @@
-"""Inspection commands: /context and /info."""
+"""Inspection commands: /context, /usage, and /info."""
 
 import click
 
 from otaku.chat.state import DIM, RESET, Session
-from otaku.formatting import flatten, format_size, truncate
+from otaku.formatting import flatten, format_size, pretty_path, truncate
 from otaku.lore import assembler
 from otaku.store import Store
 
@@ -22,6 +22,39 @@ def cmd_context(session: Session, store: Store, args: list[str]) -> None:
     click.echo_via_pager(preview, color=True)
 
 
+def cmd_usage(session: Session, store: Store, args: list[str]) -> None:
+    """`/usage` — tokens spent in this story. `/usage all` — every story in
+    the database. Grouped by what the tokens were spent on (chat, lore, …),
+    then by model."""
+    everything = bool(args) and args[0].lower() == "all"
+    if not everything and session.story_id is None:
+        print("No story yet — send a message first, or use /usage all.")
+        return
+    rows = store.usage.get_totals(None if everything else session.story_id)
+    if not rows:
+        print("No recorded usage yet." if everything else "No recorded usage for this story.")
+        return
+
+    scope = "all stories" if everything else "this story"
+    labels = [f"{r.purpose} · {r.provider}/{r.model}" for r in rows]
+    width = max(len(label) for label in labels)
+    print(f"Token usage — {scope}:")
+    print(f"  {'':<{width}}  {'REQS':>5}  {'PROMPT':>10}  {'REPLY':>10}  {'TOK/S':>7}")
+    for label, r in zip(labels, rows, strict=True):
+        rate = r.completion_tokens / r.seconds if r.seconds > 0 else 0.0
+        print(
+            f"  {label:<{width}}  {r.requests:>5,}  {r.prompt_tokens:>10,}  "
+            f"{r.completion_tokens:>10,}  {rate:>7.1f}"
+        )
+    total_p = sum(r.prompt_tokens for r in rows)
+    total_c = sum(r.completion_tokens for r in rows)
+    total_r = sum(r.requests for r in rows)
+    print(
+        f"  {'total':<{width}}  {total_r:>5,}  {total_p:>10,}  {total_c:>10,}"
+        f"  {'':>7}\n  ({total_p + total_c:,} tokens across {len(rows)} model/purpose pairs)"
+    )
+
+
 def cmd_info(session: Session, store: Store, args: list[str]) -> None:
     """Best-effort dump of everything otaku knows about the active model and
     session. Network-backed fields are silently skipped when the provider
@@ -29,6 +62,8 @@ def cmd_info(session: Session, store: Store, args: list[str]) -> None:
     client = session.providers.get_client(session.provider.name)
     provider = session.provider
 
+    print(f"State dir: {pretty_path(session.paths.root)}")
+    print()
     print(f"Model:    {session.full_model_name}")
     print(f"Backend:  {client.kind} ({provider.url})")
     if provider.api_key:
@@ -72,10 +107,10 @@ def cmd_info(session: Session, store: Store, args: list[str]) -> None:
         f"({user_count} user, {assistant_count} assistant)"
     )
     if session.story_id is not None:
-        story = store.stories.get(session.story_id)
-        if story is not None:
-            label = flatten(truncate(story.title or "untitled", 40))
-            print(f"  story: {label} ({session.story_id})")
+        label = flatten(truncate(session.story_label(store), 40))
+        print(
+            f"  story: {label} ({session.story_id})" if label else f"  story: ({session.story_id})"
+        )
     if session.system:
         print(f'System: "{session.system}"')
     if session.params:

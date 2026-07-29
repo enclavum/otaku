@@ -103,12 +103,13 @@ class _StreamWatcher:
 
 def run_inference(session: Session, store: Store, *, ooc: bool = False) -> None:
     """Stream a completion for the current transcript, append the reply, and
-    persist it. Ctrl+C cancels the stream and keeps the partial reply.
-    Ctrl+R cancels and immediately regenerates (loops here until no further
-    regen is requested). `ooc` marks the REPLY out of character (kind
-    `ooc`) — set only by /ooc and a regenerate of an ooc reply, never
-    inferred, because a /you switch also ends on an ((OOC:)) turn yet wants
-    an in-character answer."""
+    persist it. A cancelled stream always keeps the received portion: Ctrl+C
+    stops and leaves it as the reply; Ctrl+R stops and immediately
+    regenerates (looping here until no further regen is requested), the
+    partial surviving in the tree as a sibling like any regenerated reply.
+    `ooc` marks the REPLY out of character (kind `ooc`) — set only by /ooc
+    and a regenerate of an ooc reply, never inferred, because a /you switch
+    also ends on an ((OOC:)) turn yet wants an in-character answer."""
     _run_step(session, store, ooc)
     while session.regen_after:
         session.regen_after = False
@@ -119,8 +120,8 @@ def run_inference(session: Session, store: Store, *, ooc: bool = False) -> None:
 def _run_step(session: Session, store: Store, ooc: bool) -> None:
     """One streaming pass. ^C during the stream is consumed here: partial
     output is kept and persisted so the user can regenerate or continue.
-    ^R sets `session.regen_after` for the outer loop and discards the
-    partial reply."""
+    ^R persists the partial the same way, then sets `session.regen_after`
+    for the outer loop, whose drop_last_reply leaves it as a sibling."""
     content: list[str] = []
     in_thinking = False
     final: Stats | None = None
@@ -171,12 +172,6 @@ def _run_step(session: Session, store: Store, ooc: bool) -> None:
         return
     sys.stdout.write("\n")
 
-    if watcher.regen_requested:
-        # Ctrl+R during the stream: discard the partial, queue a regenerate.
-        print(f"{DIM}[ regenerating ]{RESET}")
-        session.regen_after = True
-        return
-
     elapsed = time.monotonic() - start
     if session.verbose and interrupted:
         chars = sum(len(c) for c in content)
@@ -212,6 +207,12 @@ def _run_step(session: Session, store: Store, ooc: bool) -> None:
             duration_seconds=final.duration_seconds,
         )
 
+    if watcher.regen_requested:
+        # Ctrl+R during the stream: the partial is recorded above like any
+        # reply; the outer loop's drop_last_reply siblings it away.
+        print(f"{DIM}[ regenerating ]{RESET}")
+        session.regen_after = True
+
 
 def format_stats(stats: Stats) -> str:
     """The verbose stats line:
@@ -246,9 +247,10 @@ def _error_message(e: Exception, provider: Provider) -> str:
     server's explanatory body — a bare '400 Bad Request' hides the actual
     reason (usually context overflow)."""
     if isinstance(e, httpx.HTTPStatusError):
+        body = ""
         with contextlib.suppress(Exception):
-            e.response.read()  # streamed responses aren't read yet
-        body = " ".join(e.response.text.split())
+            e.response.read()  # a streamed response may not be read yet
+            body = " ".join(e.response.text.split())
         detail = f": {body[:300]}" if body else ""
         return f"HTTP {e.response.status_code} from {e.request.url.host}{detail}"
     if isinstance(e, httpx.RequestError):

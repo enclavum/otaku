@@ -20,6 +20,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Self
 
+from otaku.chat.markdown import render_markdown
 from otaku.paths import Paths
 from otaku.providers.registry import Registry as ProviderRegistry
 from otaku.settings import models as models_file
@@ -29,6 +30,7 @@ from otaku.settings.config import Config, Provider
 from otaku.settings.prompts import Prompts
 from otaku.store import Store
 from otaku.store.schema import Message
+from otaku.store.stories import StoryListing
 
 DIM = "\x1b[2m"
 RESET = "\x1b[0m"
@@ -49,6 +51,11 @@ KNOWN_PARAMS: dict[str, type] = {
 # a level: it means send nothing and let the model decide (`think = None`).
 THINK_LEVELS = {"none", "low", "medium", "high", "max"}
 THINK_ALIASES = {"on": "medium", "off": "none"}
+
+# What the story browser hands back on a confirmed selection: the story id,
+# its messages up to the picked turn, and the total turn count (so a
+# mid-story pick is recognizable).
+PickedStory = tuple[int, list[Message], int]
 
 
 @dataclass
@@ -80,6 +87,10 @@ class Session:
     # on cancel). Injected by the CLI: the picker is a UI package, which
     # chat may not import.
     pick_model: Callable[[str], str | None] | None = None
+    # Opens the story browser over the given listings (the current story
+    # pre-selected) and returns (story id, its messages up to the picked
+    # turn, total turns) — None on cancel. Injected like pick_model.
+    pick_story: Callable[[Store, list[StoryListing], int | None], PickedStory | None] | None = None
 
     @classmethod
     def start(
@@ -92,6 +103,8 @@ class Session:
         state: state_file.AppState,
         store: Store,
         pick_model: Callable[[str], str | None] | None = None,
+        pick_story: Callable[[Store, list[StoryListing], int | None], PickedStory | None]
+        | None = None,
     ) -> Self:
         """The session for a launch on `spec` ("provider/model"): the
         model's saved parameters, the persisted toggles, and the remembered
@@ -107,6 +120,7 @@ class Session:
             model=model,
             verbose=state.verbose,
             pick_model=pick_model,
+            pick_story=pick_story,
         )
         session._apply_think(state.think)
         session._apply_params(models_file.load(paths).get(model, {}))
@@ -118,6 +132,22 @@ class Session:
         """ "<provider>/<model>" for display — derived, so a model switch can
         never leave it stale."""
         return f"{self.provider.name}/{self.model}"
+
+    def story_label(self, store: Store) -> str:
+        """The loaded story's display label: its title, else the newest
+        story-so-far rollup, else the first user message — the same fallback
+        order the story browser uses. "" when nothing exists to show."""
+        if self.story_id is None:
+            return ""
+        story = store.stories.get(self.story_id)
+        if story is None:
+            return ""
+        if story.title:
+            return story.title
+        arc = store.scenes.get_arc(self.story_id, [m.id for m in self.messages])
+        if arc:
+            return arc
+        return next((m.body for m in self.messages if m.role == "user"), "")
 
     def ensure_story(self, store: Store) -> int:
         """The session's story id, creating the story on the first real turn
@@ -193,14 +223,16 @@ class Session:
             )
 
     def render_last_turns(self, count: int, *, dim: str = DIM, reset: str = RESET) -> str:
-        """The last `count` turns as `/context` shows them: a dim `[role]`
-        marker with one blank line before it, and the content with its own
-        blank lines dropped."""
+        """The last `count` turns, echoed the way they played: a dim `[role]`
+        marker with one blank line before it, and the content — its own
+        blank lines dropped — with its markdown rendered, as it looked
+        streaming."""
         out: list[str] = []
         for message in self.messages[-count:]:
             out.append("")
             out.append(f"{dim}[{message.role}]{reset}")
-            out.extend(line for line in message.body.splitlines() if line.strip())
+            body = "\n".join(line for line in message.body.splitlines() if line.strip())
+            out.extend(render_markdown(body).splitlines())
         return "\n".join(out).lstrip("\n")
 
     # ---------- startup internals ----------

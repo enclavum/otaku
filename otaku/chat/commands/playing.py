@@ -14,15 +14,15 @@ from otaku.store.schema import Message
 
 
 def cmd_me(session: Session, store: Store, args: list[str]) -> None:
-    """`/me NAME - PROMPT` — send PROMPT as NAME's line; you keep writing as
+    """`/me NAME: PROMPT` — send PROMPT as NAME's line; you keep writing as
     NAME. NAME is free text: an existing cast member resolves (case/alias →
     canonical name), anyone else is taken verbatim and joins the cast at the
     next scene close. ONE row: the line is the body, the template rides its
     framing."""
-    name_part, sep, prompt = session.raw_args.partition(" - ")
+    name_part, sep, prompt = session.raw_args.partition(":")
     prompt = prompt.strip()
     if not sep or not name_part.strip() or not prompt:
-        print("Usage: /me NAME - PROMPT")
+        print("Usage: /me NAME: PROMPT")
         return
     name = _resolve_character(session, store, name_part) or name_part.strip()
     framing = session.prompts.me_framing.replace("{name}", name)
@@ -47,12 +47,12 @@ def cmd_you(session: Session, store: Store, args: list[str]) -> None:
 
 
 def cmd_ooc(session: Session, store: Store, args: list[str]) -> None:
-    """`/ooc QUESTION` — talk to the model out of character; the reply is out
-    of character too and the story doesn't advance. ONE turn: QUESTION is
+    """`/ooc PROMPT` — talk to the model out of character; the reply is out
+    of character too and the story doesn't advance. ONE turn: PROMPT is
     the body, the template rides its framing; `kind="ooc"` marks both
     sides."""
     if not args:
-        print("Usage: /ooc <question or note>")
+        print("Usage: /ooc PROMPT")
         return
     question = " ".join(args)
     session.record_turn(
