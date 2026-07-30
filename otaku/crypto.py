@@ -164,11 +164,12 @@ class Keystore:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         os.chmod(self._path.parent, 0o700)
         try:
-            with self._path.open("x") as f:
-                f.write(self._toml(slots))
+            # Born 0600: never a moment (or a crash residue) at umask perms.
+            fd = os.open(self._path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         except FileExistsError as e:
             raise CryptoError(f"{self._path} already exists; refusing to overwrite") from e
-        os.chmod(self._path, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(self._toml(slots))
 
     def _toml(self, slots: list[dict[str, Any]]) -> str:
         out = [
@@ -386,8 +387,10 @@ class DiskKek(KekProvider):
         path.parent.mkdir(parents=True, exist_ok=True)
         os.chmod(path.parent, 0o700)
         kek = secrets.token_bytes(_KEY_LEN)
-        path.write_bytes(kek)
-        os.chmod(path, 0o600)
+        # Born 0600: never a moment (or a crash residue) at umask perms.
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(kek)
         return kek
 
 

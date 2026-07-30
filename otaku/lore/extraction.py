@@ -272,6 +272,12 @@ class Extractor:
         Only now is the story decrypted; the spans' journals feed each next
         extraction, so the story stays continuous across them."""
         by_id = {m.id: m for m in self._store.stories.get_messages(self._story_id)}
+        if any(i not in by_id for i in tail_ids):
+            # The story moved between the gate's snapshot and this read (an
+            # undo on the REPL thread) — this pass is stale; the next one
+            # sees the new chain.
+            self._log(f"extraction declined (story {self._story_id}): the story changed mid-pass")
+            return PassResult.CANCELLED
         tail = [by_id[i] for i in tail_ids]
         sizes = [len(m.body) for m in tail]
         spans = [tail[a:b] for a, b in pack(sizes, min_chars=min_chars, min_messages=min_messages)]
@@ -340,7 +346,8 @@ class Extractor:
         Returns False when cancelled mid-stream (nothing written). Raises
         `httpx.HTTPError` (request failed) or `ValueError` (unparsable
         reply) — the caller decides what that means."""
-        current = self._store.journals.get_current(self._story_id)
+        chain = self._store.stories.get_messages_ids(self._story_id)
+        current = self._store.journals.get_current(self._story_id, chain)
         prompt = prompts_file.render(
             self._prompts.extract_prompt,
             cast=cast.prompt_block(),
@@ -349,7 +356,9 @@ class Extractor:
         )
         raw = self.complete(prompt, purpose)
         if not raw:
-            return False  # cancelled mid-stream
+            if self._cancel.is_set():
+                return False  # cancelled mid-stream
+            raise ValueError("the reply was empty")
         data = _parse_json(raw)
         self._apply_scene(cast, data, span, current, report)
         report.scenes += 1
@@ -476,10 +485,11 @@ class Extractor:
         entries, never from the previous history. Best-effort per
         character."""
         names = {c.id: c.name for c in self._store.characters.list(self._story_id)}
-        for character_id, journal_id in self._store.journals.get_rollups_due(self._story_id):
+        chain = self._store.stories.get_messages_ids(self._story_id)
+        for character_id, journal_id in self._store.journals.get_rollups_due(self._story_id, chain):
             if self._cancel.is_set():
                 return
-            entries = self._store.journals.get_entries(self._story_id, character_id)
+            entries = self._store.journals.get_entries(self._story_id, character_id, chain)
             if not entries:
                 continue
             name = names.get(character_id, "?")

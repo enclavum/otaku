@@ -254,7 +254,7 @@ class TestFork:
             assert scenes[0].history == scripted.STORY_SO_FAR
             cast = app.store.characters.list(story_id)
             assert [c.name for c in cast] == ["Keeper"]
-            assert app.store.journals.get_current(story_id)[cast[0].id].state == "at the gate"
+            assert app.store.journals.get_current(story_id, ids)[cast[0].id].state == "at the gate"
         finally:
             app.close()
 

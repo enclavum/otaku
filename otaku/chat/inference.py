@@ -171,9 +171,12 @@ def _run_step(session: Session, store: Store, ooc: bool) -> None:
     if in_thinking:
         sys.stdout.write(RESET)
     if error is not None:
+        # What streamed is already on the screen, so the story keeps it —
+        # exactly as a Ctrl+C does. The record below runs on whatever
+        # arrived; only the stats are meaningless now.
         print(f"\n[error: {error}]")
-        return
-    sys.stdout.write("\n")
+    else:
+        sys.stdout.write("\n")
 
     elapsed = time.monotonic() - start
     if session.verbose and interrupted:

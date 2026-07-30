@@ -95,6 +95,7 @@ class LoreBrowser(ListScreen):
         super().__init__()
         self.store = store
         ids = store.stories.get_messages_ids(story_id)
+        self.message_ids = ids
         self.scenes: list[Scene] = store.scenes.get_current(story_id, ids)
         self.ordinal: dict[int, int] = {mid: i + 1 for i, mid in enumerate(ids)}
         self.total_messages = len(ids)
@@ -655,7 +656,7 @@ class LoreBrowser(ListScreen):
                 if r.id >= row.id:
                     r.history = ""
         elif f.kind == "state":
-            self.store.journals.set_state(f.target, new)
+            self.store.journals.set_state(f.target, new, self.message_ids)
             next(r for r in self.jrows if r.id == f.target).state = new
         self._rebuild_fields()
 

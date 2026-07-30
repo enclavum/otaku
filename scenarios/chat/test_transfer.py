@@ -59,6 +59,27 @@ class TestImport:
         assert app.session.story_id is None
         assert app.server.requests == []
 
+    def test_a_reply_full_of_markdown_survives_the_round_trip(
+        self, app: App, tmp_path: Path, monkeypatch
+    ) -> None:
+        # Model replies routinely hold headings and fences; the document
+        # must carry them byte-exact through export and back.
+        monkeypatch.chdir(tmp_path)
+        reply = "### Chapter One\n\nThe hall was dark.\n```\nan unclosed fence"
+        app.server.script = lambda body: reply
+        app.play("I open the book.")
+        app.play("The story goes on.")
+        app.play("/rename Book")
+        app.play("/export")
+        app.play(f"/import chat {tmp_path / 'book.md'}")
+        chain = app.store.stories.get_messages(app.session.story_id)
+        assert [m.body for m in chain] == [
+            "I open the book.",
+            reply,
+            "The story goes on.",
+            reply,
+        ]
+
 
 class TestSillyTavern:
     def test_a_tavern_chat_imports_attributed_and_builds_memory(

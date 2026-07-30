@@ -10,7 +10,10 @@ heading, a `## Story` section (story so far, system, cast), `## Scenes`
 speaker, and JSON-quoted framing present only when they exist, with the
 verbatim body starting on the very next line. Empty parts are simply
 absent, an untitled story has no heading, and message bodies keep their
-interior blank lines.
+interior blank lines. Free text is structure-proof: a content line that
+would read as a heading (or as this escape itself) is written with one
+extra leading backslash, and the parser strips exactly one — so bodies,
+summaries, and the rest survive byte-exact whatever Markdown they hold.
 
 Importing accepts exactly two shapes: this document and a SillyTavern
 chat (.jsonl), both parsed into the same `StoryExport`. Prose files go

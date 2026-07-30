@@ -20,7 +20,6 @@ from otaku.transfer import (
     StoryExport,
 )
 
-_FENCE = re.compile(r"^(```|~~~)")
 # A message header: `### 3 · user (ooc) · Speaker · "framing"` — the
 # speaker and the JSON-quoted framing optional, in that order.
 _MSG_HEADER = re.compile(
@@ -31,6 +30,10 @@ _SCENE_HEADER = re.compile(r"^(\d+)(?:\s*·\s*(.+))?$")
 _CAST_BULLET = re.compile(r"^-\s*\*\*(.+?)\*\*(?:\s*\(aka\s*(.+?)\))?(?:\s*—\s*(.+))?$")
 _SPAN_BULLET = re.compile(r"^-\s*\*\*Messages:\*\*\s*(\d+)(?:-(\d+))?$")
 _FIELD = re.compile(r"^\*\*([A-Za-z ]+):\*\*\s?(.*)$")  # **State:** / **History:** / **Entry:**
+# A free-text line that would parse as document structure — a heading of
+# any level the format uses, or an already-escaped such line. The
+# renderer's `_escape` adds one backslash; `_unescape` strips one back.
+STRUCTURE_LINE = re.compile(r"^(\\*)(#{1,4} )")
 
 
 def parse_story(text: str) -> StoryExport | None:
@@ -54,9 +57,9 @@ def parse_story(text: str) -> StoryExport | None:
     _, story_subs = _split_by_header(blocks.get("Story", []), "### ")
     for header, body in story_subs:
         if header == "Story so far":
-            story_so_far = _strip_edges(body)
+            story_so_far = _unescape(_strip_edges(body))
         elif header == "System":
-            system = _strip_edges(body)
+            system = _unescape(_strip_edges(body))
         elif header == "Cast":
             for line in body:
                 if (m := _CAST_BULLET.match(line.strip())) is not None:
@@ -82,13 +85,15 @@ def parse_story(text: str) -> StoryExport | None:
         journals = tuple(
             ExportedJournal(
                 character=name.strip(),
-                entry=(fields := _labeled_fields(jbody)).get("entry", ""),
-                state=fields.get("state", ""),
-                history=fields.get("history", ""),
+                entry=_unescape((fields := _labeled_fields(jbody)).get("entry", "")),
+                state=_unescape(fields.get("state", "")),
+                history=_unescape(fields.get("history", "")),
             )
             for name, jbody in journal_secs
         )
-        scenes.append(ExportedScene(scene_title, span, _strip_edges(summary_lines), journals))
+        scenes.append(
+            ExportedScene(scene_title, span, _unescape(_strip_edges(summary_lines)), journals)
+        )
 
     messages: list[ExportedMessage] = []
     _, msg_secs = _split_by_header(blocks.get("Messages", []), "### ")
@@ -100,7 +105,7 @@ def parse_story(text: str) -> StoryExport | None:
         messages.append(
             ExportedMessage(
                 role=m.group(2),
-                body=_strip_edges(mbody),
+                body=_unescape(_strip_edges(mbody)),
                 kind=m.group(3) or "dialogue",
                 speaker=speaker,
                 framing=framing,
@@ -188,19 +193,17 @@ def write_story(store: Store, export: StoryExport) -> int:
 def _split_by_header(
     lines: list[str], marker: str
 ) -> tuple[list[str], list[tuple[str, list[str]]]]:
-    """Split lines at headers of exactly `marker` level (e.g. '## '),
-    fence-aware. Returns (lines before the first header, [(header, body)]).
-    The trailing space in `marker` excludes deeper levels — '## ' never
-    matches '### '."""
+    """Split lines at headers of exactly `marker` level (e.g. '## ').
+    Returns (lines before the first header, [(header, body)]). The
+    trailing space in `marker` excludes deeper levels — '## ' never
+    matches '### '. Content cannot masquerade as a header: the renderer
+    escapes structure-shaped free-text lines."""
     preamble: list[str] = []
     header: str | None = None
     body: list[str] = []
     sections: list[tuple[str, list[str]]] = []
-    in_fence = False
     for line in lines:
-        if _FENCE.match(line.strip()):
-            in_fence = not in_fence
-        elif not in_fence and line.startswith(marker):
+        if line.startswith(marker):
             if header is not None:
                 sections.append((header, body))
             header, body = line[len(marker) :].strip(), []
@@ -260,3 +263,12 @@ def _labeled_fields(lines: list[str]) -> dict[str, str]:
     if key is not None:
         fields[key] = "\n".join(buf).strip()
     return fields
+
+
+def _unescape(text: str) -> str:
+    """The renderer's structure escape, undone: one leading backslash off
+    every heading-shaped free-text line (see `exports._escape`)."""
+    return "\n".join(
+        STRUCTURE_LINE.sub(lambda m: m.group(1)[1:] + m.group(2), line)
+        for line in text.splitlines()
+    )

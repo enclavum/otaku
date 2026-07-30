@@ -44,6 +44,7 @@ class ModelServer:
         self.managed = managed
         self.loaded: set[str] = set()
         self.chunk_delay = 0.0
+        self.fail_after: int | None = None  # abort the stream after N content chunks
         self.requests: list[dict[str, Any]] = []
         self.script: Callable[[dict[str, Any]], str | tuple[str, str]] = default_script
         outer = self
@@ -91,6 +92,10 @@ class ModelServer:
                 thinking, text = result if isinstance(result, tuple) else ("", result)
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
+                if outer.fail_after is not None:
+                    # Promise more than will ever come, so the hangup below
+                    # is a transport ERROR client-side, not a clean end.
+                    self.send_header("Content-Length", "1048576")
                 self.end_headers()
                 # A client hanging up mid-stream is a legitimate scenario
                 # (an interrupted reply), not server noise worth a trace.
@@ -99,7 +104,12 @@ class ModelServer:
                         self._event({"choices": [{"delta": {"reasoning_content": thinking}}]})
                     # A few chunks, so the streaming path is exercised for real.
                     third = max(1, len(text) // 3)
-                    for i in range(0, len(text), third):
+                    for sent, i in enumerate(range(0, len(text), third)):
+                        if outer.fail_after is not None and sent >= outer.fail_after:
+                            # A mid-stream transport failure: hang up hard.
+                            self.wfile.flush()
+                            self.connection.close()
+                            return
                         if outer.chunk_delay:
                             time.sleep(outer.chunk_delay)
                         event = {"choices": [{"delta": {"content": text[i : i + third]}}]}

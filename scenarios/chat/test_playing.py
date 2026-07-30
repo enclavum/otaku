@@ -28,6 +28,16 @@ class TestTurns:
         stored = app.store.stories.get_messages(app.session.story_id)[0]
         assert stored.body == "I step into the light."  # the body stays bare
 
+    def test_a_stream_error_keeps_what_already_arrived(self, app: App, capsys) -> None:
+        # The prose the user watched stream is in the story, error or not —
+        # the screen and the story must never diverge.
+        app.server.fail_after = 1
+        app.play("I enter the hall.")
+        assert "[error:" in capsys.readouterr().out
+        chain = app.store.stories.get_messages(app.session.story_id)
+        first_chunk = scripted.CHAT_REPLY[: max(1, len(scripted.CHAT_REPLY) // 3)]
+        assert [m.body for m in chain] == ["I enter the hall.", first_chunk]
+
 
 class TestMe:
     def test_a_cast_name_resolves_to_its_canonical_form(self, app: App) -> None:

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "otaku"
-version = "0.2.0"
+dynamic = ["version"]
 description = "A roleplay terminal client"
 requires-python = ">=3.14"
 dependencies = [
@@ -25,6 +25,10 @@ dev = [
     "ruff>=0.15",
     "types-psutil>=6",
 ]
+
+# The one source of the version is the code: otaku/__init__.py.__version__.
+[tool.hatch.version]
+path = "otaku/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["otaku"]

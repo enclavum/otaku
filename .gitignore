@@ -8,3 +8,4 @@ build/
 .mypy_cache/
 .DS_Store
 migration/
+notes/

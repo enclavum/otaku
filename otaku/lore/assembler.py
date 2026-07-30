@@ -144,7 +144,7 @@ def assemble(
         + sum(_wire_tokens(m) for m in tail)
     )
     if used > budget:
-        used, tail = _trim_tail(used, head, tail, budget)
+        used, head, tail = _trim_overflow(used, head, tail, budget)
 
     shaped: list[Message] = list(head)
     if recap:
@@ -222,7 +222,11 @@ def _split_transcript(
     everything-verbatim when the transcript is short or no scene summary
     covers the middle."""
     if len(messages) <= head_messages + tail_messages:
-        return [], [], messages
+        # Everything verbatim — but split the head off anyway: a story can
+        # be short by count and still overflow the window, and the trim
+        # drops the tail's oldest first. The opening must never be what
+        # overflows: the head is always sent verbatim.
+        return messages[:head_messages], [], messages[head_messages:]
     position = {m.id: i for i, m in enumerate(messages)}
     head_end = head_messages - 1
     tail_target = len(messages) - tail_messages
@@ -232,7 +236,10 @@ def _split_transcript(
         if s.summary and head_end < position.get(s.end_message_id, -1) < tail_target
     ]
     if not covered:
-        return [], [], messages
+        # Everything verbatim — but split the head off anyway: under
+        # overflow the tail trims oldest-first, and the opening must
+        # never be what overflows (the head is always sent verbatim).
+        return messages[:head_messages], [], messages[head_messages:]
     boundary = position[covered[-1].end_message_id]
     return messages[:head_messages], [s.summary for s in covered], messages[boundary + 1 :]
 
@@ -260,14 +267,16 @@ def _compose_recap(
     return "\n\n".join(parts + kept), count
 
 
-def _trim_tail(
+def _trim_overflow(
     used: int, head: list[Message], tail: list[Message], budget: int
-) -> tuple[int, list[Message]]:
+) -> tuple[int, list[Message], list[Message]]:
     """Over budget: drop the tail's oldest messages, aiming `_TRIM_SLACK`
     below budget, then snap the cut FORWARD to a `_TRIM_BLOCK` multiple so
     the boundary stays put across turns — unless the window is so tight the
     block would eat half of what fits, where the cache is a lost cause
-    anyway and context wins."""
+    anyway and context wins. The head is sent verbatim while anything else
+    can give: only when the tail is down to its floor does the head's own
+    start trim — a window the whole opening cannot fit beats no request."""
     target = budget - int(budget * _TRIM_SLACK)
     dropped = 0
     while dropped < len(tail) - 1 and len(head) + len(tail) - dropped > _MIN_KEEP:
@@ -284,7 +293,12 @@ def _trim_tail(
     if len(tail) - snapped >= max(_MIN_KEEP, affordable // 2):
         used -= sum(_wire_tokens(m) for m in tail[dropped:snapped])
         dropped = snapped
-    return used, tail[dropped:]
+    tail = tail[dropped:]
+    lost = 0
+    while used > target and lost < len(head) and len(head) - lost + len(tail) > _MIN_KEEP:
+        used -= _wire_tokens(head[lost])
+        lost += 1
+    return used, head[lost:], tail
 
 
 def _wire_tokens(message: Message) -> int:

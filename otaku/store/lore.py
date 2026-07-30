@@ -14,15 +14,6 @@ from dataclasses import dataclass
 from otaku.store.database import Database
 from otaku.store.schema import Character, Journal, Scene
 
-# Journal rows this character's current history rollup does not cover yet.
-# One predicate shared by every reader, so they can never disagree about
-# where the uncovered entries begin.
-_UNCOVERED = (
-    "j.story_id = ? AND j.id > COALESCE((SELECT MAX(h.id) FROM journals h "
-    "WHERE h.story_id = j.story_id AND h.character_id = j.character_id "
-    "AND h.history IS NOT NULL), 0)"
-)
-
 
 class SceneOps:
     def __init__(self, db: Database) -> None:
@@ -377,14 +368,22 @@ class JournalOps:
 
     # ---------- getters and setters ----------
 
-    def get_current(self, story_id: int) -> dict[int, CharacterMemory]:
-        """Each character's memory as of now, keyed by character id."""
+    def get_current(
+        self, story_id: int, message_ids: builtins.list[int]
+    ) -> dict[int, CharacterMemory]:
+        """Each character's memory as of now, keyed by character id —
+        composed only from the current timeline's journal rows: a journal
+        whose scene was undone away is left out, exactly as the scene is."""
+        scene_ids = self._current_scene_ids(story_id, message_ids)
+        if not scene_ids:
+            return {}
+        marks = ",".join("?" * len(scene_ids))
         # fmt: off
         states = {
             int(cid): self._db.unseal(sealed)
             for cid, sealed in self._db.conn.execute(
-                "SELECT character_id, state FROM journals WHERE id IN (SELECT MAX(id) FROM journals WHERE story_id = ? GROUP BY character_id)",
-                (story_id,),
+                f"SELECT character_id, state FROM journals WHERE id IN (SELECT MAX(id) FROM journals WHERE story_id = ? AND scene_id IN ({marks}) GROUP BY character_id)",
+                (story_id, *scene_ids),
             )
         }
         # fmt: on
@@ -394,14 +393,14 @@ class JournalOps:
         histories = {
             int(cid): self._db.unseal(sealed)
             for cid, sealed in self._db.conn.execute(
-                "SELECT character_id, history FROM journals WHERE id IN (SELECT MAX(id) FROM journals WHERE story_id = ? AND history IS NOT NULL GROUP BY character_id)",
-                (story_id,),
+                f"SELECT character_id, history FROM journals WHERE id IN (SELECT MAX(id) FROM journals WHERE story_id = ? AND scene_id IN ({marks}) AND history IS NOT NULL GROUP BY character_id)",
+                (story_id, *scene_ids),
             )
         }
         entries: dict[int, list[str]] = {}
         for cid, sealed in self._db.conn.execute(
-            f"SELECT j.character_id, j.entry FROM journals j WHERE {_UNCOVERED} ORDER BY j.id",
-            (story_id,),
+            f"SELECT j.character_id, j.entry FROM journals j WHERE {_uncovered(marks)} ORDER BY j.id",
+            (story_id, *scene_ids, *scene_ids),
         ):
             entries.setdefault(int(cid), []).append(self._db.unseal(sealed))
         # fmt: on
@@ -434,29 +433,42 @@ class JournalOps:
             for jid, sid, cid, entry, state, history in rows
         ]
 
-    def get_rollups_due(self, story_id: int) -> builtins.list[tuple[int, int]]:
+    def get_rollups_due(
+        self, story_id: int, message_ids: builtins.list[int]
+    ) -> builtins.list[tuple[int, int]]:
         """(character id, journal row id) pairs the next history rollups
-        belong on: each character whose NEWEST journal row lacks a history —
-        freshly written at a scene close, or invalidated by an entry edit.
-        A character absent from the latest scenes has a rollup on their
-        newest row already and is not due. Id-only; nothing is decrypted."""
+        belong on: each character whose NEWEST current-timeline journal row
+        lacks a history — freshly written at a scene close, or invalidated
+        by an entry edit. A character absent from the latest scenes has a
+        rollup on their newest row already and is not due. Id-only;
+        nothing is decrypted."""
+        scene_ids = self._current_scene_ids(story_id, message_ids)
+        if not scene_ids:
+            return []
+        marks = ",".join("?" * len(scene_ids))
         # fmt: off
         rows = self._db.conn.execute(
-            "SELECT character_id, id FROM journals WHERE story_id = ? AND history IS NULL AND id IN ("
-            "    SELECT MAX(id) FROM journals WHERE story_id = ? GROUP BY character_id) "
-            "ORDER BY character_id",
-            (story_id, story_id),
+            f"SELECT character_id, id FROM journals WHERE story_id = ? AND history IS NULL AND id IN ("
+            f"    SELECT MAX(id) FROM journals WHERE story_id = ? AND scene_id IN ({marks}) GROUP BY character_id) "
+            f"ORDER BY character_id",
+            (story_id, story_id, *scene_ids),
         ).fetchall()
         # fmt: on
         return [(int(cid), int(jid)) for cid, jid in rows]
 
-    def get_entries(self, story_id: int, character_id: int) -> builtins.list[str]:
-        """Every entry this character has written, oldest first — the whole
-        input to a history rollup."""
+    def get_entries(
+        self, story_id: int, character_id: int, message_ids: builtins.list[int]
+    ) -> builtins.list[str]:
+        """Every entry this character wrote on the current timeline,
+        oldest first — the whole input to a history rollup."""
+        scene_ids = self._current_scene_ids(story_id, message_ids)
+        if not scene_ids:
+            return []
+        marks = ",".join("?" * len(scene_ids))
         # fmt: off
         rows = self._db.conn.execute(
-            "SELECT entry FROM journals WHERE story_id = ? AND character_id = ? ORDER BY id",
-            (story_id, character_id),
+            f"SELECT entry FROM journals WHERE story_id = ? AND character_id = ? AND scene_id IN ({marks}) ORDER BY id",
+            (story_id, character_id, *scene_ids),
         ).fetchall()
         # fmt: on
         return [text for (sealed,) in rows if (text := self._db.unseal(sealed))]
@@ -494,20 +506,23 @@ class JournalOps:
             )
             # fmt: on
 
-    def set_state(self, journal_id: int, state: str) -> None:
+    def set_state(self, journal_id: int, state: str, message_ids: builtins.list[int]) -> None:
         """The author's correction of a state snapshot — the character's
-        latest row only. Older states are superseded fossils; an edit there
-        would change nothing, so it is refused rather than absorbed."""
+        latest CURRENT-timeline row only. Older states are superseded
+        fossils; an edit there would change nothing, so it is refused
+        rather than absorbed."""
         row = self._db.conn.execute(
             "SELECT story_id, character_id FROM journals WHERE id = ?", (journal_id,)
         ).fetchone()
         if row is None:
             raise ValueError(f"no journal row {journal_id}")
+        scene_ids = self._current_scene_ids(int(row[0]), message_ids)
+        marks = ",".join("?" * len(scene_ids))
         # fmt: off
         latest = self._db.conn.execute(
-            "SELECT MAX(id) FROM journals WHERE story_id = ? AND character_id = ?",
-            (int(row[0]), int(row[1])),
-        ).fetchone()[0]
+            f"SELECT MAX(id) FROM journals WHERE story_id = ? AND character_id = ? AND scene_id IN ({marks})",
+            (int(row[0]), int(row[1]), *scene_ids),
+        ).fetchone()[0] if scene_ids else None
         # fmt: on
         if latest != journal_id:
             raise ValueError("only the latest journal row's state can be edited")
@@ -518,3 +533,31 @@ class JournalOps:
                 (self._db.seal(state), self._db.now(), journal_id),
             )
             # fmt: on
+
+    def _current_scene_ids(
+        self, story_id: int, message_ids: builtins.list[int]
+    ) -> builtins.list[int]:
+        """Scene row ids of the current timeline — the scenes' own rule
+        (end among the story's messages as of now), id-only, inherited by
+        every journal reader so the two tables can never disagree."""
+        current = set(message_ids)
+        # fmt: off
+        rows = self._db.conn.execute(
+            "SELECT id, end_message_id FROM scenes WHERE story_id = ? ORDER BY id",
+            (story_id,),
+        ).fetchall()
+        # fmt: on
+        return [int(sid) for sid, end in rows if end in current]
+
+
+def _uncovered(marks: str) -> str:
+    """The journal rows a character's current history rollup does not
+    cover yet, within the current scenes (`marks` — their IN-list). One
+    predicate shared by every reader, so they can never disagree about
+    where the uncovered entries begin. Parameters: story id, then the
+    scene ids twice (the row's own filter, the rollup subquery's)."""
+    return (
+        f"j.story_id = ? AND j.scene_id IN ({marks}) AND j.id > COALESCE((SELECT MAX(h.id) FROM journals h "
+        f"WHERE h.story_id = j.story_id AND h.character_id = j.character_id "
+        f"AND h.scene_id IN ({marks}) AND h.history IS NOT NULL), 0)"
+    )

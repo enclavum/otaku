@@ -57,6 +57,45 @@ class TestRoundTrip:
     def test_a_full_story_survives_exactly(self) -> None:
         assert parse_story(render(FULL)) == FULL
 
+    def test_a_body_led_by_a_heading_survives(self) -> None:
+        x = StoryExport(
+            messages=(ExportedMessage(role="user", body="### Chapter One\nThe hall was dark."),)
+        )
+        assert parse_story(render(x)) == x
+
+    def test_a_body_with_a_section_heading_keeps_later_messages(self) -> None:
+        x = StoryExport(
+            messages=(
+                ExportedMessage(role="user", body="## Recap\nSo far so good."),
+                ExportedMessage(role="assistant", body="A later reply."),
+            )
+        )
+        assert parse_story(render(x)) == x
+
+    def test_an_unbalanced_fence_swallows_nothing(self) -> None:
+        x = StoryExport(
+            messages=(
+                ExportedMessage(role="user", body="An unbalanced fence:\n```\ncode here"),
+                ExportedMessage(role="assistant", body="The next reply."),
+            )
+        )
+        assert parse_story(render(x)) == x
+
+    def test_an_escape_shaped_line_survives(self) -> None:
+        x = StoryExport(
+            messages=(ExportedMessage(role="user", body="\\### literally backslashed"),)
+        )
+        assert parse_story(render(x)) == x
+
+    def test_a_summary_and_a_system_with_headings_survive(self) -> None:
+        x = StoryExport(
+            system="## House rules\nNo dragons.",
+            story_so_far="### So far\nA guest arrived.",
+            scenes=(ExportedScene(title="One", span=(1, 1), summary="## Twist\nIt happened."),),
+            messages=(ExportedMessage(role="user", body="Hi."),),
+        )
+        assert parse_story(render(x)) == x
+
     def test_a_bare_story_survives(self) -> None:
         bare = StoryExport(
             messages=(

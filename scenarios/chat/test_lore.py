@@ -54,15 +54,17 @@ class TestLoreBrowser:
         assert journal.entry == "I saw the guest.!"
         assert not journal.history  # invalidated with the edit
         app.play("/extract")  # declines a new scene, heals the rollup
-        memory = app.store.journals.get_current(story_id)[keeper.id]
+        ids = app.store.stories.get_messages_ids(story_id)
+        memory = app.store.journals.get_current(story_id, ids)[keeper.id]
         assert memory.history  # rebuilt from the fixed input
 
     def test_a_derived_history_is_not_editable(self, app: App) -> None:
         story_id = remembered(app)
         keeper = app.store.characters.list(story_id)[0]
-        before = app.store.journals.get_current(story_id)[keeper.id]
+        ids = app.store.stories.get_messages_ids(story_id)
+        before = app.store.journals.get_current(story_id, ids)[keeper.id]
         browse(app, story_id, TAB + ENTER + DOWN + DOWN + ENTER + "!" + CTRL_S + ESC * 3)
-        after = app.store.journals.get_current(story_id)[keeper.id]
+        after = app.store.journals.get_current(story_id, ids)[keeper.id]
         assert after.history == before.history  # dim, read-only, untouched
         assert app.store.characters.list(story_id)[0].description == "warden of the gate"
 
@@ -93,7 +95,7 @@ class TestExtract:
         assert scenes[0].history == scripted.STORY_SO_FAR
         cast = app.store.characters.list(story_id)
         assert [c.name for c in cast] == ["Keeper"]
-        memory = app.store.journals.get_current(story_id)[cast[0].id]
+        memory = app.store.journals.get_current(story_id, ids)[cast[0].id]
         assert memory.state == "at the gate"
         assert memory.history == scripted.CHARACTER_HISTORY
 
@@ -190,6 +192,32 @@ class TestIdleScheduling:
             app.close()
 
 
+class TestRewind:
+    def test_a_rewound_scene_takes_its_memory_with_it(self, app: App) -> None:
+        # Undo past a scene's end: the scene is no longer current, and
+        # neither is its journal — the memory follows the chain, exactly
+        # as scenes do.
+        for i in range(3):
+            app.play(f"Turn number {i}.")
+        app.play("/extract")
+        app.play("/undo")
+        story_id = app.session.story_id
+        ids = app.store.stories.get_messages_ids(story_id)
+        assert app.store.journals.get_current(story_id, ids) == {}
+
+        # The next close starts from nothing: the abandoned timeline's
+        # memories never feed the continuation.
+        app.play("A different turn.")
+        app.play("/extract")
+        analyst = [
+            str(r["messages"][-1]["content"])
+            for r in app.server.requests
+            if "You are a story analyst" in str(r["messages"][-1]["content"])
+        ][-1]
+        assert "at the gate" not in analyst  # the rewound state is gone
+        assert "(none yet)" in analyst
+
+
 class TestDisabled:
     def test_disabled_extraction_gates_only_the_idle_scheduling(self, server, tmp_path) -> None:
         # [lore_extraction].enabled = false stops the automatic passes and
@@ -259,6 +287,21 @@ class TestFailedPass:
         app.play("/extract")
         assert len(app.store.scenes.get_current(story_id, ids)) == 1
 
+    def test_an_empty_reply_is_a_failure_not_a_cancellation(self, app: App, capsys) -> None:
+        # Nobody cancelled anything: an empty reply must land on the loud
+        # FAILED path, or a model that answers nothing builds no memory,
+        # silently forever.
+        for i in range(3):
+            app.play(f"Turn number {i}.")
+        app.server.script = lambda body: ""
+        capsys.readouterr()
+        app.play("/extract")
+        out = capsys.readouterr().out
+        assert "failed" in out
+        assert "ancelled" not in out
+        logs = app.paths.root / "logs"
+        assert any("the reply was empty" in f.read_text() for f in logs.rglob("*") if f.is_file())
+
     def test_a_scene_without_a_summary_is_refused(self, app: App, capsys) -> None:
         # A committed scene whose summary is empty would swallow its span:
         # not in the head, not in the tail, not in the recap. Refused whole.
@@ -326,7 +369,8 @@ class TestHealing:
 
         story_id = app.session.story_id
         cast = {c.name: c.id for c in app.store.characters.list(story_id)}
-        memories = app.store.journals.get_current(story_id)
+        ids = app.store.stories.get_messages_ids(story_id)
+        memories = app.store.journals.get_current(story_id, ids)
         assert memories[cast["Кассиан"]].history == scripted.CHARACTER_HISTORY
         # The other character's memory came through untouched.
         untouched = next(j for j in scene.journals if j.character == "Элоиза")
@@ -360,7 +404,7 @@ class TestLongStory:
             assert bounds == [(0, 3), (4, 7), (8, 11)]
             # One journal entry per scene; the newest state stands.
             keeper = app.store.characters.list(story_id)[0]
-            memory = app.store.journals.get_current(story_id)[keeper.id]
+            memory = app.store.journals.get_current(story_id, ids)[keeper.id]
             assert memory.state == "state 3"
             assert scenes[-1].history == scripted.STORY_SO_FAR
         finally:
@@ -471,6 +515,23 @@ class TestRecap:
         finally:
             app.close()
 
+    def test_the_verbatim_head_survives_overflow_without_scenes(self, server, tmp_path) -> None:
+        # No scene has closed, and the story outgrows the window: the
+        # opening stays verbatim — the middle is what overflows.
+        set_config(tmp_path / "state", head_messages=2)
+        app = launch(tmp_path / "state", server)
+        try:
+            for i in range(8):
+                app.play(f"Turn number {i}. " + "x" * 8000)
+            app.play("We continue.")
+            wire = scripted.chat_request(app.server, "We continue.")
+            sent = "\n".join(m["content"] for m in wire["messages"])
+            assert "Turn number 0." in sent  # the opening, verbatim
+            assert "Turn number 3." not in sent  # the middle overflowed
+            assert "Turn number 7." in sent  # the recent tail stays
+        finally:
+            app.close()
+
 
 class TestMerge:
     def test_merge_folds_a_duplicate_into_the_real_character(self, app: App, capsys) -> None:
@@ -508,7 +569,8 @@ class TestMerge:
         assert [c.name for c in cast] == ["Keeper"]
         assert "The Keeper" in cast[0].aliases
         # The duplicate's newer journal followed the merge.
-        assert app.store.journals.get_current(story_id)[cast[0].id].state == "by the door"
+        ids = app.store.stories.get_messages_ids(story_id)
+        assert app.store.journals.get_current(story_id, ids)[cast[0].id].state == "by the door"
 
     def test_merge_invalidates_the_rolled_up_memory(self, app: App) -> None:
         # A rollup composed before the merge covers only one side; the
@@ -540,11 +602,12 @@ class TestMerge:
         app.play("/merge The Keeper into Keeper")
         story_id = app.session.story_id
         keeper = app.store.characters.list(story_id)[0]
-        assert not app.store.journals.get_current(story_id)[keeper.id].history
+        ids = app.store.stories.get_messages_ids(story_id)
+        assert not app.store.journals.get_current(story_id, ids)[keeper.id].history
 
         app.server.script = scripted.default_script
         app.play("/extract")  # declines a scene, rebuilds the memory
-        assert app.store.journals.get_current(story_id)[keeper.id].history
+        assert app.store.journals.get_current(story_id, ids)[keeper.id].history
         rebuild = next(
             str(r["messages"][-1]["content"])
             for r in reversed(app.server.requests)

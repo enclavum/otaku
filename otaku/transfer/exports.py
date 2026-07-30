@@ -12,6 +12,7 @@ from otaku.transfer import (
     ExportedScene,
     StoryExport,
 )
+from otaku.transfer.imports import STRUCTURE_LINE
 
 
 def read_story(store: Store, story_id: int) -> StoryExport:
@@ -86,9 +87,9 @@ def render_story(export: StoryExport, *, otaku_version: str, model: str, exporte
     if export.story_so_far or export.system or export.cast:
         out += ["## Story", ""]
         if export.story_so_far:
-            out += ["### Story so far", "", export.story_so_far, ""]
+            out += ["### Story so far", "", _escape(export.story_so_far), ""]
         if export.system:
-            out += ["### System", "", export.system, ""]
+            out += ["### System", "", _escape(export.system), ""]
         if export.cast:
             out += ["### Cast", ""]
             for character in export.cast:
@@ -107,15 +108,15 @@ def render_story(export: StoryExport, *, otaku_version: str, model: str, exporte
                 out.append(f"- **Messages:** {span}")
             out.append("")
             if scene.summary:
-                out += [scene.summary, ""]
+                out += [_escape(scene.summary), ""]
             for journal in scene.journals:
                 out += [f"#### {journal.character}", ""]
                 if journal.state:
-                    out.append(f"**State:** {journal.state}")
+                    out.append(f"**State:** {_escape(journal.state)}")
                 if journal.history:
-                    out.append(f"**History:** {journal.history}")
+                    out.append(f"**History:** {_escape(journal.history)}")
                 if journal.entry:
-                    out.append(f"**Entry:** {journal.entry}")
+                    out.append(f"**Entry:** {_escape(journal.entry)}")
                 out.append("")
 
     out += ["## Messages", ""]
@@ -128,5 +129,13 @@ def render_story(export: StoryExport, *, otaku_version: str, model: str, exporte
             # JSON-quoted: newlines survive, and the quotes tell it apart
             # from a speaker name.
             header += f" · {json.dumps(message.framing, ensure_ascii=False)}"
-        out += [header, message.body, ""]
+        out += [header, _escape(message.body), ""]
     return "\n".join(out).rstrip() + "\n"
+
+
+def _escape(text: str) -> str:
+    """Free text, made structure-proof: a heading-shaped line gains one
+    leading backslash; the parser's `_unescape` strips exactly one back."""
+    return "\n".join(
+        STRUCTURE_LINE.sub(lambda m: "\\" + m.group(0), line) for line in text.splitlines()
+    )
