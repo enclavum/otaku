@@ -43,7 +43,9 @@ class ModelServer:
         self.models = list(models)
         self.managed = managed
         self.loaded: set[str] = set()
+        self.sizes: dict[str, int] = {}  # reported bytes per model; absent → 1 MB
         self.chunk_delay = 0.0
+        self.chunk_size: int | None = None  # stream in pieces this long; None → thirds
         self.fail_after: int | None = None  # abort the stream after N content chunks
         self.requests: list[dict[str, Any]] = []
         self.script: Callable[[dict[str, Any]], str | tuple[str, str]] = default_script
@@ -58,10 +60,22 @@ class ModelServer:
                 if path.endswith("/models"):
                     self._json({"data": [{"id": name} for name in outer.models]})
                 elif outer.managed and path.endswith("/api/ps"):
-                    self._json({"models": [{"name": name} for name in sorted(outer.loaded)]})
+                    self._json(
+                        {
+                            "models": [
+                                {"name": name, "size": outer.sizes.get(name, 1_000_000)}
+                                for name in sorted(outer.loaded)
+                            ]
+                        }
+                    )
                 elif outer.managed and path.endswith("/api/tags"):
                     self._json(
-                        {"models": [{"name": name, "size": 1_000_000} for name in outer.models]}
+                        {
+                            "models": [
+                                {"name": name, "size": outer.sizes.get(name, 1_000_000)}
+                                for name in outer.models
+                            ]
+                        }
                     )
                 else:
                     self.send_response(404)
@@ -103,7 +117,7 @@ class ModelServer:
                     if thinking:
                         self._event({"choices": [{"delta": {"reasoning_content": thinking}}]})
                     # A few chunks, so the streaming path is exercised for real.
-                    third = max(1, len(text) // 3)
+                    third = outer.chunk_size or max(1, len(text) // 3)
                     for sent, i in enumerate(range(0, len(text), third)):
                         if outer.fail_after is not None and sent >= outer.fail_after:
                             # A mid-stream transport failure: hang up hard.

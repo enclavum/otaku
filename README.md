@@ -8,7 +8,7 @@
 Stories that branch, remember, and grow their own lore — on your
 machine, with optional at-rest encryption.
 
-<!-- TODO: docs/demo.gif — record the first-launch journey -->
+![otaku demo](docs/demo.gif)
 
 ## What it is
 
