@@ -60,7 +60,7 @@ def run_otaku(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
         timeout=30,
-        env={**os.environ, "OTAKU_CONFIG_DIR": str(root)},
+        env={**os.environ, "OTAKU_CONFIG_DIR": str(root), "COLUMNS": "200"},
         check=False,
     )
 

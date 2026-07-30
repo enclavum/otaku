@@ -38,10 +38,11 @@ from otaku.chat.commands.lore import build_job
 from otaku.chat.completer import SlashCompleter
 from otaku.chat.inference import run_inference
 from otaku.chat.session import RESUME_TURNS, Session
-from otaku.formatting import flatten, truncate
+from otaku.formatting import flatten, pretty_path, truncate
+from otaku.logs.errors import ErrorLog
 from otaku.store import Store
 from otaku.store.schema import Message
-from otaku.terminal import CURSOR_BLINK_ON, banner, statusline
+from otaku.terminal import BOLD, CURSOR_BLINK_ON, RESET, banner, statusline
 from otaku.terminal.statusline import StatusLine
 
 _PLACEHOLDER = FormattedText([("class:placeholder", "Send a message")])
@@ -155,6 +156,11 @@ def run(session: Session, store: Store) -> None:
     if session.config.show_banner:
         print(_banner(session, store))
     _show_resumed(session, store)
+    if session.notice:
+        print()
+        print(f"{BOLD}{session.notice}{RESET}")
+        print()
+        session.notice = ""
 
     # A shortcut key stashes the in-progress input here before exiting the
     # prompt with its command, so the next prompt restores it.
@@ -233,15 +239,25 @@ def submit(line: str, session: Session, store: Store, *, raw: bool = False) -> N
     dispatches — never for a `raw` block, which is always a literal
     prompt — and anything else is recorded as the user's turn and the
     model answers. A new model turn arms the idle-debounced lore pass:
-    it fires while the user reads and dies the moment they type."""
+    it fires while the user reads and dies the moment they type.
+
+    A crash is contained here, at the line boundary: the traceback goes
+    to the error log, one short line says so, and the session lives on —
+    every store write is transactional, so nothing is half-done."""
     session.worker.defer()
     last_before = session.messages[-1] if session.messages else None
-    if not raw and dispatch(line, session, store):
+    try:
+        if not raw and dispatch(line, session, store):
+            _maybe_schedule(session, last_before)
+            return
+        session.record_turn(store, Message(role="user", body=line))
+        run_inference(session, store)
         _maybe_schedule(session, last_before)
-        return
-    session.record_turn(store, Message(role="user", body=line))
-    run_inference(session, store)
-    _maybe_schedule(session, last_before)
+    except KeyboardInterrupt:
+        raise  # ^C is the user speaking, not a crash — the loop handles it
+    except Exception as e:
+        path = ErrorLog(session.paths).record(f"command {line.split(' ', 1)[0]!r}", e)
+        print(f"command failed ({type(e).__name__}) — recorded in {pretty_path(path)}")
 
 
 def _maybe_schedule(session: Session, last_before: Message | None) -> None:

@@ -22,14 +22,14 @@ CommandHandler = Callable[[Session, Store, list[str]], None]
 
 
 # (command, shortcut, description) per row; "" for no shortcut, None starts
-# a group heading. A trailing tuple element is a wrapped continuation line.
-_HELP_ROWS: list[tuple[str | None, str, str] | tuple[str | None, str, str, str]] = [
+# a group heading. A description is ONE line in the printed help, whatever
+# its length — split literals below wrap the source, never the output.
+_HELP_ROWS: list[tuple[str | None, str, str]] = [
     (None, "", "Playing:"),
     (
         "PROMPT",
         "",
-        "Your character speaks or acts; the model continues the",
-        "scene. What you type is sent verbatim",
+        "Your character speaks or acts; the model continues the scene — sent verbatim",
     ),
     ("/me NAME: PROMPT", "", "Send PROMPT as NAME's line; you keep writing as NAME"),
     ("/you NAME", "", "The model plays NAME and responds"),
@@ -60,20 +60,18 @@ _HELP_ROWS: list[tuple[str | None, str, str] | tuple[str | None, str, str, str]]
     (
         "/model [PROVIDER/MODEL]",
         "Ctrl+O",
-        "Switch model in-place (opens the picker with no arg);",
-        "remembered as last used",
+        "Switch model in-place (opens the picker with no arg); remembered as last used",
     ),
     (
         "/set think <level>",
         "",
-        "Thinking effort: on|off|none|low|medium|high|max|default",
-        "(for the model)",
+        "Thinking effort for the model: on|off|none|low|medium|high|max|default",
     ),
     (
         "/set parameter <name> <val>",
         "",
-        "Set an inference parameter for the model;",
-        "<val> = reset returns it to the default",
+        "Set an inference parameter for the model; "
+        "no <val> shows it, <val> = reset returns the default",
     ),
     ("/set verbose on|off", "", "Show the stats line after each reply"),
     ("", "", ""),
@@ -91,17 +89,14 @@ _HELP_ROWS: list[tuple[str | None, str, str] | tuple[str | None, str, str, str]]
 def _build_help() -> str:
     cmd_width = max(len(row[0]) for row in _HELP_ROWS if row[0])
     key_width = max(len(row[1]) for row in _HELP_ROWS)
-    desc_col = 2 + cmd_width + 1 + key_width + 2
     lines: list[str] = []
-    for row in _HELP_ROWS:
-        command, key, desc, *cont = row
+    for command, key, desc in _HELP_ROWS:
         if command is None:  # a group heading — one blank line before it
             if lines:
                 lines.append("")
             lines.append(desc)
             continue
         lines.append(f"  {command:<{cmd_width}} {key:<{key_width}}  {desc}".rstrip())
-        lines.extend(" " * desc_col + line for line in cont)
     return "\n".join(lines)
 
 

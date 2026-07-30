@@ -128,9 +128,16 @@ def _set_parameter(session: Session, rest: list[str]) -> None:
         print(f"Unknown parameter {name!r}. Known: {', '.join(KNOWN_PARAMS)}.")
         return
     raw = " ".join(rest[1:])
-    # No value, or the literal `reset`, returns the parameter to the model's
-    # own default — here and in the saved file.
-    if not raw or raw.lower() == "reset":
+    if not raw:
+        # Asking is not setting: the bare name shows where it stands.
+        if name in session.params:
+            print(f"{name} = {session.params[name]}")
+        else:
+            print(f"Parameter {name} is at the model's own default.")
+        return
+    # The literal `reset` returns the parameter to the model's own
+    # default — here and in the saved file.
+    if raw.lower() == "reset":
         if name in session.params:
             session.params.pop(name)
             print(f"Parameter {name} reset to default{_save_params(session)}")

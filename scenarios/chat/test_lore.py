@@ -341,6 +341,10 @@ class TestFailedPass:
         assert "failed" in capsys.readouterr().out
         logs = list((app.paths.root / "logs").rglob("*"))
         assert any("RuntimeError" in f.read_text() for f in logs if f.is_file())
+        # The error log holds the WHOLE traceback, not just the shape.
+        errors = [f for f in logs if f.name.startswith("errors-")]
+        assert errors and "Traceback" in errors[0].read_text()
+        assert "boom" in errors[0].read_text()
 
 
 class TestHealing:

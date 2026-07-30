@@ -43,6 +43,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from otaku.logs.errors import ErrorLog
 from otaku.logs.system import SystemLog
 from otaku.lore import assembler
 from otaku.lore.extraction import Extractor, PassResult, Report
@@ -100,12 +101,14 @@ class LoreWorker:
         providers: ProviderRegistry,
         system_log: SystemLog,
         *,
+        errors: ErrorLog | None = None,
         idle_seconds: float,
         min_dwell: float = _MIN_STATUS_DWELL,
     ) -> None:
         self._store_factory = store_factory
         self._providers = providers
         self._log = system_log
+        self._errors = errors
         self._idle = idle_seconds
         self._min_dwell = min_dwell
         # `_desired` is what the worker last asked to show; `_shown` is what
@@ -244,13 +247,15 @@ class LoreWorker:
                     except Exception as e:
                         # Never a traceback under the live prompt — but
                         # never silence either: the system log records the
-                        # shape of the crash (the type only; the log stays
-                        # content-free).
+                        # shape of the crash (the type only; that log stays
+                        # content-free), the error log the whole traceback.
                         held = f"extraction failed ({type(e).__name__})"
                         with contextlib.suppress(Exception):
                             self._log.record(
                                 f"pass crashed (story {job.story_id}): {type(e).__name__}"
                             )
+                            if self._errors is not None:
+                                self._errors.record(f"lore pass (story {job.story_id})", e)
                     # Before the warm-up: the waiter asked for the scene
                     # close, not for a prefill it was never going to watch.
                     if job.on_done is not None:

@@ -17,6 +17,7 @@ from otaku.chat import repl
 from otaku.chat.commands import dispatch
 from otaku.chat.session import TUI, Session
 from otaku.formatting import pretty_path
+from otaku.logs.errors import ErrorLog
 from otaku.logs.requests import RequestLog
 from otaku.logs.system import SystemLog
 from otaku.lore.worker import LoreWorker
@@ -30,6 +31,11 @@ from otaku.store import Store, is_encrypted
 from otaku.tui import lore as lore_browser
 from otaku.tui import models as model_picker
 from otaku.tui import stories as story_picker
+
+_SAMPLE_NOTICE = (
+    "A sample story was imported so you can look around — type to play on, "
+    "or see every command with /help · /new starts your own play."
+)
 
 
 class CancelledError(Exception):
@@ -82,6 +88,7 @@ class App:
             lambda: Store.open(self.paths, cipher, backups=0),
             registry,
             SystemLog(self.paths),
+            errors=ErrorLog(self.paths),
             idle_seconds=cfg.idle_seconds,
         )
         if tui is None:
@@ -115,6 +122,7 @@ class App:
                 self.store,
             )
             self.session.save_state()
+            self.session.notice = _SAMPLE_NOTICE
 
     def run(self) -> None:
         """The chat loop over the assembled session."""

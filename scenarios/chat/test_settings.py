@@ -205,6 +205,18 @@ class TestParameters:
         assert relaunched.server.requests[-1]["temperature"] == 0.7
         relaunched.close()
 
+    def test_a_bare_name_shows_the_value_and_changes_nothing(self, app: App, capsys) -> None:
+        # Asking is not setting: the bare name prints where the parameter
+        # stands; only the literal `reset` resets.
+        app.play("/set parameter temperature 0.7")
+        capsys.readouterr()
+        app.play("/set parameter temperature")
+        assert "temperature = 0.7" in capsys.readouterr().out
+        app.play("I enter the hall.")
+        assert app.server.requests[-1]["temperature"] == 0.7
+        app.play("/set parameter top_p")
+        assert "default" in capsys.readouterr().out  # unset: named as such
+
     def test_reset_returns_the_parameter_to_the_default(self, app: App) -> None:
         app.play("/set parameter temperature 0.7")
         app.play("/set parameter temperature reset")

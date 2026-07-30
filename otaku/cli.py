@@ -15,6 +15,8 @@ import click
 
 from otaku import __version__, crypto
 from otaku import app as app_mod
+from otaku.formatting import pretty_path
+from otaku.logs.errors import ErrorLog
 from otaku.logs.requests import RequestLog
 from otaku.logs.system import SystemLog
 from otaku.paths import Paths
@@ -22,7 +24,12 @@ from otaku.settings import config as config_mod
 from otaku.store import DatabaseError
 
 
-@click.group(invoke_without_command=True, context_settings={"help_option_names": ["-h", "--help"]})
+@click.group(
+    invoke_without_command=True,
+    # Wide help: every command's description prints in full, on one line,
+    # instead of click's wrapped-and-truncated defaults.
+    context_settings={"help_option_names": ["-h", "--help"], "max_content_width": 160},
+)
 @click.version_option(__version__, "-v", "--version", prog_name="otaku")
 @click.pass_context
 def main(ctx: click.Context) -> None:
@@ -41,20 +48,47 @@ def main(ctx: click.Context) -> None:
         ctx.exit(1)
     try:
         application.run()
+    except Exception as e:
+        # The last resort: whatever escaped every inner containment. The
+        # story is safe — every store write is transactional — so say so,
+        # record the traceback, and leave quietly.
+        path = ErrorLog(Paths.resolve()).record("unhandled", e)
+        click.echo(
+            f"otaku crashed — your story is safe in the database. The crash is "
+            f"recorded in {pretty_path(path)}; please attach it to an issue.",
+            err=True,
+        )
+        ctx.exit(1)
     finally:
         application.close()
 
 
-@main.group(invoke_without_command=True)
+class _DeclaredOrderGroup(click.Group):
+    """Subcommands listed in declaration order, not alphabetically."""
+
+    def list_commands(self, ctx: click.Context) -> list[str]:
+        return list(self.commands)
+
+
+@main.group(
+    cls=_DeclaredOrderGroup,
+    invoke_without_command=True,
+    short_help="Day-rotated logs: requests (what the models were sent — the default), "
+    "system (the lore worker's account), errors (contained crashes)",
+)
 @click.pass_context
 def logs(ctx: click.Context) -> None:
     """Day-rotated logs: `requests` (what the models were sent — the
-    default) and `system` (the lore worker's own account)."""
+    default), `system` (the lore worker's own account), and `errors`
+    (every contained crash's traceback)."""
     if ctx.invoked_subcommand is None:
         ctx.invoke(logs_requests)
 
 
-@logs.command("requests")
+@logs.command(
+    "requests",
+    short_help="Show the model-request log",
+)
 @click.argument("day", required=False)
 @click.option("--list", "list_days", is_flag=True, help="List the available log days.")
 def logs_requests(day: str | None, list_days: bool) -> None:
@@ -90,7 +124,10 @@ def logs_requests(day: str | None, list_days: bool) -> None:
     click.echo_via_pager(render())
 
 
-@logs.command("system")
+@logs.command(
+    "system",
+    short_help="Show the background lore work",
+)
 @click.argument("day", required=False)
 @click.option("--list", "list_days", is_flag=True, help="List the available log days.")
 def logs_system(day: str | None, list_days: bool) -> None:
@@ -106,6 +143,29 @@ def logs_system(day: str | None, list_days: bool) -> None:
     path = system_log.get_path(stamp)
     if not path.exists():
         click.echo(f"no system log for {_dashed(stamp)}", err=True)
+        ctx.exit(1)
+    click.echo_via_pager(path.read_text(encoding="utf-8"))
+
+
+@logs.command(
+    "errors",
+    short_help="Show every contained crash's traceback",
+)
+@click.argument("day", required=False)
+@click.option("--list", "list_days", is_flag=True, help="List the available log days.")
+def logs_errors(day: str | None, list_days: bool) -> None:
+    """Print one day's error log — every contained crash's traceback
+    (DAY as YYYY-MM-DD, default today)."""
+    paths = Paths.resolve()
+    ctx = click.get_current_context()
+    error_log = ErrorLog(paths)
+    if list_days:
+        _echo_days(error_log.get_days(), "no error logs yet")
+        return
+    stamp = _resolve_day(ctx, day)
+    path = error_log.get_path(stamp)
+    if not path.exists():
+        click.echo(f"no error log for {_dashed(stamp)}", err=True)
         ctx.exit(1)
     click.echo_via_pager(path.read_text(encoding="utf-8"))
 

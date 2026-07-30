@@ -101,6 +101,9 @@ class Session:
     # The REPL's exit flag: /bye (and Ctrl+D) raise it, and the run loop
     # leaves after the current turn instead of unwinding mid-command.
     should_quit: bool = False
+    # A one-shot line the REPL prints in bold after the resume echo, then
+    # clears — the launch's way to say something before the first prompt.
+    notice: str = ""
     # Verbatim argument text of the slash command being dispatched — set by
     # `dispatch` so handlers taking free text keep the user's exact spacing.
     raw_args: str = ""

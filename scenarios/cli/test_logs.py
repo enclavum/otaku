@@ -32,6 +32,25 @@ class TestRequests:
         assert "DAY must be" in result.stderr
 
 
+class TestErrors:
+    def test_a_contained_crash_prints_and_a_day_without_refuses(
+        self, app: App, capsys, monkeypatch
+    ) -> None:
+        def boom(session: object, store: object, args: object) -> None:
+            raise RuntimeError("boom")
+
+        from otaku.chat import commands
+
+        monkeypatch.setitem(commands.COMMANDS, "/help", (boom, None))
+        app.play("/help")
+        result = run_otaku(app.paths.root, "logs", "errors")
+        assert result.returncode == 0
+        assert "RuntimeError: boom" in result.stdout
+        refused = run_otaku(app.paths.root, "logs", "errors", "2001-01-01")
+        assert refused.returncode == 1
+        assert "no error log for 2001-01-01" in refused.stderr
+
+
 class TestSystem:
     def test_the_workers_account_prints(self, app: App) -> None:
         for i in range(3):

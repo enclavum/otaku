@@ -15,6 +15,31 @@ class TestHelp:
         out = capsys.readouterr().out
         for command in ("/model", "/stories", "/extract", "/undo", "/bye"):
             assert command in out
+        # Every description is ONE full line beside its command — never
+        # wrapped onto a continuation.
+        line = next(ln for ln in out.splitlines() if "/set parameter" in ln)
+        assert "reset returns the default" in line
+
+
+class TestCrashContainment:
+    def test_a_crashing_command_never_kills_the_session(
+        self, app: App, capsys, monkeypatch
+    ) -> None:
+        def boom(session: object, store: object, args: object) -> None:
+            raise RuntimeError("boom")
+
+        from otaku.chat import commands
+
+        monkeypatch.setitem(commands.COMMANDS, "/help", (boom, None))
+        app.play("/help")
+        out = capsys.readouterr().out
+        assert "command failed (RuntimeError)" in out
+        assert "errors-" in out  # the notice names the log
+        errors = [f for f in (app.paths.root / "logs").rglob("errors-*") if f.is_file()]
+        assert errors and "Traceback" in errors[0].read_text()
+        # The session lives on: the next line plays normally.
+        app.play("I enter the hall.")
+        assert app.session.messages[-1].body
 
 
 class TestUnknown:

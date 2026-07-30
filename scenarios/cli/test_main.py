@@ -33,6 +33,7 @@ class TestFirstRun:
         terminal.expect("No models reachable right now.")
         terminal.expect("Imported 14 message(s)")
         terminal.expect("You're late, mapmaker.")  # resumed mid-scene
+        terminal.expect("A sample story was imported")
         terminal.send("Hello?")
         terminal.send(ENTER, 1.0)
         terminal.expect("No model selected")
@@ -92,6 +93,7 @@ class TestChat:
         terminal.send(ENTER, 1.0)
         terminal.expect("Imported 14 message(s)")
         terminal.expect("You're late, mapmaker.")  # resumed mid-scene
+        terminal.expect("A sample story was imported")
         assert terminal.quit() == 0
 
 
@@ -159,6 +161,14 @@ class TestHelpVersion:
         result = run_otaku(tmp_path / "state", "--help")
         assert result.returncode == 0
         assert "logs" in result.stdout
+        # Descriptions print in full on one line — never shrunk to "..." —
+        # and the commands list in declaration order, not alphabetically.
+        listing = run_otaku(tmp_path / "state", "logs", "--help").stdout
+        commands_block = listing.split("Commands:", 1)[1]
+        assert "..." not in commands_block
+        assert "Show every contained crash's traceback" in commands_block
+        order = [commands_block.index(name) for name in ("requests", "system", "errors")]
+        assert order == sorted(order)
 
 
 class TestStreaming:
