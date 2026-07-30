@@ -250,7 +250,7 @@ def _maybe_schedule(session: Session, last_before: Message | None) -> None:
     length) detects it: regenerate swaps the last message without changing
     the count. [lore_extraction].enabled gates THIS — the automatic
     scheduling — and nothing else; /extract still works."""
-    if not session.config.lore_enabled:
+    if not session.config.lore_enabled or session.provider is None:
         return
     if session.story_id is None or not session.messages:
         return
@@ -263,16 +263,20 @@ def _banner(session: Session, store: Store) -> str:
     """The session header. Best-effort: a provider that can't report its
     context window just leaves that fact out — the banner never blocks or
     fails a launch."""
-    client = session.providers.get_client(session.provider.name)
-    try:
-        context = client.get_context_size(session.model)
-    except Exception:
-        context = None
+    context = None
+    backend = ""
+    if session.provider is not None:
+        client = session.providers.get_client(session.provider.name)
+        backend = client.kind
+        try:
+            context = client.get_context_size(session.model)
+        except Exception:
+            context = None
     story = flatten(truncate(session.story_label(store), 40))
     return banner.render(
         __version__,
-        session.full_model_name,
-        backend=client.kind,
+        session.full_model_name or "(no model)",
+        backend=backend,
         context=context,
         story=story,
     )

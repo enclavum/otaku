@@ -61,6 +61,9 @@ PickedStory = tuple[int, list[Message], int]
 # import — so the scene is on screen before the prompt.
 RESUME_TURNS = 3
 
+# What every model-facing door says while no model is selected.
+NO_MODEL_HINT = "No model selected — start your model server and pick one with /model."
+
 
 @dataclass(frozen=True)
 class TUI:
@@ -85,7 +88,7 @@ class Session:
     prompts: Prompts
     paths: Paths
     providers: ProviderRegistry
-    provider: Provider
+    provider: Provider | None
     model: str  # bare model name, as the server expects it
     story_id: int | None = None  # created lazily on the first real turn
     system: str = ""  # the story's system prompt; never a message row
@@ -127,7 +130,9 @@ class Session:
         tui: TUI | None = None,
         worker: LoreWorker,
     ) -> Self:
-        """The session for a launch on `spec` ("provider/model"): the
+        """The session for a launch on `spec` ("provider/model" — or ""
+        when no model is reachable yet: the session opens without one, and
+        every model-facing door says so until /model picks one): the
         model's saved parameters, the persisted toggles, and the remembered
         story, all applied. A value the files no longer make sense of is
         reported and skipped — a stale setting must never cost a launch."""
@@ -137,7 +142,7 @@ class Session:
             prompts=prompts_file.load(paths),
             paths=paths,
             providers=providers,
-            provider=config.providers[provider_name],
+            provider=config.providers[provider_name] if spec else None,
             model=model,
             verbose=state.verbose,
             tui=tui or TUI(),
@@ -153,9 +158,10 @@ class Session:
 
     @property
     def full_model_name(self) -> str:
-        """ "<provider>/<model>" for display — derived, so a model switch can
+        """ "<provider>/<model>" for display ("" without a model) —
+        derived, so a model switch can
         never leave it stale."""
-        return f"{self.provider.name}/{self.model}"
+        return f"{self.provider.name}/{self.model}" if self.provider else ""
 
     # The assembler's StoryView: the shaping settings, read off the session
     # so every assemble_story call sees the same values.

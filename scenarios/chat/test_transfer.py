@@ -39,8 +39,9 @@ class TestImport:
         app.play(f"/import chat {CHAPEL}")
         out = capsys.readouterr().out
         assert "1 scene(s) applied verbatim" in out
-        assert "Nothing new since the last scene." in out  # the extract pass declined
-        assert app.server.requests == []  # memory came from the file, not a model
+        # A native export carries its extraction state: no pass runs, no
+        # model is called — the story arrives exactly as it was.
+        assert app.server.requests == []
 
         # The session switched onto the imported story, memory and all.
         story_id = app.session.story_id

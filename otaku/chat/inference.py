@@ -15,7 +15,7 @@ from typing import Any, Self
 import httpx
 
 from otaku.chat.markdown import MarkdownStreamer
-from otaku.chat.session import Session
+from otaku.chat.session import NO_MODEL_HINT, Session
 from otaku.formatting import format_context
 from otaku.lore import assembler
 from otaku.providers.base import Stats, Text, Thinking
@@ -123,6 +123,12 @@ def _run_step(session: Session, store: Store, ooc: bool) -> None:
     output is kept and persisted so the user can regenerate or continue.
     ^R persists the partial the same way, then sets `session.regen_after`
     for the outer loop, whose drop_last_reply leaves it as a sibling."""
+    provider = session.provider
+    if provider is None:
+        # The turn is recorded — it is story — and plays on a /regen once
+        # a model exists.
+        print(NO_MODEL_HINT)
+        return
     content: list[str] = []
     in_thinking = False
     final: Stats | None = None
@@ -134,7 +140,7 @@ def _run_step(session: Session, store: Store, ooc: bool) -> None:
     start = time.monotonic()
     watcher = _StreamWatcher()
     renderer = MarkdownStreamer()
-    client = session.providers.get_client(session.provider.name)
+    client = session.providers.get_client(provider.name)
     wire = assembler.assemble_story(store, session, client.get_context_size(session.model)).messages
     # The activity line survives the prompt's absence: entering `status_row`
     # reserves the bottom terminal row and paints the worker's status there
@@ -163,7 +169,7 @@ def _run_step(session: Session, store: Store, ooc: bool) -> None:
         except KeyboardInterrupt:
             interrupted = True
         except Exception as e:
-            error = _error_message(e, session.provider)
+            error = _error_message(e, provider)
         finally:
             spinner.stop()
             renderer.flush()
@@ -198,13 +204,13 @@ def _run_step(session: Session, store: Store, ooc: bool) -> None:
                 role="assistant",
                 body="".join(content),
                 kind="ooc" if ooc else "dialogue",
-                provider=session.provider.name,
+                provider=provider.name,
                 model=session.model,
             ),
         )
     if final is not None:
         store.usage.record(
-            session.provider.name,
+            provider.name,
             session.model,
             "chat",
             story_id=session.story_id,

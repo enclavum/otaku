@@ -71,6 +71,7 @@ class Config:
     settle_messages: int = 20
     # [database]
     backups: int = 7
+    seed_sample: bool = True
 
     def serves(self, spec: str) -> bool:
         """Whether `spec` ("provider/model") names a configured provider —
@@ -126,6 +127,10 @@ class Config:
             row(
                 f"backups = {self.backups}",
                 "daily snapshots kept in database/backups/ (0 disables)",
+            ),
+            row(
+                f"seed_sample = {toml_scalar(self.seed_sample)}",
+                "import the sample story into a freshly created database",
             ),
             "",
             "[encryption]",
@@ -209,6 +214,7 @@ def load(paths: Paths) -> Config:
             scene_min_messages=max(1, _int(lore, "scene_min_messages", 20)),
             settle_messages=max(0, _int(lore, "settle_messages", 20)),
             backups=max(0, _int(database, "backups", 7)),
+            seed_sample=bool(database.get("seed_sample", True)),
         )
     except ValueError as e:
         raise ConfigError(f"{path}: {e}") from e

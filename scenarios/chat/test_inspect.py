@@ -31,6 +31,19 @@ class TestContext:
         for message in sent[:-1]:
             assert str(message["content"]) in preview
 
+    def test_the_preview_needs_no_model(self, server, tmp_path, capsys) -> None:
+        # Without a model the preview still stands, over the default window.
+        set_config(tmp_path / "state", seed_sample=True)
+        app = launch(tmp_path / "state", server, spec="")
+        try:
+            capsys.readouterr()
+            app.play("/context")
+            out = capsys.readouterr().out
+            assert "8,192 window" in out
+            assert "You're late, mapmaker." in out
+        finally:
+            app.close()
+
     def test_the_preview_shows_the_recap_where_the_middle_was(
         self, server, tmp_path, capsys
     ) -> None:

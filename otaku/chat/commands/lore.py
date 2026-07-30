@@ -8,7 +8,7 @@ a pass sees.
 import threading
 from dataclasses import replace
 
-from otaku.chat.session import Session
+from otaku.chat.session import NO_MODEL_HINT, Session
 from otaku.lore.extraction import PassResult, Report
 from otaku.lore.worker import Job
 from otaku.store import Store
@@ -19,6 +19,7 @@ def build_job(session: Session) -> Job:
     """The worker job for the session as it stands: the story, the model,
     and the snapshot the warm-up rebuilds the next request from."""
     assert session.story_id is not None  # callers gate on a recorded story
+    assert session.provider is not None  # callers gate on a selected model
     return Job(
         provider_name=session.provider.name,
         model=session.model,
@@ -46,6 +47,9 @@ def cmd_extract(session: Session, store: Store, args: list[str]) -> None:
     of the tail waits for the next pass."""
     if session.story_id is None:
         print("No story yet — send a message first.")
+        return
+    if session.provider is None:
+        print(NO_MODEL_HINT)
         return
     forced = replace(build_job(session), force=True)
     done = threading.Event()

@@ -5,7 +5,13 @@
 thing they describe, and nothing is written into the user-owned config.
 """
 
-from otaku.chat.session import KNOWN_PARAMS, THINK_ALIASES, THINK_LEVELS, Session
+from otaku.chat.session import (
+    KNOWN_PARAMS,
+    NO_MODEL_HINT,
+    THINK_ALIASES,
+    THINK_LEVELS,
+    Session,
+)
 from otaku.settings import models as models_file
 from otaku.store import Store
 
@@ -28,8 +34,8 @@ def cmd_model(session: Session, store: Store, args: list[str]) -> None:
         print("No picker available; use /model PROVIDER/MODEL.")
         return
     spec = session.tui.pick_model(session.full_model_name)
-    if spec is None:
-        return  # cancelled — keep the current model
+    if not spec:
+        return  # cancelled, or nothing to pick — the picker said why
     head, _, rest = spec.partition("/")
     _switch_model(session, head, rest)
 
@@ -76,6 +82,9 @@ def _set_think(session: Session, rest: list[str]) -> None:
     if value not in THINK_LEVELS:
         print("Usage: /set think on|off|none|low|medium|high|max|default")
         return
+    if session.provider is None:
+        print(NO_MODEL_HINT)
+        return
     if value != "none" and not session.provider.supports_thinking:
         print(f"Thinking is not supported by provider {session.provider.name!r}.")
         return
@@ -110,6 +119,9 @@ def _set_parameter(session: Session, rest: list[str]) -> None:
         print("Parameters:")
         for name, value in session.params.items():
             print(f"  {name} = {value}.")
+        return
+    if session.provider is None:
+        print(NO_MODEL_HINT)
         return
     name = rest[0]
     if name not in KNOWN_PARAMS:

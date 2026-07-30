@@ -10,16 +10,17 @@ from pathlib import Path
 from otaku.paths import Paths
 from otaku.settings import state as state_mod
 from scenarios.support import server as scripted
-from scenarios.support.harness import SPEC, run_otaku, set_config_provider
+from scenarios.support.harness import SPEC, run_otaku, set_config, set_config_provider
 from scenarios.support.server import ModelServer
 from scenarios.support.terminal import CTRL_O, CTRL_R, CTRL_T, CTRL_U, ENTER, Terminal
 
 
 class TestFirstRun:
-    def test_first_launch_creates_configs_and_reports_no_models(self, tmp_path: Path) -> None:
-        """The user opens the app for the very first time on a machine with
-        no reachable providers: the state dir and configs appear, and the
-        launch explains where models would come from instead of opening."""
+    def test_first_launch_without_a_model_opens_the_sample(self, tmp_path: Path) -> None:
+        """The very first launch on a machine with nothing running: the
+        state dir and configs appear, the picker has nothing to offer —
+        and the app opens anyway, landing mid-story in the sample with no
+        model selected. A turn explains itself instead of failing."""
         state = tmp_path / "state"
         terminal = Terminal(
             str(state),
@@ -30,7 +31,12 @@ class TestFirstRun:
         )
         terminal.expect("Created", "config.toml")
         terminal.expect("No models reachable right now.")
-        assert terminal.wait() == 0
+        terminal.expect("Imported 14 message(s)")
+        terminal.expect("You're late, mapmaker.")  # resumed mid-scene
+        terminal.send("Hello?")
+        terminal.send(ENTER, 1.0)
+        terminal.expect("No model selected")
+        assert terminal.quit() == 0
         config = (state / "configs" / "config.toml").read_text()
         for section in ("[providers.ollama]", "[providers.omlx]", "[providers.koboldcpp]"):
             assert section in config
@@ -74,6 +80,19 @@ class TestChat:
         second = Terminal(str(state))
         second.expect("Resumed at message 2.", scripted.CHAT_REPLY.split()[0])
         assert second.quit() == 0
+
+    def test_the_install_journey_lands_mid_story(self, server: ModelServer, tmp_path: Path) -> None:
+        """The whole first-run scenario: install, launch, pick a model —
+        and you are in the middle of a playable story, ready to explore."""
+        state = tmp_path / "state"
+        set_config_provider(state, server)
+        set_config(state, seed_sample=True)
+        terminal = Terminal(str(state))
+        terminal.expect("Models (1)", "test-model")
+        terminal.send(ENTER, 1.0)
+        terminal.expect("Imported 14 message(s)")
+        terminal.expect("You're late, mapmaker.")  # resumed mid-scene
+        assert terminal.quit() == 0
 
 
 class TestShortcuts:

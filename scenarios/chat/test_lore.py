@@ -91,13 +91,15 @@ class TestExtract:
         assert len(scenes) == 1
         assert scenes[0].title == "The Meeting"
         assert scenes[0].summary == "A guest came in and met the Keeper."
-        # Both rollups landed right after the close.
-        assert scenes[0].history == scripted.STORY_SO_FAR
+        # Both rollups landed right after the close — verbatim: a rollup
+        # of one summary (or one entry) is its source, no model pass.
+        assert scenes[0].history == "A guest came in and met the Keeper."
         cast = app.store.characters.list(story_id)
         assert [c.name for c in cast] == ["Keeper"]
         memory = app.store.journals.get_current(story_id, ids)[cast[0].id]
         assert memory.state == "at the gate"
-        assert memory.history == scripted.CHARACTER_HISTORY
+        assert memory.history == "I saw the guest."
+        assert len(lore_calls(app)) == 1  # the extraction; no rollup calls
 
     def test_extract_with_nothing_new_declines(self, app: App, capsys) -> None:
         app.play("A single turn.")
@@ -346,8 +348,8 @@ class TestHealing:
         self, app: App, tmp_path
     ) -> None:
         # The chapel export, with one character's history blanked: the
-        # import's pass rebuilds exactly the missing rollup — one model
-        # call — and touches nothing that is already there.
+        # next pass rebuilds exactly the missing rollup — from the one
+        # entry, verbatim — and touches nothing that is already there.
         export = imports.parse_story(CHAPEL.read_text())
         scene = export.scenes[-1]
         journals = tuple(
@@ -362,16 +364,16 @@ class TestHealing:
         )
 
         app.play(f"/import chat {path}")
-        assert len(app.server.requests) == 1
-        prompt = str(app.server.requests[0]["messages"][-1]["content"])
-        assert prompt.startswith("Write ")
-        assert "Кассиан" in prompt
+        assert app.server.requests == []  # a native import triggers nothing
 
+        app.play("/extract")  # the next pass heals the hole...
+        assert app.server.requests == []  # ...verbatim: one entry IS the history
         story_id = app.session.story_id
         cast = {c.name: c.id for c in app.store.characters.list(story_id)}
         ids = app.store.stories.get_messages_ids(story_id)
         memories = app.store.journals.get_current(story_id, ids)
-        assert memories[cast["Кассиан"]].history == scripted.CHARACTER_HISTORY
+        holed = next(j for j in journals if j.character == "Кассиан")
+        assert memories[cast["Кассиан"]].history == holed.entry
         # The other character's memory came through untouched.
         untouched = next(j for j in scene.journals if j.character == "Элоиза")
         assert memories[cast["Элоиза"]].history == untouched.history
@@ -432,7 +434,7 @@ class TestLongStory:
             ]
             assert len(extractions) == 2
             assert "(none yet)" in extractions[0]  # scene 1 starts from nothing
-            assert f"so far: {scripted.CHARACTER_HISTORY}" in extractions[1]
+            assert "so far: Entry 1." in extractions[1]  # scene 1's one entry, verbatim
             assert "now: state 1" in extractions[1]
         finally:
             app.close()

@@ -28,9 +28,11 @@ def cmd_import(session: Session, store: Store, args: list[str]) -> None:
     """`/import chat FILE` — import a chat: an otaku /export file (its
     memory applied verbatim, no model calls) or a SillyTavern .jsonl.
     `/import text FILE` — dismantle a free-form text file into verbatim
-    messages instead. Either way the story's missing memory is then built
-    by the same forced extraction pass `/extract` runs, waited on in the
-    foreground; the session switches to the imported story."""
+    messages instead. A native export arrives with its extraction state
+    and triggers nothing; the memoryless shapes (SillyTavern, text) have
+    their memory built by the same forced extraction pass `/extract`
+    runs, waited on in the foreground. The session switches to the
+    imported story."""
     mode, _, rest = session.raw_args.partition(" ")
     path_text = rest.strip()
     if mode not in ("chat", "text") or not path_text:
@@ -43,19 +45,19 @@ def cmd_import(session: Session, store: Store, args: list[str]) -> None:
         print(f"Could not read {path}: {e}")
         return
 
-    if mode == "chat":
-        export = story_imports.parse_story(text)
-        if export is None:
-            export = parse_sillytavern(text)
-            if export is None:
-                print("Not an otaku export or a SillyTavern chat (.jsonl).")
-                return
-            print(f"SillyTavern chat: {len(export.messages)} message(s).")
-    else:
+    native = False
+    if mode == "text":
         export = parse_freetext(text)
-        if export is None:
-            print("The file contains no text to import.")
-            return
+    elif (export := story_imports.parse_story(text)) is not None:
+        native = True
+    elif (export := parse_sillytavern(text)) is not None:
+        print(f"SillyTavern chat: {len(export.messages)} message(s).")
+    else:
+        print("Not an otaku export or a SillyTavern chat (.jsonl).")
+        return
+    if export is None:
+        print("The file contains no text to import.")
+        return
     if not export.messages:
         print("The file contains no messages to import.")
         return
@@ -65,9 +67,13 @@ def cmd_import(session: Session, store: Store, args: list[str]) -> None:
     print(f"Imported {len(export.messages)} message(s) → story {story_id}{applied}.")
 
     session.switch_to(store, story_id)
-    # The memory the file didn't carry is built by the extraction — the
-    # same forced pass, waited on the same way, as typing /extract.
-    lore.cmd_extract(session, store, [])
+    # A native export carries its whole extraction state — including a
+    # legitimately unextracted tail — so the story arrives exactly as it
+    # was and extraction resumes its normal idle-gated life. The
+    # memoryless shapes get their memory built now: the same forced pass,
+    # waited on the same way, as typing /extract.
+    if not native:
+        lore.cmd_extract(session, store, [])
 
 
 def cmd_export(session: Session, store: Store, args: list[str]) -> None:

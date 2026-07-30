@@ -2,7 +2,7 @@
 
 import click
 
-from otaku.chat.session import Session
+from otaku.chat.session import NO_MODEL_HINT, Session
 from otaku.formatting import flatten, format_size, pretty_path, truncate
 from otaku.lore import assembler
 from otaku.store import Store
@@ -13,8 +13,13 @@ def cmd_context(session: Session, store: Store, args: list[str]) -> None:
     """Preview the next request: token estimates per part, the system text
     (yours alone), and the transcript exactly as it will be sent. `otaku
     logs` shows what was actually sent; this shows what is about to be."""
-    client = session.providers.get_client(session.provider.name)
-    prompt = assembler.assemble_story(store, session, client.get_context_size(session.model))
+    context = None
+    if session.provider is not None:
+        client = session.providers.get_client(session.provider.name)
+        context = client.get_context_size(session.model)
+    # No model: the preview still stands, over the assembler's default
+    # window — what WOULD be sent is a question that needs no server.
+    prompt = assembler.assemble_story(store, session, context)
     preview = assembler.render_preview(prompt, dim=DIM, reset=RESET)
     # Long stories make this thousands of lines; page it like `otaku logs`.
     # color=True keeps the dim markers through less (-R).
@@ -58,6 +63,9 @@ def cmd_info(session: Session, store: Store, args: list[str]) -> None:
     """Best-effort dump of everything otaku knows about the active model and
     session. Network-backed fields are silently skipped when the provider
     doesn't expose them or the request fails."""
+    if session.provider is None:
+        print(NO_MODEL_HINT)
+        return
     client = session.providers.get_client(session.provider.name)
     provider = session.provider
 

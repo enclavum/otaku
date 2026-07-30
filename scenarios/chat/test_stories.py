@@ -251,7 +251,7 @@ class TestFork:
             ids = app.store.stories.get_messages_ids(story_id)
             scenes = app.store.scenes.get_current(story_id, ids)
             assert len(scenes) == 1
-            assert scenes[0].history == scripted.STORY_SO_FAR
+            assert scenes[0].history == "A guest came in and met the Keeper."
             cast = app.store.characters.list(story_id)
             assert [c.name for c in cast] == ["Keeper"]
             assert app.store.journals.get_current(story_id, ids)[cast[0].id].state == "at the gate"

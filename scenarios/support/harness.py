@@ -100,9 +100,10 @@ def set_config_provider(
 
 def _load_or_default(paths: Paths) -> config_mod.Config:
     """The config to update: the file when there is one, else app defaults
-    with smoothing off (deterministic stream timing) and the test provider
-    on a dead port — a config needs a provider section to be valid, and
-    the autoconfigured ones read the machine, which a scenario config must
+    with smoothing off (deterministic stream timing), no sample seeding
+    (a scenario's story is its own), and the test provider on a dead
+    port — a config needs a provider section to be valid, and the
+    autoconfigured ones read the machine, which a scenario config must
     not. `launch` points the provider at the live server."""
     paths.ensure_tree()
     if paths.config_file.exists():
@@ -110,4 +111,6 @@ def _load_or_default(paths: Paths) -> config_mod.Config:
     placeholder = config_mod.Provider(
         name=PROVIDER, url="http://127.0.0.1:9/v1", supports_thinking=True
     )
-    return config_mod.Config(providers={PROVIDER: placeholder}, smooth_streaming=False)
+    return config_mod.Config(
+        providers={PROVIDER: placeholder}, smooth_streaming=False, seed_sample=False
+    )

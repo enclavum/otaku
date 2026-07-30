@@ -105,6 +105,84 @@ class TestBackups:
         assert any(app.paths.backups_dir.iterdir())
 
 
+class TestFirstLaunch:
+    """The install experience, end to end: a fresh database seeds the
+    sample story, the user lands in it — with or without a reachable
+    model — and every model-facing door explains itself until /model."""
+
+    def test_a_fresh_database_seeds_the_sample_and_lands_in_it(self, server, tmp_path) -> None:
+        # The first launch over a new database imports the shipped story —
+        # a native import, zero model calls — and the user is in the
+        # middle of it, memory and all.
+        set_config(tmp_path / "state", seed_sample=True)
+        app = launch(tmp_path / "state", server)
+        try:
+            assert app.server.requests == []  # seeding never calls a model
+            story_id = app.session.story_id
+            assert story_id is not None
+            story = app.store.stories.get(story_id)
+            assert story.title == "The River That Forgot Its Name"
+            assert len(app.session.messages) == 14
+            ids = app.store.stories.get_messages_ids(story_id)
+            assert len(app.store.scenes.get_current(story_id, ids)) == 2
+            assert [c.name for c in app.store.characters.list(story_id)] == ["Maren", "Tallis"]
+        finally:
+            app.close()
+        # Remembered: a relaunch resumes the sample and does NOT seed again.
+        relaunched = launch(tmp_path / "state", server)
+        try:
+            assert relaunched.session.story_id == story_id
+            assert len(relaunched.store.stories.list()) == 1
+        finally:
+            relaunched.close()
+
+    def test_no_models_still_opens_into_the_sample(self, server, tmp_path, capsys) -> None:
+        # Nothing reachable: the session opens without a model, the sample
+        # is there to explore, and a turn is kept as story but explains
+        # why nothing streams.
+        set_config(tmp_path / "state", seed_sample=True)
+        app = launch(tmp_path / "state", server, spec="")
+        try:
+            assert app.session.provider is None
+            story = app.store.stories.get(app.session.story_id)
+            assert story.title == "The River That Forgot Its Name"
+            capsys.readouterr()
+            app.play("Hello? Is someone there?")
+            assert "No model selected" in capsys.readouterr().out
+            assert app.server.requests == []
+            assert len(app.session.messages) == 15  # the turn is story, kept
+        finally:
+            app.close()
+
+    def test_a_model_picked_later_revives_the_session(self, server, tmp_path, capsys) -> None:
+        set_config(tmp_path / "state", seed_sample=True)
+        app = launch(tmp_path / "state", server, spec="")
+        try:
+            app.play("/model test/test-model")
+            assert "Switched to test/test-model." in capsys.readouterr().out
+            app.play("I climb toward the voice.")
+            assert app.session.messages[-1].body == scripted.CHAT_REPLY
+        finally:
+            app.close()
+
+    def test_an_existing_database_never_seeds(self, server, tmp_path) -> None:
+        root = tmp_path / "state"
+        app = launch(root, server)  # seed_sample off: the database exists now
+        app.play("I enter the hall.")
+        app.close()
+        set_config(root, seed_sample=True)
+        relaunched = launch(root, server)
+        try:
+            assert len(relaunched.store.stories.list()) == 1  # only the played story
+        finally:
+            relaunched.close()
+
+    def test_the_knob_off_seeds_nothing(self, app: App) -> None:
+        # The scenario default: a fresh database, seed_sample = false.
+        assert app.session.story_id is None
+        assert app.store.stories.list() == []
+
+
 class TestResume:
     def test_a_deleted_remembered_story_starts_fresh(self, app: App) -> None:
         app.play("I enter the hall.")

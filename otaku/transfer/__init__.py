@@ -18,8 +18,10 @@ summaries, and the rest survive byte-exact whatever Markdown they hold.
 Importing accepts exactly two shapes: this document and a SillyTavern
 chat (.jsonl), both parsed into the same `StoryExport`. Prose files go
 through `imports.split_segments` instead. The writers only put records in
-the store — building the missing memory is the extraction pass's job,
-which the import command triggers exactly like `/extract`.
+the store. A native document carries its whole extraction state, an
+unextracted tail included, so importing it triggers nothing; the
+memoryless shapes have their memory built by the extraction pass, which
+the import command triggers exactly like `/extract`.
 """
 
 from dataclasses import dataclass

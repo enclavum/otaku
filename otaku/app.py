@@ -14,6 +14,7 @@ from pathlib import Path
 
 from otaku import crypto
 from otaku.chat import repl
+from otaku.chat.commands import dispatch
 from otaku.chat.session import TUI, Session
 from otaku.formatting import pretty_path
 from otaku.logs.requests import RequestLog
@@ -70,6 +71,7 @@ class App:
         if spec is None:
             raise CancelledError
 
+        fresh = not self.paths.database_file.exists()
         self.store = Store.open(self.paths, cipher, backups=cfg.backups)
         # The worker's own store connection (WAL makes the concurrent write
         # safe), opened lazily on its thread; backups=0 — the session's open
@@ -102,6 +104,17 @@ class App:
         except BaseException:
             self.store.close()
             raise
+        if fresh and cfg.seed_sample:
+            # A database created from scratch is seeded with the shipped
+            # sample story, through the real command — a native import, so
+            # no pass runs and no model is called — and remembered, so the
+            # user lands (and stays) in the middle of a playable story.
+            dispatch(
+                f"/import chat {Path(__file__).parent / 'samples' / 'story.md'}",
+                self.session,
+                self.store,
+            )
+            self.session.save_state()
 
     def run(self) -> None:
         """The chat loop over the assembled session."""

@@ -10,7 +10,8 @@ packed into spans each meeting both minimums. Per span, one completion
 joining the cast, one journal row per character present, and speaker
 labels filled onto unattributed in-character rows. The rollups then bring
 every history up to date — the story-so-far on the newest scene, each
-active character's history on their newest journal row. Both self-gate on
+active character's history on their newest journal row; a single-source
+rollup is its source verbatim, no model pass. Both self-gate on
 "newest row lacks a history", which is also what heals a rollup nulled by
 an edit (or lost to a cancel) on the next idle, whether or not a scene
 closes.
@@ -456,6 +457,12 @@ class Extractor:
         summaries = [s.summary for s in scenes if s.summary]
         if not summaries:
             return
+        if len(summaries) == 1:
+            # The rollup of one summary is that summary: a model pass over
+            # a single source adds nothing and loses detail to paraphrase.
+            self._store.scenes.set_history(due[-1], summaries[0])
+            report.scene_histories += 1
+            return
         self._progress(f"composing the story so far from {len(summaries)} scene summaries…")
         started = time.monotonic()
         try:
@@ -491,6 +498,12 @@ class Extractor:
                 return
             entries = self._store.journals.get_entries(self._story_id, character_id, chain)
             if not entries:
+                continue
+            if len(entries) == 1:
+                # One entry: the history IS that entry, verbatim — no model
+                # pass, no paraphrase drift, the language trivially kept.
+                self._store.journals.set_history(journal_id, entries[0])
+                report.histories += 1
                 continue
             name = names.get(character_id, "?")
             self._progress(f"rebuilding {name}'s history from {len(entries)} entries…")

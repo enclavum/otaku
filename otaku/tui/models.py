@@ -459,8 +459,10 @@ class ModelPicker(ListScreen):
 
 
 def pick(providers: ProviderRegistry, initial_spec: str | None = None) -> str | None:
-    """Show the model picker. Returns the chosen 'provider/model' spec or
-    None on cancel. Loading errors stay inside the picker."""
+    """Show the model picker. Returns the chosen 'provider/model' spec,
+    None on cancel, or "" when no models are reachable at all — the
+    caller opens without a model, and the printed diagnostic says how to
+    fix that. Loading errors stay inside the picker."""
     rows, reachable = providers.inventory()
     entries: list[ModelEntry] = []
     # Sorted by provider name so the grouping is stable regardless of
@@ -483,5 +485,6 @@ def pick(providers: ProviderRegistry, initial_spec: str | None = None) -> str | 
             )
     if not entries:
         print(providers.unreachable_help(reachable))
-        return None
+        print("Opening without a model — pick one with /model once a server is up.")
+        return ""
     return ModelPicker(providers, entries, initial_spec=initial_spec).run()
