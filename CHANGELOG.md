@@ -41,7 +41,7 @@ Initial public release. (`0.1.0` was a premature PyPI upload from a pre-release
 tree — it was never tagged and is superseded by `0.1.1`.)
 
 ### Added
-- Multi-backend client for Ollama, LM Studio, MLX (omlx), and any
+- Multi-backend client for Ollama, LM Studio, oMLX, and any
   OpenAI-compatible server — from one terminal command.
 - Zero-config first run: the initial `~/.otaku/config.toml` auto-detects each
   built-in engine's port (and omlx's API key) from your environment

@@ -11,7 +11,7 @@ license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "enclavum", email = "293312193+enclavum@users.noreply.github.com" }]
 requires-python = ">=3.14"
-keywords = ["llm", "ollama", "mlx", "koboldcpp", "terminal", "tui", "roleplay", "story", "lore", "local"]
+keywords = ["llm", "ollama", "mlx", "omlx", "koboldcpp", "terminal", "tui", "roleplay", "story", "lore", "local"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
