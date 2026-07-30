@@ -11,6 +11,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from otaku.paths import Paths
 from otaku.transfer import exports, imports
 from otaku.tui import lore
 from scenarios.support import server as scripted
@@ -102,6 +103,37 @@ class TestExtract:
         capsys.readouterr()
         app.play("/extract")
         assert "Nothing new since the last scene." in capsys.readouterr().out
+
+    def test_an_edited_template_with_literal_json_still_extracts(self, server, tmp_path) -> None:
+        # The prompts file's promise: what you edit is exactly what the
+        # model sees. A template holding a literal JSON example — braces
+        # and all — must render verbatim and never break the pass.
+        root = tmp_path / "state"
+        paths = Paths.resolve(root)
+        paths.ensure_tree()
+        template = (
+            "You are a story analyst. Cast: {cast}\nJournals: {journals}\n"
+            "Messages:\n{chunk}\n"
+            'Reply as {"scene": {"title": "...", "summary": "..."}} — {this} stays literal.'
+        )
+        paths.prompts_file.write_text(f"extract_prompt = {json.dumps(template)}\n")
+        app = launch(root, server)
+        try:
+            for i in range(3):
+                app.play(f"Turn number {i}.")
+            app.play("/extract")
+            story_id = app.session.story_id
+            ids = app.store.stories.get_messages_ids(story_id)
+            assert len(app.store.scenes.get_current(story_id, ids)) == 1
+            analyst = next(
+                str(r["messages"][-1]["content"])
+                for r in app.server.requests
+                if "You are a story analyst" in str(r["messages"][-1]["content"])
+            )
+            assert '{"scene": {"title"' in analyst  # the JSON example, verbatim
+            assert "{this} stays literal" in analyst
+        finally:
+            app.close()
 
 
 class TestIdleScheduling:
@@ -226,6 +258,44 @@ class TestFailedPass:
         app.server.script = scripted.default_script
         app.play("/extract")
         assert len(app.store.scenes.get_current(story_id, ids)) == 1
+
+    def test_a_scene_without_a_summary_is_refused(self, app: App, capsys) -> None:
+        # A committed scene whose summary is empty would swallow its span:
+        # not in the head, not in the tail, not in the recap. Refused whole.
+        for i in range(3):
+            app.play(f"Turn number {i}.")
+        app.server.script = lambda body: json.dumps(
+            {"scene": {"title": "Untold"}, "speakers": [], "characters": [], "journals": []}
+        )
+        capsys.readouterr()
+        app.play("/extract")
+        assert "failed" in capsys.readouterr().out
+        story_id = app.session.story_id
+        ids = app.store.stories.get_messages_ids(story_id)
+        assert app.store.scenes.get_current(story_id, ids) == []
+        assert app.store.characters.list(story_id) == []  # nothing half-applied
+
+        app.server.script = scripted.default_script
+        app.play("/extract")
+        assert len(app.store.scenes.get_current(story_id, ids)) == 1
+
+    def test_an_unexpected_crash_is_logged_not_swallowed(
+        self, app: App, capsys, monkeypatch
+    ) -> None:
+        class Exploding:
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                pass
+
+            def run(self, **kwargs: Any) -> None:
+                raise RuntimeError("boom")
+
+        monkeypatch.setattr("otaku.lore.worker.Extractor", Exploding)
+        app.play("I enter the hall.")
+        capsys.readouterr()
+        app.play("/extract")
+        assert "failed" in capsys.readouterr().out
+        logs = list((app.paths.root / "logs").rglob("*"))
+        assert any("RuntimeError" in f.read_text() for f in logs if f.is_file())
 
 
 class TestHealing:
@@ -439,6 +509,49 @@ class TestMerge:
         assert "The Keeper" in cast[0].aliases
         # The duplicate's newer journal followed the merge.
         assert app.store.journals.get_current(story_id)[cast[0].id].state == "by the door"
+
+    def test_merge_invalidates_the_rolled_up_memory(self, app: App) -> None:
+        # A rollup composed before the merge covers only one side; the
+        # merge resets the histories and the next pass rebuilds the one
+        # memory from the union of entries.
+        for i in range(3):
+            app.play(f"Turn number {i}.")
+        app.play("/extract")
+
+        def duplicated(body: dict[str, Any]) -> str:
+            prompt = str(body.get("messages", [{}])[-1].get("content", ""))
+            if "You are a story analyst" not in prompt:
+                return scripted.default_script(body)
+            return json.dumps(
+                {
+                    "scene": {"title": "The Return", "summary": "The guest returned."},
+                    "speakers": [],
+                    "characters": [{"name": "The Keeper", "description": "the same warden"}],
+                    "journals": [
+                        {"character": "The Keeper", "entry": "Back again.", "state": "by the door"}
+                    ],
+                }
+            )
+
+        app.server.script = duplicated
+        for i in range(3):
+            app.play(f"Turn number {3 + i}.")
+        app.play("/extract")
+        app.play("/merge The Keeper into Keeper")
+        story_id = app.session.story_id
+        keeper = app.store.characters.list(story_id)[0]
+        assert not app.store.journals.get_current(story_id)[keeper.id].history
+
+        app.server.script = scripted.default_script
+        app.play("/extract")  # declines a scene, rebuilds the memory
+        assert app.store.journals.get_current(story_id)[keeper.id].history
+        rebuild = next(
+            str(r["messages"][-1]["content"])
+            for r in reversed(app.server.requests)
+            if str(r["messages"][-1]["content"]).startswith("Write ")
+        )
+        assert "I saw the guest." in rebuild  # the union of entries...
+        assert "Back again." in rebuild  # ...feeds the one memory
 
 
 def remembered(app: App) -> int:

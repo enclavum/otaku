@@ -259,7 +259,10 @@ class CharacterOps:
         speakers, journal rows — moves to the target, the source's name and
         aliases join the target's aliases, and the source row is deleted.
         Where both wrote a journal row for the same scene, the target's row
-        wins and the source's is dropped."""
+        wins and the source's is dropped. The merged memory is a new
+        memory: every history rollup composed before the merge covered
+        only one side, so they all reset and the next pass rebuilds from
+        the union of entries."""
         # fmt: off
         rows = {
             int(cid): (name, aliases)
@@ -299,6 +302,10 @@ class CharacterOps:
             conn.execute(
                 "UPDATE journals SET character_id = ?, updated_at = ? WHERE character_id = ?",
                 (target_id, now, source_id),
+            )
+            conn.execute(
+                "UPDATE journals SET history = NULL, updated_at = ? WHERE character_id = ?",
+                (now, target_id),
             )
             conn.execute(
                 "DELETE FROM characters WHERE id = ?",

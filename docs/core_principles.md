@@ -28,7 +28,7 @@ haven't been processed before. What is extracted:
 * Labeling messages to characters — messages that are stored in the database are labeled by which character spoke.
 
 To account for possible /undo and /regen commands, automatic lore extraction doesn't create scenes from the last 20
-messages. You can also manually trigger the lore extraction by executing the /scene command.
+messages. You can also manually trigger the lore extraction by executing the /extract command.
 
 To view the extracted lore, you can use the /lore and /cast commands.
 

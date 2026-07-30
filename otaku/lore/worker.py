@@ -214,7 +214,7 @@ class LoreWorker:
                 result = PassResult.FAILED
                 report = Report()
                 try:
-                    with contextlib.suppress(Exception):
+                    try:
                         self._set_status("")  # a new pass supersedes a held failure
                         if store is None:
                             store = self._store_factory()
@@ -241,6 +241,16 @@ class LoreWorker:
                             # the clear below overwrites the notice before
                             # anyone sees it.
                             held = self._last_line
+                    except Exception as e:
+                        # Never a traceback under the live prompt — but
+                        # never silence either: the system log records the
+                        # shape of the crash (the type only; the log stays
+                        # content-free).
+                        held = f"extraction failed ({type(e).__name__})"
+                        with contextlib.suppress(Exception):
+                            self._log.record(
+                                f"pass crashed (story {job.story_id}): {type(e).__name__}"
+                            )
                     # Before the warm-up: the waiter asked for the scene
                     # close, not for a prefill it was never going to watch.
                     if job.on_done is not None:

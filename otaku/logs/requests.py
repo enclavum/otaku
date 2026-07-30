@@ -11,6 +11,7 @@ models were actually sent.
 import base64
 import json
 import sys
+import threading
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime
@@ -35,6 +36,7 @@ class RequestLog(DailyLog):
     def __init__(self, paths: Paths, cipher: Cipher) -> None:
         super().__init__(paths)
         self._cipher = cipher
+        self._lock = threading.Lock()  # appends come from worker and REPL threads
 
     def record(self, provider: str, purpose: str, body: dict[str, object]) -> None:
         """Append one request. Best-effort: a logging failure warns on
@@ -53,7 +55,7 @@ class RequestLog(DailyLog):
         try:
             path = self.get_path(now.strftime("%Y%m%d"))
             path.parent.mkdir(parents=True, exist_ok=True)
-            with path.open("a", encoding="utf-8") as f:
+            with self._lock, path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(entry, ensure_ascii=False) + "\n")
         except OSError as e:
             print(f"otaku: request log failed: {e}", file=sys.stderr)

@@ -11,7 +11,7 @@ import tomllib
 from dataclasses import dataclass
 
 from otaku.paths import Paths
-from otaku.settings.files import row, write_atomic
+from otaku.settings.files import row, toml_scalar, write_atomic
 
 
 @dataclass(frozen=True)
@@ -47,10 +47,10 @@ def save(paths: Paths, state: AppState) -> None:
     body = "\n".join(
         [
             "# Written by otaku — what it remembers between sessions.",
-            row(f'model = "{state.model}"', "bare `otaku` resumes this model"),
+            row(f"model = {toml_scalar(state.model)}", "bare `otaku` resumes this model"),
             row(f"story = {state.story}", "and reattaches this story (0 = none)"),
             row(f"verbose = {str(state.verbose).lower()}", "/set verbose"),
-            row(f'think = "{state.think}"', "/set think"),
+            row(f"think = {toml_scalar(state.think)}", "/set think"),
         ]
     )
     write_atomic(paths.state_file, body + "\n")

@@ -22,10 +22,7 @@ def cmd_stories(session: Session, store: Store, args: list[str]) -> None:
         return
     result = session.tui.pick_story(store, rows, session.story_id)
     if result is None:
-        # No selection — but the browser edits messages in place, so the
-        # session must not keep a stale copy of the story it is on.
-        if session.story_id is not None:
-            session.messages = store.stories.get_messages(session.story_id)
+        _reread_current(session, store)
         return
     story_id, messages, total = result
 
@@ -42,6 +39,7 @@ def cmd_stories(session: Session, store: Store, args: list[str]) -> None:
             )
         except EOFError, KeyboardInterrupt:
             print("Cancelled.")
+            _reread_current(session, store)
             return
         if not ans or ans in YES_ANSWERS:  # empty = the [Y/n] default
             story_id = store.stories.fork(
@@ -57,6 +55,7 @@ def cmd_stories(session: Session, store: Store, args: list[str]) -> None:
             print("Resuming here — later messages stay in the tree as siblings.")
         else:
             print("Cancelled.")
+            _reread_current(session, store)
             return
 
     session.switch_to(store, story_id, messages)
@@ -118,3 +117,11 @@ def cmd_new(session: Session, store: Store, args: list[str]) -> None:
     session.story_id = None
     session.save_state()  # a relaunch starts fresh, like this session
     print("Started a new story.")
+
+
+def _reread_current(session: Session, store: Store) -> None:
+    """The browser edits messages in place, so EVERY way out of it that
+    keeps the current story must reread — the session must never hold a
+    stale copy."""
+    if session.story_id is not None:
+        session.messages = store.stories.get_messages(session.story_id)

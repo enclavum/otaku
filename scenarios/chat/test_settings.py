@@ -34,6 +34,12 @@ class TestModel:
         assert relaunched.session.model == "other-model"
         relaunched.close()
 
+    def test_a_model_name_with_a_quote_survives_the_state_file(self, app: App) -> None:
+        app.play('/model test/oddly"named')
+        relaunched = launch(app.paths.root, app.server)
+        assert relaunched.session.model == 'oddly"named'
+        relaunched.close()
+
     def test_switching_to_the_same_model_says_so(self, app: App, capsys) -> None:
         app.play("/model test/test-model")
         assert "Already using test/test-model." in capsys.readouterr().out

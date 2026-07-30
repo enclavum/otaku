@@ -18,6 +18,7 @@ placeholder) is reported once and ignored — a bad override must never cost
 a session.
 """
 
+import re
 import sys
 import tomllib
 from dataclasses import dataclass, fields
@@ -43,16 +44,16 @@ translate it, and do not answer in English because these instructions are in
 English. Only the JSON keys stay in English.
 
 Extract from THIS SCENE ONLY and reply with ONLY a JSON object, no prose, in this shape:
-{{
-  "scene": {{"title": "...",
-             "summary": "a detailed narrative recap of the scene, 250-400 words"}},
-  "speakers": [{{"n": 1, "speaker": "who speaks or acts in message [n], or null"}}],
-  "characters": [{{"name": "...", "aliases": ["..."],
-                   "description": "one line, or null"}}],
-  "journals": [{{"character": "name",
+{
+  "scene": {"title": "...",
+             "summary": "a detailed narrative recap of the scene, 250-400 words"},
+  "speakers": [{"n": 1, "speaker": "who speaks or acts in message [n], or null"}],
+  "characters": [{"name": "...", "aliases": ["..."],
+                   "description": "one line, or null"}],
+  "journals": [{"character": "name",
                  "entry": "their own record of this scene",
-                 "state": "their situation right now"}}]
-}}
+                 "state": "their situation right now"}]
+}
 
 Rules:
 - "summary": prose, chronological, written like a story recap — not a synopsis.
@@ -196,6 +197,18 @@ def load(paths: Paths) -> Prompts:
             continue
         overrides[key] = value
     return Prompts(**overrides)
+
+
+def render(template: str, **substitutions: str) -> str:
+    """Fill a template's `{placeholder}`s in ONE pass. Only the given
+    names substitute; every other brace stays literal, so a template can
+    hold a JSON example without doubling anything, and the substituted
+    text is never rescanned, so story content can never inject a
+    placeholder. Rendering cannot fail: an unknown `{word}` is just text."""
+    if not substitutions:
+        return template
+    pattern = "|".join(r"\{" + re.escape(name) + r"\}" for name in substitutions)
+    return re.sub(pattern, lambda m: substitutions[m.group(0)[1:-1]], template)
 
 
 def write_stub(paths: Paths) -> bool:

@@ -45,6 +45,7 @@ import httpx
 
 from otaku.formatting import combine_framing
 from otaku.providers.base import OpenAIClient, Stats, Text, WireMessage
+from otaku.settings import prompts as prompts_file
 from otaku.settings.prompts import Prompts
 from otaku.store import Store
 from otaku.store.lore import CharacterMemory
@@ -300,15 +301,16 @@ class Extractor:
                 self._log(f"extraction failed (story {self._story_id}): {type(e).__name__}")
                 self._progress(f"extraction failed ({e}) — {kept}the tail stays open")
                 return PassResult.FAILED
-            except ValueError, json.JSONDecodeError:
+            except (ValueError, json.JSONDecodeError) as e:
                 # Best-effort: the unclosed tail stays unextracted, retried
-                # on the next idle. Say so — a model that never returns
-                # parsable JSON would otherwise build no memory at all,
+                # on the next idle. Say why — a model that never returns
+                # a usable reply would otherwise build no memory at all,
                 # silently forever.
-                self._log(f"extraction failed (story {self._story_id}): the reply did not parse")
-                self._progress(
-                    f"extraction failed (the reply did not parse) — {kept}the tail stays open"
+                reason = (
+                    "the reply did not parse" if isinstance(e, json.JSONDecodeError) else str(e)
                 )
+                self._log(f"extraction failed (story {self._story_id}): {reason}")
+                self._progress(f"extraction failed ({reason}) — {kept}the tail stays open")
                 return PassResult.FAILED
             if not closed:  # cancelled mid-stream
                 self._log(f"extraction cancelled (story {self._story_id})")
@@ -339,7 +341,8 @@ class Extractor:
         `httpx.HTTPError` (request failed) or `ValueError` (unparsable
         reply) — the caller decides what that means."""
         current = self._store.journals.get_current(self._story_id)
-        prompt = self._prompts.extract_prompt.format(
+        prompt = prompts_file.render(
+            self._prompts.extract_prompt,
             cast=cast.prompt_block(),
             journals=_journals_block(current, cast),
             chunk=numbered_chat(span),
@@ -364,6 +367,15 @@ class Extractor:
         row, the journals (state carries forward when the extraction omits
         it), and speaker labels — fill-only, never onto an attributed or
         ooc row."""
+        scene = data.get("scene")
+        scene_data = scene if isinstance(scene, dict) else {}
+        summary = _as_str(scene_data.get("summary"))
+        if not summary:
+            # A committed scene without a summary would swallow its span:
+            # not in the head, not in the tail, not in the recap. Refuse
+            # the whole extraction BEFORE anything is written.
+            raise ValueError("the reply held no scene summary")
+
         for item in _as_list(data.get("characters")):
             if not isinstance(item, dict):
                 continue
@@ -376,14 +388,12 @@ class Extractor:
                 report.characters.append(name)
             cast.get_or_add(name, aliases=aliases, description=_as_str(item.get("description")))
 
-        scene = data.get("scene")
-        scene_data = scene if isinstance(scene, dict) else {}
         scene_id = self._store.scenes.add(
             self._story_id,
             start_message_id=span[0].id,
             end_message_id=span[-1].id,
             title=_as_str(scene_data.get("title")),
-            summary=_as_str(scene_data.get("summary")),
+            summary=summary,
         )
 
         written: set[int] = set()
@@ -441,7 +451,9 @@ class Extractor:
         started = time.monotonic()
         try:
             story_so_far = self.complete(
-                self._prompts.story_so_far_prompt.format(summaries="\n\n".join(summaries)),
+                prompts_file.render(
+                    self._prompts.story_so_far_prompt, summaries="\n\n".join(summaries)
+                ),
                 "rollup",
             ).strip()
         except httpx.HTTPError as e:
@@ -472,7 +484,8 @@ class Extractor:
                 continue
             name = names.get(character_id, "?")
             self._progress(f"rebuilding {name}'s history from {len(entries)} entries…")
-            prompt = self._prompts.history_prompt.format(
+            prompt = prompts_file.render(
+                self._prompts.history_prompt,
                 name=name,
                 entries="\n\n".join(f"{n}. {text}" for n, text in enumerate(entries, 1)),
             )

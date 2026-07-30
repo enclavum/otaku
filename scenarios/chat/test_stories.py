@@ -107,6 +107,23 @@ class TestForkQuestion:
         assert app.session.story_id == second  # still where the user was
         assert app.store.stories.get_head(first) is not None
 
+    def test_a_cancelled_question_still_rereads_edits(self, app: App, monkeypatch) -> None:
+        # The browser edits messages in place; every way OUT of the fork
+        # question — not just a clean cancel — must leave the session
+        # reading the edited story, never a stale copy.
+        app.play("I enter the hall.")
+        target = app.session.messages[0].id
+
+        def pick(store: Store, rows: list[StoryListing], current: int | None) -> PickedStory:
+            store.messages.update(target, "I enter the throne hall.")
+            messages = store.stories.get_messages(app.session.story_id)
+            return (app.session.story_id, messages[:1], len(messages))
+
+        app.session.tui = TUI(pick_story=pick)
+        monkeypatch.setattr(builtins, "input", lambda prompt="": "what?")
+        app.play("/stories")
+        assert app.session.messages[0].body == "I enter the throne hall."
+
     def test_ctrl_c_at_the_question_cancels(self, app: App, capsys, monkeypatch) -> None:
         first, second = two_stories(app)
         app.session.tui = TUI(pick_story=picks(first, upto=1))
