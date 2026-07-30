@@ -47,12 +47,12 @@ package tree: `tests/lore/test_assembler.py` covers
 `otaku/lore/assembler.py`.
 
 Scenario tests (`scenarios/`, `make scenarios`) play user stories against
-the real application: `support/harness.py` assembles it the way
-`cli.main` does, wired to the scripted OpenAI-compatible server in
-`support/server.py` over a throwaway state dir built fresh per test —
-commands go through the real dispatch, and a few stories drive the real
-binary in a pty (`support/driver.py`). Deterministic and offline; the
-wire is asserted against the server's recorded requests. The `live`-marked
+the real application: `support/harness.py` builds the real `otaku.app.App`
+over a throwaway state dir whose config points at the scripted
+OpenAI-compatible server in `support/server.py`, and plays lines through
+the REPL's own `submit`; a few stories drive the real binary in a pty
+(`support/terminal.py`). Deterministic and offline; the wire is asserted
+against the server's recorded requests. The `live`-marked
 smokes talk to a real local model (ollama, OTAKU_TEST_MODEL, default
 ollama/gemma3) and skip themselves when it is absent; deselect with
 `-m "not live"`.
@@ -84,8 +84,9 @@ Each package may import only the packages listed after its arrow (plus the
 standard library and the declared dependencies); everything else is
 forbidden:
 
-    cli        → chat, tui, lore, store, providers, settings, crypto, logs,
-                 paths, terminal, formatting
+    cli        → app, crypto, logs, paths, settings, store
+    app        → chat, tui, lore, store, providers, settings, crypto, logs,
+                 paths, formatting
     chat       → transfer, lore, store, providers, settings, logs, paths,
                  terminal, formatting
     tui        → store, providers, settings, terminal, formatting

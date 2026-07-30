@@ -37,7 +37,7 @@ from otaku.chat.commands import dispatch
 from otaku.chat.commands.lore import build_job
 from otaku.chat.completer import SlashCompleter
 from otaku.chat.inference import run_inference
-from otaku.chat.state import RESUME_TURNS, Session
+from otaku.chat.session import RESUME_TURNS, Session
 from otaku.formatting import flatten, truncate
 from otaku.store import Store
 from otaku.store.schema import Message
@@ -179,20 +179,6 @@ def run(session: Session, store: Store) -> None:
     prompt_session.default_buffer.on_text_changed += lambda _buf: worker.touch()
     worker.start()
 
-    def maybe_schedule(last_before: Message | None) -> None:
-        """Arm an idle-debounced pass when a NEW model turn just landed —
-        plain messages, /regen, /ooc, /you, and /me all produce them.
-        Identity (not length) detects it: regenerate swaps the last message
-        without changing the count. [lore_extraction].enabled gates THIS —
-        the automatic scheduling — and nothing else; /extract still works."""
-        if not session.config.lore_enabled:
-            return
-        if session.story_id is None or not session.messages:
-            return
-        last = session.messages[-1]
-        if last is not last_before and last.role == "assistant":
-            worker.schedule(build_job(session))
-
     assembler = LineAssembler()
 
     while not session.should_quit:
@@ -214,11 +200,8 @@ def run(session: Session, store: Store) -> None:
         # is always a command — even mid-"""-block, where feeding it to the
         # assembler would paste "/regen" into the user's text.
         if carry.pop("shortcut", None) is not None:
-            worker.defer()
-            last_before = session.messages[-1] if session.messages else None
             try:
-                dispatch(line, session, store)
-                maybe_schedule(last_before)
+                submit(line, session, store)
             except KeyboardInterrupt:
                 print()
             continue
@@ -232,23 +215,8 @@ def run(session: Session, store: Store) -> None:
         if not message:
             continue
 
-        # The user is active again: drop any queued background work. A pass
-        # already in flight is left to finish — killing it would discard
-        # work already paid for, and with a short think-time, the same work
-        # every time (see lore/worker.py).
-        worker.defer()
-
         try:
-            last_before = session.messages[-1] if session.messages else None
-            # A """-wrapped message is always a literal prompt, never a command.
-            if not is_raw and dispatch(message, session, store):
-                maybe_schedule(last_before)
-                continue
-            session.record_turn(store, Message(role="user", body=message))
-            run_inference(session, store)
-            # Arm an idle-debounced pass over the just-finished turn; it
-            # fires while the user reads and dies the moment they type.
-            maybe_schedule(last_before)
+            submit(message, session, store, raw=is_raw)
         except KeyboardInterrupt:
             # ^C during streaming or a picker: return to the prompt cleanly.
             print()
@@ -257,6 +225,38 @@ def run(session: Session, store: Store) -> None:
 
 
 # ---------- session chrome ----------
+
+
+def submit(line: str, session: Session, store: Store, *, raw: bool = False) -> None:
+    """One submitted line, whatever surface it came from: the user is
+    active again, so queued background work is dropped; a slash command
+    dispatches — never for a `raw` block, which is always a literal
+    prompt — and anything else is recorded as the user's turn and the
+    model answers. A new model turn arms the idle-debounced lore pass:
+    it fires while the user reads and dies the moment they type."""
+    session.worker.defer()
+    last_before = session.messages[-1] if session.messages else None
+    if not raw and dispatch(line, session, store):
+        _maybe_schedule(session, last_before)
+        return
+    session.record_turn(store, Message(role="user", body=line))
+    run_inference(session, store)
+    _maybe_schedule(session, last_before)
+
+
+def _maybe_schedule(session: Session, last_before: Message | None) -> None:
+    """Arm an idle-debounced pass when a NEW model turn just landed — plain
+    messages, /regen, /ooc, /you, and /me all produce them. Identity (not
+    length) detects it: regenerate swaps the last message without changing
+    the count. [lore_extraction].enabled gates THIS — the automatic
+    scheduling — and nothing else; /extract still works."""
+    if not session.config.lore_enabled:
+        return
+    if session.story_id is None or not session.messages:
+        return
+    last = session.messages[-1]
+    if last is not last_before and last.role == "assistant":
+        session.worker.schedule(build_job(session))
 
 
 def _banner(session: Session, store: Store) -> str:
@@ -356,7 +356,7 @@ def _build_prompt(session: Session, store: Store, carry: dict[str, str]) -> Prom
 def _make_bindings(carry: dict[str, str]) -> KeyBindings:
     kb = KeyBindings()
     for key, command in _SHORTCUTS.items():
-        kb.add(key)(_submit(command, carry))
+        kb.add(key)(_submit_shortcut(command, carry))
 
     # A pre-selected menu row is accepted by Enter (run it) or Tab (fill it
     # in and keep editing). The default bindings can't: they treat the
@@ -402,7 +402,7 @@ def _make_bindings(carry: dict[str, str]) -> KeyBindings:
     return kb
 
 
-def _submit(command: str, carry: dict[str, str]) -> Callable[[Any], None]:
+def _submit_shortcut(command: str, carry: dict[str, str]) -> Callable[[Any], None]:
     """Exit the prompt directly with `command` as the result — without
     rendering it into the buffer (no visible flash) or running it through
     `validate_and_handle` (no history append)."""

@@ -5,7 +5,7 @@
 thing they describe, and nothing is written into the user-owned config.
 """
 
-from otaku.chat.state import KNOWN_PARAMS, THINK_ALIASES, THINK_LEVELS, Session
+from otaku.chat.session import KNOWN_PARAMS, THINK_ALIASES, THINK_LEVELS, Session
 from otaku.settings import models as models_file
 from otaku.store import Store
 
@@ -58,6 +58,7 @@ def _switch_model(session: Session, provider_name: str, model: str) -> None:
         return
     session.provider = session.config.providers[provider_name]
     session.model = model
+    session.reload_params()
     session.save_state()
     print(f"Switched to {session.full_model_name}.")
 

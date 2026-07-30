@@ -1,4 +1,9 @@
-"""Import and export: the fixture story round-trips through the app."""
+"""Import and export: the fixture story round-trips through the app.
+
+The chapel fixture is deliberately Cyrillic: importing it proves non-Latin
+content survives the whole path — parse, sealed store, session, export —
+byte for byte.
+"""
 
 from pathlib import Path
 
@@ -34,13 +39,13 @@ class TestExport:
         self, app: App, tmp_path: Path, monkeypatch
     ) -> None:
         monkeypatch.chdir(tmp_path)
-        app.play("Я вхожу в зал.")
-        app.play("/rename Зал")
+        app.play("I enter the hall.")
+        app.play("/rename Hall")
         app.play("/export")
-        exported = parse_story((tmp_path / "зал.md").read_text())
+        exported = parse_story((tmp_path / "hall.md").read_text())
         assert exported is not None
-        assert exported.title == "Зал"
+        assert exported.title == "Hall"
         assert [m.body for m in exported.messages] == [
-            "Я вхожу в зал.",
+            "I enter the hall.",
             app.session.messages[-1].body,
         ]

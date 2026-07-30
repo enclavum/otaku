@@ -8,7 +8,7 @@ a pass sees.
 import threading
 from dataclasses import replace
 
-from otaku.chat.state import Session
+from otaku.chat.session import Session
 from otaku.lore.extraction import PassResult, Report
 from otaku.lore.worker import Job
 from otaku.store import Store

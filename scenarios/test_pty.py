@@ -10,9 +10,9 @@ from pathlib import Path
 from otaku.paths import Paths
 from otaku.settings import state as state_mod
 from scenarios.support import server as scripted
-from scenarios.support.driver import CTRL_U, ENTER, Terminal
-from scenarios.support.harness import SPEC, write_config
+from scenarios.support.harness import SPEC, set_config_provider
 from scenarios.support.server import ModelServer
+from scenarios.support.terminal import CTRL_U, ENTER, Terminal
 
 
 def remember(root: Path) -> None:
@@ -50,14 +50,14 @@ class TestChat:
         """The user launches with no remembered model, picks one in the
         picker, plays a turn, and Ctrl+U takes it back."""
         state = tmp_path / "state"
-        write_config(state, server)
+        set_config_provider(state, server)
         terminal = Terminal(str(state))
         terminal.expect("Models (1)", "test-model")  # the picker, on screen
         terminal.send(ENTER, 1.0)
         terminal.expect("otaku")  # the banner — we are in the REPL
-        terminal.send("Я вхожу в зал.")
+        terminal.send("I enter the hall.")
         terminal.send(ENTER, 1.0)
-        terminal.expect("шевельнулось")  # the reply streamed to the screen
+        terminal.expect("stirred")  # the reply streamed to the screen
         terminal.settle()  # the prompt must be back before a control key
         terminal.send(CTRL_U, 1.0)
         terminal.expect("Undone.")
@@ -68,13 +68,13 @@ class TestChat:
     ) -> None:
         """Closing and reopening the app lands mid-scene in the same story."""
         state = tmp_path / "state"
-        write_config(state, server)
+        set_config_provider(state, server)
         remember(state)
         first = Terminal(str(state))
         first.expect("otaku")
-        first.send("Я вхожу в зал.")
+        first.send("I enter the hall.")
         first.send(ENTER, 1.0)
-        first.expect("шевельнулось")
+        first.expect("stirred")
         assert first.quit() == 0
 
         second = Terminal(str(state))

@@ -15,7 +15,7 @@ from pathlib import Path
 
 from otaku import __version__
 from otaku.chat.commands import lore
-from otaku.chat.state import Session
+from otaku.chat.session import Session
 from otaku.store import Store
 from otaku.terminal import YES_ANSWERS, clipboard, latin_key
 from otaku.transfer import exports as story_exports

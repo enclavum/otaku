@@ -1,5 +1,5 @@
 """The model-facing inference loop: streaming and the in-stream Ctrl+R
-watcher. Session state lives in `chat/state.py`; the slash-command handlers
+watcher. Session state lives in `chat/session.py`; the slash-command handlers
 build on both.
 """
 
@@ -15,7 +15,7 @@ from typing import Any, Self
 import httpx
 
 from otaku.chat.markdown import MarkdownStreamer
-from otaku.chat.state import Session
+from otaku.chat.session import Session
 from otaku.formatting import format_context
 from otaku.lore import assembler
 from otaku.providers.base import Stats, Text, Thinking

@@ -6,7 +6,7 @@ at that point, and declining rewinds the head instead (the later turns
 stay in the tree as siblings — nothing is deleted either way).
 """
 
-from otaku.chat.state import RESUME_TURNS, Session
+from otaku.chat.session import RESUME_TURNS, Session
 from otaku.store import Store
 from otaku.terminal import NO_ANSWERS, YES_ANSWERS, latin_key
 

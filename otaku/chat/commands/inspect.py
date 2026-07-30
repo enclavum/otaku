@@ -2,7 +2,7 @@
 
 import click
 
-from otaku.chat.state import Session
+from otaku.chat.session import Session
 from otaku.formatting import flatten, format_size, pretty_path, truncate
 from otaku.lore import assembler
 from otaku.store import Store

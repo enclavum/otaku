@@ -144,7 +144,7 @@ class Session:
             worker=worker,
         )
         session._apply_think(state.think)
-        session._apply_params(models_file.load(paths).get(model, {}))
+        session.reload_params()
         # Reattach the story the previous session was on, so bare `otaku`
         # reopens it mid-scene; one deleted since simply starts fresh.
         if state.story and store.stories.exists(state.story):
@@ -284,15 +284,11 @@ class Session:
             out.extend(render_markdown(body).splitlines())
         return "\n".join(out).lstrip("\n")
 
-    # ---------- startup internals ----------
-
-    def _apply_think(self, think: str) -> None:
-        if think == "default":
-            self.think = None
-        elif think in THINK_LEVELS:
-            self.think = think
-        else:
-            self.think = "none"
+    def reload_params(self) -> None:
+        """Replace the live parameters with the current model's saved
+        ones — parameters follow the model, at startup and on a switch."""
+        self.params = {}
+        self._apply_params(models_file.load(self.paths).get(self.model, {}))
 
     def _apply_params(self, saved: dict[str, object]) -> None:
         for name, value in saved.items():
@@ -304,6 +300,16 @@ class Session:
                 self.params[name] = coerce(value)
             except TypeError, ValueError:
                 print(f"Ignoring invalid {name} value {value!r} saved for {self.model}.")
+
+    # ---------- startup internals ----------
+
+    def _apply_think(self, think: str) -> None:
+        if think == "default":
+            self.think = None
+        elif think in THINK_LEVELS:
+            self.think = think
+        else:
+            self.think = "none"
 
     def _move_head(self, store: Store) -> None:
         """Point the story at the session's last message (None when empty)."""

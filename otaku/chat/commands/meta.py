@@ -4,7 +4,7 @@
 # HELP_TEXT) imports THIS module for the dispatch table, so the text is
 # read at call time, after the package finished initializing.
 from otaku.chat import commands
-from otaku.chat.state import Session
+from otaku.chat.session import Session
 from otaku.store import Store
 
 

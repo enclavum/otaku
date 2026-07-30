@@ -8,7 +8,7 @@ subtree; the completer derives its tree from it and the descriptions from
 from collections.abc import Callable
 
 from otaku.chat.commands import inspect, lore, meta, playing, settings, stories, transfer
-from otaku.chat.state import KNOWN_PARAMS, Session
+from otaku.chat.session import KNOWN_PARAMS, Session
 from otaku.store import Store
 
 # A completion-tree leaf may be PATH_LEAF: "complete a filesystem path
