@@ -14,8 +14,10 @@ import pytest
 from otaku.chat.session import TUI, PickedStory
 from otaku.store import Store
 from otaku.store.stories import StoryListing
+from otaku.tui import stories
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch, set_config
+from scenarios.support.screens import DELETE, ENTER, ESC, UP, run_screen
 
 Picker = Callable[[Store, list[StoryListing], int | None], PickedStory | None]
 
@@ -31,7 +33,6 @@ def picks(story_id: int, upto: int | None = None) -> Picker:
 
     return pick
 
-
 def two_stories(app: App) -> tuple[int, int]:
     """A titled two-turn story, then a fresh current one. Returns their
     ids (first, current)."""
@@ -41,7 +42,6 @@ def two_stories(app: App) -> tuple[int, int]:
     app.play("/new")
     app.play("The second story begins.")
     return first, app.session.story_id
-
 
 class TestBrowsing:
     def test_no_stories_yet(self, app: App, capsys) -> None:
@@ -77,7 +77,6 @@ class TestBrowsing:
         app.session.tui = TUI(pick_story=lambda store, rows, current: None)
         app.play("/stories")
         assert app.session.messages[0].body == "I enter the throne hall."
-
 
 class TestForkQuestion:
     """Picking an EARLIER message asks: fork here? Yes copies, no rewinds,
@@ -140,6 +139,52 @@ class TestForkQuestion:
         assert "Cancelled." in capsys.readouterr().out
         assert app.session.story_id == second
 
+class TestStoryBrowser:
+    def pick(self, app: App, keys: str, initial: int | None = None):
+        rows = app.store.stories.list()
+        return run_screen(keys, lambda: stories.pick(app.store, rows, initial))
+
+    def test_enter_drills_in_and_enter_resumes_at_the_end(self, app: App) -> None:
+        _first, second = two_stories(app)
+        picked = self.pick(app, ENTER + ENTER)
+        assert picked is not None
+        story_id, messages, total = picked
+        assert story_id == second  # the list leads with the recently played
+        assert [m.body for m in messages] == ["The second story begins.", scripted.CHAT_REPLY]
+        assert total == 2
+
+    def test_an_earlier_message_cuts_the_chain_there(self, app: App) -> None:
+        _first, second = two_stories(app)
+        picked = self.pick(app, ENTER + UP + ENTER)
+        story_id, messages, total = picked
+        assert story_id == second
+        assert [m.body for m in messages] == ["The second story begins."]
+        assert total == 2
+
+    def test_esc_cancels(self, app: App) -> None:
+        two_stories(app)
+        assert self.pick(app, ESC) is None
+
+    def test_esc_from_the_messages_view_goes_back_not_out(self, app: App) -> None:
+        two_stories(app)
+        # In, back out to the list, then cancel — one Esc per level.
+        assert self.pick(app, ENTER + ESC + ESC) is None
+
+    def test_the_open_story_is_preselected(self, app: App) -> None:
+        first, _second = two_stories(app)
+        picked = self.pick(app, ENTER + ENTER, initial=first)
+        assert picked[0] == first
+
+    def test_the_filter_matches_titles(self, app: App) -> None:
+        first, _second = two_stories(app)
+        picked = self.pick(app, f"/First{ENTER}{ENTER}{ENTER}")
+        assert picked[0] == first
+
+    def test_delete_removes_a_story_after_a_confirm(self, app: App) -> None:
+        first, _second = two_stories(app)
+        assert self.pick(app, DELETE + "y" + ESC) is None
+        remaining = [row.id for row in app.store.stories.list()]
+        assert remaining == [first]  # the newest row was deleted
 
 class TestFork:
     def test_nothing_to_fork_yet(self, app: App, capsys) -> None:
@@ -222,6 +267,26 @@ class TestFork:
         # The cast is per-story and always travels.
         assert [c.name for c in app.store.characters.list(story_id)] == ["Keeper"]
 
+class TestSystem:
+    def test_system_before_the_first_turn_lands_on_the_created_story(self, app: App) -> None:
+        app.play("/system You are the narrator.")
+        assert app.session.story_id is None  # /system alone creates nothing
+        app.play("I enter the hall.")
+        assert app.store.stories.get_system(app.session.story_id) == "You are the narrator."
+
+    def test_system_on_a_live_story_persists(self, app: App, capsys) -> None:
+        app.play("I enter the hall.")
+        app.play("/system Answer briefly.")
+        assert "System prompt set (15 chars)." in capsys.readouterr().out
+        assert app.store.stories.get_system(app.session.story_id) == "Answer briefly."
+
+    def test_bare_system_shows_the_prompt_or_none(self, app: App, capsys) -> None:
+        app.play("/system")
+        assert "System: (none)" in capsys.readouterr().out
+        app.play("/system You are the narrator.")
+        capsys.readouterr()
+        app.play("/system")
+        assert 'System: "You are the narrator."' in capsys.readouterr().out
 
 class TestRename:
     def test_rename_titles_the_story(self, app: App, capsys) -> None:
@@ -256,29 +321,6 @@ class TestRename:
         # Titling is metadata: the list still leads with the recently
         # PLAYED story, not the recently renamed one.
         assert app.store.stories.list()[0].id == second
-
-
-class TestSystem:
-    def test_system_before_the_first_turn_lands_on_the_created_story(self, app: App) -> None:
-        app.play("/system You are the narrator.")
-        assert app.session.story_id is None  # /system alone creates nothing
-        app.play("I enter the hall.")
-        assert app.store.stories.get_system(app.session.story_id) == "You are the narrator."
-
-    def test_system_on_a_live_story_persists(self, app: App, capsys) -> None:
-        app.play("I enter the hall.")
-        app.play("/system Answer briefly.")
-        assert "System prompt set (15 chars)." in capsys.readouterr().out
-        assert app.store.stories.get_system(app.session.story_id) == "Answer briefly."
-
-    def test_bare_system_shows_the_prompt_or_none(self, app: App, capsys) -> None:
-        app.play("/system")
-        assert "System: (none)" in capsys.readouterr().out
-        app.play("/system You are the narrator.")
-        capsys.readouterr()
-        app.play("/system")
-        assert 'System: "You are the narrator."' in capsys.readouterr().out
-
 
 class TestNew:
     def test_new_detaches_and_the_next_turn_starts_fresh(self, app: App, capsys) -> None:

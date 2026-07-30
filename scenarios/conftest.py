@@ -9,19 +9,14 @@ from scenarios.support.harness import App, launch
 from scenarios.support.server import ModelServer
 
 
-@pytest.fixture(scope="session")
-def _session_server() -> Iterator[ModelServer]:
-    server = ModelServer()
-    yield server
-    server.close()
-
-
 @pytest.fixture
-def server(_session_server: ModelServer) -> Iterator[ModelServer]:
-    """The scripted model server, reset to the default script per test."""
-    _session_server.reset()
-    yield _session_server
-    _session_server.reset()
+def server() -> Iterator[ModelServer]:
+    """A scripted model server, fresh per test — a worker outliving its
+    test (shutdown never joins) talks to a dead port instead of leaking
+    requests into the next test's recording."""
+    fresh = ModelServer()
+    yield fresh
+    fresh.close()
 
 
 @pytest.fixture

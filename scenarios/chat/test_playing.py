@@ -1,4 +1,5 @@
-"""Playing a story: turns, the wire promise, undo, regenerate, /me."""
+"""Playing a story: turns, the wire promise, undo, regenerate, and the
+roleplay commands /me, /you, /ooc."""
 
 from scenarios.support import server as scripted
 from scenarios.support.harness import App
@@ -26,6 +27,53 @@ class TestTurns:
         assert sent == "((OOC: The user writes as Elara.))\nI step into the light."
         stored = app.store.stories.get_messages(app.session.story_id)[0]
         assert stored.body == "I step into the light."  # the body stays bare
+
+
+class TestMe:
+    def test_a_cast_name_resolves_to_its_canonical_form(self, app: App) -> None:
+        for i in range(3):
+            app.play(f"Turn number {i}.")
+        app.play("/extract")  # the Keeper joins the cast
+        app.play("/me keeper: I bow.")
+        sent = app.server.requests[-1]["messages"][-1]["content"]
+        assert "Keeper" in sent  # canonical, not as typed
+        assert sent.endswith("I bow.")
+
+
+class TestYou:
+    def test_you_hands_the_scene_to_the_named_character(self, app: App) -> None:
+        app.play("I enter the hall.")
+        app.play("/you Elara")
+        sent = app.server.requests[-1]["messages"][-1]["content"]
+        assert sent.startswith("((OOC")
+        assert "Elara" in sent
+        chain = app.store.stories.get_messages(app.session.story_id)
+        # One body-less turn — the framing IS the turn — and a normal reply.
+        assert [(m.role, m.body) for m in chain[-2:]] == [
+            ("user", ""),
+            ("assistant", scripted.CHAT_REPLY),
+        ]
+
+
+class TestOoc:
+    def test_ooc_is_framed_and_marks_both_sides(self, app: App) -> None:
+        app.play("I enter the hall.")
+        app.play("/ooc What genre is this?")
+        sent = app.server.requests[-1]["messages"][-1]["content"]
+        assert sent.startswith("((OOC")
+        assert "What genre is this?" in sent
+        chain = app.store.stories.get_messages(app.session.story_id)
+        assert chain[-2].body == "What genre is this?"  # the body stays bare
+        assert (chain[-2].kind, chain[-1].kind) == ("ooc", "ooc")
+
+    def test_regenerating_an_ooc_reply_stays_ooc(self, app: App) -> None:
+        app.play("I enter the hall.")
+        app.play("/ooc What genre is this?")
+        app.server.script = lambda body: "Dark fantasy."
+        app.play("/regen")
+        chain = app.store.stories.get_messages(app.session.story_id)
+        assert chain[-1].body == "Dark fantasy."
+        assert chain[-1].kind == "ooc"
 
 
 class TestUndo:

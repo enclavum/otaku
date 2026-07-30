@@ -52,7 +52,12 @@ over a throwaway state dir whose config points at the scripted
 OpenAI-compatible server in `support/server.py`, and plays lines through
 the REPL's own `submit`; a few stories drive the real binary in a pty
 (`support/terminal.py`). Deterministic and offline; the wire is asserted
-against the server's recorded requests. The `live`-marked
+against the server's recorded requests. The layout follows the app's
+command surface: `scenarios/chat/` has one test module per
+`otaku/chat/commands` module, classes in `/help` order, with the tui
+screen a command opens tested beside it; `scenarios/cli/` has one module
+per top-level command (`test_main.py` — the bare invocation, driven in a
+pty — and `test_logs.py`); the live smokes stay in `test_live.py`. The `live`-marked
 smokes talk to a real local model (ollama, OTAKU_TEST_MODEL, default
 ollama/gemma3) and skip themselves when it is absent; deselect with
 `-m "not live"`.

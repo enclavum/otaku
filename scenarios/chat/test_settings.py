@@ -7,8 +7,11 @@ a model switch keeps the story context and is remembered as last used.
 """
 
 from otaku.chat.session import TUI
+from otaku.tui import models
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch, set_config_provider
+from scenarios.support.screens import ENTER, ESC, run_screen
+from scenarios.support.server import ModelServer
 
 
 class TestModel:
@@ -60,6 +63,43 @@ class TestModel:
         app.play("/model")
         assert app.session.model == "test-model"
 
+class TestModelPicker:
+    def test_enter_picks_the_highlighted_model(self, app: App) -> None:
+        spec = run_screen(ENTER, lambda: models.pick(app.session.providers))
+        assert spec == "test/test-model"
+
+    def test_esc_cancels_without_picking(self, app: App) -> None:
+        assert run_screen(ESC, lambda: models.pick(app.session.providers)) is None
+
+    def test_the_cursor_restores_to_the_last_used_model(self, tmp_path) -> None:
+        server = ModelServer(models=("alpha", "beta"))
+        try:
+            app = launch(tmp_path / "state", server)
+            try:
+                registry = app.session.providers
+                first = run_screen(ENTER, lambda: models.pick(registry))
+                assert first == "test/alpha"
+                resumed = run_screen(
+                    ENTER, lambda: models.pick(registry, initial_spec="test/beta")
+                )
+                assert resumed == "test/beta"
+            finally:
+                app.close()
+        finally:
+            server.close()
+
+    def test_the_filter_narrows_the_list(self, tmp_path) -> None:
+        server = ModelServer(models=("alpha", "beta"))
+        try:
+            app = launch(tmp_path / "state", server)
+            try:
+                registry = app.session.providers
+                spec = run_screen(f"/bet{ENTER}{ENTER}", lambda: models.pick(registry))
+                assert spec == "test/beta"
+            finally:
+                app.close()
+        finally:
+            server.close()
 
 class TestThink:
     def test_a_level_is_set_and_remembered(self, app: App, capsys) -> None:
@@ -128,27 +168,6 @@ class TestThink:
         finally:
             plain.close()
 
-
-class TestVerbose:
-    def test_verbose_adds_the_stats_line_after_a_reply(self, app: App, capsys) -> None:
-        app.play("/set verbose on")
-        app.play("I enter the hall.")
-        assert "[ total" in capsys.readouterr().out
-
-    def test_off_removes_it(self, app: App, capsys) -> None:
-        app.play("/set verbose on")
-        app.play("/set verbose off")
-        capsys.readouterr()
-        app.play("I enter the hall.")
-        assert "[ total" not in capsys.readouterr().out
-
-    def test_the_toggle_is_remembered(self, app: App) -> None:
-        app.play("/set verbose on")
-        relaunched = launch(app.paths.root, app.server)
-        assert relaunched.session.verbose is True
-        relaunched.close()
-
-
 class TestParameters:
     def test_a_set_parameter_reaches_the_wire(self, app: App) -> None:
         app.play("/set parameter temperature 0.7")
@@ -200,3 +219,22 @@ class TestParameters:
     def test_bare_set_shows_the_usage(self, app: App, capsys) -> None:
         app.play("/set")
         assert "Usage" in capsys.readouterr().out
+
+class TestVerbose:
+    def test_verbose_adds_the_stats_line_after_a_reply(self, app: App, capsys) -> None:
+        app.play("/set verbose on")
+        app.play("I enter the hall.")
+        assert "[ total" in capsys.readouterr().out
+
+    def test_off_removes_it(self, app: App, capsys) -> None:
+        app.play("/set verbose on")
+        app.play("/set verbose off")
+        capsys.readouterr()
+        app.play("I enter the hall.")
+        assert "[ total" not in capsys.readouterr().out
+
+    def test_the_toggle_is_remembered(self, app: App) -> None:
+        app.play("/set verbose on")
+        relaunched = launch(app.paths.root, app.server)
+        assert relaunched.session.verbose is True
+        relaunched.close()

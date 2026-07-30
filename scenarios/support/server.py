@@ -30,49 +30,6 @@ EXTRACTION = {
 }
 
 
-def default_script(body: dict[str, Any]) -> str:
-    """Answers by prompt kind: the extraction prompt gets valid JSON, the
-    rollup prompts get one-line rollups, anything else gets the chat
-    reply. Recognition is by each lore prompt's fixed opening words."""
-    prompt = str(body.get("messages", [{}])[-1].get("content", ""))
-    if "You are a story analyst" in prompt:
-        return json.dumps(EXTRACTION, ensure_ascii=False)
-    if prompt.startswith("Combine the scene summaries"):
-        return STORY_SO_FAR
-    if prompt.startswith("Write ") and "'s history" in prompt:
-        return CHARACTER_HISTORY
-    return CHAT_REPLY
-
-
-def numbered_script(summary_chars: int = 0) -> Callable[[dict[str, Any]], str]:
-    """Like the default script, but every extraction call closes a DISTINCT
-    scene — "Scene 1", "Scene 2", … in call order — so long-story tests can
-    assert which scene ended up where. `summary_chars` pads each summary to
-    roughly that size, for stories about the recap outgrowing its budget."""
-    state = {"scene": 0}
-
-    def script(body: dict[str, Any]) -> str:
-        prompt = str(body.get("messages", [{}])[-1].get("content", ""))
-        if "You are a story analyst" not in prompt:
-            return default_script(body)
-        state["scene"] += 1
-        n = state["scene"]
-        summary = f"Scene summary {n}."
-        if summary_chars > len(summary):
-            summary += " x" * ((summary_chars - len(summary)) // 2)
-        extraction = {
-            "scene": {"title": f"Scene {n}", "summary": summary},
-            "speakers": [],
-            "characters": [{"name": "Keeper", "description": "warden of the gate"}]
-            if n == 1
-            else [],
-            "journals": [{"character": "Keeper", "entry": f"Entry {n}.", "state": f"state {n}"}],
-        }
-        return json.dumps(extraction, ensure_ascii=False)
-
-    return script
-
-
 class ModelServer:
     """The server, on a free localhost port from construction to `close`.
     `script` is swappable per test; `reset` restores the default and
@@ -141,3 +98,57 @@ class ModelServer:
 
     def close(self) -> None:
         self._httpd.shutdown()
+
+
+def chat_request(server: ModelServer, last_line: str) -> dict[str, Any]:
+    """The recorded request whose newest message ends with `last_line` —
+    the turn under test, picked explicitly because the post-close prompt
+    warm-up races the next turn onto the server, making the newest
+    recorded request ambiguous."""
+    for body in reversed(server.requests):
+        if str(body["messages"][-1]["content"]).endswith(last_line):
+            return body
+    raise AssertionError(f"no recorded request ends with {last_line!r}")
+
+
+def default_script(body: dict[str, Any]) -> str:
+    """Answers by prompt kind: the extraction prompt gets valid JSON, the
+    rollup prompts get one-line rollups, anything else gets the chat
+    reply. Recognition is by each lore prompt's fixed opening words."""
+    prompt = str(body.get("messages", [{}])[-1].get("content", ""))
+    if "You are a story analyst" in prompt:
+        return json.dumps(EXTRACTION, ensure_ascii=False)
+    if prompt.startswith("Combine the scene summaries"):
+        return STORY_SO_FAR
+    if prompt.startswith("Write ") and "'s history" in prompt:
+        return CHARACTER_HISTORY
+    return CHAT_REPLY
+
+
+def numbered_script(summary_chars: int = 0) -> Callable[[dict[str, Any]], str]:
+    """Like the default script, but every extraction call closes a DISTINCT
+    scene — "Scene 1", "Scene 2", … in call order — so long-story tests can
+    assert which scene ended up where. `summary_chars` pads each summary to
+    roughly that size, for stories about the recap outgrowing its budget."""
+    state = {"scene": 0}
+
+    def script(body: dict[str, Any]) -> str:
+        prompt = str(body.get("messages", [{}])[-1].get("content", ""))
+        if "You are a story analyst" not in prompt:
+            return default_script(body)
+        state["scene"] += 1
+        n = state["scene"]
+        summary = f"Scene summary {n}."
+        if summary_chars > len(summary):
+            summary += " x" * ((summary_chars - len(summary)) // 2)
+        extraction = {
+            "scene": {"title": f"Scene {n}", "summary": summary},
+            "speakers": [],
+            "characters": [{"name": "Keeper", "description": "warden of the gate"}]
+            if n == 1
+            else [],
+            "journals": [{"character": "Keeper", "entry": f"Entry {n}.", "state": f"state {n}"}],
+        }
+        return json.dumps(extraction, ensure_ascii=False)
+
+    return script

@@ -11,8 +11,9 @@ from otaku.paths import Paths
 from otaku.settings import state as state_mod
 from scenarios.support import server as scripted
 from scenarios.support.harness import SPEC, set_config_provider
+from scenarios.support.process import run_otaku
 from scenarios.support.server import ModelServer
-from scenarios.support.terminal import CTRL_U, ENTER, Terminal
+from scenarios.support.terminal import CTRL_O, CTRL_R, CTRL_T, CTRL_U, ENTER, Terminal
 
 
 def remember(root: Path) -> None:
@@ -80,3 +81,69 @@ class TestChat:
         second = Terminal(str(state))
         second.expect("Resumed at message 2.", scripted.CHAT_REPLY.split()[0])
         assert second.quit() == 0
+
+
+class TestShortcuts:
+    def launch(self, server: ModelServer, tmp_path: Path) -> Terminal:
+        state = tmp_path / "state"
+        set_config_provider(state, server)
+        remember(state)
+        terminal = Terminal(str(state))
+        terminal.expect("otaku")  # the banner — we are in the REPL
+        return terminal
+
+    def test_ctrl_r_regenerates_the_reply(self, server: ModelServer, tmp_path: Path) -> None:
+        """A fresh take on the same prompt: Ctrl+R at the prompt streams a
+        different reply in place of the old one."""
+        terminal = self.launch(server, tmp_path)
+        terminal.send("I roll the dice.")
+        terminal.send(ENTER, 1.0)
+        terminal.expect("stirred")
+        server.script = lambda body: "It came up six."  # the model changes its mind
+        terminal.settle()
+        terminal.send(CTRL_R, 1.0)
+        terminal.expect("It came up six.")
+        assert terminal.quit() == 0
+
+    def test_ctrl_t_browses_and_resumes_the_story(
+        self, server: ModelServer, tmp_path: Path
+    ) -> None:
+        """The story browser on screen: Ctrl+T opens it over the session,
+        Enter drills into the messages, Enter resumes."""
+        terminal = self.launch(server, tmp_path)
+        terminal.send("I enter the hall.")
+        terminal.send(ENTER, 1.0)
+        terminal.expect("stirred")
+        terminal.settle()
+        terminal.send(CTRL_T, 1.0)
+        terminal.expect("Stories (1)")
+        terminal.send(ENTER, 1.0)
+        terminal.expect("messages")  # the message view's header
+        terminal.send(ENTER, 1.0)
+        terminal.expect("Resumed at message 2.")
+        assert terminal.quit() == 0
+
+    def test_ctrl_o_opens_the_picker_over_the_session(
+        self, server: ModelServer, tmp_path: Path
+    ) -> None:
+        """Ctrl+O opens the model picker mid-session; picking the current
+        model lands back at the prompt with nothing changed."""
+        terminal = self.launch(server, tmp_path)
+        terminal.settle()
+        terminal.send(CTRL_O, 1.0)
+        terminal.expect("Models (1)", "test-model")
+        terminal.send(ENTER, 1.0)
+        terminal.expect("Already using test/test-model.")
+        assert terminal.quit() == 0
+
+
+class TestHelpVersion:
+    def test_version_prints_and_exits(self, tmp_path: Path) -> None:
+        result = run_otaku(tmp_path / "state", "--version")
+        assert result.returncode == 0
+        assert "otaku" in result.stdout
+
+    def test_help_names_the_subcommands(self, tmp_path: Path) -> None:
+        result = run_otaku(tmp_path / "state", "--help")
+        assert result.returncode == 0
+        assert "logs" in result.stdout
