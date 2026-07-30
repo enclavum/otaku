@@ -9,6 +9,7 @@ from pathlib import Path
 
 from otaku.paths import Paths
 from otaku.settings import state as state_mod
+from otaku.terminal import PROMPT_CONTINUATION
 from scenarios.support import server as scripted
 from scenarios.support.harness import SPEC, run_otaku, set_config, set_config_provider
 from scenarios.support.server import ModelServer
@@ -206,7 +207,7 @@ class TestStreaming:
         terminal.expect("otaku")
         terminal.send('"""')
         terminal.send(ENTER, 0.3)
-        terminal.expect("... ")  # the continuation prompt
+        terminal.expect(PROMPT_CONTINUATION)
         terminal.send("/regen is part of my story")
         terminal.send(ENTER, 0.3)
         terminal.send('and so is this line"""')

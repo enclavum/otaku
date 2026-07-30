@@ -44,6 +44,27 @@ _RUSSIAN_TO_LATIN = str.maketrans(
 )
 
 
+# The prompt markers: `PROMPT_PREFIX` opens every input line (and each
+# line `user_block` echoes); `PROMPT_CONTINUATION` marks the lines of an
+# open `"""` block.
+PROMPT_PREFIX = "> "
+PROMPT_CONTINUATION = "... "
+
+# A played user turn, echoed: its text on a light band (#f0f0f0), the
+# text in the terminal's normal color.
+_USER_TURN = "\x1b[48;2;240;240;240m"
+
+
+def user_block(text: str) -> str:
+    """`text` as the submitted-turn block: every line on the band behind a
+    `> ` marker echoing the prompt. The band runs the full terminal
+    width — erase-to-end-of-line with the background active paints the
+    rest of the row, so no width math is needed. Printed between blank
+    lines by the callers."""
+    lines = text.splitlines() or [""]
+    return "\n".join(f"{_USER_TURN}{PROMPT_PREFIX}{line}\x1b[K{RESET}" for line in lines)
+
+
 def fg(color: int) -> str:
     """SGR 256-color foreground."""
     return f"\x1b[38;5;{color}m"

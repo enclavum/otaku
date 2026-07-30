@@ -37,6 +37,8 @@ class TestBrowsing:
         out = capsys.readouterr().out
         assert "Resumed at message 2." in out
         assert "The first story begins." in out  # the scene is echoed back
+        assert "\x1b[48;2;240;240;240m" in out  # the user turn rides its band
+        assert "[user]" not in out  # no role markers in the echo
         assert app.session.story_id == first
         assert app.session.system == ""  # the second story's premise stayed behind
         assert [m.body for m in app.session.messages] == [

@@ -45,7 +45,12 @@ _HELP_ROWS: list[tuple[str | None, str, str]] = [
     (None, "", "Lore:"),
     ("/lore", "Ctrl+L", "Browse and edit the memory: scenes, cast, journals"),
     ("/cast", "", "The same browser, opened directly on the cast"),
-    ("/extract", "", "Extract lore from the recent messages now (closes a scene)"),
+    (
+        "/extract",
+        "",
+        "Extract lore from the recent messages now (closes a scene); "
+        "triggered automatically after 5 minutes of inactivity",
+    ),
     ("/merge A into B", "", "Fold a duplicate character into the real one"),
     (None, "", "Inspect:"),
     ("/context", "", "Preview the next request (assembled prompt + budgets)"),

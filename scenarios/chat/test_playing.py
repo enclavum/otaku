@@ -45,7 +45,7 @@ class TestMe:
             app.play(f"Turn number {i}.")
         app.play("/extract")  # the Keeper joins the cast
         app.play("/me keeper: I bow.")
-        sent = app.server.requests[-1]["messages"][-1]["content"]
+        sent = scripted.chat_request(app.server, "I bow.")["messages"][-1]["content"]
         assert "Keeper" in sent  # canonical, not as typed
         assert sent.endswith("I bow.")
 

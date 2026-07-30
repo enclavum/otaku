@@ -15,6 +15,7 @@ between the delimiters (newlines preserved) is sent as a single message.
 """
 
 import contextlib
+import shutil
 import sys
 from collections.abc import Callable
 from typing import Any
@@ -31,6 +32,7 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import menus as _ptk_menus
 from prompt_toolkit.layout.controls import BufferControl
 from prompt_toolkit.styles import Style
+from prompt_toolkit.utils import get_cwidth
 
 from otaku import __version__
 from otaku.chat.commands import dispatch
@@ -42,7 +44,16 @@ from otaku.formatting import flatten, pretty_path, truncate
 from otaku.logs.errors import ErrorLog
 from otaku.store import Store
 from otaku.store.schema import Message
-from otaku.terminal import BOLD, CURSOR_BLINK_ON, RESET, banner, statusline
+from otaku.terminal import (
+    BOLD,
+    CURSOR_BLINK_ON,
+    PROMPT_CONTINUATION,
+    PROMPT_PREFIX,
+    RESET,
+    banner,
+    statusline,
+    user_block,
+)
 from otaku.terminal.statusline import StatusLine
 
 _PLACEHOLDER = FormattedText([("class:placeholder", "Send a message")])
@@ -157,7 +168,8 @@ def run(session: Session, store: Store) -> None:
         print(_banner(session, store))
     _show_resumed(session, store)
     if session.notice:
-        print()
+        # The resume echo above always precedes the notice and ends with
+        # its own blank line.
         print(f"{BOLD}{session.notice}{RESET}")
         print()
         session.notice = ""
@@ -187,25 +199,38 @@ def run(session: Session, store: Store) -> None:
 
     assembler = LineAssembler()
 
+    # Terminal rows the CURRENT submission's input occupies on screen —
+    # accumulated across a """ block's prompts — so a played turn can be
+    # erased and re-echoed as the grey submitted-turn block.
+    input_rows = 0
+
     while not session.should_quit:
         default = carry.pop("text", "")
+        prefix = PROMPT_CONTINUATION if assembler.in_block else PROMPT_PREFIX
+        placeholder = None if assembler.in_block else _PLACEHOLDER
         try:
-            if assembler.in_block:
-                line = prompt_session.prompt("... ", placeholder=None, default=default)
-            else:
-                line = prompt_session.prompt(">>> ", placeholder=_PLACEHOLDER, default=default)
+            line = prompt_session.prompt(prefix, placeholder=placeholder, default=default)
         except EOFError:
             session.should_quit = True
             break
         except KeyboardInterrupt:
             # ^C clears the line; inside a """ block it also drops the buffer.
             assembler.reset()
+            input_rows = 0
             continue
+        input_rows += _rows_on_screen(line, prefix)
 
         # A shortcut key exits the prompt with its command as the result; it
         # is always a command — even mid-"""-block, where feeding it to the
         # assembler would paste "/regen" into the user's text.
         if carry.pop("shortcut", None) is not None:
+            input_rows = 0
+            # The exited prompt line goes: its text returns at the next
+            # prompt, and a leftover placeholder above the command's output
+            # is noise. Erase what was SHOWN — the carried text, not the
+            # command that exited the prompt.
+            rows = _rows_on_screen(carry.get("text", ""), prefix)
+            sys.stdout.write(f"\x1b[{rows}A\r\x1b[J")
             try:
                 submit(line, session, store)
             except KeyboardInterrupt:
@@ -218,8 +243,18 @@ def run(session: Session, store: Store) -> None:
 
         text, is_raw = result
         message = text if is_raw else text.strip()
+        rows, input_rows = input_rows, 0
         if not message:
             continue
+
+        # A story turn re-echoes as the grey block, the typed input erased
+        # under it; a command stays on screen as typed.
+        if is_raw or not message.startswith("/"):
+            # The erase leaves the blank line every preceding output ends
+            # with, so the block prints no leading blank of its own.
+            sys.stdout.write(f"\x1b[{rows}A\r\x1b[J" if rows else "")
+            print(user_block(message))
+            print()
 
         try:
             submit(message, session, store, raw=is_raw)
@@ -275,6 +310,13 @@ def _maybe_schedule(session: Session, last_before: Message | None) -> None:
         session.worker.schedule(build_job(session))
 
 
+def _rows_on_screen(line: str, prefix: str) -> int:
+    """Terminal rows one prompt read occupied: the prompt prefix plus the
+    line, wrapped at the terminal's width."""
+    columns = max(20, shutil.get_terminal_size((80, 24)).columns)
+    return max(1, -(-get_cwidth(prefix + line) // columns))
+
+
 def _banner(session: Session, store: Store) -> str:
     """The session header. Best-effort: a provider that can't report its
     context window just leaves that fact out — the banner never blocks or
@@ -310,6 +352,7 @@ def _show_resumed(session: Session, store: Store) -> None:
         print(f"Resumed at message {len(session.messages)}.")
     print()
     print(session.render_last_turns(RESUME_TURNS))
+    print()
 
 
 def _activity_toolbar(session: Session) -> Callable[[], FormattedText]:

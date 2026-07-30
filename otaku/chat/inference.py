@@ -128,6 +128,7 @@ def _run_step(session: Session, store: Store, ooc: bool) -> None:
         # The turn is recorded — it is story — and plays on a /regen once
         # a model exists.
         print(NO_MODEL_HINT)
+        print()
         return
     content: list[str] = []
     in_thinking = False
@@ -222,8 +223,12 @@ def _run_step(session: Session, store: Store, ooc: bool) -> None:
     if watcher.regen_requested:
         # Ctrl+R during the stream: the partial is recorded above like any
         # reply; the outer loop's drop_last_reply siblings it away.
-        print(f"{DIM}[ regenerating ]{RESET}")
+        print(f"\n{DIM}[ regenerating ]{RESET}")
         session.regen_after = True
+        return
+    # One blank line between the turn's output (reply, stats, or the
+    # error note) and whatever comes next — the prompt included.
+    print()
 
 
 def format_stats(stats: Stats) -> str:

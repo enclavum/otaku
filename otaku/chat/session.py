@@ -32,7 +32,7 @@ from otaku.settings.prompts import Prompts
 from otaku.store import Store
 from otaku.store.schema import Message
 from otaku.store.stories import StoryListing
-from otaku.terminal import DIM, RESET
+from otaku.terminal import DIM, RESET, user_block
 from otaku.terminal.statusline import StatusLine
 
 # The inference parameters otaku understands, and how each is read from the
@@ -59,7 +59,7 @@ PickedStory = tuple[int, list[Message], int]
 
 # Turns echoed when a story (re)opens — launch resume, a browser pick, an
 # import — so the scene is on screen before the prompt.
-RESUME_TURNS = 3
+RESUME_TURNS = 4
 
 # What every model-facing door says while no model is selected.
 NO_MODEL_HINT = "No model selected — start your model server and pick one with /model."
@@ -280,17 +280,19 @@ class Session:
                 ),
             )
 
-    def render_last_turns(self, count: int, *, dim: str = DIM, reset: str = RESET) -> str:
-        """The last `count` turns, echoed the way they played: a dim `[role]`
-        marker with one blank line before it, and the content — its own
-        blank lines dropped — with its markdown rendered, as it looked
-        streaming."""
+    def render_last_turns(self, count: int) -> str:
+        """The last `count` turns, echoed the way they played: a user turn
+        as the grey submitted-prompt block, a model turn as its rendered
+        markdown — one blank line between turns, each turn's own interior
+        blank lines dropped."""
         out: list[str] = []
         for message in self.messages[-count:]:
             out.append("")
-            out.append(f"{dim}[{message.role}]{reset}")
             body = "\n".join(line for line in message.body.splitlines() if line.strip())
-            out.extend(render_markdown(body).splitlines())
+            if message.role == "user":
+                out.append(user_block(body))
+            else:
+                out.extend(render_markdown(body).splitlines())
         return "\n".join(out).lstrip("\n")
 
     def reload_params(self) -> None:
