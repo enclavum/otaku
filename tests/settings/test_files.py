@@ -11,10 +11,6 @@ import tomllib
 from otaku.settings.files import row, toml_key, toml_scalar
 
 
-def roundtrip(value: object) -> object:
-    return tomllib.loads(f"x = {toml_scalar(value)}")["x"]
-
-
 class TestTomlKey:
     def test_a_simple_name_stays_bare(self) -> None:
         assert toml_key("ollama") == "ollama"
@@ -60,3 +56,7 @@ class TestRow:
 
     def test_no_comment_means_the_setting_alone(self) -> None:
         assert row("a = 1", "") == "a = 1"
+
+
+def roundtrip(value: object) -> object:
+    return tomllib.loads(f"x = {toml_scalar(value)}")["x"]

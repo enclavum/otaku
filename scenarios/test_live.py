@@ -25,25 +25,6 @@ OLLAMA_URL = "http://127.0.0.1:11434/v1"
 pytestmark = pytest.mark.live
 
 
-@pytest.fixture
-def live_app(tmp_path: Path, server):  # type: ignore[no-untyped-def]
-    provider_name, _, model = SPEC.partition("/")
-    try:
-        models = httpx.get(f"{OLLAMA_URL}/models", timeout=3.0).json()["data"]
-    except Exception:
-        pytest.skip(f"no server at {OLLAMA_URL}")
-    if not any(model in m["id"] for m in models):
-        pytest.skip(f"{model!r} is not pulled (ollama pull {model})")
-    root = tmp_path / "state"
-    paths = Paths.resolve(root)
-    paths.ensure_tree()
-    providers = {provider_name: config_mod.Provider(name=provider_name, url=OLLAMA_URL)}
-    write_atomic(paths.config_file, config_mod.Config(providers=providers).to_toml())
-    app = launch(root, server, spec=SPEC)
-    yield app
-    app.close()
-
-
 class TestLive:
     def test_a_turn_streams_and_persists(self, live_app) -> None:  # type: ignore[no-untyped-def]
         live_app.play("Ответь одним словом: да или нет?")
@@ -63,3 +44,22 @@ class TestLive:
             assert live_app.store.scenes.get_current(story_id, ids)
         else:  # it did not — the tail stays open, the app stays up
             assert "failed" in out or "Nothing new" in out
+
+
+@pytest.fixture
+def live_app(tmp_path: Path, server):  # type: ignore[no-untyped-def]
+    provider_name, _, model = SPEC.partition("/")
+    try:
+        models = httpx.get(f"{OLLAMA_URL}/models", timeout=3.0).json()["data"]
+    except Exception:
+        pytest.skip(f"no server at {OLLAMA_URL}")
+    if not any(model in m["id"] for m in models):
+        pytest.skip(f"{model!r} is not pulled (ollama pull {model})")
+    root = tmp_path / "state"
+    paths = Paths.resolve(root)
+    paths.ensure_tree()
+    providers = {provider_name: config_mod.Provider(name=provider_name, url=OLLAMA_URL)}
+    write_atomic(paths.config_file, config_mod.Config(providers=providers).to_toml())
+    app = launch(root, server, spec=SPEC)
+    yield app
+    app.close()

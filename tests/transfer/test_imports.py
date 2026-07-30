@@ -17,13 +17,6 @@ from otaku.transfer import (
 from otaku.transfer.exports import render_story
 from otaku.transfer.imports import parse_story
 
-
-def render(export: StoryExport) -> str:
-    return render_story(
-        export, otaku_version="0.2.0", model="omlx/test", exported="2026-07-29 12:00"
-    )
-
-
 FULL = StoryExport(
     title="Болотная часовня",
     system="Ты — рассказчик.",
@@ -136,3 +129,9 @@ class TestMessageHeaders:
     def test_a_non_string_after_the_quote_degrades_to_absent(self) -> None:
         assert self.parse_one('1 · user · "123"').framing == "123"
         assert self.parse_one("1 · user · [1]").speaker == "[1]"
+
+
+def render(export: StoryExport) -> str:
+    return render_story(
+        export, otaku_version="0.2.0", model="omlx/test", exported="2026-07-29 12:00"
+    )

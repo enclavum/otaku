@@ -57,7 +57,11 @@ command surface: `scenarios/chat/` has one test module per
 `otaku/chat/commands` module, classes in `/help` order, with the tui
 screen a command opens tested beside it; `scenarios/cli/` has one module
 per top-level command (`test_main.py` — the bare invocation, driven in a
-pty — and `test_logs.py`); the live smokes stay in `test_live.py`. The `live`-marked
+pty — and `test_logs.py`); `test_app.py` covers the launch itself
+(encryption, backups, resume); the live smokes stay in `test_live.py`.
+In every test module — units included — the test classes come first
+(one class per command or group) and helper functions after them; within
+a class, tests follow the story's logical order. The `live`-marked
 smokes talk to a real local model (ollama, OTAKU_TEST_MODEL, default
 ollama/gemma3) and skip themselves when it is absent; deselect with
 `-m "not live"`.

@@ -11,6 +11,9 @@ worker being started bare, without the REPL's status wiring.
 """
 
 import dataclasses
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 from otaku import app as app_mod
@@ -48,6 +51,20 @@ def launch(root: Path, server: ModelServer, *, spec: str = SPEC) -> App:
     return App(root, server, spec=spec)
 
 
+def run_otaku(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    """`otaku ARGS` over the state dir at `root`, run for real and
+    captured — for the subcommands that print and exit; the pty driver
+    (`terminal.py`) owns the interactive journeys."""
+    return subprocess.run(
+        [sys.executable, "-c", "from otaku.cli import main; main()", *args],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env={**os.environ, "OTAKU_CONFIG_DIR": str(root)},
+        check=False,
+    )
+
+
 def set_config(root: Path, **fields: object) -> None:
     """Set Config fields in the state dir's config file — an update of
     whatever is there (a scenario shrinking the scene thresholds, say)."""
@@ -57,19 +74,26 @@ def set_config(root: Path, **fields: object) -> None:
 
 
 def set_config_provider(
-    root: Path, server: ModelServer, *, supports_thinking: bool | None = None
+    root: Path,
+    server: ModelServer,
+    *,
+    name: str = PROVIDER,
+    keep_alive: str = "",
+    supports_thinking: bool | None = None,
 ) -> None:
-    """Point the test provider at the scripted server's port — set into
-    whatever config is there. `supports_thinking` keeps its current value
-    unless specified; a fresh provider supports thinking, so every knob
-    is exercisable."""
+    """Point a provider at the scripted server's port — set into whatever
+    config is there. `name` picks the client the registry builds (a
+    provider named "ollama" or "omlx" gets its managed backend, the
+    default "test" the generic one). `supports_thinking` keeps its
+    current value unless specified; a fresh provider supports thinking,
+    so every knob is exercisable."""
     paths = Paths.resolve(root)
     cfg = _load_or_default(paths)
-    existing = cfg.providers.get(PROVIDER)
+    existing = cfg.providers.get(name)
     if supports_thinking is None:
         supports_thinking = existing.supports_thinking if existing else True
-    cfg.providers[PROVIDER] = config_mod.Provider(
-        name=PROVIDER, url=server.url, supports_thinking=supports_thinking
+    cfg.providers[name] = config_mod.Provider(
+        name=name, url=server.url, keep_alive=keep_alive, supports_thinking=supports_thinking
     )
     write_atomic(paths.config_file, cfg.to_toml())
 

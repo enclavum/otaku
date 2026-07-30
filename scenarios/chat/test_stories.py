@@ -17,31 +17,10 @@ from otaku.store.stories import StoryListing
 from otaku.tui import stories
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch, set_config
-from scenarios.support.screens import DELETE, ENTER, ESC, UP, run_screen
+from scenarios.support.screens import CTRL_S, DELETE, ENTER, ESC, UP, run_screen
 
 Picker = Callable[[Store, list[StoryListing], int | None], PickedStory | None]
 
-
-def picks(story_id: int, upto: int | None = None) -> Picker:
-    """A browser stub: the user picked `story_id` — at its last turn, or at
-    message `upto` of it."""
-
-    def pick(store: Store, rows: list[StoryListing], current: int | None) -> PickedStory:
-        messages = store.stories.get_messages(story_id)
-        cut = messages if upto is None else messages[:upto]
-        return (story_id, cut, len(messages))
-
-    return pick
-
-def two_stories(app: App) -> tuple[int, int]:
-    """A titled two-turn story, then a fresh current one. Returns their
-    ids (first, current)."""
-    app.play("The first story begins.")
-    app.play("/rename First")
-    first = app.session.story_id
-    app.play("/new")
-    app.play("The second story begins.")
-    return first, app.session.story_id
 
 class TestBrowsing:
     def test_no_stories_yet(self, app: App, capsys) -> None:
@@ -77,6 +56,7 @@ class TestBrowsing:
         app.session.tui = TUI(pick_story=lambda store, rows, current: None)
         app.play("/stories")
         assert app.session.messages[0].body == "I enter the throne hall."
+
 
 class TestForkQuestion:
     """Picking an EARLIER message asks: fork here? Yes copies, no rewinds,
@@ -139,6 +119,7 @@ class TestForkQuestion:
         assert "Cancelled." in capsys.readouterr().out
         assert app.session.story_id == second
 
+
 class TestStoryBrowser:
     def pick(self, app: App, keys: str, initial: int | None = None):
         rows = app.store.stories.list()
@@ -175,6 +156,12 @@ class TestStoryBrowser:
         picked = self.pick(app, ENTER + ENTER, initial=first)
         assert picked[0] == first
 
+    def test_e_edits_a_message_in_place(self, app: App) -> None:
+        _first, second = two_stories(app)
+        assert self.pick(app, ENTER + "e" + "!" + CTRL_S + ESC + ESC) is None
+        chain = app.store.stories.get_messages(second)
+        assert chain[-1].body == scripted.CHAT_REPLY + "!"
+
     def test_the_filter_matches_titles(self, app: App) -> None:
         first, _second = two_stories(app)
         picked = self.pick(app, f"/First{ENTER}{ENTER}{ENTER}")
@@ -185,6 +172,7 @@ class TestStoryBrowser:
         assert self.pick(app, DELETE + "y" + ESC) is None
         remaining = [row.id for row in app.store.stories.list()]
         assert remaining == [first]  # the newest row was deleted
+
 
 class TestFork:
     def test_nothing_to_fork_yet(self, app: App, capsys) -> None:
@@ -267,6 +255,7 @@ class TestFork:
         # The cast is per-story and always travels.
         assert [c.name for c in app.store.characters.list(story_id)] == ["Keeper"]
 
+
 class TestSystem:
     def test_system_before_the_first_turn_lands_on_the_created_story(self, app: App) -> None:
         app.play("/system You are the narrator.")
@@ -287,6 +276,7 @@ class TestSystem:
         capsys.readouterr()
         app.play("/system")
         assert 'System: "You are the narrator."' in capsys.readouterr().out
+
 
 class TestRename:
     def test_rename_titles_the_story(self, app: App, capsys) -> None:
@@ -322,6 +312,7 @@ class TestRename:
         # PLAYED story, not the recently renamed one.
         assert app.store.stories.list()[0].id == second
 
+
 class TestNew:
     def test_new_detaches_and_the_next_turn_starts_fresh(self, app: App, capsys) -> None:
         app.play("I enter the hall.")
@@ -339,3 +330,26 @@ class TestNew:
         assert app.session.story_id != original
         # The left story is intact, ready to be resumed from the browser.
         assert len(app.store.stories.get_messages(original)) == 2
+
+
+def picks(story_id: int, upto: int | None = None) -> Picker:
+    """A browser stub: the user picked `story_id` — at its last turn, or at
+    message `upto` of it."""
+
+    def pick(store: Store, rows: list[StoryListing], current: int | None) -> PickedStory:
+        messages = store.stories.get_messages(story_id)
+        cut = messages if upto is None else messages[:upto]
+        return (story_id, cut, len(messages))
+
+    return pick
+
+
+def two_stories(app: App) -> tuple[int, int]:
+    """A titled two-turn story, then a fresh current one. Returns their
+    ids (first, current)."""
+    app.play("The first story begins.")
+    app.play("/rename First")
+    first = app.session.story_id
+    app.play("/new")
+    app.play("The second story begins.")
+    return first, app.session.story_id

@@ -15,32 +15,11 @@ from otaku.transfer import exports, imports
 from otaku.tui import lore
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch, set_config
-from scenarios.support.screens import CTRL_S, ENTER, ESC, TAB, run_screen
+from scenarios.support.screens import CTRL_S, DOWN, ENTER, ESC, RIGHT, TAB, run_screen
 from scenarios.support.server import numbered_script
 
 CHAPEL = Path(__file__).parent.parent / "fixtures" / "chapel.md"
 
-
-def remembered(app: App) -> int:
-    """A story with memory: one closed scene, the Keeper, a journal."""
-    for i in range(3):
-        app.play(f"Turn number {i}.")
-    app.play("/extract")
-    return app.session.story_id
-
-def browse(app: App, story_id: int, keys: str) -> None:
-    with contextlib.suppress(EOFError):
-        run_screen(keys, lambda: lore.browse(app.store, story_id, "scenes"))
-
-def lore_calls(app: App) -> list[str]:
-    """The recorded lore-building prompts — the post-close prompt warm-up
-    is the app's own background business and doesn't count."""
-    prompts = [str(r["messages"][-1]["content"]) for r in app.server.requests]
-    return [
-        p
-        for p in prompts
-        if "You are a story analyst" in p or p.startswith(("Combine", "Write "))
-    ]
 
 class TestLoreBrowser:
     def test_a_scene_title_edits_in_place(self, app: App) -> None:
@@ -63,6 +42,37 @@ class TestLoreBrowser:
         browse(app, story_id, TAB + ENTER + ENTER + "!" + CTRL_S + ESC * 3)
         keeper = app.store.characters.list(story_id)[0]
         assert keeper.description == "warden of the gate!"
+
+    def test_a_journal_entry_edit_invalidates_the_derived_history(self, app: App) -> None:
+        # Fix the input, and the output follows: editing an entry clears
+        # the character's rolled-up history, and the next pass rebuilds it.
+        story_id = remembered(app)
+        keeper = app.store.characters.list(story_id)[0]
+        browse(app, story_id, ENTER + DOWN + DOWN + ENTER + "!" + CTRL_S + ESC * 3)
+        journal = app.store.journals.list(story_id)[-1]
+        assert journal.entry == "I saw the guest.!"
+        assert not journal.history  # invalidated with the edit
+        app.play("/extract")  # declines a new scene, heals the rollup
+        memory = app.store.journals.get_current(story_id)[keeper.id]
+        assert memory.history  # rebuilt from the fixed input
+
+    def test_a_derived_history_is_not_editable(self, app: App) -> None:
+        story_id = remembered(app)
+        keeper = app.store.characters.list(story_id)[0]
+        before = app.store.journals.get_current(story_id)[keeper.id]
+        browse(app, story_id, TAB + ENTER + DOWN + DOWN + ENTER + "!" + CTRL_S + ESC * 3)
+        after = app.store.journals.get_current(story_id)[keeper.id]
+        assert after.history == before.history  # dim, read-only, untouched
+        assert app.store.characters.list(story_id)[0].description == "warden of the gate"
+
+    def test_the_pivot_crosses_to_the_other_parent(self, app: App) -> None:
+        # A journal row has two doors: from its scene, `→` lands on the
+        # same entry under its character. An edit there proves the pivot
+        # arrived — the entry is one row, reachable from both sides.
+        story_id = remembered(app)
+        browse(app, story_id, ENTER + DOWN + DOWN + RIGHT + ENTER + "!" + CTRL_S + ESC * 4)
+        assert app.store.journals.list(story_id)[-1].entry == "I saw the guest.!"
+
 
 class TestExtract:
     def test_extract_closes_a_scene_with_journals_and_rollups(self, app: App, capsys) -> None:
@@ -93,6 +103,7 @@ class TestExtract:
         app.play("/extract")
         assert "Nothing new since the last scene." in capsys.readouterr().out
 
+
 class TestIdleScheduling:
     def test_a_model_turn_schedules_a_pass_that_runs_on_idle(self, server, tmp_path) -> None:
         # Thresholds shrunk so three turns are already a scene's worth, and
@@ -119,6 +130,34 @@ class TestIdleScheduling:
         finally:
             app.close()
 
+    def test_the_settle_margin_holds_the_newest_messages_out(self, server, tmp_path) -> None:
+        # The live rule for the AUTOMATIC pass: no scene ends where the
+        # story is still moving. With a settle margin of 2, the idle pass
+        # over six messages may close a scene only up to the fourth —
+        # /extract is the one thing that drops this margin.
+        set_config(
+            tmp_path / "state",
+            settle_messages=2,
+            scene_min_chars=10,
+            scene_min_messages=2,
+            idle_seconds=0.2,
+        )
+        app = launch(tmp_path / "state", server)
+        try:
+            for i in range(3):
+                app.play(f"Turn number {i}.")
+            deadline = time.time() + 10
+            ends: list[int] = []
+            while time.time() < deadline and not ends:
+                ids = app.store.stories.get_messages_ids(app.session.story_id)
+                ends = app.store.scenes.get_current_ends(app.session.story_id, ids)
+                time.sleep(0.1)
+            assert ends, "the idle pass never closed a scene"
+            assert ids.index(ends[-1]) == 3  # the newest two messages stayed open
+        finally:
+            app.close()
+
+
 class TestDisabled:
     def test_disabled_extraction_gates_only_the_idle_scheduling(self, server, tmp_path) -> None:
         # [lore_extraction].enabled = false stops the automatic passes and
@@ -143,6 +182,7 @@ class TestDisabled:
             assert app.store.scenes.get_current(story_id, ids) != []
         finally:
             app.close()
+
 
 class TestFailedPass:
     def test_a_garbage_reply_fails_the_pass_and_a_retry_heals(self, app: App, capsys) -> None:
@@ -187,6 +227,7 @@ class TestFailedPass:
         app.play("/extract")
         assert len(app.store.scenes.get_current(story_id, ids)) == 1
 
+
 class TestHealing:
     def test_an_import_with_a_hole_in_memory_heals_exactly_the_hole(
         self, app: App, tmp_path
@@ -221,11 +262,6 @@ class TestHealing:
         untouched = next(j for j in scene.journals if j.character == "Элоиза")
         assert memories[cast["Элоиза"]].history == untouched.history
 
-def played_chapters(app: App, turns: int) -> None:
-    """`turns` short exchanges — a backlog worth several scenes under the
-    shrunk thresholds."""
-    for i in range(turns):
-        app.play(f"Turn number {i}.")
 
 class TestLongStory:
     """A story long enough for several scenes: the backlog packs into
@@ -286,6 +322,7 @@ class TestLongStory:
             assert "now: state 1" in extractions[1]
         finally:
             app.close()
+
 
 class TestRecap:
     def test_the_recap_reaches_the_wire_after_a_scene_closes(self, server, tmp_path) -> None:
@@ -364,6 +401,7 @@ class TestRecap:
         finally:
             app.close()
 
+
 class TestMerge:
     def test_merge_folds_a_duplicate_into_the_real_character(self, app: App, capsys) -> None:
         # Two passes, each with its own spelling of the same character:
@@ -401,3 +439,32 @@ class TestMerge:
         assert "The Keeper" in cast[0].aliases
         # The duplicate's newer journal followed the merge.
         assert app.store.journals.get_current(story_id)[cast[0].id].state == "by the door"
+
+
+def remembered(app: App) -> int:
+    """A story with memory: one closed scene, the Keeper, a journal."""
+    for i in range(3):
+        app.play(f"Turn number {i}.")
+    app.play("/extract")
+    return app.session.story_id
+
+
+def browse(app: App, story_id: int, keys: str) -> None:
+    with contextlib.suppress(EOFError):
+        run_screen(keys, lambda: lore.browse(app.store, story_id, "scenes"))
+
+
+def lore_calls(app: App) -> list[str]:
+    """The recorded lore-building prompts — the post-close prompt warm-up
+    is the app's own background business and doesn't count."""
+    prompts = [str(r["messages"][-1]["content"]) for r in app.server.requests]
+    return [
+        p for p in prompts if "You are a story analyst" in p or p.startswith(("Combine", "Write "))
+    ]
+
+
+def played_chapters(app: App, turns: int) -> None:
+    """`turns` short exchanges — a backlog worth several scenes under the
+    shrunk thresholds."""
+    for i in range(turns):
+        app.play(f"Turn number {i}.")

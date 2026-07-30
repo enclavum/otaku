@@ -10,16 +10,9 @@ from pathlib import Path
 from otaku.paths import Paths
 from otaku.settings import state as state_mod
 from scenarios.support import server as scripted
-from scenarios.support.harness import SPEC, set_config_provider
-from scenarios.support.process import run_otaku
+from scenarios.support.harness import SPEC, run_otaku, set_config_provider
 from scenarios.support.server import ModelServer
 from scenarios.support.terminal import CTRL_O, CTRL_R, CTRL_T, CTRL_U, ENTER, Terminal
-
-
-def remember(root: Path) -> None:
-    """state.toml pointing at the scripted model, so launch lands in the
-    REPL instead of the picker."""
-    state_mod.save(Paths.resolve(root), state_mod.AppState(model=SPEC))
 
 
 class TestFirstRun:
@@ -147,3 +140,55 @@ class TestHelpVersion:
         result = run_otaku(tmp_path / "state", "--help")
         assert result.returncode == 0
         assert "logs" in result.stdout
+
+
+class TestStreaming:
+    def test_ctrl_r_mid_stream_cancels_and_regenerates(
+        self, server: ModelServer, tmp_path: Path
+    ) -> None:
+        """Ctrl+R while the reply is still streaming: the stream stops and
+        a fresh take begins — no waiting for the rest."""
+        state = tmp_path / "state"
+        set_config_provider(state, server)
+        remember(state)
+        terminal = Terminal(str(state))
+        terminal.expect("otaku")
+        server.chunk_delay = 0.4  # a slow model — the reply arrives in beats
+        server.script = lambda body: "The corridor stretches on, deeper into the dark."
+        terminal.send("I walk the corridor.")
+        terminal.send(ENTER, 0.2)
+        terminal.expect("The corridor")  # streaming has begun
+        server.script = lambda body: "It came up six."
+        terminal.send(CTRL_R, 0.5)
+        terminal.expect("It came up six.")
+        terminal.settle()
+        assert terminal.quit() == 0
+
+    def test_a_triple_quoted_block_sends_one_message(
+        self, server: ModelServer, tmp_path: Path
+    ) -> None:
+        """The multiline convention: an opening triple quote collects lines
+        until the closing one, and everything between goes as ONE message,
+        newlines preserved, never dispatched as a command."""
+        state = tmp_path / "state"
+        set_config_provider(state, server)
+        remember(state)
+        terminal = Terminal(str(state))
+        terminal.expect("otaku")
+        terminal.send('"""')
+        terminal.send(ENTER, 0.3)
+        terminal.expect("... ")  # the continuation prompt
+        terminal.send("/regen is part of my story")
+        terminal.send(ENTER, 0.3)
+        terminal.send('and so is this line"""')
+        terminal.send(ENTER, 1.0)
+        terminal.expect("stirred")
+        sent = str(server.requests[-1]["messages"][-1]["content"])
+        assert "/regen is part of my story\nand so is this line" in sent
+        assert terminal.quit() == 0
+
+
+def remember(root: Path) -> None:
+    """state.toml pointing at the scripted model, so launch lands in the
+    REPL instead of the picker."""
+    state_mod.save(Paths.resolve(root), state_mod.AppState(model=SPEC))

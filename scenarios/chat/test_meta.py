@@ -8,12 +8,14 @@ class TestBye:
         app.play("/bye")
         assert app.session.should_quit is True
 
+
 class TestHelp:
     def test_help_lists_the_commands(self, app: App, capsys) -> None:
         app.play("/help")
         out = capsys.readouterr().out
         for command in ("/model", "/stories", "/extract", "/undo", "/bye"):
             assert command in out
+
 
 class TestUnknown:
     def test_an_unknown_command_is_refused_not_played(self, app: App, capsys) -> None:

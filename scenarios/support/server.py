@@ -15,6 +15,7 @@ wire promise is checked against it.
 import contextlib
 import json
 import threading
+import time
 from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -33,10 +34,16 @@ EXTRACTION = {
 class ModelServer:
     """The server, on a free localhost port from construction to `close`.
     `script` is swappable per test; `reset` restores the default and
-    clears the recorded requests."""
+    clears the recorded requests. `managed=True` adds ollama's native
+    endpoints — `loaded` is the load state, mutated by /api/generate the
+    way the real engine mutates it. `chunk_delay` slows the stream down
+    for stories that act mid-stream."""
 
-    def __init__(self, models: tuple[str, ...] = ("test-model",)) -> None:
+    def __init__(self, models: tuple[str, ...] = ("test-model",), *, managed: bool = False) -> None:
         self.models = list(models)
+        self.managed = managed
+        self.loaded: set[str] = set()
+        self.chunk_delay = 0.0
         self.requests: list[dict[str, Any]] = []
         self.script: Callable[[dict[str, Any]], str | tuple[str, str]] = default_script
         outer = self
@@ -46,22 +53,40 @@ class ModelServer:
                 pass  # quiet — test output belongs to the tests
 
             def do_GET(self) -> None:
-                if self.path.rstrip("/").endswith("/models"):
-                    payload = {"data": [{"id": name} for name in outer.models]}
-                    body = json.dumps(payload).encode()
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/json")
-                    self.send_header("Content-Length", str(len(body)))
-                    self.end_headers()
-                    self.wfile.write(body)
+                path = self.path.rstrip("/")
+                if path.endswith("/models"):
+                    self._json({"data": [{"id": name} for name in outer.models]})
+                elif outer.managed and path.endswith("/api/ps"):
+                    self._json({"models": [{"name": name} for name in sorted(outer.loaded)]})
+                elif outer.managed and path.endswith("/api/tags"):
+                    self._json(
+                        {"models": [{"name": name, "size": 1_000_000} for name in outer.models]}
+                    )
                 else:
                     self.send_response(404)
                     self.end_headers()
+
+            def _json(self, payload: dict[str, Any]) -> None:
+                body = json.dumps(payload).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
 
             def do_POST(self) -> None:
                 length = int(self.headers.get("Content-Length", "0"))
                 body = json.loads(self.rfile.read(length) or b"{}")
                 outer.requests.append(body)
+                if outer.managed and self.path.rstrip("/").endswith("/api/generate"):
+                    # Ollama's load door: an empty prompt with a keep_alive
+                    # loads the model; keep_alive 0 unloads it.
+                    if body.get("keep_alive") == 0:
+                        outer.loaded.discard(str(body.get("model")))
+                    else:
+                        outer.loaded.add(str(body.get("model")))
+                    self._json({})
+                    return
                 result = outer.script(body)
                 thinking, text = result if isinstance(result, tuple) else ("", result)
                 self.send_response(200)
@@ -75,6 +100,8 @@ class ModelServer:
                     # A few chunks, so the streaming path is exercised for real.
                     third = max(1, len(text) // 3)
                     for i in range(0, len(text), third):
+                        if outer.chunk_delay:
+                            time.sleep(outer.chunk_delay)
                         event = {"choices": [{"delta": {"content": text[i : i + third]}}]}
                         self._event(event)
                     self._event(

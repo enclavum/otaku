@@ -1,7 +1,6 @@
 """`otaku logs`: the day-rotated request and system logs, printed."""
 
-from scenarios.support.harness import App
-from scenarios.support.process import run_otaku
+from scenarios.support.harness import App, run_otaku
 
 
 class TestRequests:

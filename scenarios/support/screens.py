@@ -1,6 +1,7 @@
 """Driving the tui surfaces headless: the real prompt_toolkit Application
 runs with scripted keys queued on a pipe input."""
 
+import threading
 from collections.abc import Callable
 from typing import Any
 
@@ -13,15 +14,22 @@ ESC = "\x1b"
 TAB = "\t"
 UP = "\x1b[A"
 DOWN = "\x1b[B"
+RIGHT = "\x1b[C"
 DELETE = "\x1b[3~"
 CTRL_S = "\x13"
 
 
-def run_screen(keys: str, surface: Callable[[], Any]) -> Any:
-    """`surface()` with `keys` queued as its terminal input. The pipe ends
-    after the script, so a surface that outlives its keys reads EOF and
-    dies with an exception instead of hanging the suite."""
+def run_screen(keys: str, surface: Callable[[], Any], *, patience: float = 2.0) -> Any:
+    """`surface()` with `keys` queued as its terminal input. A watchdog
+    closes the pipe `patience` seconds in, so a surface that outlives its
+    keys (a key swallowed by a busy modal, say) reads EOF and dies with
+    an exception instead of hanging the suite."""
     with create_pipe_input() as pipe:
         pipe.send_text(keys)
-        with create_app_session(input=pipe, output=DummyOutput()):
-            return surface()
+        watchdog = threading.Timer(patience, pipe.close)
+        watchdog.start()
+        try:
+            with create_app_session(input=pipe, output=DummyOutput()):
+                return surface()
+        finally:
+            watchdog.cancel()

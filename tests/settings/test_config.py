@@ -10,15 +10,6 @@ import tomllib
 from otaku.settings.config import Config, Provider
 
 
-def config() -> Config:
-    return Config(
-        providers={
-            "omlx": Provider(name="omlx", url="http://localhost:8100/v1", api_key="k"),
-            "ollama": Provider(name="ollama", url="http://localhost:11434/v1"),
-        }
-    )
-
-
 class TestServes:
     def test_a_configured_provider_with_a_model(self) -> None:
         assert config().serves("omlx/some-model") is True
@@ -47,3 +38,12 @@ class TestToToml:
         assert parsed["providers"]["omlx"]["api_key"] == "k"
         assert parsed["lore_extraction"]["enabled"] is True
         assert parsed["lore_extraction"]["scene_min_chars"] == 6000
+
+
+def config() -> Config:
+    return Config(
+        providers={
+            "omlx": Provider(name="omlx", url="http://localhost:8100/v1", api_key="k"),
+            "ollama": Provider(name="ollama", url="http://localhost:11434/v1"),
+        }
+    )

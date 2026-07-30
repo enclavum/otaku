@@ -7,10 +7,6 @@ from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch, set_config
 
 
-def numbers(text: str) -> list[int]:
-    return [int(n) for n in re.findall(r"\d+", text)]
-
-
 class TestContext:
     def test_the_preview_shows_the_parts_to_be_sent(self, app: App, capsys) -> None:
         app.play("/system You are the narrator.")
@@ -87,3 +83,7 @@ class TestInfo:
         capsys.readouterr()
         app.play("/info")
         assert "test-model" in capsys.readouterr().out
+
+
+def numbers(text: str) -> list[int]:
+    return [int(n) for n in re.findall(r"\d+", text)]

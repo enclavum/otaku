@@ -6,6 +6,8 @@ in the app's own state; `/set parameter` follows the MODEL it was set on;
 a model switch keeps the story context and is remembered as last used.
 """
 
+import contextlib
+
 from otaku.chat.session import TUI
 from otaku.tui import models
 from scenarios.support import server as scripted
@@ -15,9 +17,7 @@ from scenarios.support.server import ModelServer
 
 
 class TestModel:
-    def test_a_direct_switch_keeps_the_context_and_changes_the_wire(
-        self, app: App, capsys
-    ) -> None:
+    def test_a_direct_switch_keeps_the_context_and_changes_the_wire(self, app: App, capsys) -> None:
         app.play("I enter the hall.")
         app.play("/model test/other-model")
         app.play("I look around.")
@@ -38,9 +38,7 @@ class TestModel:
         app.play("/model test/test-model")
         assert "Already using test/test-model." in capsys.readouterr().out
 
-    def test_an_unknown_provider_is_refused_with_the_known_ones(
-        self, app: App, capsys
-    ) -> None:
+    def test_an_unknown_provider_is_refused_with_the_known_ones(self, app: App, capsys) -> None:
         app.play("/model nowhere/some-model")
         out = capsys.readouterr().out
         assert "test" in out  # the configured providers are listed
@@ -63,6 +61,7 @@ class TestModel:
         app.play("/model")
         assert app.session.model == "test-model"
 
+
 class TestModelPicker:
     def test_enter_picks_the_highlighted_model(self, app: App) -> None:
         spec = run_screen(ENTER, lambda: models.pick(app.session.providers))
@@ -79,9 +78,7 @@ class TestModelPicker:
                 registry = app.session.providers
                 first = run_screen(ENTER, lambda: models.pick(registry))
                 assert first == "test/alpha"
-                resumed = run_screen(
-                    ENTER, lambda: models.pick(registry, initial_spec="test/beta")
-                )
+                resumed = run_screen(ENTER, lambda: models.pick(registry, initial_spec="test/beta"))
                 assert resumed == "test/beta"
             finally:
                 app.close()
@@ -100,6 +97,7 @@ class TestModelPicker:
                 app.close()
         finally:
             server.close()
+
 
 class TestThink:
     def test_a_level_is_set_and_remembered(self, app: App, capsys) -> None:
@@ -156,9 +154,28 @@ class TestThink:
         app.play("I look around.")
         assert "consider" not in str(app.server.requests[-1]["messages"])
 
-    def test_a_provider_without_thinking_refuses_the_knob(
-        self, server, tmp_path, capsys
-    ) -> None:
+    def test_omlx_translates_the_level_to_its_template_flag(self, server, tmp_path) -> None:
+        # omlx ignores reasoning_effort; thinking is gated by the chat
+        # template's enable_thinking flag — a level enables, off disables,
+        # default sends nothing.
+        set_config_provider(tmp_path / "state", server, name="omlx")
+        app = launch(tmp_path / "state", server, spec="omlx/test-model")
+        try:
+            app.play("/set think high")
+            app.play("I enter the hall.")
+            body = app.server.requests[-1]
+            assert body["chat_template_kwargs"] == {"enable_thinking": True}
+            assert "reasoning_effort" not in body
+            app.play("/set think off")
+            app.play("I look around.")
+            assert app.server.requests[-1]["chat_template_kwargs"] == {"enable_thinking": False}
+            app.play("/set think default")
+            app.play("We walk on.")
+            assert "chat_template_kwargs" not in app.server.requests[-1]
+        finally:
+            app.close()
+
+    def test_a_provider_without_thinking_refuses_the_knob(self, server, tmp_path, capsys) -> None:
         set_config_provider(tmp_path / "state", server, supports_thinking=False)
         plain = launch(tmp_path / "state", server)
         try:
@@ -167,6 +184,7 @@ class TestThink:
             assert plain.session.think != "high"
         finally:
             plain.close()
+
 
 class TestParameters:
     def test_a_set_parameter_reaches_the_wire(self, app: App) -> None:
@@ -220,6 +238,7 @@ class TestParameters:
         app.play("/set")
         assert "Usage" in capsys.readouterr().out
 
+
 class TestVerbose:
     def test_verbose_adds_the_stats_line_after_a_reply(self, app: App, capsys) -> None:
         app.play("/set verbose on")
@@ -238,3 +257,50 @@ class TestVerbose:
         relaunched = launch(app.paths.root, app.server)
         assert relaunched.session.verbose is True
         relaunched.close()
+
+
+class TestManagedPicker:
+    """The picker over a managed backend (a scripted ollama): load state
+    on screen, l/u with a confirm, Enter loading before picking."""
+
+    def launch_managed(self, tmp_path) -> tuple[App, ModelServer]:
+        server = ModelServer(models=("alpha", "beta"), managed=True)
+        set_config_provider(tmp_path / "state", server, name="ollama", keep_alive="24h")
+        app = launch(tmp_path / "state", server, spec="ollama/alpha")
+        return app, server
+
+    def test_l_loads_the_model_after_a_confirm(self, tmp_path) -> None:
+        app, server = self.launch_managed(tmp_path)
+        try:
+            with contextlib.suppress(EOFError):
+                run_screen("ly" + ESC, lambda: models.pick(app.session.providers))
+            assert server.loaded == {"alpha"}
+            # The load request carried the provider's keep_alive.
+            load = next(r for r in server.requests if r.get("prompt") == "")
+            assert load["keep_alive"] == "24h"
+        finally:
+            app.close()
+            server.close()
+
+    def test_u_unloads_after_a_confirm(self, tmp_path) -> None:
+        app, server = self.launch_managed(tmp_path)
+        server.loaded = {"alpha"}
+        try:
+            with contextlib.suppress(EOFError):
+                run_screen("uy" + ESC, lambda: models.pick(app.session.providers))
+            assert server.loaded == set()
+            unload = next(r for r in server.requests if r.get("keep_alive") == 0)
+            assert unload["model"] == "alpha"
+        finally:
+            app.close()
+            server.close()
+
+    def test_enter_on_a_not_loaded_model_loads_it_first(self, tmp_path) -> None:
+        app, server = self.launch_managed(tmp_path)
+        try:
+            spec = run_screen(ENTER, lambda: models.pick(app.session.providers))
+            assert spec == "ollama/alpha"
+            assert "alpha" in server.loaded  # picked only after the load
+        finally:
+            app.close()
+            server.close()

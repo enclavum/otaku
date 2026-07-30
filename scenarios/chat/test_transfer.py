@@ -17,27 +17,21 @@ from scenarios.support.harness import App
 
 CHAPEL = Path(__file__).parent.parent / "fixtures" / "chapel.md"
 
+# fmt: off
 TAVERN_LINES = (
     {"user_name": "User", "character_name": "Elara", "create_date": "2026-05-01@12h00m00s"},
-    {"name": "Elara", "is_user": False, "is_system": False,
-     "mes": "The gate stands open. Come in from the rain."},
-    {"name": "User", "is_user": True, "is_system": False,
-     "mes": "I step inside and lower my hood."},
+    {"name": "Elara", "is_user": False, "is_system": False, "mes": "Come in from the rain."},
+    {"name": "User", "is_user": True, "is_system": False, "mes": "I step in and lower my hood."},
     {"name": "Elara", "is_user": False, "is_system": True, "mes": "(a hidden note)"},
     {"name": "Elara", "is_user": False, "is_system": False, "mes": "Welcome, traveler."},
 )
+# fmt: on
 
 PROSE = """The chapel stood silent at the edge of the marsh, its windows dark.
 
 "Who goes there?" the Keeper called from within. The heavy door creaked
 on its hinges.
 """
-
-
-def tavern_file(tmp_path: Path) -> Path:
-    path = tmp_path / "elara.jsonl"
-    path.write_text("\n".join(json.dumps(line) for line in TAVERN_LINES))
-    return path
 
 
 class TestImport:
@@ -75,8 +69,8 @@ class TestSillyTavern:
         chain = app.store.stories.get_messages(story_id)
         # The hidden `is_system` line is skipped; the rest arrive verbatim.
         assert [(m.role, m.body) for m in chain] == [
-            ("assistant", "The gate stands open. Come in from the rain."),
-            ("user", "I step inside and lower my hood."),
+            ("assistant", "Come in from the rain."),
+            ("user", "I step in and lower my hood."),
             ("assistant", "Welcome, traveler."),
         ]
         # Real names become speakers; ST's "User" placeholder does not.
@@ -184,3 +178,9 @@ class TestCopy:
         assert "I enter the hall." in transcript
         assert scripted.CHAT_REPLY in transcript
         assert "## " in transcript  # role headers, readable as Markdown
+
+
+def tavern_file(tmp_path: Path) -> Path:
+    path = tmp_path / "elara.jsonl"
+    path.write_text("\n".join(json.dumps(line) for line in TAVERN_LINES))
+    return path

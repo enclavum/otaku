@@ -14,29 +14,6 @@ from otaku.lore.assembler import assemble, render_preview
 from otaku.store.schema import Message, Scene
 
 
-def user(body: str, framing: str | None = None) -> Message:
-    return Message(role="user", body=body, framing=framing)
-
-
-def assistant(body: str) -> Message:
-    return Message(role="assistant", body=body)
-
-
-def turns(n: int) -> list[Message]:
-    """n alternating turns with stable ids 1..n."""
-    out = []
-    for i in range(1, n + 1):
-        role = "user" if i % 2 else "assistant"
-        out.append(Message(role=role, body=f"turn {i}", id=i))
-    return out
-
-
-def scene(end_id: int, summary: str = "", history: str = "") -> Scene:
-    return Scene(
-        id=end_id, start_message_id=1, end_message_id=end_id, summary=summary, history=history
-    )
-
-
 class TestAssemble:
     def test_sends_a_single_turn_verbatim(self) -> None:
         prompt = assemble("", [user("I open the door.")], 8192)
@@ -189,3 +166,26 @@ class TestPreview:
     def test_reports_the_window(self) -> None:
         preview = render_preview(assemble("", [user("Hi.")], 8192))
         assert "8,192" in preview
+
+
+def user(body: str, framing: str | None = None) -> Message:
+    return Message(role="user", body=body, framing=framing)
+
+
+def assistant(body: str) -> Message:
+    return Message(role="assistant", body=body)
+
+
+def turns(n: int) -> list[Message]:
+    """n alternating turns with stable ids 1..n."""
+    out = []
+    for i in range(1, n + 1):
+        role = "user" if i % 2 else "assistant"
+        out.append(Message(role=role, body=f"turn {i}", id=i))
+    return out
+
+
+def scene(end_id: int, summary: str = "", history: str = "") -> Scene:
+    return Scene(
+        id=end_id, start_message_id=1, end_message_id=end_id, summary=summary, history=history
+    )

@@ -17,24 +17,6 @@ _ITALIC = "\x1b[3m"
 _RESET = "\x1b[0m"
 
 
-def render(text: str, *, chunk: int = 0) -> str:
-    """`text` through the renderer, in one chunk or in `chunk`-sized bites."""
-    out = io.StringIO()
-    streamer = MarkdownStreamer(out)
-    if chunk:
-        for i in range(0, len(text), chunk):
-            streamer.feed(text[i : i + chunk])
-    else:
-        streamer.feed(text)
-    streamer.flush()
-    return out.getvalue()
-
-
-def plain(text: str, *, chunk: int = 0) -> str:
-    """The rendered output with the styling stripped — what a reader sees."""
-    return _ANSI.sub("", render(text, chunk=chunk))
-
-
 class TestPlainText:
     def test_passes_prose_through_unchanged(self) -> None:
         assert plain("The door opens.\n") == "The door opens.\n"
@@ -139,18 +121,6 @@ class TestFlush:
             assert not _open_style(render(text))
 
 
-def _open_style(rendered: str) -> bool:
-    """True when the output ends inside a style (no RESET after the last
-    style escape) — the terminal would stay coloured."""
-    codes = _ANSI.findall(rendered)
-    for code in reversed(codes):
-        if code == _RESET:
-            return False
-        if code in (_BOLD, _ITALIC, "\x1b[2m"):
-            return True
-    return False
-
-
 class TestRenderMarkdown:
     """`render_markdown` returns as a string exactly what the streamer
     would have printed for the same text."""
@@ -167,3 +137,33 @@ class TestRenderMarkdown:
 
     def test_closes_styles_at_the_end(self) -> None:
         assert render_markdown("**unclosed").endswith(_RESET)
+
+
+def render(text: str, *, chunk: int = 0) -> str:
+    """`text` through the renderer, in one chunk or in `chunk`-sized bites."""
+    out = io.StringIO()
+    streamer = MarkdownStreamer(out)
+    if chunk:
+        for i in range(0, len(text), chunk):
+            streamer.feed(text[i : i + chunk])
+    else:
+        streamer.feed(text)
+    streamer.flush()
+    return out.getvalue()
+
+
+def plain(text: str, *, chunk: int = 0) -> str:
+    """The rendered output with the styling stripped — what a reader sees."""
+    return _ANSI.sub("", render(text, chunk=chunk))
+
+
+def _open_style(rendered: str) -> bool:
+    """True when the output ends inside a style (no RESET after the last
+    style escape) — the terminal would stay coloured."""
+    codes = _ANSI.findall(rendered)
+    for code in reversed(codes):
+        if code == _RESET:
+            return False
+        if code in (_BOLD, _ITALIC, "\x1b[2m"):
+            return True
+    return False
