@@ -8,7 +8,7 @@ this file and the core principles disagree, the core principles win.
 ## What otaku is
 
 A roleplay terminal client for OpenAI-compatible LLM servers (Ollama,
-LM Studio, omlx, KoboldCpp, and others). Chats are stories that can be
+omlx, KoboldCpp, and others). Chats are stories that can be
 branched from any message. A background pass extracts lore from played
 messages — scenes, characters, journals — and the context sent to the model
 keeps the opening and the recent tail verbatim with scene summaries in
@@ -18,14 +18,14 @@ between. The database is encrypted.
 
 Python 3.14 in the `otaku2` conda environment:
 
-    conda run -n otaku2 otaku    # run the app
-    make lint                    # ruff check
-    make format                  # ruff format
-    make typecheck               # mypy (strict)
-    make test                    # pytest
+    conda run -n otaku2 otaku            # run the app
+    make lint RUN="conda run -n otaku2"  # ruff check (Makefile defaults to uv)
+    make format RUN=...                  # ruff format
+    make typecheck RUN=...               # mypy (strict)
+    make test RUN=...                    # pytest
 
-The state dir is `~/.otaku-v2`, relocatable via the `OTAKU_CONFIG_DIR` env
-var.
+The state dir is `paths.DEFAULT_ROOT`, relocatable via the
+`OTAKU_CONFIG_DIR` env var.
 
 ## Configuration ownership
 

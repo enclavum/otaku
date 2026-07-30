@@ -1,18 +1,20 @@
-ENV = otaku2
+# RUN prefixes every command (override: `make lint RUN=` with an
+# activated venv, or point it at any other environment runner).
+RUN ?= uv run
 
 .PHONY: lint format typecheck test scenarios
 
 lint:
-	conda run -n $(ENV) ruff check otaku/ tests/ scenarios/
+	$(RUN) ruff check otaku/ tests/ scenarios/
 
 format:
-	conda run -n $(ENV) ruff format otaku/ tests/ scenarios/
+	$(RUN) ruff format otaku/ tests/ scenarios/
 
 typecheck:
-	conda run -n $(ENV) mypy
+	$(RUN) mypy
 
 test:
-	conda run -n $(ENV) pytest
+	$(RUN) pytest
 
 scenarios:
-	conda run -n $(ENV) pytest scenarios/
+	$(RUN) pytest scenarios/

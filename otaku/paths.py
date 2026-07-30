@@ -1,7 +1,7 @@
 """Filesystem layout of the state dir.
 
 The state dir is resolved once at startup — from OTAKU_CONFIG_DIR, falling
-back to ~/.otaku-v2 — into an immutable `Paths` value that is passed
+back to ~/.otaku — into an immutable `Paths` value that is passed
 explicitly to everything that touches disk. Nothing derives a path at import
 time.
 
@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Self
 
 _ENV_VAR = "OTAKU_CONFIG_DIR"
-_DEFAULT_ROOT = "~/.otaku-v2"  # TODO: switch to ~/.otaku
+_DEFAULT_ROOT = "~/.otaku"
 
 
 @dataclass(frozen=True)
