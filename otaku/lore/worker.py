@@ -46,7 +46,7 @@ from dataclasses import dataclass, field
 from otaku.logs.errors import ErrorLog
 from otaku.logs.system import SystemLog
 from otaku.lore import assembler
-from otaku.lore.extraction import Extractor, PassResult, Report
+from otaku.lore.extraction import Extractor, PassResult, Report, fmt_duration
 from otaku.providers.base import OpenAIClient
 from otaku.providers.registry import Registry as ProviderRegistry
 from otaku.settings.config import Config
@@ -252,7 +252,7 @@ class LoreWorker:
                         held = f"extraction failed ({type(e).__name__})"
                         with contextlib.suppress(Exception):
                             self._log.record(
-                                f"pass crashed (story {job.story_id}): {type(e).__name__}"
+                                f"extraction crashed (story {job.story_id}): {type(e).__name__}"
                             )
                             if self._errors is not None:
                                 self._errors.record(f"lore pass (story {job.story_id})", e)
@@ -300,6 +300,8 @@ class LoreWorker:
         assert self._deferred is not None
         if not job.messages or self._deferred.is_set():
             return
+        started = time.monotonic()
+        self._log.record(f"warm-up started (story {job.story_id})")
         self._set_status("warming the prompt cache")
         try:
             context = client.get_context_size(job.model)
@@ -319,7 +321,10 @@ class LoreWorker:
             log=self._log.record,
         ).complete(wire, "warm", params={"temperature": 0, "max_tokens": 1})
         if not self._deferred.is_set():
-            self._log.record(f"prompt cache warmed (story {job.story_id})")
+            self._log.record(
+                f"warm-up finished (story {job.story_id}) "
+                f"({fmt_duration(time.monotonic() - started)})"
+            )
 
     # ---------- the status row ----------
 

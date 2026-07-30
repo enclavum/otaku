@@ -34,8 +34,8 @@ class TestCrashContainment:
         app.play("/help")
         out = capsys.readouterr().out
         assert "command failed (RuntimeError)" in out
-        assert "errors-" in out  # the notice names the log
-        errors = [f for f in (app.paths.root / "logs").rglob("errors-*") if f.is_file()]
+        assert "error-" in out  # the notice names the log
+        errors = [f for f in (app.paths.root / "logs").rglob("error-*") if f.is_file()]
         assert errors and "Traceback" in errors[0].read_text()
         # The session lives on: the next line plays normally.
         app.play("I enter the hall.")

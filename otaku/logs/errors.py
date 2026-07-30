@@ -1,9 +1,9 @@
 """The error log: every unexpected traceback, in one place.
 
-`logs/errors-YYYYMMDD.log` — a timestamped `=== <context>` header and the
+`logs/error-YYYYMMDD.log` — a timestamped `=== <context>` header and the
 full traceback, appended wherever a crash is contained (a command in the
 REPL, a worker pass, the last-resort handler in `cli.main`), and readable
-with `otaku logs errors`. Frames and exception messages only, NEVER
+with `otaku logs error`. Frames and exception messages only, NEVER
 locals: this file sits in plain text beside a possibly-encrypted
 database, and a traceback with locals would leak what the cipher
 protects. Best-effort: a logging failure warns once and never blocks
@@ -21,7 +21,7 @@ from otaku.paths import Paths
 
 
 class ErrorLog(DailyLog):
-    _prefix = "errors-"
+    _prefix = "error-"
     _suffix = ".log"
 
     def __init__(self, paths: Paths) -> None:

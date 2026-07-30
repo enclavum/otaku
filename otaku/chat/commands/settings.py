@@ -77,7 +77,7 @@ def _set_think(session: Session, rest: list[str]) -> None:
     if value == "default":
         session.think = None
         session.save_state()
-        print("Think: default (nothing sent — the model decides). (saved)")
+        print("Think: default (nothing sent — the model decides).")
         return
     if value not in THINK_LEVELS:
         print("Usage: /set think on|off|none|low|medium|high|max|default")
@@ -90,7 +90,7 @@ def _set_think(session: Session, rest: list[str]) -> None:
         return
     session.think = value
     session.save_state()
-    print(f"Think: {value}. (saved)")
+    print(f"Think: {value}.")
 
 
 def _set_verbose(session: Session, rest: list[str]) -> None:
@@ -108,7 +108,7 @@ def _set_verbose(session: Session, rest: list[str]) -> None:
         print("Usage: /set verbose on|off")
         return
     session.save_state()
-    print(f"Verbose: {'on' if session.verbose else 'off'}. (saved)")
+    print(f"Verbose: {'on' if session.verbose else 'off'}.")
 
 
 def _set_parameter(session: Session, rest: list[str]) -> None:
@@ -159,4 +159,4 @@ def _save_params(session: Session) -> str:
         models_file.save_parameters(session.paths, session.model, dict(session.params))
     except (OSError, ValueError) as e:
         return f" (this session only — could not save: {e})."
-    return f" (saved for {session.model})."
+    return "."

@@ -86,7 +86,6 @@ class Field:
     target: int  # scene id / character id / journal id, per kind
     editable: bool
     pivot: int | None = None  # character id (scene detail) / scene id (cast detail)
-    note: str = ""  # dim annotation: why not editable, or the field's vintage
     scene_no: int | None = None  # journal rows in the char view carry their scene's number
 
 
@@ -113,6 +112,11 @@ class LoreBrowser(ListScreen):
         for r in self.jrows:
             self.by_scene.setdefault(r.scene_id, []).append(r)
             self.by_char.setdefault(r.character_id, []).append(r)
+        # A character's rows in STORY order — the cast drill-in walks them
+        # scene by scene, and the newest scene's row is the live one.
+        position = {s.id: i for i, s in enumerate(self.scenes)}
+        for rows in self.by_char.values():
+            rows.sort(key=lambda r: position[r.scene_id])
         self.latest_row: dict[int, int] = {cid: rows[-1].id for cid, rows in self.by_char.items()}
 
         self.lens: str = lens  # scenes | cast
@@ -198,7 +202,6 @@ class LoreBrowser(ListScreen):
                     r.id,
                     latest,
                     r.character_id,
-                    note="" if latest else "(superseded)",
                 )
             )
         return out
@@ -221,7 +224,6 @@ class LoreBrowser(ListScreen):
                     r.id,
                     latest,
                     r.scene_id,
-                    note="" if latest else "(superseded)",
                     scene_no=no,
                 )
             )
@@ -234,7 +236,6 @@ class LoreBrowser(ListScreen):
                     history,
                     hrow.id,
                     False,
-                    note="(rebuilt from entries)",
                 )
             )
         return out
@@ -287,8 +288,6 @@ class LoreBrowser(ListScreen):
             avail = max(10, self._max_row_content_width() - 4 - no_w - 2 - label_w - 3)
             for i, f in enumerate(self.fields):
                 head = truncate(flatten(f.text[: 4 * avail]), avail) or "(empty)"
-                if f.note:
-                    head = f"{f.note} {head}"
                 no = f"{f.scene_no:>{no_w}}  " if f.scene_no is not None else " " * (no_w + 2)
                 row = f"{no if no_w else ''}{truncate(f.label, label_w):<{label_w}} · {head}"
                 self._emit_row(out, i == self.field_cursor, row, dim=not f.editable)
@@ -328,10 +327,7 @@ class LoreBrowser(ListScreen):
         if self.detail is None or not self.fields:
             return [("", "")]
         f = self.fields[self.field_cursor]
-        out: StyleAndTextTuples = [("class:preview.title", f.label + "\n")]
-        if f.note:
-            out.append(("class:preview.muted", f.note + "\n"))
-        return out
+        return [("class:preview.title", f.label + "\n")]
 
     def _preview_text(self) -> StyleAndTextTuples:
         width = max(10, self._preview_inner_width())
@@ -540,7 +536,7 @@ class LoreBrowser(ListScreen):
             if f.kind == "history":
                 return "history is rebuilt from the entries — edit those instead"
             if f.kind == "state":
-                return "superseded — only the latest state is ever read again"
+                return "only the latest state is ever read again"
             return "not editable"
         return None
 

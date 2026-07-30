@@ -287,9 +287,17 @@ class Extractor:
         ids = self._store.stories.get_messages_ids(self._story_id)
         number = {mid: i for i, mid in enumerate(ids, 1)}
         cast = Cast.load(self._store, self._story_id)
+        pass_started = time.monotonic()
+        self._log(
+            f"extraction started (story {self._story_id}): "
+            f"{len(tail_ids)} messages in {len(spans)} span(s)"
+        )
         for k, span in enumerate(spans, 1):
             if self._cancel.is_set():
-                self._log(f"extraction cancelled (story {self._story_id})")
+                self._log(
+                    f"extraction cancelled (story {self._story_id}) "
+                    f"({fmt_duration(time.monotonic() - pass_started)})"
+                )
                 return PassResult.CANCELLED
             span_range = f"{number[span[0].id]} - {number[span[-1].id]}"
             part = f" ({k}/{len(spans)})" if len(spans) > 1 else ""
@@ -297,15 +305,19 @@ class Extractor:
             # tail stays open" would read as if the whole pass was lost.
             kept = f"{report.scenes} scene(s) closed, the rest of " if report.scenes else ""
             self._log(
-                f"extraction (story {self._story_id}): "
-                f"closing a scene over {len(span)} messages ({span_range}){part}"
+                f"scene close started (story {self._story_id}): "
+                f"{len(span)} messages ({span_range}){part}"
             )
             self._progress(f"closing a scene over {len(span)} messages ({span_range}){part}…")
             journals_before = report.journals
+            scene_started = time.monotonic()
             try:
                 closed = self._close_scene(cast, span, "lore", report)
             except httpx.HTTPError as e:
-                self._log(f"extraction failed (story {self._story_id}): {type(e).__name__}")
+                self._log(
+                    f"extraction failed (story {self._story_id}): {type(e).__name__} "
+                    f"({fmt_duration(time.monotonic() - pass_started)})"
+                )
                 self._progress(f"extraction failed ({e}) — {kept}the tail stays open")
                 return PassResult.FAILED
             except (ValueError, json.JSONDecodeError) as e:
@@ -316,15 +328,22 @@ class Extractor:
                 reason = (
                     "the reply did not parse" if isinstance(e, json.JSONDecodeError) else str(e)
                 )
-                self._log(f"extraction failed (story {self._story_id}): {reason}")
+                self._log(
+                    f"extraction failed (story {self._story_id}): {reason} "
+                    f"({fmt_duration(time.monotonic() - pass_started)})"
+                )
                 self._progress(f"extraction failed ({reason}) — {kept}the tail stays open")
                 return PassResult.FAILED
             if not closed:  # cancelled mid-stream
-                self._log(f"extraction cancelled (story {self._story_id})")
+                self._log(
+                    f"extraction cancelled (story {self._story_id}) "
+                    f"({fmt_duration(time.monotonic() - pass_started)})"
+                )
                 return PassResult.CANCELLED
             self._log(
-                f"scene closed (story {self._story_id}): "
-                f"{len(span)} messages, {report.journals - journals_before} journal entries"
+                f"scene close finished (story {self._story_id}): "
+                f"{len(span)} messages, {report.journals - journals_before} journal entries "
+                f"({fmt_duration(time.monotonic() - scene_started)})"
             )
             # The rollups follow each scene immediately — summary and entries
             # land, then the histories composed from them — so the journals
@@ -332,6 +351,11 @@ class Extractor:
             # accumulating every entry across a long backlog.
             self._refresh_scene_history(report)
             self._refresh_histories(report)
+        self._log(
+            f"extraction finished (story {self._story_id}): {report.scenes} scene(s), "
+            f"{report.journals} journal entries, {report.histories} history rollup(s) "
+            f"({fmt_duration(time.monotonic() - pass_started)})"
+        )
         return PassResult.CLOSED
 
     def _close_scene(
@@ -462,9 +486,16 @@ class Extractor:
             # a single source adds nothing and loses detail to paraphrase.
             self._store.scenes.set_history(due[-1], summaries[0])
             report.scene_histories += 1
+            self._log(
+                f"story-so-far rollup finished (story {self._story_id}): "
+                "the one summary, verbatim"
+            )
             return
         self._progress(f"composing the story so far from {len(summaries)} scene summaries…")
         started = time.monotonic()
+        self._log(
+            f"story-so-far rollup started (story {self._story_id}): {len(summaries)} summaries"
+        )
         try:
             story_so_far = self.complete(
                 prompts_file.render(
@@ -473,7 +504,10 @@ class Extractor:
                 "rollup",
             ).strip()
         except httpx.HTTPError as e:
-            self._log(f"story-so-far rollup failed (story {self._story_id}): {type(e).__name__}")
+            self._log(
+                f"story-so-far rollup failed (story {self._story_id}): {type(e).__name__} "
+                f"({fmt_duration(time.monotonic() - started)})"
+            )
             self._progress(f"story-so-far rollup failed ({e})")
             return
         if not story_so_far or self._cancel.is_set():
@@ -481,8 +515,8 @@ class Extractor:
         self._store.scenes.set_history(due[-1], story_so_far)
         report.scene_histories += 1
         self._log(
-            f"story-so-far rebuilt (story {self._story_id}) from {len(summaries)} scene "
-            f"summaries in {_fmt_duration(time.monotonic() - started)}"
+            f"story-so-far rollup finished (story {self._story_id}): {len(summaries)} "
+            f"summaries ({fmt_duration(time.monotonic() - started)})"
         )
 
     def _refresh_histories(self, report: Report) -> None:
@@ -504,9 +538,18 @@ class Extractor:
                 # pass, no paraphrase drift, the language trivially kept.
                 self._store.journals.set_history(journal_id, entries[0])
                 report.histories += 1
+                self._log(
+                    f"history rollup finished (story {self._story_id}, "
+                    f"character {character_id}): the one entry, verbatim"
+                )
                 continue
             name = names.get(character_id, "?")
             self._progress(f"rebuilding {name}'s history from {len(entries)} entries…")
+            rollup_started = time.monotonic()
+            self._log(
+                f"history rollup started (story {self._story_id}, "
+                f"character {character_id}): {len(entries)} entries"
+            )
             prompt = prompts_file.render(
                 self._prompts.history_prompt,
                 name=name,
@@ -517,15 +560,17 @@ class Extractor:
             except httpx.HTTPError as e:
                 self._log(
                     f"history rollup failed (story {self._story_id}, "
-                    f"character {character_id}): {type(e).__name__}"
+                    f"character {character_id}): {type(e).__name__} "
+                    f"({fmt_duration(time.monotonic() - rollup_started)})"
                 )
                 continue
             if text.strip() and not self._cancel.is_set():
                 self._store.journals.set_history(journal_id, text.strip())
                 report.histories += 1
                 self._log(
-                    f"history rebuilt (story {self._story_id}): "
-                    f"character {character_id} from {len(entries)} entries"
+                    f"history rollup finished (story {self._story_id}, "
+                    f"character {character_id}): {len(entries)} entries "
+                    f"({fmt_duration(time.monotonic() - rollup_started)})"
                 )
 
     def _stream_once(
@@ -666,7 +711,7 @@ def _as_list(obj: object) -> list[object]:
     return obj if isinstance(obj, list) else []
 
 
-def _fmt_duration(seconds: float) -> str:
+def fmt_duration(seconds: float) -> str:
     if seconds >= 60:
         return f"{int(seconds // 60)}m {int(seconds % 60):02d}s"
     return f"{seconds:.0f}s"

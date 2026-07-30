@@ -167,7 +167,7 @@ class TestHelpVersion:
         commands_block = listing.split("Commands:", 1)[1]
         assert "..." not in commands_block
         assert "Show every contained crash's traceback" in commands_block
-        order = [commands_block.index(name) for name in ("requests", "system", "errors")]
+        order = [commands_block.index(name) for name in ("requests", "system", "error")]
         assert order == sorted(order)
 
 

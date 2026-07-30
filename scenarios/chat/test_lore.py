@@ -342,7 +342,7 @@ class TestFailedPass:
         logs = list((app.paths.root / "logs").rglob("*"))
         assert any("RuntimeError" in f.read_text() for f in logs if f.is_file())
         # The error log holds the WHOLE traceback, not just the shape.
-        errors = [f for f in logs if f.name.startswith("errors-")]
+        errors = [f for f in logs if f.name.startswith("error-")]
         assert errors and "Traceback" in errors[0].read_text()
         assert "boom" in errors[0].read_text()
 

@@ -72,17 +72,13 @@ class _DeclaredOrderGroup(click.Group):
 
 @main.group(
     cls=_DeclaredOrderGroup,
-    invoke_without_command=True,
-    short_help="Day-rotated logs: requests (what the models were sent — the default), "
-    "system (the lore worker's account), errors (contained crashes)",
+    short_help="Day-rotated logs: requests (what the models were sent), "
+    "system (the lore worker's account), error (contained crashes)",
 )
-@click.pass_context
-def logs(ctx: click.Context) -> None:
-    """Day-rotated logs: `requests` (what the models were sent — the
-    default), `system` (the lore worker's own account), and `errors`
-    (every contained crash's traceback)."""
-    if ctx.invoked_subcommand is None:
-        ctx.invoke(logs_requests)
+def logs() -> None:
+    """Day-rotated logs: `requests` (what the models were sent), `system`
+    (the lore worker's own account), and `error` (every contained crash's
+    traceback)."""
 
 
 @logs.command(
@@ -148,12 +144,12 @@ def logs_system(day: str | None, list_days: bool) -> None:
 
 
 @logs.command(
-    "errors",
+    "error",
     short_help="Show every contained crash's traceback",
 )
 @click.argument("day", required=False)
 @click.option("--list", "list_days", is_flag=True, help="List the available log days.")
-def logs_errors(day: str | None, list_days: bool) -> None:
+def logs_error(day: str | None, list_days: bool) -> None:
     """Print one day's error log — every contained crash's traceback
     (DAY as YYYY-MM-DD, default today)."""
     paths = Paths.resolve()
