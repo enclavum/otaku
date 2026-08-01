@@ -38,6 +38,7 @@ class TestImport:
         app.play(f"/import {CHAPEL}")
         out = capsys.readouterr().out
         assert "1 scene(s) applied verbatim" in out
+        assert "\x1b[48;2;240;240;240m" in out  # the scene echo: last turns, banded
         # A native export carries its extraction state: no pass runs, no
         # model is called — the story arrives exactly as it was.
         assert app.server.requests == []

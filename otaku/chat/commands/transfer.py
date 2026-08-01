@@ -28,21 +28,33 @@ def cmd_import(session: Session, store: Store, args: list[str]) -> None:
     """`/import FILE` — import a story, the format detected from the
     file's name and contents: an otaku /export document (.md, its memory
     applied verbatim, no model calls), a SillyTavern chat (.jsonl), or
-    plain text (.txt) dismantled into verbatim messages. A native export
-    arrives with its extraction state and triggers nothing; the
-    memoryless shapes (SillyTavern, plain text) have their memory built
-    by the same forced extraction pass `/extract` runs, waited on in the
-    foreground. The session switches to the imported story."""
+    plain text (.txt) dismantled into verbatim messages. The session
+    switches to the imported story and its last turns are echoed the way
+    a resume echoes them."""
     path_text = session.raw_args.strip()
     if not path_text:
         print("Usage: /import FILE")
         return
+    if not import_story(session, store, path_text):
+        return
+    # Land in the scene.
+    print()
+    print(session.render_last_turns(2))
+
+
+def import_story(session: Session, store: Store, path_text: str) -> bool:
+    """Everything of `/import` but the scene echo — detection, refusals,
+    the store write, the forced extraction pass for the memoryless shapes
+    (a native export arrives with its extraction state and triggers
+    nothing), and the session switch. Callable on its own: the launch
+    seeding imports quietly, the REPL's resume echo showing the scene.
+    True when a story was imported and switched to."""
     path = Path(path_text).expanduser()
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError as e:
         print(f"Could not read {path}: {e}")
-        return
+        return False
 
     # The format is detected — never declared — and the file's NAME and
     # contents must agree. A file that matches a format but fails its
@@ -53,25 +65,25 @@ def cmd_import(session: Session, store: Store, args: list[str]) -> None:
         export = story_imports.parse_story(text)
         if export is None:
             print("This looks like an otaku export, but it does not parse.")
-            return
+            return False
         native = True
     elif suffix == ".jsonl" and text.lstrip().startswith("{"):
         export = parse_sillytavern(text)
         if export is None:
             print("This looks like JSON, but not a SillyTavern chat (.jsonl).")
-            return
+            return False
         print(f"SillyTavern chat: {len(export.messages)} message(s).")
     elif suffix == ".txt":
         export = parse_plaintext(text)
         if export is None:
             print("The file contains no text to import.")
-            return
+            return False
     else:
         print("Cannot detect file format.")
-        return
+        return False
     if not export.messages:
         print("The file contains no messages to import.")
-        return
+        return False
 
     story_id = story_imports.write_story(store, export)
     applied = f", {len(export.scenes)} scene(s) applied verbatim" if export.scenes else ""
@@ -85,6 +97,7 @@ def cmd_import(session: Session, store: Store, args: list[str]) -> None:
     # waited on the same way, as typing /extract.
     if not native:
         lore.cmd_extract(session, store, [])
+    return True
 
 
 def cmd_export(session: Session, store: Store, args: list[str]) -> None:

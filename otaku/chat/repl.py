@@ -18,7 +18,7 @@ import contextlib
 import shutil
 import sys
 from collections.abc import Callable
-from typing import Any
+from typing import Any, TextIO, cast
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.application.current import get_app
@@ -136,6 +136,25 @@ class LineAssembler:
         self.in_block = False
 
 
+class _OutputTracker:
+    """A sys.stdout stand-in that remembers whether anything was written.
+    The full-screen surfaces don't register: prompt_toolkit writes through
+    its own Output object, bound to the real stream before any tracker
+    exists — exactly the split the prompt-gap rule needs."""
+
+    def __init__(self, wrapped: TextIO) -> None:
+        self.wrapped = wrapped
+        self.wrote = False
+
+    def write(self, text: str) -> int:
+        if text:
+            self.wrote = True
+        return self.wrapped.write(text)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.wrapped, name)
+
+
 class StoreHistory(History):
     """prompt_toolkit input history backed by the store: the last lines you
     submitted at the prompt, browsable with Up/Down across sessions.
@@ -231,13 +250,21 @@ def run(session: Session, store: Store) -> None:
             # command that exited the prompt.
             rows = _rows_on_screen(carry.get("text", ""), prefix)
             sys.stdout.write(f"\x1b[{rows}A\r\x1b[J")
+            tracker = _OutputTracker(sys.stdout)
+            sys.stdout = cast(TextIO, tracker)
             try:
                 submit(line, session, store)
             except KeyboardInterrupt:
                 print()
-            # One blank line between whatever the line printed and the next
-            # prompt — the gap lives HERE, once, not at each print site.
-            print()
+            finally:
+                sys.stdout = tracker.wrapped
+            if tracker.wrote:
+                # One blank line between whatever the line printed and the
+                # next prompt — the gap lives HERE, once, not at each print
+                # site. Under NO output (a picker cancelled without a word)
+                # there is no gap either: with the prompt line erased above,
+                # the screen stays exactly as it was.
+                print()
             continue
 
         result = assembler.feed(line)

@@ -5,8 +5,7 @@
 [![Python 3.14+](https://img.shields.io/badge/python-3.14%2B-blue)](https://github.com/enclavum/otaku/blob/main/pyproject.toml)
 [![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)](https://github.com/enclavum/otaku#requirements)
 
-Stories that branch, remember, and grow their own lore — on your machine, with optional at-rest
-encryption.
+Stories that branch and grow their own lore — on your machine, with optional at-rest encryption.
 
 ![otaku demo](docs/demo.gif)
 
@@ -19,7 +18,8 @@ Otaku is an attempt to build a terminal alternative to SillyTavern (ST), with a 
 - automatic character extraction from the chat (the `/cast` command),
 - minimal to no under-the-hood prompt injection.
 
-Differences from ST (partly limitations of the current version, partly intentional):
+How the otaku workflow differs from ST (partly limitations of the current version, partly
+intentional):
 - no pre-created character cards, worlds, lore, etc. — everything is inferred and extracted from
   the chat;
 - however, you can set up your world or characters manually in the system message (the `/system`
@@ -51,7 +51,7 @@ otaku
 
 On first start, you choose a provider and a model: otaku automatically detects local installations
 of Ollama, oMLX, and KoboldCpp and lets you pick from their models. After you've chosen, you land
-at the prompt.
+at the prompt. If nothing is running yet, otaku opens anyway — pick a model later with `/model`.
 
 To give you an idea of the features and what play looks like, on first start a sample story is
 imported, and you land right in the middle of it. You can explore it with the `/lore`, `/cast`,
@@ -60,9 +60,11 @@ and `/context` commands.
 From there, you either start your own story with the `/new` command or import an ST chat with
 `/import`. Importing takes time, because it doesn't only import the messages — it also extracts
 characters and scenes from them (more on that below). You can also import a plain text file the
-same way; it will be split into messages.
+same way; it will be split into messages. The format is detected from the file, and the extension
+has to match: `.jsonl` for an ST chat, `.txt` for plain text, `.md` for an otaku export.
 
 ```
+/import ~/stories/the-long-road.md  # an otaku export, memory included
 /import ~/chats/my-st-chat.jsonl    # a SillyTavern chat
 /import ~/drafts/story.txt          # plain text, split into turns
 ```
@@ -99,7 +101,8 @@ summaries may exist up to the latest message, only the older ones are actually u
 
 ## Warnings, limitations, and planned features
 
-This is only the second release, and an alpha. Planned for the next version:
+This is only the second release, and an alpha. For now, otaku works with local LLMs only. Planned
+for the next version:
 
 - Properly wire the characters and lore into the roleplay context, alongside the scene summaries.
   Even though they are extracted, they are not yet injected anywhere into the prompt — they are

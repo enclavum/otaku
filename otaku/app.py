@@ -14,7 +14,7 @@ from pathlib import Path
 
 from otaku import crypto
 from otaku.chat import repl
-from otaku.chat.commands import dispatch
+from otaku.chat.commands.transfer import import_story
 from otaku.chat.session import TUI, Session
 from otaku.formatting import pretty_path
 from otaku.logs.errors import ErrorLog
@@ -113,13 +113,16 @@ class App:
             raise
         if fresh and cfg.seed_sample:
             # A database created from scratch is seeded with the shipped
-            # sample story, through the real command — a native import, so
-            # no pass runs and no model is called — and remembered, so the
-            # user lands (and stays) in the middle of a playable story.
-            dispatch(
-                f"/import {Path(__file__).parent / 'samples' / 'story.md'}",
+            # sample story, through the command's own machinery — a native
+            # import, so no pass runs and no model is called — and
+            # remembered, so the user lands (and stays) in the middle of a
+            # playable story. `import_story`, not the full command: its
+            # scene echo belongs to a live session, and at launch the
+            # REPL's own resume echo shows the scene.
+            import_story(
                 self.session,
                 self.store,
+                str(Path(__file__).parent / "samples" / "story.md"),
             )
             self.session.save_state()
             self.session.notice = _SAMPLE_NOTICE

@@ -73,7 +73,7 @@ def cmd_undo(session: Session, store: Store, args: list[str]) -> None:
     if not session.messages:
         print("Undone. The story is now empty (its turns stay in the tree).")
         return
-    print("Undone. The story now ends with:")
+    print(f"{DIM}[ undone. the story now ends with: ]{RESET}")
     print()
     print(session.render_last_turns(2))
 
