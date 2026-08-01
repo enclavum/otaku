@@ -1,9 +1,9 @@
-"""Free prose, dismantled into the same shape the other readers parse to.
+"""Plain text, dismantled into the same shape the other readers parse to.
 
 `split_segments` owns the dismantling: paragraphs split into narration
 beats and spoken lines (quoted or dash-led), oversized narration split at
 sentence boundaries — the text reproduced verbatim, nothing rewritten.
-`parse_freetext` wraps the segments as a story of narration turns; the
+`parse_plaintext` wraps the segments as a story of narration turns; the
 extraction pass builds the memory afterwards, exactly as for live play.
 """
 
@@ -25,10 +25,12 @@ _SAID_VERB = re.compile(
 )
 
 
-def parse_freetext(text: str) -> StoryExport | None:
+def parse_plaintext(text: str) -> StoryExport | None:
     """`text` as a story of verbatim narration turns — or None when it
-    holds nothing to import. Never rejects a format: any text is free
-    text; the other parsers must be tried first."""
+    holds nothing to import. Plain text is the open class — it never
+    rejects a format, so the caller routes here only when no marked
+    format (the export header, a SillyTavern JSON line) claimed the
+    file."""
     segments = split_segments(text)
     if not segments:
         return None

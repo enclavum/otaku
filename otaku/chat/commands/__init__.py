@@ -22,15 +22,12 @@ CommandHandler = Callable[[Session, Store, list[str]], None]
 
 
 # (command, shortcut, description) per row; "" for no shortcut, None starts
-# a group heading. A description is ONE line in the printed help, whatever
-# its length — split literals below wrap the source, never the output.
+# a group heading. One row per source line, whatever its width — E501 is
+# off for this file (see pyproject) and the formatter is off for the table.
+# fmt: off
 _HELP_ROWS: list[tuple[str | None, str, str]] = [
     (None, "", "Playing:"),
-    (
-        "PROMPT",
-        "",
-        "Your character speaks or acts; the model continues the scene — sent verbatim",
-    ),
+    ("PROMPT", "", "Your character speaks or acts; the model continues the scene — sent verbatim"),
     ("/me NAME: PROMPT", "", "Send PROMPT as NAME's line; you keep writing as NAME"),
     ("/you NAME", "", "The model plays NAME and responds"),
     ("/ooc PROMPT", "", "Talk to the model out of character"),
@@ -45,39 +42,19 @@ _HELP_ROWS: list[tuple[str | None, str, str]] = [
     (None, "", "Lore:"),
     ("/lore", "Ctrl+L", "Browse and edit the memory: scenes, cast, journals"),
     ("/cast", "", "The same browser, opened directly on the cast"),
-    (
-        "/extract",
-        "",
-        "Extract lore from the recent messages now (closes a scene); "
-        "triggered automatically after 5 minutes of inactivity",
-    ),
+    ("/extract", "", "Extract lore from the recent messages now (closes a scene); triggered automatically after 5 minutes of inactivity"),
     ("/merge A into B", "", "Fold a duplicate character into the real one"),
     (None, "", "Inspect:"),
     ("/context", "", "Preview the next request (assembled prompt + budgets)"),
     ("/usage [all]", "", "Tokens spent on this story (or everything)"),
     ("/info", "", "Show details about the current model + session"),
     (None, "", "Import/export:"),
-    ("/import chat FILE", "", "Import a chat: an otaku /export file, or SillyTavern .jsonl"),
-    ("/import text FILE", "", "Build a new story from a free text file (current model)"),
+    ("/import FILE", "", "Import a story: an otaku export, SillyTavern chat (.jsonl), or plain text"),
     ("/export [FILE]", "", "Export the whole story to Markdown (memory + messages)"),
-    ("/copy [all]", "", "Copy the last reply (or the whole chat) to the clipboard"),
     (None, "", "Model and settings:"),
-    (
-        "/model [PROVIDER/MODEL]",
-        "Ctrl+O",
-        "Switch model in-place (opens the picker with no arg); remembered as last used",
-    ),
-    (
-        "/set think <level>",
-        "",
-        "Thinking effort for the model: on|off|none|low|medium|high|max|default",
-    ),
-    (
-        "/set parameter <name> <val>",
-        "",
-        "Set an inference parameter for the model; "
-        "no <val> shows it, <val> = reset returns the default",
-    ),
+    ("/model [PROVIDER/MODEL]", "Ctrl+O", "Switch model in-place (opens the picker with no arg); remembered as last used"),
+    ("/set think <level>", "", "Thinking effort for the model: on|off|none|low|medium|high|max|default"),
+    ("/set parameter <name> <val>", "", "Set an inference parameter for the model; no <val> shows it, <val> = reset returns the default"),
     ("/set verbose on|off", "", "Show the stats line after each reply"),
     ("", "", ""),
     ("/bye", "Ctrl+D", "Exit"),
@@ -89,6 +66,7 @@ _HELP_ROWS: list[tuple[str | None, str, str]] = [
     ("Up / Down", "", "Walk your recent prompt history (saved across runs)"),
     ("Ctrl+C", "", "Clear the current line; cancel an in-flight reply"),
 ]
+# fmt: on
 
 
 def _build_help() -> str:
@@ -108,9 +86,20 @@ def _build_help() -> str:
 HELP_TEXT = _build_help()
 
 
+def _set_tree() -> CompletionTree:
+    """/set's completion subtree: each setting with its value menu."""
+    levels = ("on", "off", "none", "low", "medium", "high", "max", "default")
+    return {
+        "think": {level: None for level in levels},
+        "parameter": {p: {"reset": None} for p in KNOWN_PARAMS},
+        "verbose": {"on": None, "off": None},
+    }
+
+
 # Each entry pairs the handler with its tab-completion subtree (None = no
-# arguments). Ordered as in _HELP_TEXT so the menu lists commands in the
-# same order as the help.
+# arguments), one entry per source line. Ordered as in _HELP_TEXT so the
+# menu lists commands in the same order as the help.
+# fmt: off
 COMMANDS: dict[str, tuple[CommandHandler, CompletionTree | str | None]] = {
     "/me": (playing.cmd_me, None),
     "/you": (playing.cmd_you, None),
@@ -129,23 +118,14 @@ COMMANDS: dict[str, tuple[CommandHandler, CompletionTree | str | None]] = {
     "/context": (inspect.cmd_context, None),
     "/usage": (inspect.cmd_usage, {"all": None}),
     "/info": (inspect.cmd_info, None),
-    "/import": (transfer.cmd_import, {"chat": PATH_LEAF, "text": PATH_LEAF}),
+    "/import": (transfer.cmd_import, PATH_LEAF),
     "/export": (transfer.cmd_export, PATH_LEAF),
-    "/copy": (transfer.cmd_copy, {"all": None}),
     "/model": (settings.cmd_model, None),
-    "/set": (
-        settings.cmd_set,
-        {
-            "think": {
-                k: None for k in ("on", "off", "none", "low", "medium", "high", "max", "default")
-            },
-            "parameter": {p: {"reset": None} for p in KNOWN_PARAMS},
-            "verbose": {"on": None, "off": None},
-        },
-    ),
+    "/set": (settings.cmd_set, _set_tree()),
     "/bye": (meta.cmd_bye, None),
     "/help": (meta.cmd_help, None),
 }
+# fmt: on
 
 
 def completion_tree() -> CompletionTree:

@@ -53,9 +53,11 @@ THINK_LEVELS = {"none", "low", "medium", "high", "max"}
 THINK_ALIASES = {"on": "medium", "off": "none"}
 
 # What the story browser hands back on a confirmed selection: the story id,
-# its messages up to the picked turn, and the total turn count (so a
-# mid-story pick is recognizable).
-PickedStory = tuple[int, list[Message], int]
+# its messages up to the picked turn, and the action its dialog settled —
+# "resume" (the tail was picked), "fork" (continue in a copy from there),
+# or "truncate" (rewind the head; later turns stay in the tree as
+# siblings).
+PickedStory = tuple[int, list[Message], str]
 
 # Turns echoed when a story (re)opens — launch resume, a browser pick, an
 # import — so the scene is on screen before the prompt.
@@ -233,16 +235,17 @@ class Session:
 
     def undo(self, store: Store) -> list[Message]:
         """Discard the trailing exchange: the assistant reply (if any) plus
-        every trailing user row back to the previous assistant turn — one
-        submission can be several rows (a /me or /you direction beside its
-        line). Nothing is deleted: the head moves back and the undone turns
-        stay in the tree as siblings. Returns the popped messages."""
+        the ONE user row that prompted it — every submission is a single
+        row (a /me or /you direction rides its row's framing), and an
+        imported backlog of consecutive user rows is story, not one
+        submission. Nothing is deleted: the head moves back and the undone
+        turns stay in the tree as siblings. Returns the popped messages."""
         popped: list[Message] = []
         if not self.messages:
             return popped
         if self.messages[-1].role == "assistant":
             popped.append(self.messages.pop())
-        while self.messages and self.messages[-1].role == "user":
+        if self.messages and self.messages[-1].role == "user":
             popped.append(self.messages.pop())
         if popped:
             self._move_head(store)
@@ -283,16 +286,14 @@ class Session:
     def render_last_turns(self, count: int) -> str:
         """The last `count` turns, echoed the way they played: a user turn
         as the grey submitted-prompt block, a model turn as its rendered
-        markdown — one blank line between turns, each turn's own interior
-        blank lines dropped."""
+        markdown — one blank line between turns, bodies verbatim."""
         out: list[str] = []
         for message in self.messages[-count:]:
             out.append("")
-            body = "\n".join(line for line in message.body.splitlines() if line.strip())
             if message.role == "user":
-                out.append(user_block(body))
+                out.append(user_block(message.body))
             else:
-                out.extend(render_markdown(body).splitlines())
+                out.extend(render_markdown(message.body).splitlines())
         return "\n".join(out).lstrip("\n")
 
     def reload_params(self) -> None:
@@ -309,7 +310,7 @@ class Session:
                 continue
             try:
                 self.params[name] = coerce(value)
-            except TypeError, ValueError:
+            except (TypeError, ValueError):
                 print(f"Ignoring invalid {name} value {value!r} saved for {self.model}.")
 
     # ---------- startup internals ----------

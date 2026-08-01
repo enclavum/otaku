@@ -1,16 +1,16 @@
 """Free prose into a story.
 
 `split_segments` dismantles prose into message-sized segments,
-reproducing the text verbatim; `parse_freetext` wraps them as narration
+reproducing the text verbatim; `parse_plaintext` wraps them as narration
 turns and returns None only when there is nothing to import.
 """
 
-from otaku.transfer.freetext import parse_freetext, split_segments
+from otaku.transfer.plaintext import parse_plaintext, split_segments
 
 
-class TestParseFreetext:
+class TestParsePlaintext:
     def test_prose_becomes_narration_turns(self) -> None:
-        parsed = parse_freetext("Первый абзац.\n\nВторой абзац.")
+        parsed = parse_plaintext("Первый абзац.\n\nВторой абзац.")
         assert parsed is not None
         assert [(m.role, m.kind, m.body) for m in parsed.messages] == [
             ("user", "narration", "Первый абзац."),
@@ -18,8 +18,8 @@ class TestParseFreetext:
         ]
 
     def test_nothing_to_import_is_none(self) -> None:
-        assert parse_freetext("") is None
-        assert parse_freetext("   \n\n  ") is None
+        assert parse_plaintext("") is None
+        assert parse_plaintext("   \n\n  ") is None
 
 
 class TestSplitSegments:

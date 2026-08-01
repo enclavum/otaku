@@ -57,7 +57,7 @@ class _StreamWatcher:
             return self
         try:
             fd = sys.stdin.fileno()
-        except ValueError, OSError:
+        except (ValueError, OSError):
             return self
         if not os.isatty(fd):
             return self
@@ -86,7 +86,7 @@ class _StreamWatcher:
         while not self._stop.is_set():
             try:
                 ready, _, _ = select.select([self._fd], [], [], 0.05)
-            except OSError, ValueError:
+            except (OSError, ValueError):
                 return
             if not ready:
                 continue
@@ -128,7 +128,6 @@ def _run_step(session: Session, store: Store, ooc: bool) -> None:
         # The turn is recorded — it is story — and plays on a /regen once
         # a model exists.
         print(NO_MODEL_HINT)
-        print()
         return
     content: list[str] = []
     in_thinking = False
@@ -224,11 +223,8 @@ def _run_step(session: Session, store: Store, ooc: bool) -> None:
         # Ctrl+R during the stream: the partial is recorded above like any
         # reply; the outer loop's drop_last_reply siblings it away.
         print(f"\n{DIM}[ regenerating ]{RESET}")
+        print()
         session.regen_after = True
-        return
-    # One blank line between the turn's output (reply, stats, or the
-    # error note) and whatever comes next — the prompt included.
-    print()
 
 
 def format_stats(stats: Stats) -> str:

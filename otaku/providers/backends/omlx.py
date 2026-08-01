@@ -88,6 +88,6 @@ def _read_home_json(relative: str) -> dict[str, Any]:
     """A JSON object at `~/<relative>`, or {} on any failure."""
     try:
         parsed = json.loads((Path.home() / relative).read_text())
-    except OSError, json.JSONDecodeError:
+    except (OSError, json.JSONDecodeError):
         return {}
     return parsed if isinstance(parsed, dict) else {}

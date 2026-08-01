@@ -29,9 +29,6 @@ SCROLL_ABOVE = "\x1b[1;{}r"  # DECSTBM: scrolling confined to rows 1..N
 SCROLL_ALL = "\x1b[r"  # DECSTBM reset: the whole screen scrolls again
 CURSOR_BLINK_ON = "\x1b[?12h"  # DECSET 12: ask the terminal to blink the cursor
 
-# Clipboard
-CLIPBOARD_COPY = "\x1b]52;c;{}\x07"  # OSC 52: set the clipboard to the base64 payload
-
 # Confirm-prompt answers, matched after `latin_key` folds the typed layout.
 # A site with a yes-default accepts the empty answer explicitly.
 YES_ANSWERS = {"y", "yes"}
@@ -42,7 +39,6 @@ _RUSSIAN_TO_LATIN = str.maketrans(
     "йцукенгшщзхъфывапролджэячсмитьбюё",
     "qwertyuiop[]asdfghjkl;'zxcvbnm,.`",
 )
-
 
 # The prompt markers: `PROMPT_PREFIX` opens every input line (and each
 # line `user_block` echoes); `PROMPT_CONTINUATION` marks the lines of an

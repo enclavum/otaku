@@ -367,7 +367,7 @@ class TestHealing:
             )
         )
 
-        app.play(f"/import chat {path}")
+        app.play(f"/import {path}")
         assert app.server.requests == []  # a native import triggers nothing
 
         app.play("/extract")  # the next pass heals the hole...

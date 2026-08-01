@@ -27,7 +27,7 @@ def load(paths: Paths) -> dict[str, dict[str, object]]:
         return {}
     try:
         raw = tomllib.loads(path.read_text())
-    except OSError, tomllib.TOMLDecodeError:
+    except (OSError, tomllib.TOMLDecodeError):
         return {}
     return {str(name): dict(entry) for name, entry in raw.items() if isinstance(entry, dict)}
 

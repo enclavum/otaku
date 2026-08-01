@@ -117,7 +117,7 @@ class App:
             # no pass runs and no model is called — and remembered, so the
             # user lands (and stays) in the middle of a playable story.
             dispatch(
-                f"/import chat {Path(__file__).parent / 'samples' / 'story.md'}",
+                f"/import {Path(__file__).parent / 'samples' / 'story.md'}",
                 self.session,
                 self.store,
             )

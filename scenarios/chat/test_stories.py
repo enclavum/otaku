@@ -1,15 +1,12 @@
 """Managing stories: browsing and resuming, forking, /rename, /system, /new.
 
 The browser itself is a tui surface tested in its own file; here it is an
-injected pick, so these stories are about what a selection MEANS — resume,
-the fork question, the head rewind — and about the story commands' effects
-on the store, the session, and the remembered state.
+injected pick, so these stories are about what a settled selection MEANS —
+resume, fork, truncate — and about the story commands' effects on the
+store, the session, and the remembered state.
 """
 
-import builtins
 from collections.abc import Callable
-
-import pytest
 
 from otaku.chat.session import TUI, PickedStory
 from otaku.store import Store
@@ -17,7 +14,7 @@ from otaku.store.stories import StoryListing
 from otaku.tui import stories
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch, set_config
-from scenarios.support.screens import CTRL_S, DELETE, ENTER, ESC, UP, run_screen
+from scenarios.support.screens import CTRL_S, DELETE, DOWN, ENTER, ESC, UP, run_screen
 
 Picker = Callable[[Store, list[StoryListing], int | None], PickedStory | None]
 
@@ -50,6 +47,17 @@ class TestBrowsing:
         assert relaunched.session.story_id == first
         relaunched.close()
 
+    def test_the_echo_keeps_blank_lines_verbatim(self, app: App, capsys) -> None:
+        app.play("The hall is dark.\n\nTorches gutter.")
+        first = app.session.story_id
+        app.play("/new")
+        app.session.tui = TUI(pick_story=picks(first))
+        capsys.readouterr()
+        app.play("/stories")
+        out = capsys.readouterr().out
+        assert "\x1b[48;2;240;240;240m> The hall is dark.\x1b[K" in out
+        assert "\x1b[48;2;240;240;240m> \x1b[K" in out  # the paragraph break, banded
+
     def test_a_cancelled_browse_rereads_an_edited_story(self, app: App) -> None:
         app.play("I enter the hall.")
         first_id = app.session.messages[0].id
@@ -60,23 +68,19 @@ class TestBrowsing:
         assert app.session.messages[0].body == "I enter the throne hall."
 
 
-class TestForkQuestion:
-    """Picking an EARLIER message asks: fork here? Yes copies, no rewinds,
-    anything else cancels."""
+class TestResumeDialog:
+    """Picking an EARLIER message: the browser's dialog settled the action —
+    the command executes a fork or a truncation (cancel never leaves the
+    browser)."""
 
-    def ask(self, app: App, story_id: int, answer: str, monkeypatch) -> None:
-        app.session.tui = TUI(pick_story=picks(story_id, upto=1))
-        monkeypatch.setattr(builtins, "input", lambda prompt="": answer)
+    def decided(self, app: App, story_id: int, action: str) -> None:
+        app.session.tui = TUI(pick_story=picks(story_id, upto=1, action=action))
         app.play("/stories")
 
-    # The empty answer is the [Y/n] default; "н" is y on the ЙЦУКЕН layout.
-    @pytest.mark.parametrize("answer", ["", "y", "н"])
-    def test_yes_forks_at_the_picked_message(
-        self, app: App, capsys, monkeypatch, answer: str
-    ) -> None:
+    def test_fork_copies_at_the_picked_message(self, app: App, capsys) -> None:
         first, second = two_stories(app)
         old_head = app.store.stories.get_head(first)
-        self.ask(app, first, answer, monkeypatch)
+        self.decided(app, first, "fork")
 
         out = capsys.readouterr().out
         assert "Forked to 'First - 2'." in out
@@ -89,10 +93,10 @@ class TestForkQuestion:
         # The original did not move.
         assert app.store.stories.get_head(first) == old_head
 
-    def test_no_rewinds_the_head_keeping_siblings(self, app: App, capsys, monkeypatch) -> None:
+    def test_truncate_rewinds_the_head_keeping_siblings(self, app: App, capsys) -> None:
         first, _ = two_stories(app)
         reply_id = app.store.stories.get_messages(first)[1].id
-        self.ask(app, first, "n", monkeypatch)
+        self.decided(app, first, "truncate")
 
         assert "Resuming here — later messages stay in the tree as siblings." in (
             capsys.readouterr().out
@@ -101,42 +105,6 @@ class TestForkQuestion:
         assert [m.body for m in app.session.messages] == ["The first story begins."]
         # The abandoned reply still exists in the tree — nothing was deleted.
         assert app.store.messages.count_body_chars([reply_id]) > 0
-
-    def test_any_other_answer_cancels(self, app: App, capsys, monkeypatch) -> None:
-        first, second = two_stories(app)
-        self.ask(app, first, "what?", monkeypatch)
-        assert "Cancelled." in capsys.readouterr().out
-        assert app.session.story_id == second  # still where the user was
-        assert app.store.stories.get_head(first) is not None
-
-    def test_a_cancelled_question_still_rereads_edits(self, app: App, monkeypatch) -> None:
-        # The browser edits messages in place; every way OUT of the fork
-        # question — not just a clean cancel — must leave the session
-        # reading the edited story, never a stale copy.
-        app.play("I enter the hall.")
-        target = app.session.messages[0].id
-
-        def pick(store: Store, rows: list[StoryListing], current: int | None) -> PickedStory:
-            store.messages.update(target, "I enter the throne hall.")
-            messages = store.stories.get_messages(app.session.story_id)
-            return (app.session.story_id, messages[:1], len(messages))
-
-        app.session.tui = TUI(pick_story=pick)
-        monkeypatch.setattr(builtins, "input", lambda prompt="": "what?")
-        app.play("/stories")
-        assert app.session.messages[0].body == "I enter the throne hall."
-
-    def test_ctrl_c_at_the_question_cancels(self, app: App, capsys, monkeypatch) -> None:
-        first, second = two_stories(app)
-        app.session.tui = TUI(pick_story=picks(first, upto=1))
-
-        def interrupted(prompt: str = "") -> str:
-            raise KeyboardInterrupt
-
-        monkeypatch.setattr(builtins, "input", interrupted)
-        app.play("/stories")
-        assert "Cancelled." in capsys.readouterr().out
-        assert app.session.story_id == second
 
 
 class TestStoryBrowser:
@@ -148,18 +116,35 @@ class TestStoryBrowser:
         _first, second = two_stories(app)
         picked = self.pick(app, ENTER + ENTER)
         assert picked is not None
-        story_id, messages, total = picked
+        story_id, messages, action = picked
         assert story_id == second  # the list leads with the recently played
         assert [m.body for m in messages] == ["The second story begins.", scripted.CHAT_REPLY]
-        assert total == 2
+        assert action == "resume"
 
-    def test_an_earlier_message_cuts_the_chain_there(self, app: App) -> None:
+    def test_an_earlier_message_asks_and_fork_is_the_default(self, app: App) -> None:
         _first, second = two_stories(app)
-        picked = self.pick(app, ENTER + UP + ENTER)
-        story_id, messages, total = picked
+        # Enter on the earlier turn opens the dialog; Enter confirms fork.
+        picked = self.pick(app, ENTER + UP + ENTER + ENTER)
+        story_id, messages, action = picked
         assert story_id == second
         assert [m.body for m in messages] == ["The second story begins."]
-        assert total == 2
+        assert action == "fork"
+
+    def test_the_dialog_offers_truncate(self, app: App) -> None:
+        _first, second = two_stories(app)
+        picked = self.pick(app, ENTER + UP + ENTER + DOWN + ENTER)
+        story_id, messages, action = picked
+        assert story_id == second
+        assert [m.body for m in messages] == ["The second story begins."]
+        assert action == "truncate"
+
+    def test_the_dialog_cancels_back_into_the_browser(self, app: App) -> None:
+        two_stories(app)
+        # Cancel (the third row) closes the dialog; the browser is still up,
+        # so it takes two more Esc to leave with no pick.
+        assert self.pick(app, ENTER + UP + ENTER + DOWN + DOWN + ENTER + ESC + ESC) is None
+        # Esc on the open dialog is the same cancel.
+        assert self.pick(app, ENTER + UP + ENTER + ESC + ESC + ESC) is None
 
     def test_esc_cancels(self, app: App) -> None:
         two_stories(app)
@@ -351,14 +336,14 @@ class TestNew:
         assert len(app.store.stories.get_messages(original)) == 2
 
 
-def picks(story_id: int, upto: int | None = None) -> Picker:
+def picks(story_id: int, upto: int | None = None, action: str = "resume") -> Picker:
     """A browser stub: the user picked `story_id` — at its last turn, or at
-    message `upto` of it."""
+    message `upto` of it with the resume dialog settling `action`."""
 
     def pick(store: Store, rows: list[StoryListing], current: int | None) -> PickedStory:
         messages = store.stories.get_messages(story_id)
         cut = messages if upto is None else messages[:upto]
-        return (story_id, cut, len(messages))
+        return (story_id, cut, action)
 
     return pick
 

@@ -134,7 +134,7 @@ def render_story(export: StoryExport, *, otaku_version: str, model: str, exporte
 
 
 def _escape(text: str) -> str:
-    """Free text, made structure-proof: a heading-shaped line gains one
+    """Body text, made structure-proof: a heading-shaped line gains one
     leading backslash; the parser's `_unescape` strips exactly one back."""
     return "\n".join(
         STRUCTURE_LINE.sub(lambda m: "\\" + m.group(0), line) for line in text.splitlines()

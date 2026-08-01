@@ -1,12 +1,11 @@
-"""Import/export commands: /import, /export, /copy.
+"""Import/export commands: /import, /export.
 
 `/import` writes the file's records into a fresh story, switches the
 session onto it, and then triggers the extraction exactly like `/extract`
 — one path builds the memory whether the messages came from play or from
 a file. A full export that carries its memory needs no extraction; the
 pass simply finds nothing to do. `/export` writes the story as the one
-Markdown document the `transfer` package owns; `/copy` puts the last reply
-(or a readable transcript) on the clipboard.
+Markdown document the `transfer` package owns.
 """
 
 import re
@@ -17,26 +16,26 @@ from otaku import __version__
 from otaku.chat.commands import lore
 from otaku.chat.session import Session
 from otaku.store import Store
-from otaku.terminal import YES_ANSWERS, clipboard, latin_key
+from otaku.terminal import YES_ANSWERS, latin_key
+from otaku.transfer import EXPORT_MARKER
 from otaku.transfer import exports as story_exports
 from otaku.transfer import imports as story_imports
-from otaku.transfer.freetext import parse_freetext
+from otaku.transfer.plaintext import parse_plaintext
 from otaku.transfer.sillytavern import parse_sillytavern
 
 
 def cmd_import(session: Session, store: Store, args: list[str]) -> None:
-    """`/import chat FILE` — import a chat: an otaku /export file (its
-    memory applied verbatim, no model calls) or a SillyTavern .jsonl.
-    `/import text FILE` — dismantle a free-form text file into verbatim
-    messages instead. A native export arrives with its extraction state
-    and triggers nothing; the memoryless shapes (SillyTavern, text) have
-    their memory built by the same forced extraction pass `/extract`
-    runs, waited on in the foreground. The session switches to the
-    imported story."""
-    mode, _, rest = session.raw_args.partition(" ")
-    path_text = rest.strip()
-    if mode not in ("chat", "text") or not path_text:
-        print("Usage: /import chat FILE  or  /import text FILE")
+    """`/import FILE` — import a story, the format detected from the
+    file's name and contents: an otaku /export document (.md, its memory
+    applied verbatim, no model calls), a SillyTavern chat (.jsonl), or
+    plain text (.txt) dismantled into verbatim messages. A native export
+    arrives with its extraction state and triggers nothing; the
+    memoryless shapes (SillyTavern, plain text) have their memory built
+    by the same forced extraction pass `/extract` runs, waited on in the
+    foreground. The session switches to the imported story."""
+    path_text = session.raw_args.strip()
+    if not path_text:
+        print("Usage: /import FILE")
         return
     path = Path(path_text).expanduser()
     try:
@@ -45,18 +44,30 @@ def cmd_import(session: Session, store: Store, args: list[str]) -> None:
         print(f"Could not read {path}: {e}")
         return
 
+    # The format is detected — never declared — and the file's NAME and
+    # contents must agree. A file that matches a format but fails its
+    # parser is refused, not degraded into prose.
+    suffix = path.suffix.lower()
     native = False
-    if mode == "text":
-        export = parse_freetext(text)
-    elif (export := story_imports.parse_story(text)) is not None:
+    if suffix == ".md" and EXPORT_MARKER in text:
+        export = story_imports.parse_story(text)
+        if export is None:
+            print("This looks like an otaku export, but it does not parse.")
+            return
         native = True
-    elif (export := parse_sillytavern(text)) is not None:
+    elif suffix == ".jsonl" and text.lstrip().startswith("{"):
+        export = parse_sillytavern(text)
+        if export is None:
+            print("This looks like JSON, but not a SillyTavern chat (.jsonl).")
+            return
         print(f"SillyTavern chat: {len(export.messages)} message(s).")
+    elif suffix == ".txt":
+        export = parse_plaintext(text)
+        if export is None:
+            print("The file contains no text to import.")
+            return
     else:
-        print("Not an otaku export or a SillyTavern chat (.jsonl).")
-        return
-    if export is None:
-        print("The file contains no text to import.")
+        print("Cannot detect file format.")
         return
     if not export.messages:
         print("The file contains no messages to import.")
@@ -80,7 +91,7 @@ def cmd_export(session: Session, store: Store, args: list[str]) -> None:
     """`/export [FILE]` — the current story as one Markdown document: the
     story-so-far, system, and cast, the scenes with their journals, then
     every message verbatim (framing included) — importable back with
-    `/import chat`, losslessly. No name writes `<story-title>.md` (or
+    `/import`, losslessly. No name writes `<story-title>.md` (or
     story.md) in the current directory; an existing file prompts before
     overwriting (default no)."""
     if not session.messages:
@@ -98,7 +109,7 @@ def cmd_export(session: Session, store: Store, args: list[str]) -> None:
     if path.exists():
         try:
             answer = latin_key(input(f"{path} already exists — overwrite? [y/N] ").strip())
-        except EOFError, KeyboardInterrupt:
+        except (EOFError, KeyboardInterrupt):
             print("Cancelled.")
             return
         if answer not in YES_ANSWERS:
@@ -112,49 +123,9 @@ def cmd_export(session: Session, store: Store, args: list[str]) -> None:
     print(f"Exported to {path}.")
 
 
-def cmd_copy(session: Session, store: Store, args: list[str]) -> None:
-    """`/copy` — the last model reply to the clipboard; `/copy all` — the
-    whole transcript as readable Markdown (for pasting elsewhere; round
-    trips go through /export files). A native clipboard tool when one
-    exists, else the OSC 52 terminal escape."""
-    if args and args[0].lower() != "all":
-        print("Usage: /copy [all]")
-        return
-    if not session.messages:
-        print("Nothing to copy.")
-        return
-    if args:
-        text, what = _transcript_markdown(session), "transcript"
-    else:
-        reply = next((m.body for m in reversed(session.messages) if m.role == "assistant"), "")
-        if not reply:
-            print("Nothing to copy (no assistant reply yet).")
-            return
-        text, what = reply, "last reply"
-    method = clipboard.copy(text)
-    suffix = " (via OSC 52)" if method == "osc52" else ""
-    print(f"Copied {what} to clipboard ({len(text):,} chars){suffix}.")
-
-
 def _default_filename(session: Session, store: Store) -> str:
     """`the-long-road.md` from the story title; `story.md` when untitled."""
     story = store.stories.get(session.story_id) if session.story_id is not None else None
     stem = re.sub(r"[^\w\s-]", "", (story.title if story else "").lower())
     slug = re.sub(r"[\s_-]+", "-", stem).strip("-")
     return f"{slug or 'story'}.md"
-
-
-def _transcript_markdown(session: Session) -> str:
-    """The context as a readable `## role` transcript — bodies only, with
-    the speaker or an ooc mark in the header."""
-    stamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M")
-    lines = [f"# {session.full_model_name} · {stamp}", ""]
-    for message in session.messages:
-        if message.kind == "ooc":
-            label = f"{message.role} (ooc)"
-        elif message.speaker:
-            label = f"{message.role} ({message.speaker})"
-        else:
-            label = message.role
-        lines += [f"## {label}", "", message.body, ""]
-    return "\n".join(lines).rstrip() + "\n"

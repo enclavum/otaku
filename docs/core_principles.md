@@ -39,11 +39,11 @@ Messages in the middle are replaced with scene summaries, which helps keep the c
 details. You can see the exact context that will be sent to the LLM after you enter your prompt with the /context
 command.
 
-## Import from ST and free text files
+## Import from ST and plain text files
 
-Messages can be imported from ST chats with the /import chat command, where you provide the path to the chat JSONL
-file, or from a free text file with the /import text command, where the text is split into messages automatically.
-After importing messages, the lore extraction is automatically triggered in the foreground.
+Messages can be imported from ST chats with the /import command, where you provide the path to the chat JSONL file, or
+even from a plain text file, where the text is split into messages automatically. After importing messages, the lore
+extraction is automatically triggered in the foreground.
 
 ## Database encryption
 

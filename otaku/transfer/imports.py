@@ -30,7 +30,7 @@ _SCENE_HEADER = re.compile(r"^(\d+)(?:\s*·\s*(.+))?$")
 _CAST_BULLET = re.compile(r"^-\s*\*\*(.+?)\*\*(?:\s*\(aka\s*(.+?)\))?(?:\s*—\s*(.+))?$")
 _SPAN_BULLET = re.compile(r"^-\s*\*\*Messages:\*\*\s*(\d+)(?:-(\d+))?$")
 _FIELD = re.compile(r"^\*\*([A-Za-z ]+):\*\*\s?(.*)$")  # **State:** / **History:** / **Entry:**
-# A free-text line that would parse as document structure — a heading of
+# A body line that would parse as document structure — a heading of
 # any level the format uses, or an already-escaped such line. The
 # renderer's `_escape` adds one backslash; `_unescape` strips one back.
 STRUCTURE_LINE = re.compile(r"^(\\*)(#{1,4} )")
@@ -197,7 +197,7 @@ def _split_by_header(
     Returns (lines before the first header, [(header, body)]). The
     trailing space in `marker` excludes deeper levels — '## ' never
     matches '### '. Content cannot masquerade as a header: the renderer
-    escapes structure-shaped free-text lines."""
+    escapes structure-shaped body lines."""
     preamble: list[str] = []
     header: str | None = None
     body: list[str] = []
@@ -267,7 +267,7 @@ def _labeled_fields(lines: list[str]) -> dict[str, str]:
 
 def _unescape(text: str) -> str:
     """The renderer's structure escape, undone: one leading backslash off
-    every heading-shaped free-text line (see `exports._escape`)."""
+    every heading-shaped body line (see `exports._escape`)."""
     return "\n".join(
         STRUCTURE_LINE.sub(lambda m: m.group(1)[1:] + m.group(2), line)
         for line in text.splitlines()

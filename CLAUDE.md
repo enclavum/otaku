@@ -16,10 +16,10 @@ between. The database is encrypted.
 
 ## Environment and commands
 
-Python 3.14 in the `otaku2` conda environment:
+Python 3.14 in the `otaku` conda environment:
 
-    conda run -n otaku2 otaku            # run the app
-    make lint RUN="conda run -n otaku2"  # ruff check (Makefile defaults to uv)
+    conda run -n otaku otaku            # run the app
+    make lint RUN="conda run -n otaku"  # ruff check (Makefile defaults to uv)
     make format RUN=...                  # ruff format
     make typecheck RUN=...               # mypy (strict)
     make test RUN=...                    # pytest

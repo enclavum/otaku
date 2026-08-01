@@ -235,6 +235,9 @@ def run(session: Session, store: Store) -> None:
                 submit(line, session, store)
             except KeyboardInterrupt:
                 print()
+            # One blank line between whatever the line printed and the next
+            # prompt — the gap lives HERE, once, not at each print site.
+            print()
             continue
 
         result = assembler.feed(line)
@@ -261,6 +264,7 @@ def run(session: Session, store: Store) -> None:
         except KeyboardInterrupt:
             # ^C during streaming or a picker: return to the prompt cleanly.
             print()
+        print()  # the same systematic gap before the prompt
 
     worker.shutdown()  # non-blocking: exit is immediate
 

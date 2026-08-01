@@ -97,6 +97,18 @@ class TestUndo:
         assert app.session.messages == chain
         assert app.store.messages.get_parent(3) == 2
 
+    def test_undo_never_swallows_sequential_user_messages(self, app: App, tmp_path) -> None:
+        # Sequential user rows are story, not one submission — /undo takes
+        # back the played exchange only. A text import is how a run of
+        # user rows arises through the surface.
+        tale = tmp_path / "tale.txt"
+        tale.write_text("First beat.\n\nSecond beat.\n\nThird beat.", encoding="utf-8")
+        app.play(f"/import {tale}")
+        imported = [m.body for m in app.session.messages]
+        app.play("I look around.")
+        app.play("/undo")
+        assert [m.body for m in app.session.messages] == imported
+
     def test_undo_on_an_empty_story_says_so(self, app: App, capsys) -> None:
         app.play("/undo")
         assert "Nothing to undo." in capsys.readouterr().out

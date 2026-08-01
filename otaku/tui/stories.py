@@ -26,9 +26,11 @@ the split changes.
 A row's label is the story's title, else its newest story-so-far rollup,
 else its first prompt. `/` filters; in the story list the filter also
 matches full message content, indexed lazily on the first keystroke.
-Enter drills in; Enter on a message hands the selection back to the
-caller, which owns what resuming mid-story means. `e` edits a message in
-place; Del deletes a story after a confirm.
+Enter drills in; Enter on the last message resumes, and on an earlier
+one a dialog asks what resuming there means — fork from that point (the
+default), truncate the story, or cancel — and the settled action rides
+the result for the caller to execute. `e` edits a message in place; Del
+deletes a story after a confirm.
 """
 
 from dataclasses import replace
@@ -78,6 +80,14 @@ _STYLE = Style.from_dict(
 _STORY_SPLIT = (1, 1)
 _TURN_SPLIT = (2, 1)
 
+# The resume dialog's rows, in order: (action, label). The action is what
+# the picker returns; "cancel" closes the dialog and stays in the browser.
+_RESUME_OPTIONS = (
+    ("fork", "Fork — continue in a new story from here"),
+    ("truncate", "Truncate — discard the messages after this one"),
+    ("cancel", "Cancel"),
+)
+
 
 def _label(row: StoryListing) -> str:
     """A story's one-line label: title, else the story so far, else the
@@ -121,15 +131,20 @@ class StoryPicker(ListScreen):
 
         self.confirming_delete: bool = False
 
+        # The resume dialog (Enter on an earlier message): up or not, and
+        # which _RESUME_OPTIONS row is highlighted (fork is the default).
+        self.confirming_resume: bool = False
+        self.resume_choice: int = 0
+
         # Inline message editing (`e` in the message view): while True the
         # preview body is the edit buffer and navigation is suspended.
         self.editing: bool = False
         self.edit_buffer = Buffer(multiline=True)
 
-        self.result: tuple[int, list[Message], int] | None = None
+        self.result: tuple[int, list[Message], str] | None = None
         self.app = self._build_app()
 
-    def run(self) -> tuple[int, list[Message], int] | None:
+    def run(self) -> tuple[int, list[Message], str] | None:
         if not self.all:
             return None
         self.app.run()
@@ -153,6 +168,20 @@ class StoryPicker(ListScreen):
             ("class:dialog.body", "(its messages, scenes, and cast go with it)\n"),
             ("class:dialog.muted", "y to confirm     n / esc to cancel"),
         ]
+
+    def _resume_text(self) -> StyleAndTextTuples:
+        picked = self.turn_filtered[self.turn_cursor] + 1 if self.turn_filtered else 0
+        out: StyleAndTextTuples = [
+            ("class:dialog.title", f"Resume at message {picked} of {len(self.loaded_msgs)}\n"),
+            ("class:dialog.body", "\n"),
+        ]
+        for i, (_, label) in enumerate(_RESUME_OPTIONS):
+            selected = i == self.resume_choice
+            style = "class:row.selected" if selected else "class:dialog.body"
+            out.append((style, f"{' > ' if selected else '   '}{label}\n"))
+        out.append(("class:dialog.body", "\n"))
+        out.append(("class:dialog.muted", "↑/↓ choose · enter confirm · esc cancel"))
+        return out
 
     def _items_text(self) -> StyleAndTextTuples:
         out: StyleAndTextTuples = []
@@ -365,17 +394,28 @@ class StoryPicker(ListScreen):
         self._refilter()
         self.confirming_delete = False
 
+    def _do_resume(self) -> None:
+        action = _RESUME_OPTIONS[self.resume_choice][0]
+        self.confirming_resume = False
+        if action == "cancel" or self.selected_story is None or not self.turn_filtered:
+            return
+        orig = self.turn_filtered[self.turn_cursor]
+        self.result = (self.selected_story.id, self.loaded_msgs[: orig + 1], action)
+        get_app().exit()
+
     def _on_enter(self) -> None:
         if self.in_turns:
             if not self.turn_filtered or self.selected_story is None:
                 return
             orig = self.turn_filtered[self.turn_cursor]
-            self.result = (
-                self.selected_story.id,
-                self.loaded_msgs[: orig + 1],
-                len(self.loaded_msgs),
-            )
-            get_app().exit()
+            if orig + 1 == len(self.loaded_msgs):
+                self.result = (self.selected_story.id, self.loaded_msgs[:], "resume")
+                get_app().exit()
+            else:
+                # An earlier turn: what resuming there means is the resume
+                # dialog's question, fork being the default.
+                self.confirming_resume = True
+                self.resume_choice = 0
             return
 
         if not self.filtered:
@@ -458,6 +498,7 @@ class StoryPicker(ListScreen):
     def _build_app(self) -> Application[None]:
         kb = KeyBindings()
         confirming = Condition(lambda: self.confirming_delete)
+        resuming = Condition(lambda: self.confirming_resume)
 
         # While the confirm dialog is up: only y/n/esc do anything.
         @kb.add("escape", eager=True, filter=confirming)
@@ -472,7 +513,25 @@ class StoryPicker(ListScreen):
             elif key == "n":
                 self.confirming_delete = False
 
-        self._standard_keys(kb, when=~confirming)
+        # While the resume dialog is up: arrows walk the options, Enter
+        # confirms the highlighted one, Esc closes back into the browser.
+        @kb.add("escape", eager=True, filter=resuming)
+        def _resume_esc(event: Any) -> None:
+            self.confirming_resume = False
+
+        @kb.add("up", filter=resuming)
+        def _resume_up(event: Any) -> None:
+            self.resume_choice = (self.resume_choice - 1) % len(_RESUME_OPTIONS)
+
+        @kb.add("down", filter=resuming)
+        def _resume_down(event: Any) -> None:
+            self.resume_choice = (self.resume_choice + 1) % len(_RESUME_OPTIONS)
+
+        @kb.add("enter", filter=resuming)
+        def _resume_enter(event: Any) -> None:
+            self._do_resume()
+
+        self._standard_keys(kb, when=~confirming & ~resuming)
 
         @kb.add("delete")
         def _delete_key(event: Any) -> None:
@@ -532,16 +591,27 @@ class StoryPicker(ListScreen):
             ),
             filter=confirming,
         )
+        resume_dialog = ConditionalContainer(
+            content=bordered_box(
+                FormattedTextControl(text=self._resume_text, show_cursor=False),
+                width=D(min=50, max=74, preferred=64),
+                height=D.exact(11),
+                style="class:dialog.body",
+                border_style="class:dialog.border",
+            ),
+            filter=resuming,
+        )
 
         root = VSplit([left_pane, self._preview_gap(), preview_pane])
-        return self._finish_app(root, bindings, _STYLE, floats=[confirm_dialog])
+        return self._finish_app(root, bindings, _STYLE, floats=[confirm_dialog, resume_dialog])
 
 
 def pick(
     store: Store, rows: list[StoryListing], initial_story: int | None = None
-) -> tuple[int, list[Message], int] | None:
+) -> tuple[int, list[Message], str] | None:
     """Show the story browser over `rows`. `initial_story` pre-selects the
     matching row when set (the story already loaded in the REPL). Returns
-    (story_id, its messages up to the picked turn, total turns) on a
-    confirmed selection, or None when the user cancels (Esc/Ctrl+C)."""
+    (story_id, its messages up to the picked turn, the settled action —
+    "resume", "fork", or "truncate") on a confirmed selection, or None
+    when the user cancels (Esc/Ctrl+C)."""
     return StoryPicker(store, rows, initial_story=initial_story).run()

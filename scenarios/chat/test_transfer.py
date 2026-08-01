@@ -2,14 +2,13 @@
 
 The chapel fixture is deliberately Cyrillic: importing it proves non-Latin
 content survives the whole path — parse, sealed store, session, export —
-byte for byte. The SillyTavern and free-text imports arrive memoryless, so
+byte for byte. The SillyTavern and plain-text imports arrive memoryless, so
 each triggers the same forced extraction pass live play gets.
 """
 
 import json
 from pathlib import Path
 
-from otaku.terminal import clipboard
 from otaku.transfer.exports import read_story
 from otaku.transfer.imports import parse_story
 from scenarios.support import server as scripted
@@ -36,7 +35,7 @@ on its hinges.
 
 class TestImport:
     def test_a_full_export_imports_verbatim_without_model_calls(self, app: App, capsys) -> None:
-        app.play(f"/import chat {CHAPEL}")
+        app.play(f"/import {CHAPEL}")
         out = capsys.readouterr().out
         assert "1 scene(s) applied verbatim" in out
         # A native export carries its extraction state: no pass runs, no
@@ -51,14 +50,53 @@ class TestImport:
         assert [c.name for c in cast] == ["Кассиан", "Элоиза"]
 
     def test_the_reimported_story_equals_the_file(self, app: App, tmp_path: Path) -> None:
-        app.play(f"/import chat {CHAPEL}")
+        app.play(f"/import {CHAPEL}")
         assert read_story(app.store, app.session.story_id) == parse_story(CHAPEL.read_text())
 
     def test_a_missing_file_imports_nothing(self, app: App, capsys) -> None:
-        app.play(f"/import chat {Path('/nowhere') / 'gone.md'}")
+        app.play(f"/import {Path('/nowhere') / 'gone.md'}")
         assert capsys.readouterr().out.strip()  # refused out loud
         assert app.session.story_id is None
         assert app.server.requests == []
+
+    def test_a_bare_import_shows_usage(self, app: App, capsys) -> None:
+        app.play("/import")
+        assert "Usage: /import FILE" in capsys.readouterr().out
+
+    def test_a_broken_export_is_refused_not_read_as_prose(
+        self, app: App, capsys, tmp_path: Path
+    ) -> None:
+        # The marker claims the native format; a failed parse must refuse,
+        # never degrade the scaffolding into a plain-text story.
+        broken = tmp_path / "broken.md"
+        broken.write_text("<!-- otaku export -->\nno structure here")
+        app.play(f"/import {broken}")
+        assert "to import" in capsys.readouterr().out  # refused, not imported
+        assert app.session.story_id is None
+        assert app.server.requests == []
+
+    def test_json_that_is_not_a_tavern_chat_is_refused(
+        self, app: App, capsys, tmp_path: Path
+    ) -> None:
+        data = tmp_path / "data.jsonl"
+        data.write_text('{"hello": "world"}\n')
+        app.play(f"/import {data}")
+        assert "not a SillyTavern chat" in capsys.readouterr().out
+        assert app.session.story_id is None
+        assert app.server.requests == []
+
+    def test_an_unknown_format_is_refused(self, app: App, capsys, tmp_path: Path) -> None:
+        # The file's name and contents must agree: an unknown extension,
+        # or a .md without the export marker, match nothing.
+        stray = tmp_path / "story.doc"
+        stray.write_text("Some prose.")
+        app.play(f"/import {stray}")
+        assert "Cannot detect file format" in capsys.readouterr().out
+        markerless = tmp_path / "story.md"
+        markerless.write_text("Just markdown prose.")
+        app.play(f"/import {markerless}")
+        assert "Cannot detect file format" in capsys.readouterr().out
+        assert app.session.story_id is None
 
     def test_a_reply_full_of_markdown_survives_the_round_trip(
         self, app: App, tmp_path: Path, monkeypatch
@@ -72,7 +110,7 @@ class TestImport:
         app.play("The story goes on.")
         app.play("/rename Book")
         app.play("/export")
-        app.play(f"/import chat {tmp_path / 'book.md'}")
+        app.play(f"/import {tmp_path / 'book.md'}")
         chain = app.store.stories.get_messages(app.session.story_id)
         assert [m.body for m in chain] == [
             "I open the book.",
@@ -86,7 +124,7 @@ class TestSillyTavern:
     def test_a_tavern_chat_imports_attributed_and_builds_memory(
         self, app: App, tmp_path: Path
     ) -> None:
-        app.play(f"/import chat {tavern_file(tmp_path)}")
+        app.play(f"/import {tavern_file(tmp_path)}")
         story_id = app.session.story_id
         chain = app.store.stories.get_messages(story_id)
         # The hidden `is_system` line is skipped; the rest arrive verbatim.
@@ -124,18 +162,18 @@ class TestSillyTavern:
             )
 
         app.server.script = renaming
-        app.play(f"/import chat {tavern_file(tmp_path)}")
+        app.play(f"/import {tavern_file(tmp_path)}")
         chain = app.store.stories.get_messages(app.session.story_id)
         assert [m.speaker for m in chain] == ["Elara", "Guest", "Elara"]
 
 
-class TestFreetext:
+class TestPlaintext:
     def test_prose_is_dismantled_verbatim_and_memory_is_built(
         self, app: App, tmp_path: Path, capsys
     ) -> None:
         path = tmp_path / "chapel.txt"
         path.write_text(PROSE)
-        app.play(f"/import text {path}")
+        app.play(f"/import {path}")
         assert "Imported" in capsys.readouterr().out
 
         story_id = app.session.story_id
@@ -176,30 +214,6 @@ class TestExport:
         monkeypatch.setattr("builtins.input", lambda prompt="": "")  # the [y/N] default
         app.play(f"/export {target}")
         assert target.read_text() == "precious notes"
-
-
-class TestCopy:
-    def test_copy_puts_the_last_reply_on_the_clipboard(self, app: App, monkeypatch) -> None:
-        copied: list[str] = []
-
-        def fake_copy(text: str) -> str:
-            copied.append(text)
-            return "stub"
-
-        monkeypatch.setattr(clipboard, "copy", fake_copy)
-        app.play("I enter the hall.")
-        app.play("/copy")
-        assert copied == [scripted.CHAT_REPLY]
-
-    def test_copy_all_is_a_readable_transcript(self, app: App, monkeypatch) -> None:
-        copied: list[str] = []
-        monkeypatch.setattr(clipboard, "copy", lambda text: copied.append(text) or "stub")
-        app.play("I enter the hall.")
-        app.play("/copy all")
-        (transcript,) = copied
-        assert "I enter the hall." in transcript
-        assert scripted.CHAT_REPLY in transcript
-        assert "## " in transcript  # role headers, readable as Markdown
 
 
 def tavern_file(tmp_path: Path) -> Path:

@@ -76,7 +76,6 @@ def cmd_undo(session: Session, store: Store, args: list[str]) -> None:
     print("Undone. The story now ends with:")
     print()
     print(session.render_last_turns(2))
-    print()
 
 
 def cmd_regen(session: Session, store: Store, args: list[str]) -> None:
@@ -87,6 +86,7 @@ def cmd_regen(session: Session, store: Store, args: list[str]) -> None:
         print("Nothing to regenerate.")
         return
     print(f"{DIM}[ regenerating ]{RESET}")
+    print()
     # An out-of-character reply regenerates out of character.
     run_inference(session, store, ooc=popped.kind == "ooc")
 

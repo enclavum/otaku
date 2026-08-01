@@ -1,14 +1,14 @@
 """Story commands: /stories, /fork, /system, /rename, and /new.
 
-`/stories` opens the browser and owns what a selection means: picking the
-last turn resumes the story as-is; picking an earlier turn offers a fork
-at that point, and declining rewinds the head instead (the later turns
-stay in the tree as siblings — nothing is deleted either way).
+`/stories` opens the browser and executes what its selection settled:
+picking the last turn resumes the story as-is; picking an earlier turn
+asks in the browser's own dialog — fork at that point (the default), or
+truncate the story by rewinding the head (the later turns stay in the
+tree as siblings — nothing is deleted either way).
 """
 
 from otaku.chat.session import RESUME_TURNS, Session
 from otaku.store import Store
-from otaku.terminal import NO_ANSWERS, YES_ANSWERS, latin_key
 
 
 def cmd_stories(session: Session, store: Store, args: list[str]) -> None:
@@ -24,45 +24,25 @@ def cmd_stories(session: Session, store: Store, args: list[str]) -> None:
     if result is None:
         _reread_current(session, store)
         return
-    story_id, messages, total = result
+    story_id, messages, action = result
 
-    # Picking an earlier message offers a fork at that point — the
-    # playthrough mechanism. Declining resumes on this story with the head
-    # moved back (the later messages stay in the tree as siblings).
-    if len(messages) < total:
-        try:
-            ans = latin_key(
-                input(
-                    f"Resume at message {len(messages)} of {total}: "
-                    f"continue in a fork from here? [Y/n] "
-                ).strip()
-            )
-        except EOFError, KeyboardInterrupt:
-            print("Cancelled.")
-            _reread_current(session, store)
-            return
-        if not ans or ans in YES_ANSWERS:  # empty = the [Y/n] default
-            story_id = store.stories.fork(
-                story_id,
-                from_message_id=messages[-1].id,
-                settle=session.config.settle_messages,
-            )
-            messages = store.stories.get_messages(story_id)
-            story = store.stories.get(story_id)
-            print(f"Forked to '{story.title}'." if story and story.title else "Forked.")
-        elif ans in NO_ANSWERS:
-            store.stories.set_head(story_id, messages[-1].id)
-            print("Resuming here — later messages stay in the tree as siblings.")
-        else:
-            print("Cancelled.")
-            _reread_current(session, store)
-            return
+    if action == "fork":
+        story_id = store.stories.fork(
+            story_id,
+            from_message_id=messages[-1].id,
+            settle=session.config.settle_messages,
+        )
+        messages = store.stories.get_messages(story_id)
+        story = store.stories.get(story_id)
+        print(f"Forked to '{story.title}'." if story and story.title else "Forked.")
+    elif action == "truncate":
+        store.stories.set_head(story_id, messages[-1].id)
+        print("Resuming here — later messages stay in the tree as siblings.")
 
     session.switch_to(store, story_id, messages)
     print(f"Resumed at message {len(messages)}.")
     print()
     print(session.render_last_turns(RESUME_TURNS))
-    print()
 
 
 def cmd_rename(session: Session, store: Store, args: list[str]) -> None:
