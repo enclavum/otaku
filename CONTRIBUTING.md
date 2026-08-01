@@ -11,7 +11,7 @@ otaku uses [uv](https://docs.astral.sh/uv/). With the repo cloned:
 uv sync                      # create a venv and install runtime + dev deps
 ```
 
-A virtual environment with Python 3.14 is required.
+A virtual environment with Python 3.11 is required.
 
 ## Before opening a PR
 

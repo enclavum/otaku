@@ -5,6 +5,14 @@ All notable changes to otaku are documented in this file. The format is based on
 [Semantic Versioning](https://semver.org/) — while pre-1.0, minor releases may include breaking
 changes.
 
+## [0.2.1] - 2026-08-01
+
+Packaging only — no functional changes.
+
+### Changed
+- The required Python version is now 3.11, down from 3.14.
+- Dependency bounds updated.
+
 ## [0.2.0] - 2026-08-01
 
 0.2 is a ground-up rewrite as a **roleplay terminal client**: chats are stories that can be

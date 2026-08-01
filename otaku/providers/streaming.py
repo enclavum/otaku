@@ -16,6 +16,8 @@ flag on every chunk and closes the source stream itself, so cancelling the
 consumer still stops the server's generation promptly.
 """
 
+from __future__ import annotations  # `Chunk` is imported for typing only
+
 import threading
 import time
 from collections import deque

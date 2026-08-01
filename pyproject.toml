@@ -10,7 +10,7 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "enclavum", email = "293312193+enclavum@users.noreply.github.com" }]
-requires-python = ">=3.14"
+requires-python = ">=3.11"
 keywords = ["llm", "ollama", "mlx", "omlx", "koboldcpp", "terminal", "tui", "roleplay", "story", "lore", "local"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -19,15 +19,20 @@ classifiers = [
     "Operating System :: MacOS",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
     "Topic :: Games/Entertainment :: Role-Playing",
 ]
+# Floor = the version otaku is tested against, cap = the next major: both
+# bounds mean something, and neither describes an install nobody performs.
 dependencies = [
-    "click>=8.1,<9.0",
-    "cryptography>=44,<50",
-    "httpx>=0.27,<1.0",
-    "prompt_toolkit>=3.0.43,<4.0",
-    "psutil>=6,<8",
+    "click>=8.4,<9.0",
+    "cryptography>=49,<51",
+    "httpx>=0.28,<1.0",
+    "prompt_toolkit>=3.0.53,<4.0",
+    "psutil>=7,<8",
 ]
 
 [project.urls]
@@ -40,10 +45,10 @@ otaku = "otaku.cli:main"
 
 [dependency-groups]
 dev = [
-    "mypy>=1.15",
-    "pytest>=8",
-    "ruff>=0.15",
-    "types-psutil>=6",
+    "mypy>=2.3,<3",
+    "pytest>=9.1,<10",
+    "ruff>=0.16,<0.17",
+    "types-psutil>=7,<8",
 ]
 
 # The one source of the version is the code: otaku/__init__.py.__version__.
@@ -55,6 +60,10 @@ packages = ["otaku"]
 
 [tool.ruff]
 line-length = 100
+# The supported floor, not the interpreter in use: syntax newer than this
+# (PEP 695 generics, PEP 758 unparenthesized excepts) is a SyntaxError on
+# the older versions otaku supports, and only this catches it here.
+target-version = "py311"
 
 [tool.ruff.lint]
 select = ["B", "E", "F", "I", "N", "RUF", "SIM", "UP", "W"]
@@ -72,6 +81,7 @@ select = ["B", "E", "F", "I", "N", "RUF", "SIM", "UP", "W"]
 [tool.mypy]
 strict = true
 files = ["otaku"]
+python_version = "3.11"  # type-check against the floor, not the interpreter in use
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -220,7 +220,7 @@ class OpenAIClient:
             )
             if response.status_code == 200:
                 return response.json()
-        except httpx.HTTPError, OSError, ValueError:
+        except (httpx.HTTPError, OSError, ValueError):
             pass
         return None
 

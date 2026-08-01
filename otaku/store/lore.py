@@ -310,7 +310,7 @@ class CharacterOps:
             return ()
         try:
             return tuple(str(alias) for alias in json.loads(raw))
-        except json.JSONDecodeError, TypeError:
+        except (json.JSONDecodeError, TypeError):
             return ()
 
 

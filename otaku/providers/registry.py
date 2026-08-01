@@ -15,6 +15,7 @@ import builtins
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from typing import TypeVar
 
 from otaku.logs.requests import RequestLog
 from otaku.providers.backends.koboldcpp import KoboldCppClient
@@ -22,6 +23,8 @@ from otaku.providers.backends.ollama import OllamaClient
 from otaku.providers.backends.omlx import OmlxClient
 from otaku.providers.base import ManagedClient, OpenAIClient
 from otaku.settings.config import Provider
+
+_T = TypeVar("_T")  # Registry.map's result type
 
 # The backends with a native management API, by the provider name that
 # activates them; every other name gets the plain OpenAIClient.
@@ -117,7 +120,7 @@ class Registry:
             f"disambiguate as '<provider>/{spec}'"
         )
 
-    def map[T](self, fn: Callable[[str, Provider], T]) -> builtins.list[T]:
+    def map(self, fn: Callable[[str, Provider], _T]) -> builtins.list[_T]:
         """Run `fn(name, provider)` for every configured provider
         concurrently, results in configuration order — one dead provider's
         timeout overlaps the others instead of adding to them. `fn` handles

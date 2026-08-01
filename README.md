@@ -2,7 +2,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/otaku.svg)](https://pypi.org/project/otaku/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/enclavum/otaku/blob/main/LICENSE)
-[![Python 3.14+](https://img.shields.io/badge/python-3.14%2B-blue)](https://github.com/enclavum/otaku/blob/main/pyproject.toml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://github.com/enclavum/otaku/blob/main/pyproject.toml)
 [![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)](https://github.com/enclavum/otaku#requirements)
 
 Stories that branch and grow their own lore — on your machine, with optional at-rest encryption.
@@ -157,7 +157,7 @@ backups are kept in the state dir. Details in [SECURITY.md](SECURITY.md).
 ## Requirements
 
 - macOS or Linux, and a terminal
-- Python 3.14+ (installed automatically by `uv tool install`)
+- Python 3.11+ (installed automatically by either installer above)
 - a local model server: Ollama, oMLX, or KoboldCpp
 
 ## Contributing
