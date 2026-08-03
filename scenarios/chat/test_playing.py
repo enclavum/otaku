@@ -163,4 +163,35 @@ class TestRegenerate:
         app.play("I roll the dice.")
         capsys.readouterr()
         app.play("/regen")
-        assert "[ regenerating ]" in capsys.readouterr().out
+        out = capsys.readouterr().out
+        assert "[ regenerating ]" in out
+        assert "> I roll the dice." in out  # the prompt being re-run, echoed
+
+
+class TestLast:
+    def test_shows_the_recent_exchanges_as_played(self, app: App, capsys) -> None:
+        for n in range(3):
+            app.play(f"Turn {n}.")
+        capsys.readouterr()
+        app.play("/last")
+        out = capsys.readouterr().out
+        assert "> Turn 0." in out
+        assert "> Turn 2." in out
+        assert scripted.CHAT_REPLY in out
+
+    def test_a_count_limits_the_echo(self, app: App, capsys) -> None:
+        for n in range(3):
+            app.play(f"Turn {n}.")
+        capsys.readouterr()
+        app.play("/last 1")
+        out = capsys.readouterr().out
+        assert "> Turn 2." in out
+        assert "> Turn 1." not in out
+
+    def test_an_empty_story_says_so(self, app: App, capsys) -> None:
+        app.play("/last")
+        assert "No turns yet." in capsys.readouterr().out
+
+    def test_rejects_a_bad_count(self, app: App, capsys) -> None:
+        app.play("/last riddle")
+        assert "Usage: /last [N]" in capsys.readouterr().out

@@ -79,19 +79,24 @@ class ScreenLedger:
 
     # ---------- the exchange lifecycle ----------
 
-    def echo_block(self, text: str) -> None:
+    def echo_block(self, text: str, above: str = "") -> None:
         """Show `text` as the played-turn block: erase the typed input
         (`typed_rows`), print the block and the blank line under it, and
         open a new exchange. Until a reply writes, that blank doubles as
         the pre-prompt gap — a /you that answers nothing suppresses the
-        loop's own."""
+        loop's own. `above` is a marker line just printed (with its blank)
+        over this echo — a fallback /regen's — riding the exchange the way
+        an undo report rides its re-echo (see `restore_exchange`)."""
         self._lead_blank = False  # the typed line is replaced, not printed under
         width = terminal_width()
         block = user_block(text)
         erase = _ERASE_UP.format(self.typed_rows) if self.typed_rows else ""
         sys.stdout.write(f"{erase}{block}\n\n")
         sys.stdout.flush()
-        self._stack.append(_Exchange(measure(block + "\n", width), width))
+        entry = _Exchange(measure(block + "\n", width), width)
+        if above:
+            entry.lead = measure(above + "\n", width) + 1
+        self._stack.append(entry)
         self._suppress_gap = True
         self.typed_rows = 0
 
@@ -126,10 +131,11 @@ class ScreenLedger:
     # ---------- erasing ----------
 
     def top_is_report(self) -> bool:
-        """The exchange on top is an undo report's re-echo: erasing it
-        takes the report line above it too, so the caller must print a
-        fresh report in its place — the screen would otherwise show a
-        report pointing at nothing."""
+        """A report or marker line rides the exchange on top (an undo
+        report over its re-echo, a fallback /regen's marker over its
+        echo): erasing the exchange takes that line too, so the caller
+        must print a fresh report in its place — the screen would
+        otherwise show a message pointing at nothing."""
         entry = self._top()
         return entry is not None and entry.lead > 0
 

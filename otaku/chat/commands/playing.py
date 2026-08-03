@@ -1,4 +1,4 @@
-"""The playing commands: /me, /you, /ooc, /undo, /regen.
+"""The playing commands: /me, /you, /ooc, /undo, /regen, /last.
 
 The three roleplay commands do ONE thing each: write their template into
 the turn's `framing` verbatim, filling only `{name}` — the `((OOC: …))`
@@ -19,6 +19,10 @@ from otaku.chat.session import Session
 from otaku.store import Store
 from otaku.store.schema import Message
 from otaku.terminal import DIM, RESET
+
+# Turns /last shows when called bare — a turn being an exchange, the
+# prompt and its reply (two message rows).
+_LAST_TURNS_DEFAULT = 5
 
 
 def cmd_me(session: Session, store: Store, args: list[str]) -> None:
@@ -116,19 +120,41 @@ def _report_ending(session: Session) -> None:
 def cmd_regen(session: Session, store: Store, args: list[str]) -> None:
     """Re-run the last prompt: the current reply becomes a sibling in the
     tree and a fresh one streams — in the old one's place when the screen
-    allows, announced by the marker otherwise."""
+    allows. When it is beyond reach, the marker announces and the prompt
+    being re-run echoes under it, like an undo report shows its turns:
+    the new take reads as an exchange, and /undo and /regen keep working
+    it."""
     popped = session.drop_last_reply(store)
     if popped is None:
         session.screen.invalidate()
         print("Nothing to regenerate.")
         return
     if not session.screen.erase_reply():
-        # The marker, like any command output, ends the clearable run.
         session.screen.invalidate()
-        print(f"{DIM}[ regenerating ]{RESET}")
+        marker = f"{DIM}[ regenerating ]{RESET}"
+        print(marker)
         print()
+        # The typed line stays above the marker — nothing of it to erase.
+        session.screen.typed_rows = 0
+        session.screen.echo_block(session.messages[-1].body, above=marker)
     # An out-of-character reply regenerates out of character.
     run_inference(session, store, ooc=popped.kind == "ooc")
+
+
+def cmd_last(session: Session, store: Store, args: list[str]) -> None:
+    """`/last [N]` — show the last N turns again (default 5), the way a
+    relaunch shows the scene: a clean view after undos, regens, etc. The
+    echoed turns go back to the ledger, so /undo and /regen work them
+    like freshly played ones."""
+    if args and not (args[0].isdigit() and int(args[0]) > 0):
+        print("Usage: /last [N]")
+        return
+    count = int(args[0]) if args else _LAST_TURNS_DEFAULT
+    if not session.messages:
+        print("No turns yet.")
+        return
+    print(session.render_last_turns(count * 2))  # a turn is two message rows
+    session.restore_screen_tail(count * 2)
 
 
 def _resolve_character(session: Session, store: Store, raw: str) -> str | None:

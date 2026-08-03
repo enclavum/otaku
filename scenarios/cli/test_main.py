@@ -132,9 +132,31 @@ class TestChat:
         assert "[ regenerating ]" not in terminal.transcript
         assert terminal.quit() == 0
 
-    def test_undo_past_the_echo_refreshes_the_report_in_place(
+    def test_last_reechoes_the_scene_and_its_turns_clear_again(
         self, server: ModelServer, tmp_path: Path
     ) -> None:
+        """/last brings the recent exchanges back after command litter —
+        and hands them to the ledger: Ctrl+U right after erases the top
+        re-echoed exchange silently, like a freshly played one."""
+        terminal = launch_remembered(server, tmp_path / "state")
+        play(terminal, "The first turn.", "stirred")
+        server.script = lambda body: "The dice settle slowly."
+        terminal.settle()
+        play(terminal, "The second turn.", "settle slowly")
+        terminal.settle()
+        play(terminal, "/info", "State dir:")  # litter below the turns
+        terminal.settle()
+        before = terminal.transcript.count("> The first turn.")
+        terminal.send("/last")
+        terminal.send(ENTER, 1.0)
+        assert terminal.transcript.count("> The first turn.") == before + 1
+        terminal.settle()
+        terminal.arm_cpr(20)
+        terminal.send(CTRL_U, 1.0)
+        terminal.settle()
+        assert b"\x1b[4A\r\x1b[J" in terminal.raw  # the re-echo erased
+        assert "undone" not in terminal.transcript  # silently — turns remain shown
+        assert terminal.quit() == 0
         """Resume, undo through the echoed turns and keep going: each
         /undo past them replaces report and re-echo with a fresh report
         of the earlier exchange — one current report on screen, never one
@@ -245,6 +267,39 @@ class TestShortcuts:
         terminal.settle()
         terminal.send(CTRL_R, 1.0)
         terminal.expect("It came up six.")
+        assert terminal.quit() == 0
+
+    def test_a_fallback_regen_echoes_the_prompt_it_reruns(
+        self, server: ModelServer, tmp_path: Path
+    ) -> None:
+        """/info printed below the reply, so Ctrl+R announces — with the
+        prompt re-echoed under the marker, like an undo report shows its
+        turns. The new take reads as an exchange: the next Ctrl+R erases
+        its reply in place, and Ctrl+U takes marker and echo into an undo
+        report."""
+        terminal = launch_remembered(server, tmp_path / "state")
+        play(terminal, "I roll the dice.", "stirred")
+        terminal.settle()
+        play(terminal, "/info", "State dir:")  # prints below — regen must announce
+        server.script = lambda body: "It came up six."
+        terminal.settle()
+        before = terminal.transcript.count("> I roll the dice.")
+        terminal.send(CTRL_R, 1.0)
+        terminal.expect("It came up six.")
+        assert "[ regenerating ]" in terminal.transcript
+        assert terminal.transcript.count("> I roll the dice.") == before + 1  # re-echoed
+        server.script = lambda body: "It came up one."
+        terminal.settle()
+        terminal.arm_cpr(20)
+        terminal.send(CTRL_R, 1.0)  # the echo is a live exchange — in place
+        terminal.expect("It came up one.")
+        assert terminal.transcript.count("[ regenerating ]") == 1
+        assert b"\x1b[2A\r\x1b[J" in terminal.raw
+        terminal.settle()
+        terminal.arm_cpr(20)
+        terminal.send(CTRL_U, 1.0)  # marker and echo go — the report replaces them
+        terminal.expect("The story is now empty")
+        assert b"\x1b[6A\r\x1b[J" in terminal.raw
         assert terminal.quit() == 0
 
     def test_ctrl_r_erases_the_old_reply_when_the_terminal_answers(
