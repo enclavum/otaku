@@ -5,6 +5,13 @@ the turn's `framing` verbatim, filling only `{name}` — the `((OOC: …))`
 enclosure lives in the template, and the assembler joins framing to body at
 wire time. No persona state, no rewriting: the wire role stays fixed by
 who produced the row.
+
+On screen they play like any turn: once the input validates, the typed
+line re-echoes as the grey played-turn block. /undo and /regen work the
+screen through the ledger (chat/screen.py): the erased exchange or reply
+simply vanishes, and only when the ledger cannot prove the erase do they
+fall back to reporting — every fallback print invalidates the ledger,
+because it lands below the exchange it describes.
 """
 
 from otaku.chat.inference import run_inference
@@ -23,10 +30,12 @@ def cmd_me(session: Session, store: Store, args: list[str]) -> None:
     name_part, sep, prompt = session.raw_args.partition(":")
     prompt = prompt.strip()
     if not sep or not name_part.strip() or not prompt:
+        session.screen.invalidate()
         print("Usage: /me NAME: PROMPT")
         return
     name = _resolve_character(session, store, name_part) or name_part.strip()
     framing = session.prompts.me_framing.replace("{name}", name)
+    session.screen.echo_block(session.raw_line)
     session.record_turn(store, Message(role="user", body=prompt, framing=framing))
     run_inference(session, store)
 
@@ -36,12 +45,14 @@ def cmd_you(session: Session, store: Store, args: list[str]) -> None:
     the scene immediately. One body-less turn whose framing is the template;
     the reply is a normal assistant turn."""
     if not args:
+        session.screen.invalidate()
         print("Usage: /you NAME")
         return
     raw = " ".join(args)
     name = _resolve_character(session, store, raw) or raw.strip()
     had_turn = bool(session.messages)
     framing = session.prompts.you_framing.replace("{name}", name)
+    session.screen.echo_block(session.raw_line)
     session.record_turn(store, Message(role="user", body="", kind="ooc", framing=framing))
     if had_turn:
         run_inference(session, store)
@@ -53,9 +64,11 @@ def cmd_ooc(session: Session, store: Store, args: list[str]) -> None:
     the body, the template rides its framing; `kind="ooc"` marks both
     sides."""
     if not args:
+        session.screen.invalidate()
         print("Usage: /ooc PROMPT")
         return
     question = " ".join(args)
+    session.screen.echo_block(session.raw_line)
     session.record_turn(
         store, Message(role="user", body=question, kind="ooc", framing=session.prompts.ooc_framing)
     )
@@ -65,28 +78,38 @@ def cmd_ooc(session: Session, store: Store, args: list[str]) -> None:
 def cmd_undo(session: Session, store: Store, args: list[str]) -> None:
     """Discard the last exchange: the reply plus the prompt that caused it.
     Nothing is deleted — the head moves back and the undone turns stay in
-    the tree as siblings."""
+    the tree as siblings. When the exchange still sits directly above the
+    prompt, it is erased from the screen as if never played; otherwise the
+    new ending is reported — an echo like a resume's, handed back to the
+    ledger, so the next /undo or /regen works the re-echoed turns."""
     popped = session.undo(store)
     if not popped:
+        session.screen.invalidate()
         print("Nothing to undo.")
         return
+    if session.screen.erase_exchange():
+        return  # the vanishing is the whole report
+    session.screen.invalidate()
     if not session.messages:
         print("Undone. The story is now empty (its turns stay in the tree).")
         return
     print(f"{DIM}[ undone. the story now ends with: ]{RESET}")
     print()
     print(session.render_last_turns(2))
+    session.restore_screen_tail(2)
 
 
 def cmd_regen(session: Session, store: Store, args: list[str]) -> None:
     """Re-run the last prompt: the current reply becomes a sibling in the
-    tree and a fresh one streams in its place."""
+    tree and a fresh one streams — in the old one's place when the screen
+    allows, announced by the marker otherwise."""
     popped = session.drop_last_reply(store)
     if popped is None:
+        session.screen.invalidate()
         print("Nothing to regenerate.")
         return
-    print(f"{DIM}[ regenerating ]{RESET}")
-    print()
+    if not session.screen.erase_reply():
+        session.screen.reply.write(f"{DIM}[ regenerating ]{RESET}\n\n")
     # An out-of-character reply regenerates out of character.
     run_inference(session, store, ooc=popped.kind == "ooc")
 

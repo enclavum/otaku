@@ -15,7 +15,6 @@ between the delimiters (newlines preserved) is sent as a single message.
 """
 
 import contextlib
-import shutil
 import sys
 from collections.abc import Callable
 from typing import Any, TextIO, cast
@@ -32,13 +31,13 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import menus as _ptk_menus
 from prompt_toolkit.layout.controls import BufferControl
 from prompt_toolkit.styles import Style
-from prompt_toolkit.utils import get_cwidth
 
 from otaku import __version__
 from otaku.chat.commands import dispatch
 from otaku.chat.commands.lore import build_job
 from otaku.chat.completer import SlashCompleter
 from otaku.chat.inference import run_inference
+from otaku.chat.screen import terminal_width
 from otaku.chat.session import RESUME_TURNS, Session
 from otaku.formatting import flatten, pretty_path, truncate
 from otaku.logs.errors import ErrorLog
@@ -52,8 +51,8 @@ from otaku.terminal import (
     RESET,
     banner,
     statusline,
-    user_block,
 )
+from otaku.terminal.rows import measure
 from otaku.terminal.statusline import StatusLine
 
 _PLACEHOLDER = FormattedText([("class:placeholder", "Send a message")])
@@ -188,10 +187,12 @@ def run(session: Session, store: Store) -> None:
     _show_resumed(session, store)
     if session.notice:
         # The resume echo above always precedes the notice and ends with
-        # its own blank line.
+        # its own blank line. The notice sits below the echoed turns, so
+        # they are no longer erasable.
         print(f"{BOLD}{session.notice}{RESET}")
         print()
         session.notice = ""
+        session.screen.invalidate()
 
     # A shortcut key stashes the in-progress input here before exiting the
     # prompt with its command, so the next prompt restores it.
@@ -233,9 +234,12 @@ def run(session: Session, store: Store) -> None:
             session.should_quit = True
             break
         except KeyboardInterrupt:
-            # ^C clears the line; inside a """ block it also drops the buffer.
+            # ^C clears the line; inside a """ block it also drops the
+            # buffer. The aborted prompt line stays on screen as a row the
+            # ledger cannot measure, so erasing is off until the next play.
             assembler.reset()
             input_rows = 0
+            session.screen.invalidate()
             continue
         input_rows += _rows_on_screen(line, prefix)
 
@@ -244,6 +248,13 @@ def run(session: Session, store: Store) -> None:
         # assembler would paste "/regen" into the user's text.
         if carry.pop("shortcut", None) is not None:
             input_rows = 0
+            # The prompt line is erased below, so the submission occupies
+            # no rows; an open """ block's collected lines above it are
+            # composition the ledger cannot see past — leave the screen
+            # alone and let the command fall back.
+            session.screen.typed_rows = 0
+            if assembler.in_block:
+                session.screen.invalidate()
             # The exited prompt line goes: its text returns at the next
             # prompt, and a leftover placeholder above the command's output
             # is noise. Erase what was SHOWN — the carried text, not the
@@ -256,14 +267,16 @@ def run(session: Session, store: Store) -> None:
                 submit(line, session, store)
             except KeyboardInterrupt:
                 print()
+                session.screen.invalidate()
             finally:
                 sys.stdout = tracker.wrapped
-            if tracker.wrote:
+            if tracker.wrote and not session.screen.take_suppressed_gap():
                 # One blank line between whatever the line printed and the
                 # next prompt — the gap lives HERE, once, not at each print
                 # site. Under NO output (a picker cancelled without a word)
                 # there is no gap either: with the prompt line erased above,
-                # the screen stays exactly as it was.
+                # the screen stays exactly as it was. An erased /undo left
+                # the standing blank on screen — no second one.
                 print()
             continue
 
@@ -273,25 +286,21 @@ def run(session: Session, store: Store) -> None:
 
         text, is_raw = result
         message = text if is_raw else text.strip()
-        rows, input_rows = input_rows, 0
         if not message:
+            # A bare Enter leaves its prompt row on screen; its rows stay
+            # in input_rows so the next submission's erase takes it too.
             continue
-
-        # A story turn re-echoes as the grey block, the typed input erased
-        # under it; a command stays on screen as typed.
-        if is_raw or not message.startswith("/"):
-            # The erase leaves the blank line every preceding output ends
-            # with, so the block prints no leading blank of its own.
-            sys.stdout.write(f"\x1b[{rows}A\r\x1b[J" if rows else "")
-            print(user_block(message))
-            print()
+        session.screen.typed_rows, input_rows = input_rows, 0
 
         try:
             submit(message, session, store, raw=is_raw)
         except KeyboardInterrupt:
-            # ^C during streaming or a picker: return to the prompt cleanly.
+            # ^C during streaming or a picker: return to the prompt
+            # cleanly. What it left mid-row is not the ledger's to count.
             print()
-        print()  # the same systematic gap before the prompt
+            session.screen.invalidate()
+        if not session.screen.take_suppressed_gap():
+            print()  # the same systematic gap before the prompt
 
     worker.shutdown()  # non-blocking: exit is immediate
 
@@ -303,25 +312,31 @@ def submit(line: str, session: Session, store: Store, *, raw: bool = False) -> N
     """One submitted line, whatever surface it came from: the user is
     active again, so queued background work is dropped; a slash command
     dispatches — never for a `raw` block, which is always a literal
-    prompt — and anything else is recorded as the user's turn and the
-    model answers. A new model turn arms the idle-debounced lore pass:
-    it fires while the user reads and dies the moment they type.
+    prompt — and anything else echoes as the grey played-turn block, is
+    recorded as the user's turn, and the model answers. A new model turn
+    arms the idle-debounced lore pass: it fires while the user reads and
+    dies the moment they type.
 
     A crash is contained here, at the line boundary: the traceback goes
     to the error log, one short line says so, and the session lives on —
-    every store write is transactional, so nothing is half-done."""
+    every store write is transactional, so nothing is half-done. The
+    error line prints past the screen ledger, so it invalidates it."""
     session.worker.defer()
     last_before = session.messages[-1] if session.messages else None
     try:
         if not raw and dispatch(line, session, store):
             _maybe_schedule(session, last_before)
             return
+        session.screen.echo_block(line)
         session.record_turn(store, Message(role="user", body=line))
         run_inference(session, store)
         _maybe_schedule(session, last_before)
     except KeyboardInterrupt:
         raise  # ^C is the user speaking, not a crash — the loop handles it
     except Exception as e:
+        if session.screen.take_lead_blank():
+            print()  # the crash report is the command's first output
+        session.screen.invalidate()
         path = ErrorLog(session.paths).record(f"command {line.split(' ', 1)[0]!r}", e)
         print(f"command failed ({type(e).__name__}) — recorded in {pretty_path(path)}")
 
@@ -343,9 +358,9 @@ def _maybe_schedule(session: Session, last_before: Message | None) -> None:
 
 def _rows_on_screen(line: str, prefix: str) -> int:
     """Terminal rows one prompt read occupied: the prompt prefix plus the
-    line, wrapped at the terminal's width."""
-    columns = max(20, shutil.get_terminal_size((80, 24)).columns)
-    return max(1, -(-get_cwidth(prefix + line) // columns))
+    line — wrapping at the terminal's width and embedded newlines (a
+    recalled multiline entry) included."""
+    return measure(prefix + line + "\n", terminal_width())
 
 
 def _banner(session: Session, store: Store) -> str:
@@ -373,7 +388,8 @@ def _banner(session: Session, store: Store) -> str:
 
 def _show_resumed(session: Session, store: Store) -> None:
     """A resumed story starts mid-scene: name what was resumed and show its
-    last turns, so the scene is on screen before the prompt."""
+    last turns, so the scene is on screen before the prompt — and hand
+    them to the screen ledger, so /undo and /regen can take them back."""
     if not session.messages:
         return
     label = flatten(truncate(session.story_label(store), 40))
@@ -384,6 +400,7 @@ def _show_resumed(session: Session, store: Store) -> None:
     print()
     print(session.render_last_turns(RESUME_TURNS))
     print()
+    session.restore_screen_tail(RESUME_TURNS)
 
 
 def _activity_toolbar(session: Session) -> Callable[[], FormattedText]:

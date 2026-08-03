@@ -122,12 +122,18 @@ def _run_step(session: Session, store: Store, ooc: bool) -> None:
     """One streaming pass. ^C during the stream is consumed here: partial
     output is kept and persisted so the user can regenerate or continue.
     ^R persists the partial the same way, then sets `session.regen_after`
-    for the outer loop, whose drop_last_reply leaves it as a sibling."""
+    for the outer loop, whose drop_last_reply leaves it as a sibling.
+
+    Everything shown inline — thinking, prose, error and stats lines —
+    prints through the screen ledger's reply writer, so the exchange's
+    row count can never drift from the screen (the spinner and the pinned
+    status row erase themselves and stay outside)."""
+    out = session.screen.reply
     provider = session.provider
     if provider is None:
         # The turn is recorded — it is story — and plays on a /regen once
         # a model exists.
-        print(NO_MODEL_HINT)
+        out.write(NO_MODEL_HINT + "\n")
         return
     content: list[str] = []
     in_thinking = False
@@ -139,7 +145,7 @@ def _run_step(session: Session, store: Store, ooc: bool) -> None:
     spinner.start()
     start = time.monotonic()
     watcher = _StreamWatcher()
-    renderer = MarkdownStreamer()
+    renderer = MarkdownStreamer(out)
     client = session.providers.get_client(provider.name)
     wire = assembler.assemble_story(store, session, client.get_context_size(session.model)).messages
     # The activity line survives the prompt's absence: entering `status_row`
@@ -154,13 +160,13 @@ def _run_step(session: Session, store: Store, ooc: bool) -> None:
                 spinner.stop()  # idempotent — the first real signal clears it
                 if isinstance(chunk, Thinking):
                     if not in_thinking:
-                        sys.stdout.write(DIM + "(thinking) ")
+                        out.write(DIM + "(thinking) ")
                         in_thinking = True
-                    sys.stdout.write(chunk.text)
-                    sys.stdout.flush()
+                    out.write(chunk.text)
+                    out.flush()
                 elif isinstance(chunk, Text):
                     if in_thinking:
-                        sys.stdout.write(RESET + "\n")
+                        out.write(RESET + "\n")
                         in_thinking = False
                     renderer.feed(chunk.text)
                     content.append(chunk.text)
@@ -175,25 +181,25 @@ def _run_step(session: Session, store: Store, ooc: bool) -> None:
             renderer.flush()
 
     if in_thinking:
-        sys.stdout.write(RESET)
+        out.write(RESET)
     if error is not None:
         # What streamed is already on the screen, so the story keeps it —
         # exactly as a Ctrl+C does. The record below runs on whatever
         # arrived; only the stats are meaningless now.
-        print(f"\n[error: {error}]")
+        out.write(f"\n[error: {error}]\n")
     else:
-        sys.stdout.write("\n")
+        out.write("\n")
 
     elapsed = time.monotonic() - start
     if session.verbose and interrupted:
         chars = sum(len(c) for c in content)
         rate = chars / elapsed if elapsed > 0 else 0.0
-        print(
+        out.write(
             f"{DIM}[ total {elapsed:.1f}s, "
-            f"eval {chars} chars @ {rate:.0f} chars/s, interrupted ]{RESET}"
+            f"eval {chars} chars @ {rate:.0f} chars/s, interrupted ]{RESET}\n"
         )
     elif session.verbose and final is not None:
-        print(DIM + format_stats(final) + RESET)
+        out.write(DIM + format_stats(final) + RESET + "\n")
 
     if content:
         # No speaker set here: lore extraction attributes the reply later
@@ -221,9 +227,11 @@ def _run_step(session: Session, store: Store, ooc: bool) -> None:
 
     if watcher.regen_requested:
         # Ctrl+R during the stream: the partial is recorded above like any
-        # reply; the outer loop's drop_last_reply siblings it away.
-        print(f"\n{DIM}[ regenerating ]{RESET}")
-        print()
+        # reply; the outer loop's drop_last_reply siblings it away — and
+        # off the screen too, the fresh reply streaming in its place. Only
+        # a partial the ledger cannot erase gets the marker instead.
+        if not session.screen.erase_reply_tail():
+            out.write(f"\n{DIM}[ regenerating ]{RESET}\n\n")
         session.regen_after = True
 
 

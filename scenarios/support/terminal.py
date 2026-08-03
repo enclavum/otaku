@@ -13,15 +13,20 @@ line-kill there). `settle` before sending a control key rides that window
 out.
 """
 
+import fcntl
 import os
 import pty
 import re
 import select
+import struct
 import subprocess
 import sys
+import termios
 import time
 
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b[78]|\x1b\][^\x07]*\x07")
+
+_CPR_QUERY = b"\x1b[6n"
 
 CTRL_C = b"\x03"
 CTRL_D = b"\x04"
@@ -37,8 +42,16 @@ class Terminal:
     """One app run in a pty. `send` types, `expect` waits for markers in
     the transcript so far, `quit` ends the session."""
 
-    def __init__(self, state_dir: str, *, env: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        state_dir: str,
+        *,
+        env: dict[str, str] | None = None,
+        rows: int = 24,
+        cols: int = 80,
+    ) -> None:
         self._master, slave = pty.openpty()
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
         run_env = (
             os.environ
             | {
@@ -57,11 +70,26 @@ class Terminal:
         )
         os.close(slave)
         self._raw = b""
+        self._cpr_row: int | None = None
+        self._cpr_from = 0
 
     @property
     def transcript(self) -> str:
         """Everything the app has drawn so far, ANSI stripped."""
         return _ANSI.sub("", self._raw.decode("utf-8", "replace"))
+
+    @property
+    def raw(self) -> bytes:
+        """Everything the app has drawn, escapes included — for asserting
+        the erase sequences themselves."""
+        return self._raw
+
+    def arm_cpr(self, row: int) -> None:
+        """Answer the app's next cursor-position query (ESC[6n) with `row`
+        — one-shot, armed right before the keystroke that triggers an
+        erase, so it meets that query and no other."""
+        self._cpr_row = row
+        self._cpr_from = len(self._raw)
 
     def send(self, data: bytes | str, settle: float = 0.5) -> None:
         os.write(self._master, data.encode() if isinstance(data, str) else data)
@@ -112,3 +140,6 @@ class Terminal:
                     self._raw += os.read(self._master, 65536)
                 except OSError:
                     return
+                if self._cpr_row is not None and _CPR_QUERY in self._raw[self._cpr_from :]:
+                    os.write(self._master, b"\x1b[%d;1R" % self._cpr_row)
+                    self._cpr_row = None

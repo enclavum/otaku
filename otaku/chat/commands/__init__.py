@@ -147,20 +147,32 @@ def describe_command(tokens: tuple[str, ...]) -> str:
     return ""
 
 
+# The playing commands manage the screen ledger themselves: three echo the
+# turn as the grey block, two take one back. Every other command prints
+# below the last exchange, so dispatch invalidates the ledger before it.
+_PLAYING = {"/me", "/you", "/ooc", "/undo", "/regen"}
+
+
 def dispatch(line: str, session: Session, store: Store) -> bool:
     """True when the line was a slash command (handled); False when it
-    should go to the model as a user message. Alongside the split args, the
-    verbatim argument text lands in `session.raw_args` for handlers that
-    take free text — split-and-rejoin would collapse the user's spacing."""
+    should go to the model as a user message. The line lands verbatim in
+    `session.raw_line` (a playing command echoes exactly what was typed)
+    and its argument text in `session.raw_args` (free-text handlers keep
+    the user's exact spacing — split-and-rejoin would collapse it)."""
     if not line.startswith("/"):
         return False
     command, *args = line.split()
-    entry = COMMANDS.get(command)
-    if entry is None:
-        print(f"Unknown command: {command}. Type /help.")
-        return True
+    session.raw_line = line
     split_once = line.split(None, 1)
     session.raw_args = split_once[1] if len(split_once) > 1 else ""
-    handler, _ = entry
-    handler(session, store, args)
-    return True
+    entry = COMMANDS.get(command)
+    with session.screen.command_output():
+        if entry is None:
+            session.screen.invalidate()
+            print(f"Unknown command: {command}. Type /help.")
+            return True
+        if command not in _PLAYING:
+            session.screen.invalidate()
+        handler, _ = entry
+        handler(session, store, args)
+        return True

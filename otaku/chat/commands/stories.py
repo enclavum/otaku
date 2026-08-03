@@ -43,6 +43,7 @@ def cmd_stories(session: Session, store: Store, args: list[str]) -> None:
     print(f"Resumed at message {len(messages)}.")
     print()
     print(session.render_last_turns(RESUME_TURNS))
+    session.restore_screen_tail(RESUME_TURNS)
 
 
 def cmd_rename(session: Session, store: Store, args: list[str]) -> None:

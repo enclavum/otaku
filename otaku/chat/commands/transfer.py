@@ -40,6 +40,7 @@ def cmd_import(session: Session, store: Store, args: list[str]) -> None:
     # Land in the scene.
     print()
     print(session.render_last_turns(2))
+    session.restore_screen_tail(2)
 
 
 def import_story(session: Session, store: Store, path_text: str) -> bool:

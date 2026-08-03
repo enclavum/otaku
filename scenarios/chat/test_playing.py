@@ -14,6 +14,10 @@ class TestTurns:
             ("assistant", scripted.CHAT_REPLY),
         ]
 
+    def test_a_played_turn_echoes_as_the_grey_block(self, app: App, capsys) -> None:
+        app.play("I open the door.")
+        assert "> I open the door." in capsys.readouterr().out
+
     def test_the_wire_carries_the_message_verbatim(self, app: App) -> None:
         app.play("/system You are the narrator.")
         app.play("I wait.   With   spaces?")
@@ -40,6 +44,16 @@ class TestTurns:
 
 
 class TestMe:
+    def test_the_typed_line_echoes_as_the_grey_block(self, app: App, capsys) -> None:
+        app.play("/me Elara: I step into the light.")
+        assert "> /me Elara: I step into the light." in capsys.readouterr().out
+
+    def test_a_usage_error_stays_plain(self, app: App, capsys) -> None:
+        app.play("/me no colon here")
+        out = capsys.readouterr().out
+        assert "Usage: /me NAME: PROMPT" in out
+        assert "> /me" not in out  # no block for a turn that never played
+
     def test_a_cast_name_resolves_to_its_canonical_form(self, app: App) -> None:
         for i in range(3):
             app.play(f"Turn number {i}.")
@@ -51,6 +65,11 @@ class TestMe:
 
 
 class TestYou:
+    def test_the_typed_line_echoes_as_the_grey_block(self, app: App, capsys) -> None:
+        app.play("I enter the hall.")
+        app.play("/you Elara")
+        assert "> /you Elara" in capsys.readouterr().out
+
     def test_you_hands_the_scene_to_the_named_character(self, app: App) -> None:
         app.play("I enter the hall.")
         app.play("/you Elara")
@@ -66,6 +85,10 @@ class TestYou:
 
 
 class TestOoc:
+    def test_the_typed_line_echoes_as_the_grey_block(self, app: App, capsys) -> None:
+        app.play("/ooc What genre is this?")
+        assert "> /ooc What genre is this?" in capsys.readouterr().out
+
     def test_ooc_is_framed_and_marks_both_sides(self, app: App) -> None:
         app.play("I enter the hall.")
         app.play("/ooc What genre is this?")
@@ -113,6 +136,18 @@ class TestUndo:
         app.play("/undo")
         assert "Nothing to undo." in capsys.readouterr().out
 
+    def test_undo_reports_the_new_ending_when_it_cannot_erase(self, app: App, capsys) -> None:
+        # Off a terminal the ledger can never prove an erase (no cursor
+        # answer), so /undo falls back to reporting — the erased look is a
+        # pty story (scenarios/cli/test_main.py).
+        app.play("The first turn.")
+        app.play("The second turn.")
+        capsys.readouterr()
+        app.play("/undo")
+        out = capsys.readouterr().out
+        assert "[ undone. the story now ends with: ]" in out
+        assert "> The first turn." in out  # the surviving exchange, re-echoed
+
 
 class TestRegenerate:
     def test_regen_replaces_the_reply_and_siblings_the_old_one(self, app: App) -> None:
@@ -123,3 +158,9 @@ class TestRegenerate:
         assert [m.body for m in chain] == ["I roll the dice.", "It came up six."]
         # Both replies hang off the same prompt: the old one is a sibling.
         assert app.store.messages.get_parent(2) == app.store.messages.get_parent(3) == 1
+
+    def test_regen_announces_itself_when_it_cannot_erase(self, app: App, capsys) -> None:
+        app.play("I roll the dice.")
+        capsys.readouterr()
+        app.play("/regen")
+        assert "[ regenerating ]" in capsys.readouterr().out

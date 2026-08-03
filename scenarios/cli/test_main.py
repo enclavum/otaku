@@ -57,31 +57,129 @@ class TestChat:
         terminal.expect("Models (1)", "test-model")  # the picker, on screen
         terminal.send(ENTER, 1.0)
         terminal.expect("otaku")  # the banner — we are in the REPL
-        terminal.send("I enter the hall.")
-        terminal.send(ENTER, 1.0)
-        terminal.expect("stirred")  # the reply streamed to the screen
+        play(terminal, "I enter the hall.", "stirred")
         terminal.settle()  # the prompt must be back before a control key
         terminal.send(CTRL_U, 1.0)
         terminal.expect("Undone.")
+        assert terminal.quit() == 0
+
+    def test_undo_erases_the_exchange_when_the_terminal_answers(
+        self, server: ModelServer, tmp_path: Path
+    ) -> None:
+        """On a terminal that reports its cursor, Ctrl+U takes the whole
+        exchange off the screen — block, blank, and reply — and says
+        nothing: the vanishing is the report. The story really moved back:
+        the next turn's context no longer carries the undone one."""
+        terminal = launch_remembered(server, tmp_path / "state")
+        play(terminal, "I enter the hall.", "stirred")
+        terminal.settle()
+        terminal.arm_cpr(20)  # the exchange sits well inside a 24-row screen
+        terminal.send(CTRL_U, 1.0)
+        terminal.settle()
+        assert b"\x1b[6n" in terminal.raw  # the app asked the terminal
+        # Block(1) + blank(1) + reply(1) + the standing gap(1): four rows up.
+        assert b"\x1b[4A\r\x1b[J" in terminal.raw
+        assert "Undone" not in terminal.transcript
+        assert "undone" not in terminal.transcript
+        server.script = lambda body: "A different dawn."
+        play(terminal, "A fresh start.", "A different dawn.")
+        sent = server.requests[-1]["messages"]
+        assert not any("I enter the hall." in str(m) for m in sent)
+        assert terminal.quit() == 0
+
+    def test_undo_falls_back_after_another_command_intervened(
+        self, server: ModelServer, tmp_path: Path
+    ) -> None:
+        """/help printed below the exchange, so the screen cannot be
+        restored by erasing — Ctrl+U reports the new ending instead, even
+        though the terminal would have answered the cursor query."""
+        terminal = launch_remembered(server, tmp_path / "state")
+        play(terminal, "The first turn.", "stirred")
+        terminal.settle()
+        play(terminal, "/help", "Playing:")
+        # One blank line between the typed command line and its output.
+        assert "\r\n\r\nPlaying:" in terminal.transcript
+        terminal.settle()
+        terminal.arm_cpr(20)
+        terminal.send(CTRL_U, 1.0)
+        terminal.expect("Undone.")  # the story emptied — reported, not erased
+        assert terminal.quit() == 0
+
+    def test_regen_after_an_undo_report_erases_the_reechoed_reply(
+        self, server: ModelServer, tmp_path: Path
+    ) -> None:
+        """/info broke the ledger, so /undo reported and re-echoed the
+        surviving exchange — and handed it back to the ledger: Ctrl+R
+        right after erases the re-echoed reply and streams the fresh
+        take in its place, no marker."""
+        terminal = launch_remembered(server, tmp_path / "state")
+        play(terminal, "The first turn.", "stirred")
+        server.script = lambda body: "The dice settle slowly."
+        terminal.settle()
+        play(terminal, "The second turn.", "settle slowly")
+        terminal.settle()
+        play(terminal, "/info", "State dir:")  # prints below — undo must report
+        terminal.settle()
+        terminal.send(CTRL_U, 1.0)
+        terminal.expect("the story now ends with")
+        server.script = lambda body: "It came up six."
+        terminal.settle()
+        terminal.arm_cpr(20)
+        terminal.send(CTRL_R, 1.0)
+        terminal.expect("It came up six.")
+        # The re-echoed reply(1) + the standing gap(1): two rows up.
+        assert b"\x1b[2A\r\x1b[J" in terminal.raw
+        assert "[ regenerating ]" not in terminal.transcript
         assert terminal.quit() == 0
 
     def test_a_remembered_story_resumes_on_launch(
         self, server: ModelServer, tmp_path: Path
     ) -> None:
         """Closing and reopening the app lands mid-scene in the same story."""
-        state = tmp_path / "state"
-        set_config_provider(state, server)
-        remember(state)
-        first = Terminal(str(state))
-        first.expect("otaku")
-        first.send("I enter the hall.")
-        first.send(ENTER, 1.0)
-        first.expect("stirred")
+        first = launch_remembered(server, tmp_path / "state")
+        play(first, "I enter the hall.", "stirred")
         assert first.quit() == 0
 
-        second = Terminal(str(state))
+        second = Terminal(str(tmp_path / "state"))
         second.expect("Resumed at message 2.", scripted.CHAT_REPLY.split()[0])
         assert second.quit() == 0
+
+    def test_resumed_turns_can_be_undone_off_the_screen(
+        self, server: ModelServer, tmp_path: Path
+    ) -> None:
+        """A relaunch lands mid-scene — and Ctrl+U takes the shown
+        exchange back like a played one: the screen erases with no
+        report, and the story head really moves."""
+        terminal = relaunch_mid_story(server, tmp_path / "state", "I enter the hall.")
+        terminal.settle()
+        terminal.arm_cpr(20)
+        terminal.send(CTRL_U, 1.0)
+        terminal.settle()
+        # Block(1) + blank(1) + reply(1) + the standing gap(1): four rows.
+        assert b"\x1b[4A\r\x1b[J" in terminal.raw
+        assert "Undone" not in terminal.transcript
+        assert "undone" not in terminal.transcript
+        server.script = lambda body: "A different dawn."
+        play(terminal, "A fresh start.", "A different dawn.")
+        sent = server.requests[-1]["messages"]
+        assert not any("I enter the hall." in str(m) for m in sent)
+        assert terminal.quit() == 0
+
+    def test_a_resumed_reply_regenerates_in_place(
+        self, server: ModelServer, tmp_path: Path
+    ) -> None:
+        """Ctrl+R right after a relaunch: the shown reply is erased and
+        the fresh take streams where it stood — no marker."""
+        terminal = relaunch_mid_story(server, tmp_path / "state", "I roll the dice.")
+        server.script = lambda body: "It came up six."
+        terminal.settle()
+        terminal.arm_cpr(20)
+        terminal.send(CTRL_R, 1.0)
+        terminal.expect("It came up six.")
+        # Reply(1) + the standing gap(1): two rows up, and no marker.
+        assert b"\x1b[2A\r\x1b[J" in terminal.raw
+        assert "[ regenerating ]" not in terminal.transcript
+        assert terminal.quit() == 0
 
     def test_the_install_journey_lands_mid_story(self, server: ModelServer, tmp_path: Path) -> None:
         """The whole first-run scenario: install, launch, pick a model —
@@ -99,25 +197,32 @@ class TestChat:
 
 
 class TestShortcuts:
-    def launch(self, server: ModelServer, tmp_path: Path) -> Terminal:
-        state = tmp_path / "state"
-        set_config_provider(state, server)
-        remember(state)
-        terminal = Terminal(str(state))
-        terminal.expect("otaku")  # the banner — we are in the REPL
-        return terminal
-
     def test_ctrl_r_regenerates_the_reply(self, server: ModelServer, tmp_path: Path) -> None:
         """A fresh take on the same prompt: Ctrl+R at the prompt streams a
         different reply in place of the old one."""
-        terminal = self.launch(server, tmp_path)
-        terminal.send("I roll the dice.")
-        terminal.send(ENTER, 1.0)
-        terminal.expect("stirred")
+        terminal = launch_remembered(server, tmp_path / "state")
+        play(terminal, "I roll the dice.", "stirred")
         server.script = lambda body: "It came up six."  # the model changes its mind
         terminal.settle()
         terminal.send(CTRL_R, 1.0)
         terminal.expect("It came up six.")
+        assert terminal.quit() == 0
+
+    def test_ctrl_r_erases_the_old_reply_when_the_terminal_answers(
+        self, server: ModelServer, tmp_path: Path
+    ) -> None:
+        """With the cursor known, Ctrl+R does not announce itself: the old
+        reply vanishes and the fresh take streams in its place."""
+        terminal = launch_remembered(server, tmp_path / "state")
+        play(terminal, "I roll the dice.", "stirred")
+        server.script = lambda body: "It came up six."
+        terminal.settle()
+        terminal.arm_cpr(20)
+        terminal.send(CTRL_R, 1.0)
+        terminal.expect("It came up six.")
+        # Reply(1) + the standing gap(1): two rows up, and no marker.
+        assert b"\x1b[2A\r\x1b[J" in terminal.raw
+        assert "[ regenerating ]" not in terminal.transcript
         assert terminal.quit() == 0
 
     def test_ctrl_t_browses_and_resumes_the_story(
@@ -125,10 +230,8 @@ class TestShortcuts:
     ) -> None:
         """The story browser on screen: Ctrl+T opens it over the session,
         Enter drills into the messages, Enter resumes."""
-        terminal = self.launch(server, tmp_path)
-        terminal.send("I enter the hall.")
-        terminal.send(ENTER, 1.0)
-        terminal.expect("stirred")
+        terminal = launch_remembered(server, tmp_path / "state")
+        play(terminal, "I enter the hall.", "stirred")
         terminal.settle()
         terminal.send(CTRL_T, 1.0)
         terminal.expect("Stories (1)")
@@ -143,7 +246,7 @@ class TestShortcuts:
     ) -> None:
         """Ctrl+O opens the model picker mid-session; picking the current
         model lands back at the prompt with nothing changed."""
-        terminal = self.launch(server, tmp_path)
+        terminal = launch_remembered(server, tmp_path / "state")
         terminal.settle()
         terminal.send(CTRL_O, 1.0)
         terminal.expect("Models (1)", "test-model")
@@ -178,11 +281,7 @@ class TestStreaming:
     ) -> None:
         """Ctrl+R while the reply is still streaming: the stream stops and
         a fresh take begins — no waiting for the rest."""
-        state = tmp_path / "state"
-        set_config_provider(state, server)
-        remember(state)
-        terminal = Terminal(str(state))
-        terminal.expect("otaku")
+        terminal = launch_remembered(server, tmp_path / "state")
         server.chunk_delay = 0.4  # a slow model — the reply arrives in beats
         server.script = lambda body: "The corridor stretches on, deeper into the dark."
         terminal.send("I walk the corridor.")
@@ -200,11 +299,7 @@ class TestStreaming:
         """The multiline convention: an opening triple quote collects lines
         until the closing one, and everything between goes as ONE message,
         newlines preserved, never dispatched as a command."""
-        state = tmp_path / "state"
-        set_config_provider(state, server)
-        remember(state)
-        terminal = Terminal(str(state))
-        terminal.expect("otaku")
+        terminal = launch_remembered(server, tmp_path / "state")
         terminal.send('"""')
         terminal.send(ENTER, 0.3)
         terminal.expect(PROMPT_CONTINUATION)
@@ -222,3 +317,31 @@ def remember(root: Path) -> None:
     """state.toml pointing at the scripted model, so launch lands in the
     REPL instead of the picker."""
     state_mod.save(Paths.resolve(root), state_mod.AppState(model=SPEC))
+
+
+def launch_remembered(server: ModelServer, root: Path) -> Terminal:
+    """A terminal already in the REPL: the scripted provider configured,
+    the model remembered, the picker skipped."""
+    set_config_provider(root, server)
+    remember(root)
+    terminal = Terminal(str(root))
+    terminal.expect("otaku")  # the banner — we are in the REPL
+    return terminal
+
+
+def play(terminal: Terminal, line: str, marker: str) -> None:
+    """Send one prompt line and wait until `marker` shows on screen."""
+    terminal.send(line)
+    terminal.send(ENTER, 1.0)
+    terminal.expect(marker)
+
+
+def relaunch_mid_story(server: ModelServer, root: Path, line: str) -> Terminal:
+    """Play one turn, close, reopen: a terminal resumed mid-scene, its
+    last turns echoed on screen."""
+    first = launch_remembered(server, root)
+    play(first, line, "stirred")
+    assert first.quit() == 0
+    second = Terminal(str(root))
+    second.expect("Resumed at message 2.")
+    return second

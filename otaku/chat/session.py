@@ -21,6 +21,7 @@ from dataclasses import dataclass, field, replace
 from typing import Self
 
 from otaku.chat.markdown import render_markdown
+from otaku.chat.screen import ScreenLedger
 from otaku.lore.worker import LoreWorker
 from otaku.paths import Paths
 from otaku.providers.registry import Registry as ProviderRegistry
@@ -106,8 +107,11 @@ class Session:
     # A one-shot line the REPL prints in bold after the resume echo, then
     # clears — the launch's way to say something before the first prompt.
     notice: str = ""
-    # Verbatim argument text of the slash command being dispatched — set by
-    # `dispatch` so handlers taking free text keep the user's exact spacing.
+    # The slash command being dispatched, verbatim — the whole line and
+    # its argument text — set by `dispatch` so handlers taking free text
+    # keep the user's exact spacing and a playing command can echo
+    # exactly what was typed.
+    raw_line: str = ""
     raw_args: str = ""
     # Set by the in-stream Ctrl+R watcher to request an immediate regenerate
     # after the current reply is cancelled; drained by run_inference.
@@ -121,6 +125,9 @@ class Session:
     # The pinned bottom-row activity line, alive while a reply streams —
     # built by the REPL together with its toolbar twin.
     status_line: StatusLine | None = None
+    # What the played exchanges occupy on screen — the echoed blocks, the
+    # counted replies, and the erase/fallback contract (see chat/screen.py).
+    screen: ScreenLedger = field(default_factory=ScreenLedger)
 
     @classmethod
     def start(
@@ -290,11 +297,34 @@ class Session:
         out: list[str] = []
         for message in self.messages[-count:]:
             out.append("")
-            if message.role == "user":
-                out.append(user_block(message.body))
-            else:
-                out.extend(render_markdown(message.body).splitlines())
+            out.append(_rendered_turn(message))
         return "\n".join(out).lstrip("\n")
+
+    def restore_screen_tail(self, count: int) -> None:
+        """Hand the just-echoed tail (`render_last_turns(count)`) to the
+        screen ledger, grouped the way /undo pops — a reply plus the one
+        user row before it, either alone when the other is missing — so
+        the shown turns can be taken back off the screen without having
+        been played. Call right after the echo prints, and only when the
+        echo is the flow's last output."""
+        shown = self.messages[-count:]
+        groups: list[tuple[Message | None, Message | None]] = []
+        i = len(shown)
+        while i > 0:
+            reply = shown[i - 1] if shown[i - 1].role == "assistant" else None
+            if reply is not None:
+                i -= 1
+            prompt = shown[i - 1] if i > 0 and shown[i - 1].role == "user" else None
+            if prompt is not None:
+                i -= 1
+            if reply is None and prompt is None:
+                break  # an unexpected role — better unerasable than wrong
+            groups.append((prompt, reply))
+        for prompt, reply in reversed(groups):
+            self.screen.restore_exchange(
+                _rendered_turn(prompt) if prompt else None,
+                _rendered_turn(reply) if reply is not None else None,
+            )
 
     def reload_params(self) -> None:
         """Replace the live parameters with the current model's saved
@@ -329,3 +359,12 @@ class Session:
             return
         head = self.messages[-1].id if self.messages else None
         store.stories.set_head(self.story_id, head)
+
+
+def _rendered_turn(message: Message) -> str:
+    """One turn exactly as the echoes print it: a user turn as the grey
+    block, a model turn as its rendered markdown — the trailing newline
+    normalized away, the caller joining and terminating lines."""
+    if message.role == "user":
+        return user_block(message.body)
+    return "\n".join(render_markdown(message.body).splitlines())
