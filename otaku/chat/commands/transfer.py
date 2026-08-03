@@ -30,8 +30,9 @@ def cmd_import(session: Session, store: Store, args: list[str]) -> None:
     applied verbatim, no model calls), a SillyTavern chat (.jsonl), or
     plain text (.txt) dismantled into verbatim messages. The session
     switches to the imported story and its last turns are echoed the way
-    a resume echoes them."""
-    path_text = session.raw_args.strip()
+    a resume echoes them. A leading `@` — the path-completion trigger —
+    is not part of the name."""
+    path_text = session.raw_args.strip().removeprefix("@")
     if not path_text:
         print("Usage: /import FILE")
         return
@@ -107,7 +108,8 @@ def cmd_export(session: Session, store: Store, args: list[str]) -> None:
     every message verbatim (framing included) — importable back with
     `/import`, losslessly. No name writes `<story-title>.md` (or
     story.md) in the current directory; an existing file prompts before
-    overwriting (default no)."""
+    overwriting (default no). A leading `@` — the path-completion
+    trigger — is not part of the name."""
     if not session.messages:
         print("Nothing to export yet.")
         return
@@ -118,7 +120,7 @@ def cmd_export(session: Session, store: Store, args: list[str]) -> None:
         model=session.full_model_name,
         exported=datetime.now().astimezone().strftime("%Y-%m-%d %H:%M"),
     )
-    name = session.raw_args.strip()
+    name = session.raw_args.strip().removeprefix("@")
     path = Path(name).expanduser() if name else Path(_default_filename(session, store))
     if path.exists():
         try:

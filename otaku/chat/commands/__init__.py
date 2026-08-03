@@ -12,8 +12,9 @@ from otaku.chat.session import KNOWN_PARAMS, Session
 from otaku.store import Store
 
 # A completion-tree leaf may be PATH_LEAF: "complete a filesystem path
-# here" (Tab-triggered; see completer.py). Paths may contain spaces —
-# handlers read them from raw_args, never from split args.
+# here" (behind an `@`; see completer.py). Paths may contain spaces —
+# handlers read them from raw_args, never from split args, and strip the
+# leading `@`.
 PATH_LEAF = "<path>"
 
 CompletionTree = dict[str, "CompletionTree | str | None"]
@@ -63,6 +64,7 @@ _HELP_ROWS: list[tuple[str | None, str, str]] = [
     (None, "", "Keys at the prompt:"),
     ('"""', "", 'Begin a multiline message; close it with """'),
     ("/", "", "Open the command menu; it filters as you type"),
+    ("@", "", "In a FILE argument: complete paths — the menu pops at @ and filters as you type"),
     ("Tab", "", "Cycle through the menu's completions"),
     ("Up / Down", "", "Walk your recent prompt history (saved across runs)"),
     ("Ctrl+C", "", "Clear the current line; cancel an in-flight reply"),

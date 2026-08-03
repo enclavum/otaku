@@ -64,6 +64,14 @@ class TestImport:
         app.play("/import")
         assert "Usage: /import FILE" in capsys.readouterr().out
 
+    def test_a_leading_at_is_the_completion_trigger_not_the_name(
+        self, app: App, capsys, tmp_path: Path
+    ) -> None:
+        tale = tmp_path / "tale.txt"
+        tale.write_text("First beat.", encoding="utf-8")
+        app.play(f"/import @{tale}")
+        assert "Imported 1 message(s)" in capsys.readouterr().out
+
     def test_a_broken_export_is_refused_not_read_as_prose(
         self, app: App, capsys, tmp_path: Path
     ) -> None:

@@ -3,7 +3,10 @@
 A small custom Completer that walks the command tree by whitespace-split
 tokens, matching the literal current token against the keys at the current
 node. The tree derives from `commands.COMMANDS`, and each row
-carries its /help line as the menu's meta column.
+carries its /help line as the menu's meta column. A `PATH_LEAF` node
+hands the argument to `chat.pathcomplete` — this module owns only WHEN
+that fires (behind an explicit `@`, immediately and while typing) and
+the raw-line slicing that lets spaces survive in paths.
 
 It fires ONLY on lines that start with `/`: the REPL completes while
 typing (the menu opens the moment `/` is pressed and filters with every
@@ -13,12 +16,12 @@ pop mid-sentence.
 
 import re
 from collections.abc import Iterator
-from pathlib import Path
 from typing import Any, Self
 
 from prompt_toolkit.completion import CompleteEvent, Completer, Completion
 from prompt_toolkit.document import Document
 
+from otaku.chat import pathcomplete
 from otaku.chat.commands import (
     PATH_LEAF,
     CompletionTree,
@@ -72,10 +75,13 @@ class SlashCompleter(Completer):
                 return
 
         if node == PATH_LEAF:
-            # Filenames complete on Tab only — auto-popping a directory
-            # listing under every keystroke of a path would be noise.
-            if arg_start is not None and complete_event.completion_requested:
-                yield from _path_completions(text[arg_start:])
+            # Paths complete behind an explicit `@`: the menu pops the
+            # moment it is typed and filters while typing. Never on a bare
+            # path — a directory listing under every keystroke of ordinary
+            # text would be noise. The handlers strip the `@`; it is a
+            # trigger, not part of the name.
+            if arg_start is not None and text[arg_start:].startswith("@"):
+                yield from pathcomplete.completions(text[arg_start + 1 :])
             return
 
         if not isinstance(node, dict):
@@ -95,25 +101,3 @@ class SlashCompleter(Completer):
                     display=key.ljust(key_width),
                     display_meta=metas[key].ljust(meta_width) if meta_width else None,
                 )
-
-
-def _path_completions(prefix: str) -> Iterator[Completion]:
-    """Filesystem completion for the last SEGMENT of `prefix` (the text
-    after the final `/`), so `~/` and earlier directories stay exactly as
-    typed — and spaces anywhere in the path just work, because the prefix
-    is sliced from the raw line, never whitespace-tokenized."""
-    sep = prefix.rfind("/")
-    base, frag = (prefix[: sep + 1], prefix[sep + 1 :]) if sep >= 0 else ("", prefix)
-    directory = Path(base).expanduser() if base else Path(".")
-    try:
-        entries = sorted(directory.iterdir(), key=lambda e: e.name.casefold())
-    except OSError:
-        return
-    names = [
-        entry.name + ("/" if entry.is_dir() else "")
-        for entry in entries
-        if entry.name.startswith(frag) and (frag.startswith(".") or not entry.name.startswith("."))
-    ]
-    width = max((len(name) for name in names), default=0)
-    for name in names:
-        yield Completion(name, start_position=-len(frag), display=name.ljust(width))

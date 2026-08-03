@@ -132,6 +132,21 @@ class TestChat:
         assert "[ regenerating ]" not in terminal.transcript
         assert terminal.quit() == 0
 
+    def test_at_pops_the_path_menu_and_enter_imports_the_pick(
+        self, server: ModelServer, tmp_path: Path
+    ) -> None:
+        """Typing @ in /import's FILE argument pops the path menu at once —
+        no Tab — and Enter on the highlighted file completes and submits;
+        the @ never reaches the handler."""
+        tale = tmp_path / "tale.txt"
+        tale.write_text("First beat.", encoding="utf-8")
+        terminal = launch_remembered(server, tmp_path / "state")
+        terminal.send(f"/import @{tmp_path}/ta")
+        terminal.expect("tale.txt")  # the menu, popped while typing
+        terminal.send(ENTER, 1.0)
+        terminal.expect("Imported 1 message(s)")
+        assert terminal.quit() == 0
+
     def test_last_reechoes_the_scene_and_its_turns_clear_again(
         self, server: ModelServer, tmp_path: Path
     ) -> None:
