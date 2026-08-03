@@ -121,6 +121,14 @@ and the row types).
 ever rely on them. UI display use (e.g. ordering the story list by recency)
 is allowed.
 
+## Command conventions
+
+The `@` sigil in a command argument exists ONLY to trigger path
+autocompletion (the menu pops at `@` and filters while typing — see
+`otaku/chat/pathcomplete.py`). Commands must ignore it: every handler
+that reads a path strips a leading `@` (`removeprefix("@")`) and never
+branches on it — it is a UI trigger, not part of any name or value.
+
 ## Module conventions
 
 Order within a module: constants, then classes, then functions — public

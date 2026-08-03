@@ -7,6 +7,8 @@ truncate the story by rewinding the head (the later turns stay in the
 tree as siblings — nothing is deleted either way).
 """
 
+from pathlib import Path
+
 from otaku.chat.session import RESUME_TURNS, Session
 from otaku.store import Store
 
@@ -78,15 +80,27 @@ def cmd_fork(session: Session, store: Store, args: list[str]) -> None:
 
 
 def cmd_system(session: Session, store: Store, args: list[str]) -> None:
-    """`/system <text>` — set this story's system prompt (the premise); no
-    text prints the current one. It lives on the story, never on the
-    model."""
+    """`/system <text | FILE>` — set this story's system prompt (the
+    premise): an argument naming an existing file supplies the prompt
+    from that file, anything else is the prompt verbatim. A leading `@` —
+    the path-completion trigger — is not part of the name. No text prints
+    the current one. It lives on the story, never on the model."""
     # raw_args is everything after `/system`, verbatim, so the prompt keeps
     # its exact spacing.
-    text = session.raw_args.strip()
+    text = session.raw_args.strip().removeprefix("@")
     if not text:
         print(f'System: "{session.system}"' if session.system else "System: (none)")
         return
+    path = Path(text).expanduser()
+    if path.is_file():
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError as e:
+            print(f"Could not read {path}: {e}")
+            return
+        if not text:
+            print(f"{path} is empty — system prompt unchanged.")
+            return
     session.set_system(store, text)
     print(f"System prompt set ({len(text)} chars).")
 

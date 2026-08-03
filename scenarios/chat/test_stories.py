@@ -273,6 +273,40 @@ class TestSystem:
         assert "System prompt set (15 chars)." in capsys.readouterr().out
         assert app.store.stories.get_system(app.session.story_id) == "Answer briefly."
 
+    def test_a_file_argument_supplies_the_prompt(self, app: App, tmp_path) -> None:
+        premise = tmp_path / "premise.md"
+        premise.write_text("You are the narrator.\n", encoding="utf-8")
+        app.play(f"/system {premise}")
+        app.play("I enter the hall.")
+        assert app.store.stories.get_system(app.session.story_id) == "You are the narrator."
+
+    def test_the_completion_trigger_is_not_part_of_the_name(self, app: App, tmp_path) -> None:
+        premise = tmp_path / "premise.md"
+        premise.write_text("You are the narrator.", encoding="utf-8")
+        app.play(f"/system @{premise}")
+        assert app.session.system == "You are the narrator."
+
+    def test_text_naming_no_file_stays_literal(self, app: App) -> None:
+        app.play("/system /nowhere/gone.md")
+        assert app.session.system == "/nowhere/gone.md"
+
+    def test_an_unreadable_file_changes_nothing(self, app: App, capsys, tmp_path) -> None:
+        sealed = tmp_path / "sealed.md"
+        sealed.write_text("You are the narrator.", encoding="utf-8")
+        sealed.chmod(0o000)
+        app.play("/system The premise stands.")
+        app.play(f"/system {sealed}")
+        assert "Could not read" in capsys.readouterr().out
+        assert app.session.system == "The premise stands."
+
+    def test_an_empty_file_changes_nothing(self, app: App, capsys, tmp_path) -> None:
+        empty = tmp_path / "empty.md"
+        empty.write_text("", encoding="utf-8")
+        app.play("/system The premise stands.")
+        app.play(f"/system {empty}")
+        assert "empty — system prompt unchanged" in capsys.readouterr().out
+        assert app.session.system == "The premise stands."
+
     def test_bare_system_shows_the_prompt_or_none(self, app: App, capsys) -> None:
         app.play("/system")
         assert "System: (none)" in capsys.readouterr().out
