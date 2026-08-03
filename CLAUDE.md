@@ -30,11 +30,15 @@ The state dir is `paths.DEFAULT_ROOT`, relocatable via the
 ## Configuration ownership
 
 `configs/config.toml` is user-owned: the app writes it once at first run and
-never touches it again. Every setting changed from inside the app persists in
-app-owned files instead — `configs/state.toml` for session-wide values (the
-resumed model and story, `/set` toggles) and `configs/models.toml` for
-per-model overrides. App-owned files are rewritten wholesale; user-owned
-files are never rewritten.
+thereafter edits it only through settings migrations
+(`otaku/settings/migrations.py`) — surgical, idempotent shape changes
+applied at every launch (no version stamp; each migration detects its own
+applicability on the parsed file), the pre-migration file kept as
+`configs/backups/config-YYYYMMDD.toml`. Every setting changed from inside
+the app persists in app-owned files instead — `configs/state.toml` for
+session-wide values (the resumed model and story, `/set` toggles) and
+`configs/models.toml` for per-model overrides. App-owned files are
+rewritten wholesale; user-owned files are edited surgically or not at all.
 
 ## Tests
 

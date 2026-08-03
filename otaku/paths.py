@@ -42,8 +42,15 @@ class Paths:
 
     @property
     def config_file(self) -> Path:
-        """User-owned configuration; the app writes it once at first run."""
+        """User-owned configuration; the app writes it once at first run
+        and thereafter touches it only through settings migrations."""
         return self.configs_dir / "config.toml"
+
+    @property
+    def config_backups_dir(self) -> Path:
+        """Pre-migration snapshots of config.toml, dated like the database
+        backups."""
+        return self.configs_dir / "backups"
 
     @property
     def state_file(self) -> Path:

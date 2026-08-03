@@ -24,6 +24,7 @@ from otaku.lore.worker import LoreWorker
 from otaku.paths import Paths
 from otaku.providers.registry import Registry, autoconfigure_providers
 from otaku.settings import config as config_mod
+from otaku.settings import migrations
 from otaku.settings import prompts as prompts_file
 from otaku.settings import state as state_mod
 from otaku.settings.files import write_atomic
@@ -138,13 +139,16 @@ class App:
 
 def load_config(paths: Paths) -> config_mod.Config:
     """The config — written with the autoconfigured provider sections
-    first when this is a first run. Raises `ConfigError` when it does not
+    first when this is a first run, migrated to the current shape when it
+    is from an older build. Raises `ConfigError` when it does not
     parse."""
     paths.ensure_tree()
     if not paths.config_file.exists():
         first_run = config_mod.Config(providers=autoconfigure_providers())
         write_atomic(paths.config_file, first_run.to_toml())
         print(f"Created {pretty_path(paths.config_file)}")
+    else:
+        migrations.migrate(paths)
     return config_mod.load(paths)
 
 

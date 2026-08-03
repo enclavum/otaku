@@ -1,7 +1,9 @@
 """The user's configuration: configs/config.toml.
 
-Read-only for the app — bootstrap writes it once at first run, the user edits
-it thereafter. Everything the app itself changes lives in state.toml
+Read-only for the app — bootstrap writes it once at first run, the user
+edits it thereafter, and the one exception is `settings.migrations`:
+surgical shape updates applied at launch when the file is from an older
+build. Everything the app itself changes lives in state.toml
 (`settings.state`) or models.toml instead.
 
 This module owns the config surface: the dataclasses, the reader, and the
