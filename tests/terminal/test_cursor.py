@@ -1,4 +1,4 @@
-"""The row-accounting machine.
+"""The cursor simulation — the pure surface of terminal/cursor.py.
 
 The contract: `RowTracker` simulates the cursor of a VT100-family terminal
 consuming otaku's own output, and `rows` is the number of completed row
@@ -8,11 +8,12 @@ advances nothing until the next printable character), wide characters take
 two columns, `\r` `\t` `\b` move without advancing, and escape sequences —
 CSI, OSC, and two-byte ESC forms — occupy nothing, even split across feeds.
 `measure` runs a fresh tracker over one string; a printed line or block is
-measured with its trailing newline.
+measured with its trailing newline. (`cursor_row` asks a real terminal and
+is exercised by the pty scenarios instead.)
 """
 
 from otaku.terminal import user_block
-from otaku.terminal.rows import RowTracker, measure
+from otaku.terminal.cursor import RowTracker, measure
 
 
 class TestRowTracker:

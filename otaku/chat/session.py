@@ -300,13 +300,16 @@ class Session:
             out.append(_rendered_turn(message))
         return "\n".join(out).lstrip("\n")
 
-    def restore_screen_tail(self, count: int) -> None:
+    def restore_screen_tail(self, count: int, above: str = "") -> None:
         """Hand the just-echoed tail (`render_last_turns(count)`) to the
         screen ledger, grouped the way /undo pops — a reply plus the one
         user row before it, either alone when the other is missing — so
         the shown turns can be taken back off the screen without having
-        been played. Call right after the echo prints, and only when the
-        echo is the flow's last output."""
+        been played. `above` names the undo report line printed (with its
+        blank) right over the echo: it joins the oldest restored exchange
+        and refreshes with it instead of going stale. Call right after
+        the echo prints, and only when the echo is the flow's last
+        output."""
         shown = self.messages[-count:]
         groups: list[tuple[Message | None, Message | None]] = []
         i = len(shown)
@@ -324,7 +327,9 @@ class Session:
             self.screen.restore_exchange(
                 _rendered_turn(prompt) if prompt else None,
                 _rendered_turn(reply) if reply is not None else None,
+                above=above,
             )
+            above = ""  # the report belongs to the oldest exchange only
 
     def reload_params(self) -> None:
         """Replace the live parameters with the current model's saved

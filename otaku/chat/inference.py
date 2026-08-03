@@ -228,9 +228,11 @@ def _run_step(session: Session, store: Store, ooc: bool) -> None:
     if watcher.regen_requested:
         # Ctrl+R during the stream: the partial is recorded above like any
         # reply; the outer loop's drop_last_reply siblings it away — and
-        # off the screen too, the fresh reply streaming in its place. Only
-        # a partial the ledger cannot erase gets the marker instead.
+        # off the screen too, the fresh reply streaming in its place. A
+        # partial the ledger cannot erase gets the marker instead, which
+        # ends the clearable run like any command output.
         if not session.screen.erase_reply_tail():
+            session.screen.invalidate()
             out.write(f"\n{DIM}[ regenerating ]{RESET}\n\n")
         session.regen_after = True
 

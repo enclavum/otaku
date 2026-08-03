@@ -1,10 +1,14 @@
-"""How many terminal rows a stream of output occupies.
+"""Where the cursor is, and how printed text moves it.
 
-`RowTracker` simulates the cursor of a VT100-family terminal consuming the
-exact text otaku prints, so a caller that wants to take output back knows
-how many rows to erase. `rows` counts completed row advances — the rows
-ABOVE the one the cursor is on — because an erase moves up that many rows
-and clears downward, taking the current partial row with it.
+Two views of the same thing, both serving the screen-erasing paths:
+`RowTracker` simulates the cursor consuming the exact text otaku prints,
+so a caller that wants to take output back knows how many rows to erase;
+`cursor_row` asks the terminal itself (DSR 6 → CPR) where the cursor
+really is — the ground truth that already accounts for scroll regions,
+prompt_toolkit's menu scrolling, and everything else that moved the
+screen. `terminal_width` is the width the simulation wraps and measures
+at. Only `cursor_row` touches the terminal; everything else is pure, and
+the unit tests cover exactly that pure surface.
 
 The simulation follows what a real terminal behind a cooked tty does:
 
@@ -29,7 +33,24 @@ describes what was printed at that width, and a caller who finds the
 terminal resized must throw the count away rather than trust it.
 """
 
+import contextlib
+import os
+import re
+import select
+import shutil
+import sys
+import time
+
 from prompt_toolkit.utils import get_cwidth
+
+# POSIX-only raw-terminal control, exactly like the in-stream watcher's:
+# absent on Windows, where the cursor query degrades to "no answer".
+try:
+    import termios
+    import tty
+except ImportError:
+    termios = None  # type: ignore[assignment]
+    tty = None  # type: ignore[assignment]
 
 _TAB_STOP = 8
 
@@ -37,10 +58,16 @@ _TAB_STOP = 8
 # ESC seen inside OSC (a string terminator, ESC \, may be forming).
 _TEXT, _ESC, _CSI, _OSC, _OSC_ESC = range(5)
 
+_QUERY = "\x1b[6n"
+_RESPONSE = re.compile(rb"\x1b\[\??(\d+);\d+R")
+_DEADLINE = 0.2
+
 
 class RowTracker:
     """Feed printed text; read `rows` (completed advances since creation
-    or `reset`) and `column` (0-based)."""
+    or `reset` — the rows ABOVE the one the cursor is on, because an erase
+    moves up that many rows and clears downward, taking the current
+    partial row with it) and `column` (0-based)."""
 
     def __init__(self, width: int) -> None:
         self.width = max(1, width)
@@ -123,3 +150,61 @@ def measure(text: str, width: int) -> int:
     tracker = RowTracker(width)
     tracker.feed(text)
     return tracker.rows
+
+
+def terminal_width() -> int:
+    """The width everything inline prints and measures at — floored, so
+    degenerate reports (a zero-size pty) still measure sanely."""
+    return max(20, shutil.get_terminal_size((80, 24)).columns)
+
+
+def cursor_row() -> int | None:
+    """The cursor's 1-based screen row, or None when it cannot be known:
+    no TTY, no termios, or a terminal silent past the deadline — callers
+    fall back to not erasing. The terminal must be in cooked mode (between
+    prompts, after a stream) — the query takes it raw for the exchange and
+    always restores it. Bytes typed while the query is in flight are read
+    with the response and dropped: the window is a few milliseconds, and a
+    swallowed keystroke costs one re-press, while preserving it would cost
+    a screen model."""
+    if termios is None or tty is None:
+        return None
+    try:
+        fd = sys.stdin.fileno()
+    except (ValueError, OSError):
+        return None
+    if not os.isatty(fd) or not sys.stdout.isatty():
+        return None
+    try:
+        orig = termios.tcgetattr(fd)
+        tty.setcbreak(fd)
+    except termios.error:
+        return None
+    try:
+        sys.stdout.write(_QUERY)
+        sys.stdout.flush()
+        return _read_response(fd)
+    except OSError:
+        return None
+    finally:
+        with contextlib.suppress(termios.error):
+            termios.tcsetattr(fd, termios.TCSANOW, orig)
+
+
+def _read_response(fd: int) -> int | None:
+    data = b""
+    deadline = time.monotonic() + _DEADLINE
+    while True:
+        left = deadline - time.monotonic()
+        if left <= 0:
+            return None
+        ready, _, _ = select.select([fd], [], [], left)
+        if not ready:
+            return None
+        chunk = os.read(fd, 64)
+        if not chunk:
+            return None
+        data += chunk
+        match = _RESPONSE.search(data)
+        if match:
+            return int(match.group(1))

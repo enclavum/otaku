@@ -26,10 +26,18 @@ An erase happens only when it provably restores the screen:
   a partially visible exchange is left alone.
 
 Otherwise the caller falls back to printing, exactly as before erasing
-existed. A successful /undo leaves the screen as if the exchange was
-never played; the standing blank line before the prompt is then already
-on screen, so the run loop asks `take_suppressed_gap()` before printing
-its own.
+existed. The clearable run is TURNS — blocks and replies: a report or
+marker line ("[ undone… ]", "[ regenerating ]") ends it when it prints,
+the same as any other command's output. Turns echoed BELOW an undo
+report start a new run: a regen clears just that response and streams
+the fresh one in its place, the request still displayed above — and an
+undo that takes the re-echoed exchange takes the report line with it and
+prints a fresh one in the same spot, so the screen always shows exactly
+one, current, report — never one pointing at nothing, never two stacked.
+A successful /undo otherwise says nothing — the vanishing is the whole
+report — and leaves the screen as if the exchange was never played; the
+standing blank line before the prompt is then already on screen, so the
+run loop asks `take_suppressed_gap()` before printing its own.
 
 Command output is spaced like a reply: while the typed command line is
 on screen, one blank line separates it from the command's first inline
@@ -41,14 +49,12 @@ exactly as it was.
 """
 
 import contextlib
-import shutil
 import sys
 from collections.abc import Iterator
 from typing import Any, TextIO, cast
 
 from otaku.terminal import user_block
-from otaku.terminal.query import cursor_row
-from otaku.terminal.rows import RowTracker, measure
+from otaku.terminal.cursor import RowTracker, cursor_row, measure, terminal_width
 
 # Up N rows, to column 0, erase to the end of the screen.
 _ERASE_UP = "\x1b[{}A\r\x1b[J"
@@ -95,16 +101,22 @@ class ScreenLedger:
         through this writer; with no live exchange it just forwards."""
         return cast(TextIO, self._reply)
 
-    def restore_exchange(self, block: str | None, reply: str | None) -> None:
+    def restore_exchange(self, block: str | None, reply: str | None, above: str = "") -> None:
         """Adopt an exchange a resume echo just printed — `block` and
         `reply` are the exact strings on screen, either possibly missing
         (an import's promptless tail, a reply whose prompt scrolled out of
         the echo) — so /undo and /regen can take shown turns back without
-        having played them. Measured, never printed: call for each echoed
-        exchange, oldest first, right after the echo — and only when the
-        echo is the flow's last output."""
+        having played them. `above` is an undo report line printed (with
+        one blank under it) directly over this exchange: erasing the
+        exchange takes it too, so the caller prints a fresh report in the
+        same spot — the report refreshes rather than going stale.
+        Measured, never printed: call for each echoed exchange, oldest
+        first, right after the echo — and only when the echo is the
+        flow's last output."""
         width = terminal_width()
         entry = _Exchange(measure(block + "\n", width) if block else 0, width)
+        if above:
+            entry.lead = measure(above + "\n", width) + 1
         if block and reply is not None:
             entry.internal = 1
         if reply is not None:
@@ -112,6 +124,14 @@ class ScreenLedger:
         self._stack.append(entry)
 
     # ---------- erasing ----------
+
+    def top_is_report(self) -> bool:
+        """The exchange on top is an undo report's re-echo: erasing it
+        takes the report line above it too, so the caller must print a
+        fresh report in its place — the screen would otherwise show a
+        report pointing at nothing."""
+        entry = self._top()
+        return entry is not None and entry.lead > 0
 
     def erase_exchange(self) -> bool:
         """Take the whole last exchange off the screen (/undo): the typed
@@ -130,36 +150,17 @@ class ScreenLedger:
     def erase_reply(self) -> bool:
         """Take the last reply off the screen (/regen), leaving everything
         above it: the cursor lands where the reply began and the new one
-        streams in its place. On False — no reply rows on screen (a /you
-        that answered nothing) or an unprovable erase — the caller prints
-        the regenerating marker through `reply` instead; the typed line,
-        the standing gap, and the marker's lead blank have already joined
-        the exchange, so a later /undo still takes everything."""
+        streams in its place. False — no reply rows on screen (a /you
+        that answered nothing) or an unprovable erase — means fall back
+        to the marker, which invalidates like any command output."""
         entry = self._top()
-        if (
-            entry is not None
-            and entry.tracker.rows
-            and self._erase(self.typed_rows + 1 + entry.tracker.rows, entry)
-        ):
-            entry.tracker.reset()
-            self.typed_rows = 0
-            return True
-        self._absorb_marker()
-        return False
-
-    def _absorb_marker(self) -> None:
-        """The regenerating marker prints below the typed line: fold that
-        line, the standing gap, and the marker's lead blank into the live
-        exchange, so its extent keeps matching the screen. Without a live
-        exchange there is nothing to keep true — the dispatch window still
-        spaces the marker."""
-        entry = self._top()
-        if entry is None:
-            return
-        entry.tracker.rows += self.typed_rows + 1
+        if entry is None or entry.tracker.rows == 0:
+            return False
+        if not self._erase(self.typed_rows + 1 + entry.tracker.rows, entry):
+            return False
+        entry.tracker.reset()
         self.typed_rows = 0
-        if self.take_lead_blank():
-            self._reply.write("\n")
+        return True
 
     def erase_reply_tail(self) -> bool:
         """Take the current, just-interrupted reply off the screen (the
@@ -257,19 +258,21 @@ class ScreenLedger:
 class _Exchange:
     """One played submission's screen extent: the grey block, the blank
     under it (claimed once a reply writes), and the reply's tracker —
-    all at the width they printed at."""
+    all at the width they printed at. `lead` counts an undo report's rows
+    above the block, erased with the exchange and reprinted fresh."""
 
-    __slots__ = ("block", "internal", "tracker", "width")
+    __slots__ = ("block", "internal", "lead", "tracker", "width")
 
     def __init__(self, block: int, width: int) -> None:
         self.block = block
         self.internal = 0
+        self.lead = 0
         self.tracker = RowTracker(width)
         self.width = width
 
     @property
     def rows(self) -> int:
-        return self.block + self.internal + self.tracker.rows
+        return self.lead + self.block + self.internal + self.tracker.rows
 
 
 class _ReplyWriter:
@@ -312,9 +315,3 @@ class _LeadBlankWriter:
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self.wrapped, name)
-
-
-def terminal_width() -> int:
-    """The width everything inline prints and measures at — floored, so
-    degenerate reports (a zero-size pty) still measure sanely."""
-    return max(20, shutil.get_terminal_size((80, 24)).columns)

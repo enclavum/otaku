@@ -80,23 +80,37 @@ def cmd_undo(session: Session, store: Store, args: list[str]) -> None:
     Nothing is deleted — the head moves back and the undone turns stay in
     the tree as siblings. When the exchange still sits directly above the
     prompt, it is erased from the screen as if never played; otherwise the
-    new ending is reported — an echo like a resume's, handed back to the
-    ledger, so the next /undo or /regen works the re-echoed turns."""
+    new ending is reported. The re-echoed turns below the report are
+    turns — the next /undo or /regen works them — and taking them takes
+    the report too, a fresh one printing in its place: the screen always
+    shows one, current, report."""
     popped = session.undo(store)
     if not popped:
         session.screen.invalidate()
         print("Nothing to undo.")
         return
+    refreshing = session.screen.top_is_report()
     if session.screen.erase_exchange():
-        return  # the vanishing is the whole report
+        if refreshing:
+            session.screen.take_suppressed_gap()  # output follows after all
+            _report_ending(session)
+        return  # otherwise the ending is still on screen — say nothing
     session.screen.invalidate()
+    _report_ending(session)
+
+
+def _report_ending(session: Session) -> None:
+    """The story's new ending, reported and re-echoed — and handed back to
+    the ledger, the report line included, so the next /undo or /regen
+    works the re-echoed turns."""
     if not session.messages:
         print("Undone. The story is now empty (its turns stay in the tree).")
         return
-    print(f"{DIM}[ undone. the story now ends with: ]{RESET}")
+    report = f"{DIM}[ undone. the story now ends with: ]{RESET}"
+    print(report)
     print()
     print(session.render_last_turns(2))
-    session.restore_screen_tail(2)
+    session.restore_screen_tail(2, above=report)
 
 
 def cmd_regen(session: Session, store: Store, args: list[str]) -> None:
@@ -109,7 +123,10 @@ def cmd_regen(session: Session, store: Store, args: list[str]) -> None:
         print("Nothing to regenerate.")
         return
     if not session.screen.erase_reply():
-        session.screen.reply.write(f"{DIM}[ regenerating ]{RESET}\n\n")
+        # The marker, like any command output, ends the clearable run.
+        session.screen.invalidate()
+        print(f"{DIM}[ regenerating ]{RESET}")
+        print()
     # An out-of-character reply regenerates out of character.
     run_inference(session, store, ooc=popped.kind == "ooc")
 

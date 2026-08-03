@@ -108,10 +108,10 @@ class TestChat:
     def test_regen_after_an_undo_report_erases_the_reechoed_reply(
         self, server: ModelServer, tmp_path: Path
     ) -> None:
-        """/info broke the ledger, so /undo reported and re-echoed the
-        surviving exchange — and handed it back to the ledger: Ctrl+R
-        right after erases the re-echoed reply and streams the fresh
-        take in its place, no marker."""
+        """The turns an /undo report re-echoes are turns: Ctrl+R right
+        after clears the re-echoed response and streams the fresh take in
+        its place, the request still displayed — no marker. The report
+        line above stays."""
         terminal = launch_remembered(server, tmp_path / "state")
         play(terminal, "The first turn.", "stirred")
         server.script = lambda body: "The dice settle slowly."
@@ -131,6 +131,45 @@ class TestChat:
         assert b"\x1b[2A\r\x1b[J" in terminal.raw
         assert "[ regenerating ]" not in terminal.transcript
         assert terminal.quit() == 0
+
+    def test_undo_past_the_echo_refreshes_the_report_in_place(
+        self, server: ModelServer, tmp_path: Path
+    ) -> None:
+        """Resume, undo through the echoed turns and keep going: each
+        /undo past them replaces report and re-echo with a fresh report
+        of the earlier exchange — one current report on screen, never one
+        over nothing, never two stacked — down to the empty story."""
+        state = tmp_path / "state"
+        first = launch_remembered(server, state)
+        for n in range(1, 6):
+            server.script = lambda body, n=n: f"Reply number {n}."
+            play(first, f"Turn number {n}.", f"Reply number {n}.")
+        assert first.quit() == 0
+
+        second = Terminal(str(state))
+        second.expect("Resumed at message 10.")
+        second.settle()
+        second.arm_cpr(20)
+        second.send(CTRL_U, 1.0)  # erases echoed exchange 5, silently
+        second.settle()
+        second.arm_cpr(20)
+        second.send(CTRL_U, 1.0)  # erases echoed exchange 4, silently
+        second.settle()
+        second.send(CTRL_U, 1.0)  # nothing shown to erase — report
+        second.expect("the story now ends with")
+        second.settle()
+        second.arm_cpr(20)
+        second.send(CTRL_U, 1.0)  # takes re-echo AND report — fresh report
+        second.expect("Reply number 1.")  # …now showing the earlier exchange
+        assert second.transcript.count("the story now ends with") == 2
+        # Report(1) + blank(1) + block(1) + blank(1) + reply(1) + gap(1).
+        assert b"\x1b[6A\r\x1b[J" in second.raw
+        second.settle()
+        second.arm_cpr(20)
+        second.send(CTRL_U, 1.0)  # the last exchange goes — empty, in place
+        second.expect("The story is now empty")
+        assert second.transcript.count("the story now ends with") == 2
+        assert second.quit() == 0
 
     def test_a_remembered_story_resumes_on_launch(
         self, server: ModelServer, tmp_path: Path
