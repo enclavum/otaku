@@ -1,4 +1,4 @@
-"""The playing commands: /me, /you, /ooc, /undo, /regen, /last.
+"""The playing commands: /me, /you, /ooc, /undo, /regen, /last, /clear.
 
 The three roleplay commands do ONE thing each: write their template into
 the turn's `framing` verbatim, filling only `{name}` — the `((OOC: …))`
@@ -155,6 +155,12 @@ def cmd_last(session: Session, store: Store, args: list[str]) -> None:
         return
     print(session.render_last_turns(count * 2))  # a turn is two message rows
     session.restore_screen_tail(count * 2)
+
+
+def cmd_clear(session: Session, store: Store, args: list[str]) -> None:
+    """`/clear` — wipe the screen; the story is untouched and `/last`
+    brings the scene back. The next prompt opens at the top."""
+    session.screen.clear()
 
 
 def _resolve_character(session: Session, store: Store, raw: str) -> str | None:

@@ -20,6 +20,7 @@ RESET = "\x1b[0m"
 DEFAULT_BG = "\x1b[49m"  # back to the terminal's own background
 
 # Erasing and cursor motion
+CLEAR_SCREEN = "\x1b[H\x1b[2J"  # wipe the visible screen, cursor home; scrollback stays
 ERASE_LINE = "\x1b[2K"  # clear the row the cursor is on
 UP_ONE = "\x1b[1A"
 GOTO_ROW = "\x1b[{};1H"  # CUP to column 1 of the given row

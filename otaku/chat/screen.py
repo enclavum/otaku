@@ -53,7 +53,7 @@ import sys
 from collections.abc import Iterator
 from typing import Any, TextIO, cast
 
-from otaku.terminal import user_block
+from otaku.terminal import CLEAR_SCREEN, user_block
 from otaku.terminal.cursor import RowTracker, measure, terminal_width
 from otaku.terminal.query import cursor_row
 
@@ -128,6 +128,16 @@ class ScreenLedger:
         if reply is not None:
             entry.tracker.feed(reply + "\n")
         self._stack.append(entry)
+
+    def clear(self) -> None:
+        """Wipe the visible screen (/clear): everything erased, the cursor
+        home — scrollback stays. The stack empties with it, and the
+        suppressed gap puts the next prompt flush with the top."""
+        self._lead_blank = False  # nothing prints under a wiped typed line
+        sys.stdout.write(CLEAR_SCREEN)
+        sys.stdout.flush()
+        self._stack.clear()
+        self._suppress_gap = True
 
     # ---------- erasing ----------
 

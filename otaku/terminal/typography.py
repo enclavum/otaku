@@ -58,14 +58,14 @@ _QUOTE_CLOSERS = {
 # punctuation — anywhere else it is a parenthetical inside the current voice.
 _HANDOVER_AFTER = ",.!?…:;"
 
-# What "auto" — the shipped default — resolves to: the gold pair, one shade
-# per background (warm speech is the captioning tradition), designed rather
-# than delegated to the theme. When the terminal keeps its background to
-# itself, the theme's own yellow slot keeps us in the same family, legible
-# on whatever the background turns out to be.
-_AUTO_DARK = "#e6b450"  # soft gold on a dark background
-_AUTO_LIGHT = "#9a6700"  # deep gold on a light one
-_AUTO_FALLBACK = "yellow"
+# What "auto" — the shipped default — resolves to: the teal pair, one
+# shade per background (the cool tone this category's readers know as
+# speech), designed rather than delegated to the theme. When the terminal
+# keeps its background to itself, the theme's own cyan slot keeps us in
+# the same family, legible on whatever the background turns out to be.
+_AUTO_DARK = "#56b6c2"  # soft teal on a dark background
+_AUTO_LIGHT = "#0e7490"  # deep teal on a light one
+_AUTO_FALLBACK = "cyan"
 
 
 class Typesetter:
@@ -421,9 +421,9 @@ def typeset(text: str, *, speech_color: str = "auto", speech_bold: bool = False)
 
 def _speech_escape(spec: str) -> str:
     """The SGR escape for a dialogue-color setting. "auto" — and any spec
-    `color` cannot read — picks the gold tuned to the detected background,
-    or the theme's yellow when the terminal keeps its background to
-    itself; a color name or #rrggbb passes through as itself."""
+    `color` cannot read — picks the teal tuned to the detected background,
+    or the theme's cyan when the terminal keeps its background to itself;
+    a color name or #rrggbb passes through as itself."""
     if spec.strip().lower() != "auto":
         resolved = color(spec)
         if resolved:

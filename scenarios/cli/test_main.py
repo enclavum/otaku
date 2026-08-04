@@ -136,8 +136,8 @@ class TestChat:
         self, server: ModelServer, tmp_path: Path
     ) -> None:
         """dialogue_color = "auto" (the default): the app asks the
-        terminal for its background once and speaks in the gold tuned to
-        it — soft gold (#e6b450) on the dark background this terminal
+        terminal for its background once and speaks in the teal tuned
+        to it — soft teal (#56b6c2) on the dark background this terminal
         reports."""
         state = tmp_path / "state"
         set_config_provider(state, server)
@@ -149,7 +149,7 @@ class TestChat:
         terminal.arm_background(dark=True)
         play(terminal, "I knock.", "Come in")
         assert b"\x1b]11;?" in terminal.raw  # the app asked
-        assert b"\x1b[38;2;230;180;80m" in terminal.raw  # #e6b450 speech
+        assert b"\x1b[38;2;86;182;194m" in terminal.raw  # #56b6c2 speech
         assert terminal.quit() == 0
 
     def test_at_pops_the_path_menu_and_enter_imports_the_pick(

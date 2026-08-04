@@ -203,3 +203,11 @@ class TestLast:
     def test_rejects_a_bad_count(self, app: App, capsys) -> None:
         app.play("/last riddle")
         assert "Usage: /last [N]" in capsys.readouterr().out
+
+
+class TestClear:
+    def test_wipes_the_screen_and_keeps_the_story(self, app: App, capsys) -> None:
+        app.play("I open the door.")
+        app.play("/clear")
+        assert "\x1b[H\x1b[2J" in capsys.readouterr().out
+        assert len(app.session.messages) == 2  # the story is untouched

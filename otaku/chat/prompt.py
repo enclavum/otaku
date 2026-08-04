@@ -9,8 +9,8 @@ Keybindings:
   Ctrl+R -> /regen
   Ctrl+U -> /undo
   Ctrl+T -> /stories
-  Ctrl+L -> /lore      (shadows clear-screen, which a chat never needs)
-  Ctrl+O -> /model      (Ctrl+M is unusable — the terminal sends it as Enter)
+  Ctrl+L -> /lore      (shadows clear-screen, which lives at /clear)
+  Ctrl+O -> /model     (Ctrl+M is unusable — the terminal sends it as Enter)
   Ctrl+D -> /bye
 
 A shortcut key exits the prompt with its command as the result, stashing
