@@ -95,7 +95,13 @@ class App:
         if tui is None:
             tui = TUI(
                 pick_model=lambda current: model_picker.pick(registry, initial_spec=current),
-                pick_story=story_picker.pick,
+                pick_story=lambda store, rows, current: story_picker.pick(
+                    store,
+                    rows,
+                    current,
+                    dialogue_color=cfg.dialogue_color,
+                    dialogue_bold=cfg.dialogue_bold,
+                ),
                 browse_lore=lore_browser.browse,
             )
         try:

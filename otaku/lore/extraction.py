@@ -487,8 +487,7 @@ class Extractor:
             self._store.scenes.set_history(due[-1], summaries[0])
             report.scene_histories += 1
             self._log(
-                f"story-so-far rollup finished (story {self._story_id}): "
-                "the one summary, verbatim"
+                f"story-so-far rollup finished (story {self._story_id}): the one summary, verbatim"
             )
             return
         self._progress(f"composing the story so far from {len(summaries)} scene summaries…")

@@ -2,7 +2,7 @@
 roleplay commands /me, /you, /ooc."""
 
 from scenarios.support import server as scripted
-from scenarios.support.harness import App
+from scenarios.support.harness import App, launch, set_config
 
 
 class TestTurns:
@@ -17,6 +17,14 @@ class TestTurns:
     def test_a_played_turn_echoes_as_the_grey_block(self, app: App, capsys) -> None:
         app.play("I open the door.")
         assert "> I open the door." in capsys.readouterr().out
+
+    def test_the_configured_dialogue_look_styles_the_reply(self, server, tmp_path, capsys) -> None:
+        set_config(tmp_path / "state", dialogue_color="magenta", dialogue_bold=True)
+        app = launch(tmp_path / "state", server)
+        app.server.script = lambda body: '"Come in," she said.'
+        app.play("I knock.")
+        app.close()
+        assert "\x1b[35m\x1b[1m" in capsys.readouterr().out  # magenta + bold speech
 
     def test_the_wire_carries_the_message_verbatim(self, app: App) -> None:
         app.play("/system You are the narrator.")

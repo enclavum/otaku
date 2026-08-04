@@ -41,7 +41,7 @@ from prompt_toolkit.application.current import get_app
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.document import Document
 from prompt_toolkit.filters import Condition
-from prompt_toolkit.formatted_text import StyleAndTextTuples
+from prompt_toolkit.formatted_text import ANSI, StyleAndTextTuples, to_formatted_text
 from prompt_toolkit.key_binding import (
     ConditionalKeyBindings,
     KeyBindings,
@@ -58,6 +58,7 @@ from otaku.store import Store
 from otaku.store.schema import Message
 from otaku.store.stories import StoryListing
 from otaku.terminal import latin_key
+from otaku.terminal.typography import typeset
 from otaku.tui.screen import BASE_STYLE, ListScreen, bordered_box, wrap_text
 
 # Light palette — shared chrome from BASE_STYLE plus the row + preview
@@ -101,9 +102,16 @@ class StoryPicker(ListScreen):
         store: Store,
         rows: list[StoryListing],
         initial_story: int | None = None,
+        *,
+        dialogue_color: str = "",
+        dialogue_bold: bool = False,
     ) -> None:
         super().__init__()
         self.store = store
+        # The configured dialogue look for the message preview — the raw
+        # specs; the typesetter resolves them.
+        self._dialogue_color = dialogue_color
+        self._dialogue_bold = dialogue_bold
         self.all: list[StoryListing] = list(rows)
         self.filtered: list[StoryListing] = list(rows)
         # Full message text per story, built lazily on the first search
@@ -243,8 +251,16 @@ class StoryPicker(ListScreen):
             m = self.loaded_msgs[orig]
             out: StyleAndTextTuples = []
             if m.body:
-                for line in wrap_text(m.body, width):
-                    out.append(("class:preview.body", line + "\n"))
+                # The body typeset the way it streamed — dialogue color,
+                # emphasis, blocks — parsed into fragments so the window's
+                # own wrapping carries styles across wrapped rows. Editing
+                # swaps this window out, so the buffer stays raw text.
+                body = typeset(
+                    m.body, speech_color=self._dialogue_color, speech_bold=self._dialogue_bold
+                )
+                if not body.endswith("\n"):
+                    body += "\n"
+                out.extend(to_formatted_text(ANSI(body), style="class:preview.body"))
             # The framing (a /me or /you direction, the /ooc note) shown DIM
             # after a blank line — the raw template layer (its `{body}`
             # placeholder and all) that combine_framing joins to the body to
@@ -607,11 +623,23 @@ class StoryPicker(ListScreen):
 
 
 def pick(
-    store: Store, rows: list[StoryListing], initial_story: int | None = None
+    store: Store,
+    rows: list[StoryListing],
+    initial_story: int | None = None,
+    *,
+    dialogue_color: str = "",
+    dialogue_bold: bool = False,
 ) -> tuple[int, list[Message], str] | None:
     """Show the story browser over `rows`. `initial_story` pre-selects the
-    matching row when set (the story already loaded in the REPL). Returns
-    (story_id, its messages up to the picked turn, the settled action —
-    "resume", "fork", or "truncate") on a confirmed selection, or None
-    when the user cancels (Esc/Ctrl+C)."""
-    return StoryPicker(store, rows, initial_story=initial_story).run()
+    matching row when set (the story already loaded in the REPL); the
+    dialogue knobs style the message preview the way the chat streams it.
+    Returns (story_id, its messages up to the picked turn, the settled
+    action — "resume", "fork", or "truncate") on a confirmed selection, or
+    None when the user cancels (Esc/Ctrl+C)."""
+    return StoryPicker(
+        store,
+        rows,
+        initial_story=initial_story,
+        dialogue_color=dialogue_color,
+        dialogue_bold=dialogue_bold,
+    ).run()

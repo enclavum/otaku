@@ -8,8 +8,8 @@ advances nothing until the next printable character), wide characters take
 two columns, `\r` `\t` `\b` move without advancing, and escape sequences —
 CSI, OSC, and two-byte ESC forms — occupy nothing, even split across feeds.
 `measure` runs a fresh tracker over one string; a printed line or block is
-measured with its trailing newline. (`cursor_row` asks a real terminal and
-is exercised by the pty scenarios instead.)
+measured with its trailing newline. (Asking the real terminal lives in
+`terminal.query`, exercised by the pty scenarios.)
 """
 
 from otaku.terminal import user_block

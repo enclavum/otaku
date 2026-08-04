@@ -132,6 +132,26 @@ class TestChat:
         assert "[ regenerating ]" not in terminal.transcript
         assert terminal.quit() == 0
 
+    def test_auto_dialogue_color_follows_the_reported_background(
+        self, server: ModelServer, tmp_path: Path
+    ) -> None:
+        """dialogue_color = "auto" (the default): the app asks the
+        terminal for its background once and speaks in the gold tuned to
+        it — soft gold (#e6b450) on the dark background this terminal
+        reports."""
+        state = tmp_path / "state"
+        set_config_provider(state, server)
+        remember(state)
+        # COLORFGBG neutralized: the OSC 11 answer must be the one source.
+        terminal = Terminal(str(state), env={"COLORFGBG": ""})
+        terminal.expect("otaku")
+        server.script = lambda body: '"Come in," she said.'
+        terminal.arm_background(dark=True)
+        play(terminal, "I knock.", "Come in")
+        assert b"\x1b]11;?" in terminal.raw  # the app asked
+        assert b"\x1b[38;2;230;180;80m" in terminal.raw  # #e6b450 speech
+        assert terminal.quit() == 0
+
     def test_at_pops_the_path_menu_and_enter_imports_the_pick(
         self, server: ModelServer, tmp_path: Path
     ) -> None:

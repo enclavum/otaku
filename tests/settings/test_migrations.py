@@ -41,6 +41,23 @@ class TestEnsureSection:
         assert "# [display] will exist someday" in migrated
         assert migrated.endswith("\n[display]\nsmooth = true\n")
 
+    def test_after_places_the_section_below_its_anchor(self) -> None:
+        migrated = ensure_section("display", "[display]\nsmooth = true", after="settings")(BASE)
+        assert migrated == (
+            "[settings]\n"
+            "show_banner = true            # the session header\n"
+            "\n"
+            "[display]\n"
+            "smooth = true\n"
+            "\n"
+            "[context]\n"
+            "head_messages = 20\n"
+        )
+
+    def test_a_missing_anchor_falls_back_to_the_end(self) -> None:
+        migrated = ensure_section("display", "[display]", after="vanished")(BASE)
+        assert migrated == BASE + "\n[display]\n"
+
 
 class TestEnsureKey:
     def test_inserts_after_the_sections_last_line(self) -> None:
@@ -68,6 +85,16 @@ class TestEnsureKey:
     def test_the_last_section_of_the_file_grows_at_its_end(self) -> None:
         migrated = ensure_key("context", "tail_messages", "tail_messages = 150")(BASE)
         assert migrated.endswith("head_messages = 20\ntail_messages = 150\n")
+
+    def test_after_places_the_key_below_its_anchor(self) -> None:
+        text = "[settings]\nfirst = 1\nlast = 3\n"
+        migrated = ensure_key("settings", "second", "second = 2", after="first")(text)
+        assert migrated == "[settings]\nfirst = 1\nsecond = 2\nlast = 3\n"
+
+    def test_a_missing_anchor_key_falls_back_to_the_section_end(self) -> None:
+        text = "[settings]\nfirst = 1\nlast = 3\n"
+        migrated = ensure_key("settings", "second", "second = 2", after="vanished")(text)
+        assert migrated == "[settings]\nfirst = 1\nlast = 3\nsecond = 2\n"
 
 
 class TestMoveKey:

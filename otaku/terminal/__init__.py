@@ -10,6 +10,8 @@ layout just works without ever being announced — help text still says
 control byte from the physical key, the same in any layout.
 """
 
+import re
+
 # SGR text attributes
 BOLD = "\x1b[1m"
 DIM = "\x1b[2m"
@@ -59,6 +61,46 @@ def user_block(text: str) -> str:
     lines by the callers."""
     lines = text.splitlines() or [""]
     return "\n".join(f"{_USER_TURN}{PROMPT_PREFIX}{line}\x1b[K{RESET}" for line in lines)
+
+
+# Color specs. A NAME is the portable form: it compiles to one of the 16
+# palette slots, which every terminal on every platform renders and the
+# user's own theme shades, so it stays legible on light and dark alike. A
+# #rrggbb is truecolor — exact everywhere, and therefore fixed.
+_COLOR_NAMES = {
+    "black": 30,
+    "red": 31,
+    "green": 32,
+    "yellow": 33,
+    "blue": 34,
+    "magenta": 35,
+    "cyan": 36,
+    "white": 37,
+    "bright black": 90,
+    "bright red": 91,
+    "bright green": 92,
+    "bright yellow": 93,
+    "bright blue": 94,
+    "bright magenta": 95,
+    "bright cyan": 96,
+    "bright white": 97,
+}
+_HEX = re.compile(r"^#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})$")
+
+
+def color(spec: str) -> str:
+    """A color name ("cyan", "bright blue") or a #rrggbb hex → the SGR
+    foreground escape. "" when the spec is neither, so a caller can fall
+    back to its default rather than print garbage."""
+    text = " ".join(spec.strip().lower().replace("-", " ").replace("_", " ").split())
+    slot = _COLOR_NAMES.get(text)
+    if slot is not None:
+        return f"\x1b[{slot}m"
+    m = _HEX.match(spec.strip())
+    if m is None:
+        return ""
+    r, g, b = (int(part, 16) for part in m.groups())
+    return f"\x1b[38;2;{r};{g};{b}m"
 
 
 def fg(color: int) -> str:

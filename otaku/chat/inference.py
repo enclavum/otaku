@@ -14,7 +14,6 @@ from typing import Any, Self
 
 import httpx
 
-from otaku.chat.markdown import MarkdownStreamer
 from otaku.chat.session import NO_MODEL_HINT, Session
 from otaku.formatting import format_context
 from otaku.lore import assembler
@@ -24,6 +23,7 @@ from otaku.store import Store
 from otaku.store.schema import Message
 from otaku.terminal import DIM, RESET
 from otaku.terminal.spinner import Spinner
+from otaku.terminal.typography import Typesetter
 
 # POSIX-only raw-terminal control for the in-stream Ctrl+R watcher. Absent
 # on Windows — the watcher degrades to a no-op there; Ctrl+C cancellation
@@ -145,7 +145,11 @@ def _run_step(session: Session, store: Store, ooc: bool) -> None:
     spinner.start()
     start = time.monotonic()
     watcher = _StreamWatcher()
-    renderer = MarkdownStreamer(out)
+    typesetter = Typesetter(
+        out,
+        speech_color=session.config.dialogue_color,
+        speech_bold=session.config.dialogue_bold,
+    )
     client = session.providers.get_client(provider.name)
     wire = assembler.assemble_story(store, session, client.get_context_size(session.model)).messages
     # The activity line survives the prompt's absence: entering `status_row`
@@ -168,7 +172,7 @@ def _run_step(session: Session, store: Store, ooc: bool) -> None:
                     if in_thinking:
                         out.write(RESET + "\n")
                         in_thinking = False
-                    renderer.feed(chunk.text)
+                    typesetter.feed(chunk.text)
                     content.append(chunk.text)
                 elif isinstance(chunk, Stats):
                     final = chunk
@@ -178,7 +182,7 @@ def _run_step(session: Session, store: Store, ooc: bool) -> None:
             error = _error_message(e, provider)
         finally:
             spinner.stop()
-            renderer.flush()
+            typesetter.flush()
 
     if in_thinking:
         out.write(RESET)

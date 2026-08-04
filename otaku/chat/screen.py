@@ -54,7 +54,8 @@ from collections.abc import Iterator
 from typing import Any, TextIO, cast
 
 from otaku.terminal import user_block
-from otaku.terminal.cursor import RowTracker, cursor_row, measure, terminal_width
+from otaku.terminal.cursor import RowTracker, measure, terminal_width
+from otaku.terminal.query import cursor_row
 
 # Up N rows, to column 0, erase to the end of the screen.
 _ERASE_UP = "\x1b[{}A\r\x1b[J"

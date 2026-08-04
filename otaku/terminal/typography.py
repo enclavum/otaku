@@ -1,12 +1,21 @@
-"""Streaming markdown renderer.
+"""Streaming typesetter for the story's text.
 
 Consumes text chunks as they arrive from the model and emits ANSI-styled
-output. Handles inline markup (`*…*`, `**…**`, `` `…` ``) and block markup
+output. Handles inline markup (`*…*`, `**…**`, `` `…` ``), spoken lines, and block markup
 detected at the start of a line: ATX headers, unordered/ordered lists,
 blockquotes, horizontal rules, and fenced code blocks (rendered dim, the
 info string as a language label).
 
-The renderer is forward-only (no repaint). Block markers are the only thing
+Dialogue is colored, in both conventions writers use. Paired quotes —
+"…", "…", «…», „…" — open and close a spoken span. A line opening with an
+em or en dash is spoken until a dash that FOLLOWS sentence punctuation
+hands over to the attribution ("— Yes, — he said. — Come in."), which
+hands back on the next such dash. A dash after an ordinary word is a
+parenthetical and changes nothing. Being forward-only, the typesetter must
+decide at the opening mark, so a quoted word inside narration is colored
+too — there is no way to look ahead and reconsider.
+
+The typesetter is forward-only (no repaint). Block markers are the only thing
 buffered, and only until the line's type is known — a plain prose line
 resolves on its first character, so normal text still streams character by
 character. Code-block bodies buffer one line at a time (needed to detect
@@ -20,7 +29,8 @@ import shutil
 import sys
 from typing import Any, TextIO
 
-from otaku.terminal import BOLD, DIM, ITALIC, RESET
+from otaku.terminal import BOLD, DIM, ITALIC, RESET, color
+from otaku.terminal.query import background_is_dark
 
 _MORE: Any = object()  # verdict: keep buffering, block type not yet known
 
@@ -31,13 +41,47 @@ _RE_QUOTE = re.compile(r"^(\s*)>")
 _RE_FENCE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
 _RE_HR = re.compile(r"^ {0,3}([-*_])[ \t]*(?:\1[ \t]*){2,}$")
 
+# Dialogue. The ASCII hyphen is deliberately absent: `- ` opens a markdown
+# list, and a list marker must stay a list marker.
+_DASHES = "—–"  # noqa: RUF001 — en dash is deliberate
+# Opening quote → the marks that may close it. `“` both opens (English) and
+# closes („…“), resolved by whether a span is already open; the straight
+# quote closes itself, so it toggles. `„` accepts either curly mark, because
+# the strict `„…“` pairing is often typed as `„…”`.
+_QUOTE_CLOSERS = {
+    "«": "»",
+    "\u201c": "\u201d",
+    "\u201e": "\u201c\u201d",
+    '"': '"',
+}
+# A dash hands over to (or back from) the attribution only after sentence
+# punctuation — anywhere else it is a parenthetical inside the current voice.
+_HANDOVER_AFTER = ",.!?…:;"
 
-class MarkdownStreamer:
+# What "auto" — the shipped default — resolves to: the gold pair, one shade
+# per background (warm speech is the captioning tradition), designed rather
+# than delegated to the theme. When the terminal keeps its background to
+# itself, the theme's own yellow slot keeps us in the same family, legible
+# on whatever the background turns out to be.
+_AUTO_DARK = "#e6b450"  # soft gold on a dark background
+_AUTO_LIGHT = "#9a6700"  # deep gold on a light one
+_AUTO_FALLBACK = "yellow"
+
+
+class Typesetter:
     """Block-and-inline markdown state machine. Feed text via `feed()`; call
     `flush()` once the stream ends to close any open span or fence."""
 
-    def __init__(self, out: TextIO | None = None) -> None:
+    def __init__(
+        self, out: TextIO | None = None, *, speech_color: str = "auto", speech_bold: bool = False
+    ) -> None:
         self._out = out if out is not None else sys.stdout
+        # `speech_color` is the SPEC — "auto", a color name, or #rrggbb —
+        # resolved here so every caller can pass the setting through
+        # verbatim. An unreadable spec resolves like "auto" rather than
+        # printing itself at the reader.
+        self._speech_color = _speech_escape(speech_color)
+        self._speech_bold = speech_bold
         # inline span state
         self._bold = False
         self._italic = False
@@ -45,6 +89,13 @@ class MarkdownStreamer:
         self._header = False  # whole line is a header → bold
         self._pending_star = False
         self._escape = False
+        # dialogue state
+        self._speech = False
+        self._quote_close = ""  # the mark that will close the open quote
+        self._quote_outer = False  # was speech already on when it opened?
+        self._dash_line = False  # this line opened with a dialogue dash
+        self._col0 = True  # nothing of this line's content written yet
+        self._last_sig = ""  # last non-space character written
         # line/block state
         self._at_bol = True  # at the start of a line, classifying the block
         self._pending = ""  # buffered leading chars while classifying
@@ -72,7 +123,7 @@ class MarkdownStreamer:
             pending, self._pending = self._pending, ""
             self._flush_text(pending)
             self._at_bol = False
-        styled = self._bold or self._italic or self._code or self._header
+        styled = self._bold or self._italic or self._code or self._header or self._speech
         if self._pending_star:
             self._pending_star = False
             if self._italic:
@@ -262,13 +313,70 @@ class MarkdownStreamer:
             self._code = True
             self._restyle()
             return
+        if self._dialogue(ch):
+            return
+        self._write(ch)
+
+    def _dialogue(self, ch: str) -> bool:
+        """Open or close a spoken span on `ch`. True when it was handled.
+
+        A closing mark stays inside the span and an opening one joins it, so
+        the marks themselves carry the color — including the dash that hands
+        speech back, which reads as part of the line it introduces."""
+        if self._quote_close:
+            if ch in self._quote_close:
+                self._write(ch)  # the closing mark belongs to the speech
+                self._quote_close = ""
+                # Back to whatever the quote interrupted, which is NOT
+                # always narration: inside a dash-opened line, one speaker
+                # quoting another is speech within speech, and forcing it
+                # off here would invert the rest of the line — the words
+                # after the citation would go plain and the attribution
+                # would light up instead.
+                self._speech = self._quote_outer
+                self._restyle()
+                return True
+            return False
+        if ch in _QUOTE_CLOSERS:
+            self._quote_outer = self._speech
+            self._speech = True
+            self._quote_close = _QUOTE_CLOSERS[ch]
+            self._restyle()
+            self._write(ch)
+            return True
+        if ch not in _DASHES:
+            return False
+        if self._col0:  # a line opening with a dash is spoken
+            self._dash_line = True
+            self._speech = True
+            self._restyle()
+            self._write(ch)
+            return True
+        if self._dash_line and self._last_sig in _HANDOVER_AFTER:
+            self._speech = not self._speech
+            self._restyle()
+            self._write(ch)
+            return True
+        return False
+
+    def _write(self, ch: str) -> None:
+        """Emit one character of content, remembering what a dialogue dash
+        needs to know: whether the line has begun, and what preceded it."""
         self._out.write(ch)
+        if not ch.isspace():
+            self._col0 = False
+            self._last_sig = ch
 
     def _restyle(self) -> None:
         """Emit RESET then the currently-active style escapes — cheaper than
         toggling attributes off, which terminals do inconsistently."""
         self._out.write(RESET)
-        if self._bold or self._header:
+        if self._speech:
+            self._out.write(self._speech_color)
+        # Weight only when asked for: the color carries the separation
+        # on its own, and bold on a palette slot often means "the bright
+        # variant" rather than a heavier font, which shifts the hue.
+        if self._bold or self._header or (self._speech and self._speech_bold):
             self._out.write(BOLD)
         if self._italic:
             self._out.write(ITALIC)
@@ -279,7 +387,7 @@ class MarkdownStreamer:
         """Close the current line: resolve a dangling `*`, reset open spans,
         and emit the newline — inline spans do not cross lines, so the
         terminal can never get stuck styled on a mid-span break."""
-        styled = self._bold or self._italic or self._code or self._header
+        styled = self._bold or self._italic or self._code or self._header or self._speech
         if self._pending_star:
             self._pending_star = False
             if self._italic:
@@ -289,18 +397,38 @@ class MarkdownStreamer:
         if styled:
             self._out.write(RESET)
         self._bold = self._italic = self._code = self._header = False
+        self._speech = self._dash_line = False
+        self._quote_close = ""
+        self._quote_outer = False
+        self._col0 = True
+        self._last_sig = ""
         self._escape = self._eat_space = False
         self._out.write("\n")
         self._at_bol = True
         self._pending = ""
 
 
-def render_markdown(text: str) -> str:
+def typeset(text: str, *, speech_color: str = "auto", speech_bold: bool = False) -> str:
     """`text` rendered in one pass, returned as a string: exactly what the
     streamer would have printed — for echoing stored messages the way they
     looked when they streamed."""
     out = io.StringIO()
-    streamer = MarkdownStreamer(out)
+    streamer = Typesetter(out, speech_color=speech_color, speech_bold=speech_bold)
     streamer.feed(text)
     streamer.flush()
     return out.getvalue()
+
+
+def _speech_escape(spec: str) -> str:
+    """The SGR escape for a dialogue-color setting. "auto" — and any spec
+    `color` cannot read — picks the gold tuned to the detected background,
+    or the theme's yellow when the terminal keeps its background to
+    itself; a color name or #rrggbb passes through as itself."""
+    if spec.strip().lower() != "auto":
+        resolved = color(spec)
+        if resolved:
+            return resolved
+    dark = background_is_dark()
+    if dark is None:
+        return color(_AUTO_FALLBACK)
+    return color(_AUTO_DARK if dark else _AUTO_LIGHT)

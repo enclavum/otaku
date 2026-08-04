@@ -20,7 +20,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Self
 
-from otaku.chat.markdown import render_markdown
 from otaku.chat.screen import ScreenLedger
 from otaku.lore.worker import LoreWorker
 from otaku.paths import Paths
@@ -35,6 +34,7 @@ from otaku.store.schema import Message
 from otaku.store.stories import StoryListing
 from otaku.terminal import DIM, RESET, user_block
 from otaku.terminal.statusline import StatusLine
+from otaku.terminal.typography import typeset
 
 # The inference parameters otaku understands, and how each is read from the
 # saved file or a `/set parameter` argument.
@@ -297,7 +297,7 @@ class Session:
         out: list[str] = []
         for message in self.messages[-count:]:
             out.append("")
-            out.append(_rendered_turn(message))
+            out.append(self._rendered_turn(message))
         return "\n".join(out).lstrip("\n")
 
     def restore_screen_tail(self, count: int, above: str = "") -> None:
@@ -325,11 +325,26 @@ class Session:
             groups.append((prompt, reply))
         for prompt, reply in reversed(groups):
             self.screen.restore_exchange(
-                _rendered_turn(prompt) if prompt else None,
-                _rendered_turn(reply) if reply is not None else None,
+                self._rendered_turn(prompt) if prompt else None,
+                self._rendered_turn(reply) if reply is not None else None,
                 above=above,
             )
             above = ""  # the report belongs to the oldest exchange only
+
+    def _rendered_turn(self, message: Message) -> str:
+        """One turn exactly as the echoes print it: a user turn as the grey
+        block, a model turn typeset with the configured dialogue look — the
+        trailing newline normalized away, the caller joining and
+        terminating lines. One renderer for showing AND measuring, so the
+        screen ledger can never disagree with the echo."""
+        if message.role == "user":
+            return user_block(message.body)
+        styled = typeset(
+            message.body,
+            speech_color=self.config.dialogue_color,
+            speech_bold=self.config.dialogue_bold,
+        )
+        return "\n".join(styled.splitlines())
 
     def reload_params(self) -> None:
         """Replace the live parameters with the current model's saved
@@ -364,12 +379,3 @@ class Session:
             return
         head = self.messages[-1].id if self.messages else None
         store.stories.set_head(self.story_id, head)
-
-
-def _rendered_turn(message: Message) -> str:
-    """One turn exactly as the echoes print it: a user turn as the grey
-    block, a model turn as its rendered markdown — the trailing newline
-    normalized away, the caller joining and terminating lines."""
-    if message.role == "user":
-        return user_block(message.body)
-    return "\n".join(render_markdown(message.body).splitlines())

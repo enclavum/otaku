@@ -11,6 +11,7 @@ import base64
 import pytest
 
 from otaku import crypto
+from otaku.app import load_config
 from otaku.settings import config as config_mod
 from otaku.store import is_encrypted
 from scenarios.support import server as scripted
@@ -103,6 +104,45 @@ class TestBackups:
         relaunched = launch(root, server)
         relaunched.close()
         assert any(app.paths.backups_dir.iterdir())
+
+
+class TestConfigMigration:
+    def test_an_old_config_gains_the_new_section_and_a_backup(
+        self, server: ModelServer, tmp_path
+    ) -> None:
+        """A config from an older build passes through the launch's
+        `load_config` and comes out in the current shape — surgically,
+        the user's own lines intact — with the pre-migration file waiting
+        in configs/backups/."""
+        app = launch(tmp_path / "state", server)
+        app.close()
+        config_file = app.paths.config_file
+        old = "\n".join(
+            line
+            for line in config_file.read_text().splitlines()
+            if not line.startswith(("[ui]", "dialogue_color =", "dialogue_bold ="))
+        )
+        config_file.write_text(old + "\n# my note\n")
+
+        cfg = load_config(app.paths)
+        migrated = config_file.read_text()
+        assert "[ui]" in migrated
+        assert 'dialogue_color = "auto"' in migrated
+        # Anchored below [settings], where a fresh config renders it.
+        assert migrated.index("[settings]") < migrated.index("[ui]") < migrated.index("[context]")
+        assert "# my note" in migrated  # the user's own line survived
+        assert cfg.dialogue_color == "auto"
+        backups = list(app.paths.config_backups_dir.iterdir())
+        assert len(backups) == 1
+        assert "[ui]" not in backups[0].read_text()
+
+    def test_a_current_config_is_left_untouched(self, server: ModelServer, tmp_path) -> None:
+        app = launch(tmp_path / "state", server)
+        app.close()
+        before = app.paths.config_file.read_text()
+        load_config(app.paths)
+        assert app.paths.config_file.read_text() == before
+        assert not app.paths.config_backups_dir.exists()
 
 
 class TestFirstLaunch:

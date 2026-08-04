@@ -28,7 +28,7 @@ from collections.abc import Callable
 from datetime import datetime
 
 from otaku.paths import Paths
-from otaku.settings.files import write_atomic
+from otaku.settings.files import row, write_atomic
 
 # One shape change: config text in, config text out (unchanged when the
 # change does not apply).
@@ -42,32 +42,52 @@ def _migrations() -> list[Migration]:
     across app versions, each safe to re-run on any config the app ever
     wrote. A function, not a constant, only so the table can sit here on
     top — its entries call the factories defined below."""
-    return []
+    return [
+        # 0.2.2 — dialogue coloring arrives with the [ui] section.
+        ensure_section(
+            "ui",
+            "[ui]\n"
+            + row(
+                'dialogue_color = "auto"',
+                'spoken lines: "auto" fits the background; a color name ("cyan") or #rrggbb',
+            )
+            + "\n"
+            + row("dialogue_bold = false", "also bold the spoken lines"),
+            after="settings",
+        ),
+    ]
 
 
-def ensure_section(name: str, block: str) -> Migration:
+def ensure_section(name: str, block: str, after: str = "") -> Migration:
     """A migration adding a whole new `[name]` section: when the parsed
     file has no such table, `block` — the header line and its rows,
-    exactly as a fresh config would render them — is appended at the end
-    of the file after one separating blank line. Present, even empty:
-    untouched."""
+    exactly as a fresh config would render them — is inserted right below
+    the `[after]` section, one separating blank line between, so the
+    migrated file keeps the fresh file's order. Without `after`, or when
+    the file no longer has that section, the block is appended at the end
+    instead. Present, even empty: untouched."""
 
     def apply(text: str) -> str:
         parsed = _parse(text)
         if parsed is None or name in parsed:
             return text
         chunk = block if block.endswith("\n") else block + "\n"
-        return text.rstrip("\n") + "\n\n" + chunk
+        lines = text.splitlines()
+        span = _section_span(lines, after) if after else None
+        if span is None:
+            return text.rstrip("\n") + "\n\n" + chunk
+        return _joined(_inserted_at_span_end(lines, span, ["", *chunk.splitlines()]))
 
     return apply
 
 
-def ensure_key(section: str, key: str, line: str) -> Migration:
+def ensure_key(section: str, key: str, line: str, after: str = "") -> Migration:
     """A migration adding `line` (a `row(...)`-rendered `key = value`) to
-    an existing `[section]`: inserted after the section's last non-blank
-    line when the parsed table lacks `key`. No `[section]` in the file —
-    the user deleted it — means no insertion: the loader's default serves
-    them."""
+    an existing `[section]`: inserted right below the `after` key when
+    one is named and present, so the migrated file keeps the fresh file's
+    order — after the section's last non-blank line otherwise. No
+    `[section]` in the file — the user deleted it — means no insertion:
+    the loader's default serves them."""
 
     def apply(text: str) -> str:
         parsed = _parse(text)
@@ -80,7 +100,10 @@ def ensure_key(section: str, key: str, line: str) -> Migration:
         span = _section_span(lines, section)
         if span is None:
             return text
-        return _joined(_inserted_at_span_end(lines, span, [line]))
+        anchor = _key_index(lines, span, after) if after else None
+        if anchor is None:
+            return _joined(_inserted_at_span_end(lines, span, [line]))
+        return _joined([*lines[: anchor + 1], line, *lines[anchor + 1 :]])
 
     return apply
 

@@ -29,7 +29,8 @@ class TestToToml:
 
     def test_every_section_is_present(self) -> None:
         parsed = tomllib.loads(config().to_toml())
-        for section in ("settings", "context", "lore_extraction", "database", "encryption"):
+        sections = ("settings", "ui", "context", "lore_extraction", "database", "encryption")
+        for section in sections:
             assert section in parsed, section
 
     def test_values_roundtrip(self) -> None:
@@ -38,6 +39,8 @@ class TestToToml:
         assert parsed["providers"]["omlx"]["api_key"] == "k"
         assert parsed["lore_extraction"]["enabled"] is True
         assert parsed["lore_extraction"]["scene_min_chars"] == 6000
+        assert parsed["ui"]["dialogue_color"] == "auto"
+        assert parsed["ui"]["dialogue_bold"] is False
 
 
 def config() -> Config:

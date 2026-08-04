@@ -75,6 +75,9 @@ select = ["B", "E", "F", "I", "N", "RUF", "SIM", "UP", "W"]
 # The command table: one help row / one dispatch entry per source line,
 # whatever the width (see the `# fmt: off` blocks).
 "otaku/chat/commands/__init__.py" = ["E501"]
+# The rendered config: one setting per source line, whatever the width
+# (see the `# fmt: off` block in to_toml).
+"otaku/settings/config.py" = ["E501"]
 "tests/*" = ["RUF001"]
 "scenarios/*" = ["RUF001"]
 
