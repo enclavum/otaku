@@ -16,6 +16,7 @@ they hold no multiline strings by construction; prompts.toml (multiline
 templates) must not be edited with these tools.
 """
 
+import os
 import re
 import tomllib
 from collections.abc import Callable
@@ -160,11 +161,17 @@ def backup_path(paths: Paths, stem: str) -> Path:
 
 def commit(file: Path, backup: Path, text: str, migrated: str) -> bool:
     """The write behind every config edit: the pre-edit text kept under
-    its own dated backup name, then the atomic replace. OSError is
-    swallowed — an edit is never worth a crash — and False reports it."""
+    its own dated backup name — born 0600 in a 0700 backups dir, since a
+    pre-seal state may hold a plain api key — then the atomic replace.
+    OSError is swallowed — an edit is never worth a crash — and False
+    reports it."""
     try:
         backup.parent.mkdir(parents=True, exist_ok=True)
-        backup.write_text(text)
+        os.chmod(backup.parent, 0o700)
+        # Born 0600: never a moment (or a crash residue) at umask perms.
+        fd = os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
         write_atomic(file, migrated)
     except OSError:
         return False
@@ -224,7 +231,8 @@ def _dropped(text: str, section: str, key: str) -> str:
 def _section_span(lines: list[str], name: str) -> tuple[int, int] | None:
     """(header index, end index) of `[name]` — end exclusive, at the next
     header or the file's end; None when no such header line exists."""
-    header = re.compile(rf"\s*\[\s*{re.escape(name)}\s*\]\s*(?:#.*)?$")
+    quoted = re.escape(f'"{name}"')
+    header = re.compile(rf"\s*\[\s*(?:{re.escape(name)}|{quoted})\s*\]\s*(?:#.*)?$")
     for i, line in enumerate(lines):
         if header.match(line):
             end = i + 1

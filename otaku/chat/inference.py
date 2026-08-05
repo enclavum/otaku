@@ -15,7 +15,7 @@ from typing import Any, Self
 import httpx
 
 from otaku.chat.session import NO_MODEL_HINT, Session
-from otaku.formatting import format_context
+from otaku.formatting import format_context, printable
 from otaku.lore import assembler
 from otaku.providers.base import Stats, Text, Thinking
 from otaku.settings.config import ProviderConfig
@@ -167,7 +167,7 @@ def _run_step(session: Session, store: Store, ooc: bool) -> None:
                     if not in_thinking:
                         out.write(DIM + "(thinking) ")
                         in_thinking = True
-                    out.write(chunk.text)
+                    out.write(printable(chunk.text))
                     out.flush()
                 elif isinstance(chunk, Text):
                     if in_thinking:
@@ -292,7 +292,7 @@ def _error_message(e: Exception, provider_config: ProviderConfig) -> str:
         body = ""
         with contextlib.suppress(Exception):
             e.response.read()  # a streamed response may not be read yet
-            body = " ".join(e.response.text.split())
+            body = printable(" ".join(e.response.text.split()))
         detail = f": {body[:300]}" if body else ""
         return f"HTTP {e.response.status_code} from {e.request.url.host}{detail}"
     if isinstance(e, httpx.RequestError):

@@ -12,11 +12,12 @@ finish (a key that would not seal, say) heals on the next one. A file
 is written only when something actually changed.
 """
 
+import contextlib
 from collections.abc import Callable
 
 from otaku.paths import Paths
 from otaku.settings.config import ProviderConfig
-from otaku.settings.files import row
+from otaku.settings.files import row, write_atomic
 from otaku.settings.migrations.providers import (
     ensure_providers,
     move_providers,
@@ -81,10 +82,15 @@ def _provider_migrations(seal: Callable[[str], str]) -> list[Migration]:
 def migrate(paths: Paths, providers: dict[str, ProviderConfig]) -> None:
     """The whole launch step over the settings files, in order: the
     config table, the provider move, the providers table, the given
-    backends' sections ensured. A missing config is bootstrap's
-    business, and failures are swallowed — a migration is never worth a
-    launch."""
+    backends' sections ensured. providers.toml itself converges too:
+    missing beside an existing config — a crash between the first-run
+    writes, a hand deletion — it is founded empty here, for the ensured
+    sections to fill. A missing config is bootstrap's business, and
+    failures are swallowed — a migration is never worth a launch."""
     update_config(paths, _config_migrations())
     move_providers(paths)
+    if paths.config_file.exists() and not paths.providers_file.exists():
+        with contextlib.suppress(OSError):
+            write_atomic(paths.providers_file, "")
     update_providers(paths, _provider_migrations(sealer(paths)))
     ensure_providers(paths, providers)

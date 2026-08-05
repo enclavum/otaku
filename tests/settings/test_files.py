@@ -43,6 +43,12 @@ class TestTomlScalar:
         tricky = 'a "quoted" \\ path\nsecond line'
         assert roundtrip(tricky) == tricky
 
+    def test_control_characters_roundtrip(self) -> None:
+        # A server-reported model name can carry anything; whatever the
+        # string holds, the rendered file must parse back.
+        tricky = "a\rb\tc\x01d\x7fe\x1bf"
+        assert roundtrip(tricky) == tricky
+
 
 class TestRow:
     def test_aligns_the_comment_to_one_column(self) -> None:

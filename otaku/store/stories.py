@@ -262,7 +262,7 @@ class StoryOps:
         cut = from_message_id if from_message_id is not None else source.head_id
         chain = self._get_chain_ids(cut)
         copied = set(chain)
-        settled = set(chain[: len(chain) - settle] if settle > 0 else chain)
+        settled = set(chain[: max(0, len(chain) - settle)] if settle > 0 else chain)
         if title is None:
             title = self._fork_title(source.title)
         now = self._db.now()

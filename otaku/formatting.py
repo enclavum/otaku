@@ -3,6 +3,10 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
+# Control characters display must drop: C0 minus newline and tab, plus DEL.
+_CONTROL = {c: None for c in range(32) if chr(c) not in "\n\t"}
+_CONTROL[0x7F] = None
+
 
 def combine_framing(body: str, framing: str | None) -> str:
     """The composed text of one turn: its body plus the framing a command
@@ -28,6 +32,17 @@ def pretty_path(path: Path) -> str:
     except ValueError:
         return str(path)
     return "~" if relative == Path() else f"~/{relative}"
+
+
+def printable(text: str) -> str:
+    """`text` with every control character a terminal could act on
+    dropped — C0 except newline and tab, DEL, and with them any escape
+    sequence's lead byte. Model output and server messages pass through
+    here before display, so a hostile stream can never move the cursor,
+    retitle the window, or touch the clipboard — and the screen ledger's
+    row math stays true. Only what is shown is filtered; storage keeps
+    every byte."""
+    return text.translate(_CONTROL)
 
 
 def flatten(text: str) -> str:

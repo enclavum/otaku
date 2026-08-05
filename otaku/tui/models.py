@@ -205,12 +205,14 @@ class ModelPicker(ListScreen):
 
     def _table_width(self) -> int:
         """Natural width of the model table (row prefix + label + gap +
-        size + gap + context)."""
-        if not self.filtered:
+        size + gap + context). One snapshot of the list — a background
+        refresh may swap it mid-call."""
+        rows = self.filtered
+        if not rows:
             return 0
-        max_label = max(len(truncate(e.model, _ROW_HEAD_LIMIT)) for e in self.filtered)
-        max_size = max(len(format_size(e.size_bytes)) for e in self.filtered)
-        max_context = max(len(format_context(e.context)) for e in self.filtered)
+        max_label = max(len(truncate(e.model, _ROW_HEAD_LIMIT)) for e in rows)
+        max_size = max(len(format_size(e.size_bytes)) for e in rows)
+        max_context = max(len(format_context(e.context)) for e in rows)
         return 4 + max_label + 2 + max_size + 2 + max_context  # 4 = the row prefix
 
     def _row_width(self) -> int:
@@ -244,23 +246,26 @@ class ModelPicker(ListScreen):
         return [*head, ("class:header.detail", gap + ram)]
 
     def _items_text(self) -> StyleAndTextTuples:
-        if not self.filtered:
+        # One snapshot for the whole frame: a background refresh swaps
+        # self.filtered, and the column lists must match the row loop.
+        rows = self.filtered
+        if not rows:
             msg = "(no matches)" if self.query else "(no models)"
             return [("class:muted", "  " + msg)]
 
         # Every row spans one stretched width: the model name on the
         # left, the size and context columns flushed to the right edge.
-        labels = [truncate(e.model, _ROW_HEAD_LIMIT) for e in self.filtered]
+        labels = [truncate(e.model, _ROW_HEAD_LIMIT) for e in rows]
         # A catalog row has no size at all — not even the unknown dash.
-        sizes = ["" if e.cloud else format_size(e.size_bytes) for e in self.filtered]
-        contexts = [format_context(e.context) for e in self.filtered]
+        sizes = ["" if e.cloud else format_size(e.size_bytes) for e in rows]
+        contexts = [format_context(e.context) for e in rows]
         max_size = max((len(s) for s in sizes), default=0)
         max_context = max((len(s) for s in contexts), default=0)
         width = self._row_width()
 
         out: StyleAndTextTuples = []
         prev_provider: str | None = None
-        for i, entry in enumerate(self.filtered):
+        for i, entry in enumerate(rows):
             if entry.provider_name != prev_provider:
                 # The provider panel's structure, mirrored: a caption, a
                 # blank, the rows — a provider with no models is absent.
@@ -468,11 +473,14 @@ class ModelPicker(ListScreen):
                 # response — without this sleep the refresh below sees the
                 # model still loaded after an unload.
                 time.sleep(0.2)
-                # Refresh load state for this provider only.
+                # Refresh load state for this provider only — under
+                # the lock, a concurrent catalog refresh may be swapping
+                # the list.
                 fresh = {m.name for m in client.models() if m.loaded}
-                for e in self.all:
-                    if e.provider_name == entry.provider_name:
-                        e.loaded = e.model in fresh
+                with self._lock:
+                    for e in self.all:
+                        if e.provider_name == entry.provider_name:
+                            e.loaded = e.model in fresh
             except Exception as ex:
                 err = f"{type(ex).__name__}: {ex}"
 
@@ -656,30 +664,34 @@ class ModelPicker(ListScreen):
                 self.connected.discard(name)
             can = isinstance(client, ManagedClient)
             cloud = not client.local
-            entries = [e for e in self.all if e.provider_name != name]
-            for model in fresh:
-                entries.append(
-                    ModelEntry(
-                        full_spec=f"{name}/{model.name}",
-                        provider_name=name,
-                        model=model.name,
-                        loaded=model.loaded if can else True,
-                        can_load_unload=can,
-                        size_bytes=model.size,
-                        context=model.context,
-                        cloud=cloud,
-                    )
+            rows = [
+                ModelEntry(
+                    full_spec=f"{name}/{model.name}",
+                    provider_name=name,
+                    model=model.name,
+                    loaded=model.loaded if can else True,
+                    can_load_unload=can,
+                    size_bytes=model.size,
+                    context=model.context,
+                    cloud=cloud,
                 )
-            self.all = _ordered(entries)
-            self.pending.discard(name)
-            self._refilter()
-            # A remembered model whose rows just arrived gets the cursor,
-            # unless the user already moved it somewhere.
-            if self._initial_spec and self.cursor == 0:
-                for i, e in enumerate(self.filtered):
-                    if e.full_spec == self._initial_spec:
-                        self.cursor = i
-                        break
+                for model in fresh
+            ]
+            # Concurrent refreshes (both catalogs at open, say) rebuild
+            # the same list — the swap happens under the lock, so no
+            # worker starts from a list another is replacing.
+            with self._lock:
+                entries = [e for e in self.all if e.provider_name != name]
+                self.all = _ordered(entries + rows)
+                self.pending.discard(name)
+                self._refilter()
+                # A remembered model whose rows just arrived gets the
+                # cursor, unless the user already moved it somewhere.
+                if self._initial_spec and self.cursor == 0:
+                    for i, e in enumerate(self.filtered):
+                        if e.full_spec == self._initial_spec:
+                            self.cursor = i
+                            break
             with contextlib.suppress(Exception):
                 self.app.invalidate()
 
@@ -899,14 +911,22 @@ def pick(
         print(providers.unreachable_help(reachable))
         print("Opening without a model — pick one with /model once a server is up.")
         return ""
-    return ModelPicker(
+    picker = ModelPicker(
         providers,
         _ordered(entries),
         initial_spec=initial_spec,
         paths=paths,
         fetch=catalogs,
         connected=reachable,
-    ).run()
+    )
+    chosen = picker.run()
+    if chosen is None and not picker.all:
+        # Nothing ever arrived — a cloud-only setup with dead catalogs
+        # must not exit silently: say what failed, open without a model.
+        print(providers.unreachable_help(reachable | picker.connected))
+        print("Opening without a model — pick one with /model once a server is up.")
+        return ""
+    return chosen
 
 
 def _ordered(entries: list[ModelEntry]) -> list[ModelEntry]:

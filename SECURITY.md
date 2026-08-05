@@ -42,7 +42,10 @@ It does **not** protect against:
 
 The request log seals its entries with the same cipher; the system and
 error logs are content-free by contract (ids, counts, and tracebacks
-without locals — never story text).
+without locals — never story text). With encryption off, the request
+log is plain text too: every prompt as sent, kept indefinitely —
+deleting a story does not delete its wire history. The log directory
+is yours to prune.
 
 ## Provider API keys
 

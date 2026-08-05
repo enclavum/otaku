@@ -29,6 +29,7 @@ import shutil
 import sys
 from typing import Any, TextIO
 
+from otaku.formatting import printable
 from otaku.terminal import BOLD, DIM, ITALIC, RESET, color
 from otaku.terminal.query import background_is_dark
 
@@ -108,7 +109,9 @@ class Typesetter:
         self._code_line = ""
 
     def feed(self, text: str) -> None:
-        for ch in text:
+        # The one display chokepoint sanitizes: a control byte in model
+        # output could steer the terminal and desync the screen ledger.
+        for ch in printable(text):
             self._consume(ch)
         self._out.flush()
 

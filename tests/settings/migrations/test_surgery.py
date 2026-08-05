@@ -84,6 +84,13 @@ class TestSetKey:
         text = "[settings]\nidle = 30\n"
         assert set_key("settings", "idle", "idle = 30")(text) is text
 
+    def test_a_quoted_section_name_is_seen(self) -> None:
+        # A user may quote a section name; the textual scan must find it,
+        # or its api key would silently never seal.
+        text = '["my server"]\napi_key = "plain"\n'
+        migrated = set_key("my server", "api_key", 'api_key = "sealed:x"')(text)
+        assert migrated == '["my server"]\napi_key = "sealed:x"\n'
+
 
 class TestDropKeyEverywhere:
     def test_removes_the_key_from_every_section(self) -> None:

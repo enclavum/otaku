@@ -47,10 +47,18 @@ class Database:
         conn = sqlite3.connect(path)
         # journal_mode=WAL persists in the file header; the rest are
         # per-connection and must be set on every open.
-        conn.execute("PRAGMA journal_mode = WAL")
-        conn.execute("PRAGMA synchronous = NORMAL")
-        conn.execute("PRAGMA busy_timeout = 5000")
-        conn.execute("PRAGMA foreign_keys = ON")
+        try:
+            conn.execute("PRAGMA journal_mode = WAL")
+            conn.execute("PRAGMA synchronous = NORMAL")
+            conn.execute("PRAGMA busy_timeout = 5000")
+            conn.execute("PRAGMA foreign_keys = ON")
+        except sqlite3.DatabaseError as e:
+            # The first PRAGMA reads the file header: a file that is not
+            # SQLite at all is refused here, curated, never a traceback.
+            conn.close()
+            raise DatabaseError(
+                f"{path} is not a database this app wrote ({e}); move the file aside"
+            ) from e
         return conn
 
     @classmethod
@@ -116,7 +124,15 @@ class Database:
         """Refuse a database this session cannot read correctly. The check
         canary must unseal to its known plaintext under the session cipher;
         how it fails tells the user what is actually wrong."""
-        meta = dict(conn.execute("SELECT key, value FROM meta"))
+        try:
+            meta = dict(conn.execute("SELECT key, value FROM meta"))
+        except sqlite3.Error as e:
+            # A foreign or corrupt file — the curated message, never a
+            # raw traceback.
+            conn.close()
+            raise DatabaseError(
+                f"{path} is not a database this app wrote ({e}); move the file aside"
+            ) from e
         version = meta.get(_VERSION_KEY)
         if version != SCHEMA_VERSION:
             conn.close()

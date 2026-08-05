@@ -206,7 +206,7 @@ class Extractor:
         last_end = max(ends, default=None)
         tail_ids = ids if last_end is None else [i for i in ids if i > last_end]
         if not force and settle > 0:
-            tail_ids = tail_ids[: len(tail_ids) - settle]
+            tail_ids = tail_ids[: max(0, len(tail_ids) - settle)]
         chars = self._store.messages.count_body_chars(tail_ids)
         if not tail_ids or (not force and (chars < min_chars or len(tail_ids) < min_messages)):
             self._log(

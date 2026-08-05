@@ -11,6 +11,8 @@ import time
 import tomllib
 
 from otaku.chat.session import TUI
+from otaku.paths import Paths
+from otaku.providers.registry import Registry
 from otaku.settings import config, sealed
 from otaku.tui import models
 from scenarios.support import server as scripted
@@ -455,13 +457,28 @@ class TestCloudProviders:
                 assert by_name["gpt-alpha"].context == 128_000
                 assert by_name["gpt-alpha"].size is None
                 assert all(m.loaded for m in catalog.models)
-                # Chat-time introspection reads the same catalog.
+                # The listing seeded the context cache — chat-time
+                # lookups never refetch the catalog.
                 client = app.session.providers.get_client("openrouter")
+                assert client._context_cache.get("gpt-alpha") == 128_000
                 assert client.get_context_size("gpt-alpha") == 128_000
             finally:
                 app.close()
         finally:
             server.close()
+
+    def test_a_dead_catalog_never_exits_silently(self, tmp_path, capsys) -> None:
+        # A cloud-only setup whose catalog is down: the picker opens,
+        # nothing ever arrives, and leaving still says what failed.
+        registry = Registry(
+            {"openrouter": config.ProviderConfig(name="openrouter", url="http://127.0.0.1:9/v1")}
+        )
+        paths = Paths.resolve(tmp_path / "state")
+        paths.ensure_tree()
+        result = run_screen(ESC, lambda: models.pick(registry, paths=paths))
+        assert result == ""
+        out = capsys.readouterr().out
+        assert "No models reachable right now." in out
 
     def test_a_panel_added_provider_is_switchable_at_once(self, app: App) -> None:
         # A provider that was not in the config at launch is registered

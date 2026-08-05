@@ -98,7 +98,8 @@ Each package may import only the packages listed after its arrow (plus the
 standard library and the declared dependencies); everything else is
 forbidden:
 
-    cli        → app, crypto, logs, paths, settings, store, update
+    cli        → app, crypto, logs, paths, settings, store, update,
+                 formatting
     app        → chat, tui, lore, store, providers, settings, crypto, logs,
                  paths, formatting
     chat       → transfer, lore, store, providers, settings, logs, paths,

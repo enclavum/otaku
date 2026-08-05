@@ -11,6 +11,7 @@ from otaku.formatting import (
     format_size,
     human_age,
     pretty_path,
+    printable,
     truncate,
 )
 
@@ -24,6 +25,17 @@ class TestPrettyPath:
 
     def test_shortens_home_itself(self) -> None:
         assert pretty_path(Path.home()) == "~"
+
+
+class TestPrintable:
+    def test_drops_the_controls_a_terminal_could_act_on(self) -> None:
+        assert printable("a\x1b[2Ab\x07c\x00d\x7fe") == "a[2Abcde"
+
+    def test_newline_and_tab_survive(self) -> None:
+        assert printable("line\nnext\tcol") == "line\nnext\tcol"
+
+    def test_plain_text_and_unicode_pass_through(self) -> None:
+        assert printable("Ombre parle — « oui »") == "Ombre parle — « oui »"
 
 
 class TestFlatten:

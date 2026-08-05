@@ -74,6 +74,8 @@ class App:
         # ONE providers dict for the whole session: the config the session
         # reads and the registry the picker's panel updates share it, so a
         # provider added or edited there is visible everywhere at once.
+        # The invariant: names are the stable handle — a config may swap
+        # under a running pass, which resolves its client by name.
         cfg = replace(cfg, providers=providers)
         registry = Registry(
             cfg.providers, request_log=RequestLog(self.paths, cipher), smooth=cfg.smooth_streaming
@@ -159,9 +161,10 @@ class App:
 
 def load_config(paths: Paths) -> config_mod.Config:
     """The config — written, with providers.toml beside it, when this is
-    a first run; migrated to the current shape when it is from an older
-    build (the table over config.toml, then the provider split). Raises
-    `ConfigError` when a file does not parse."""
+    a first run; migrated to the current shape always, first run
+    included, so an autoconfigured plain api key (omlx's, say) is sealed
+    by the very launch that wrote it. Raises `ConfigError` when a file
+    does not parse."""
     paths.ensure_tree()
     if not paths.config_file.exists():
         first_run = config_mod.Config(providers=autoconfigure_providers())
@@ -169,8 +172,7 @@ def load_config(paths: Paths) -> config_mod.Config:
         if not paths.providers_file.exists():
             write_atomic(paths.providers_file, config_mod.providers_toml(first_run.providers))
         print(f"Created {pretty_path(paths.config_file)}")
-    else:
-        migrations.migrate(paths, autoconfigure_providers())
+    migrations.migrate(paths, autoconfigure_providers())
     return config_mod.load(paths)
 
 

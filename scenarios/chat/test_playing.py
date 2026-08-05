@@ -50,6 +50,16 @@ class TestTurns:
         first_chunk = scripted.CHAT_REPLY[: max(1, len(scripted.CHAT_REPLY) // 3)]
         assert [m.body for m in chain] == ["I enter the hall.", first_chunk]
 
+    def test_model_control_bytes_never_reach_the_screen(self, app: App, capsys) -> None:
+        # A hostile or glitchy stream cannot move the cursor, retitle the
+        # window, or desync the screen ledger — the story keeps the bytes.
+        app.server.script = lambda body: "safe\x1b[2Atext\x07"
+        app.play("I enter the hall.")
+        out = capsys.readouterr().out
+        assert "\x1b[2A" not in out
+        assert "\x07" not in out
+        assert app.session.messages[-1].body == "safe\x1b[2Atext\x07"
+
     def test_a_replys_padding_blank_lines_never_print(self, app: App, capsys) -> None:
         # Some cloud models wrap the reply in blank lines; the screen and
         # the record both start at the first real character and end at

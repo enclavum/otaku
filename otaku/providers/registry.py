@@ -133,7 +133,7 @@ class Registry:
             else:
                 mark, note = "x", "not responding — is the server running?"
             lines.append(f"  {mark} {name} → {self._providers[name].url}  ({note})")
-        lines.append("Start your model server, or fix the [providers.NAME] url in config.toml.")
+        lines.append("Start your model server, or fix the [NAME] url in providers.toml.")
         return "\n".join(lines)
 
     def _gather(self, name: str, provider_config: ProviderConfig) -> tuple[str, Inventory] | None:

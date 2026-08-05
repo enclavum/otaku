@@ -332,6 +332,19 @@ class CloudClient(OpenAIClient):
     # one to include the model details.
     _MODELS_QUERY: ClassVar[str] = ""
 
+    def __init__(
+        self,
+        provider_config: ProviderConfig,
+        *,
+        request_log: RequestLog | None = None,
+        smooth: bool = False,
+    ) -> None:
+        super().__init__(provider_config, request_log=request_log, smooth=smooth)
+        # One failed catalog fetch stops chat-time context lookups for
+        # the session — a down catalog must not tax every turn with a
+        # timeout; any later successful listing clears the mark.
+        self._catalog_down = False
+
     def balance(self, timeout: float = 10.0) -> str | None:
         """The account balance as the catalog reports it, rendered for a
         human — None when the service will not say."""
@@ -354,14 +367,24 @@ class CloudClient(OpenAIClient):
                     loaded=True,
                 )
             )
+        # The catalog just paid for every window — seed the cache, so
+        # chat-time lookups (the assembler's budget, the stats line)
+        # never refetch what the picker already carried home.
+        for row in rows:
+            if row.context:
+                self._context_cache[row.name] = row.context
+        self._catalog_down = False
         return sorted(rows, key=lambda row: row.name)
 
     def _fetch_context_size(self, model: str) -> int | None:
-        # The catalog is the one source — chat-time introspection reads
-        # the listed window (get_context_size caches the first hit).
+        # The catalog is the one source — usually pre-seeded by `_list`;
+        # this fetch is the fallback when nothing listed yet.
+        if self._catalog_down:
+            return None
         try:
             rows = self.models(timeout=5.0)
         except Exception:
+            self._catalog_down = True
             return None
         for row in rows:
             if row.name == model:

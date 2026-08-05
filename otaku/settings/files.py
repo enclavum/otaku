@@ -6,6 +6,17 @@ from pathlib import Path
 # as a column instead of a wall of prose.
 _COMMENT_COLUMN = 30
 
+# The control characters TOML basic strings spell with short escapes.
+_STRING_ESCAPES = {
+    "\\": "\\\\",
+    '"': '\\"',
+    "\n": "\\n",
+    "\r": "\\r",
+    "\t": "\\t",
+    "\b": "\\b",
+    "\f": "\\f",
+}
+
 
 def toml_key(name: str) -> str:
     """A TOML key or table header: bare when it can be, quoted otherwise —
@@ -16,13 +27,23 @@ def toml_key(name: str) -> str:
 
 
 def toml_scalar(value: object) -> str:
-    """One TOML value. otaku writes only strings, numbers, and booleans."""
+    """One TOML value. otaku writes only strings, numbers, and booleans.
+    Every control character a string carries is escaped per the TOML
+    spec — no value (a server-reported model name, say) can render a
+    file that fails to parse back."""
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, int | float):
         return repr(value)
-    text = str(value).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
-    return f'"{text}"'
+    out = []
+    for ch in str(value):
+        if ch in _STRING_ESCAPES:
+            out.append(_STRING_ESCAPES[ch])
+        elif ch < " " or ch == "\x7f":
+            out.append(f"\\u{ord(ch):04X}")
+        else:
+            out.append(ch)
+    return '"' + "".join(out) + '"'
 
 
 def row(setting: str, comment: str) -> str:

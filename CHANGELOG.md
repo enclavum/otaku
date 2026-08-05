@@ -7,6 +7,19 @@ changes.
 
 ## [0.2.2] - [planned]
 
+**TL;DR**
+
+- New providers: OpenRouter and NanoGPT (cloud), llama.cpp and LM Studio (local).
+- Numerous UI improvements, including:
+  - dialogue coloring;
+  - undo erases the taken-back exchange from the screen;
+  - regenerate erases the old reply and streams the new one in its place;
+  - providers configurable directly in the model picker (`/model` or Ctrl+O);
+  - `/system` accepting a file in addition to text input.
+- New commands: `/clear`, `/last`, `/balance`.
+
+**Full version:**
+
 Cloud arrives, and the model picker becomes the provider control center: OpenRouter and NanoGPT
 next to the five local engines, API keys entered in the picker and stored sealed, providers in
 their own config file — plus quality-of-life across the REPL.

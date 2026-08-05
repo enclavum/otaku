@@ -8,6 +8,7 @@ missing keystore refused BEFORE the ceremony could mint over it."""
 
 import base64
 import secrets
+from datetime import datetime
 
 import pytest
 
@@ -15,8 +16,8 @@ from otaku import crypto
 from otaku.app import load_config
 from otaku.paths import Paths
 from otaku.settings import config as config_mod
-from otaku.settings import sealed
-from otaku.store import is_encrypted
+from otaku.settings import migrations, sealed
+from otaku.store import DatabaseError, is_encrypted
 from otaku.terminal import BOLD, RESET
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch, run_otaku, set_config
@@ -110,9 +111,24 @@ class TestBackups:
         assert any(app.paths.backups_dir.iterdir())
 
 
+class TestDatabaseGuard:
+    def test_a_foreign_file_is_refused_with_the_curated_message(
+        self, server: ModelServer, tmp_path
+    ) -> None:
+        paths = Paths.resolve(tmp_path / "state")
+        paths.ensure_tree()
+        paths.database_file.write_bytes(b"this is not a database")
+        with pytest.raises(DatabaseError, match="move the file aside"):
+            launch(tmp_path / "state", server)
+
+
 class TestConfigMigration:
     def test_a_first_run_writes_both_config_files(self, tmp_path) -> None:
         paths = Paths.resolve(tmp_path / "state")
+        paths.ensure_tree()
+        # The sealing key as a file — first run now migrates too, and a
+        # real autoconfigured key must never reach the OS keychain here.
+        paths.config_key_file.write_bytes(secrets.token_bytes(32))
         cfg = load_config(paths)
         assert "[providers." not in paths.config_file.read_text()
         providers = paths.providers_file.read_text()
@@ -156,6 +172,29 @@ class TestConfigMigration:
         load_config(app.paths)
         assert app.paths.config_file.read_text() == before
         assert not app.paths.config_backups_dir.exists()
+
+    def test_a_missing_providers_file_is_refounded(self, tmp_path) -> None:
+        """A crash between the first-run writes — or a hand deletion —
+        heals: the file is founded and the known backends ensured."""
+        paths = Paths.resolve(tmp_path / "state")
+        paths.ensure_tree()
+        paths.config_key_file.write_bytes(secrets.token_bytes(32))
+        paths.config_file.write_text("[settings]\nshow_banner = false\n")
+        cfg = load_config(paths)
+        assert paths.providers_file.exists()
+        assert set(cfg.providers) == {"llamacpp", "koboldcpp", "ollama", "omlx", "lmstudio"}
+
+    def test_backups_are_private(self, tmp_path) -> None:
+        """Every backup is born 0600 in a 0700 dir — a pre-seal copy may
+        hold a plain api key."""
+        paths = Paths.resolve(tmp_path / "state")
+        paths.ensure_tree()
+        paths.providers_file.write_text('[a]\nurl = "x"\napi_key = ""\n')
+        assert migrations.update_providers(paths, [migrations.set_key("a", "url", 'url = "y"')])
+        stamp = datetime.now().astimezone().strftime("%Y%m%d")
+        backup = paths.config_backups_dir / f"providers-{stamp}.toml"
+        assert (backup.stat().st_mode & 0o777) == 0o600
+        assert (backup.parent.stat().st_mode & 0o777) == 0o700
 
     def test_an_old_configs_providers_move_into_their_own_file(self, tmp_path) -> None:
         """The cross-file migration: [providers.*] sections leave for
