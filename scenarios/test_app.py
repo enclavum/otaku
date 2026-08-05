@@ -157,11 +157,11 @@ class TestConfigMigration:
         assert app.paths.config_file.read_text() == before
         assert not app.paths.config_backups_dir.exists()
 
-    def test_an_old_configs_providers_split_into_their_own_file(self, tmp_path) -> None:
+    def test_an_old_configs_providers_move_into_their_own_file(self, tmp_path) -> None:
         """The cross-file migration: [providers.*] sections leave for
         providers.toml — as they are, headers unprefixed, the retired
-        thinking knob dropped, a plain api key sealed on the way — and
-        the trigger, spent, never fires twice."""
+        thinking knob and the plain api key cleaned up at their new
+        home — and reruns converge on the same state."""
         paths = Paths.resolve(tmp_path / "state")
         paths.ensure_tree()
         paths.config_key_file.write_bytes(secrets.token_bytes(32))
@@ -188,11 +188,38 @@ class TestConfigMigration:
         conf = paths.config_file.read_text()
         assert "[providers.mine]" not in conf
         assert "show_banner = false" in conf
-        # The pre-move config waits in backups; a second launch re-splits
+        # The pre-move config waits in backups; a second launch moves
         # nothing and loads the same providers.
         assert any(p.name.startswith("config-") for p in paths.config_backups_dir.iterdir())
         again = load_config(paths)
         assert again.providers["mine"].api_key == cfg.providers["mine"].api_key
+
+    def test_a_half_done_move_heals_on_the_next_launch(self, tmp_path) -> None:
+        """A crash between the move's two writes leaves the section in
+        both files; the next launch drops the config copy — the new home
+        wins — and converges."""
+        paths = Paths.resolve(tmp_path / "state")
+        paths.ensure_tree()
+        paths.config_key_file.write_bytes(secrets.token_bytes(32))
+        paths.providers_file.write_text('[mine]\nurl = "http://localhost:9/v1"\napi_key = ""\n')
+        paths.config_file.write_text(
+            '[providers.mine]\nurl = "http://old:9/v1"\n\n[settings]\nshow_banner = false\n'
+        )
+        cfg = load_config(paths)
+        assert "[providers.mine]" not in paths.config_file.read_text()
+        assert cfg.providers["mine"].url == "http://localhost:9/v1"  # the new home won
+
+    def test_a_hand_typed_plain_key_seals_at_the_next_launch(self, tmp_path) -> None:
+        paths = Paths.resolve(tmp_path / "state")
+        paths.ensure_tree()
+        paths.config_key_file.write_bytes(secrets.token_bytes(32))
+        paths.config_file.write_text("[settings]\nshow_banner = false\n")
+        paths.providers_file.write_text(
+            '[mine]\nurl = "http://localhost:9/v1"\napi_key = "pasted-plain"\n'
+        )
+        cfg = load_config(paths)
+        assert "pasted-plain" not in paths.providers_file.read_text()
+        assert sealed.unseal(paths, cfg.providers["mine"].api_key) == "pasted-plain"
 
 
 class TestFirstLaunch:

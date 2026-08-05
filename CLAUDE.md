@@ -32,10 +32,12 @@ The state dir is `paths.DEFAULT_ROOT`, relocatable via the
 The app writes `configs/config.toml` and `configs/providers.toml` (one
 top-level `[name]` section per provider) once at first run and thereafter
 edits them only surgically — line by line, never rewritten as a whole:
-settings migrations (`otaku/settings/migrations.py`), idempotent shape
-changes applied at every launch (no version stamp; each migration detects
-its own applicability on the parsed file), and the model picker's
-provider-field saves. Every edit keeps the pre-edit file as
+settings migrations (the `otaku/settings/migrations` package) and the
+model picker's provider-field saves. Migration is one idempotent,
+convergent mechanism: every step reruns at every launch, detects its own
+applicability on the parsed file (no version stamp), and heals any
+half-state — a crash between writes, a hand edit, a seal that could not
+happen — on the next run; nothing is ever one-shot. Every edit keeps the pre-edit file as
 `configs/backups/{config,providers}-YYYYMMDD.toml`, `-N` appended when
 the day already has one. Every setting changed from inside the app
 persists elsewhere and is rewritten wholesale: `configs/state.toml` for
