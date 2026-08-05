@@ -25,7 +25,7 @@ from pathlib import Path
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from otaku.paths import Paths
-from otaku.settings.config import Provider
+from otaku.settings.config import ProviderConfig
 
 _PREFIX = "sealed:"
 _KEY_LEN = 32
@@ -67,19 +67,19 @@ def unseal(paths: Paths, value: str) -> str:
 
 
 def resolve_api_keys(
-    paths: Paths, providers: dict[str, Provider]
-) -> tuple[dict[str, Provider], list[str]]:
+    paths: Paths, providers: dict[str, ProviderConfig]
+) -> tuple[dict[str, ProviderConfig], list[str]]:
     """The providers with sealed api keys opened for the session, plus a
     warning line per key that would not open — its provider keeps an
     empty key, so requests go out unauthenticated rather than with a
     dead token. The sealing key is fetched once for the whole pass — a
     launch never asks the OS keychain per provider."""
-    resolved: dict[str, Provider] = {}
+    resolved: dict[str, ProviderConfig] = {}
     warnings: list[str] = []
     key: bytes | None = None
     fetched = False
-    for name, provider in providers.items():
-        if is_sealed(provider.api_key):
+    for name, provider_config in providers.items():
+        if is_sealed(provider_config.api_key):
             if not fetched:
                 key, fetched = _load_key(paths, create=False), True
             try:
@@ -87,14 +87,16 @@ def resolve_api_keys(
                     raise SealedError(
                         "the sealing key is in neither the OS keychain nor configs/config.key"
                     )
-                provider = replace(provider, api_key=_opened(key, provider.api_key))
+                provider_config = replace(
+                    provider_config, api_key=_opened(key, provider_config.api_key)
+                )
             except SealedError as e:
                 warnings.append(
                     f"The api key for {name!r} cannot be unsealed ({e}); "
                     "enter it again in the model picker."
                 )
-                provider = replace(provider, api_key="")
-        resolved[name] = provider
+                provider_config = replace(provider_config, api_key="")
+        resolved[name] = provider_config
     return resolved, warnings
 
 

@@ -68,10 +68,10 @@ from prompt_toolkit.styles import Style
 from otaku.formatting import format_context, format_size, truncate
 from otaku.paths import Paths
 from otaku.providers.base import ManagedClient
-from otaku.providers.registry import BACKENDS
+from otaku.providers.registry import CLIENTS
 from otaku.providers.registry import Registry as ProviderRegistry
 from otaku.settings import migrations, sealed
-from otaku.settings.config import Provider
+from otaku.settings.config import ProviderConfig
 from otaku.settings.files import toml_scalar
 from otaku.terminal import latin_key
 from otaku.terminal.spinner import FRAMES as SPINNER_FRAMES
@@ -161,7 +161,7 @@ class ModelPicker(ListScreen):
             (kind, attr)
             for kind, _ in _PANEL_PROVIDERS
             for attr in ("url", "api_key")
-            if attr != "url" or BACKENDS[kind].local
+            if attr != "url" or CLIENTS[kind].local
         ]
         self.field_cursor: int = 0
         self.editing: bool = False
@@ -353,7 +353,7 @@ class ModelPicker(ListScreen):
         field, the API key field (its value never displayed), a blank."""
         out: StyleAndTextTuples = []
         for kind, caption in _PANEL_PROVIDERS:
-            provider = self._provider(kind)
+            provider_config = self._provider_config(kind)
             if kind in self.connected:
                 out.append(("class:preview.title", caption))
                 out.append(("class:tick", " ✓"))
@@ -362,8 +362,10 @@ class ModelPicker(ListScreen):
                 out.append(("class:preview.muted", caption))
             out.append(("", "\n"))
             out.append(("class:preview.body", "\n"))
-            out.extend(self._field_line(kind, "url", provider.url))
-            out.extend(self._field_line(kind, "api_key", "(set)" if provider.api_key else ""))
+            out.extend(self._field_line(kind, "url", provider_config.url))
+            out.extend(
+                self._field_line(kind, "api_key", "(set)" if provider_config.api_key else "")
+            )
             out.append(("class:preview.body", "\n"))
         return out
 
@@ -565,13 +567,13 @@ class ModelPicker(ListScreen):
 
     # ---------- provider field editing ----------
 
-    def _provider(self, name: str) -> Provider:
+    def _provider_config(self, name: str) -> ProviderConfig:
         """The backend's current provider: the configured section when
         there is one, its autoconfigured default otherwise."""
         configured = {p.name: p for p in self.providers.configured()}
         if name in configured:
             return configured[name]
-        return BACKENDS[name].autoconfigure()
+        return CLIENTS[name].autoconfigure()
 
     def _start_field_edit(self) -> None:
         if not self.fields:
@@ -581,7 +583,7 @@ class ModelPicker(ListScreen):
         self.editing = True
         # The url edits in place; the api key always starts blank — its
         # current value is never displayed, not even to edit.
-        prefill = self._provider(name).url if attr == "url" else ""
+        prefill = self._provider_config(name).url if attr == "url" else ""
         self.edit_buffer.document = Document(prefill, len(prefill))
 
     def _finish_field_edit(self, *, save: bool) -> None:
@@ -595,11 +597,11 @@ class ModelPicker(ListScreen):
             self.notice = "(empty — not saved)"
             return
         name, attr = self.fields[self.field_cursor]
-        provider = self._provider(name)
+        provider_config = self._provider_config(name)
         if attr == "url":
             value = value.rstrip("/")
             line = f"url = {toml_scalar(value)}"
-            updated = replace(provider, url=value)
+            updated = replace(provider_config, url=value)
             self.notice = "url saved"
         else:
             try:
@@ -607,10 +609,12 @@ class ModelPicker(ListScreen):
             except sealed.SealedError as e:
                 self.notice = f"save failed: {e}"
                 return
-            updated = replace(provider, api_key=value)  # saved silently — the (set) mark says it
+            updated = replace(
+                provider_config, api_key=value
+            )  # saved silently — the (set) mark says it
         # A backend not in providers.toml yet gets its section written
         # first — this is how a cloud provider is added deliberately.
-        block = f"[{name}]\nurl = {toml_scalar(provider.url)}\n" + 'api_key = ""'
+        block = f"[{name}]\nurl = {toml_scalar(provider_config.url)}\n" + 'api_key = ""'
         migrations.update_providers(
             self.paths,
             [migrations.ensure_section(name, block), migrations.set_key(name, attr, line)],
@@ -626,14 +630,14 @@ class ModelPicker(ListScreen):
         name, attr = self.fields[self.field_cursor]
         if attr != "api_key":
             return
-        provider = self._provider(name)
-        if not provider.api_key:
+        provider_config = self._provider_config(name)
+        if not provider_config.api_key:
             self.notice = "(no api key)"
             return
         migrations.update_providers(
             self.paths, [migrations.set_key(name, "api_key", 'api_key = ""')]
         )
-        self.providers.update_provider(replace(provider, api_key=""))
+        self.providers.update_provider(replace(provider_config, api_key=""))
         self._refresh_provider(name)
         self.notice = "api key cleared"
 
@@ -874,12 +878,12 @@ def pick(
     entries: list[ModelEntry] = []
     for row in rows:
         can = row.can_load_unload
-        cloud = not providers.get_client(row.provider.name).local
+        cloud = not providers.get_client(row.provider_config.name).local
         for model in row.models:
             entries.append(
                 ModelEntry(
-                    full_spec=f"{row.provider.name}/{model.name}",
-                    provider_name=row.provider.name,
+                    full_spec=f"{row.provider_config.name}/{model.name}",
+                    provider_name=row.provider_config.name,
                     model=model.name,
                     # A backend you can't load/unload serves its models
                     # statically, so they are ALWAYS available — shown

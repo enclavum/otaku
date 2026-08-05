@@ -4,7 +4,7 @@ state and reads the true context window; chat rides the OpenAI protocol
 at /v1."""
 
 from otaku.providers.base import LocalSingleClient, ModelInfo
-from otaku.settings.config import Provider
+from otaku.settings.config import ProviderConfig
 
 
 class KoboldCppClient(LocalSingleClient):
@@ -12,10 +12,10 @@ class KoboldCppClient(LocalSingleClient):
     supports_thinking = False  # no request-level knob; thinking is model-baked
 
     @classmethod
-    def autoconfigure(cls) -> Provider:
+    def autoconfigure(cls) -> ProviderConfig:
         # Configured by launch flags — nothing on disk to detect a port
         # from, so the section is the standard default.
-        return Provider(name=cls.kind, url="http://localhost:5001/v1")
+        return ProviderConfig(name=cls.kind, url="http://localhost:5001/v1")
 
     def _list(self, timeout: float) -> list[ModelInfo]:
         """The single-model listing, the engine's own name prefix

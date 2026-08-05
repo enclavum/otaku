@@ -18,7 +18,7 @@ from otaku.chat.session import NO_MODEL_HINT, Session
 from otaku.formatting import format_context
 from otaku.lore import assembler
 from otaku.providers.base import Stats, Text, Thinking
-from otaku.settings.config import Provider
+from otaku.settings.config import ProviderConfig
 from otaku.store import Store
 from otaku.store.schema import Message
 from otaku.terminal import DIM, RESET
@@ -129,8 +129,8 @@ def _run_step(session: Session, store: Store, ooc: bool) -> None:
     row count can never drift from the screen (the spinner and the pinned
     status row erase themselves and stay outside)."""
     out = session.screen.reply
-    provider = session.provider
-    if provider is None:
+    provider_config = session.provider_config
+    if provider_config is None:
         # The turn is recorded — it is story — and plays on a /regen once
         # a model exists.
         out.write(NO_MODEL_HINT + "\n")
@@ -151,7 +151,7 @@ def _run_step(session: Session, store: Store, ooc: bool) -> None:
         speech_color=session.config.dialogue_color,
         speech_bold=session.config.dialogue_bold,
     )
-    client = session.providers.get_client(provider.name)
+    client = session.providers.get_client(provider_config.name)
     wire = assembler.assemble_story(store, session, client.get_context_size(session.model)).messages
     # The activity line survives the prompt's absence: entering `status_row`
     # reserves the bottom terminal row and paints the worker's status there
@@ -193,7 +193,7 @@ def _run_step(session: Session, store: Store, ooc: bool) -> None:
         except KeyboardInterrupt:
             interrupted = True
         except Exception as e:
-            error = _error_message(e, provider)
+            error = _error_message(e, provider_config)
         finally:
             spinner.stop()
             typesetter.flush()
@@ -229,13 +229,13 @@ def _run_step(session: Session, store: Store, ooc: bool) -> None:
                 role="assistant",
                 body="".join(content),
                 kind="ooc" if ooc else "dialogue",
-                provider=provider.name,
+                provider=provider_config.name,
                 model=session.model,
             ),
         )
     if final is not None:
         store.usage.record(
-            provider.name,
+            provider_config.name,
             session.model,
             "chat",
             story_id=session.story_id,
@@ -284,7 +284,7 @@ def format_stats(stats: Stats) -> str:
     return "[ " + ", ".join(parts) + " ]"
 
 
-def _error_message(e: Exception, provider: Provider) -> str:
+def _error_message(e: Exception, provider_config: ProviderConfig) -> str:
     """One formatter for every stream failure. A 4xx/5xx carries the
     server's explanatory body — a bare '400 Bad Request' hides the actual
     reason (usually context overflow)."""
@@ -296,5 +296,5 @@ def _error_message(e: Exception, provider: Provider) -> str:
         detail = f": {body[:300]}" if body else ""
         return f"HTTP {e.response.status_code} from {e.request.url.host}{detail}"
     if isinstance(e, httpx.RequestError):
-        return f"could not reach {provider.name} at {provider.url}"
+        return f"could not reach {provider_config.name} at {provider_config.url}"
     return str(e)

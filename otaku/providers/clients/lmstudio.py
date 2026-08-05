@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 
 from otaku.providers.base import ManagedClient, ModelInfo
-from otaku.settings.config import Provider
+from otaku.settings.config import ProviderConfig
 
 
 class LmStudioClient(ManagedClient):
@@ -16,12 +16,12 @@ class LmStudioClient(ManagedClient):
     supports_thinking = False  # no request-level knob; reasoning is per-model
 
     @classmethod
-    def autoconfigure(cls) -> Provider:
+    def autoconfigure(cls) -> ProviderConfig:
         """The first-run section, its port detected from LM Studio's own
         server config file."""
         port = _read_home_json(".lmstudio/.internal/http-server-config.json").get("port")
         url = f"http://localhost:{port if isinstance(port, int) else 1234}/v1"
-        return Provider(name=cls.kind, url=url)
+        return ProviderConfig(name=cls.kind, url=url)
 
     def load_model(self, model: str) -> None:
         # Idempotent on purpose: LM Studio's /load is not — repeated calls
@@ -29,9 +29,9 @@ class LmStudioClient(ManagedClient):
         if any(row.name == model and row.loaded for row in self.models(timeout=5.0)):
             return
         response = httpx.post(
-            f"{self.provider.base_url}/api/v1/models/load",
+            f"{self.provider_config.base_url}/api/v1/models/load",
             json={"model": model},
-            headers=self.provider.headers,
+            headers=self.provider_config.headers,
             timeout=None,
         )
         response.raise_for_status()
@@ -47,9 +47,9 @@ class LmStudioClient(ManagedClient):
                 if not isinstance(instance_id, str):
                     continue
                 response = httpx.post(
-                    f"{self.provider.base_url}/api/v1/models/unload",
+                    f"{self.provider_config.base_url}/api/v1/models/unload",
                     json={"instance_id": instance_id},
-                    headers=self.provider.headers,
+                    headers=self.provider_config.headers,
                     timeout=None,
                 )
                 response.raise_for_status()

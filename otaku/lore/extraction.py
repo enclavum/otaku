@@ -610,7 +610,7 @@ class Extractor:
                 close()
         if final is not None:
             self._store.usage.record(
-                self._client.provider.name,
+                self._client.provider_config.name,
                 self._model,
                 purpose,
                 story_id=self._story_id,

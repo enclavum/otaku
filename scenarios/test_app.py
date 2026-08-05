@@ -233,7 +233,7 @@ class TestFirstLaunch:
         set_config(tmp_path / "state", seed_sample=True)
         app = launch(tmp_path / "state", server, spec="")
         try:
-            assert app.session.provider is None
+            assert app.session.provider_config is None
             story = app.store.stories.get(app.session.story_id)
             assert story.title == "The River That Forgot Its Name"
             capsys.readouterr()

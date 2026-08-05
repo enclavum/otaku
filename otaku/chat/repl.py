@@ -217,7 +217,7 @@ def _maybe_schedule(session: Session, last_before: Message | None) -> None:
     length) detects it: regenerate swaps the last message without changing
     the count. [lore_extraction].enabled gates THIS — the automatic
     scheduling — and nothing else; /extract still works."""
-    if not session.config.lore_enabled or session.provider is None:
+    if not session.config.lore_enabled or session.provider_config is None:
         return
     if session.story_id is None or not session.messages:
         return
@@ -237,8 +237,8 @@ def _placeholder(session: Session) -> FormattedText:
     """The idle prompt's hint — the cloud wording when the story is
     played against a hosted catalog, so every turn quietly says the text
     leaves the machine."""
-    if session.provider is not None:
-        client = session.providers.get_client(session.provider.name)
+    if session.provider_config is not None:
+        client = session.providers.get_client(session.provider_config.name)
         if not client.local:
             return CLOUD_PLACEHOLDER
     return PLACEHOLDER
@@ -251,8 +251,8 @@ def _banner(session: Session, store: Store) -> str:
     lives across the internet, and a launch does not wait for that."""
     context = None
     backend = ""
-    if session.provider is not None:
-        client = session.providers.get_client(session.provider.name)
+    if session.provider_config is not None:
+        client = session.providers.get_client(session.provider_config.name)
         backend = client.kind
         if client.local:
             try:

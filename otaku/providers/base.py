@@ -36,7 +36,7 @@ import httpx
 
 from otaku.logs.requests import RequestLog
 from otaku.providers import streaming
-from otaku.settings.config import Provider
+from otaku.settings.config import ProviderConfig
 
 
 @dataclass(frozen=True)
@@ -97,21 +97,21 @@ class OpenAIClient:
     local: ClassVar[bool] = True
 
     @classmethod
-    def autoconfigure(cls) -> Provider:
+    def autoconfigure(cls) -> ProviderConfig:
         """The backend's default provider section: what the provider panel
         shows before a backend is configured, and what first-run writes
         for the local engines. The plain OpenAI client has no natural
         endpoint — a generic provider is configured by hand."""
-        return Provider(name=cls.kind, url="")
+        return ProviderConfig(name=cls.kind, url="")
 
     def __init__(
         self,
-        provider: Provider,
+        provider_config: ProviderConfig,
         *,
         request_log: RequestLog | None = None,
         smooth: bool = False,
     ) -> None:
-        self.provider = provider
+        self.provider_config = provider_config
         self._request_log = request_log
         self._smooth = smooth
         self._context_cache: dict[str, int] = {}
@@ -143,7 +143,9 @@ class OpenAIClient:
     def _model_names(self, timeout: float) -> list[str]:
         """The bare /models listing, sorted — raises when unreachable."""
         response = httpx.get(
-            f"{self.provider.url}/models", headers=self.provider.headers, timeout=timeout
+            f"{self.provider_config.url}/models",
+            headers=self.provider_config.headers,
+            timeout=timeout,
         )
         response.raise_for_status()
         data = response.json()
@@ -172,7 +174,7 @@ class OpenAIClient:
         }
         self._apply_thinking(body, think)
         if self._request_log is not None:
-            self._request_log.record(self.provider.name, purpose, body)
+            self._request_log.record(self.provider_config.name, purpose, body)
         stream = self._stream(model, body, timeout)
         if smooth and self._smooth:
             return streaming.smooth(stream)
@@ -186,9 +188,9 @@ class OpenAIClient:
 
         with httpx.stream(
             "POST",
-            f"{self.provider.url}/chat/completions",
+            f"{self.provider_config.url}/chat/completions",
             json=body,
-            headers=self.provider.headers,
+            headers=self.provider_config.headers,
             timeout=timeout,
         ) as response:
             if response.status_code >= 400:
@@ -266,7 +268,9 @@ class OpenAIClient:
         non-200. For best-effort native-API reads only."""
         try:
             response = httpx.get(
-                f"{self.provider.base_url}{path}", headers=self.provider.headers, timeout=timeout
+                f"{self.provider_config.base_url}{path}",
+                headers=self.provider_config.headers,
+                timeout=timeout,
             )
             if response.status_code == 200:
                 return response.json()
@@ -280,9 +284,9 @@ class OpenAIClient:
         fail loudly use httpx directly."""
         try:
             response = httpx.post(
-                f"{self.provider.base_url}{path}",
+                f"{self.provider_config.base_url}{path}",
                 json=body,
-                headers=self.provider.headers,
+                headers=self.provider_config.headers,
                 timeout=timeout,
             )
             if response.status_code == 200:
@@ -335,8 +339,8 @@ class CloudClient(OpenAIClient):
 
     def _list(self, timeout: float) -> list[ModelInfo]:
         response = httpx.get(
-            f"{self.provider.url}/models{self._MODELS_QUERY}",
-            headers=self.provider.headers,
+            f"{self.provider_config.url}/models{self._MODELS_QUERY}",
+            headers=self.provider_config.headers,
             timeout=timeout,
         )
         response.raise_for_status()

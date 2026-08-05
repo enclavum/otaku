@@ -88,7 +88,9 @@ def set_config_provider(
     default "test" the generic one)."""
     paths = Paths.resolve(root)
     cfg = _load_or_default(paths)
-    cfg.providers[name] = config_mod.Provider(name=name, url=server.url, keep_alive=keep_alive)
+    cfg.providers[name] = config_mod.ProviderConfig(
+        name=name, url=server.url, keep_alive=keep_alive
+    )
     write_atomic(paths.config_file, cfg.to_toml())
     write_atomic(paths.providers_file, config_mod.providers_toml(cfg.providers))
     # The sealing key as a file, pre-seeded: a scenario that saves an api
@@ -107,12 +109,12 @@ def _load_or_default(paths: Paths) -> config_mod.Config:
     paths.ensure_tree()
     if paths.config_file.exists():
         return config_mod.load(paths)
-    placeholder = config_mod.Provider(name=PROVIDER, url="http://127.0.0.1:9/v1")
+    placeholder = config_mod.ProviderConfig(name=PROVIDER, url="http://127.0.0.1:9/v1")
     # The local backends, pre-seeded on the same dead port: the launch's
     # ensure_providers finds them present and never writes sections that
     # point at the developer machine's real engines.
     locals_dead = {
-        kind: config_mod.Provider(name=kind, url="http://127.0.0.1:9/v1")
+        kind: config_mod.ProviderConfig(name=kind, url="http://127.0.0.1:9/v1")
         for kind in ("llamacpp", "koboldcpp", "ollama", "omlx", "lmstudio")
     }
     return config_mod.Config(

@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from otaku.providers.backends.openrouter import OpenRouterClient
-from otaku.settings.config import Provider
+from otaku.providers.clients.openrouter import OpenRouterClient
+from otaku.settings.config import ProviderConfig
 from scenarios.support.live import live_app as build_app
 from scenarios.support.live import require_env
 
@@ -41,13 +41,13 @@ class TestOpenRouter:
 @pytest.fixture
 def client() -> OpenRouterClient:
     key = require_env("OPENROUTER_API_KEY")
-    return OpenRouterClient(Provider(name="openrouter", url=URL, api_key=key))
+    return OpenRouterClient(ProviderConfig(name="openrouter", url=URL, api_key=key))
 
 
 @pytest.fixture
 def live_app(tmp_path: Path, server):  # type: ignore[no-untyped-def]
     key = require_env("OPENROUTER_API_KEY")
-    provider = Provider(name="openrouter", url=URL, api_key=key)
-    app = build_app(tmp_path, server, provider, MODEL)
+    provider_config = ProviderConfig(name="openrouter", url=URL, api_key=key)
+    app = build_app(tmp_path, server, provider_config, MODEL)
     yield app
     app.close()

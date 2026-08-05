@@ -63,7 +63,7 @@ def _switch_model(session: Session, provider_name: str, model: str) -> None:
     if f"{provider_name}/{model}" == session.full_model_name:
         print(f"Already using {session.full_model_name}.")
         return
-    session.provider = session.config.providers[provider_name]
+    session.provider_config = session.config.providers[provider_name]
     session.model = model
     session.reload_params()
     session.save_state()
@@ -83,12 +83,12 @@ def _set_think(session: Session, rest: list[str]) -> None:
     if value not in THINK_LEVELS:
         print("Usage: /set think on|off|none|low|medium|high|max|default")
         return
-    if session.provider is None:
+    if session.provider_config is None:
         print(NO_MODEL_HINT)
         return
-    client = session.providers.get_client(session.provider.name)
+    client = session.providers.get_client(session.provider_config.name)
     if value != "none" and not client.supports_thinking:
-        print(f"Thinking is not supported by provider {session.provider.name!r}.")
+        print(f"Thinking is not supported by provider {session.provider_config.name!r}.")
         return
     session.think = value
     session.save_state()
@@ -122,7 +122,7 @@ def _set_parameter(session: Session, rest: list[str]) -> None:
         for name, value in session.params.items():
             print(f"  {name} = {value}.")
         return
-    if session.provider is None:
+    if session.provider_config is None:
         print(NO_MODEL_HINT)
         return
     name = rest[0]

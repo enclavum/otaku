@@ -6,7 +6,7 @@ from otaku.chat.session import NO_MODEL_HINT, Session
 from otaku.formatting import flatten, format_context, format_size, pretty_path, truncate
 from otaku.lore import assembler
 from otaku.providers.base import CloudClient
-from otaku.settings.config import Provider
+from otaku.settings.config import ProviderConfig
 from otaku.store import Store
 from otaku.terminal import DIM, RESET
 
@@ -16,8 +16,8 @@ def cmd_context(session: Session, store: Store, args: list[str]) -> None:
     (yours alone), and the transcript exactly as it will be sent. `otaku
     logs` shows what was actually sent; this shows what is about to be."""
     context = None
-    if session.provider is not None:
-        client = session.providers.get_client(session.provider.name)
+    if session.provider_config is not None:
+        client = session.providers.get_client(session.provider_config.name)
         context = client.get_context_size(session.model)
     # No model: the preview still stands, over the assembler's default
     # window — what WOULD be sent is a question that needs no server.
@@ -31,7 +31,7 @@ def cmd_context(session: Session, store: Store, args: list[str]) -> None:
 def cmd_usage(session: Session, store: Store, args: list[str]) -> None:
     """`/usage` — tokens spent in this story. `/usage all` — every story in
     the database. Grouped by what the tokens were spent on (chat, lore, …),
-    then by model."""
+    then by provider and model — a column each."""
     everything = bool(args) and args[0].lower() == "all"
     if not everything and session.story_id is None:
         print("No story yet — send a message first, or use /usage all.")
@@ -42,21 +42,26 @@ def cmd_usage(session: Session, store: Store, args: list[str]) -> None:
         return
 
     scope = "all stories" if everything else "this story"
-    labels = [f"{r.purpose} · {r.provider}/{r.model}" for r in rows]
-    width = max(len(label) for label in labels)
+    purpose_w = max(len("total"), max(len(r.purpose) for r in rows))
+    provider_w = max(len(r.provider) for r in rows)
+    model_w = max(len(r.model) for r in rows)
+    # The text columns join with " · "; the header and total rows blank
+    # the separator out, so the numeric columns stay aligned.
+    head = f"  {'':<{purpose_w}}   {'':<{provider_w}}   {'':<{model_w}}"
     print(f"Token usage — {scope}:")
-    print(f"  {'':<{width}}  {'REQS':>5}  {'PROMPT':>10}  {'REPLY':>10}  {'TOK/S':>7}")
-    for label, r in zip(labels, rows, strict=True):
+    print(f"{head}  {'REQS':>5}  {'PROMPT':>10}  {'REPLY':>10}  {'TOK/S':>7}")
+    for r in rows:
         rate = r.completion_tokens / r.seconds if r.seconds > 0 else 0.0
         print(
-            f"  {label:<{width}}  {r.requests:>5,}  {r.prompt_tokens:>10,}  "
-            f"{r.completion_tokens:>10,}  {rate:>7.1f}"
+            f"  {r.purpose:<{purpose_w}} · {r.provider:<{provider_w}} · {r.model:<{model_w}}  "
+            f"{r.requests:>5,}  {r.prompt_tokens:>10,}  {r.completion_tokens:>10,}  {rate:>7.1f}"
         )
     total_p = sum(r.prompt_tokens for r in rows)
     total_c = sum(r.completion_tokens for r in rows)
     total_r = sum(r.requests for r in rows)
     print(
-        f"  {'total':<{width}}  {total_r:>5,}  {total_p:>10,}  {total_c:>10,}"
+        f"  {'total':<{purpose_w}}   {'':<{provider_w}}   {'':<{model_w}}"
+        f"  {total_r:>5,}  {total_p:>10,}  {total_c:>10,}"
         f"  {'':>7}\n  ({total_p + total_c:,} tokens across {len(rows)} model/purpose pairs)"
     )
 
@@ -66,7 +71,7 @@ def cmd_balance(session: Session, store: Store, args: list[str]) -> None:
     report one — the cloud catalogs; a local engine has nothing to bill.
     Queried concurrently, an unreachable provider simply skipped."""
 
-    def probe(name: str, provider: Provider) -> tuple[str, str] | None:
+    def probe(name: str, provider_config: ProviderConfig) -> tuple[str, str] | None:
         client = session.providers.get_client(name)
         if not isinstance(client, CloudClient):
             return None  # a local engine has no account to ask
@@ -89,17 +94,17 @@ def cmd_info(session: Session, store: Store, args: list[str]) -> None:
     """Best-effort dump of everything otaku knows about the active model and
     session. Network-backed fields are silently skipped when the provider
     doesn't expose them or the request fails."""
-    if session.provider is None:
+    if session.provider_config is None:
         print(NO_MODEL_HINT)
         return
-    client = session.providers.get_client(session.provider.name)
-    provider = session.provider
+    client = session.providers.get_client(session.provider_config.name)
+    provider_config = session.provider_config
 
     print(f"State dir: {pretty_path(session.paths.root)}")
     print()
     print(f"Model:    {session.full_model_name}")
-    print(f"Backend:  {client.kind} ({provider.url})")
-    if provider.api_key:
+    print(f"Backend:  {client.kind} ({provider_config.url})")
+    if provider_config.api_key:
         print("Auth:     api_key configured")
 
     # The model's own row — load state only where loading is a real state
@@ -120,8 +125,8 @@ def cmd_info(session: Session, store: Store, args: list[str]) -> None:
     else:
         print("Thinking: not supported")
 
-    if provider.keep_alive:
-        print(f"Keep-alive: {provider.keep_alive}")
+    if provider_config.keep_alive:
+        print(f"Keep-alive: {provider_config.keep_alive}")
 
     print()
 

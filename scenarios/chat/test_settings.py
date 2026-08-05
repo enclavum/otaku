@@ -321,7 +321,7 @@ class TestManagedPicker:
         server.contexts["alpha"] = 32768
         try:
             rows, _ = app.session.providers.inventory()
-            ollama = next(r for r in rows if r.provider.name == "ollama")
+            ollama = next(r for r in rows if r.provider_config.name == "ollama")
             models = {m.name: m for m in ollama.models}
             assert models["alpha"].context == 32768
             assert models["beta"].context == 8192  # the scripted default
@@ -372,7 +372,7 @@ class TestProviderPanel:
         assert 'url = "http://localhost:7777/v1"' in raw
         assert "[test]" in raw  # the other sections survived
         client = app.session.providers.get_client("llamacpp")
-        assert client.provider.url == "http://localhost:7777/v1"
+        assert client.provider_config.url == "http://localhost:7777/v1"
 
     def test_the_editor_moves_the_cursor_and_takes_a_paste(self, app: App) -> None:
         # Ctrl+U, then a bracketed paste of the whole url, then the
@@ -392,7 +392,7 @@ class TestProviderPanel:
         assert entry["api_key"].startswith("sealed:")
         assert sealed.unseal(app.paths, entry["api_key"]) == "hunter-2"
         # The running session got the plain key at once...
-        assert app.session.providers.get_client("llamacpp").provider.api_key == "hunter-2"
+        assert app.session.providers.get_client("llamacpp").provider_config.api_key == "hunter-2"
         # ...and the next launch resolves it back from the sealed value.
         resolved, warnings = sealed.resolve_api_keys(app.paths, config.load(app.paths).providers)
         assert warnings == []
@@ -403,7 +403,7 @@ class TestProviderPanel:
         run_screen(keys, lambda: models.pick(app.session.providers, paths=app.paths))
         raw = app.paths.providers_file.read_text()
         assert tomllib.loads(raw)["llamacpp"]["api_key"] == ""
-        assert app.session.providers.get_client("llamacpp").provider.api_key == ""
+        assert app.session.providers.get_client("llamacpp").provider_config.api_key == ""
 
     def test_a_cloud_backend_offers_only_its_key_and_keeps_its_url(self, server, tmp_path) -> None:
         # openrouter pre-pointed at the scripted server so the panel's
@@ -449,7 +449,7 @@ class TestCloudProviders:
             app = launch(tmp_path / "state", server, spec="openrouter/gpt-alpha")
             try:
                 rows, _ = app.session.providers.inventory()
-                catalog = next(r for r in rows if r.provider.name == "openrouter")
+                catalog = next(r for r in rows if r.provider_config.name == "openrouter")
                 assert catalog.can_load_unload is False
                 by_name = {m.name: m for m in catalog.models}
                 assert by_name["gpt-alpha"].context == 128_000
@@ -467,10 +467,12 @@ class TestCloudProviders:
         # A provider that was not in the config at launch is registered
         # by the panel, and /model switches to it at once — the session's
         # config and the registry share the one providers dict.
-        app.session.providers.update_provider(config.Provider(name="nanogpt", url=app.server.url))
+        app.session.providers.update_provider(
+            config.ProviderConfig(name="nanogpt", url=app.server.url)
+        )
         app.play("/model nanogpt/test-model")
-        assert app.session.provider is not None
-        assert app.session.provider.name == "nanogpt"
+        assert app.session.provider_config is not None
+        assert app.session.provider_config.name == "nanogpt"
         assert app.session.model == "test-model"
 
     def test_a_successful_listing_earns_the_panels_tick(self, server, tmp_path) -> None:
@@ -494,7 +496,7 @@ class TestCloudProviders:
             registry = app.session.providers
             # The blocking pass skips the catalogs entirely...
             rows, reachable = registry.inventory(skip={"openrouter"})
-            assert all(row.provider.name != "openrouter" for row in rows)
+            assert all(row.provider_config.name != "openrouter" for row in rows)
             assert "openrouter" not in reachable
             # ...and the picker fetches them after opening: the rows land
             # in the background and the pending mark drains.

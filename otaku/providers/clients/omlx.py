@@ -9,14 +9,14 @@ from urllib.parse import quote
 import httpx
 
 from otaku.providers.base import ManagedClient, ModelInfo
-from otaku.settings.config import Provider
+from otaku.settings.config import ProviderConfig
 
 
 class OmlxClient(ManagedClient):
     kind = "omlx"
 
     @classmethod
-    def autoconfigure(cls) -> Provider:
+    def autoconfigure(cls) -> ProviderConfig:
         """The first-run section, its port and api key detected from omlx's
         own settings file."""
         settings = _read_home_json(".omlx/settings.json")
@@ -25,20 +25,20 @@ class OmlxClient(ManagedClient):
         auth = settings.get("auth")
         key = auth.get("api_key") if isinstance(auth, dict) else None
         url = f"http://localhost:{port if isinstance(port, int) else 8000}/v1"
-        return Provider(name=cls.kind, url=url, api_key=str(key) if key else "")
+        return ProviderConfig(name=cls.kind, url=url, api_key=str(key) if key else "")
 
     def load_model(self, model: str) -> None:
         response = httpx.post(
-            f"{self.provider.base_url}/v1/models/{quote(model, safe='')}/load",
-            headers=self.provider.headers,
+            f"{self.provider_config.base_url}/v1/models/{quote(model, safe='')}/load",
+            headers=self.provider_config.headers,
             timeout=None,
         )
         response.raise_for_status()
 
     def unload_model(self, model: str) -> None:
         response = httpx.post(
-            f"{self.provider.base_url}/v1/models/{quote(model, safe='')}/unload",
-            headers=self.provider.headers,
+            f"{self.provider_config.base_url}/v1/models/{quote(model, safe='')}/unload",
+            headers=self.provider_config.headers,
             timeout=None,
         )
         response.raise_for_status()

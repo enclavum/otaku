@@ -14,7 +14,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from otaku.settings.config import Provider
+from otaku.settings.config import ProviderConfig
 from scenarios.support.live import live_app as build_app
 
 SPEC = os.environ.get("OTAKU_TEST_MODEL", "ollama/gemma3")
@@ -53,6 +53,6 @@ def live_app(tmp_path: Path, server):  # type: ignore[no-untyped-def]
         pytest.skip(f"no server at {URL}")
     if not any(model in m["id"] for m in models):
         pytest.skip(f"{model!r} is not pulled (ollama pull {model})")
-    app = build_app(tmp_path, server, Provider(name=provider_name, url=URL), model)
+    app = build_app(tmp_path, server, ProviderConfig(name=provider_name, url=URL), model)
     yield app
     app.close()

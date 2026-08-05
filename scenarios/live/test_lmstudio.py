@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from otaku.settings.config import Provider
+from otaku.settings.config import ProviderConfig
 from scenarios.support.live import first_model
 from scenarios.support.live import live_app as build_app
 
@@ -37,6 +37,6 @@ class TestLmStudio:
 @pytest.fixture
 def live_app(tmp_path: Path, server):  # type: ignore[no-untyped-def]
     model = MODEL or first_model(URL)
-    app = build_app(tmp_path, server, Provider(name="lmstudio", url=URL), model)
+    app = build_app(tmp_path, server, ProviderConfig(name="lmstudio", url=URL), model)
     yield app
     app.close()

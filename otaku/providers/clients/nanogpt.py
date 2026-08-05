@@ -3,7 +3,7 @@ https://nano-gpt.com/api/v1. The base cloud listing serves it as is —
 context windows appear whenever the catalog reports `context_length`."""
 
 from otaku.providers.base import CloudClient
-from otaku.settings.config import Provider
+from otaku.settings.config import ProviderConfig
 
 
 class NanoGptClient(CloudClient):
@@ -13,10 +13,10 @@ class NanoGptClient(CloudClient):
     _MODELS_QUERY = "?detailed=true"
 
     @classmethod
-    def autoconfigure(cls) -> Provider:
+    def autoconfigure(cls) -> ProviderConfig:
         # The deliberate-add default: the catalog's one endpoint; the api
         # key is the user's to provide.
-        return Provider(name=cls.kind, url="https://nano-gpt.com/api/v1")
+        return ProviderConfig(name=cls.kind, url="https://nano-gpt.com/api/v1")
 
     def balance(self, timeout: float = 10.0) -> str | None:
         # The account balance lives on the legacy /api surface. Only the

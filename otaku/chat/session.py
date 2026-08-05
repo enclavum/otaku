@@ -27,7 +27,7 @@ from otaku.providers.registry import Registry as ProviderRegistry
 from otaku.settings import models as models_file
 from otaku.settings import prompts as prompts_file
 from otaku.settings import state as state_file
-from otaku.settings.config import Config, Provider
+from otaku.settings.config import Config, ProviderConfig
 from otaku.settings.prompts import Prompts
 from otaku.store import Store
 from otaku.store.schema import Message
@@ -91,7 +91,7 @@ class Session:
     prompts: Prompts
     paths: Paths
     providers: ProviderRegistry
-    provider: Provider | None
+    provider_config: ProviderConfig | None
     model: str  # bare model name, as the server expects it
     story_id: int | None = None  # created lazily on the first real turn
     system: str = ""  # the story's system prompt; never a message row
@@ -154,7 +154,7 @@ class Session:
             prompts=prompts_file.load(paths),
             paths=paths,
             providers=providers,
-            provider=config.providers[provider_name] if model_spec else None,
+            provider_config=config.providers[provider_name] if model_spec else None,
             model=model,
             verbose=state.verbose,
             tui=tui or TUI(),
@@ -173,7 +173,7 @@ class Session:
         """ "<provider>/<model>" for display ("" without a model) —
         derived, so a model switch can
         never leave it stale."""
-        return f"{self.provider.name}/{self.model}" if self.provider else ""
+        return f"{self.provider_config.name}/{self.model}" if self.provider_config else ""
 
     # The assembler's StoryView: the shaping settings, read off the session
     # so every assemble_story call sees the same values.

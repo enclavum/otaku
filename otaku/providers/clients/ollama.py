@@ -6,31 +6,31 @@ import os
 import httpx
 
 from otaku.providers.base import ManagedClient, ModelInfo
-from otaku.settings.config import Provider
+from otaku.settings.config import ProviderConfig
 
 
 class OllamaClient(ManagedClient):
     kind = "ollama"
 
     @classmethod
-    def autoconfigure(cls) -> Provider:
+    def autoconfigure(cls) -> ProviderConfig:
         """The first-run section, its port detected from OLLAMA_HOST."""
         host = os.environ.get("OLLAMA_HOST")
         port = (_parse_port(host) if host else None) or 11434
         url = f"http://localhost:{port}/v1"
-        return Provider(name=cls.kind, url=url, keep_alive="24h")
+        return ProviderConfig(name=cls.kind, url=url, keep_alive="24h")
 
     def load_model(self, model: str) -> None:
         body = {
             "model": model,
             "prompt": "",
             "stream": False,
-            "keep_alive": self.provider.keep_alive or "24h",
+            "keep_alive": self.provider_config.keep_alive or "24h",
         }
         response = httpx.post(
-            f"{self.provider.base_url}/api/generate",
+            f"{self.provider_config.base_url}/api/generate",
             json=body,
-            headers=self.provider.headers,
+            headers=self.provider_config.headers,
             timeout=None,
         )
         response.raise_for_status()
@@ -38,9 +38,9 @@ class OllamaClient(ManagedClient):
     def unload_model(self, model: str) -> None:
         body = {"model": model, "prompt": "", "stream": False, "keep_alive": 0}
         response = httpx.post(
-            f"{self.provider.base_url}/api/generate",
+            f"{self.provider_config.base_url}/api/generate",
             json=body,
-            headers=self.provider.headers,
+            headers=self.provider_config.headers,
             timeout=None,
         )
         response.raise_for_status()
@@ -54,7 +54,7 @@ class OllamaClient(ManagedClient):
         sizes: dict[str, int] = {}
         data = self._get_json("/api/tags", timeout=timeout)
         if data is None:
-            raise httpx.ConnectError(f"{self.provider.name} is not answering /api/tags")
+            raise httpx.ConnectError(f"{self.provider_config.name} is not answering /api/tags")
         for entry in data.get("models") or [] if isinstance(data, dict) else []:
             name = entry.get("name") or entry.get("model")
             size = entry.get("size")

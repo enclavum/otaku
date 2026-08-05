@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from otaku.providers.backends.omlx import OmlxClient
-from otaku.settings.config import Provider
+from otaku.providers.clients.omlx import OmlxClient
+from otaku.settings.config import ProviderConfig
 from scenarios.support.live import live_app as build_app
 
 URL = "http://127.0.0.1:8000/v1"
@@ -35,14 +35,14 @@ class TestOmlx:
 
 @pytest.fixture
 def live_app(tmp_path: Path, server):  # type: ignore[no-untyped-def]
-    provider = Provider(name="omlx", url=URL)
+    provider_config = ProviderConfig(name="omlx", url=URL)
     try:
-        rows = OmlxClient(provider).models(timeout=3.0)
+        rows = OmlxClient(provider_config).models(timeout=3.0)
     except Exception:
         pytest.skip(f"no server at {URL}")
     loaded = [row for row in rows if row.loaded]
     if not loaded and not MODEL:
         pytest.skip("no model loaded in omlx")
-    app = build_app(tmp_path, server, provider, MODEL or loaded[0].name)
+    app = build_app(tmp_path, server, provider_config, MODEL or loaded[0].name)
     yield app
     app.close()

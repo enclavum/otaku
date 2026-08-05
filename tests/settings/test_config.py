@@ -7,7 +7,7 @@ above all must parse back as TOML with every section present.
 
 import tomllib
 
-from otaku.settings.config import Config, Provider, providers_toml
+from otaku.settings.config import Config, ProviderConfig, providers_toml
 
 
 class TestServes:
@@ -49,15 +49,15 @@ class TestProvidersToml:
         assert parsed["omlx"]["api_key"] == "k"
 
     def test_keep_alive_appears_only_when_set(self) -> None:
-        with_it = providers_toml({"a": Provider(name="a", url="x", keep_alive="24h")})
+        with_it = providers_toml({"a": ProviderConfig(name="a", url="x", keep_alive="24h")})
         assert 'keep_alive = "24h"' in with_it
-        assert "keep_alive" not in providers_toml({"a": Provider(name="a", url="x")})
+        assert "keep_alive" not in providers_toml({"a": ProviderConfig(name="a", url="x")})
 
 
 def config() -> Config:
     return Config(
         providers={
-            "omlx": Provider(name="omlx", url="http://localhost:8100/v1", api_key="k"),
-            "ollama": Provider(name="ollama", url="http://localhost:11434/v1"),
+            "omlx": ProviderConfig(name="omlx", url="http://localhost:8100/v1", api_key="k"),
+            "ollama": ProviderConfig(name="ollama", url="http://localhost:11434/v1"),
         }
     )

@@ -34,7 +34,7 @@ from pathlib import Path
 
 from otaku.paths import Paths
 from otaku.settings import sealed
-from otaku.settings.config import Provider
+from otaku.settings.config import ProviderConfig
 from otaku.settings.files import row, toml_key, toml_scalar, write_atomic
 
 # One shape change: config text in, config text out (unchanged when the
@@ -149,7 +149,7 @@ def apply_migrations(text: str, migrations: list[Migration]) -> str:
     return migrated
 
 
-def migrate(paths: Paths, providers: dict[str, Provider]) -> None:
+def migrate(paths: Paths, providers: dict[str, ProviderConfig]) -> None:
     """The whole launch step over the settings files, in order: the table
     over config.toml, the provider split, the given backends' sections
     ensured in providers.toml. A missing config is bootstrap's business,
@@ -267,7 +267,7 @@ def _split_providers(paths: Paths) -> None:
     _commit(paths.config_file, _backup_path(paths, "config"), text, remaining)
 
 
-def _ensure_providers(paths: Paths, providers: dict[str, Provider]) -> None:
+def _ensure_providers(paths: Paths, providers: dict[str, ProviderConfig]) -> None:
     """The launch step over providers.toml: every given backend keeps a
     section — what first run writes, ensured thereafter, so an engine
     the app learned after this install still shows up in the picker.
@@ -275,11 +275,12 @@ def _ensure_providers(paths: Paths, providers: dict[str, Provider]) -> None:
     converges, so a deleted section returns — retire an engine by
     leaving its section pointing nowhere instead."""
     changes = []
-    for provider in providers.values():
-        block = f"[{toml_key(provider.name)}]\nurl = {toml_scalar(provider.url)}\n" + 'api_key = ""'
-        if provider.keep_alive:
-            block += f"\nkeep_alive = {toml_scalar(provider.keep_alive)}"
-        changes.append(ensure_section(provider.name, block))
+    for provider_config in providers.values():
+        head = f"[{toml_key(provider_config.name)}]\nurl = {toml_scalar(provider_config.url)}\n"
+        block = head + 'api_key = ""'
+        if provider_config.keep_alive:
+            block += f"\nkeep_alive = {toml_scalar(provider_config.keep_alive)}"
+        changes.append(ensure_section(provider_config.name, block))
     update_providers(paths, changes)
 
 

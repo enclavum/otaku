@@ -22,22 +22,22 @@ from dataclasses import dataclass
 from typing import TypeVar
 
 from otaku.logs.requests import RequestLog
-from otaku.providers.backends.koboldcpp import KoboldCppClient
-from otaku.providers.backends.llamacpp import LlamaCppClient
-from otaku.providers.backends.lmstudio import LmStudioClient
-from otaku.providers.backends.nanogpt import NanoGptClient
-from otaku.providers.backends.ollama import OllamaClient
-from otaku.providers.backends.omlx import OmlxClient
-from otaku.providers.backends.openrouter import OpenRouterClient
 from otaku.providers.base import ManagedClient, ModelInfo, OpenAIClient
-from otaku.settings.config import Provider
+from otaku.providers.clients.koboldcpp import KoboldCppClient
+from otaku.providers.clients.llamacpp import LlamaCppClient
+from otaku.providers.clients.lmstudio import LmStudioClient
+from otaku.providers.clients.nanogpt import NanoGptClient
+from otaku.providers.clients.ollama import OllamaClient
+from otaku.providers.clients.omlx import OmlxClient
+from otaku.providers.clients.openrouter import OpenRouterClient
+from otaku.settings.config import ProviderConfig
 
 _T = TypeVar("_T")  # Registry.map's result type
 
-# The backends with a native API, by the provider name that activates
-# them, in the model picker's canonical order; every other name gets the
-# plain OpenAIClient.
-BACKENDS: dict[str, type[OpenAIClient]] = {
+# The client classes with a native API, by the provider name that
+# activates them, in the model picker's canonical order; every other
+# name gets the plain OpenAIClient.
+CLIENTS: dict[str, type[OpenAIClient]] = {
     LlamaCppClient.kind: LlamaCppClient,
     KoboldCppClient.kind: KoboldCppClient,
     OllamaClient.kind: OllamaClient,
@@ -52,7 +52,7 @@ BACKENDS: dict[str, type[OpenAIClient]] = {
 class Inventory:
     """One reachable provider's models, for the model picker."""
 
-    provider: Provider
+    provider_config: ProviderConfig
     models: builtins.list[ModelInfo]
     can_load_unload: bool
 
@@ -60,7 +60,7 @@ class Inventory:
 class Registry:
     def __init__(
         self,
-        providers: dict[str, Provider],
+        providers: dict[str, ProviderConfig],
         *,
         request_log: RequestLog | None = None,
         smooth: bool = True,
@@ -75,28 +75,28 @@ class Registry:
         name (see the module docstring)."""
         if name in self._clients:
             return self._clients[name]
-        provider = self._providers.get(name)
-        if provider is None:
+        provider_config = self._providers.get(name)
+        if provider_config is None:
             raise ValueError(f"no provider {name!r} in the configuration")
-        cls = BACKENDS.get(name, OpenAIClient)
-        client = cls(provider, request_log=self._request_log, smooth=self._smooth)
+        cls = CLIENTS.get(name, OpenAIClient)
+        client = cls(provider_config, request_log=self._request_log, smooth=self._smooth)
         self._clients[name] = client
         return client
 
-    def configured(self) -> builtins.list[Provider]:
+    def configured(self) -> builtins.list[ProviderConfig]:
         """Every configured provider, name-sorted — reachable or not; the
         provider panel edits them all."""
         return [self._providers[name] for name in sorted(self._providers)]
 
-    def update_provider(self, provider: Provider) -> None:
+    def update_provider(self, provider_config: ProviderConfig) -> None:
         """Swap one provider's configuration for the running session and
         drop its cached client, so the next request is built against the
         new url and key. Persisting the change is the caller's business."""
-        self._providers[provider.name] = provider
-        self._clients.pop(provider.name, None)
+        self._providers[provider_config.name] = provider_config
+        self._clients.pop(provider_config.name, None)
 
-    def map(self, fn: Callable[[str, Provider], _T]) -> builtins.list[_T]:
-        """Run `fn(name, provider)` for every configured provider
+    def map(self, fn: Callable[[str, ProviderConfig], _T]) -> builtins.list[_T]:
+        """Run `fn(name, provider_config)` for every configured provider
         concurrently, results in configuration order — one dead provider's
         timeout overlaps the others instead of adding to them. `fn` handles
         its own errors; an exception propagates."""
@@ -114,10 +114,10 @@ class Registry:
         catalogs asynchronously, after the screen is up."""
 
         # Inner on purpose: the filter closes over the skip set.
-        def gather(name: str, provider: Provider) -> tuple[str, Inventory] | None:
+        def gather(name: str, provider_config: ProviderConfig) -> tuple[str, Inventory] | None:
             if skip and name in skip:
                 return None
-            return self._gather(name, provider)
+            return self._gather(name, provider_config)
 
         results = [r for r in self.map(gather) if r is not None]
         return [row for _name, row in results], {name for name, _row in results}
@@ -136,17 +136,17 @@ class Registry:
         lines.append("Start your model server, or fix the [providers.NAME] url in config.toml.")
         return "\n".join(lines)
 
-    def _gather(self, name: str, provider: Provider) -> tuple[str, Inventory] | None:
+    def _gather(self, name: str, provider_config: ProviderConfig) -> tuple[str, Inventory] | None:
         """One provider's inventory row, or None when it is unreachable."""
         client = self.get_client(name)
         try:
             models = client.models(timeout=5.0)
         except Exception:
             return None
-        return name, Inventory(provider, models, isinstance(client, ManagedClient))
+        return name, Inventory(provider_config, models, isinstance(client, ManagedClient))
 
 
-def autoconfigure_providers() -> dict[str, Provider]:
+def autoconfigure_providers() -> dict[str, ProviderConfig]:
     """The first-run provider sections: one per supported backend, present
     whether or not the engine is installed, each with its configuration
     (port, api key) detected from the machine. Runs only at the one
@@ -158,4 +158,4 @@ def autoconfigure_providers() -> dict[str, Provider]:
         OmlxClient.autoconfigure(),
         LmStudioClient.autoconfigure(),
     )
-    return {provider.name: provider for provider in configured}
+    return {provider_config.name: provider_config for provider_config in configured}

@@ -19,9 +19,9 @@ def build_job(session: Session) -> Job:
     """The worker job for the session as it stands: the story, the model,
     and the snapshot the warm-up rebuilds the next request from."""
     assert session.story_id is not None  # callers gate on a recorded story
-    assert session.provider is not None  # callers gate on a selected model
+    assert session.provider_config is not None  # callers gate on a selected model
     return Job(
-        provider_name=session.provider.name,
+        provider_name=session.provider_config.name,
         model=session.model,
         story_id=session.story_id,
         prompts=session.prompts,
@@ -48,7 +48,7 @@ def cmd_extract(session: Session, store: Store, args: list[str]) -> None:
     if session.story_id is None:
         print("No story yet — send a message first.")
         return
-    if session.provider is None:
+    if session.provider_config is None:
         print(NO_MODEL_HINT)
         return
     forced = replace(build_job(session), force=True)
