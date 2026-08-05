@@ -28,7 +28,8 @@ intentional):
 Other features:
 - importing chats from ST, with scene and character extraction,
 - importing a plain text file, parsed into turns, with scene and character extraction,
-- loading and unloading models in Ollama, oMLX and LM Studio directly from the app,
+- loading and unloading models in Ollama, oMLX, and LM Studio directly from the app,
+- cloud providers (OpenRouter, NanoGPT) next to the local ones — API keys stored sealed,
 - automatic daily backups,
 - optional encryption,
 - and more.
@@ -59,8 +60,10 @@ otaku
 ```
 
 On first start, you choose a provider and a model: otaku automatically detects local installations
-of Ollama, oMLX, and KoboldCpp and lets you pick from their models. After you've chosen, you land
-at the prompt. If nothing is running yet, otaku opens anyway — pick a model later with `/model`.
+of Ollama, oMLX, LM Studio, llama.cpp, and KoboldCpp and lets you pick from their models. Cloud
+providers (OpenRouter, NanoGPT) are added right there in the picker — enter an API key and their
+catalogs appear. After you've chosen, you land at the prompt. If nothing is running yet, otaku
+opens anyway — pick a model later with `/model`.
 
 To give you an idea of the features and what play looks like, on first start a sample story is
 imported, and you land right in the middle of it. You can explore it with the `/lore`, `/cast`,
@@ -110,7 +113,7 @@ summaries may exist up to the latest message, only the older ones are actually u
 
 ## Warnings, limitations, and planned features
 
-This is only the second release, and an alpha. Planned for the next versions:
+Beware, this is an early alpha. Features planned for the next versions:
 
 - Properly wire the characters and lore into the roleplay context, alongside the scene summaries.
   Even though they are extracted, they are not yet injected anywhere into the prompt — they are
@@ -136,31 +139,44 @@ PROMPT     your character speaks or acts             /lore      browse and edit 
 
 Everything lives in the state dir, `~/.otaku` by default:
 
-- `configs/config.toml` — yours: providers, context window, extraction thresholds, encryption,
-  backups. Written once on first run, never touched again.
+- `configs/config.toml` — context window, extraction thresholds, encryption, backups.
+- `configs/providers.toml` — one section per provider (url, api key). The model picker edits it
+  for you, and api keys are stored sealed.
 - `configs/prompts.toml` — every template otaku ever sends, editable.
 - `configs/state.toml`, `configs/models.toml` — the app's own memory of your session and
   per-model settings.
+
+The two config files are written on first run and after that edited only surgically — line by
+line, never rewritten as a whole: version migrations at launch and the picker's provider edits,
+each keeping the pre-edit file in `configs/backups/`.
 
 Set `OTAKU_CONFIG_DIR` to run a completely separate environment:
 `OTAKU_CONFIG_DIR=~/.otaku-alt otaku`.
 
 ## Privacy and storage
 
-Stories live in a local SQLite database and never leave your machine — otaku talks only to the
-model servers you configure. Encryption at rest is one config switch away (AES-256-GCM, sealed
-client-side): the key can live in your OS keychain, come from a command of your choice (a password
-manager, a hardware token), derive from a passphrase, or sit on disk. The request log is sealed
-with the same cipher; the system and error logs are content-free by contract. Daily database
-backups are kept in the state dir. Details in [SECURITY.md](SECURITY.md).
+Stories live in a local SQLite database. Encryption at rest is disabled by default but is one
+config switch away (AES-256-GCM, sealed client-side): the key can live in your OS keychain, come
+from a command of your choice (a password manager, a hardware token), derive from a passphrase,
+or sit on disk. The request log will be sealed with the same cipher; the system and error logs
+are content-free by contract.
+
+Provider API keys are always stored sealed, their key in the OS keychain. Daily database backups
+are kept in the state dir.
+
+Details in [SECURITY.md](SECURITY.md).
 
 ## Provider support
 
-| Backend | Autodetected | Load / unload |
-| --- | --- | --- |
-| Ollama | yes | yes |
-| oMLX | yes | yes |
-| KoboldCpp | yes | served as-is |
+| Backend    | Autodetected          | Load / unload models |
+|------------|-----------------------|----------------------|
+| llama.cpp  | yes                   | -                    |
+| KoboldCpp  | yes                   | -                    |
+| Ollama     | yes                   | yes                  |
+| oMLX       | yes                   | yes                  |
+| LM Studio  | yes                   | yes                  |
+| OpenRouter | API key in the picker | -                    |
+| NanoGPT    | API key in the picker | -                    |
 
 ## Requirements
 

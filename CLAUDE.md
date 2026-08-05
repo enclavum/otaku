@@ -76,11 +76,6 @@ api key is absent (`scripts/live-providers.sh` launches the local
 engines; the cloud smokes read OPENROUTER_API_KEY / NANOGPT_API_KEY and
 send one short prompt to a cheap model); deselect with `-m "not live"`.
 
-## Temporary limitations
-
-- The app is tested with local backends only; remote OpenAI-compatible
-  backends should work but are untested (see the core principles).
-
 ## Process rules
 
 - Never commit without the user's explicit approval.

@@ -20,7 +20,7 @@ statically: they all show as loaded, Enter picks them directly, and the
 l/u keys (and their help entries) disappear on such a row.
 
 The right side is the provider panel: the app's backends in a fixed
-order — llama.cpp, koboldcpp, Ollama, oMLX, LM Studio, OpenRouter,
+order — llama.cpp, KoboldCpp, Ollama, oMLX, LM Studio, OpenRouter,
 NanoGPT — each
 a caption with its `URL:` and `API key:` fields, the key's value never
 displayed, the cloud catalogs' url fixed (shown dimmed, never
@@ -105,7 +105,7 @@ _ROW_HEAD_LIMIT = 100
 # section name is the kind on the left.
 _PANEL_PROVIDERS: list[tuple[str, str]] = [
     ("llamacpp", "llama.cpp"),
-    ("koboldcpp", "koboldcpp"),
+    ("koboldcpp", "KoboldCpp"),
     ("ollama", "Ollama"),
     ("omlx", "oMLX"),
     ("lmstudio", "LM Studio"),

@@ -43,3 +43,19 @@ It does **not** protect against:
 The request log seals its entries with the same cipher; the system and
 error logs are content-free by contract (ids, counts, and tracebacks
 without locals — never story text).
+
+## Provider API keys
+
+Cloud provider API keys never sit in a config file as plain text. They
+are stored in `configs/providers.toml` sealed (AES-256-GCM) — a plane
+fully separate from the story encryption above, with its own key, and
+independent of `[encryption]` being enabled at all. The sealing key
+lives in the OS keychain (macOS `security`, Linux `secret-tool`), one
+item per state dir; on a machine without a keychain tool it falls back
+to `configs/config.key` at mode `0600`. A key pasted into the file as
+plain text is sealed automatically at the next launch.
+
+Leaking `providers.toml` alone therefore leaks no credentials. The same
+limits as above apply: an attacker running as your logged-in user can
+read the keychain item, and a running process's memory holds the open
+keys.

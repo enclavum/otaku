@@ -5,6 +5,46 @@ All notable changes to otaku are documented in this file. The format is based on
 [Semantic Versioning](https://semver.org/) — while pre-1.0, minor releases may include breaking
 changes.
 
+## [0.2.2] - [planned]
+
+Cloud arrives, and the model picker becomes the provider control center: OpenRouter and NanoGPT
+next to the five local engines, API keys entered in the picker and stored sealed, providers in
+their own config file — plus quality-of-life across the REPL.
+
+### Added
+- Cloud providers: OpenRouter and NanoGPT — their catalogs listed with context windows (fetched
+  asynchronously, so the picker opens without waiting on the internet), a short `(cloud)` prompt
+  hint while playing against one, and `/balance` for the account balance.
+- New local backends: llama.cpp (`llama-server`) and LM Studio (load/unload included), joining
+  Ollama, oMLX, and KoboldCpp; every backend now reports each model's context window, shown as a
+  column in the picker.
+- The picker's provider panel: every backend with its `URL:` and `API key:` fields, editable in
+  place (paste works, the key never displayed), a tick for providers that answered, and models
+  re-listed the moment a setting changes. Editing an unconfigured backend writes its section —
+  that is how a cloud provider is added.
+- `configs/providers.toml`: provider sections live in their own file now, one `[name]` section
+  each — moved out of config.toml automatically, API keys sealed on the way (AES-256-GCM, the
+  sealing key in the OS keychain; independent of the story encryption).
+- Config migrations: one idempotent, convergent mechanism that reruns at every launch — dated
+  pre-edit backups in `configs/backups/`, and a plain API key (hand-typed included) is sealed at
+  the next launch.
+- `otaku update`: detects how otaku was installed and runs that installer's own upgrade.
+- `/undo` and `/regen` erase the taken-back turns from the screen when it is provably safe;
+  `/last [N]` re-echoes the last turns for a clean view; `/clear` wipes the screen.
+- Dialogue coloring: spoken lines («quotes» and dash lines) render in a soft teal that follows
+  the detected terminal background (`[ui] dialogue_color`, `dialogue_bold`).
+- `/system` accepts an existing file's path and reads the prompt from it.
+- Path autocompletion behind `@` in file arguments: the menu pops as typed and filters.
+- Live smokes for all seven providers (`scenarios/live/`, `scripts/live-providers.sh`).
+
+### Changed
+- The picker lists bare model names grouped under provider captions, sizes and context flushed
+  right; `/usage` prints purpose, provider, and model as columns; the banner shows the bare model
+  name; `/info` reads its rows from the provider listing.
+- Thinking support is per-backend knowledge now — the `supports_thinking` config knob is gone
+  (migrated away), and omlx no longer needs it set by hand.
+- `/model` echoes the switched-to model in bold.
+
 ## [0.2.1] - 2026-08-01
 
 Packaging only — no functional changes.

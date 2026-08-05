@@ -38,9 +38,11 @@ There are two suites, with a deliberate division of labor:
   against the real application: the real launch composition over a
   throwaway state dir, a scripted OpenAI-compatible server as the model,
   prompt_toolkit screens driven by real keystrokes, and a few journeys
-  running the actual binary in a pty. Deterministic and offline. The
-  `live`-marked smokes talk to a real local model (`ollama pull gemma3`)
-  and skip themselves when it is absent; deselect with `-m "not live"`.
+  running the actual binary in a pty. Deterministic and offline.
+  The `live`-marked smokes (`scenarios/live/`, one module per provider)
+  talk to real providers and each skips itself when its server or API
+  key is absent — `scripts/live-providers.sh` launches the local
+  engines; deselect with `-m "not live"`.
 
 A behavior change comes with the scenario that proves it — red first
 against the unfixed code where practical. No test may touch your real
@@ -58,8 +60,8 @@ home directory, keychain, or network.
 ## Reporting bugs and requesting features
 
 Open an issue describing what you ran, what you expected, and what
-happened — including your provider (Ollama / omlx / KoboldCpp) and
-the model. For security issues, see
+happened — including your provider (Ollama, oMLX, LM Studio, llama.cpp,
+KoboldCpp, OpenRouter, NanoGPT) and the model. For security issues, see
 [SECURITY.md](SECURITY.md) instead of the public tracker.
 
 ## License
