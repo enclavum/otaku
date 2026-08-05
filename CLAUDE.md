@@ -65,7 +65,7 @@ command surface: `scenarios/chat/` has one test module per
 `otaku/chat/commands` module, classes in `/help` order, with the tui
 screen a command opens tested beside it; `scenarios/cli/` has one module
 per top-level command (`test_main.py` — the bare invocation, driven in a
-pty — and `test_logs.py`); `test_app.py` covers the launch itself
+pty — `test_logs.py`, and `test_update.py`); `test_app.py` covers the launch itself
 (encryption, backups, resume); the live smokes live in `scenarios/live/`,
 one module per provider.
 In every test module — units included — the test classes come first
@@ -103,7 +103,7 @@ Each package may import only the packages listed after its arrow (plus the
 standard library and the declared dependencies); everything else is
 forbidden:
 
-    cli        → app, crypto, logs, paths, settings, store
+    cli        → app, crypto, logs, paths, settings, store, update
     app        → chat, tui, lore, store, providers, settings, crypto, logs,
                  paths, formatting
     chat       → transfer, lore, store, providers, settings, logs, paths,
@@ -117,6 +117,7 @@ forbidden:
     crypto     → settings, paths
     settings   → paths
     terminal   → formatting
+    update     → (nothing)
     paths      → (nothing)
     formatting → (nothing)
 

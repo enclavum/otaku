@@ -28,7 +28,7 @@ intentional):
 Other features:
 - importing chats from ST, with scene and character extraction,
 - importing a plain text file, parsed into turns, with scene and character extraction,
-- loading and unloading models in Ollama and oMLX directly from the app,
+- loading and unloading models in Ollama, oMLX and LM Studio directly from the app,
 - automatic daily backups,
 - optional encryption,
 - and more.
@@ -42,6 +42,15 @@ uv tool install otaku
 # or via Homebrew
 brew install enclavum/tap/otaku
 ```
+
+Update:
+
+```bash
+otaku update
+```
+
+It detects how otaku was installed and runs that installer's own upgrade — `uv tool upgrade otaku`
+or `brew upgrade enclavum/tap/otaku`.
 
 ## Get started
 
@@ -101,15 +110,14 @@ summaries may exist up to the latest message, only the older ones are actually u
 
 ## Warnings, limitations, and planned features
 
-This is only the second release, and an alpha. For now, otaku works with local LLMs only. Planned
-for the next version:
+This is only the second release, and an alpha. Planned for the next versions:
 
 - Properly wire the characters and lore into the roleplay context, alongside the scene summaries.
   Even though they are extracted, they are not yet injected anywhere into the prompt — they are
   only used to build each character's journal for subsequent scenes. How to use them better is
   still an open question.
 - Implement proper multi-chats, with different characters optionally backed by different LLMs.
-- Add support for cloud APIs (OpenRouter, OpenAI, and any other OpenAI-compatible endpoint).
+- Import character cards from SillyTavern.
 
 ## Usage
 
@@ -158,7 +166,6 @@ backups are kept in the state dir. Details in [SECURITY.md](SECURITY.md).
 
 - macOS or Linux, and a terminal
 - Python 3.11+ (installed automatically by either installer above)
-- a local model server: Ollama, oMLX, or KoboldCpp
 
 ## Contributing
 

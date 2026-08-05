@@ -59,8 +59,3 @@ You can create a completely separate environment by setting OTAKU_CONFIG_DIR and
 
 Even though extracted, the list of characters, their states, journals, and some other information are not used
 directly but are planned to be used in later versions.
-
-## Current limitations that can be lifted in the future
-
-The app has been tested with local backends only. Using remote backends should be possible, as the app supports the
-OpenAI protocol, but this needs additional testing.

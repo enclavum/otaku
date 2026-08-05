@@ -2,20 +2,20 @@
 
 `otaku` resumes the model and story the last session left off on and opens
 the chat; on a first run — or when the remembered model's provider is gone
-— it opens the model picker instead. `otaku logs requests` prints a day's
-model-request log, `otaku logs system` the lore worker's own account.
+— it opens the model picker instead. `otaku update` updates the app in
+place; `otaku logs requests` prints a day's model-request log, `otaku logs
+system` the lore worker's own account.
 """
 
-import json
-import re
-from collections.abc import Iterator
 from datetime import datetime
 
 import click
 
 from otaku import __version__, crypto
 from otaku import app as app_mod
+from otaku import update as updater
 from otaku.formatting import pretty_path
+from otaku.logs import view as logs_view
 from otaku.logs.errors import ErrorLog
 from otaku.logs.requests import RequestLog
 from otaku.logs.system import SystemLog
@@ -63,6 +63,26 @@ def main(ctx: click.Context) -> None:
         application.close()
 
 
+@main.command(short_help="Update otaku to the latest release")
+def update() -> None:
+    """Update otaku in place, whatever installed it: a Homebrew or uv
+    install runs its own upgrade, a source checkout is left to git, and
+    anything else gets pip. The new version runs at the next launch."""
+    command = updater.upgrade_command()
+    if command is None:
+        click.echo("This otaku runs from a source checkout — update it with git:")
+        click.echo("  git pull")
+        return
+    click.echo("Updating via: " + " ".join(command))
+    if updater.run(command) == 0:
+        click.echo("Done — the new version runs at the next otaku.")
+        return
+    click.echo("The update did not finish — run the one matching your install:", err=True)
+    for manual in updater.MANUAL_COMMANDS:
+        click.echo(f"  {manual}", err=True)
+    click.get_current_context().exit(1)
+
+
 class _DeclaredOrderGroup(click.Group):
     """Subcommands listed in declaration order, not alphabetically."""
 
@@ -97,27 +117,12 @@ def logs_requests(day: str | None, list_days: bool) -> None:
     if list_days:
         _echo_days(request_log.get_days(), "no request logs yet")
         return
-    stamp = _resolve_day(ctx, day)
+    stamp = _day_stamp(ctx, day)
     if not request_log.get_path(stamp).exists():
-        click.echo(f"no request log for {_dashed(stamp)}", err=True)
+        click.echo(f"no request log for {logs_view.dashed(stamp)}", err=True)
         ctx.exit(1)
 
-    def render() -> Iterator[str]:
-        for entry in request_log.read(stamp):
-            yield f"=== {entry.ts}  {entry.provider}  [{entry.purpose}]\n"
-            if entry.body is None:
-                yield "  <unreadable: wrong key or corrupted>\n\n"
-                continue
-            meta = {k: v for k, v in entry.body.items() if k != "messages"}
-            yield f"  {json.dumps(meta, ensure_ascii=False)}\n"
-            messages = entry.body.get("messages")
-            if isinstance(messages, list):
-                for message in messages:
-                    if isinstance(message, dict):
-                        yield f"  [{message.get('role')}] {message.get('content')}\n"
-            yield "\n"
-
-    click.echo_via_pager(render())
+    click.echo_via_pager(logs_view.render_requests(request_log, stamp))
 
 
 @logs.command(
@@ -135,10 +140,10 @@ def logs_system(day: str | None, list_days: bool) -> None:
     if list_days:
         _echo_days(system_log.get_days(), "no system logs yet")
         return
-    stamp = _resolve_day(ctx, day)
+    stamp = _day_stamp(ctx, day)
     path = system_log.get_path(stamp)
     if not path.exists():
-        click.echo(f"no system log for {_dashed(stamp)}", err=True)
+        click.echo(f"no system log for {logs_view.dashed(stamp)}", err=True)
         ctx.exit(1)
     click.echo_via_pager(path.read_text(encoding="utf-8"))
 
@@ -158,10 +163,10 @@ def logs_error(day: str | None, list_days: bool) -> None:
     if list_days:
         _echo_days(error_log.get_days(), "no error logs yet")
         return
-    stamp = _resolve_day(ctx, day)
+    stamp = _day_stamp(ctx, day)
     path = error_log.get_path(stamp)
     if not path.exists():
-        click.echo(f"no error log for {_dashed(stamp)}", err=True)
+        click.echo(f"no error log for {logs_view.dashed(stamp)}", err=True)
         ctx.exit(1)
     click.echo_via_pager(path.read_text(encoding="utf-8"))
 
@@ -179,28 +184,23 @@ def _unlock(ctx: click.Context, paths: Paths) -> crypto.Cipher:
         ctx.exit(1)
 
 
-def _resolve_day(ctx: click.Context, day: str | None) -> str:
-    """A DAY argument as the logs name their files (YYYYMMDD). Accepts the
-    dashed form too; defaults to today."""
+def _day_stamp(ctx: click.Context, day: str | None) -> str:
+    """The file stamp a subcommand pages: today when DAY is absent,
+    `logs_view.resolve_day`'s parse otherwise — or a usage error."""
     if day is None:
         return datetime.now().astimezone().strftime("%Y%m%d")
-    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
-        return day.replace("-", "")
-    if re.fullmatch(r"\d{8}", day):
-        return day
-    click.echo(
-        "DAY must be YYYY-MM-DD (or YYYYMMDD), e.g. otaku logs requests 2026-07-25", err=True
-    )
-    ctx.exit(2)
-
-
-def _dashed(stamp: str) -> str:
-    return f"{stamp[:4]}-{stamp[4:6]}-{stamp[6:]}"
+    stamp = logs_view.resolve_day(day)
+    if stamp is None:
+        click.echo(
+            "DAY must be YYYY-MM-DD (or YYYYMMDD), e.g. otaku logs requests 2026-07-25", err=True
+        )
+        ctx.exit(2)
+    return stamp
 
 
 def _echo_days(days: list[tuple[str, int]], empty: str) -> None:
     if not days:
         click.echo(empty)
         return
-    for name, size in days:
-        click.echo(f"{_dashed(name)}  {size:>10,} B")
+    for row in logs_view.day_rows(days):
+        click.echo(row)
