@@ -1,0 +1,48 @@
+"""oMLX smokes — the server is assumed to be running with a model
+loaded. Marked `live`; they skip themselves when it isn't listening or
+nothing is loaded. OTAKU_LIVE_OMLX_MODEL overrides the model; by
+default the loaded one plays.
+"""
+
+import os
+from pathlib import Path
+
+import pytest
+
+from otaku.providers.backends.omlx import OmlxClient
+from otaku.settings.config import Provider
+from scenarios.support.live import live_app as build_app
+
+URL = "http://127.0.0.1:8000/v1"
+MODEL = os.environ.get("OTAKU_LIVE_OMLX_MODEL", "")
+
+pytestmark = pytest.mark.live
+
+
+class TestOmlx:
+    def test_a_turn_streams_and_persists(self, live_app) -> None:  # type: ignore[no-untyped-def]
+        live_app.play("Reply with one word: ready?")
+        chain = live_app.store.stories.get_messages(live_app.session.story_id)
+        assert chain[1].role == "assistant"
+        assert chain[1].body.strip()
+
+    def test_the_listing_marks_the_loaded_model(self, live_app) -> None:  # type: ignore[no-untyped-def]
+        client = live_app.session.providers.get_client("omlx")
+        rows = client.models()
+        assert rows
+        assert any(row.loaded for row in rows)
+
+
+@pytest.fixture
+def live_app(tmp_path: Path, server):  # type: ignore[no-untyped-def]
+    provider = Provider(name="omlx", url=URL)
+    try:
+        rows = OmlxClient(provider).models(timeout=3.0)
+    except Exception:
+        pytest.skip(f"no server at {URL}")
+    loaded = [row for row in rows if row.loaded]
+    if not loaded and not MODEL:
+        pytest.skip("no model loaded in omlx")
+    app = build_app(tmp_path, server, provider, MODEL or loaded[0].name)
+    yield app
+    app.close()

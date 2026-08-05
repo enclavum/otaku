@@ -50,6 +50,28 @@ class TestTurns:
         first_chunk = scripted.CHAT_REPLY[: max(1, len(scripted.CHAT_REPLY) // 3)]
         assert [m.body for m in chain] == ["I enter the hall.", first_chunk]
 
+    def test_a_replys_padding_blank_lines_never_print(self, app: App, capsys) -> None:
+        # Some cloud models wrap the reply in blank lines; the screen and
+        # the record both start at the first real character and end at
+        # the last.
+        app.server.script = lambda body: "\n\nThe hall glows.\n\n"
+        app.play("I enter the hall.")
+        assert "\n\n\n" not in capsys.readouterr().out
+        assert app.session.messages[-1].body == "The hall glows."
+
+    def test_an_instant_failure_prints_without_a_blank(self, server, tmp_path, capsys) -> None:
+        # A request that dies before any output starts at the margin —
+        # the designed gap above the reply, nothing more. The harness
+        # seeds llamacpp on a dead port; playing it fails instantly.
+        app = launch(tmp_path / "state", server, spec="llamacpp/test-model")
+        try:
+            app.play("I enter the hall.")
+            out = capsys.readouterr().out
+            assert "[error: could not reach" in out
+            assert "\n\n\n" not in out
+        finally:
+            app.close()
+
 
 class TestMe:
     def test_the_typed_line_echoes_as_the_grey_block(self, app: App, capsys) -> None:

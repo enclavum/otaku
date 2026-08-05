@@ -54,8 +54,8 @@ class UsageOps:
             # fmt: on
 
     def get_totals(self, story_id: int | None = None) -> builtins.list[UsageTotal]:
-        """Accounting grouped by purpose then model — the whole database, or
-        one story when given."""
+        """Accounting grouped by purpose, provider, and model — the whole
+        database, or one story when given — sorted the same way."""
         where = "WHERE story_id = ?" if story_id is not None else ""
         params = (story_id,) if story_id is not None else ()
         # fmt: off
@@ -66,7 +66,7 @@ class UsageOps:
             "    COALESCE(SUM(duration_seconds), 0.0) "
             f"FROM token_usage {where} "
             "GROUP BY purpose, provider, model "
-            "ORDER BY purpose, SUM(completion_tokens) DESC",
+            "ORDER BY purpose, provider, model",
             params,
         ).fetchall()
         # fmt: on

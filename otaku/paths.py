@@ -47,6 +47,12 @@ class Paths:
         return self.configs_dir / "config.toml"
 
     @property
+    def providers_file(self) -> Path:
+        """User-owned provider sections — one top-level [name] table per
+        provider; the model picker edits it surgically."""
+        return self.configs_dir / "providers.toml"
+
+    @property
     def config_backups_dir(self) -> Path:
         """Pre-migration snapshots of config.toml, dated like the database
         backups."""
@@ -76,6 +82,12 @@ class Paths:
     def kek_file(self) -> Path:
         """The key-encryption key of the `disk` provider."""
         return self.configs_dir / "kek.key"
+
+    @property
+    def config_key_file(self) -> Path:
+        """The sealing key for encrypted config values, when it lives on
+        disk rather than in the OS keychain (see `settings.sealed`)."""
+        return self.configs_dir / "config.key"
 
     # database/ — the story store
 

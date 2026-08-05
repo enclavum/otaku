@@ -27,18 +27,20 @@ Python 3.11 in the `otaku` conda environment:
 The state dir is `paths.DEFAULT_ROOT`, relocatable via the
 `OTAKU_CONFIG_DIR` env var.
 
-## Configuration ownership
+## Configuration files
 
-`configs/config.toml` is user-owned: the app writes it once at first run and
-thereafter edits it only through settings migrations
-(`otaku/settings/migrations.py`) — surgical, idempotent shape changes
-applied at every launch (no version stamp; each migration detects its own
-applicability on the parsed file), the pre-migration file kept as
-`configs/backups/config-YYYYMMDD.toml`. Every setting changed from inside
-the app persists in app-owned files instead — `configs/state.toml` for
+The app writes `configs/config.toml` and `configs/providers.toml` (one
+top-level `[name]` section per provider) once at first run and thereafter
+edits them only surgically — line by line, never rewritten as a whole:
+settings migrations (`otaku/settings/migrations.py`), idempotent shape
+changes applied at every launch (no version stamp; each migration detects
+its own applicability on the parsed file), and the model picker's
+provider-field saves. Every edit keeps the pre-edit file as
+`configs/backups/{config,providers}-YYYYMMDD.toml`, `-N` appended when
+the day already has one. Every setting changed from inside the app
+persists elsewhere and is rewritten wholesale: `configs/state.toml` for
 session-wide values (the resumed model and story, `/set` toggles) and
-`configs/models.toml` for per-model overrides. App-owned files are
-rewritten wholesale; user-owned files are edited surgically or not at all.
+`configs/models.toml` for per-model overrides.
 
 ## Tests
 
@@ -62,13 +64,15 @@ command surface: `scenarios/chat/` has one test module per
 screen a command opens tested beside it; `scenarios/cli/` has one module
 per top-level command (`test_main.py` — the bare invocation, driven in a
 pty — and `test_logs.py`); `test_app.py` covers the launch itself
-(encryption, backups, resume); the live smokes stay in `test_live.py`.
+(encryption, backups, resume); the live smokes live in `scenarios/live/`,
+one module per provider.
 In every test module — units included — the test classes come first
 (one class per command or group) and helper functions after them; within
 a class, tests follow the story's logical order. The `live`-marked
-smokes talk to a real local model (ollama, OTAKU_TEST_MODEL, default
-ollama/gemma3) and skip themselves when it is absent; deselect with
-`-m "not live"`.
+smokes talk to real providers and each skips itself when its server or
+api key is absent (`scripts/live-providers.sh` launches the local
+engines; the cloud smokes read OPENROUTER_API_KEY / NANOGPT_API_KEY and
+send one short prompt to a cheap model); deselect with `-m "not live"`.
 
 ## Temporary limitations
 
@@ -102,7 +106,7 @@ forbidden:
                  paths, formatting
     chat       → transfer, lore, store, providers, settings, logs, paths,
                  terminal, formatting
-    tui        → store, providers, settings, terminal, formatting
+    tui        → store, providers, settings, paths, terminal, formatting
     transfer   → store
     lore       → store, providers, settings, logs, formatting
     store      → crypto, logs, paths

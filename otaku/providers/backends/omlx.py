@@ -8,7 +8,7 @@ from urllib.parse import quote
 
 import httpx
 
-from otaku.providers.base import ManagedClient
+from otaku.providers.base import ManagedClient, ModelInfo
 from otaku.settings.config import Provider
 
 
@@ -27,23 +27,6 @@ class OmlxClient(ManagedClient):
         url = f"http://localhost:{port if isinstance(port, int) else 8000}/v1"
         return Provider(name=cls.kind, url=url, api_key=str(key) if key else "")
 
-    def get_loaded_models(self, timeout: float = 1.5) -> set[str]:
-        loaded: set[str] = set()
-        for entry in self._status_models(timeout):
-            model_id = entry.get("id")
-            if isinstance(model_id, str) and entry.get("loaded"):
-                loaded.add(model_id)
-        return loaded
-
-    def get_model_sizes(self, timeout: float = 5.0) -> dict[str, int]:
-        sizes: dict[str, int] = {}
-        for entry in self._status_models(timeout):
-            model_id = entry.get("id")
-            size = entry.get("actual_size") or entry.get("estimated_size")
-            if isinstance(model_id, str) and isinstance(size, int) and size > 0:
-                sizes[model_id] = size
-        return sizes
-
     def load_model(self, model: str) -> None:
         response = httpx.post(
             f"{self.provider.base_url}/v1/models/{quote(model, safe='')}/load",
@@ -60,11 +43,35 @@ class OmlxClient(ManagedClient):
         )
         response.raise_for_status()
 
+    def _list(self, timeout: float) -> list[ModelInfo]:
+        """One row per model, everything from the one /v1/models/status
+        pass: id, size, loaded state, and the context window. No status
+        surface — not an omlx server — falls to the plain names; a dead
+        server raises out of them."""
+        entries = self._status_models(timeout)
+        if not entries:
+            return [ModelInfo(name=name) for name in self._model_names(timeout)]
+        rows = []
+        for entry in entries:
+            model_id = entry.get("id")
+            if not isinstance(model_id, str):
+                continue
+            size = entry.get("actual_size") or entry.get("estimated_size")
+            context = entry.get("max_context_window")
+            rows.append(
+                ModelInfo(
+                    name=model_id,
+                    size=size if isinstance(size, int) and size > 0 else None,
+                    context=context if isinstance(context, int) and context > 0 else None,
+                    loaded=bool(entry.get("loaded")),
+                )
+            )
+        return sorted(rows, key=lambda row: row.name)
+
     def _apply_thinking(self, body: dict[str, object], think: str | None) -> None:
         # omlx ignores `reasoning_effort`; thinking is gated by the chat
         # template's `enable_thinking` flag. A level enables, "none"
-        # disables, None leaves the model's template default. Sent
-        # regardless of `supports_thinking`, so "off" always takes.
+        # disables, None leaves the model's template default.
         if think is None:
             return
         body["chat_template_kwargs"] = {"enable_thinking": think != "none"}

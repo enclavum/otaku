@@ -1,7 +1,11 @@
 """Model picker — opened by the bare `otaku` invocation and `/model`.
 
-A single full-screen Application listing every model from every configured
-provider, color-coded by load state. The user can:
+A single full-screen Application, split 1:1. The left side lists every
+model from every reachable provider — grouped under provider captions
+in the panel's order, bare model names, providers with no models
+absent — color-coded by load state. Only the local engines are waited
+for before the screen opens; each cloud catalog's rows arrive when it
+answers, the header naming what is still loading. The user can:
     - move the cursor (↑/↓/PgUp/PgDn/Home/End)
     - type-to-filter by pressing `/` first; Esc cancels the filter
     - toggle load state with `l`/`u` (a confirm dialog, then a spinner)
@@ -14,23 +18,46 @@ Loaded models render bold; not-loaded muted. The cursor restores to the
 last-used model on open. A backend without load/unload serves its models
 statically: they all show as loaded, Enter picks them directly, and the
 l/u keys (and their help entries) disappear on such a row.
+
+The right side is the provider panel: the app's backends in a fixed
+order — llama.cpp, koboldcpp, Ollama, oMLX, LM Studio, OpenRouter,
+NanoGPT — each
+a caption with its `URL:` and `API key:` fields, the key's value never
+displayed, the cloud catalogs' url fixed (shown dimmed, never
+walkable). Tab switches sides; ↑/↓ walk the fields; Enter edits the
+highlighted one in place (←/→ move the cursor, paste works, Enter
+saves); Delete on an api key, outside the editor, clears it. A saved
+url is written into config.toml surgically, a saved api key is sealed
+first (see `settings.sealed`), and a backend not configured yet gets
+its section written — that is how a cloud provider is added. Both take
+effect in the running session at once, and the provider's models are
+re-listed under the new configuration.
 """
 
+import contextlib
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import psutil
 from prompt_toolkit.application import Application
 from prompt_toolkit.application.current import get_app
+from prompt_toolkit.buffer import Buffer
+from prompt_toolkit.data_structures import Point
+from prompt_toolkit.document import Document
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import StyleAndTextTuples
-from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.key_binding import (
+    ConditionalKeyBindings,
+    KeyBindings,
+    merge_key_bindings,
+)
 from prompt_toolkit.keys import Keys
 from prompt_toolkit.layout.containers import (
     ConditionalContainer,
     HSplit,
+    ScrollOffsets,
     VSplit,
     Window,
 )
@@ -38,26 +65,58 @@ from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.dimension import D
 from prompt_toolkit.styles import Style
 
-from otaku.formatting import format_size, truncate
+from otaku.formatting import format_context, format_size, truncate
+from otaku.paths import Paths
 from otaku.providers.base import ManagedClient
+from otaku.providers.registry import BACKENDS
 from otaku.providers.registry import Registry as ProviderRegistry
+from otaku.settings import migrations, sealed
+from otaku.settings.config import Provider
+from otaku.settings.files import toml_scalar
 from otaku.terminal import latin_key
 from otaku.terminal.spinner import FRAMES as SPINNER_FRAMES
-from otaku.tui.screen import BASE_STYLE, ListScreen, bordered_box, term_cols, text_line
+from otaku.tui.screen import BASE_STYLE, ListScreen, bordered_box, text_line
 
 _STYLE = Style.from_dict(
     {
         **BASE_STYLE,
         "row.loaded": "bold fg:#000000 bg:#ffffff",
         "row.notloaded": "fg:#767676 bg:#ffffff",
+        "row.plain": "fg:#000000 bg:#ffffff",
         "row.selected.loaded": "bold fg:#000000 bg:#e4e4e4",
         "row.selected.notloaded": "bold fg:#767676 bg:#e4e4e4",
-        "separator": "fg:#bcbcbc bg:#ffffff",
+        "row.selected.plain": "fg:#000000 bg:#e4e4e4",
+        "header.detail": "nobold fg:#303030 bg:#ffffff",  # the light parts of the bold header
+        "row.selected": "bold fg:#000000 bg:#e4e4e4",
         "dialog.error": "bold fg:#c0392b bg:#ffffff",
+        "preview.title": "bold fg:#303030 bg:#ffffff",
+        "preview.body": "fg:#000000 bg:#ffffff",
+        "preview.muted": "fg:#767676 bg:#ffffff",  # the unloaded models' look
+        "field.cursor": "fg:#ffffff bg:#303030",
+        "tick": "fg:#2f9e44 bg:#ffffff",
+        "notice": "fg:#767676 bg:#ffffff",
     }
 )
 
 _ROW_HEAD_LIMIT = 100
+
+# The provider panel's rows: every backend the app speaks natively, in
+# this order, captioned the way its project spells itself. The config
+# section name is the kind on the left.
+_PANEL_PROVIDERS: list[tuple[str, str]] = [
+    ("llamacpp", "llama.cpp"),
+    ("koboldcpp", "koboldcpp"),
+    ("ollama", "Ollama"),
+    ("omlx", "oMLX"),
+    ("lmstudio", "LM Studio"),
+    ("openrouter", "OpenRouter"),
+    ("nanogpt", "NanoGPT"),
+]
+
+_FIELD_LABELS = {"url": "URL:", "api_key": "API key:"}
+
+_PANEL_ORDER = {kind: i for i, (kind, _) in enumerate(_PANEL_PROVIDERS)}
+_PANEL_CAPTIONS = dict(_PANEL_PROVIDERS)
 
 
 @dataclass
@@ -68,6 +127,8 @@ class ModelEntry:
     loaded: bool
     can_load_unload: bool = True  # False → served statically
     size_bytes: int | None = None  # None when the provider doesn't expose it
+    context: int | None = None  # the model's context window, when reported
+    cloud: bool = False  # a hosted catalog's row: normal weight, no size
 
 
 class ModelPicker(ListScreen):
@@ -76,12 +137,35 @@ class ModelPicker(ListScreen):
         providers: ProviderRegistry,
         entries: list[ModelEntry],
         initial_spec: str | None = None,
+        *,
+        paths: Paths,
+        fetch: list[str] | None = None,
+        connected: set[str] | None = None,
     ) -> None:
         super().__init__()
         self.providers = providers
+        self.paths = paths
+        # Names whose last listing succeeded — the panel's tick: the
+        # provider answered, and with the right key where one is needed.
+        self.connected: set[str] = set(connected or ())
         self.all: list[ModelEntry] = list(entries)
         self.filtered: list[ModelEntry] = list(entries)
         self.cursor: int = 0
+        self._initial_spec = initial_spec
+
+        # The provider panel (the right side): the walkable field list —
+        # two rows per backend, except the cloud catalogs whose url is
+        # fixed (their API key alone) — its cursor, the inline editor.
+        self.side: str = "models"
+        self.fields: list[tuple[str, str]] = [
+            (kind, attr)
+            for kind, _ in _PANEL_PROVIDERS
+            for attr in ("url", "api_key")
+            if attr != "url" or BACKENDS[kind].local
+        ]
+        self.field_cursor: int = 0
+        self.editing: bool = False
+        self.edit_buffer = Buffer(multiline=False)
 
         if initial_spec is not None:
             for i, entry in enumerate(self.all):
@@ -105,8 +189,14 @@ class ModelPicker(ListScreen):
         self.result: str | None = None  # full_spec on confirm, None on cancel
         self.app = self._build_app()
 
+        # The named providers (the cloud catalogs) answer after the screen
+        # is up: each fetch merges its rows in and leaves the pending set.
+        self.pending: set[str] = set(fetch or [])
+        for name in self.pending:
+            self._refresh_provider(name)
+
     def run(self) -> str | None:
-        if not self.all:
+        if not self.all and not self.pending:
             return None
         self.app.run()
         return self.result
@@ -114,17 +204,28 @@ class ModelPicker(ListScreen):
     # ---------- text content ----------
 
     def _table_width(self) -> int:
-        """Rendered width of the model table (row prefix + label + gap +
-        size), so the header can right-align to its right edge."""
+        """Natural width of the model table (row prefix + label + gap +
+        size + gap + context)."""
         if not self.filtered:
             return 0
-        max_label = max(len(truncate(e.full_spec, _ROW_HEAD_LIMIT)) for e in self.filtered)
+        max_label = max(len(truncate(e.model, _ROW_HEAD_LIMIT)) for e in self.filtered)
         max_size = max(len(format_size(e.size_bytes)) for e in self.filtered)
-        return 4 + max_label + 2 + max_size  # 4 = the "    " / "  > " row prefix
+        max_context = max(len(format_context(e.context)) for e in self.filtered)
+        return 4 + max_label + 2 + max_size + 2 + max_context  # 4 = the row prefix
+
+    def _row_width(self) -> int:
+        """Full width of a rendered model row: stretched so the selection
+        ends 5 empty columns before the provider panel's border (3 of
+        them the pane gap), never narrower than the table itself."""
+        return max(self._table_width(), self._pane_cols()[0] - 2)
 
     def _header_text(self) -> StyleAndTextTuples:
         n, total = len(self.filtered), len(self.all)
         left = f" Models ({n} of {total})" if n != total else f" Models ({n})"
+        loading = ""
+        if self.pending:
+            names = ", ".join(sorted(_PANEL_CAPTIONS.get(p, p) for p in self.pending))
+            loading = f" · loading {names}…"
         try:
             vm = psutil.virtual_memory()
             used_gb = vm.used / (1024**3)
@@ -133,60 +234,79 @@ class ModelPicker(ListScreen):
         except Exception:
             ram = ""
 
+        head: StyleAndTextTuples = [("class:header", left), ("class:header.detail", loading)]
         if not ram:
-            return [("class:header", left)]
+            return head
 
-        # Right-align RAM to the table's right edge (never past the screen).
-        width = min(self._table_width(), term_cols())
-        gap = " " * max(2, width - len(left) - len(ram))
-        return [("class:header", left + gap + ram)]
+        # Right-align RAM to the rows' right edge (never past the pane).
+        width = min(self._row_width(), self._pane_cols()[0])
+        gap = " " * max(2, width - len(left) - len(loading) - len(ram))
+        return [*head, ("class:header.detail", gap + ram)]
 
     def _items_text(self) -> StyleAndTextTuples:
         if not self.filtered:
             msg = "(no matches)" if self.query else "(no models)"
             return [("class:muted", "  " + msg)]
 
-        # Pre-compute label + size column widths so the size column right-
-        # aligns and the selection background extends across the full row.
-        labels = [truncate(e.full_spec, _ROW_HEAD_LIMIT) for e in self.filtered]
-        sizes = [format_size(e.size_bytes) for e in self.filtered]
-        max_label = max((len(s) for s in labels), default=0)
+        # Every row spans one stretched width: the model name on the
+        # left, the size and context columns flushed to the right edge.
+        labels = [truncate(e.model, _ROW_HEAD_LIMIT) for e in self.filtered]
+        # A catalog row has no size at all — not even the unknown dash.
+        sizes = ["" if e.cloud else format_size(e.size_bytes) for e in self.filtered]
+        contexts = [format_context(e.context) for e in self.filtered]
         max_size = max((len(s) for s in sizes), default=0)
-        rule = "    " + "─" * (max_label + 2 + max_size)
+        max_context = max((len(s) for s in contexts), default=0)
+        width = self._row_width()
 
         out: StyleAndTextTuples = []
         prev_provider: str | None = None
         for i, entry in enumerate(self.filtered):
-            if prev_provider is not None and entry.provider_name != prev_provider:
-                out.append(("class:separator", rule + "\n"))
-            prev_provider = entry.provider_name
-            label = labels[i].ljust(max_label)
-            size = sizes[i].rjust(max_size)
-            row = f"{label}  {size}"  # 2-space gap before size
-            selected = i == self.cursor
-            if selected:
+            if entry.provider_name != prev_provider:
+                # The provider panel's structure, mirrored: a caption, a
+                # blank, the rows — a provider with no models is absent.
+                if prev_provider is not None:
+                    out.append(("", "\n"))
+                caption = _PANEL_CAPTIONS.get(entry.provider_name, entry.provider_name)
+                out.append(("class:preview.title", "  " + caption + "\n"))
+                out.append(("", "\n"))
+                prev_provider = entry.provider_name
+            # The cursor shows only while this side has the focus — on the
+            # providers side the left list carries no selection at all.
+            selected = i == self.cursor and self.side == "models"
+            head = ("  > " if selected else "    ") + labels[i]
+            tail = f"{sizes[i].rjust(max_size)}  {contexts[i].rjust(max_context)}".rstrip()
+            gap = max(2, width - len(head) - len(tail))
+            if entry.cloud:
+                klass = "class:row.selected.plain" if selected else "class:row.plain"
+            elif selected:
                 klass = (
                     "class:row.selected.loaded" if entry.loaded else "class:row.selected.notloaded"
                 )
-                out.append((klass, f"  > {row}\n"))
             else:
                 klass = "class:row.loaded" if entry.loaded else "class:row.notloaded"
-                out.append((klass, f"    {row}\n"))
+            out.append((klass, head + " " * gap + tail + "\n"))
         return out
 
     def _cursor_line(self) -> int:
-        """Visual row of the cursor, counting the provider separators
-        rendered above it — keeps scroll-to-cursor aligned with the extra
-        lines `_items_text` inserts between provider groups."""
-        seps = sum(
-            1
-            for i in range(1, min(self.cursor + 1, len(self.filtered)))
-            if self.filtered[i].provider_name != self.filtered[i - 1].provider_name
-        )
-        return self.cursor + seps
+        """Visual row of the cursor, counting the caption and blank lines
+        `_items_text` renders around each provider group."""
+        line = 0
+        prev: str | None = None
+        for i, entry in enumerate(self.filtered[: self.cursor + 1]):
+            if entry.provider_name != prev:
+                line += 2 if prev is None else 3  # (group gap +) caption + blank
+                prev = entry.provider_name
+            if i == self.cursor:
+                return line
+            line += 1
+        return line
 
     def _help_text(self) -> StyleAndTextTuples:
-        if self.in_filter:
+        if self.editing:
+            txt = " editing — enter save · esc cancel"
+        elif self.side == "providers":
+            txt = " ↑/↓ navigate · enter edit · del clear key · tab models · esc back"
+        elif self.in_filter:
             txt = " type to filter · ↑/↓ navigate · enter select · esc clear filter"
         else:
             segments = ["↑/↓ navigate", "/ filter"]
@@ -194,7 +314,7 @@ class ModelPicker(ListScreen):
             # supports them.
             if self.filtered and self.filtered[self.cursor].can_load_unload:
                 segments += ["l load", "u unload"]
-            segments += ["enter select", "esc quit"]
+            segments += ["enter select", "tab providers", "esc quit"]
             txt = " " + " · ".join(segments)
         return [("class:help", txt)]
 
@@ -228,16 +348,89 @@ class ModelPicker(ListScreen):
             ("class:dialog.muted", f"  {spin}  please wait…"),
         ]
 
+    def _providers_text(self) -> StyleAndTextTuples:
+        """The provider panel: per backend a caption, a blank, the URL
+        field, the API key field (its value never displayed), a blank."""
+        out: StyleAndTextTuples = []
+        for kind, caption in _PANEL_PROVIDERS:
+            provider = self._provider(kind)
+            if kind in self.connected:
+                out.append(("class:preview.title", caption))
+                out.append(("class:tick", " ✓"))
+            else:
+                # Not connected: the name alone reads disabled.
+                out.append(("class:preview.muted", caption))
+            out.append(("", "\n"))
+            out.append(("class:preview.body", "\n"))
+            out.extend(self._field_line(kind, "url", provider.url))
+            out.extend(self._field_line(kind, "api_key", "(set)" if provider.api_key else ""))
+            out.append(("class:preview.body", "\n"))
+        return out
+
+    def _field_line(self, kind: str, attr: str, value: str) -> StyleAndTextTuples:
+        """One field row: the label outside the selection, the value cell
+        highlighted when the cursor is on it — labels padded to one
+        column so the input fields left-align. A field that is not
+        walkable (a cloud catalog's fixed url) renders dimmed."""
+        if (kind, attr) not in self.fields:
+            head = f"  {_FIELD_LABELS[attr]:<9}"
+            return [("class:preview.muted", head + value + "\n")]
+        selected = self.side == "providers" and self.fields[self.field_cursor] == (kind, attr)
+        head = f"{'> ' if selected else '  '}{_FIELD_LABELS[attr]:<9}"
+        if selected and self.editing:
+            return [("class:preview.body", head), *self._editor_segments(attr, len(head))]
+        if selected:
+            width = max(1, self._preview_inner_width() - len(head))
+            return [("class:preview.body", head), ("class:row.selected", value.ljust(width) + "\n")]
+        return [("class:preview.body", (head + value).rstrip() + "\n")]
+
+    def _editor_segments(self, attr: str, head_len: int) -> StyleAndTextTuples:
+        """The value cell while editing: the buffer's text — bullets for
+        an api key — with the character under the cursor as the caret."""
+        text = self.edit_buffer.text
+        pos = min(self.edit_buffer.cursor_position, len(text))
+        shown = "•" * len(text) if attr == "api_key" else text
+        width = max(len(shown) + 1, self._preview_inner_width() - head_len)
+        caret = shown[pos] if pos < len(shown) else " "
+        return [
+            ("class:row.selected", shown[:pos]),
+            ("class:field.cursor", caret),
+            ("class:row.selected", shown[pos + 1 :].ljust(width - pos - 1) + "\n"),
+        ]
+
+    def _panel_cursor_line(self) -> int:
+        """Visual row of the highlighted field — each provider block is 5
+        rows (caption, blank, url, api key, blank)."""
+        kind, attr = self.fields[self.field_cursor]
+        return _PANEL_ORDER[kind] * 5 + 2 + (0 if attr == "url" else 1)
+
     # ---------- behavior ----------
 
     def _rows_count(self) -> int:
-        return len(self.filtered)
+        return len(self.fields) if self.side == "providers" else len(self.filtered)
 
     def _cursor(self) -> int:
-        return self.cursor
+        return self.field_cursor if self.side == "providers" else self.cursor
 
     def _set_cursor(self, value: int) -> None:
-        self.cursor = value
+        if self.side == "providers":
+            self.field_cursor = value
+        else:
+            self.cursor = value
+
+    def _move_cursor(self, delta: int) -> None:
+        self.notice = ""
+        super()._move_cursor(delta)
+
+    def _type(self, data: str) -> None:
+        # Letters and the `/` filter belong to the models side.
+        if self.side == "models":
+            super()._type(data)
+
+    def _toggle_side(self) -> None:
+        self.notice = ""
+        self._clear_filter()
+        self.side = "providers" if self.side == "models" else "models"
 
     def _refilter(self) -> None:
         q = self.query.strip().lower()
@@ -274,7 +467,7 @@ class ModelPicker(ListScreen):
                 # model still loaded after an unload.
                 time.sleep(0.2)
                 # Refresh load state for this provider only.
-                fresh = client.get_loaded_models()
+                fresh = {m.name for m in client.models() if m.loaded}
                 for e in self.all:
                     if e.provider_name == entry.provider_name:
                         e.loaded = e.model in fresh
@@ -311,6 +504,9 @@ class ModelPicker(ListScreen):
         threading.Thread(target=animator, daemon=True).start()
 
     def _on_enter(self) -> None:
+        if self.side == "providers":
+            self._start_field_edit()
+            return
         if not self.filtered:
             return
         entry = self.filtered[self.cursor]
@@ -353,6 +549,10 @@ class ModelPicker(ListScreen):
         self.confirming_entry = None
 
     def _on_escape(self) -> None:
+        if self.side == "providers":
+            self.notice = ""
+            self.side = "models"
+            return
         if not self._clear_filter():
             get_app().exit()
 
@@ -362,6 +562,124 @@ class ModelPicker(ListScreen):
             self._request_load()
         elif key == "u":
             self._request_unload()
+
+    # ---------- provider field editing ----------
+
+    def _provider(self, name: str) -> Provider:
+        """The backend's current provider: the configured section when
+        there is one, its autoconfigured default otherwise."""
+        configured = {p.name: p for p in self.providers.configured()}
+        if name in configured:
+            return configured[name]
+        return BACKENDS[name].autoconfigure()
+
+    def _start_field_edit(self) -> None:
+        if not self.fields:
+            return
+        name, attr = self.fields[self.field_cursor]
+        self.notice = ""
+        self.editing = True
+        # The url edits in place; the api key always starts blank — its
+        # current value is never displayed, not even to edit.
+        prefill = self._provider(name).url if attr == "url" else ""
+        self.edit_buffer.document = Document(prefill, len(prefill))
+
+    def _finish_field_edit(self, *, save: bool) -> None:
+        self.editing = False
+        value = self.edit_buffer.text.strip()
+        self.edit_buffer.reset()
+        if not save:
+            self.notice = "(cancelled)"
+            return
+        if not value:
+            self.notice = "(empty — not saved)"
+            return
+        name, attr = self.fields[self.field_cursor]
+        provider = self._provider(name)
+        if attr == "url":
+            value = value.rstrip("/")
+            line = f"url = {toml_scalar(value)}"
+            updated = replace(provider, url=value)
+            self.notice = "url saved"
+        else:
+            try:
+                line = f"api_key = {toml_scalar(sealed.seal(self.paths, value))}"
+            except sealed.SealedError as e:
+                self.notice = f"save failed: {e}"
+                return
+            updated = replace(provider, api_key=value)  # saved silently — the (set) mark says it
+        # A backend not in providers.toml yet gets its section written
+        # first — this is how a cloud provider is added deliberately.
+        block = f"[{name}]\nurl = {toml_scalar(provider.url)}\n" + 'api_key = ""'
+        migrations.update_providers(
+            self.paths,
+            [migrations.ensure_section(name, block), migrations.set_key(name, attr, line)],
+        )
+        self.providers.update_provider(updated)
+        self._refresh_provider(name)
+
+    def _clear_field(self) -> None:
+        """Delete on an api key field, outside the editor: forget the
+        stored key — the config and the running session both."""
+        if self.side != "providers":
+            return
+        name, attr = self.fields[self.field_cursor]
+        if attr != "api_key":
+            return
+        provider = self._provider(name)
+        if not provider.api_key:
+            self.notice = "(no api key)"
+            return
+        migrations.update_providers(
+            self.paths, [migrations.set_key(name, "api_key", 'api_key = ""')]
+        )
+        self.providers.update_provider(replace(provider, api_key=""))
+        self._refresh_provider(name)
+        self.notice = "api key cleared"
+
+    def _refresh_provider(self, name: str) -> None:
+        """Re-list one provider after any of its settings changed, so the
+        models side follows the edit without a relaunch — a provider that
+        stopped answering simply loses its rows."""
+
+        def worker() -> None:
+            client = self.providers.get_client(name)
+            try:
+                fresh = client.models(timeout=5.0)
+                self.connected.add(name)
+            except Exception:
+                fresh = []  # the reread found nothing — honest emptiness
+                self.connected.discard(name)
+            can = isinstance(client, ManagedClient)
+            cloud = not client.local
+            entries = [e for e in self.all if e.provider_name != name]
+            for model in fresh:
+                entries.append(
+                    ModelEntry(
+                        full_spec=f"{name}/{model.name}",
+                        provider_name=name,
+                        model=model.name,
+                        loaded=model.loaded if can else True,
+                        can_load_unload=can,
+                        size_bytes=model.size,
+                        context=model.context,
+                        cloud=cloud,
+                    )
+                )
+            self.all = _ordered(entries)
+            self.pending.discard(name)
+            self._refilter()
+            # A remembered model whose rows just arrived gets the cursor,
+            # unless the user already moved it somewhere.
+            if self._initial_spec and self.cursor == 0:
+                for i, e in enumerate(self.filtered):
+                    if e.full_spec == self._initial_spec:
+                        self.cursor = i
+                        break
+            with contextlib.suppress(Exception):
+                self.app.invalidate()
+
+        threading.Thread(target=worker, daemon=True).start()
 
     # ---------- application wiring ----------
 
@@ -394,16 +712,76 @@ class ModelPicker(ListScreen):
 
         self._standard_keys(kb, when=idle)
 
-        @kb.add("c-c")
+        @kb.add("tab", filter=idle)
+        def _tab(event: Any) -> None:
+            self._toggle_side()
+
+        @kb.add("delete", filter=idle)
+        def _clear(event: Any) -> None:
+            self._clear_field()
+
+        # While a field is being edited, every binding above is suspended —
+        # keystrokes belong to the inline editor. Ctrl+C stays live.
+        editing = Condition(lambda: self.editing)
+        edit_kb = KeyBindings()
+
+        @edit_kb.add("enter", filter=editing)
+        def _save(event: Any) -> None:
+            self._finish_field_edit(save=True)
+
+        @edit_kb.add("escape", filter=editing, eager=True)
+        def _cancel(event: Any) -> None:
+            self._finish_field_edit(save=False)
+
+        @edit_kb.add("backspace", filter=editing)
+        def _erase(event: Any) -> None:
+            self.edit_buffer.delete_before_cursor(1)
+
+        @edit_kb.add("delete", filter=editing)
+        def _erase_ahead(event: Any) -> None:
+            self.edit_buffer.delete(1)
+
+        @edit_kb.add("left", filter=editing)
+        def _left(event: Any) -> None:
+            self.edit_buffer.cursor_position = max(0, self.edit_buffer.cursor_position - 1)
+
+        @edit_kb.add("right", filter=editing)
+        def _right(event: Any) -> None:
+            buffer = self.edit_buffer
+            buffer.cursor_position = min(len(buffer.text), buffer.cursor_position + 1)
+
+        @edit_kb.add("c-u", filter=editing)
+        def _wipe(event: Any) -> None:
+            self.edit_buffer.reset()
+
+        @edit_kb.add(Keys.BracketedPaste, filter=editing)
+        def _paste(event: Any) -> None:
+            # A url or an api key is one line — a pasted newline is noise.
+            self.edit_buffer.insert_text(event.data.replace("\r", "").replace("\n", ""))
+
+        @edit_kb.add(Keys.Any, filter=editing)
+        def _typed(event: Any) -> None:
+            if event.data and event.data.isprintable():
+                self.edit_buffer.insert_text(event.data)
+
+        always_kb = KeyBindings()
+
+        @always_kb.add("c-c")
         def _ctrlc(event: Any) -> None:
             self.result = None
             event.app.exit()
+
+        bindings = merge_key_bindings([ConditionalKeyBindings(kb, ~editing), edit_kb, always_kb])
 
         items_window = Window(
             content=self._make_items_control(cursor_line=self._cursor_line),
             wrap_lines=False,
             always_hide_cursor=True,
             dont_extend_width=True,
+            # Two lines of margin above the cursor: exactly the caption
+            # and its blank, so a group's header scrolls into view when
+            # the cursor stands on the group's first model.
+            scroll_offsets=ScrollOffsets(top=2),
             style="class:row.notloaded",
         )
 
@@ -425,9 +803,31 @@ class ModelPicker(ListScreen):
                 text_line(self._header_text, style="class:header"),
                 Window(height=1, char=" ", always_hide_cursor=True),
                 items_window,
+                text_line(
+                    lambda: [("class:notice", "  " + self.notice if self.notice else "")],
+                    filter=Condition(lambda: bool(self.notice)),
+                ),
                 Window(height=1, char=" ", always_hide_cursor=True),
                 bottom_row,
-            ]
+            ],
+            width=D(weight=1),
+        )
+
+        # Named _preview_window so the base class's measured pane width
+        # serves the field cells.
+        self._preview_window = Window(
+            FormattedTextControl(
+                text=self._providers_text,
+                get_cursor_position=lambda: Point(0, self._panel_cursor_line()),
+                show_cursor=False,
+            ),
+            wrap_lines=True,
+            always_hide_cursor=True,
+            scroll_offsets=ScrollOffsets(top=2),  # caption + blank, as on the left
+            style="class:preview.body",
+        )
+        provider_panel = bordered_box(
+            self._preview_window, width=D(weight=1), style="class:preview.body"
         )
 
         busy_dialog = ConditionalContainer(
@@ -455,20 +855,26 @@ class ModelPicker(ListScreen):
         )
 
         dialog = HSplit([busy_dialog, confirm_dialog])
-        return self._finish_app(left_pane, kb, _STYLE, floats=[dialog])
+        root = VSplit([left_pane, self._preview_gap(), provider_panel])
+        return self._finish_app(root, bindings, _STYLE, floats=[dialog])
 
 
-def pick(providers: ProviderRegistry, initial_spec: str | None = None) -> str | None:
+def pick(
+    providers: ProviderRegistry, initial_spec: str | None = None, *, paths: Paths
+) -> str | None:
     """Show the model picker. Returns the chosen 'provider/model' spec,
     None on cancel, or "" when no models are reachable at all — the
     caller opens without a model, and the printed diagnostic says how to
-    fix that. Loading errors stay inside the picker."""
-    rows, reachable = providers.inventory()
+    fix that. Loading errors stay inside the picker; the provider panel
+    on the right edits urls and api keys in place (hence `paths`). Only
+    the local engines are waited for: the screen opens on their answers,
+    and each cloud catalog's rows arrive when it responds."""
+    catalogs = [p.name for p in providers.configured() if not providers.get_client(p.name).local]
+    rows, reachable = providers.inventory(skip=set(catalogs))
     entries: list[ModelEntry] = []
-    # Sorted by provider name so the grouping is stable regardless of
-    # completion order.
-    for row in sorted(rows, key=lambda r: r.provider.name):
+    for row in rows:
         can = row.can_load_unload
+        cloud = not providers.get_client(row.provider.name).local
         for model in row.models:
             entries.append(
                 ModelEntry(
@@ -478,13 +884,32 @@ def pick(providers: ProviderRegistry, initial_spec: str | None = None) -> str | 
                     # A backend you can't load/unload serves its models
                     # statically, so they are ALWAYS available — shown
                     # loaded, and Enter picks them directly.
-                    loaded=model.is_loaded if can else True,
+                    loaded=model.loaded if can else True,
                     can_load_unload=can,
                     size_bytes=model.size,
+                    context=model.context,
+                    cloud=cloud,
                 )
             )
-    if not entries:
+    if not entries and not catalogs:
         print(providers.unreachable_help(reachable))
         print("Opening without a model — pick one with /model once a server is up.")
         return ""
-    return ModelPicker(providers, entries, initial_spec=initial_spec).run()
+    return ModelPicker(
+        providers,
+        _ordered(entries),
+        initial_spec=initial_spec,
+        paths=paths,
+        fetch=catalogs,
+        connected=reachable,
+    ).run()
+
+
+def _ordered(entries: list[ModelEntry]) -> list[ModelEntry]:
+    """Panel order: the six backends as the provider panel lists them,
+    any other configured provider after, by name; models keep their
+    client order within a provider."""
+    return sorted(
+        entries,
+        key=lambda e: (_PANEL_ORDER.get(e.provider_name, len(_PANEL_ORDER)), e.provider_name),
+    )

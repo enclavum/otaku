@@ -1,16 +1,22 @@
-"""The OpenAI-compatible client — and the base of every backend.
+"""The OpenAI-compatible client — and the base of every backend family.
 
 `OpenAIClient` speaks the OpenAI wire protocol: `/models` to list and
 streaming `/chat/completions` to generate. That is the whole protocol
-surface. The passive introspection on this class — loaded-state, sizes,
-the context window — is NOT OpenAI: those are questions any caller may ask
-any backend, answered honestly as "unknown" here and overridden by
-backends whose native APIs can do better. A provider that is just an
-OpenAI endpoint — local or remote — is served by this class as is.
+surface; a provider that is just an OpenAI endpoint is served by this
+class as is. `models()` is the one listing call, returning rich
+`ModelInfo` rows — the base fills only the names, and each backend
+family fills what its native APIs know in one pass.
 
-`ManagedClient` extends it with the ACTIONS: a backend that can load and
-unload models on demand. UI checks `isinstance(client, ManagedClient)` to
-know whether to offer them.
+The families, one subclass each:
+
+- `LocalSingleClient` — a single-model engine (llama.cpp, KoboldCpp):
+  the server fronts one model chosen at its own launch, or none.
+- `ManagedClient` — a local registry (Ollama, omlx, LM Studio) that can
+  load and unload models on demand; the UI offers those actions exactly
+  when a client `isinstance`-checks as one of these.
+- `CloudClient` — a hosted catalog (OpenRouter, NanoGPT): models are
+  listed with their context windows, never sized (no disk to weigh),
+  and every row is simply available.
 
 `chat_stream` yields typed chunks: `Thinking` deltas, `Text` deltas, and a
 final `Stats`. Bursty output is re-timed into an even flow when smoothing
@@ -31,6 +37,17 @@ import httpx
 from otaku.logs.requests import RequestLog
 from otaku.providers import streaming
 from otaku.settings.config import Provider
+
+
+@dataclass(frozen=True)
+class ModelInfo:
+    """One model as its provider reports it — the row every listing
+    returns, filled as far as the backend's native API can see."""
+
+    name: str
+    size: int | None = None  # bytes on disk; local backends only
+    context: int | None = None  # the model's context window, when reported
+    loaded: bool = False
 
 
 @dataclass(frozen=True)
@@ -70,6 +87,22 @@ class WireMessage(Protocol):
 
 class OpenAIClient:
     kind: ClassVar[str] = "openai"
+    # Whether the backend understands a request-level thinking knob —
+    # class knowledge, not configuration. The OpenAI protocol itself has
+    # `reasoning_effort`, so the base says yes; engines where thinking is
+    # baked into the model declare False, and /set think refuses levels.
+    supports_thinking: ClassVar[bool] = True
+    # Whether the backend runs on this machine. A cloud catalog says no,
+    # and launch-time introspection never waits on the internet for it.
+    local: ClassVar[bool] = True
+
+    @classmethod
+    def autoconfigure(cls) -> Provider:
+        """The backend's default provider section: what the provider panel
+        shows before a backend is configured, and what first-run writes
+        for the local engines. The plain OpenAI client has no natural
+        endpoint — a generic provider is configured by hand."""
+        return Provider(name=cls.kind, url="")
 
     def __init__(
         self,
@@ -85,7 +118,30 @@ class OpenAIClient:
 
     # ---------- the OpenAI protocol ----------
 
-    def list_models(self, timeout: float = 10.0) -> list[str]:
+    def models(self, timeout: float = 10.0) -> list[ModelInfo]:
+        """Every model this provider offers, as rich rows — the one
+        listing call, never overridden. Each backend shapes its own rows
+        in `_list`, the single override point; the base knows only the
+        plain /models names."""
+        return self._list(timeout)
+
+    def model(self, name: str, timeout: float = 10.0) -> ModelInfo | None:
+        """The listing row for one model — best effort: None when the
+        provider does not offer it or cannot be reached."""
+        try:
+            rows = self.models(timeout)
+        except Exception:
+            return None
+        for row in rows:
+            if row.name == name:
+                return row
+        return None
+
+    def _list(self, timeout: float) -> list[ModelInfo]:
+        return [ModelInfo(name=name) for name in self._model_names(timeout)]
+
+    def _model_names(self, timeout: float) -> list[str]:
+        """The bare /models listing, sorted — raises when unreachable."""
         response = httpx.get(
             f"{self.provider.url}/models", headers=self.provider.headers, timeout=timeout
         )
@@ -180,13 +236,14 @@ class OpenAIClient:
             generation_seconds=(end - first_token_at) if first_token_at is not None else None,
         )
 
+    def _apply_thinking(self, body: dict[str, object], think: str | None) -> None:
+        """Translate the think setting into the request. Base = OpenAI-style
+        `reasoning_effort`: a level enables it, "none" actively disables it,
+        None sends nothing and leaves the backend's default."""
+        if think and self.supports_thinking:
+            body["reasoning_effort"] = think
+
     # ---------- passive introspection (native APIs; defaults = unknown) ----------
-
-    def get_loaded_models(self, timeout: float = 1.5) -> set[str]:
-        return set()
-
-    def get_model_sizes(self, timeout: float = 5.0) -> dict[str, int]:
-        return {}
 
     def get_context_size(self, model: str) -> int | None:
         """The loaded context window for `model`, or None when the backend
@@ -198,13 +255,6 @@ class OpenAIClient:
         if result is not None:
             self._context_cache[model] = result
         return result
-
-    def _apply_thinking(self, body: dict[str, object], think: str | None) -> None:
-        """Translate the think setting into the request. Base = OpenAI-style
-        `reasoning_effort`: a level enables it, "none" actively disables it,
-        None sends nothing and leaves the backend's default."""
-        if think and self.provider.supports_thinking:
-            body["reasoning_effort"] = think
 
     def _fetch_context_size(self, model: str) -> int | None:
         return None
@@ -224,14 +274,92 @@ class OpenAIClient:
             pass
         return None
 
+    def _post_json(self, path: str, body: dict[str, Any], *, timeout: float) -> Any | None:
+        """POST `<base url>{path}` → parsed JSON; None on any error or
+        non-200. For best-effort native-API reads only — actions that must
+        fail loudly use httpx directly."""
+        try:
+            response = httpx.post(
+                f"{self.provider.base_url}{path}",
+                json=body,
+                headers=self.provider.headers,
+                timeout=timeout,
+            )
+            if response.status_code == 200:
+                return response.json()
+        except (httpx.HTTPError, OSError, ValueError):
+            pass
+        return None
+
+
+class LocalSingleClient(OpenAIClient):
+    """A single-model engine (llama.cpp, KoboldCpp): the server fronts the
+    one model it was launched with — or none — and never loads or unloads.
+    Every listed row is loaded and asked for its context window."""
+
+    def _list(self, timeout: float) -> list[ModelInfo]:
+        return [
+            ModelInfo(name=name, context=self.get_context_size(name), loaded=True)
+            for name in self._model_names(timeout)
+        ]
+
 
 class ManagedClient(OpenAIClient, ABC):
-    """A backend that can load and unload models on demand — the actions on
-    top of the passive base. UI offers load/unload exactly when a client is
-    one of these."""
+    """A local registry (Ollama, omlx, LM Studio) that can load and unload
+    models on demand — the actions on top of the passive base. UI offers
+    load/unload exactly when a client is one of these."""
 
     @abstractmethod
     def load_model(self, model: str) -> None: ...
 
     @abstractmethod
     def unload_model(self, model: str) -> None: ...
+
+
+class CloudClient(OpenAIClient):
+    """A hosted catalog (OpenRouter, NanoGPT): the standard listing with
+    each model's context window harvested when the catalog reports one.
+    Nothing is sized — there is no disk to weigh — and every row is simply
+    available, so all of them list as loaded. Cloud alone has an account
+    to bill, so `balance` lives here."""
+
+    local = False
+    # Extra query string for the catalog listing, when the service wants
+    # one to include the model details.
+    _MODELS_QUERY: ClassVar[str] = ""
+
+    def balance(self, timeout: float = 10.0) -> str | None:
+        """The account balance as the catalog reports it, rendered for a
+        human — None when the service will not say."""
+        return None
+
+    def _list(self, timeout: float) -> list[ModelInfo]:
+        response = httpx.get(
+            f"{self.provider.url}/models{self._MODELS_QUERY}",
+            headers=self.provider.headers,
+            timeout=timeout,
+        )
+        response.raise_for_status()
+        rows = []
+        for entry in response.json().get("data", []):
+            context = entry.get("context_length")
+            rows.append(
+                ModelInfo(
+                    name=str(entry["id"]),
+                    context=context if isinstance(context, int) and context > 0 else None,
+                    loaded=True,
+                )
+            )
+        return sorted(rows, key=lambda row: row.name)
+
+    def _fetch_context_size(self, model: str) -> int | None:
+        # The catalog is the one source — chat-time introspection reads
+        # the listed window (get_context_size caches the first hit).
+        try:
+            rows = self.models(timeout=5.0)
+        except Exception:
+            return None
+        for row in rows:
+            if row.name == model:
+                return row.context
+        return None

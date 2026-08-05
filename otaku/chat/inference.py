@@ -136,6 +136,7 @@ def _run_step(session: Session, store: Store, ooc: bool) -> None:
         out.write(NO_MODEL_HINT + "\n")
         return
     content: list[str] = []
+    held = ""  # a whitespace run the stream has not yet earned printing
     in_thinking = False
     final: Stats | None = None
     interrupted = False
@@ -172,8 +173,21 @@ def _run_step(session: Session, store: Store, ooc: bool) -> None:
                     if in_thinking:
                         out.write(RESET + "\n")
                         in_thinking = False
-                    typesetter.feed(chunk.text)
-                    content.append(chunk.text)
+                    # Some models pad the reply with blank lines. The text
+                    # starts at its first real character, and a trailing
+                    # whitespace run is held back — printed only when more
+                    # text follows it, dropped at the stream's end. What
+                    # is recorded is exactly what was shown.
+                    text = held + chunk.text
+                    held = ""
+                    if not content:
+                        text = text.lstrip()
+                    stripped = text.rstrip()
+                    held, text = text[len(stripped) :], stripped
+                    if not text:
+                        continue
+                    typesetter.feed(text)
+                    content.append(text)
                 elif isinstance(chunk, Stats):
                     final = chunk
         except KeyboardInterrupt:
@@ -189,8 +203,9 @@ def _run_step(session: Session, store: Store, ooc: bool) -> None:
     if error is not None:
         # What streamed is already on the screen, so the story keeps it —
         # exactly as a Ctrl+C does. The record below runs on whatever
-        # arrived; only the stats are meaningless now.
-        out.write(f"\n[error: {error}]\n")
+        # arrived; only the stats are meaningless now. A failure before
+        # any output starts at the margin — no stray blank above it.
+        out.write(("\n" if content else "") + f"[error: {error}]\n")
     else:
         out.write("\n")
 

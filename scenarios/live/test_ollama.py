@@ -1,11 +1,11 @@
-"""Smokes against a real model — the plumbing only a live server proves.
+"""Ollama smokes — the plumbing only a live server proves.
 
-Part of `make scenarios`, marked `live` (deselect with `-m "not live"`);
-they skip themselves when ollama isn't listening or the model isn't
-pulled. The spec comes from OTAKU_TEST_MODEL, default ollama/gemma3. A
-small model's output is not deterministic, so these assert that otaku
-behaves — streams, persists, survives an extraction attempt — not that
-the model extracts well.
+Marked `live` (deselect with `-m "not live"`); they skip themselves when
+ollama isn't listening or the model isn't pulled. The server is assumed
+to be running with its model available; the spec comes from
+OTAKU_TEST_MODEL, default ollama/gemma3. A small model's output is not
+deterministic, so these assert that otaku behaves — streams, persists,
+survives an extraction attempt — not that the model answers well.
 """
 
 import os
@@ -14,18 +14,16 @@ from pathlib import Path
 import httpx
 import pytest
 
-from otaku.paths import Paths
-from otaku.settings import config as config_mod
-from otaku.settings.files import write_atomic
-from scenarios.support.harness import launch
+from otaku.settings.config import Provider
+from scenarios.support.live import live_app as build_app
 
 SPEC = os.environ.get("OTAKU_TEST_MODEL", "ollama/gemma3")
-OLLAMA_URL = "http://127.0.0.1:11434/v1"
+URL = "http://127.0.0.1:11434/v1"
 
 pytestmark = pytest.mark.live
 
 
-class TestLive:
+class TestOllama:
     def test_a_turn_streams_and_persists(self, live_app) -> None:  # type: ignore[no-untyped-def]
         live_app.play("Ответь одним словом: да или нет?")
         chain = live_app.store.stories.get_messages(live_app.session.story_id)
@@ -50,16 +48,11 @@ class TestLive:
 def live_app(tmp_path: Path, server):  # type: ignore[no-untyped-def]
     provider_name, _, model = SPEC.partition("/")
     try:
-        models = httpx.get(f"{OLLAMA_URL}/models", timeout=3.0).json()["data"]
+        models = httpx.get(f"{URL}/models", timeout=3.0).json()["data"]
     except Exception:
-        pytest.skip(f"no server at {OLLAMA_URL}")
+        pytest.skip(f"no server at {URL}")
     if not any(model in m["id"] for m in models):
         pytest.skip(f"{model!r} is not pulled (ollama pull {model})")
-    root = tmp_path / "state"
-    paths = Paths.resolve(root)
-    paths.ensure_tree()
-    providers = {provider_name: config_mod.Provider(name=provider_name, url=OLLAMA_URL)}
-    write_atomic(paths.config_file, config_mod.Config(providers=providers).to_toml())
-    app = launch(root, server, spec=SPEC)
+    app = build_app(tmp_path, server, Provider(name=provider_name, url=URL), model)
     yield app
     app.close()

@@ -89,6 +89,6 @@ python_version = "3.11"  # type-check against the floor, not the interpreter in 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
-    "live: talks to a real local model (skips itself when ollama or the model is absent)",
+    "live: talks to a real provider (each smoke skips itself when its server or api key is absent)",
 ]
 addopts = "-q"

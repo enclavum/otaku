@@ -53,6 +53,18 @@ def format_size(size: int | None) -> str:
     return f"{size / 1024**3:.1f} GB"
 
 
+def format_context(tokens: int | None) -> str:
+    """A token count as a compact label ('8K', '128K', '1M') for exact
+    multiples of 1024, thousands-separated otherwise; "" when unknown."""
+    if tokens is None or tokens <= 0:
+        return ""
+    if tokens >= 1_048_576 and tokens % 1_048_576 == 0:
+        return f"{tokens // 1_048_576}M"
+    if tokens >= 1024 and tokens % 1024 == 0:
+        return f"{tokens // 1024}K"
+    return f"{tokens:,}"
+
+
 def human_age(t: datetime) -> str:
     """How long ago an aware timestamp was, the way a human says it: "just
     now" under a minute, then the largest fitting unit ("7m ago", "3h ago",
@@ -65,15 +77,3 @@ def human_age(t: datetime) -> str:
     if sec < 86400:
         return f"{int(sec // 3600)}h ago"
     return f"{int(sec // 86400)}d ago"
-
-
-def format_context(tokens: int | None) -> str:
-    """A token count as a compact label ('8K', '128K', '1M') for exact
-    multiples of 1024, thousands-separated otherwise; "" when unknown."""
-    if tokens is None or tokens <= 0:
-        return ""
-    if tokens >= 1_048_576 and tokens % 1_048_576 == 0:
-        return f"{tokens // 1_048_576}M"
-    if tokens >= 1024 and tokens % 1024 == 0:
-        return f"{tokens // 1024}K"
-    return f"{tokens:,}"

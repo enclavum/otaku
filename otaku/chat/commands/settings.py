@@ -14,6 +14,7 @@ from otaku.chat.session import (
 )
 from otaku.settings import models as models_file
 from otaku.store import Store
+from otaku.terminal import BOLD, RESET
 
 
 def cmd_model(session: Session, store: Store, args: list[str]) -> None:
@@ -66,7 +67,7 @@ def _switch_model(session: Session, provider_name: str, model: str) -> None:
     session.model = model
     session.reload_params()
     session.save_state()
-    print(f"Switched to {session.full_model_name}.")
+    print(f"Switched to {BOLD}{session.full_model_name}{RESET}.")
 
 
 def _set_think(session: Session, rest: list[str]) -> None:
@@ -85,7 +86,8 @@ def _set_think(session: Session, rest: list[str]) -> None:
     if session.provider is None:
         print(NO_MODEL_HINT)
         return
-    if value != "none" and not session.provider.supports_thinking:
+    client = session.providers.get_client(session.provider.name)
+    if value != "none" and not client.supports_thinking:
         print(f"Thinking is not supported by provider {session.provider.name!r}.")
         return
     session.think = value

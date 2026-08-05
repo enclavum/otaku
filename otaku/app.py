@@ -10,6 +10,7 @@ way the app does).
 """
 
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 
 from otaku import crypto
@@ -24,7 +25,7 @@ from otaku.lore.worker import LoreWorker
 from otaku.paths import Paths
 from otaku.providers.registry import Registry, autoconfigure_providers
 from otaku.settings import config as config_mod
-from otaku.settings import migrations
+from otaku.settings import migrations, sealed
 from otaku.settings import prompts as prompts_file
 from otaku.settings import state as state_mod
 from otaku.settings.files import write_atomic
@@ -65,6 +66,15 @@ class App:
         prompts_file.write_stub(self.paths)
         cipher = unlock_cipher(cfg, self.paths)
         state = state_mod.load(self.paths)
+        # Sealed api keys open here, once, into the session's providers;
+        # one that will not open is reported and its provider runs keyless.
+        providers, key_warnings = sealed.resolve_api_keys(self.paths, cfg.providers)
+        for line in key_warnings:
+            print(line)
+        # ONE providers dict for the whole session: the config the session
+        # reads and the registry the picker's panel updates share it, so a
+        # provider added or edited there is visible everywhere at once.
+        cfg = replace(cfg, providers=providers)
         registry = Registry(
             cfg.providers, request_log=RequestLog(self.paths, cipher), smooth=cfg.smooth_streaming
         )
@@ -74,8 +84,10 @@ class App:
         # passphrase prompt never lands after the model is chosen. A
         # remembered model whose provider is still configured skips it.
         remembered = state.model if cfg.serves(state.model) else None
-        spec = remembered or (pick(registry) if pick else model_picker.pick(registry))
-        if spec is None:
+        model_spec = remembered or (
+            pick(registry) if pick else model_picker.pick(registry, paths=self.paths)
+        )
+        if model_spec is None:
             raise CancelledError
 
         fresh = not self.paths.database_file.exists()
@@ -94,7 +106,9 @@ class App:
         )
         if tui is None:
             tui = TUI(
-                pick_model=lambda current: model_picker.pick(registry, initial_spec=current),
+                pick_model=lambda current: model_picker.pick(
+                    registry, initial_spec=current, paths=self.paths
+                ),
                 pick_story=lambda store, rows, current: story_picker.pick(
                     store,
                     rows,
@@ -109,7 +123,7 @@ class App:
                 config=cfg,
                 paths=self.paths,
                 providers=registry,
-                spec=spec,
+                model_spec=model_spec,
                 state=state,
                 store=self.store,
                 tui=tui,
@@ -144,17 +158,19 @@ class App:
 
 
 def load_config(paths: Paths) -> config_mod.Config:
-    """The config — written with the autoconfigured provider sections
-    first when this is a first run, migrated to the current shape when it
-    is from an older build. Raises `ConfigError` when it does not
-    parse."""
+    """The config — written, with providers.toml beside it, when this is
+    a first run; migrated to the current shape when it is from an older
+    build (the table over config.toml, then the provider split). Raises
+    `ConfigError` when a file does not parse."""
     paths.ensure_tree()
     if not paths.config_file.exists():
         first_run = config_mod.Config(providers=autoconfigure_providers())
         write_atomic(paths.config_file, first_run.to_toml())
+        if not paths.providers_file.exists():
+            write_atomic(paths.providers_file, config_mod.providers_toml(first_run.providers))
         print(f"Created {pretty_path(paths.config_file)}")
     else:
-        migrations.migrate(paths)
+        migrations.migrate(paths, autoconfigure_providers())
     return config_mod.load(paths)
 
 

@@ -12,6 +12,7 @@ worker being started bare, without the REPL's status wiring.
 
 import dataclasses
 import os
+import secrets
 import subprocess
 import sys
 from pathlib import Path
@@ -71,6 +72,7 @@ def set_config(root: Path, **fields: object) -> None:
     paths = Paths.resolve(root)
     cfg = dataclasses.replace(_load_or_default(paths), **fields)  # type: ignore[arg-type]
     write_atomic(paths.config_file, cfg.to_toml())
+    write_atomic(paths.providers_file, config_mod.providers_toml(cfg.providers))
 
 
 def set_config_provider(
@@ -79,23 +81,20 @@ def set_config_provider(
     *,
     name: str = PROVIDER,
     keep_alive: str = "",
-    supports_thinking: bool | None = None,
 ) -> None:
     """Point a provider at the scripted server's port — set into whatever
     config is there. `name` picks the client the registry builds (a
     provider named "ollama" or "omlx" gets its managed backend, the
-    default "test" the generic one). `supports_thinking` keeps its
-    current value unless specified; a fresh provider supports thinking,
-    so every knob is exercisable."""
+    default "test" the generic one)."""
     paths = Paths.resolve(root)
     cfg = _load_or_default(paths)
-    existing = cfg.providers.get(name)
-    if supports_thinking is None:
-        supports_thinking = existing.supports_thinking if existing else True
-    cfg.providers[name] = config_mod.Provider(
-        name=name, url=server.url, keep_alive=keep_alive, supports_thinking=supports_thinking
-    )
+    cfg.providers[name] = config_mod.Provider(name=name, url=server.url, keep_alive=keep_alive)
     write_atomic(paths.config_file, cfg.to_toml())
+    write_atomic(paths.providers_file, config_mod.providers_toml(cfg.providers))
+    # The sealing key as a file, pre-seeded: a scenario that saves an api
+    # key must never reach the developer's real OS keychain.
+    if not paths.config_key_file.exists():
+        paths.config_key_file.write_bytes(secrets.token_bytes(32))
 
 
 def _load_or_default(paths: Paths) -> config_mod.Config:
@@ -108,9 +107,16 @@ def _load_or_default(paths: Paths) -> config_mod.Config:
     paths.ensure_tree()
     if paths.config_file.exists():
         return config_mod.load(paths)
-    placeholder = config_mod.Provider(
-        name=PROVIDER, url="http://127.0.0.1:9/v1", supports_thinking=True
-    )
+    placeholder = config_mod.Provider(name=PROVIDER, url="http://127.0.0.1:9/v1")
+    # The local backends, pre-seeded on the same dead port: the launch's
+    # ensure_providers finds them present and never writes sections that
+    # point at the developer machine's real engines.
+    locals_dead = {
+        kind: config_mod.Provider(name=kind, url="http://127.0.0.1:9/v1")
+        for kind in ("llamacpp", "koboldcpp", "ollama", "omlx", "lmstudio")
+    }
     return config_mod.Config(
-        providers={PROVIDER: placeholder}, smooth_streaming=False, seed_sample=False
+        providers={PROVIDER: placeholder, **locals_dead},
+        smooth_streaming=False,
+        seed_sample=False,
     )

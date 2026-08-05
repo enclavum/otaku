@@ -4,7 +4,7 @@ counts the tokens spent, /info dumps what otaku knows."""
 import re
 
 from scenarios.support import server as scripted
-from scenarios.support.harness import App, launch, set_config
+from scenarios.support.harness import App, launch, set_config, set_config_provider
 
 
 class TestContext:
@@ -88,6 +88,36 @@ class TestUsage:
         app.play("/usage all")
         everything = capsys.readouterr().out
         assert sum(numbers(everything)) > sum(numbers(story_only))
+
+
+class TestBalance:
+    def test_openrouter_credits_print_in_dollars(self, server, tmp_path, capsys) -> None:
+        server.credits = (20.0, 7.66)
+        set_config_provider(tmp_path / "state", server, name="openrouter")
+        app = launch(tmp_path / "state", server, spec="openrouter/test-model")
+        try:
+            app.play("/balance")
+            out = capsys.readouterr().out
+            assert "openrouter" in out
+            assert "$12.34" in out  # purchased minus spent
+        finally:
+            app.close()
+
+    def test_nanogpt_reports_dollars_rounded_and_no_crypto(self, server, tmp_path, capsys) -> None:
+        server.balances = {"usd_balance": "5.1043327", "nano_balance": "0.42"}
+        set_config_provider(tmp_path / "state", server, name="nanogpt")
+        app = launch(tmp_path / "state", server, spec="nanogpt/test-model")
+        try:
+            app.play("/balance")
+            out = capsys.readouterr().out
+            assert "$5.10" in out
+            assert "0.42" not in out  # the crypto balance stays out of it
+        finally:
+            app.close()
+
+    def test_no_reporting_provider_says_so(self, app: App, capsys) -> None:
+        app.play("/balance")
+        assert "No provider reports a balance." in capsys.readouterr().out
 
 
 class TestInfo:

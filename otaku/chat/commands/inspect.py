@@ -1,10 +1,12 @@
-"""Inspection commands: /context, /usage, and /info."""
+"""Inspection commands: /context, /usage, /balance, and /info."""
 
 import click
 
 from otaku.chat.session import NO_MODEL_HINT, Session
-from otaku.formatting import flatten, format_size, pretty_path, truncate
+from otaku.formatting import flatten, format_context, format_size, pretty_path, truncate
 from otaku.lore import assembler
+from otaku.providers.base import CloudClient
+from otaku.settings.config import Provider
 from otaku.store import Store
 from otaku.terminal import DIM, RESET
 
@@ -59,6 +61,30 @@ def cmd_usage(session: Session, store: Store, args: list[str]) -> None:
     )
 
 
+def cmd_balance(session: Session, store: Store, args: list[str]) -> None:
+    """Account balance per configured provider, for the backends that
+    report one — the cloud catalogs; a local engine has nothing to bill.
+    Queried concurrently, an unreachable provider simply skipped."""
+
+    def probe(name: str, provider: Provider) -> tuple[str, str] | None:
+        client = session.providers.get_client(name)
+        if not isinstance(client, CloudClient):
+            return None  # a local engine has no account to ask
+        try:
+            value = client.balance(timeout=5.0)
+        except Exception:
+            return None
+        return (name, value) if value else None
+
+    rows = [row for row in session.providers.map(probe) if row]
+    if not rows:
+        print("No provider reports a balance.")
+        return
+    width = max(len(name) for name, _ in rows)
+    for name, value in rows:
+        print(f"{name:<{width}}  {value}")
+
+
 def cmd_info(session: Session, store: Store, args: list[str]) -> None:
     """Best-effort dump of everything otaku knows about the active model and
     session. Network-backed fields are silently skipped when the provider
@@ -76,29 +102,21 @@ def cmd_info(session: Session, store: Store, args: list[str]) -> None:
     if provider.api_key:
         print("Auth:     api_key configured")
 
-    # Load state — only meaningful for backends that expose it.
-    if client.kind != "openai":
-        try:
-            loaded: bool | None = session.model in client.get_loaded_models()
-        except Exception:
-            loaded = None
-        if loaded is not None:
-            print(f"Loaded:   {'yes' if loaded else 'no'}")
+    # The model's own row — load state only where loading is a real state
+    # (a plain endpoint or a cloud catalog serves everything statically).
+    row = client.model(session.model)
+    if row is not None and client.local and client.kind != "openai":
+        print(f"Loaded:   {'yes' if row.loaded else 'no'}")
 
-    context = client.get_context_size(session.model)
-    if context is not None:
+    if row is not None and row.size:
+        print(f"Size:     {format_size(row.size)}")
+
+    context = format_context(client.get_context_size(session.model))
+    if context:
         print(f"Context:  {context}")
 
-    try:
-        size = client.get_model_sizes().get(session.model)
-    except Exception:
-        size = None
-    if size is not None and size > 0:
-        print(f"Size:     {format_size(size)}")
-
-    if provider.supports_thinking:
-        think = session.think if session.think else "default"
-        print(f"Thinking: supported, currently {think}")
+    if client.supports_thinking:
+        print(f"Thinking: {session.think if session.think else 'default'}")
     else:
         print("Thinking: not supported")
 

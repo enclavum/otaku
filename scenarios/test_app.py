@@ -7,13 +7,17 @@ principle, not a stub: sealed bytes on disk, a wrong key refused, a
 missing keystore refused BEFORE the ceremony could mint over it."""
 
 import base64
+import secrets
 
 import pytest
 
 from otaku import crypto
 from otaku.app import load_config
+from otaku.paths import Paths
 from otaku.settings import config as config_mod
+from otaku.settings import sealed
 from otaku.store import is_encrypted
+from otaku.terminal import BOLD, RESET
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch, run_otaku, set_config
 from scenarios.support.server import ModelServer
@@ -107,6 +111,15 @@ class TestBackups:
 
 
 class TestConfigMigration:
+    def test_a_first_run_writes_both_config_files(self, tmp_path) -> None:
+        paths = Paths.resolve(tmp_path / "state")
+        cfg = load_config(paths)
+        assert "[providers." not in paths.config_file.read_text()
+        providers = paths.providers_file.read_text()
+        for section in ("[llamacpp]", "[koboldcpp]", "[ollama]", "[omlx]", "[lmstudio]"):
+            assert section in providers
+        assert set(cfg.providers) == {"llamacpp", "koboldcpp", "ollama", "omlx", "lmstudio"}
+
     def test_an_old_config_gains_the_new_section_and_a_backup(
         self, server: ModelServer, tmp_path
     ) -> None:
@@ -143,6 +156,43 @@ class TestConfigMigration:
         load_config(app.paths)
         assert app.paths.config_file.read_text() == before
         assert not app.paths.config_backups_dir.exists()
+
+    def test_an_old_configs_providers_split_into_their_own_file(self, tmp_path) -> None:
+        """The cross-file migration: [providers.*] sections leave for
+        providers.toml — as they are, headers unprefixed, the retired
+        thinking knob dropped, a plain api key sealed on the way — and
+        the trigger, spent, never fires twice."""
+        paths = Paths.resolve(tmp_path / "state")
+        paths.ensure_tree()
+        paths.config_key_file.write_bytes(secrets.token_bytes(32))
+        paths.config_file.write_text(
+            "# the box in the closet\n"
+            "[providers.mine]\n"
+            'url = "http://localhost:9/v1"\n'
+            'api_key = "plain-secret"\n'
+            "supports_thinking = true\n"
+            "\n"
+            "[settings]\n"
+            "show_banner = false\n"
+        )
+        cfg = load_config(paths)
+        assert cfg.providers["mine"].url == "http://localhost:9/v1"
+        assert sealed.unseal(paths, cfg.providers["mine"].api_key) == "plain-secret"
+        moved = paths.providers_file.read_text()
+        assert "# the box in the closet\n[mine]\n" in moved
+        assert "supports_thinking" not in moved
+        assert "plain-secret" not in moved  # sealed on the way over
+        # The backends this old config never knew arrived alongside.
+        assert "[llamacpp]" in moved
+        assert "[lmstudio]" in moved
+        conf = paths.config_file.read_text()
+        assert "[providers.mine]" not in conf
+        assert "show_banner = false" in conf
+        # The pre-move config waits in backups; a second launch re-splits
+        # nothing and loads the same providers.
+        assert any(p.name.startswith("config-") for p in paths.config_backups_dir.iterdir())
+        again = load_config(paths)
+        assert again.providers["mine"].api_key == cfg.providers["mine"].api_key
 
 
 class TestFirstLaunch:
@@ -199,7 +249,7 @@ class TestFirstLaunch:
         app = launch(tmp_path / "state", server, spec="")
         try:
             app.play("/model test/test-model")
-            assert "Switched to test/test-model." in capsys.readouterr().out
+            assert f"Switched to {BOLD}test/test-model{RESET}." in capsys.readouterr().out
             app.play("I climb toward the voice.")
             assert app.session.messages[-1].body == scripted.CHAT_REPLY
         finally:

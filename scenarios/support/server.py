@@ -44,6 +44,9 @@ class ModelServer:
         self.managed = managed
         self.loaded: set[str] = set()
         self.sizes: dict[str, int] = {}  # reported bytes per model; absent → 1 MB
+        self.contexts: dict[str, int] = {}  # context per model; absent → 8192
+        self.credits: tuple[float, float] | None = None  # openrouter (total, used); None → 404
+        self.balances: dict[str, Any] = {}  # nanogpt check-balance payload; empty → 404
         self.chunk_delay = 0.0
         self.chunk_size: int | None = None  # stream in pieces this long; None → thirds
         self.fail_after: int | None = None  # abort the stream after N content chunks
@@ -56,14 +59,29 @@ class ModelServer:
                 pass  # quiet — test output belongs to the tests
 
             def do_GET(self) -> None:
-                path = self.path.rstrip("/")
+                path = self.path.split("?", 1)[0].rstrip("/")
                 if path.endswith("/models"):
-                    self._json({"data": [{"id": name} for name in outer.models]})
+                    # `context_length` rides along when a test sets it —
+                    # the cloud catalogs report it there.
+                    rows: list[dict[str, Any]] = []
+                    for name in outer.models:
+                        entry: dict[str, Any] = {"id": name}
+                        if name in outer.contexts:
+                            entry["context_length"] = outer.contexts[name]
+                        rows.append(entry)
+                    self._json({"data": rows})
+                elif path.endswith("/credits") and outer.credits is not None:
+                    total, used = outer.credits
+                    self._json({"data": {"total_credits": total, "total_usage": used}})
                 elif outer.managed and path.endswith("/api/ps"):
                     self._json(
                         {
                             "models": [
-                                {"name": name, "size": outer.sizes.get(name, 1_000_000)}
+                                {
+                                    "name": name,
+                                    "size": outer.sizes.get(name, 1_000_000),
+                                    "context_length": outer.contexts.get(name, 8192),
+                                }
                                 for name in sorted(outer.loaded)
                             ]
                         }
@@ -93,6 +111,13 @@ class ModelServer:
                 length = int(self.headers.get("Content-Length", "0"))
                 body = json.loads(self.rfile.read(length) or b"{}")
                 outer.requests.append(body)
+                if outer.balances and self.path.rstrip("/").endswith("/check-balance"):
+                    self._json(outer.balances)
+                    return
+                if outer.managed and self.path.rstrip("/").endswith("/api/show"):
+                    context = outer.contexts.get(str(body.get("model")), 8192)
+                    self._json({"model_info": {"test.context_length": context}})
+                    return
                 if outer.managed and self.path.rstrip("/").endswith("/api/generate"):
                     # Ollama's load door: an empty prompt with a keep_alive
                     # loads the model; keep_alive 0 unloads it.

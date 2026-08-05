@@ -18,11 +18,19 @@ blank is already on screen, and the ledger suppresses the loop's own.
 import sys
 from typing import Any, TextIO, cast
 
+from prompt_toolkit.formatted_text import FormattedText
+
 from otaku import __version__
 from otaku.chat.commands import dispatch
 from otaku.chat.commands.lore import build_job
 from otaku.chat.inference import run_inference
-from otaku.chat.prompt import PLACEHOLDER, Carry, LineAssembler, build_prompt
+from otaku.chat.prompt import (
+    CLOUD_PLACEHOLDER,
+    PLACEHOLDER,
+    Carry,
+    LineAssembler,
+    build_prompt,
+)
 from otaku.chat.session import RESUME_TURNS, Session
 from otaku.formatting import flatten, pretty_path, truncate
 from otaku.logs.errors import ErrorLog
@@ -109,7 +117,7 @@ def run(session: Session, store: Store) -> None:
 
     while not session.should_quit:
         prefix = PROMPT_CONTINUATION if assembler.in_block else PROMPT_PREFIX
-        placeholder = None if assembler.in_block else PLACEHOLDER
+        placeholder = None if assembler.in_block else _placeholder(session)
         try:
             line = prompt_session.prompt(prefix, placeholder=placeholder, default=carry.take_text())
         except EOFError:
@@ -225,23 +233,36 @@ def _rows_on_screen(line: str, prefix: str) -> int:
     return measure(prefix + line + "\n", terminal_width())
 
 
+def _placeholder(session: Session) -> FormattedText:
+    """The idle prompt's hint — the cloud wording when the story is
+    played against a hosted catalog, so every turn quietly says the text
+    leaves the machine."""
+    if session.provider is not None:
+        client = session.providers.get_client(session.provider.name)
+        if not client.local:
+            return CLOUD_PLACEHOLDER
+    return PLACEHOLDER
+
+
 def _banner(session: Session, store: Store) -> str:
     """The session header. Best-effort: a provider that can't report its
     context window just leaves that fact out — the banner never blocks or
-    fails a launch."""
+    fails a launch. A cloud catalog is never asked at all: its answer
+    lives across the internet, and a launch does not wait for that."""
     context = None
     backend = ""
     if session.provider is not None:
         client = session.providers.get_client(session.provider.name)
         backend = client.kind
-        try:
-            context = client.get_context_size(session.model)
-        except Exception:
-            context = None
+        if client.local:
+            try:
+                context = client.get_context_size(session.model)
+            except Exception:
+                context = None
     story = flatten(truncate(session.story_label(store), 40))
     return banner.render(
         __version__,
-        session.full_model_name or "(no model)",
+        session.model or "(no model)",
         backend=backend,
         context=context,
         story=story,

@@ -136,25 +136,25 @@ class Session:
         config: Config,
         paths: Paths,
         providers: ProviderRegistry,
-        spec: str,
+        model_spec: str,
         state: state_file.AppState,
         store: Store,
         tui: TUI | None = None,
         worker: LoreWorker,
     ) -> Self:
-        """The session for a launch on `spec` ("provider/model" — or ""
-        when no model is reachable yet: the session opens without one, and
-        every model-facing door says so until /model picks one): the
+        """The session for a launch on `model_spec` ("provider/model" — or
+        "" when no model is reachable yet: the session opens without one,
+        and every model-facing door says so until /model picks one): the
         model's saved parameters, the persisted toggles, and the remembered
         story, all applied. A value the files no longer make sense of is
         reported and skipped — a stale setting must never cost a launch."""
-        provider_name, _, model = spec.partition("/")
+        provider_name, _, model = model_spec.partition("/")
         session = cls(
             config=config,
             prompts=prompts_file.load(paths),
             paths=paths,
             providers=providers,
-            provider=config.providers[provider_name] if spec else None,
+            provider=config.providers[provider_name] if model_spec else None,
             model=model,
             verbose=state.verbose,
             tui=tui or TUI(),

@@ -5,7 +5,10 @@ only journeys that need the real REPL (keybindings, pickers on screen,
 process lifecycle) live here.
 """
 
+import socket
 from pathlib import Path
+
+import pytest
 
 from otaku.paths import Paths
 from otaku.settings import state as state_mod
@@ -21,7 +24,12 @@ class TestFirstRun:
         """The very first launch on a machine with nothing running: the
         state dir and configs appear, the picker has nothing to offer —
         and the app opens anyway, landing mid-story in the sample with no
-        model selected. A turn explains itself instead of failing."""
+        model selected. A turn explains itself instead of failing. The
+        premise is an empty machine: a real engine on a fixed default
+        port cannot be isolated by env, so the story skips instead."""
+        for port in (8000, 8080, 5001, 1234):  # omlx, llama.cpp, kobold, LM Studio
+            if _listening(port):
+                pytest.skip(f"a real engine answers on :{port} — this story needs a quiet machine")
         state = tmp_path / "state"
         terminal = Terminal(
             str(state),
@@ -39,9 +47,10 @@ class TestFirstRun:
         terminal.send(ENTER, 1.0)
         terminal.expect("No model selected")
         assert terminal.quit() == 0
-        config = (state / "configs" / "config.toml").read_text()
-        for section in ("[providers.ollama]", "[providers.omlx]", "[providers.koboldcpp]"):
-            assert section in config
+        assert "[providers." not in (state / "configs" / "config.toml").read_text()
+        providers = (state / "configs" / "providers.toml").read_text()
+        for section in ("[llamacpp]", "[koboldcpp]", "[ollama]", "[omlx]", "[lmstudio]"):
+            assert section in providers
         assert (state / "configs" / "prompts.toml").exists()
 
 
@@ -440,6 +449,12 @@ class TestStreaming:
         sent = str(server.requests[-1]["messages"][-1]["content"])
         assert "/regen is part of my story\nand so is this line" in sent
         assert terminal.quit() == 0
+
+
+def _listening(port: int) -> bool:
+    with socket.socket() as probe:
+        probe.settimeout(0.2)
+        return probe.connect_ex(("127.0.0.1", port)) == 0
 
 
 def remember(root: Path) -> None:
