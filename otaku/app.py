@@ -40,10 +40,6 @@ _SAMPLE_NOTICE = (
 )
 
 
-class CancelledError(Exception):
-    """The model picker was cancelled — there is nothing to run."""
-
-
 class App:
     """The running application: `paths`, `store`, `worker`, and the
     `session` over them, ready for the chat loop."""
@@ -59,8 +55,7 @@ class App:
         standard state dir). `tui` and `pick` are the interactive
         surfaces, the real terminal ones unless a test passes stubs.
         Raises `ConfigError`, `CryptoError`, or `DatabaseError` when a
-        piece refuses, and `CancelledError` when `pick` declines to name a
-        model."""
+        piece refuses."""
         self.paths = Paths.resolve(root)
         cfg = load_config(self.paths)
         prompts_file.write_stub(self.paths)
@@ -81,16 +76,14 @@ class App:
             cfg.providers, request_log=RequestLog(self.paths, cipher), smooth=cfg.smooth_streaming
         )
 
-        # The picker runs before the store: cancelling it exits without
-        # touching the database, and the key ceremony above is done, so a
-        # passphrase prompt never lands after the model is chosen. A
-        # remembered model whose provider is still configured skips it.
+        # The picker runs before the store, so the key ceremony is done
+        # and a passphrase prompt never lands after the model is chosen.
+        # A remembered model whose provider is still configured skips the
+        # screen. Esc is not a cancel: "" opens the session without a
+        # model — the same state /model's Esc leaves behind.
+        choose = pick or (lambda r: model_picker.pick(r, paths=self.paths))
         remembered = state.model if cfg.serves(state.model) else None
-        model_spec = remembered or (
-            pick(registry) if pick else model_picker.pick(registry, paths=self.paths)
-        )
-        if model_spec is None:
-            raise CancelledError
+        model_spec = remembered or choose(registry) or ""
 
         fresh = not self.paths.database_file.exists()
         self.store = Store.open(self.paths, cipher, backups=cfg.backups)

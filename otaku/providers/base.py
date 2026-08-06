@@ -350,7 +350,20 @@ class CloudClient(OpenAIClient):
         human — None when the service will not say."""
         return None
 
+    def _key_works(self, timeout: float) -> bool:
+        """Whether the configured api key actually opens the account.
+        Catalogs can be public (OpenRouter's is), so a listing alone
+        proves nothing; subclasses answer through an authenticated
+        endpoint. The base client cannot know and stays permissive."""
+        return True
+
     def _list(self, timeout: float) -> list[ModelInfo]:
+        # No key, or one the account rejects → unreachable: rows from a
+        # public catalog would only invite a chat that fails with 401.
+        if not self.provider_config.api_key:
+            raise PermissionError(f"{self.provider_config.name} has no api key")
+        if not self._key_works(timeout):
+            raise PermissionError(f"{self.provider_config.name} rejected the api key")
         response = httpx.get(
             f"{self.provider_config.url}/models{self._MODELS_QUERY}",
             headers=self.provider_config.headers,

@@ -38,8 +38,6 @@ def main(ctx: click.Context) -> None:
         return
     try:
         application = app_mod.App()
-    except app_mod.CancelledError:
-        return
     except config_mod.ConfigError as e:
         click.echo(f"config error: {e}", err=True)
         ctx.exit(2)

@@ -26,3 +26,7 @@ class OpenRouterClient(CloudClient):
         if isinstance(total, int | float) and isinstance(used, int | float):
             return f"${total - used:.2f}"
         return None
+
+    def _key_works(self, timeout: float) -> bool:
+        # /credits answers only a working key — the catalog is public.
+        return self.balance(timeout=timeout) is not None

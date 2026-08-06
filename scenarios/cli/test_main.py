@@ -16,7 +16,7 @@ from otaku.terminal import PROMPT_CONTINUATION
 from scenarios.support import server as scripted
 from scenarios.support.harness import SPEC, run_otaku, set_config, set_config_provider
 from scenarios.support.server import ModelServer
-from scenarios.support.terminal import CTRL_O, CTRL_R, CTRL_T, CTRL_U, ENTER, Terminal
+from scenarios.support.terminal import CTRL_O, CTRL_R, CTRL_T, CTRL_U, ENTER, ESC, Terminal
 
 
 class TestFirstRun:
@@ -39,6 +39,8 @@ class TestFirstRun:
             },
         )
         terminal.expect("Created", "config.toml")
+        terminal.expect("Models (0)")  # the empty picker: the panel is the door
+        terminal.send(ESC, 1.0)
         terminal.expect("No models reachable right now.")
         terminal.expect("Imported 14 message(s)")
         terminal.expect("You're late, mapmaker.")  # resumed mid-scene

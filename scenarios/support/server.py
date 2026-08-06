@@ -45,8 +45,12 @@ class ModelServer:
         self.loaded: set[str] = set()
         self.sizes: dict[str, int] = {}  # reported bytes per model; absent → 1 MB
         self.contexts: dict[str, int] = {}  # context per model; absent → 8192
-        self.credits: tuple[float, float] | None = None  # openrouter (total, used); None → 404
-        self.balances: dict[str, Any] = {}  # nanogpt check-balance payload; empty → 404
+        self.credits: tuple[float, float] | None = (
+            10.0,
+            0.0,
+        )  # openrouter (total, used); None → 404
+        self.balances: dict[str, Any] = {"usd_balance": "10"}  # nanogpt check-balance; empty → 404
+        self.api_key: str | None = None  # set → balance endpoints demand this Bearer key
         self.chunk_delay = 0.0
         self.chunk_size: int | None = None  # stream in pieces this long; None → thirds
         self.fail_after: int | None = None  # abort the stream after N content chunks
@@ -71,6 +75,8 @@ class ModelServer:
                         rows.append(entry)
                     self._json({"data": rows})
                 elif path.endswith("/credits") and outer.credits is not None:
+                    if not self._authorized():
+                        return
                     total, used = outer.credits
                     self._json({"data": {"total_credits": total, "total_usage": used}})
                 elif outer.managed and path.endswith("/api/ps"):
@@ -99,6 +105,17 @@ class ModelServer:
                     self.send_response(404)
                     self.end_headers()
 
+            def _authorized(self) -> bool:
+                """True unless the test armed `api_key` and this request
+                carries a different Bearer key — then a 401 is sent."""
+                if outer.api_key is None:
+                    return True
+                if self.headers.get("Authorization") == f"Bearer {outer.api_key}":
+                    return True
+                self.send_response(401)
+                self.end_headers()
+                return False
+
             def _json(self, payload: dict[str, Any]) -> None:
                 body = json.dumps(payload).encode()
                 self.send_response(200)
@@ -112,6 +129,8 @@ class ModelServer:
                 body = json.loads(self.rfile.read(length) or b"{}")
                 outer.requests.append(body)
                 if outer.balances and self.path.rstrip("/").endswith("/check-balance"):
+                    if not self._authorized():
+                        return
                     self._json(outer.balances)
                     return
                 if outer.managed and self.path.rstrip("/").endswith("/api/show"):

@@ -7,6 +7,7 @@ a model switch keeps the story context and is remembered as last used.
 """
 
 import contextlib
+import secrets
 import time
 import tomllib
 
@@ -490,6 +491,21 @@ class TestCloudProviders:
         out = capsys.readouterr().out
         assert "No models reachable right now." in out
 
+    def test_an_empty_machine_still_opens_the_panel(self, tmp_path) -> None:
+        # No provider configured, nothing reachable — the picker still
+        # opens: its panel is the only door to entering an api key. Tab
+        # over, walk to a key field, save one — the section now exists,
+        # the key sealed.
+        paths = Paths.resolve(tmp_path / "state")
+        paths.ensure_tree()
+        paths.config_key_file.write_bytes(secrets.token_bytes(32))
+        paths.providers_file.write_text("")  # founded empty, as bootstrap would
+        keys = "\t" + _DOWN + ENTER + "key-on-empty" + ENTER + ESC + ESC
+        run_screen(keys, lambda: models.pick(Registry({}), paths=paths))
+        raw = paths.providers_file.read_text()
+        assert "[llamacpp]" in raw  # the panel wrote the section
+        assert "key-on-empty" not in raw  # sealed, never plain
+
     def test_a_panel_added_provider_is_switchable_at_once(self, app: App) -> None:
         # A provider that was not in the config at launch is registered
         # by the panel, and /model switches to it at once — the session's
@@ -501,6 +517,31 @@ class TestCloudProviders:
         assert app.session.provider_config is not None
         assert app.session.provider_config.name == "nanogpt"
         assert app.session.model == "test-model"
+
+    def test_a_bad_or_deleted_key_clears_the_tick_and_rows(self, server, tmp_path) -> None:
+        # OpenRouter's catalog is public, so a listing alone proves
+        # nothing: the client validates the key through the balance
+        # endpoint. A wrong key — or a deleted one — unlists the
+        # provider, tick included.
+        server.api_key = "right-key"
+        set_config_provider(tmp_path / "state", server, name="openrouter", api_key="right-key")
+        app = launch(tmp_path / "state", server)
+        try:
+            registry = app.session.providers
+            picker = models.ModelPicker(registry, [], paths=app.paths, fetch=["openrouter"])
+            _settled(lambda: not picker.pending)
+            assert "openrouter" in picker.connected
+            assert picker.all
+            for bad in ("wrong-key", ""):
+                registry.update_provider(
+                    config.ProviderConfig(name="openrouter", url=app.server.url, api_key=bad)
+                )
+                picker._refresh_provider("openrouter")
+                _settled(lambda: "openrouter" not in picker.connected)
+                assert "openrouter" not in picker.connected
+                assert not picker.all
+        finally:
+            app.close()
 
     def test_a_successful_listing_earns_the_panels_tick(self, server, tmp_path) -> None:
         set_config_provider(tmp_path / "state", server, name="openrouter")
@@ -549,3 +590,10 @@ class TestCloudProviders:
                 app.close()
         finally:
             server.close()
+
+
+def _settled(done, deadline: float = 5.0) -> None:
+    """Poll until `done()` or the deadline — background picker work."""
+    end = time.monotonic() + deadline
+    while not done() and time.monotonic() < end:
+        time.sleep(0.02)

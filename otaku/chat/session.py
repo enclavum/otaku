@@ -65,7 +65,7 @@ PickedStory = tuple[int, list[Message], str]
 RESUME_TURNS = 4
 
 # What every model-facing door says while no model is selected.
-NO_MODEL_HINT = "No model selected — start your model server and pick one with /model."
+NO_MODEL_HINT = "No model selected — pick one with /model."
 
 
 @dataclass(frozen=True)

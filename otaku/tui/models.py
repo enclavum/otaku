@@ -100,6 +100,12 @@ _STYLE = Style.from_dict(
 
 _ROW_HEAD_LIMIT = 100
 
+# Printed whenever the picker hands back "" (no model to play): the same
+# door serves a down server and a not-yet-entered cloud key.
+_NO_MODEL_DOOR = (
+    "Opening without a model — /model picks one; its panel adds providers, cloud keys included."
+)
+
 # The provider panel's rows: every backend the app speaks natively, in
 # this order, captioned the way its project spells itself. The config
 # section name is the kind on the left.
@@ -192,12 +198,15 @@ class ModelPicker(ListScreen):
         # The named providers (the cloud catalogs) answer after the screen
         # is up: each fetch merges its rows in and leaves the pending set.
         self.pending: set[str] = set(fetch or [])
-        for name in self.pending:
+        # A snapshot: a fetch that fails instantly (a keyless catalog)
+        # discards from the live set while this loop still walks it.
+        for name in list(self.pending):
             self._refresh_provider(name)
 
     def run(self) -> str | None:
-        if not self.all and not self.pending:
-            return None
+        # An empty screen still runs: the provider panel is the one door
+        # to configuring a backend, so a machine with nothing reachable
+        # must reach it — `pick` alone decides when opening is skipped.
         self.app.run()
         return self.result
 
@@ -805,7 +814,10 @@ class ModelPicker(ListScreen):
             content=self._make_items_control(cursor_line=self._cursor_line),
             wrap_lines=False,
             always_hide_cursor=True,
-            dont_extend_width=True,
+            # The window spans its whole half, so its style paints every
+            # cell the rows leave bare — a shrunk window would leave the
+            # leftover columns to the terminal's own (maybe dark)
+            # background.
             # Two lines of margin above the cursor: exactly the caption
             # and its blank, so a group's header scrolls into view when
             # the cursor stands on the group's first model.
@@ -893,10 +905,13 @@ def pick(
     """Show the model picker. Returns the chosen 'provider/model' spec,
     None on cancel, or "" when no models are reachable at all — the
     caller opens without a model, and the printed diagnostic says how to
-    fix that. Loading errors stay inside the picker; the provider panel
-    on the right edits urls and api keys in place (hence `paths`). Only
-    the local engines are waited for: the screen opens on their answers,
-    and each cloud catalog's rows arrive when it responds."""
+    fix that. The screen opens even with nothing to list: the provider
+    panel is the one place a backend is configured, so an empty machine
+    must still get there. Loading errors stay inside the picker; the
+    provider panel on the right edits urls and api keys in place (hence
+    `paths`). Only the local engines are waited for: the screen opens on
+    their answers, and each cloud catalog's rows arrive when it
+    responds."""
     catalogs = [p.name for p in providers.configured() if not providers.get_client(p.name).local]
     rows, reachable = providers.inventory(skip=set(catalogs))
     entries: list[ModelEntry] = []
@@ -919,10 +934,6 @@ def pick(
                     cloud=cloud,
                 )
             )
-    if not entries and not catalogs:
-        print(providers.unreachable_help(reachable))
-        print("Opening without a model — pick one with /model once a server is up.")
-        return ""
     picker = ModelPicker(
         providers,
         _ordered(entries),
@@ -936,7 +947,7 @@ def pick(
         # Nothing ever arrived — a cloud-only setup with dead catalogs
         # must not exit silently: say what failed, open without a model.
         print(providers.unreachable_help(reachable | picker.connected))
-        print("Opening without a model — pick one with /model once a server is up.")
+        print(_NO_MODEL_DOOR)
         return ""
     return chosen
 

@@ -306,6 +306,15 @@ class TestFirstLaunch:
         finally:
             relaunched.close()
 
+    def test_a_declined_launch_picker_opens_the_session_anyway(self, server, tmp_path) -> None:
+        # Esc in the launch picker is not a cancel: the session opens
+        # model-less — the same state /model's Esc leaves behind.
+        app = launch(tmp_path / "state", server, spec=None)
+        try:
+            assert app.session.provider_config is None
+        finally:
+            app.close()
+
     def test_no_models_still_opens_into_the_sample(self, server, tmp_path, capsys) -> None:
         # Nothing reachable: the session opens without a model, the sample
         # is there to explore, and a turn is kept as story but explains

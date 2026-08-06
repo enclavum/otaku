@@ -29,3 +29,7 @@ class NanoGptClient(CloudClient):
             return f"${float(data['usd_balance']):.2f}"
         except (KeyError, TypeError, ValueError):
             return None
+
+    def _key_works(self, timeout: float) -> bool:
+        # /check-balance answers only a working key.
+        return self.balance(timeout=timeout) is not None

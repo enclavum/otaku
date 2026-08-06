@@ -22,6 +22,7 @@ from otaku.chat import repl
 from otaku.chat.session import TUI
 from otaku.paths import Paths
 from otaku.settings import config as config_mod
+from otaku.settings import sealed
 from otaku.settings.files import write_atomic
 from scenarios.support.server import ModelServer
 
@@ -34,7 +35,7 @@ class App(app_mod.App):
     """The real app plus the scenario's view of it: the scripted `server`
     it talks to, and `play`."""
 
-    def __init__(self, root: Path, server: ModelServer, *, spec: str = SPEC) -> None:
+    def __init__(self, root: Path, server: ModelServer, *, spec: str | None = SPEC) -> None:
         set_config_provider(root, server)
         super().__init__(root, tui=TUI(), pick=lambda registry: spec)
         self.server = server
@@ -45,7 +46,7 @@ class App(app_mod.App):
         repl.submit(line, self.session, self.store)
 
 
-def launch(root: Path, server: ModelServer, *, spec: str = SPEC) -> App:
+def launch(root: Path, server: ModelServer, *, spec: str | None = SPEC) -> App:
     """The application over `root`, talking to `server`. `spec` stands in
     for what the model picker would have returned; a remembered model
     resumes over it, exactly as in the real launcher."""
@@ -81,6 +82,7 @@ def set_config_provider(
     *,
     name: str = PROVIDER,
     keep_alive: str = "",
+    api_key: str = "scenario-key",
 ) -> None:
     """Point a provider at the scripted server's port — set into whatever
     config is there. `name` picks the client the registry builds (a
@@ -88,8 +90,16 @@ def set_config_provider(
     default "test" the generic one)."""
     paths = Paths.resolve(root)
     cfg = _load_or_default(paths)
+    if api_key:
+        # Written already sealed, over the file sealing key: the config
+        # is in its converged shape, so the launch migration edits
+        # nothing and untouched-config assertions keep holding.
+        if not paths.config_key_file.exists():
+            paths.ensure_tree()
+            paths.config_key_file.write_bytes(secrets.token_bytes(32))
+        api_key = sealed.seal(paths, api_key)
     cfg.providers[name] = config_mod.ProviderConfig(
-        name=name, url=server.url, keep_alive=keep_alive
+        name=name, url=server.url, keep_alive=keep_alive, api_key=api_key
     )
     write_atomic(paths.config_file, cfg.to_toml())
     write_atomic(paths.providers_file, config_mod.providers_toml(cfg.providers))

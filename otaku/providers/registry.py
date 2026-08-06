@@ -127,7 +127,10 @@ class Registry:
         provider, whether it answered, and where to fix it. Informational
         only — printing it is the caller's choice, and nothing exits."""
         lines = ["No models reachable right now."]
-        for name in sorted(self._providers):
+        order = {kind: i for i, kind in enumerate(CLIENTS)}
+        # The picker panel's order, so the two readings line up; names
+        # the panel does not know sort after, alphabetically.
+        for name in sorted(self._providers, key=lambda n: (order.get(n, len(order)), n)):
             if name in reachable:
                 mark, note = "+", "responding, but exposes no models"
             else:

@@ -113,7 +113,8 @@ summaries may exist up to the latest message, only the older ones are actually u
 
 ## Warnings, limitations, and planned features
 
-Beware, this is an early alpha. Features planned for the next versions:
+Beware, this is an early alpha. Only light terminal themes are supported. Features planned for the
+next versions:
 
 - Properly wire the characters and lore into the roleplay context, alongside the scene summaries.
   Even though they are extracted, they are not yet injected anywhere into the prompt — they are
