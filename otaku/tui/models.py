@@ -100,12 +100,6 @@ _STYLE = Style.from_dict(
 
 _ROW_HEAD_LIMIT = 100
 
-# Printed whenever the picker hands back "" (no model to play): the same
-# door serves a down server and a not-yet-entered cloud key.
-_NO_MODEL_DOOR = (
-    "Opening without a model — /model picks one; its panel adds providers, cloud keys included."
-)
-
 # The provider panel's rows: every backend the app speaks natively, in
 # this order, captioned the way its project spells itself. The config
 # section name is the kind on the left.
@@ -903,15 +897,14 @@ def pick(
     providers: ProviderRegistry, initial_spec: str | None = None, *, paths: Paths
 ) -> str | None:
     """Show the model picker. Returns the chosen 'provider/model' spec,
-    None on cancel, or "" when no models are reachable at all — the
-    caller opens without a model, and the printed diagnostic says how to
-    fix that. The screen opens even with nothing to list: the provider
-    panel is the one place a backend is configured, so an empty machine
-    must still get there. Loading errors stay inside the picker; the
-    provider panel on the right edits urls and api keys in place (hence
-    `paths`). Only the local engines are waited for: the screen opens on
-    their answers, and each cloud catalog's rows arrive when it
-    responds."""
+    or None when the user leaves without choosing — silently: the caller
+    decides what a missing model means. The screen opens even with
+    nothing to list: the provider panel is the one place a backend is
+    configured, so an empty machine must still get there. Loading errors
+    stay inside the picker; the provider panel on the right edits urls
+    and api keys in place (hence `paths`). Only the local engines are
+    waited for: the screen opens on their answers, and each cloud
+    catalog's rows arrive when it responds."""
     catalogs = [p.name for p in providers.configured() if not providers.get_client(p.name).local]
     rows, reachable = providers.inventory(skip=set(catalogs))
     entries: list[ModelEntry] = []
@@ -942,14 +935,10 @@ def pick(
         fetch=catalogs,
         connected=reachable,
     )
-    chosen = picker.run()
-    if chosen is None and not picker.all:
-        # Nothing ever arrived — a cloud-only setup with dead catalogs
-        # must not exit silently: say what failed, open without a model.
-        print(providers.unreachable_help(reachable | picker.connected))
-        print(_NO_MODEL_DOOR)
-        return ""
-    return chosen
+    # Leaving without a choice says nothing: at launch the session
+    # opens model-less and the first turn explains itself; from /model
+    # everything simply stays as it was.
+    return picker.run()
 
 
 def _ordered(entries: list[ModelEntry]) -> list[ModelEntry]:

@@ -96,7 +96,7 @@ class Config:
             row(f"smooth_streaming = {toml_scalar(self.smooth_streaming)}", "re-time bursty model output into an even stream"),
             "",
             "[ui]",
-            row(f"dialogue_color = {toml_scalar(self.dialogue_color)}", 'spoken lines: "auto" is the shipped dark blue; a color name ("cyan") or #rrggbb'),
+            row(f"dialogue_color = {toml_scalar(self.dialogue_color)}", 'spoken lines: "auto" fits the background; a color name ("cyan") or #rrggbb'),
             row(f"dialogue_bold = {toml_scalar(self.dialogue_bold)}", "also bold the spoken lines"),
             "",
             "[context]",

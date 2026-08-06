@@ -12,6 +12,8 @@ control byte from the physical key, the same in any layout.
 
 import re
 
+from otaku.terminal import query
+
 # SGR text attributes
 BOLD = "\x1b[1m"
 DIM = "\x1b[2m"
@@ -49,9 +51,12 @@ _RUSSIAN_TO_LATIN = str.maketrans(
 PROMPT_PREFIX = "> "
 PROMPT_CONTINUATION = "... "
 
-# A played user turn, echoed: its text on a light band (#f0f0f0), the
-# text in the terminal's normal color.
-_USER_TURN = "\x1b[48;2;240;240;240m"
+# A played user turn, echoed: its text on a band the background picks —
+# light grey on a light theme, deep grey on a dark one, the text in the
+# terminal's normal color either way. An unanswered background reads as
+# light (the shipped look; a pipe has no colors to clash with).
+_USER_TURN_LIGHT = "\x1b[48;2;240;240;240m"
+_USER_TURN_DARK = "\x1b[48;2;48;48;48m"
 
 
 def user_block(text: str) -> str:
@@ -60,8 +65,9 @@ def user_block(text: str) -> str:
     width — erase-to-end-of-line with the background active paints the
     rest of the row, so no width math is needed. Printed between blank
     lines by the callers."""
+    band = _USER_TURN_DARK if query.background_is_dark() else _USER_TURN_LIGHT
     lines = text.splitlines() or [""]
-    return "\n".join(f"{_USER_TURN}{PROMPT_PREFIX}{line}\x1b[K{RESET}" for line in lines)
+    return "\n".join(f"{band}{PROMPT_PREFIX}{line}\x1b[K{RESET}" for line in lines)
 
 
 # Color specs. A NAME is the portable form: it compiles to one of the 16

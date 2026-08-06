@@ -12,7 +12,6 @@ The `Registry` is session-owned: the configured providers, the request
 log, the smoothing flag, and the per-provider client cache — constructed
 once by the CLI and passed explicitly. Nothing here ever blocks or exits
 the app: an unreachable provider is skipped in fan-outs, and
-`unreachable_help` is a message for callers to print, not a verdict.
 """
 
 import builtins
@@ -121,23 +120,6 @@ class Registry:
 
         results = [r for r in self.map(gather) if r is not None]
         return [row for _name, row in results], {name for name, _row in results}
-
-    def unreachable_help(self, reachable: set[str]) -> str:
-        """A diagnostic for a command that found no models: every configured
-        provider, whether it answered, and where to fix it. Informational
-        only — printing it is the caller's choice, and nothing exits."""
-        lines = ["No models reachable right now."]
-        order = {kind: i for i, kind in enumerate(CLIENTS)}
-        # The picker panel's order, so the two readings line up; names
-        # the panel does not know sort after, alphabetically.
-        for name in sorted(self._providers, key=lambda n: (order.get(n, len(order)), n)):
-            if name in reachable:
-                mark, note = "+", "responding, but exposes no models"
-            else:
-                mark, note = "x", "not responding — is the server running?"
-            lines.append(f"  {mark} {name} → {self._providers[name].url}  ({note})")
-        lines.append("Start your model server, or fix the [NAME] url in providers.toml.")
-        return "\n".join(lines)
 
     def _gather(self, name: str, provider_config: ProviderConfig) -> tuple[str, Inventory] | None:
         """One provider's inventory row, or None when it is unreachable."""

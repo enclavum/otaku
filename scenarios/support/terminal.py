@@ -27,6 +27,7 @@ import time
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b[78]|\x1b\][^\x07]*\x07")
 
 _CPR_QUERY = b"\x1b[6n"
+_BG_QUERY = b"\x1b]11;?"
 
 CTRL_C = b"\x03"
 CTRL_D = b"\x04"
@@ -57,6 +58,9 @@ class Terminal:
             | {
                 "OTAKU_CONFIG_DIR": state_dir,
                 "TERM": "xterm-256color",
+                # Neutralized so the background is whatever a story ARMS
+                # (OSC 11), never the developer terminal's own answer.
+                "COLORFGBG": "",
             }
             | (env or {})
         )
@@ -72,6 +76,8 @@ class Terminal:
         self._raw = b""
         self._cpr_row: int | None = None
         self._cpr_from = 0
+        self._bg_reply: bytes | None = None
+        self._bg_from = 0
 
     @property
     def transcript(self) -> str:
@@ -90,6 +96,13 @@ class Terminal:
         erase, so it meets that query and no other."""
         self._cpr_row = row
         self._cpr_from = len(self._raw)
+
+    def arm_background(self, *, dark: bool) -> None:
+        """Answer the app's next background query (OSC 11) as a dark or a
+        light terminal — one-shot, like `arm_cpr`."""
+        shade = b"1c1c" if dark else b"fafa"
+        self._bg_reply = b"\x1b]11;rgb:%s/%s/%s\x07" % (shade, shade, shade)
+        self._bg_from = len(self._raw)
 
     def send(self, data: bytes | str, settle: float = 0.5) -> None:
         os.write(self._master, data.encode() if isinstance(data, str) else data)
@@ -143,3 +156,6 @@ class Terminal:
                 if self._cpr_row is not None and _CPR_QUERY in self._raw[self._cpr_from :]:
                     os.write(self._master, b"\x1b[%d;1R" % self._cpr_row)
                     self._cpr_row = None
+                if self._bg_reply is not None and _BG_QUERY in self._raw[self._bg_from :]:
+                    os.write(self._master, self._bg_reply)
+                    self._bg_reply = None

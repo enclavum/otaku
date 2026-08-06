@@ -56,7 +56,7 @@ def _config_migrations() -> list[Migration]:
             "[ui]\n"
             + row(
                 'dialogue_color = "auto"',
-                'spoken lines: "auto" is the shipped dark blue; a color name ("cyan") or #rrggbb',
+                'spoken lines: "auto" fits the background; a color name ("cyan") or #rrggbb',
             )
             + "\n"
             + row("dialogue_bold = false", "also bold the spoken lines"),

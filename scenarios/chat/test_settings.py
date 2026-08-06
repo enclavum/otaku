@@ -478,18 +478,18 @@ class TestCloudProviders:
         finally:
             server.close()
 
-    def test_a_dead_catalog_never_exits_silently(self, tmp_path, capsys) -> None:
+    def test_a_dead_catalog_exits_quietly(self, tmp_path, capsys) -> None:
         # A cloud-only setup whose catalog is down: the picker opens,
-        # nothing ever arrives, and leaving still says what failed.
+        # nothing ever arrives, and leaving says nothing — the caller
+        # owns the meaning of a missing model.
         registry = Registry(
             {"openrouter": config.ProviderConfig(name="openrouter", url="http://127.0.0.1:9/v1")}
         )
         paths = Paths.resolve(tmp_path / "state")
         paths.ensure_tree()
         result = run_screen(ESC, lambda: models.pick(registry, paths=paths))
-        assert result == ""
-        out = capsys.readouterr().out
-        assert "No models reachable right now." in out
+        assert result is None
+        assert capsys.readouterr().out == ""
 
     def test_an_empty_machine_still_opens_the_panel(self, tmp_path) -> None:
         # No provider configured, nothing reachable — the picker still

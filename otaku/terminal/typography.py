@@ -31,6 +31,7 @@ from typing import Any, TextIO
 
 from otaku.formatting import printable
 from otaku.terminal import BOLD, DIM, ITALIC, RESET, color
+from otaku.terminal.query import background_is_dark
 
 _MORE: Any = object()  # verdict: keep buffering, block type not yet known
 
@@ -58,11 +59,13 @@ _QUOTE_CLOSERS = {
 # punctuation — anywhere else it is a parenthetical inside the current voice.
 _HANDOVER_AFTER = ",.!?…:;"
 
-# What "auto" — the shipped default — resolves to: the theme's dark-blue
-# slot (ANSI 34). One code on every background — the theme keeps its own
-# blue legible, so no detection is needed — and the cool tone is the one
-# this category's readers know as speech.
-_AUTO = "blue"  # ANSI 34
+# What "auto" — the shipped default — resolves to: blue, the shade
+# picked by the detected background — the theme's dark-blue slot on a
+# light background, its bright-blue slot on a dark one. Both are palette
+# slots the theme itself shades, and an unanswered background reads as
+# light (the shipped look; a pipe has no colors to clash with).
+_AUTO_LIGHT = "blue"  # ANSI 34
+_AUTO_DARK = "bright blue"  # ANSI 94
 
 
 class Typesetter:
@@ -420,10 +423,11 @@ def typeset(text: str, *, speech_color: str = "auto", speech_bold: bool = False)
 
 def _speech_escape(spec: str) -> str:
     """The SGR escape for a dialogue-color setting. "auto" — and any spec
-    `color` cannot read — is the theme's dark-blue slot (ANSI 34); a
-    color name or #rrggbb passes through as itself."""
+    `color` cannot read — is blue: the dark slot on a light background,
+    the bright slot on a dark one; a color name or #rrggbb passes
+    through as itself."""
     if spec.strip().lower() != "auto":
         resolved = color(spec)
         if resolved:
             return resolved
-    return color(_AUTO)
+    return color(_AUTO_DARK if background_is_dark() else _AUTO_LIGHT)

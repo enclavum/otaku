@@ -15,7 +15,7 @@ because it lands below the exchange it describes.
 """
 
 from otaku.chat.inference import run_inference
-from otaku.chat.session import Session
+from otaku.chat.session import NO_MODEL_HINT, Session
 from otaku.store import Store
 from otaku.store.schema import Message
 from otaku.terminal import DIM, RESET
@@ -124,6 +124,11 @@ def cmd_regen(session: Session, store: Store, args: list[str]) -> None:
     being re-run echoes under it, like an undo report shows its turns:
     the new take reads as an exchange, and /undo and /regen keep working
     it."""
+    if session.provider_config is None:
+        # Before anything is dropped or erased: without a model there is
+        # no fresh take, and the standing reply must survive untouched.
+        print(NO_MODEL_HINT)
+        return
     popped = session.drop_last_reply(store)
     if popped is None:
         session.screen.invalidate()

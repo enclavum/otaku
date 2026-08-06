@@ -199,6 +199,22 @@ class TestRegenerate:
         # Both replies hang off the same prompt: the old one is a sibling.
         assert app.store.messages.get_parent(2) == app.store.messages.get_parent(3) == 1
 
+    def test_regen_without_a_model_touches_nothing(self, server, tmp_path, capsys) -> None:
+        # The guard runs before the drop and the erase: the reply stays
+        # in the chain and on the screen; only the hint prints.
+        set_config(tmp_path / "state", seed_sample=True)
+        app = launch(tmp_path / "state", server, spec=None)
+        try:
+            capsys.readouterr()
+            before = [m.id for m in app.session.messages]
+            app.play("/regen")
+            out = capsys.readouterr().out
+            assert "No model selected" in out
+            assert "Nothing to regenerate" not in out
+            assert [m.id for m in app.session.messages] == before
+        finally:
+            app.close()
+
     def test_regen_announces_itself_when_it_cannot_erase(self, app: App, capsys) -> None:
         app.play("I roll the dice.")
         capsys.readouterr()

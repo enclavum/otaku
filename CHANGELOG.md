@@ -44,8 +44,9 @@ their own config file — plus quality-of-life across the REPL.
 - `otaku update`: detects how otaku was installed and runs that installer's own upgrade.
 - `/undo` and `/regen` erase the taken-back turns from the screen when it is provably safe;
   `/last [N]` re-echoes the last turns for a clean view; `/clear` wipes the screen.
-- Dialogue coloring: spoken lines («quotes» and dash lines) render in the terminal's dark blue
-  (`[ui] dialogue_color`, `dialogue_bold`).
+- Dialogue coloring: spoken lines («quotes» and dash lines) render in blue, shaded to the
+  detected terminal background (`[ui] dialogue_color`, `dialogue_bold`); the echoed prompt's band
+  follows the background the same way.
 - `/system` accepts an existing file's path and reads the prompt from it.
 - Path autocompletion behind `@` in file arguments: the menu pops as typed and filters.
 - Live smokes for all seven providers (`scenarios/live/`, `scripts/live-providers.sh`).

@@ -41,7 +41,6 @@ class TestFirstRun:
         terminal.expect("Created", "config.toml")
         terminal.expect("Models (0)")  # the empty picker: the panel is the door
         terminal.send(ESC, 1.0)
-        terminal.expect("No models reachable right now.")
         terminal.expect("Imported 14 message(s)")
         terminal.expect("You're late, mapmaker.")  # resumed mid-scene
         terminal.expect("A sample story was imported")
@@ -143,21 +142,24 @@ class TestChat:
         assert "[ regenerating ]" not in terminal.transcript
         assert terminal.quit() == 0
 
-    def test_auto_dialogue_color_is_the_terminals_dark_blue(
+    def test_auto_colors_follow_the_reported_background(
         self, server: ModelServer, tmp_path: Path
     ) -> None:
-        """dialogue_color = "auto" (the default): speech renders in the
-        theme's dark-blue slot (ANSI 34) — one code on every background,
-        so the app never needs to ask the terminal for its colors."""
+        """dialogue_color = "auto" (the default): the app asks the
+        terminal for its background once and shades to it — on the dark
+        background this terminal reports, speech is the bright-blue slot
+        (ANSI 94) and the echoed turn sits on a deep grey band."""
         state = tmp_path / "state"
         set_config_provider(state, server)
         remember(state)
         terminal = Terminal(str(state))
         terminal.expect("otaku")
         server.script = lambda body: '"Come in," she said.'
+        terminal.arm_background(dark=True)
         play(terminal, "I knock.", "Come in")
-        assert b"\x1b]11;?" not in terminal.raw  # no background query
-        assert b'\x1b[34m"Come in' in terminal.raw  # dark-blue speech, mark included
+        assert b"\x1b]11;?" in terminal.raw  # the app asked
+        assert b"\x1b[48;2;48;48;48m> I knock." in terminal.raw  # the deep band
+        assert b'\x1b[94m"Come in' in terminal.raw  # bright-blue speech
         assert terminal.quit() == 0
 
     def test_at_pops_the_path_menu_and_enter_imports_the_pick(

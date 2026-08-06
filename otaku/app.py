@@ -36,7 +36,7 @@ from otaku.tui import stories as story_picker
 
 _SAMPLE_NOTICE = (
     "A sample story was imported so you can look around — type to play on, "
-    "or see every command with /help · /new starts your own play."
+    "or see every command with /help · /model chooses a model · /new starts your own play."
 )
 
 
