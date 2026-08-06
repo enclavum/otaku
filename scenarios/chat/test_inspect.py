@@ -19,6 +19,18 @@ class TestContext:
         assert scripted.CHAT_REPLY in out
         assert "tok" in out  # the per-part estimates
 
+    def test_the_preview_filters_stored_control_bytes(self, app: App, capsys) -> None:
+        # The story keeps every byte; the preview is a display path, so a
+        # hostile reply stored earlier can never replay its escapes here.
+        app.server.script = lambda body: "safe\x1b[2Atext\x07"
+        app.play("I enter the hall.")
+        capsys.readouterr()
+        app.play("/context")
+        out = capsys.readouterr().out
+        assert "safe" in out
+        assert "\x1b[2A" not in out
+        assert "\x07" not in out
+
     def test_the_preview_matches_the_next_request(self, app: App, capsys) -> None:
         app.play("/system You are the narrator.")
         app.play("I enter the hall.")

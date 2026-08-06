@@ -1,19 +1,22 @@
 """oMLX smokes — the server is assumed to be running with a model
 loaded. Marked `live`; they skip themselves when it isn't listening or
-nothing is loaded. OTAKU_LIVE_OMLX_MODEL overrides the model; by
-default the loaded one plays.
+nothing is loaded. The url and api key come from omlx's own settings
+file (`autoconfigure` — the same detection a first run performs), so a
+non-default port just works; OTAKU_LIVE_OMLX_URL overrides it, and
+OTAKU_LIVE_OMLX_MODEL overrides the model (default: the loaded one).
 """
 
 import os
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from otaku.providers.clients.omlx import OmlxClient
-from otaku.settings.config import ProviderConfig
 from scenarios.support.live import live_app as build_app
 
-URL = "http://127.0.0.1:8000/v1"
+_AUTO = OmlxClient.autoconfigure()
+URL = os.environ.get("OTAKU_LIVE_OMLX_URL", _AUTO.url)
 MODEL = os.environ.get("OTAKU_LIVE_OMLX_MODEL", "")
 
 pytestmark = pytest.mark.live
@@ -35,7 +38,7 @@ class TestOmlx:
 
 @pytest.fixture
 def live_app(tmp_path: Path, server):  # type: ignore[no-untyped-def]
-    provider_config = ProviderConfig(name="omlx", url=URL)
+    provider_config = replace(_AUTO, url=URL)
     try:
         rows = OmlxClient(provider_config).models(timeout=3.0)
     except Exception:

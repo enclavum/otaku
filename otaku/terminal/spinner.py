@@ -22,6 +22,7 @@ class Spinner:
     def start(self) -> None:
         if self._thread is not None:
             return
+        self._stop = threading.Event()  # fresh gate: a stopped spinner restarts
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
 

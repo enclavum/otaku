@@ -253,7 +253,10 @@ class CharacterOps:
         wins and the source's is dropped. The merged memory is a new
         memory: every history rollup composed before the merge covered
         only one side, so they all reset and the next pass rebuilds from
-        the union of entries."""
+        the union of entries. Merging a character into itself is refused —
+        the reference moves and dedup below would otherwise delete it."""
+        if source_id == target_id:
+            raise ValueError("a character cannot be merged into itself")
         # fmt: off
         rows = {
             int(cid): (name, aliases)

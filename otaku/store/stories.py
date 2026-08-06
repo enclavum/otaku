@@ -259,6 +259,15 @@ class StoryOps:
         source = self.get(story_id)
         if source is None:
             raise ValueError(f"no story {story_id}")
+        if from_message_id is not None:
+            # fmt: off
+            owner = self._db.conn.execute(
+                "SELECT story_id FROM messages WHERE id = ?",
+                (from_message_id,),
+            ).fetchone()
+            # fmt: on
+            if owner is None or int(owner[0]) != story_id:
+                raise ValueError(f"message {from_message_id} is not in story {story_id}")
         cut = from_message_id if from_message_id is not None else source.head_id
         chain = self._get_chain_ids(cut)
         copied = set(chain)

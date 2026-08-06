@@ -87,6 +87,11 @@ _SHORTCUTS = {
 # complete-while-typing filter and the menu bindings.
 _SLASH_LINE = Condition(lambda: get_app().current_buffer.text.lstrip().startswith("/"))
 
+# Ctrl+D submits /bye only on an empty line — the terminal convention.
+# With a draft on the line it falls through to delete-forward, so readline
+# muscle memory can never quit the session over a draft.
+_EMPTY_LINE = Condition(lambda: not get_app().current_buffer.text)
+
 _TRIPLE = '"""'
 
 
@@ -231,7 +236,7 @@ def _activity_toolbar(session: Session) -> Callable[[], FormattedText]:
 def _make_bindings(carry: Carry) -> KeyBindings:
     kb = KeyBindings()
     for key, command in _SHORTCUTS.items():
-        kb.add(key)(_submit_shortcut(command, carry))
+        kb.add(key, filter=_EMPTY_LINE if key == "c-d" else True)(_submit_shortcut(command, carry))
 
     # A pre-selected menu row is accepted by Enter (run it) or Tab (fill it
     # in and keep editing). The default bindings can't: they treat the

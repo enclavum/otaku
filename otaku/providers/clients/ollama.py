@@ -14,10 +14,12 @@ class OllamaClient(ManagedClient):
 
     @classmethod
     def autoconfigure(cls) -> ProviderConfig:
-        """The first-run section, its port detected from OLLAMA_HOST."""
-        host = os.environ.get("OLLAMA_HOST")
-        port = (_parse_port(host) if host else None) or 11434
-        url = f"http://localhost:{port}/v1"
+        """The first-run section, its host and port detected from
+        OLLAMA_HOST — a remote server stays remote."""
+        raw = os.environ.get("OLLAMA_HOST") or ""
+        host = _parse_host(raw) or "localhost"
+        port = _parse_port(raw) or 11434
+        url = f"http://{host}:{port}/v1"
         return ProviderConfig(name=cls.kind, url=url, keep_alive="24h")
 
     def load_model(self, model: str) -> None:
@@ -100,6 +102,21 @@ class OllamaClient(ManagedClient):
                     if key.endswith(".context_length") and isinstance(value, int) and value > 0:
                         return value
         return None
+
+
+def _parse_host(value: str) -> str | None:
+    """The host of a `host:port`, `http://host[:port]`, or bare `host`
+    string; None when there is none (`:port`, a bare port, empty)."""
+    trimmed = value.strip()
+    for scheme in ("http://", "https://"):
+        if trimmed.startswith(scheme):
+            trimmed = trimmed[len(scheme) :]
+            break
+    trimmed = trimmed.split("/", 1)[0]
+    host, colon, _ = trimmed.rpartition(":")
+    if not colon:
+        return None if not trimmed or trimmed.isdigit() else trimmed
+    return host or None
 
 
 def _parse_port(value: str) -> int | None:

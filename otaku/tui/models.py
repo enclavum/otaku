@@ -520,7 +520,10 @@ class ModelPicker(ListScreen):
         if not self.filtered:
             return
         entry = self.filtered[self.cursor]
-        if entry.loaded:
+        if entry.loaded or not entry.can_load_unload:
+            # Loaded — or a statically served backend (llama.cpp, a
+            # KoboldCpp between admin swaps): the engine serves what it
+            # serves, so Enter just picks.
             self.result = entry.full_spec
             self.app.exit()
             return
@@ -609,8 +612,9 @@ class ModelPicker(ListScreen):
         if attr == "url":
             value = value.rstrip("/")
             line = f"url = {toml_scalar(value)}"
-            updated = replace(provider_config, url=value)
-            self.notice = "url saved"
+            updated = replace(
+                provider_config, url=value
+            )  # saved silently — the field shows the new value
         else:
             try:
                 line = f"api_key = {toml_scalar(sealed.seal(self.paths, value))}"
@@ -640,14 +644,12 @@ class ModelPicker(ListScreen):
             return
         provider_config = self._provider_config(name)
         if not provider_config.api_key:
-            self.notice = "(no api key)"
-            return
+            return  # nothing to clear — and no hint: the field is visibly bare
         migrations.update_providers(
             self.paths, [migrations.set_key(name, "api_key", 'api_key = ""')]
         )
         self.providers.update_provider(replace(provider_config, api_key=""))
-        self._refresh_provider(name)
-        self.notice = "api key cleared"
+        self._refresh_provider(name)  # the vanished (set) mark reports it
 
     def _refresh_provider(self, name: str) -> None:
         """Re-list one provider after any of its settings changed, so the
@@ -765,6 +767,16 @@ class ModelPicker(ListScreen):
         def _right(event: Any) -> None:
             buffer = self.edit_buffer
             buffer.cursor_position = min(len(buffer.text), buffer.cursor_position + 1)
+
+        @edit_kb.add("home", filter=editing)
+        @edit_kb.add("c-a", filter=editing)
+        def _home(event: Any) -> None:
+            self.edit_buffer.cursor_position = 0
+
+        @edit_kb.add("end", filter=editing)
+        @edit_kb.add("c-e", filter=editing)
+        def _end(event: Any) -> None:
+            self.edit_buffer.cursor_position = len(self.edit_buffer.text)
 
         @edit_kb.add("c-u", filter=editing)
         def _wipe(event: Any) -> None:

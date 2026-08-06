@@ -38,6 +38,17 @@ class TestLoreBrowser:
         ids = app.store.stories.get_messages_ids(story_id)
         assert app.store.scenes.get_current(story_id, ids)[0].title == "The Meeting"
 
+    def test_an_emptied_summary_is_refused(self, app: App) -> None:
+        # A cleared summary would silently swallow the scene's span from
+        # every future prompt — the browser refuses it, like the story
+        # editor refuses an emptied message.
+        story_id = remembered(app)
+        wipe = "\x7f" * len("A guest came in and met the Keeper.")
+        browse(app, story_id, ENTER + DOWN + ENTER + wipe + CTRL_S + ESC * 3)
+        ids = app.store.stories.get_messages_ids(story_id)
+        scene = app.store.scenes.get_current(story_id, ids)[0]
+        assert scene.summary == "A guest came in and met the Keeper."
+
     def test_the_cast_lens_edits_a_description(self, app: App) -> None:
         story_id = remembered(app)
         browse(app, story_id, TAB + ENTER + ENTER + "!" + CTRL_S + ESC * 3)

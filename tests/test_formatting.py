@@ -31,6 +31,10 @@ class TestPrintable:
     def test_drops_the_controls_a_terminal_could_act_on(self) -> None:
         assert printable("a\x1b[2Ab\x07c\x00d\x7fe") == "a[2Abcde"
 
+    def test_c1_controls_are_dropped(self) -> None:
+        # xterm honors the 8-bit CSI/OSC aliases even in UTF-8 mode.
+        assert printable("a\x9b2Ab\x85c\x9dd") == "a2Abcd"
+
     def test_newline_and_tab_survive(self) -> None:
         assert printable("line\nnext\tcol") == "line\nnext\tcol"
 

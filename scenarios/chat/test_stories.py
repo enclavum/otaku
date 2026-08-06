@@ -1,4 +1,4 @@
-"""Managing stories: browsing and resuming, forking, /rename, /system, /new.
+"""Managing stories: browsing and resuming, forking, /title, /system, /new.
 
 The browser itself is a tui surface tested in its own file; here it is an
 injected pick, so these stories are about what a settled selection MEANS —
@@ -210,7 +210,7 @@ class TestFork:
 
     def test_forks_of_a_titled_story_number_themselves(self, app: App, capsys) -> None:
         app.play("I enter the hall.")
-        app.play("/rename Hall")
+        app.play("/title Hall")
         origin = app.session.story_id
         app.play("/fork")
         assert app.store.stories.get(app.session.story_id).title == "Hall - 2"
@@ -316,36 +316,36 @@ class TestSystem:
         assert 'System: "You are the narrator."' in capsys.readouterr().out
 
 
-class TestRename:
-    def test_rename_titles_the_story(self, app: App, capsys) -> None:
+class TestTitle:
+    def test_title_titles_the_story(self, app: App, capsys) -> None:
         app.play("I enter the hall.")
-        app.play("/rename The Throne Hall")
-        assert 'Renamed to "The Throne Hall".' in capsys.readouterr().out
+        app.play("/title The Throne Hall")
+        assert 'Story title set to "The Throne Hall".' in capsys.readouterr().out
         assert app.store.stories.get(app.session.story_id).title == "The Throne Hall"
 
-    def test_bare_rename_shows_the_title_or_usage(self, app: App, capsys) -> None:
-        app.play("/rename")
-        assert "Usage: /rename NEW-TITLE" in capsys.readouterr().out
+    def test_bare_title_shows_the_title_or_usage(self, app: App, capsys) -> None:
+        app.play("/title")
+        assert "Usage: /title NEW-TITLE" in capsys.readouterr().out
         app.play("I enter the hall.")
-        app.play("/rename Hall")
+        app.play("/title Hall")
         capsys.readouterr()
-        app.play("/rename")
+        app.play("/title")
         assert 'Title: "Hall"' in capsys.readouterr().out
 
-    def test_rename_before_the_first_turn_creates_the_story(self, app: App) -> None:
+    def test_title_before_the_first_turn_creates_the_story(self, app: App) -> None:
         assert app.session.story_id is None
-        app.play("/rename The Planned Story")
+        app.play("/title The Planned Story")
         story_id = app.session.story_id
         assert story_id is not None
         assert app.store.stories.get(story_id).title == "The Planned Story"
         app.play("I enter the hall.")  # the first turn lands in that same story
         assert app.session.story_id == story_id
 
-    def test_rename_does_not_reorder_the_story_list(self, app: App) -> None:
+    def test_title_does_not_reorder_the_story_list(self, app: App) -> None:
         first, second = two_stories(app)
         app.session.tui = TUI(pick_story=picks(first))
         app.play("/stories")
-        app.play("/rename Renamed Later")
+        app.play("/title Renamed Later")
         # Titling is metadata: the list still leads with the recently
         # PLAYED story, not the recently renamed one.
         assert app.store.stories.list()[0].id == second
@@ -386,7 +386,7 @@ def two_stories(app: App) -> tuple[int, int]:
     """A titled two-turn story, then a fresh current one. Returns their
     ids (first, current)."""
     app.play("The first story begins.")
-    app.play("/rename First")
+    app.play("/title First")
     first = app.session.story_id
     app.play("/new")
     app.play("The second story begins.")

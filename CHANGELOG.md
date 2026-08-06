@@ -16,7 +16,7 @@ changes.
   - regenerate erases the old reply and streams the new one in its place;
   - providers configurable directly in the model picker (`/model` or Ctrl+O);
   - `/system` accepting a file in addition to text input.
-- New commands: `/clear`, `/last`, `/balance`.
+- New commands: `/clear`, `/last`, `/balance`; command `/rename` renamed to `/title`.
 
 **Full version:**
 
@@ -44,8 +44,8 @@ their own config file — plus quality-of-life across the REPL.
 - `otaku update`: detects how otaku was installed and runs that installer's own upgrade.
 - `/undo` and `/regen` erase the taken-back turns from the screen when it is provably safe;
   `/last [N]` re-echoes the last turns for a clean view; `/clear` wipes the screen.
-- Dialogue coloring: spoken lines («quotes» and dash lines) render in a soft teal that follows
-  the detected terminal background (`[ui] dialogue_color`, `dialogue_bold`).
+- Dialogue coloring: spoken lines («quotes» and dash lines) render in the terminal's dark blue
+  (`[ui] dialogue_color`, `dialogue_bold`).
 - `/system` accepts an existing file's path and reads the prompt from it.
 - Path autocompletion behind `@` in file arguments: the menu pops as typed and filters.
 - Live smokes for all seven providers (`scenarios/live/`, `scripts/live-providers.sh`).
@@ -56,7 +56,8 @@ their own config file — plus quality-of-life across the REPL.
   name; `/info` reads its rows from the provider listing.
 - Thinking support is per-backend knowledge now — the `supports_thinking` config knob is gone
   (migrated away), and omlx no longer needs it set by hand.
-- `/model` echoes the switched-to model in bold.
+- `/model` echoes the switched-to model in bold; the story-title command is `/title` now
+  (was `/rename`).
 
 ## [0.2.1] - 2026-08-01
 

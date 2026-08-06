@@ -614,6 +614,13 @@ class LoreBrowser(ListScreen):
         if new == f.text:
             self.notice = "(unchanged)"
             return
+        if f.kind == "scene-summary" and not new.strip():
+            # A cleared summary would silently swallow the scene's span:
+            # the assembler covers a scene only while its summary exists,
+            # and a later scene's coverage still moves the tail past this
+            # one. Extraction refuses to commit exactly this state.
+            self.notice = "(empty — not saved)"
+            return
         try:
             self._apply_edit(f, new)
         except ValueError as e:

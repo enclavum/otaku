@@ -1,4 +1,4 @@
-"""Story commands: /stories, /fork, /system, /rename, and /new.
+"""Story commands: /stories, /fork, /system, /title, and /new.
 
 `/stories` opens the browser and executes what its selection settled:
 picking the last turn resumes the story as-is; picking an earlier turn
@@ -48,18 +48,18 @@ def cmd_stories(session: Session, store: Store, args: list[str]) -> None:
     session.restore_screen_tail(RESUME_TURNS)
 
 
-def cmd_rename(session: Session, store: Store, args: list[str]) -> None:
-    """`/rename <title>` — title this story (shown in /stories and the banner);
+def cmd_title(session: Session, store: Store, args: list[str]) -> None:
+    """`/title <title>` — title this story (shown in /stories and the banner);
     no text prints the current title. The one way a story gets a
     title by hand."""
     title = session.raw_args.strip()
     if not title:
         story = store.stories.get(session.story_id) if session.story_id is not None else None
         current = story.title if story else ""
-        print(f'Title: "{current}"' if current else "Usage: /rename NEW-TITLE")
+        print(f'Title: "{current}"' if current else "Usage: /title NEW-TITLE")
         return
     store.stories.rename(session.ensure_story(store), title)
-    print(f'Renamed to "{title}".')
+    print(f'Story title set to "{title}".')
 
 
 def cmd_fork(session: Session, store: Store, args: list[str]) -> None:

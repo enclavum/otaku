@@ -145,18 +145,29 @@ def _run_step(session: Session, store: Store, ooc: bool) -> None:
     spinner = Spinner()
     spinner.start()
     start = time.monotonic()
-    watcher = _StreamWatcher()
-    typesetter = Typesetter(
-        out,
-        speech_color=session.config.dialogue_color,
-        speech_bold=session.config.dialogue_bold,
-    )
-    client = session.providers.get_client(provider_config.name)
-    wire = assembler.assemble_story(store, session, client.get_context_size(session.model)).messages
-    # The activity line survives the prompt's absence: entering `status_row`
-    # reserves the bottom terminal row and paints the worker's status there
-    # for the whole stream; leaving it releases the row.
-    status_row = session.status_line.pinned() if session.status_line else contextlib.nullcontext()
+    try:
+        watcher = _StreamWatcher()
+        typesetter = Typesetter(
+            out,
+            speech_color=session.config.dialogue_color,
+            speech_bold=session.config.dialogue_bold,
+        )
+        client = session.providers.get_client(provider_config.name)
+        wire = assembler.assemble_story(
+            store, session, client.get_context_size(session.model)
+        ).messages
+        # The activity line survives the prompt's absence: entering
+        # `status_row` reserves the bottom terminal row and paints the
+        # worker's status there for the whole stream; leaving it releases
+        # the row.
+        status_row = (
+            session.status_line.pinned() if session.status_line else contextlib.nullcontext()
+        )
+    except BaseException:
+        # A ^C while assembling must not leave the spinner animating over
+        # the prompt; the stream's own try/finally is not entered yet.
+        spinner.stop()
+        raise
     with status_row, watcher:
         try:
             for chunk in client.chat_stream(

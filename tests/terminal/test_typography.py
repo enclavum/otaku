@@ -16,7 +16,7 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*m")
 _BOLD = "\x1b[1m"
 _ITALIC = "\x1b[3m"
 _RESET = "\x1b[0m"
-_SPEECH = color("cyan")  # the tests pin an explicit spec: "auto" depends on the terminal
+_SPEECH = color("cyan")  # the tests pin an explicit spec, independent of the shipped default
 
 
 class TestPlainText:
@@ -166,6 +166,9 @@ class TestDialogue:
         assert color("magenta") + '"hi"' in styled
         assert _SPEECH not in styled
         assert color("#9a6700") + '"hi"' in typeset('"hi"\n', speech_color="#9a6700")
+
+    def test_auto_is_the_dark_blue_slot(self) -> None:
+        assert "\x1b[34m" in typeset('"hi"\n', speech_color="auto")
 
     def test_an_unreadable_spec_resolves_like_auto(self) -> None:
         unreadable = typeset('"hi"\n', speech_color="chartreuse")

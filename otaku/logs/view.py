@@ -6,6 +6,7 @@ import json
 import re
 from collections.abc import Iterator
 
+from otaku.formatting import printable
 from otaku.logs.requests import RequestLog
 
 
@@ -38,10 +39,12 @@ def render_requests(log: RequestLog, stamp: str) -> Iterator[str]:
             yield "  <unreadable: wrong key or corrupted>\n\n"
             continue
         meta = {k: v for k, v in entry.body.items() if k != "messages"}
-        yield f"  {json.dumps(meta, ensure_ascii=False)}\n"
+        # The log stores every byte as sent; the pager view filters, like
+        # every display path (click echoes plainly when PAGER is cat).
+        yield f"  {printable(json.dumps(meta, ensure_ascii=False))}\n"
         messages = entry.body.get("messages")
         if isinstance(messages, list):
             for message in messages:
                 if isinstance(message, dict):
-                    yield f"  [{message.get('role')}] {message.get('content')}\n"
+                    yield f"  [{message.get('role')}] {printable(str(message.get('content')))}\n"
         yield "\n"

@@ -66,17 +66,26 @@ class Database:
         """Open (or create) the story database with the session cipher."""
         path = paths.database_file
         path.parent.mkdir(parents=True, exist_ok=True)
-        fresh = not path.exists() or path.stat().st_size == 0
         conn = cls.connect(path)
+        # No tables means fresh: a never-written file, an empty one, or a
+        # first run that crashed mid-creation and rolled back. Creation is
+        # ONE transaction — schema, version, and canary land together, so
+        # a crash can never leave a schema'd husk `_guard` refuses forever;
+        # it rolls back to table-less, fresh again on the next launch.
+        # fmt: off
+        fresh = conn.execute("SELECT count(*) FROM sqlite_master WHERE type = 'table'").fetchone()[0] == 0
+        # fmt: on
         if fresh:
-            conn.executescript(SCHEMA_DDL)
-            with conn:
-                # fmt: off
-                conn.execute(
-                    "INSERT INTO meta (key, value) VALUES (?, ?), (?, ?)",
-                    (_VERSION_KEY, SCHEMA_VERSION, _CHECK_KEY, check_value(cipher)),
-                )
-                # fmt: on
+            # executescript adds no transaction control of its own: BEGIN
+            # opens here, the meta INSERT joins, commit() seals it all.
+            conn.executescript("BEGIN;" + SCHEMA_DDL)
+            # fmt: off
+            conn.execute(
+                "INSERT INTO meta (key, value) VALUES (?, ?), (?, ?)",
+                (_VERSION_KEY, SCHEMA_VERSION, _CHECK_KEY, check_value(cipher)),
+            )
+            # fmt: on
+            conn.commit()
         else:
             cls._guard(conn, path, cipher)
         if backups > 0:

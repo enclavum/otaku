@@ -117,7 +117,7 @@ class TestImport:
         app.server.script = lambda body: reply
         app.play("I open the book.")
         app.play("The story goes on.")
-        app.play("/rename Book")
+        app.play("/title Book")
         app.play("/export")
         app.play(f"/import {tmp_path / 'book.md'}")
         chain = app.store.stories.get_messages(app.session.story_id)
@@ -204,7 +204,7 @@ class TestExport:
     ) -> None:
         monkeypatch.chdir(tmp_path)
         app.play("I enter the hall.")
-        app.play("/rename Hall")
+        app.play("/title Hall")
         app.play("/export")
         exported = parse_story((tmp_path / "hall.md").read_text())
         assert exported is not None

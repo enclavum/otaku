@@ -3,9 +3,11 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
-# Control characters display must drop: C0 minus newline and tab, plus DEL.
+# Control characters display must drop: C0 minus newline and tab, DEL, and
+# C1 (U+0080..U+009F) — xterm honors 8-bit CSI/OSC aliases even in UTF-8 mode.
 _CONTROL = {c: None for c in range(32) if chr(c) not in "\n\t"}
 _CONTROL[0x7F] = None
+_CONTROL.update(dict.fromkeys(range(0x80, 0xA0)))
 
 
 def combine_framing(body: str, framing: str | None) -> str:
@@ -36,8 +38,9 @@ def pretty_path(path: Path) -> str:
 
 def printable(text: str) -> str:
     """`text` with every control character a terminal could act on
-    dropped — C0 except newline and tab, DEL, and with them any escape
-    sequence's lead byte. Model output and server messages pass through
+    dropped — C0 except newline and tab, DEL, the C1 range, and with
+    them any escape sequence's lead byte. Model output and server
+    messages pass through
     here before display, so a hostile stream can never move the cursor,
     retitle the window, or touch the clipboard — and the screen ledger's
     row math stays true. Only what is shown is filtered; storage keeps

@@ -2,7 +2,9 @@
 auto-loads its model just in time, so nothing needs preloading. Marked
 `live`; they skip themselves when nothing listens on the default port.
 OTAKU_LIVE_LMSTUDIO_MODEL overrides the model; by default the first
-listed one plays.
+listed one plays. LMSTUDIO_API_KEY carries the API token LM Studio
+requires by default since 0.4.16 — leave it unset when the requirement
+is disabled in the app.
 """
 
 import os
@@ -16,6 +18,7 @@ from scenarios.support.live import live_app as build_app
 
 URL = "http://127.0.0.1:1234/v1"
 MODEL = os.environ.get("OTAKU_LIVE_LMSTUDIO_MODEL", "")
+KEY = os.environ.get("LMSTUDIO_API_KEY", "")
 
 pytestmark = pytest.mark.live
 
@@ -36,7 +39,7 @@ class TestLmStudio:
 
 @pytest.fixture
 def live_app(tmp_path: Path, server):  # type: ignore[no-untyped-def]
-    model = MODEL or first_model(URL)
-    app = build_app(tmp_path, server, ProviderConfig(name="lmstudio", url=URL), model)
+    model = MODEL or first_model(URL, KEY)
+    app = build_app(tmp_path, server, ProviderConfig(name="lmstudio", url=URL, api_key=KEY), model)
     yield app
     app.close()

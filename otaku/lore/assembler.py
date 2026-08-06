@@ -42,7 +42,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from otaku.formatting import combine_framing
+from otaku.formatting import combine_framing, printable
 from otaku.store import Store
 from otaku.store.schema import Message, Scene
 
@@ -196,7 +196,7 @@ def render_preview(prompt: AssembledPrompt, *, dim: str = "", reset: str = "") -
     for message in prompt.messages:
         lines.append("")
         lines.append(f"{dim}[{message.role}]{reset}")
-        lines.extend(_preview_body(message.body, prompt.recap))
+        lines.extend(_preview_body(printable(message.body), prompt.recap))
     return "\n".join(lines)
 
 

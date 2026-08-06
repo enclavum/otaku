@@ -99,7 +99,12 @@ def unlock(enc: Encryption, paths: Paths) -> Cipher:
         keystore.write([slot])
         return Cipher(dek)
 
-    slots = keystore.slots()
+    try:
+        slots = keystore.slots()
+    except (OSError, ValueError) as e:
+        # tomllib's decode error is a ValueError: a hand-edited or corrupt
+        # keystore gets the curated message, never a traceback.
+        raise CryptoError(f"{paths.keys_file} is unreadable ({e}); restore it from backup") from e
     slots.sort(key=lambda s: 0 if s.get("provider") == enc.provider else 1)
     errors: list[str] = []
     for slot in slots:
@@ -110,9 +115,14 @@ def unlock(enc: Encryption, paths: Paths) -> Cipher:
             continue
         try:
             dek = _unwrap_dek(slot, cls(enc, paths).retrieve(slot))
-        except (CryptoError, InvalidTag, ValueError) as e:
-            # InvalidTag stringifies to "" — say what it means instead.
-            reason = str(e) or "the retrieved key does not unwrap this keystore"
+        except (CryptoError, InvalidTag, ValueError, KeyError, TypeError) as e:
+            # InvalidTag stringifies to "" — say what it means instead. A
+            # slot missing a field (KeyError) or holding the wrong type
+            # (TypeError) is named the same way, never a traceback.
+            if isinstance(e, KeyError):
+                reason = f"slot is missing {e}"
+            else:
+                reason = str(e) or "the retrieved key does not unwrap this keystore"
             errors.append(f"{name}: {reason}" if len(slots) > 1 else reason)
             continue
         return Cipher(dek)
@@ -264,7 +274,10 @@ class KeychainKek(KekProvider):
             result = subprocess.run(args, capture_output=True, text=True)
         if result.returncode != 0 or not result.stdout.strip():
             return None
-        return base64.b64decode(result.stdout.strip())
+        try:
+            return base64.b64decode(result.stdout.strip(), validate=True)
+        except ValueError as e:
+            raise CryptoError(f"keychain item {self._service()!r} is not valid base64 ({e})") from e
 
     def _put(self, kek: bytes) -> None:
         encoded = base64.b64encode(kek).decode()

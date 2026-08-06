@@ -26,6 +26,14 @@ class TestTomlKey:
         parsed = tomllib.loads(f"[{key}]\n")
         assert list(parsed) == ['we"ird']
 
+    def test_control_characters_are_escaped(self) -> None:
+        # Keys are values too — a model name heads its models.toml table,
+        # and one raw control byte would unparse the whole file.
+        tricky = "bad\nname\x01\x7f"
+        key = toml_key(tricky)
+        parsed = tomllib.loads(f"[{key}]\n")
+        assert list(parsed) == [tricky]
+
 
 class TestTomlScalar:
     def test_booleans(self) -> None:

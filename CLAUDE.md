@@ -12,7 +12,7 @@ omlx, KoboldCpp, and others). Chats are stories that can be
 branched from any message. A background pass extracts lore from played
 messages — scenes, characters, journals — and the context sent to the model
 keeps the opening and the recent tail verbatim with scene summaries in
-between. The database is encrypted.
+between. Database encryption is opt-in — plain text is the default.
 
 ## Environment and commands
 
@@ -24,8 +24,8 @@ Python 3.11 in the `otaku` conda environment:
     make typecheck RUN=...               # mypy (strict)
     make test RUN=...                    # pytest
 
-The state dir is `paths.DEFAULT_ROOT`, relocatable via the
-`OTAKU_CONFIG_DIR` env var.
+The state dir defaults to `~/.otaku` (`_DEFAULT_ROOT` in
+`otaku/paths.py`), relocatable via the `OTAKU_CONFIG_DIR` env var.
 
 ## Configuration files
 
@@ -109,7 +109,7 @@ forbidden:
     lore       → store, providers, settings, logs, formatting
     store      → crypto, logs, paths
     providers  → settings, logs
-    logs       → crypto, paths
+    logs       → crypto, paths, formatting
     crypto     → settings, paths
     settings   → paths
     terminal   → formatting

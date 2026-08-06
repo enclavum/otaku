@@ -84,6 +84,13 @@ class TestSetKey:
         text = "[settings]\nidle = 30\n"
         assert set_key("settings", "idle", "idle = 30")(text) is text
 
+    def test_a_dotted_user_name_is_a_literal_section_first(self) -> None:
+        # providers.toml sections carry user-chosen names, dots included —
+        # the literal key wins over the dotted walk, so the key still seals.
+        text = '["my.server"]\napi_key = "plain"\n'
+        migrated = set_key("my.server", "api_key", 'api_key = "sealed:x"')(text)
+        assert migrated == '["my.server"]\napi_key = "sealed:x"\n'
+
     def test_a_quoted_section_name_is_seen(self) -> None:
         # A user may quote a section name; the textual scan must find it,
         # or its api key would silently never seal.

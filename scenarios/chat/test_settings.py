@@ -23,6 +23,8 @@ from scenarios.support.server import ModelServer
 # Key escape sequences, for pipe input.
 _DOWN = "\x1b[B"
 _LEFT = "\x1b[D"
+_HOME = "\x1b[H"
+_END = "\x1b[F"
 _DEL = "\x1b[3~"
 
 
@@ -383,6 +385,14 @@ class TestProviderPanel:
         keys = "\t" + ENTER + "\x15" + paste + _LEFT * 3 + "X" + ENTER + ESC + ESC
         run_screen(keys, lambda: models.pick(app.session.providers, paths=app.paths))
         assert 'url = "http://localhost:9999X/v1"' in app.paths.providers_file.read_text()
+
+    def test_home_and_end_jump_the_editor_cursor(self, app: App) -> None:
+        # Ctrl+U, the url typed, Home + an A at the front, End + a Z at
+        # the back. Ctrl+A / Ctrl+E are bound to the same jumps.
+        typed = "\x15" + "http://x/v1" + _HOME + "A" + _END + "Z"
+        keys = "\t" + ENTER + typed + ENTER + ESC + ESC
+        run_screen(keys, lambda: models.pick(app.session.providers, paths=app.paths))
+        assert 'url = "Ahttp://x/v1Z"' in app.paths.providers_file.read_text()
 
     def test_a_saved_api_key_is_sealed_never_plain(self, app: App) -> None:
         keys = "\t" + _DOWN + ENTER + "hunter-2" + ENTER + ESC + ESC

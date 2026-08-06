@@ -145,7 +145,7 @@ class OpenAIClient:
         response = httpx.get(
             f"{self.provider_config.url}/models",
             headers=self.provider_config.headers,
-            timeout=timeout,
+            timeout=_timeout(timeout, connect=2.0),
         )
         response.raise_for_status()
         data = response.json()
@@ -191,7 +191,7 @@ class OpenAIClient:
             f"{self.provider_config.url}/chat/completions",
             json=body,
             headers=self.provider_config.headers,
-            timeout=timeout,
+            timeout=_timeout(timeout, connect=5.0),
         ) as response:
             if response.status_code >= 400:
                 # Drain now, while the stream is open — the error body (the
@@ -270,7 +270,7 @@ class OpenAIClient:
             response = httpx.get(
                 f"{self.provider_config.base_url}{path}",
                 headers=self.provider_config.headers,
-                timeout=timeout,
+                timeout=_timeout(timeout, connect=1.0),
             )
             if response.status_code == 200:
                 return response.json()
@@ -287,7 +287,7 @@ class OpenAIClient:
                 f"{self.provider_config.base_url}{path}",
                 json=body,
                 headers=self.provider_config.headers,
-                timeout=timeout,
+                timeout=_timeout(timeout, connect=1.0),
             )
             if response.status_code == 200:
                 return response.json()
@@ -354,7 +354,7 @@ class CloudClient(OpenAIClient):
         response = httpx.get(
             f"{self.provider_config.url}/models{self._MODELS_QUERY}",
             headers=self.provider_config.headers,
-            timeout=timeout,
+            timeout=_timeout(timeout, connect=2.0),
         )
         response.raise_for_status()
         rows = []
@@ -390,3 +390,13 @@ class CloudClient(OpenAIClient):
             if row.name == model:
                 return row.context
         return None
+
+
+def _timeout(total: float, *, connect: float) -> httpx.Timeout:
+    """The httpx timeout with its connect phase capped separately. A
+    dead-but-routable host — a mistyped LAN IP, a firewalled port — hangs
+    the handshake, and a flat timeout lets it hold the whole read budget
+    (a five-second launch stall per such provider); a host that is
+    listening at all completes the handshake in milliseconds. The read
+    budget stays `total`: a slow answer is not a dead host."""
+    return httpx.Timeout(total, connect=min(connect, total))

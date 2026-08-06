@@ -8,6 +8,7 @@ missing keystore refused BEFORE the ceremony could mint over it."""
 
 import base64
 import secrets
+import sqlite3
 from datetime import datetime
 
 import pytest
@@ -120,6 +121,19 @@ class TestDatabaseGuard:
         paths.database_file.write_bytes(b"this is not a database")
         with pytest.raises(DatabaseError, match="move the file aside"):
             launch(tmp_path / "state", server)
+
+    def test_a_crashed_first_run_heals_as_fresh(self, server: ModelServer, tmp_path) -> None:
+        """Creation is one transaction: a crash rolls back to a valid,
+        table-less file — which the next launch treats as fresh, instead
+        of refusing it forever."""
+        paths = Paths.resolve(tmp_path / "state")
+        paths.ensure_tree()
+        conn = sqlite3.connect(paths.database_file)
+        conn.execute("CREATE TABLE husk (id INTEGER PRIMARY KEY)")
+        conn.execute("DROP TABLE husk")
+        conn.commit()
+        conn.close()
+        launch(tmp_path / "state", server).close()  # launching IS the assertion
 
 
 class TestConfigMigration:

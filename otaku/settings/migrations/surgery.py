@@ -57,8 +57,10 @@ def ensure_section(name: str, block: str, after: str = "") -> Migration:
 
 
 def set_key(section: str, key: str, line: str) -> Migration:
-    """A migration replacing the `key = …` line of `[section]` (dotted
-    names reach child tables) with `line`, the freshly rendered
+    """A migration replacing the `key = …` line of `[section]` (a literal
+    top-level name wins — providers.toml sections carry user-chosen
+    names, dots included — else dotted names reach child tables) with
+    `line`, the freshly rendered
     `key = value` row: the value is the change, so a trailing comment on
     the old line goes with it, while comment lines above stay. An absent
     key is added at the section's end; no `[section]` in the file means
@@ -68,7 +70,7 @@ def set_key(section: str, key: str, line: str) -> Migration:
 
     def apply(text: str) -> str:
         parsed = parse(text)
-        if parsed is None or not isinstance(_child(parsed, section), dict):
+        if parsed is None or not isinstance(_table(parsed, section), dict):
             return text
         lines = text.splitlines()
         span = _section_span(lines, section)
@@ -202,6 +204,15 @@ def attached_start(lines: list[str], span: tuple[int, int], at: int) -> int:
 def joined(lines: list[str]) -> str:
     """The lines back as file text, one trailing newline."""
     return "\n".join(lines) + "\n"
+
+
+def _table(parsed: dict[str, object], section: str) -> object:
+    """The parsed table `section` names: the literal top-level key when
+    one exists — a user-named `["my.server"]` — else the dotted walk."""
+    literal = parsed.get(section)
+    if isinstance(literal, dict):
+        return literal
+    return _child(parsed, section)
 
 
 def _child(parsed: dict[str, object], section: str) -> object:

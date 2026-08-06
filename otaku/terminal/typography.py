@@ -31,7 +31,6 @@ from typing import Any, TextIO
 
 from otaku.formatting import printable
 from otaku.terminal import BOLD, DIM, ITALIC, RESET, color
-from otaku.terminal.query import background_is_dark
 
 _MORE: Any = object()  # verdict: keep buffering, block type not yet known
 
@@ -59,14 +58,11 @@ _QUOTE_CLOSERS = {
 # punctuation — anywhere else it is a parenthetical inside the current voice.
 _HANDOVER_AFTER = ",.!?…:;"
 
-# What "auto" — the shipped default — resolves to: the teal pair, one
-# shade per background (the cool tone this category's readers know as
-# speech), designed rather than delegated to the theme. When the terminal
-# keeps its background to itself, the theme's own cyan slot keeps us in
-# the same family, legible on whatever the background turns out to be.
-_AUTO_DARK = "#56b6c2"  # soft teal on a dark background
-_AUTO_LIGHT = "#0e7490"  # deep teal on a light one
-_AUTO_FALLBACK = "cyan"
+# What "auto" — the shipped default — resolves to: the theme's dark-blue
+# slot (ANSI 34). One code on every background — the theme keeps its own
+# blue legible, so no detection is needed — and the cool tone is the one
+# this category's readers know as speech.
+_AUTO = "blue"  # ANSI 34
 
 
 class Typesetter:
@@ -424,14 +420,10 @@ def typeset(text: str, *, speech_color: str = "auto", speech_bold: bool = False)
 
 def _speech_escape(spec: str) -> str:
     """The SGR escape for a dialogue-color setting. "auto" — and any spec
-    `color` cannot read — picks the teal tuned to the detected background,
-    or the theme's cyan when the terminal keeps its background to itself;
-    a color name or #rrggbb passes through as itself."""
+    `color` cannot read — is the theme's dark-blue slot (ANSI 34); a
+    color name or #rrggbb passes through as itself."""
     if spec.strip().lower() != "auto":
         resolved = color(spec)
         if resolved:
             return resolved
-    dark = background_is_dark()
-    if dark is None:
-        return color(_AUTO_FALLBACK)
-    return color(_AUTO_DARK if dark else _AUTO_LIGHT)
+    return color(_AUTO)
