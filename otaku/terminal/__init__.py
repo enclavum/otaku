@@ -50,6 +50,10 @@ _RUSSIAN_TO_LATIN = str.maketrans(
 # open `"""` block.
 PROMPT_PREFIX = "> "
 PROMPT_CONTINUATION = "... "
+# What the marker becomes on a hosted catalog: the story is billed by the
+# token from here. Same width as `PROMPT_PREFIX`, so nothing else moves —
+# the echoed block keeps its `> ` and the row arithmetic is untouched.
+CLOUD_PROMPT_PREFIX = "$ "
 
 # A played user turn, echoed: its text on a band the background picks —
 # light grey on a light theme, deep grey on a dark one, the text in the

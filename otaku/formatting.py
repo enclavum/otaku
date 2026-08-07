@@ -72,15 +72,30 @@ def format_size(size: int | None) -> str:
 
 
 def format_context(tokens: int | None) -> str:
-    """A token count as a compact label ('8K', '128K', '1M') for exact
-    multiples of 1024, thousands-separated otherwise; "" when unknown."""
+    """A context window the way the catalogs label it: '8K', '128K',
+    '200K', '1M'. K and M are DECIMAL here — thousands and millions —
+    because that is how every model catalog reads them, so a round
+    decimal size wins its label: 128,000 is the 128K its vendor
+    advertises, never the 125K that dividing by 1024 would give. A size
+    that is instead an exact power of two takes the label ITS vendor
+    prints (131,072 is 128K too), and anything else rounds to a whole
+    one (1,047,576 → '1M'). Under a thousand the count stands as it is;
+    "" when unknown.
+
+    Sizes a few percent apart therefore share a label — 1,000,000,
+    1,047,576 and 1,048,576 all read '1M'. That is the vocabulary the
+    catalogs already use, the difference never decides a model, and it
+    is what keeps the label short enough to hold a fixed column."""
     if tokens is None or tokens <= 0:
         return ""
-    if tokens >= 1_048_576 and tokens % 1_048_576 == 0:
-        return f"{tokens // 1_048_576}M"
-    if tokens >= 1024 and tokens % 1024 == 0:
-        return f"{tokens // 1024}K"
-    return f"{tokens:,}"
+    for unit, decimal, binary in (("M", 1_000_000, 1_048_576), ("K", 1_000, 1_024)):
+        if tokens >= decimal and tokens % decimal == 0:
+            return f"{tokens // decimal}{unit}"
+        if tokens >= binary and tokens % binary == 0:
+            return f"{tokens // binary}{unit}"
+        if tokens >= decimal:
+            return f"{round(tokens / decimal)}{unit}"
+    return str(tokens)
 
 
 def human_age(t: datetime) -> str:

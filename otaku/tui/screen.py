@@ -52,6 +52,9 @@ class ListScreen:
         self.in_filter: bool = False
         self.query: str = ""
         self.notice: str = ""
+        # The pane width the rows on screen were built from — compared
+        # after each frame, see `_resync_rows`.
+        self._row_width_used: int | None = None
 
     # ---------- what a subclass fills ----------
 
@@ -147,12 +150,17 @@ class ListScreen:
         else:
             self._on_key(data)
 
-    @staticmethod
-    def _emit_row(out: StyleAndTextTuples, selected: bool, row: str, *, dim: bool = False) -> None:
+    def _emit_row(
+        self, out: StyleAndTextTuples, selected: bool, row: str, *, dim: bool = False
+    ) -> None:
+        """One list row, padded to the full items pane: every row ends in
+        the same column, so the selection band is a rectangle and the gap
+        before the preview's border is `_preview_gap` on every line — not
+        only on the rows long enough to fill their width."""
         prefix = "  > " if selected else "    "
         base = "row.dim" if dim else "row"
         style = f"class:{base}.selected" if selected else f"class:{base}"
-        out.append((style, prefix + row + "\n"))
+        out.append((style, (prefix + row).ljust(self._max_row_content_width()) + "\n"))
 
     # ---------- width arithmetic ----------
 
@@ -167,20 +175,47 @@ class ListScreen:
         return left, preview_inner
 
     def _max_row_content_width(self) -> int:
-        return self._pane_cols()[0]
+        """What a list row may occupy: the WHOLE items pane, measured off
+        the rendered window. Rows fill it exactly, so the only space left
+        between them and the preview's border is `_preview_gap` — the
+        same three columns in every picker, at every terminal size. Off
+        the computed width instead, prompt_toolkit's weight rounding
+        would move that gap by a column as the terminal resizes."""
+        self._row_width_used = self._measured("_items_window", self._pane_cols()[0])
+        return self._row_width_used
+
+    def _resync_rows(self) -> None:
+        """After a frame: the measurement is only current once the window
+        has been drawn, so the rows in a frame that RESIZED the pane were
+        laid out at the previous width — the first frame of all (nothing
+        measured yet), and the frame a view flips the split on (the
+        message list is 2:1 where the story list is 1:1). Ask for one
+        more frame when the two disagree; the second one agrees, so it
+        settles there instead of redrawing forever."""
+        if self._row_width_used is None:
+            return
+        window: Window | None = getattr(self, "_items_window", None)
+        if window is None:
+            return
+        info = window.render_info
+        if info is not None and 0 < info.window_width != self._row_width_used:
+            get_app().invalidate()
 
     def _preview_inner_width(self) -> int:
-        """The preview's content width — measured off the rendered window
-        when one exists, because the split arithmetic can disagree with
-        prompt_toolkit's own weight rounding by a column, and a line padded
-        to the computed width then wraps its last character. The
-        arithmetic is the first-frame fallback."""
-        window: Window | None = getattr(self, "_preview_window", None)
+        """The preview's content width — measured the same way, because a
+        line padded to a computed width one column too wide wraps its
+        last character."""
+        return self._measured("_preview_window", self._pane_cols()[1])
+
+    def _measured(self, attr: str, fallback: int) -> int:
+        """A named window's rendered width, `fallback` (the split
+        arithmetic) until the first frame has drawn it."""
+        window: Window | None = getattr(self, attr, None)
         if window is not None:
             info = window.render_info
             if info is not None and info.window_width > 0:
                 return int(info.window_width)
-        return self._pane_cols()[1]
+        return fallback
 
     # ---------- assembly ----------
 
@@ -252,6 +287,9 @@ class ListScreen:
     ) -> AnyContainer:
         """The chrome around the list: header, blank, the filter line while
         filtering, the items, an optional notice line, blank, help."""
+        # Kept so `_max_row_content_width` can measure what the rows
+        # actually got; a picker assembling its own pane records it too.
+        self._items_window = items_window
         rows: list[AnyContainer] = [
             text_line(self._header_text, style="class:header"),
             Window(height=1, char=" ", always_hide_cursor=True),
@@ -335,6 +373,7 @@ class ListScreen:
         )
         app.timeoutlen = 0.05
         app.ttimeoutlen = 0.05
+        app.after_render += lambda _app: self._resync_rows()
         return app
 
 

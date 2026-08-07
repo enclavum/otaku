@@ -129,7 +129,7 @@ class TestBalance:
 
     def test_no_reporting_provider_says_so(self, app: App, capsys) -> None:
         app.play("/balance")
-        assert "No provider reports a balance." in capsys.readouterr().out
+        assert "Cannot get balances from cloud providers." in capsys.readouterr().out
 
 
 class TestInfo:

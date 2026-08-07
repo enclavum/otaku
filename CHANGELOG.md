@@ -18,6 +18,7 @@ changes.
   - providers configurable directly in the model picker (`/model` or Ctrl+O);
   - `/system` accepting a file in addition to text input.
 - New commands: `/clear`, `/last`, `/balance`; command `/rename` renamed to `/title`.
+- New CLI command: `otaku update`.
 
 **Full version:**
 
@@ -60,10 +61,6 @@ their own config file — plus quality-of-life across the REPL.
 - The picker lists bare model names grouped under provider captions, sizes and context flushed
   right; `/usage` prints purpose, provider, and model as columns; the banner shows the bare model
   name; `/info` reads its rows from the provider listing.
-- Thinking support is per-backend knowledge now — the `supports_thinking` config knob is gone
-  (migrated away), and omlx no longer needs it set by hand.
-- `/model` echoes the switched-to model in bold; the story-title command is `/title` now
-  (was `/rename`).
 - `/regen` re-runs the last prompt when no reply stands — a failed request leaves the prompt
   unanswered, and regenerating sends it again.
 - `/import` lands as deep in the scene as every other way into a story, and `/last` names what

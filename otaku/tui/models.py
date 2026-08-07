@@ -98,7 +98,19 @@ _STYLE = Style.from_dict(
     }
 )
 
-_ROW_HEAD_LIMIT = 100
+# A model row's shape: a 4-column prefix ("  > "), the model name, then
+# two right-aligned columns held at a FIXED width — the widest label
+# either formatter can produce for a real model ("999.9 GB", "128K";
+# see formatting.format_size / format_context) — each set off by three
+# spaces. Fixed because the columns must not move: a cloud catalog
+# arriving mid-session, or a resize, may not shove them off the pane.
+# The name is the one thing that gives, shrinking to whatever is left —
+# to a stub on a pane too narrow to hold one, because a row wider than
+# the pane would wrap, and the scroll maths counts one line per model.
+_ROW_PREFIX = 4
+_SIZE_COL = 8
+_CONTEXT_COL = 4
+_COL_GAP = 3
 
 # The provider panel's rows: every backend the app speaks natively, in
 # this order, captioned the way its project spells itself. The config
@@ -206,31 +218,26 @@ class ModelPicker(ListScreen):
 
     # ---------- text content ----------
 
-    def _table_width(self) -> int:
-        """Natural width of the model table (row prefix + label + gap +
-        size + gap + context). One snapshot of the list — a background
-        refresh may swap it mid-call."""
-        rows = self.filtered
-        if not rows:
-            return 0
-        max_label = max(len(truncate(e.model, _ROW_HEAD_LIMIT)) for e in rows)
-        max_size = max(len(format_size(e.size_bytes)) for e in rows)
-        max_context = max(len(format_context(e.context)) for e in rows)
-        return 4 + max_label + 2 + max_size + 2 + max_context  # 4 = the row prefix
-
     def _row_width(self) -> int:
-        """Full width of a rendered model row: stretched so the selection
-        ends 5 empty columns before the provider panel's border (3 of
-        them the pane gap), never narrower than the table itself."""
-        return max(self._table_width(), self._pane_cols()[0] - 2)
+        """Full width of a rendered model row: the whole items pane, so
+        the selection band ends exactly `_preview_gap` columns short of
+        the provider panel's border, like every other picker's rows. The
+        pane alone decides — never the data — so no model name can push a
+        row past the edge of the screen."""
+        return self._max_row_content_width()
+
+    def _name_width(self) -> int:
+        """Columns the model name gets: the row, less its prefix and the
+        two fixed columns with their gaps. This is where a narrow
+        terminal and a late-arriving cloud catalog are absorbed."""
+        tail = _COL_GAP + _SIZE_COL + _COL_GAP + _CONTEXT_COL
+        return max(0, self._row_width() - _ROW_PREFIX - tail)
 
     def _header_text(self) -> StyleAndTextTuples:
         n, total = len(self.filtered), len(self.all)
         left = f" Models ({n} of {total})" if n != total else f" Models ({n})"
-        loading = ""
-        if self.pending:
-            names = ", ".join(sorted(_PANEL_CAPTIONS.get(p, p) for p in self.pending))
-            loading = f" · loading {names}…"
+        # What is still loading is said in the provider panel, on the row
+        # of the provider it is about (see `_providers_text`).
         try:
             vm = psutil.virtual_memory()
             used_gb = vm.used / (1024**3)
@@ -239,13 +246,12 @@ class ModelPicker(ListScreen):
         except Exception:
             ram = ""
 
-        head: StyleAndTextTuples = [("class:header", left), ("class:header.detail", loading)]
+        head: StyleAndTextTuples = [("class:header", left)]
         if not ram:
             return head
 
-        # Right-align RAM to the rows' right edge (never past the pane).
-        width = min(self._row_width(), self._pane_cols()[0])
-        gap = " " * max(2, width - len(left) - len(loading) - len(ram))
+        # Right-align RAM to the rows' right edge.
+        gap = " " * max(2, self._row_width() - len(left) - len(ram))
         return [*head, ("class:header.detail", gap + ram)]
 
     def _items_text(self) -> StyleAndTextTuples:
@@ -256,14 +262,13 @@ class ModelPicker(ListScreen):
             msg = "(no matches)" if self.query else "(no models)"
             return [("class:muted", "  " + msg)]
 
-        # Every row spans one stretched width: the model name on the
-        # left, the size and context columns flushed to the right edge.
-        labels = [truncate(e.model, _ROW_HEAD_LIMIT) for e in rows]
+        # Every row spans one width: the model name on the left, cut to
+        # what the pane leaves it, then the two fixed columns at the
+        # right edge — same place on every row, whatever arrives later.
+        labels = [truncate(e.model, self._name_width()) for e in rows]
         # A catalog row has no size at all — not even the unknown dash.
         sizes = ["" if e.cloud else format_size(e.size_bytes) for e in rows]
         contexts = [format_context(e.context) for e in rows]
-        max_size = max((len(s) for s in sizes), default=0)
-        max_context = max((len(s) for s in contexts), default=0)
         width = self._row_width()
 
         out: StyleAndTextTuples = []
@@ -282,8 +287,13 @@ class ModelPicker(ListScreen):
             # providers side the left list carries no selection at all.
             selected = i == self.cursor and self.side == "models"
             head = ("  > " if selected else "    ") + labels[i]
-            tail = f"{sizes[i].rjust(max_size)}  {contexts[i].rjust(max_context)}".rstrip()
-            gap = max(2, width - len(head) - len(tail))
+            tail = (
+                " " * _COL_GAP
+                + sizes[i].rjust(_SIZE_COL)
+                + " " * _COL_GAP
+                + contexts[i].rjust(_CONTEXT_COL)
+            )
+            gap = max(0, width - len(head) - len(tail))
             if entry.cloud:
                 klass = "class:row.selected.plain" if selected else "class:row.plain"
             elif selected:
@@ -362,7 +372,11 @@ class ModelPicker(ListScreen):
         out: StyleAndTextTuples = []
         for kind, caption in _PANEL_PROVIDERS:
             provider_config = self._provider_config(kind)
-            if kind in self.connected:
+            if kind in self.pending:
+                # Still being listed: the answer decides the other two, so
+                # say so here rather than let the name read as a verdict.
+                out.append(("class:preview.muted", caption + " - loading…"))
+            elif kind in self.connected:
                 out.append(("class:preview.title", caption))
                 out.append(("class:tick", " ✓"))
             else:
@@ -832,6 +846,9 @@ class ModelPicker(ListScreen):
             ]
         )
 
+        # This picker assembles its own left pane, so it records the
+        # items window itself (see ListScreen._max_row_content_width).
+        self._items_window = items_window
         left_pane = HSplit(
             [
                 text_line(self._header_text, style="class:header"),

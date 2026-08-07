@@ -89,17 +89,37 @@ class TestFormatSize:
 
 
 class TestFormatContext:
-    def test_uses_k_for_multiples_of_1024(self) -> None:
+    def test_a_round_decimal_size_keeps_the_label_it_is_sold_under(self) -> None:
+        # 128,000 divides by 1024 too — the decimal reading has to win, or
+        # the 128K every catalog advertises shows as 125K.
+        assert format_context(128_000) == "128K"
+        assert format_context(200_000) == "200K"
+        assert format_context(64_000) == "64K"
+        assert format_context(1_000_000) == "1M"
+
+    def test_a_power_of_two_size_takes_the_label_its_vendor_prints(self) -> None:
         assert format_context(8192) == "8K"
-
-    def test_uses_m_for_multiples_of_a_mebi(self) -> None:
-        assert format_context(1_048_576) == "1M"
-
-    def test_uses_k_for_large_multiples_of_1024(self) -> None:
+        assert format_context(131_072) == "128K"
         assert format_context(262_144) == "256K"
+        assert format_context(1_048_576) == "1M"
+        assert format_context(2_097_152) == "2M"
 
-    def test_falls_back_to_a_thousands_separated_number(self) -> None:
-        assert format_context(1500) == "1,500"
+    def test_anything_else_rounds_to_a_whole_one(self) -> None:
+        assert format_context(1_047_576) == "1M"
+        assert format_context(163_839) == "164K"
+
+    def test_a_size_under_a_thousand_stands_as_it_is(self) -> None:
+        assert format_context(512) == "512"
+
+    def test_every_catalog_size_fits_a_narrow_column(self) -> None:
+        # The picker holds this column at a FIXED width, so the promise
+        # is the width, not just the wording.
+        sizes = (
+            4096, 8192, 32_768, 32_000, 64_000, 65_536, 96_000, 128_000, 131_072,
+            163_840, 164_000, 200_000, 262_144, 1_000_000, 1_047_576, 1_048_576,
+            2_097_152, 10_000_000,
+        )  # fmt: skip
+        assert max(len(format_context(n)) for n in sizes) <= 4
 
     def test_is_empty_when_unknown(self) -> None:
         assert format_context(None) == ""

@@ -45,8 +45,6 @@ from otaku.store import Store
 from otaku.terminal import statusline
 
 PLACEHOLDER = FormattedText([("class:placeholder", "Send a message")])
-# On a hosted catalog the hint quietly says the text leaves the machine.
-CLOUD_PLACEHOLDER = FormattedText([("class:placeholder", "Send a message (cloud)")])
 
 _PROMPT_STYLE = Style.from_dict(
     {

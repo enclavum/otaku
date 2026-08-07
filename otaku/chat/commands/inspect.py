@@ -83,7 +83,7 @@ def cmd_balance(session: Session, store: Store, args: list[str]) -> None:
 
     rows = [row for row in session.providers.map(probe) if row]
     if not rows:
-        print("No provider reports a balance.")
+        print("Cannot get balances from cloud providers.")
         return
     width = max(len(name) for name, _ in rows)
     for name, value in rows:
@@ -109,7 +109,9 @@ def cmd_info(session: Session, store: Store, args: list[str]) -> None:
 
     # The model's own row — load state only where loading is a real state
     # (a plain endpoint or a cloud catalog serves everything statically).
-    row = client.model(session.model)
+    # A cloud catalog has neither a load state nor a size to report, and
+    # asking costs a full catalog fetch: skip what would print nothing.
+    row = client.model(session.model) if client.local else None
     if row is not None and client.local and client.kind != "openai":
         print(f"Loaded:   {'yes' if row.loaded else 'no'}")
 
@@ -133,16 +135,13 @@ def cmd_info(session: Session, store: Store, args: list[str]) -> None:
     user_count = sum(1 for m in session.messages if m.role == "user")
     assistant_count = sum(1 for m in session.messages if m.role == "assistant")
     print(
-        f"Context: {len(session.messages)} messages "
+        f"Context:  {len(session.messages)} messages "
         f"({user_count} user, {assistant_count} assistant)"
     )
-    if session.story_id is not None:
-        label = session.story_headline(store)
-        print(
-            f"  story: {label} ({session.story_id})" if label else f"  story: ({session.story_id})"
-        )
+    if label := session.story_headline(store):
+        print(f"Story:    {label}")
     if session.system:
-        print(f'System: "{session.system}"')
+        print(f'System:   "{session.system}"')
     if session.params:
         rendered = ", ".join(f"{k} = {v}" for k, v in session.params.items())
         print(f"Parameters: {rendered}")

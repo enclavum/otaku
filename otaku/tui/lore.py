@@ -299,7 +299,8 @@ class LoreBrowser(ListScreen):
                 return out
             no_w = len(str(len(self.scenes)))
             span_w = max(len(self._span(s)) for s in self.scenes)
-            avail = max(10, self._max_row_content_width() - 4 - no_w - 3 - span_w - 2)
+            # prefix(4) + no + "  " + span + "  " — the row's own spacing.
+            avail = max(10, self._max_row_content_width() - 4 - no_w - 2 - span_w - 2)
             for row_i, idx in enumerate(self.scenes_f):
                 s = self.scenes[idx]
                 title = truncate(flatten(s.title), avail)

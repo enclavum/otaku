@@ -79,6 +79,8 @@ send one short prompt to a cheap model); deselect with `-m "not live"`.
 ## Process rules
 
 - Never commit without the user's explicit approval.
+- A commit message is ONE line, under 150 characters — no body. Name what
+  changed, not every detail; the changelog and the code carry those.
 - Challenge design and implementation decisions and ask questions — the user
   reviews every step. Functionality follows the core principles.
 - Keep dependencies minimal; no optional extras.

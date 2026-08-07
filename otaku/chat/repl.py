@@ -18,14 +18,11 @@ blank is already on screen, and the ledger suppresses the loop's own.
 import sys
 from typing import Any, TextIO, cast
 
-from prompt_toolkit.formatted_text import FormattedText
-
 from otaku import __version__
 from otaku.chat.commands import dispatch
 from otaku.chat.commands.lore import build_job
 from otaku.chat.inference import run_inference
 from otaku.chat.prompt import (
-    CLOUD_PLACEHOLDER,
     PLACEHOLDER,
     Carry,
     LineAssembler,
@@ -38,6 +35,7 @@ from otaku.store import Store
 from otaku.store.schema import Message
 from otaku.terminal import (
     BOLD,
+    CLOUD_PROMPT_PREFIX,
     CURSOR_BLINK_ON,
     PROMPT_CONTINUATION,
     PROMPT_PREFIX,
@@ -125,8 +123,16 @@ def run(session: Session, store: Store) -> None:
     input_rows = 0
 
     while not session.should_quit:
-        prefix = PROMPT_CONTINUATION if assembler.in_block else PROMPT_PREFIX
-        placeholder = None if assembler.in_block else _placeholder(session)
+        # The marker carries the cloud, not the hint: the hint goes at the
+        # first keystroke, which is exactly when the text is being written
+        # to leave the machine.
+        if assembler.in_block:
+            prefix = PROMPT_CONTINUATION
+        elif _on_cloud(session):
+            prefix = CLOUD_PROMPT_PREFIX
+        else:
+            prefix = PROMPT_PREFIX
+        placeholder = None if assembler.in_block else PLACEHOLDER
         try:
             line = prompt_session.prompt(prefix, placeholder=placeholder, default=carry.take_text())
         except EOFError:
@@ -242,15 +248,13 @@ def _rows_on_screen(line: str, prefix: str) -> int:
     return measure(prefix + line + "\n", terminal_width())
 
 
-def _placeholder(session: Session) -> FormattedText:
-    """The idle prompt's hint — the cloud wording when the story is
-    played against a hosted catalog, so every turn quietly says the text
-    leaves the machine."""
-    if session.provider_config is not None:
-        client = session.providers.get_client(session.provider_config.name)
-        if not client.local:
-            return CLOUD_PLACEHOLDER
-    return PLACEHOLDER
+def _on_cloud(session: Session) -> bool:
+    """Whether the story is played against a hosted catalog — what the
+    prompt's tag says, so every turn shows that the text leaves the
+    machine."""
+    if session.provider_config is None:
+        return False
+    return not session.providers.get_client(session.provider_config.name).local
 
 
 def _banner(session: Session, store: Store) -> str:
