@@ -44,14 +44,22 @@ uv tool install otaku
 brew install enclavum/tap/otaku
 ```
 
-Update:
+Update from version 0.2.1 or earlier:
+
+```bash
+# if installed with uv
+uv tool upgrade otaku
+
+# if installed via Homebrew
+brew upgrade enclavum/tap/otaku
+```
+
+Since version 0.2.2, otaku updates itself: `otaku update` detects how it was installed and runs
+that installer's own upgrade.
 
 ```bash
 otaku update
 ```
-
-It detects how otaku was installed and runs that installer's own upgrade — `uv tool upgrade otaku`
-or `brew upgrade enclavum/tap/otaku`.
 
 ## Get started
 
@@ -113,8 +121,8 @@ summaries may exist up to the latest message, only the older ones are actually u
 
 ## Warnings, limitations, and planned features
 
-Beware, this is an early alpha. Only light terminal themes are supported. Features planned for the
-next versions:
+Beware, this is an early alpha. The full-screen pickers assume a light terminal theme — the play
+screen itself adapts to dark ones. Features planned for the next versions:
 
 - Properly wire the characters and lore into the roleplay context, alongside the scene summaries.
   Even though they are extracted, they are not yet injected anywhere into the prompt — they are
@@ -129,7 +137,7 @@ Type to play — your words go to the model verbatim, and the reply streams back
 Around that:
 
 ```
-PROMPT     your character speaks or acts             /lore      browse and edit the memory
+PROMPT     your character speaks or acts             /lore      the memory browser (Ctrl+L)
 /undo      take back the last exchange (Ctrl+U)      /cast      the same browser, on the cast
 /regen     a fresh take on the reply (Ctrl+R)        /extract   run the summary pass now
 /stories   browse and resume (Ctrl+T)                /context   preview the next request
@@ -159,7 +167,7 @@ Set `OTAKU_CONFIG_DIR` to run a completely separate environment:
 Stories live in a local SQLite database. Encryption at rest is disabled by default but is one
 config switch away (AES-256-GCM, sealed client-side): the key can live in your OS keychain, come
 from a command of your choice (a password manager, a hardware token), derive from a passphrase,
-or sit on disk. The request log will be sealed with the same cipher; the system and error logs
+or sit on disk. The request log is sealed with the same cipher; the system and error logs
 are content-free by contract.
 
 Provider API keys are always stored sealed, their key in the OS keychain. Daily database backups

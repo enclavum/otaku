@@ -45,6 +45,7 @@ class ModelServer:
         self.loaded: set[str] = set()
         self.sizes: dict[str, int] = {}  # reported bytes per model; absent → 1 MB
         self.contexts: dict[str, int] = {}  # context per model; absent → 8192
+        self.status = False  # True → serve omlx's rich /v1/models/status
         self.credits: tuple[float, float] | None = (
             10.0,
             0.0,
@@ -64,6 +65,21 @@ class ModelServer:
 
             def do_GET(self) -> None:
                 path = self.path.split("?", 1)[0].rstrip("/")
+                if outer.status and path.endswith("/models/status"):
+                    self._json(
+                        {
+                            "models": [
+                                {
+                                    "id": name,
+                                    "actual_size": outer.sizes.get(name, 1_048_576),
+                                    "loaded": name in outer.loaded,
+                                    "max_context_window": outer.contexts.get(name, 8192),
+                                }
+                                for name in outer.models
+                            ]
+                        }
+                    )
+                    return
                 if path.endswith("/models"):
                     # `context_length` rides along when a test sets it —
                     # the cloud catalogs report it there.
