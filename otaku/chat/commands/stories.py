@@ -5,6 +5,11 @@ picking the last turn resumes the story as-is; picking an earlier turn
 asks in the browser's own dialog — fork at that point (the default), or
 truncate the story by rewinding the head (the later turns stay in the
 tree as siblings — nothing is deleted either way).
+
+Swapping the story under the screen breaks the played sequence, so it is
+drawn with the ledger's break rule (chat/screen.py) — over what `/stories`
+and `/new` announce, the way every break is drawn. `/fork` draws none:
+the copy continues the scene already on screen.
 """
 
 from pathlib import Path
@@ -35,17 +40,30 @@ def cmd_stories(session: Session, store: Store, args: list[str]) -> None:
             settle=session.config.settle_messages,
         )
         messages = store.stories.get_messages(story_id)
-        story = store.stories.get(story_id)
-        print(f"Forked to '{story.title}'." if story and story.title else "Forked.")
     elif action == "truncate":
         store.stories.set_head(story_id, messages[-1].id)
-        print("Resuming here — later messages stay in the tree as siblings.")
-
+    # Named only once attached, so the line reads the story it landed in.
     session.switch_to(store, story_id, messages)
-    print(f"Resumed at message {len(messages)}.")
+
+    # A different story takes the screen from here down.
+    session.screen.rule()
+    print(_landing(session, store, action))
     print()
     print(session.render_last_turns(RESUME_TURNS))
     session.restore_screen_tail(RESUME_TURNS)
+
+
+def _landing(session: Session, store: Store, action: str) -> str:
+    """The one line naming what the browser settled — the story resumed,
+    its head rewound, or the copy the session continues in — each with
+    the message it landed on."""
+    if action == "truncate":
+        return session.landed_line(store, verb="Truncated")
+    if action != "fork":
+        return session.landed_line(store)
+    label = session.story_headline(store)
+    lead = f"Forked to: {label}." if label else "Forked."
+    return f"{lead} Continued from message {len(session.messages)}."
 
 
 def cmd_title(session: Session, store: Store, args: list[str]) -> None:
@@ -75,8 +93,11 @@ def cmd_fork(session: Session, store: Store, args: list[str]) -> None:
     )
     session.messages = store.stories.get_messages(session.story_id)
     session.save_state()
-    story = store.stories.get(session.story_id)
-    print(f"Forked to '{story.title}'." if story and story.title else "Forked.")
+    # Named the way the browser's fork names it. No rule: /fork copies the
+    # story you are already in and shows nothing new — the scene on screen
+    # continues into the copy unbroken.
+    label = session.story_headline(store)
+    print(f"Forked to: {label}." if label else "Forked.")
 
 
 def cmd_system(session: Session, store: Store, args: list[str]) -> None:
@@ -112,6 +133,7 @@ def cmd_new(session: Session, store: Store, args: list[str]) -> None:
     session.system = ""
     session.story_id = None
     session.save_state()  # a relaunch starts fresh, like this session
+    session.screen.rule()  # the played story ends here
     print("Started a new story.")
 
 

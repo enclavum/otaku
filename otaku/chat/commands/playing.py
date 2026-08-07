@@ -11,7 +11,8 @@ line re-echoes as the grey played-turn block. /undo and /regen work the
 screen through the ledger (chat/screen.py): the erased exchange or reply
 simply vanishes, and only when the ledger cannot prove the erase do they
 fall back to reporting — every fallback print invalidates the ledger,
-because it lands below the exchange it describes.
+because it lands below the exchange it describes, and draws the ledger's
+break rule over what it says.
 """
 
 from otaku.chat.inference import run_inference
@@ -97,16 +98,17 @@ def cmd_undo(session: Session, store: Store, args: list[str]) -> None:
     if session.screen.erase_exchange():
         if refreshing:
             session.screen.take_suppressed_gap()  # output follows after all
-            _report_ending(session)
+            _report_undo_ending(session)
         return  # otherwise the ending is still on screen — say nothing
     session.screen.invalidate()
-    _report_ending(session)
+    _report_undo_ending(session)
 
 
-def _report_ending(session: Session) -> None:
+def _report_undo_ending(session: Session) -> None:
     """The story's new ending, reported and re-echoed — and handed back to
     the ledger, the report line included, so the next /undo or /regen
     works the re-echoed turns."""
+    session.screen.rule()
     if not session.messages:
         print("Undone. The story is now empty (its turns stay in the tree).")
         return
@@ -120,37 +122,53 @@ def _report_ending(session: Session) -> None:
 def cmd_regen(session: Session, store: Store, args: list[str]) -> None:
     """Re-run the last prompt: the current reply becomes a sibling in the
     tree and a fresh one streams — in the old one's place when the screen
-    allows. When it is beyond reach, the marker announces and the prompt
-    being re-run echoes under it, like an undo report shows its turns:
-    the new take reads as an exchange, and /undo and /regen keep working
-    it."""
+    allows. A prompt left unanswered is simply sent again: nothing to
+    sibling, and the take streams straight under the standing prompt —
+    over the error line a failed request left, or into the empty space
+    below a prompt that was never answered at all. When the screen is
+    beyond reach, the marker announces and the prompt being re-run echoes
+    under it, like an undo report shows its turns: the new take reads as
+    an exchange, and /undo and /regen keep working it."""
     if session.provider_config is None:
         # Before anything is dropped or erased: without a model there is
         # no fresh take, and the standing reply must survive untouched.
         print(NO_MODEL_HINT)
         return
     popped = session.drop_last_reply(store)
-    if popped is None:
+    # The prompt the take re-runs — absent when the story is a promptless
+    # reply, which regenerates on its own.
+    prompt = session.messages[-1] if session.messages else None
+    if popped is None and prompt is None:
         session.screen.invalidate()
         print("Nothing to regenerate.")
         return
     if not session.screen.erase_reply():
         session.screen.invalidate()
+        session.screen.rule()
         marker = f"{DIM}[ regenerating ]{RESET}"
         print(marker)
         print()
         # The typed line stays above the marker — nothing of it to erase.
         session.screen.typed_rows = 0
-        session.screen.echo_block(session.messages[-1].body, above=marker)
-    # An out-of-character reply regenerates out of character.
-    run_inference(session, store, ooc=popped.kind == "ooc")
+        session.screen.echo_block(prompt.body if prompt else "", above=marker)
+    # A regenerated reply follows the one it replaces. A resent prompt has
+    # none to follow, so the row itself decides: an ooc row is a /you
+    # switch when it is body-less — that one wants an in-character answer —
+    # and an /ooc question when it carries the body /ooc always writes.
+    if popped is not None:
+        ooc = popped.kind == "ooc"
+    else:
+        ooc = prompt is not None and prompt.kind == "ooc" and bool(prompt.body)
+    run_inference(session, store, ooc=ooc)
 
 
 def cmd_last(session: Session, store: Store, args: list[str]) -> None:
     """`/last [N]` — show the last N turns again (default 5), the way a
     relaunch shows the scene: a clean view after undos, regens, etc. The
-    echoed turns go back to the ledger, so /undo and /regen work them
-    like freshly played ones."""
+    break rule separates the copy from the turns it repeats and a report
+    names what it shows, like an undo report names the ending; the echoed
+    turns go back to the ledger, so /undo and /regen work them like
+    freshly played ones."""
     if args and not (args[0].isdigit() and int(args[0]) > 0):
         print("Usage: /last [N]")
         return
@@ -158,8 +176,16 @@ def cmd_last(session: Session, store: Store, args: list[str]) -> None:
     if not session.messages:
         print("No turns yet.")
         return
-    print(session.render_last_turns(count * 2))  # a turn is two message rows
-    session.restore_screen_tail(count * 2)
+    rows = count * 2  # a turn is two message rows
+    session.screen.rule()
+    # What the echo actually holds, never what was asked for: a short
+    # story shows everything it has, and the report must not over-claim.
+    shown = (len(session.messages[-rows:]) + 1) // 2
+    report = f"The last {shown} turns of this story:"
+    print(report)
+    print()
+    print(session.render_last_turns(rows))
+    session.restore_screen_tail(rows, above=report)
 
 
 def cmd_clear(session: Session, store: Store, args: list[str]) -> None:

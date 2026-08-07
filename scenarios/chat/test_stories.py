@@ -13,7 +13,7 @@ from otaku.store import Store
 from otaku.store.stories import StoryListing
 from otaku.tui import stories
 from scenarios.support import server as scripted
-from scenarios.support.harness import App, launch, set_config
+from scenarios.support.harness import RULE, App, launch, set_config
 from scenarios.support.screens import CTRL_S, DELETE, DOWN, ENTER, ESC, UP, run_screen
 
 Picker = Callable[[Store, list[StoryListing], int | None], PickedStory | None]
@@ -83,7 +83,8 @@ class TestResumeDialog:
         self.decided(app, first, "fork")
 
         out = capsys.readouterr().out
-        assert "Forked to 'First - 2'." in out
+        assert "Forked to: First - 2. Continued from message 1." in out
+        assert out.index(RULE) < out.index("Forked to")  # the copy starts under the rule
         fork = app.session.story_id
         assert fork not in (first, second)
         assert app.store.stories.get(fork).forked_from_id == first  # lineage, for the record
@@ -98,9 +99,7 @@ class TestResumeDialog:
         reply_id = app.store.stories.get_messages(first)[1].id
         self.decided(app, first, "truncate")
 
-        assert "Resuming here — later messages stay in the tree as siblings." in (
-            capsys.readouterr().out
-        )
+        assert "Truncated at message 1." in capsys.readouterr().out
         assert app.session.story_id == first
         assert [m.body for m in app.session.messages] == ["The first story begins."]
         # The abandoned reply still exists in the tree — nothing was deleted.
@@ -205,7 +204,9 @@ class TestFork:
     def test_an_untitled_story_forks_untitled(self, app: App, capsys) -> None:
         app.play("I enter the hall.")
         app.play("/fork")
-        assert "Forked." in capsys.readouterr().out
+        # No title to inherit: the copy is named by its opening line, the
+        # way every untitled story is named.
+        assert "Forked to: I enter the hall." in capsys.readouterr().out
         assert app.store.stories.get(app.session.story_id).title == ""
 
     def test_forks_of_a_titled_story_number_themselves(self, app: App, capsys) -> None:
@@ -356,7 +357,11 @@ class TestNew:
         app.play("I enter the hall.")
         original = app.session.story_id
         app.play("/new")
-        assert "Started a new story." in capsys.readouterr().out
+        out = capsys.readouterr().out
+        assert "Started a new story." in out
+        # The played story ends at the rule; the announcement opens below it,
+        # like every other break — two in a row can never sit adjacent.
+        assert out.index(RULE) < out.index("Started a new story.")
         assert app.session.story_id is None
         assert app.session.messages == []
         # A relaunch starts fresh too, not back in the left story.

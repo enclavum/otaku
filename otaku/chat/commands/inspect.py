@@ -3,7 +3,7 @@
 import click
 
 from otaku.chat.session import NO_MODEL_HINT, Session
-from otaku.formatting import flatten, format_context, format_size, pretty_path, truncate
+from otaku.formatting import format_context, format_size, pretty_path
 from otaku.lore import assembler
 from otaku.providers.base import CloudClient
 from otaku.settings.config import ProviderConfig
@@ -137,7 +137,7 @@ def cmd_info(session: Session, store: Store, args: list[str]) -> None:
         f"({user_count} user, {assistant_count} assistant)"
     )
     if session.story_id is not None:
-        label = flatten(truncate(session.story_label(store), 40))
+        label = session.story_headline(store)
         print(
             f"  story: {label} ({session.story_id})" if label else f"  story: ({session.story_id})"
         )

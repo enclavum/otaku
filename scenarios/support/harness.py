@@ -30,6 +30,10 @@ PROVIDER = "test"
 MODEL = "test-model"
 SPEC = f"{PROVIDER}/{MODEL}"
 
+# The break rule the screen ledger draws where the played sequence breaks,
+# at its narrowest — a prefix of the run at any terminal width.
+RULE = "┈" * 20
+
 
 class App(app_mod.App):
     """The real app plus the scenario's view of it: the scripted `server`

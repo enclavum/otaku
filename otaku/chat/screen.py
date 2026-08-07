@@ -34,6 +34,14 @@ the fresh one in its place, the request still displayed above — and an
 undo that takes the re-echoed exchange takes the report line with it and
 prints a fresh one in the same spot, so the screen always shows exactly
 one, current, report — never one pointing at nothing, never two stacked.
+
+Every such break is drawn: `rule()` prints one faint dotted line over
+whatever the break has to say — the report or marker, the announcement
+of a story swapped underneath the screen (/new, /stories, /import), the
+turns /last repeats. It is the ONE piece of that output no erase
+touches — it sits above the erasable lead — so a report replacing a
+marker slides in under the standing rule instead of stacking a second
+one; only fresh output past the ledger (`invalidate`) earns a new one.
 A successful /undo otherwise says nothing — the vanishing is the whole
 report — and leaves the screen as if the exchange was never played; the
 standing blank line before the prompt is then already on screen, so the
@@ -53,7 +61,7 @@ import sys
 from collections.abc import Iterator
 from typing import Any, TextIO, cast
 
-from otaku.terminal import CLEAR_SCREEN, user_block
+from otaku.terminal import CLEAR_SCREEN, break_rule, user_block
 from otaku.terminal.cursor import RowTracker, measure, terminal_width
 from otaku.terminal.query import cursor_row
 
@@ -75,6 +83,7 @@ class ScreenLedger:
         self._stack: list[_Exchange] = []
         self._suppress_gap = False
         self._lead_blank = False  # a command's first write earns a blank
+        self._ruled = False  # a break rule stands above the current run
         self._reply = _ReplyWriter(self)
         self._cpr_dead = False  # the terminal never answered — stop asking
 
@@ -137,7 +146,31 @@ class ScreenLedger:
         sys.stdout.write(CLEAR_SCREEN)
         sys.stdout.flush()
         self._stack.clear()
+        self._ruled = False
         self._suppress_gap = True
+
+    # ---------- the break rule ----------
+
+    def rule(self) -> None:
+        """The break rule marking where the played sequence breaks — a
+        report or marker that lands below live output instead of
+        replacing it, or a story swapped underneath the screen. Prints
+        the rule and the blank line under it, always OVER what the break
+        has to say, so every announcement reads the same way.
+
+        It sits above the erasable lead, so no erase reaches it, and it
+        prints once: a rule already standing stays put while the report
+        under it refreshes, so an /undo taking over a /regen marker keeps
+        the one rule instead of stacking a second. That is why the blank
+        belongs to the rule and not to the caller — a caller printing its
+        own would add one per refresh, the rule drifting further from its
+        report every time. `invalidate` — output past the ledger, which
+        is a break of its own — is what lets the next rule print."""
+        if self._ruled:
+            return
+        sys.stdout.write(f"{break_rule(terminal_width())}\n\n")
+        sys.stdout.flush()
+        self._ruled = True
 
     # ---------- erasing ----------
 
@@ -165,15 +198,20 @@ class ScreenLedger:
         return True
 
     def erase_reply(self) -> bool:
-        """Take the last reply off the screen (/regen), leaving everything
-        above it: the cursor lands where the reply began and the new one
-        streams in its place. False — no reply rows on screen (a /you
-        that answered nothing) or an unprovable erase — means fall back
-        to the marker, which invalidates like any command output."""
+        """Clear the ground the fresh reply takes (/regen): the cursor
+        lands where the reply began — or where an unanswered prompt's
+        reply WOULD begin — and the new one streams there. A block no
+        reply followed (a resumed prompt, a /you that answered nothing)
+        keeps the blank under it: that is the gap the reply sits below,
+        so only the typed line goes, and there may be nothing at all to
+        erase. False — no live exchange, or an unprovable erase — means
+        fall back to the marker, which invalidates like any command
+        output."""
         entry = self._top()
-        if entry is None or entry.tracker.rows == 0:
+        if entry is None:
             return False
-        if not self._erase(self.typed_rows + 1 + entry.tracker.rows, entry):
+        rows = self.typed_rows + (1 + entry.tracker.rows if entry.tracker.rows else 0)
+        if rows and not self._erase(rows, entry):
             return False
         entry.tracker.reset()
         self.typed_rows = 0
@@ -227,6 +265,7 @@ class ScreenLedger:
         command, by every fallback print site, and by the run loop on a
         KeyboardInterrupt."""
         self._stack.clear()
+        self._ruled = False
         self._suppress_gap = False
 
     def take_suppressed_gap(self) -> bool:

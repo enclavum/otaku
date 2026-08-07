@@ -14,6 +14,7 @@ changes.
   - dialogue coloring;
   - undo erases the taken-back exchange from the screen;
   - regenerate erases the old reply and streams the new one in its place;
+  - a rule drawn across the screen wherever the played story breaks;
   - providers configurable directly in the model picker (`/model` or Ctrl+O);
   - `/system` accepting a file in addition to text input.
 - New commands: `/clear`, `/last`, `/balance`; command `/rename` renamed to `/title`.
@@ -44,6 +45,10 @@ their own config file — plus quality-of-life across the REPL.
 - `otaku update`: detects how otaku was installed and runs that installer's own upgrade.
 - `/undo` and `/regen` erase the taken-back turns from the screen when it is provably safe;
   `/last [N]` re-echoes the last turns for a clean view; `/clear` wipes the screen.
+- A break rule wherever the played sequence on screen stops continuing: over an `/undo` report
+  or a `/regen` marker that could not erase in place, and where `/new`, `/stories`, `/import`,
+  or `/last` swaps or repeats the scene. It is the one thing an erase never takes, so a report
+  replacing a marker slides in under the standing rule instead of stacking a second one.
 - Dialogue coloring: spoken lines («quotes» and dash lines) render in blue, shaded to the
   detected terminal background (`[ui] dialogue_color`, `dialogue_bold`); the echoed prompt's band
   follows the background the same way.
@@ -59,6 +64,10 @@ their own config file — plus quality-of-life across the REPL.
   (migrated away), and omlx no longer needs it set by hand.
 - `/model` echoes the switched-to model in bold; the story-title command is `/title` now
   (was `/rename`).
+- `/regen` re-runs the last prompt when no reply stands — a failed request leaves the prompt
+  unanswered, and regenerating sends it again.
+- `/import` lands as deep in the scene as every other way into a story, and `/last` names what
+  it put on screen.
 
 ## [0.2.1] - 2026-08-01
 

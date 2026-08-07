@@ -12,11 +12,18 @@ self-contained.
 """
 
 import builtins
+import re
 from dataclasses import dataclass
 from datetime import datetime
 
 from otaku.store.database import Database
 from otaku.store.schema import Message, Story
+
+# The numbered suffix a fork's title carries — every one it has collected,
+# so numbering works off the stem and the suffixes can never pile up
+# ("The River - 3 - 3 - 2"). The group captures the last repetition, which
+# is the number the title actually reads as.
+_FORK_SUFFIX = re.compile(r"(?: - (\d+))+$")
 
 
 @dataclass(frozen=True)
@@ -249,7 +256,8 @@ class StoryOps:
     ) -> int:
         """A new story branched off at `from_message_id` (default: the head).
         An explicit `title` is used verbatim; otherwise the source's title
-        gains a number ("<title> - N"), and an untitled source forks
+        gains a number ("<title> - N") — one that already carries a number
+        is renumbered, never suffixed again — and an untitled source forks
         untitled. Deep copy through the cut: the message chain, the cast,
         the scenes that end at least `settle` messages before the cut — the
         live rule ("no scene ends where the story is still moving") holds in
@@ -347,20 +355,27 @@ class StoryOps:
     # ---------- internals ----------
 
     def _fork_title(self, base: str) -> str | None:
-        """The first free "<base> - N", N from 2; an untitled source forks
-        untitled."""
+        """The first free "<stem> - N" counting up FROM `base`'s own
+        number: a numbered title is renumbered off its stem — never
+        suffixed again, and never below itself, so "The River - 5" forks
+        to "- 6" even while "- 4" stands free. An unnumbered title starts
+        at 2, and an untitled source forks untitled."""
         if not base:
             return None
+        numbered = _FORK_SUFFIX.search(base)
+        stem = base[: numbered.start()] if numbered else base
+        n = int(numbered.group(1)) + 1 if numbered else 2
+        if not stem:  # a title that is nothing but a number keeps itself
+            stem, n = base, 2
         # Titles only — the full listing would decrypt every story's labels
         # just to number one fork.
         # fmt: off
         rows = self._db.conn.execute("SELECT title FROM stories").fetchall()
         # fmt: on
         taken = {self._db.unseal(title) for (title,) in rows}
-        n = 2
-        while f"{base} - {n}" in taken:
+        while f"{stem} - {n}" in taken:
             n += 1
-        return f"{base} - {n}"
+        return f"{stem} - {n}"
 
     def _get_chain_ids(self, head_id: int | None) -> builtins.list[int]:
         """Walk the parent chain from a head; ids come back root → head."""

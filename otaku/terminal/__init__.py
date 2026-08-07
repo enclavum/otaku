@@ -70,6 +70,19 @@ def user_block(text: str) -> str:
     return "\n".join(f"{band}{PROMPT_PREFIX}{line}\x1b[K{RESET}" for line in lines)
 
 
+# The rule the chat screen draws where the played sequence stops
+# continuing. A fine dotted line in the terminal's own text color: the
+# character carries the lightness, so the line reads at normal weight and
+# stays legible on any theme without a color to shade.
+_RULE_CHAR = "┈"
+
+
+def break_rule(width: int) -> str:
+    """The break rule, `width` columns wide — one row, printed by the
+    caller (chat/screen.py, which decides where a break falls)."""
+    return _RULE_CHAR * width
+
+
 # Color specs. A NAME is the portable form: it compiles to one of the 16
 # palette slots, which every terminal on every platform renders and the
 # user's own theme shades, so it stays legible on light and dark alike. A

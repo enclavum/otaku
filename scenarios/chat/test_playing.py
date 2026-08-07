@@ -2,7 +2,7 @@
 roleplay commands /me, /you, /ooc."""
 
 from scenarios.support import server as scripted
-from scenarios.support.harness import App, launch, set_config
+from scenarios.support.harness import RULE, App, launch, set_config
 
 
 class TestTurns:
@@ -45,7 +45,7 @@ class TestTurns:
         # the screen and the story must never diverge.
         app.server.fail_after = 1
         app.play("I enter the hall.")
-        assert "[error:" in capsys.readouterr().out
+        assert "[ error:" in capsys.readouterr().out
         chain = app.store.stories.get_messages(app.session.story_id)
         first_chunk = scripted.CHAT_REPLY[: max(1, len(scripted.CHAT_REPLY) // 3)]
         assert [m.body for m in chain] == ["I enter the hall.", first_chunk]
@@ -77,7 +77,7 @@ class TestTurns:
         try:
             app.play("I enter the hall.")
             out = capsys.readouterr().out
-            assert "[error: could not reach" in out
+            assert "[ error: could not reach" in out
             assert "\n\n\n" not in out
         finally:
             app.close()
@@ -123,6 +123,16 @@ class TestYou:
             ("assistant", scripted.CHAT_REPLY),
         ]
 
+    def test_resending_a_failed_switch_answers_in_character(self, app: App) -> None:
+        # The switch rides an ooc row, yet what it asks for is the scene:
+        # the resent take is a normal turn, not an ooc aside.
+        app.play("I enter the hall.")
+        app.server.fail_after = 0
+        app.play("/you Elara")
+        app.server.fail_after = None
+        app.play("/regen")
+        assert app.store.stories.get_messages(app.session.story_id)[-1].kind == "dialogue"
+
 
 class TestOoc:
     def test_the_typed_line_echoes_as_the_grey_block(self, app: App, capsys) -> None:
@@ -147,6 +157,15 @@ class TestOoc:
         chain = app.store.stories.get_messages(app.session.story_id)
         assert chain[-1].body == "Dark fantasy."
         assert chain[-1].kind == "ooc"
+
+    def test_resending_a_failed_ooc_question_stays_ooc(self, app: App) -> None:
+        app.play("I enter the hall.")
+        app.server.fail_after = 0
+        app.play("/ooc What genre is this?")
+        app.server.fail_after = None
+        app.play("/regen")
+        chain = app.store.stories.get_messages(app.session.story_id)
+        assert (chain[-2].kind, chain[-1].kind) == ("ooc", "ooc")
 
 
 class TestUndo:
@@ -187,6 +206,7 @@ class TestUndo:
         out = capsys.readouterr().out
         assert "[ undone. the story now ends with: ]" in out
         assert "> The first turn." in out  # the surviving exchange, re-echoed
+        assert RULE in out  # the break the report lands on is drawn
 
 
 class TestRegenerate:
@@ -198,6 +218,22 @@ class TestRegenerate:
         assert [m.body for m in chain] == ["I roll the dice.", "It came up six."]
         # Both replies hang off the same prompt: the old one is a sibling.
         assert app.store.messages.get_parent(2) == app.store.messages.get_parent(3) == 1
+
+    def test_regen_resends_the_prompt_a_failure_left_unanswered(self, app: App) -> None:
+        # A request that dies before any content records no reply, so the
+        # prompt stands alone at the end of the story: /regen sends it again.
+        app.server.fail_after = 0
+        app.play("I roll the dice.")
+        assert [m.role for m in app.session.messages] == ["user"]
+        app.server.fail_after = None
+        app.play("/regen")
+        chain = app.store.stories.get_messages(app.session.story_id)
+        assert [m.body for m in chain] == ["I roll the dice.", scripted.CHAT_REPLY]
+        assert app.server.requests[-1]["messages"][-1]["content"] == "I roll the dice."
+
+    def test_regen_on_an_empty_story_says_so(self, app: App, capsys) -> None:
+        app.play("/regen")
+        assert "Nothing to regenerate." in capsys.readouterr().out
 
     def test_regen_without_a_model_touches_nothing(self, server, tmp_path, capsys) -> None:
         # The guard runs before the drop and the erase: the reply stays
@@ -222,6 +258,7 @@ class TestRegenerate:
         out = capsys.readouterr().out
         assert "[ regenerating ]" in out
         assert "> I roll the dice." in out  # the prompt being re-run, echoed
+        assert RULE in out  # the break the marker lands on is drawn
 
 
 class TestLast:
@@ -234,6 +271,8 @@ class TestLast:
         assert "> Turn 0." in out
         assert "> Turn 2." in out
         assert scripted.CHAT_REPLY in out
+        # The copy is fenced off from the turns it repeats, and named.
+        assert out.index(RULE) < out.index("The last 3 turns of this story:")
 
     def test_a_count_limits_the_echo(self, app: App, capsys) -> None:
         for n in range(3):

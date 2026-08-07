@@ -32,7 +32,7 @@ from otaku.chat.prompt import (
     build_prompt,
 )
 from otaku.chat.session import RESUME_TURNS, Session
-from otaku.formatting import flatten, pretty_path, truncate
+from otaku.formatting import pretty_path
 from otaku.logs.errors import ErrorLog
 from otaku.store import Store
 from otaku.store.schema import Message
@@ -77,7 +77,16 @@ def run(session: Session, store: Store) -> None:
 
     if session.config.show_banner:
         print(_banner(session, store))
-    _show_resumed(session, store)
+    if session.messages:
+        # A resumed story starts mid-scene: name what was resumed and show
+        # its last turns, so the scene is on screen before the prompt — and
+        # hand them to the screen ledger, so /undo and /regen can take them
+        # back.
+        print(session.landed_line(store))
+        print()
+        print(session.render_last_turns(RESUME_TURNS))
+        print()
+        session.restore_screen_tail(RESUME_TURNS)
     if session.notice:
         # The resume echo above always precedes the notice and ends with
         # its own blank line. The notice sits below the echoed turns, so
@@ -259,7 +268,7 @@ def _banner(session: Session, store: Store) -> str:
                 context = client.get_context_size(session.model)
             except Exception:
                 context = None
-    story = flatten(truncate(session.story_label(store), 40))
+    story = session.story_headline(store)
     return banner.render(
         __version__,
         session.model or "(no model)",
@@ -267,20 +276,3 @@ def _banner(session: Session, store: Store) -> str:
         context=context,
         story=story,
     )
-
-
-def _show_resumed(session: Session, store: Store) -> None:
-    """A resumed story starts mid-scene: name what was resumed and show its
-    last turns, so the scene is on screen before the prompt — and hand
-    them to the screen ledger, so /undo and /regen can take them back."""
-    if not session.messages:
-        return
-    label = flatten(truncate(session.story_label(store), 40))
-    if label:
-        print(f"Story: {label}. Resumed at message {len(session.messages)}.")
-    else:
-        print(f"Resumed at message {len(session.messages)}.")
-    print()
-    print(session.render_last_turns(RESUME_TURNS))
-    print()
-    session.restore_screen_tail(RESUME_TURNS)

@@ -18,6 +18,10 @@ from scenarios.support.harness import SPEC, run_otaku, set_config, set_config_pr
 from scenarios.support.server import ModelServer
 from scenarios.support.terminal import CTRL_O, CTRL_R, CTRL_T, CTRL_U, ENTER, ESC, Terminal
 
+# The break rule as it lands in an 80-column pty (the banner's solid one
+# is a different character entirely).
+RULE = "┈" * 80
+
 
 class TestFirstRun:
     def test_first_launch_without_a_model_opens_the_sample(self, tmp_path: Path) -> None:
@@ -287,6 +291,33 @@ class TestChat:
         assert "[ regenerating ]" not in terminal.transcript
         assert terminal.quit() == 0
 
+    def test_a_resumed_prompt_no_reply_answered_just_plays(
+        self, server: ModelServer, tmp_path: Path
+    ) -> None:
+        """A story reopened on a bare prompt — the request that should
+        have answered it never landed. Ctrl+R has nothing to take off the
+        screen and says nothing: the take streams into the empty space
+        under the prompt, where a reply belonged all along."""
+        state = tmp_path / "state"
+        first = launch_remembered(server, state)
+        play(first, "I roll the dice.", "stirred")
+        server.fail_after = 0  # records the prompt, never a reply
+        first.settle()
+        play(first, "I open the door.", "error")
+        assert first.quit() == 0
+
+        server.fail_after = None
+        server.script = lambda body: "The hinges groan."
+        terminal = Terminal(str(state))
+        terminal.expect("I open the door.")  # the resume echo ends on the prompt
+        terminal.settle()
+        terminal.arm_cpr(20)
+        terminal.send(CTRL_R, 1.0)
+        terminal.expect("The hinges groan.")
+        assert "[ regenerating ]" not in terminal.transcript
+        assert RULE not in terminal.transcript  # nothing broke — nothing to draw
+        assert terminal.quit() == 0
+
     def test_the_install_journey_lands_mid_story(self, server: ModelServer, tmp_path: Path) -> None:
         """The whole first-run scenario: install, launch, pick a model —
         and you are in the middle of a playable story, ready to explore."""
@@ -321,7 +352,8 @@ class TestShortcuts:
         prompt re-echoed under the marker, like an undo report shows its
         turns. The new take reads as an exchange: the next Ctrl+R erases
         its reply in place, and Ctrl+U takes marker and echo into an undo
-        report."""
+        report. The break rule drawn over the marker outlives all of it:
+        the report slides in under the one rule, never a second."""
         terminal = launch_remembered(server, tmp_path / "state")
         play(terminal, "I roll the dice.", "stirred")
         terminal.settle()
@@ -333,6 +365,7 @@ class TestShortcuts:
         terminal.expect("It came up six.")
         assert "[ regenerating ]" in terminal.transcript
         assert terminal.transcript.count("> I roll the dice.") == before + 1  # re-echoed
+        assert terminal.transcript.count(RULE) == 1  # drawn over the marker
         server.script = lambda body: "It came up one."
         terminal.settle()
         terminal.arm_cpr(20)
@@ -345,6 +378,35 @@ class TestShortcuts:
         terminal.send(CTRL_U, 1.0)  # marker and echo go — the report replaces them
         terminal.expect("The story is now empty")
         assert b"\x1b[6A\r\x1b[J" in terminal.raw
+        # The erase took the marker, not the rule above it; the report
+        # printed in its place under that same one rule.
+        assert terminal.transcript.count(RULE) == 1
+        assert terminal.quit() == 0
+
+    def test_repeated_undo_refreshes_keep_the_one_rule(
+        self, server: ModelServer, tmp_path: Path
+    ) -> None:
+        """Undo after undo under a fallback regen's rule: every report
+        replaces the last in the same spot, printed flush against the
+        erase. A blank line of its own would push the rule one row
+        further from its report on every refresh."""
+        terminal = launch_remembered(server, tmp_path / "state")
+        for n, turn in enumerate(("Turn one.", "Turn two.", "Turn three.")):
+            server.script = lambda body, reply=f"Reply {n}.": reply  # a marker per turn
+            play(terminal, turn, f"Reply {n}.")
+        terminal.settle()
+        play(terminal, "/info", "State dir:")  # prints below — regen must announce
+        server.script = lambda body: "A fresh take."
+        terminal.settle()
+        terminal.send(CTRL_R, 1.0)
+        terminal.expect("A fresh take.")
+        for _ in range(2):
+            terminal.settle()
+            terminal.arm_cpr(20)
+            terminal.send(CTRL_U, 1.0)
+        terminal.settle()
+        assert terminal.raw.count(b"\r\x1b[J\x1b[2m[ undone.") == 2
+        assert terminal.transcript.count(RULE) == 1
         assert terminal.quit() == 0
 
     def test_ctrl_r_erases_the_old_reply_when_the_terminal_answers(

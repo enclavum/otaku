@@ -14,7 +14,7 @@ from pathlib import Path
 
 from otaku import __version__
 from otaku.chat.commands import lore
-from otaku.chat.session import Session
+from otaku.chat.session import RESUME_TURNS, Session
 from otaku.store import Store
 from otaku.terminal import YES_ANSWERS, latin_key
 from otaku.transfer import EXPORT_MARKER
@@ -30,18 +30,21 @@ def cmd_import(session: Session, store: Store, args: list[str]) -> None:
     applied verbatim, no model calls), a SillyTavern chat (.jsonl), or
     plain text (.txt) dismantled into verbatim messages. The session
     switches to the imported story and its last turns are echoed the way
-    a resume echoes them. A leading `@` — the path-completion trigger —
-    is not part of the name."""
+    a resume echoes them, under the break rule that ends whatever was
+    played above. A leading `@` — the path-completion trigger — is not
+    part of the name."""
     path_text = session.raw_args.strip().removeprefix("@")
     if not path_text:
         print("Usage: /import FILE")
         return
     if not import_story(session, store, path_text):
         return
-    # Land in the scene.
-    print()
-    print(session.render_last_turns(2))
-    session.restore_screen_tail(2)
+    # Land in the scene, as deep as any other way into a story. What the
+    # reading of the file had to say stays above the rule; the imported
+    # story's turns are the run below it.
+    session.screen.rule()
+    print(session.render_last_turns(RESUME_TURNS))
+    session.restore_screen_tail(RESUME_TURNS)
 
 
 def import_story(session: Session, store: Store, path_text: str) -> bool:

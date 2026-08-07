@@ -12,7 +12,7 @@ from pathlib import Path
 from otaku.transfer.exports import read_story
 from otaku.transfer.imports import parse_story
 from scenarios.support import server as scripted
-from scenarios.support.harness import App
+from scenarios.support.harness import RULE, App
 
 CHAPEL = Path(__file__).parent.parent / "fixtures" / "chapel.md"
 
@@ -39,6 +39,7 @@ class TestImport:
         out = capsys.readouterr().out
         assert "1 scene(s) applied verbatim" in out
         assert "\x1b[48;2;240;240;240m" in out  # the scene echo: last turns, banded
+        assert out.index(RULE) < out.index("\x1b[48;2;240;240;240m")  # the scene is fenced off
         # A native export carries its extraction state: no pass runs, no
         # model is called — the story arrives exactly as it was.
         assert app.server.requests == []

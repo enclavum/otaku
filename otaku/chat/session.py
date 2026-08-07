@@ -16,11 +16,13 @@ wire time.
 """
 
 import contextlib
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Self
 
 from otaku.chat.screen import ScreenLedger
+from otaku.formatting import flatten, truncate
 from otaku.lore.worker import LoreWorker
 from otaku.paths import Paths
 from otaku.providers.registry import Registry as ProviderRegistry
@@ -32,7 +34,7 @@ from otaku.settings.prompts import Prompts
 from otaku.store import Store
 from otaku.store.schema import Message
 from otaku.store.stories import StoryListing
-from otaku.terminal import DIM, RESET, user_block
+from otaku.terminal import user_block
 from otaku.terminal.statusline import StatusLine
 from otaku.terminal.typography import typeset
 
@@ -63,6 +65,16 @@ PickedStory = tuple[int, list[Message], str]
 # Turns echoed when a story (re)opens — launch resume, a browser pick, an
 # import — so the scene is on screen before the prompt.
 RESUME_TURNS = 4
+
+# The story name as every line naming a story shows it: one row, cut here.
+_LABEL_WIDTH = 40
+
+# A fork's numbering, kept whole when a long name has to be cut: it is the
+# only thing telling two copies of one story apart, and a name that needs
+# cutting is exactly where the cut would land. Long titles are the common
+# case in a language that does not abbreviate — the store's own numbering
+# (store/stories.py) is what this shows.
+_FORK_NUMBER = re.compile(r" - \d+$")
 
 # What every model-facing door says while no model is selected.
 NO_MODEL_HINT = "No model selected — pick one with /model."
@@ -190,21 +202,41 @@ class Session:
     def tail_messages(self) -> int:
         return self.config.tail_messages
 
-    def story_label(self, store: Store) -> str:
-        """The loaded story's display label: its title, else the newest
-        story-so-far rollup, else the first user message — the same fallback
-        order the story browser uses. "" when nothing exists to show."""
+    def story_headline(self, store: Store) -> str:
+        """The loaded story's name, the one way anything shows it: its
+        title, else the newest story-so-far rollup, else the first user
+        message — the fallback order the story browser uses — flattened to
+        one row and cut to the display width, a fork's number surviving
+        the cut. "" when nothing exists to name."""
         if self.story_id is None:
             return ""
         story = store.stories.get(self.story_id)
         if story is None:
             return ""
-        if story.title:
-            return story.title
-        story_so_far = store.scenes.get_story_so_far(self.story_id, [m.id for m in self.messages])
-        if story_so_far:
-            return story_so_far
-        return next((m.body for m in self.messages if m.role == "user"), "")
+        label = story.title
+        if not label:
+            label = store.scenes.get_story_so_far(self.story_id, [m.id for m in self.messages])
+        if not label:
+            label = next((m.body for m in self.messages if m.role == "user"), "")
+        label = flatten(label)
+        number = _FORK_NUMBER.search(label)
+        if number is None:
+            return truncate(label, _LABEL_WIDTH)
+        stem = truncate(label[: number.start()], _LABEL_WIDTH - len(number.group()))
+        return f"{stem}{number.group()}"
+
+    def landed_line(self, store: Store, *, verb: str = "Resumed") -> str:
+        """The one line a session prints when it lands in a story —
+
+            Story: The River That Forgot Its Name. Resumed at message 14.
+
+        — the same wording at launch and out of the story browser, `verb`
+        naming what the pick settled ("Truncated" when it rewound the
+        head). An unnamed story drops the first half rather than show an
+        empty name."""
+        label = self.story_headline(store)
+        head = f"Story: {label}. " if label else ""
+        return f"{head}{verb} at message {len(self.messages)}."
 
     def switch_to(self, store: Store, story_id: int, messages: list[Message] | None = None) -> None:
         """Attach the session to a story — its system prompt, its messages
@@ -225,7 +257,7 @@ class Session:
         if self.story_id is not None and not store.stories.exists(self.story_id):
             self.story_id = None
             self.messages = []
-            print(f"{DIM}[ the story was deleted — continuing in a new one ]{RESET}")
+            print("The story was deleted — continuing in a new one.")
         if self.story_id is None:
             self.story_id = store.stories.add()
             if self.system:
