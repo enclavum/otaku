@@ -34,11 +34,7 @@ def cmd_stories(session: Session, store: Store, args: list[str]) -> None:
     story_id, messages, action = result
 
     if action == "fork":
-        story_id = store.stories.fork(
-            story_id,
-            from_message_id=messages[-1].id,
-            settle=session.config.settle_messages,
-        )
+        story_id = store.stories.fork(story_id, from_message_id=messages[-1].id)
         messages = store.stories.get_messages(story_id)
     elif action == "truncate":
         store.stories.set_head(story_id, messages[-1].id)
@@ -88,9 +84,7 @@ def cmd_fork(session: Session, store: Store, args: list[str]) -> None:
         print("Nothing to fork yet — send a message first.")
         return
     title = session.raw_args.strip() or None
-    session.story_id = store.stories.fork(
-        session.story_id, title=title, settle=session.config.settle_messages
-    )
+    session.story_id = store.stories.fork(session.story_id, title=title)
     session.messages = store.stories.get_messages(session.story_id)
     session.save_state()
     # Named the way the browser's fork names it. No rule: /fork copies the

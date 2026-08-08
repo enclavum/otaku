@@ -253,18 +253,18 @@ class StoryOps:
         *,
         from_message_id: int | None = None,
         title: str | None = None,
-        settle: int = 0,
     ) -> int:
         """A new story branched off at `from_message_id` (default: the head).
         An explicit `title` is used verbatim; otherwise the source's title
         gains a number ("<title> - N") — one that already carries a number
         is renumbered, never suffixed again — and an untitled source forks
         untitled. Deep copy through the cut: the message chain, the cast,
-        the scenes that end at least `settle` messages before the cut — the
-        live rule ("no scene ends where the story is still moving") holds in
-        the copy, so an undo right after resuming cannot orphan one; the
-        uncovered span becomes unextracted tail — and the copied scenes'
-        journals. Returns the new story id."""
+        every scene of that chain, and their journals — a branch is the
+        story so far, memory included. Extraction's settle margin has no
+        business here: it exists because /undo and /regen can rewind the
+        newest turns, and these scenes already cleared it in the source.
+        A scene the copy later undoes past simply stops being current,
+        exactly as in the story it came from. Returns the new story id."""
         source = self.get(story_id)
         if source is None:
             raise ValueError(f"no story {story_id}")
@@ -280,7 +280,6 @@ class StoryOps:
         cut = from_message_id if from_message_id is not None else source.head_id
         chain = self._get_chain_ids(cut)
         copied = set(chain)
-        settled = set(chain[: max(0, len(chain) - settle)] if settle > 0 else chain)
         if title is None:
             title = self._fork_title(source.title)
         now = self._db.now()
@@ -325,7 +324,7 @@ class StoryOps:
                 (story_id,),
             ).fetchall()
             for sid, start, end, s_title, summary, history, created in rows:
-                if start not in copied or end not in settled:
+                if start not in copied or end not in copied:
                     continue
                 cur = conn.execute(
                     "INSERT INTO scenes (story_id, start_message_id, end_message_id, title, summary, history, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",

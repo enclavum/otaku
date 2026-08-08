@@ -166,7 +166,11 @@ class ScreenLedger:
         belongs to the rule and not to the caller — a caller printing its
         own would add one per refresh, the rule drifting further from its
         report every time. `invalidate` — output past the ledger, which
-        is a break of its own — is what lets the next rule print."""
+        is a break of its own — is what lets the next rule print, and the
+        rule counts as that output itself: drawn by a command that does
+        not manage the screen, it lands below whatever stood there, so
+        the rule a PREVIOUS command left cannot swallow this one."""
+        self.command_wrote()
         if self._ruled:
             return
         sys.stdout.write(f"{break_rule(terminal_width())}\n\n")

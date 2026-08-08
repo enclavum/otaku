@@ -13,7 +13,7 @@ from otaku.store import Store
 from otaku.store.stories import StoryListing
 from otaku.tui import stories
 from scenarios.support import server as scripted
-from scenarios.support.harness import App, launch, set_config
+from scenarios.support.harness import App, launch
 from scenarios.support.screens import CTRL_S, DELETE, ENTER, ESC, run_screen
 
 Picker = Callable[[Store, list[StoryListing], int | None], PickedStory | None]
@@ -150,40 +150,22 @@ class TestFork:
         app.play("/fork Another door")
         assert app.store.stories.get(app.session.story_id).title == "Another door"
 
-    def test_with_no_settle_margin_the_memory_survives_the_fork(self, server, tmp_path) -> None:
-        # settle_messages = 0: a scene ending at the head is still "settled",
-        # so the fork carries the whole memory — scene, journals, cast.
-        set_config(tmp_path / "state", settle_messages=0)
-        app = launch(tmp_path / "state", server)
-        try:
-            for i in range(3):
-                app.play(f"Turn number {i}.")
-            app.play("/extract")
-            app.play("/fork")
-            story_id = app.session.story_id
-            ids = app.store.stories.get_messages_ids(story_id)
-            scenes = app.store.scenes.get_current(story_id, ids)
-            assert len(scenes) == 1
-            assert scenes[0].history == "A guest came in and met the Keeper."
-            cast = app.store.characters.list(story_id)
-            assert [c.name for c in cast] == ["Keeper"]
-            assert app.store.journals.get_current(story_id, ids)[cast[0].id].state == "at the gate"
-        finally:
-            app.close()
-
-    def test_the_settle_margin_holds_a_fresh_scene_back(self, app: App) -> None:
-        # Default settle (20): a scene ending near the head is NOT copied —
-        # the live rule "no scene ends where the story is still moving"
-        # holds in the copy; its span becomes unextracted tail instead.
+    def test_the_memory_travels_with_the_copy(self, app: App) -> None:
+        # A branch is the story so far, memory included — whatever the
+        # settle margin is. A 3-turn story is shorter than the default 20,
+        # which used to leave every scene behind and the fork blank.
         for i in range(3):
             app.play(f"Turn number {i}.")
         app.play("/extract")
         app.play("/fork")
         story_id = app.session.story_id
         ids = app.store.stories.get_messages_ids(story_id)
-        assert app.store.scenes.get_current(story_id, ids) == []
-        # The cast is per-story and always travels.
-        assert [c.name for c in app.store.characters.list(story_id)] == ["Keeper"]
+        scenes = app.store.scenes.get_current(story_id, ids)
+        assert len(scenes) == 1
+        assert scenes[0].history == "A guest came in and met the Keeper."
+        cast = app.store.characters.list(story_id)
+        assert [c.name for c in cast] == ["Keeper"]
+        assert app.store.journals.get_current(story_id, ids)[cast[0].id].state == "at the gate"
 
 
 class TestSystem:
