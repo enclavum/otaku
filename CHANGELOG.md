@@ -5,11 +5,12 @@ All notable changes to otaku are documented in this file. The format is based on
 [Semantic Versioning](https://semver.org/) — while pre-1.0, minor releases may include breaking
 changes.
 
-## [0.2.2] - [planned]
+## [0.2.2] - 2026-08-08
 
 **TL;DR**
 
-- New providers: OpenRouter and NanoGPT (cloud), llama.cpp and LM Studio (local).
+- New providers: OpenRouter and NanoGPT (cloud), llama.cpp and LM Studio (local); the prompt for
+  cloud providers is `$` instead of `>`.
 - Numerous UI improvements, including:
   - dialogue coloring;
   - undo erases the taken-back exchange from the screen;
@@ -28,8 +29,8 @@ their own config file — plus quality-of-life across the REPL.
 
 ### Added
 - Cloud providers: OpenRouter and NanoGPT — their catalogs listed with context windows (fetched
-  asynchronously, so the picker opens without waiting on the internet), a short `(cloud)` prompt
-  hint while playing against one, and `/balance` for the account balance.
+  asynchronously, so the picker opens without waiting on the internet), the cloud prompt `$`
+  instead of `>` while playing against one, and `/balance` for the account balance.
 - New local backends: llama.cpp (`llama-server`) and LM Studio (load/unload included), joining
   Ollama, oMLX, and KoboldCpp; every backend now reports each model's context window, shown as a
   column in the picker.
@@ -65,6 +66,10 @@ their own config file — plus quality-of-life across the REPL.
   unanswered, and regenerating sends it again.
 - `/import` lands as deep in the scene as every other way into a story, and `/last` names what
   it put on screen.
+
+### Fixed
+- Forking carries the story's memory. A story shorter than `settle_messages` (20 by default) —
+  the shipped sample among them — forked with no scenes and no journals at all.
 
 ## [0.2.1] - 2026-08-01
 

@@ -7,7 +7,7 @@
 
 Stories that branch and grow their own lore — on your machine, with optional at-rest encryption.
 
-![otaku demo](docs/demo.gif)
+![otaku demo](https://otaku.sh/demo.gif)
 
 ## What it is
 
@@ -173,7 +173,7 @@ are content-free by contract.
 Provider API keys are always stored sealed, their key in the OS keychain. Daily database backups
 are kept in the state dir.
 
-Details in [SECURITY.md](SECURITY.md).
+Details in [SECURITY.md](https://github.com/enclavum/otaku/blob/main/SECURITY.md).
 
 ## Provider support
 
@@ -194,9 +194,9 @@ Details in [SECURITY.md](SECURITY.md).
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) — a small, focused project; contributions that keep it
+See [CONTRIBUTING.md](https://github.com/enclavum/otaku/blob/main/CONTRIBUTING.md) — a small, focused project; contributions that keep it
 sharp are very welcome.
 
 ## License
 
-[MIT](LICENSE).
+[MIT](https://github.com/enclavum/otaku/blob/main/LICENSE).
