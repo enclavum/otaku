@@ -93,15 +93,25 @@ def cmd_balance(session: Session, store: Store, args: list[str]) -> None:
 def cmd_info(session: Session, store: Store, args: list[str]) -> None:
     """Best-effort dump of everything otaku knows about the active model and
     session. Network-backed fields are silently skipped when the provider
-    doesn't expose them or the request fails."""
-    if session.provider_config is None:
-        print(NO_MODEL_HINT)
-        return
-    client = session.providers.get_client(session.provider_config.name)
-    provider_config = session.provider_config
-
+    doesn't expose them or the request fails. Without a model only that
+    half is missing: the state dir, the story, its premise and the
+    parameters are the session's own, and reporting them needs no
+    provider."""
     print(f"State dir: {pretty_path(session.paths.root)}")
     print()
+    if session.provider_config is None:
+        print(NO_MODEL_HINT)
+    else:
+        _print_model(session)
+    print()
+    _print_session(session, store)
+
+
+def _print_model(session: Session) -> None:
+    """The active model's half of `/info`."""
+    provider_config = session.provider_config
+    assert provider_config is not None
+    client = session.providers.get_client(provider_config.name)
     print(f"Model:    {session.full_model_name}")
     print(f"Backend:  {client.kind} ({provider_config.url})")
     if provider_config.api_key:
@@ -130,16 +140,12 @@ def cmd_info(session: Session, store: Store, args: list[str]) -> None:
     if provider_config.keep_alive:
         print(f"Keep-alive: {provider_config.keep_alive}")
 
-    print()
 
-    user_count = sum(1 for m in session.messages if m.role == "user")
-    assistant_count = sum(1 for m in session.messages if m.role == "assistant")
-    print(
-        f"Context:  {len(session.messages)} messages "
-        f"({user_count} user, {assistant_count} assistant)"
-    )
+def _print_session(session: Session, store: Store) -> None:
+    """The session's half of `/info` — what is loaded, not what answers."""
     if label := session.story_headline(store):
         print(f"Story:    {label}")
+    print(f"Messages: {len(session.messages)}")
     if session.system:
         print(f'System:   "{session.system}"')
     if session.params:

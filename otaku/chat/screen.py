@@ -83,6 +83,7 @@ class ScreenLedger:
         self._stack: list[_Exchange] = []
         self._suppress_gap = False
         self._lead_blank = False  # a command's first write earns a blank
+        self._stale_on_write = False  # this command's output would invalidate
         self._ruled = False  # a break rule stands above the current run
         self._reply = _ReplyWriter(self)
         self._cpr_dead = False  # the terminal never answered — stop asking
@@ -233,14 +234,27 @@ class ScreenLedger:
     # ---------- the dispatch window ----------
 
     @contextlib.contextmanager
-    def command_output(self) -> Iterator[None]:
+    def command_output(self, *, manages_screen: bool = False) -> Iterator[None]:
         """Around a dispatched command: its first inline write earns one
         blank line under the typed command line — the same separation a
         reply gets under its block. Armed only while the typed line is
         still on screen (`typed_rows`); a command that prints nothing
         leaves no blank. On a crash the armed flag survives the window,
-        so the crash report gets the same separation."""
+        so the crash report gets the same separation.
+
+        The window also decides when the command invalidated the stack.
+        `manages_screen` names the playing commands, which own the ledger
+        themselves; every other command's output lands below the last
+        exchange, so its FIRST write invalidates — not the dispatch that
+        precedes it. A full-screen picker left without a choice writes
+        NOTHING through here (prompt_toolkit holds the real stream) and
+        restores the screen it took over, so the exchanges above are
+        still exactly where they were and /regen can erase in place. Its
+        typed line is the exception: still on screen, below them all, so
+        a command that printed nothing invalidates anyway when one
+        stands — a shortcut key erased its own."""
         self._lead_blank = self.typed_rows > 0
+        self._stale_on_write = not manages_screen
         wrapper = _LeadBlankWriter(self, sys.stdout)
         sys.stdout = cast(TextIO, wrapper)
         try:
@@ -248,6 +262,17 @@ class ScreenLedger:
             self._lead_blank = False  # nothing printed — nothing to lead
         finally:
             sys.stdout = wrapper.wrapped
+            if self._stale_on_write and self.typed_rows:
+                self.invalidate()
+            self._stale_on_write = False
+
+    def command_wrote(self) -> None:
+        """The dispatch window's first inline write, from the wrapper:
+        output from a command that does not manage the screen lands below
+        the last exchange, so the stack no longer describes it."""
+        if self._stale_on_write:
+            self._stale_on_write = False
+            self.invalidate()
 
     def take_lead_blank(self) -> bool:
         """Consume the armed lead blank — whichever write comes first
@@ -362,8 +387,10 @@ class _LeadBlankWriter:
         self.wrapped = wrapped
 
     def write(self, text: str) -> int:
-        if text and self._ledger.take_lead_blank():
-            self.wrapped.write("\n")
+        if text:
+            self._ledger.command_wrote()
+            if self._ledger.take_lead_blank():
+                self.wrapped.write("\n")
         return self.wrapped.write(text)
 
     def flush(self) -> None:

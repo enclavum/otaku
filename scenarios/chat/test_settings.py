@@ -15,10 +15,11 @@ from otaku.chat.session import TUI
 from otaku.paths import Paths
 from otaku.providers.registry import Registry
 from otaku.settings import config, sealed
+from otaku.terminal import clipboard
 from otaku.tui import models
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch, set_config_provider
-from scenarios.support.screens import ENTER, ESC, run_screen
+from scenarios.support.screens import CTRL_V, ENTER, ESC, pasted, run_screen
 from scenarios.support.server import ModelServer
 
 # Key escape sequences, for pipe input.
@@ -394,6 +395,42 @@ class TestProviderPanel:
         keys = "\t" + ENTER + typed + ENTER + ESC + ESC
         run_screen(keys, lambda: models.pick(app.session.providers, paths=app.paths))
         assert 'url = "Ahttp://x/v1Z"' in app.paths.providers_file.read_text()
+
+    def test_ctrl_v_sets_a_key_in_one_press(self, app: App, monkeypatch) -> None:
+        # An api key is pasted, never typed: Ctrl+V on the highlighted
+        # field is the whole gesture — no Enter to open it, none to save.
+        monkeypatch.setattr(clipboard, "paste", lambda: "sk-pasted")
+        keys = "\t" + _DOWN + CTRL_V + ESC + ESC
+        run_screen(keys, lambda: models.pick(app.session.providers, paths=app.paths))
+        entry = tomllib.loads(app.paths.providers_file.read_text())["llamacpp"]
+        assert sealed.unseal(app.paths, entry["api_key"]) == "sk-pasted"
+
+    def test_a_terminal_paste_sets_the_field_too(self, app: App) -> None:
+        # On macOS the gesture is Cmd+V, which the terminal delivers as a
+        # bracketed paste — the app never sees a control byte, so the key
+        # binding alone would leave the field untouched.
+        keys = "\t" + _DOWN + pasted("sk-from-cmd-v") + ESC + ESC
+        run_screen(keys, lambda: models.pick(app.session.providers, paths=app.paths))
+        entry = tomllib.loads(app.paths.providers_file.read_text())["llamacpp"]
+        assert sealed.unseal(app.paths, entry["api_key"]) == "sk-from-cmd-v"
+
+    def test_a_paste_inside_the_editor_stays_an_ordinary_paste(self, app: App) -> None:
+        # Open, the user is composing: the clipboard goes in at the cursor
+        # and Enter is still what saves — only a CLOSED field is set.
+        keys = "\t" + _DOWN + ENTER + "head-" + pasted("tail") + ENTER + ESC + ESC
+        run_screen(keys, lambda: models.pick(app.session.providers, paths=app.paths))
+        entry = tomllib.loads(app.paths.providers_file.read_text())["llamacpp"]
+        assert sealed.unseal(app.paths, entry["api_key"]) == "head-tail"
+
+    def test_ctrl_v_sets_a_url_the_same_way(self, app: App, monkeypatch) -> None:
+        monkeypatch.setattr(clipboard, "paste", lambda: "http://localhost:7777/v1")
+        run_screen(
+            "\t" + CTRL_V + ESC + ESC,
+            lambda: models.pick(app.session.providers, paths=app.paths),
+        )
+        assert 'url = "http://localhost:7777/v1"' in app.paths.providers_file.read_text()
+        client = app.session.providers.get_client("llamacpp")
+        assert client.provider_config.url == "http://localhost:7777/v1"
 
     def test_a_saved_api_key_is_sealed_never_plain(self, app: App) -> None:
         keys = "\t" + _DOWN + ENTER + "hunter-2" + ENTER + ESC + ESC

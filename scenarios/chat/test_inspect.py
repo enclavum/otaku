@@ -133,6 +133,23 @@ class TestBalance:
 
 
 class TestInfo:
+    def test_without_a_model_the_session_half_still_reports(self, server, tmp_path, capsys) -> None:
+        # A model is one of the things /info reports, not its precondition:
+        # the story, its premise and the parameters are the session's own.
+        set_config(tmp_path / "state", seed_sample=True)
+        app = launch(tmp_path / "state", server, spec=None)
+        try:
+            app.play("/system You are the narrator.")
+            capsys.readouterr()
+            app.play("/info")
+            out = capsys.readouterr().out
+            assert "No model selected" in out
+            assert "State dir:" in out
+            assert "Messages:" in out  # the loaded story is still counted
+            assert "You are the narrator." in out
+        finally:
+            app.close()
+
     def test_info_names_the_active_model(self, app: App, capsys) -> None:
         app.play("I enter the hall.")
         capsys.readouterr()

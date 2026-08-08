@@ -154,8 +154,11 @@ def describe_command(tokens: tuple[str, ...]) -> str:
 
 
 # The playing commands manage the screen ledger themselves: three echo the
-# turn as the grey block, two take one back. Every other command prints
-# below the last exchange, so dispatch invalidates the ledger before it.
+# turn as the grey block, two take one back. Every other command's output
+# lands below the last exchange and invalidates the ledger — when it comes:
+# the dispatch window watches for the write rather than assuming one (see
+# `ScreenLedger.command_output`), so a picker left without a choice costs
+# the exchanges above it nothing.
 _PLAYING = {"/me", "/you", "/ooc", "/undo", "/regen"}
 
 
@@ -172,13 +175,10 @@ def dispatch(line: str, session: Session, store: Store) -> bool:
     split_once = line.split(None, 1)
     session.raw_args = split_once[1] if len(split_once) > 1 else ""
     entry = COMMANDS.get(command)
-    with session.screen.command_output():
+    with session.screen.command_output(manages_screen=command in _PLAYING):
         if entry is None:
-            session.screen.invalidate()
             print(f"Unknown command: {command}. Type /help.")
             return True
-        if command not in _PLAYING:
-            session.screen.invalidate()
         handler, _ = entry
         handler(session, store, args)
         return True

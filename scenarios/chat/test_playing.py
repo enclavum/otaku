@@ -1,6 +1,7 @@
 """Playing a story: turns, the wire promise, undo, regenerate, and the
 roleplay commands /me, /you, /ooc."""
 
+from otaku.paths import Paths
 from scenarios.support import server as scripted
 from scenarios.support.harness import RULE, App, launch, set_config
 
@@ -39,6 +40,29 @@ class TestTurns:
         assert sent == "((OOC: The user writes as Elara.))\nI step into the light."
         stored = app.store.stories.get_messages(app.session.story_id)[0]
         assert stored.body == "I step into the light."  # the body stays bare
+
+    def test_the_framing_templates_come_from_the_prompts_file(self, server, tmp_path) -> None:
+        # The file IS the injection, not a copy of it. Asserting the
+        # built-in wording would pass even if the load path were dropped
+        # and the defaults hardcoded, so the templates here are edited.
+        root = tmp_path / "state"
+        paths = Paths.resolve(root)
+        paths.ensure_tree()
+        paths.prompts_file.write_text(
+            'me_framing = "<<{name} speaks>>\\n{body}"\n'
+            'you_framing = "<<now play {name}>>"\n'
+            'ooc_framing = "<<aside: {body}>>"\n'
+        )
+        app = launch(root, server)
+        try:
+            app.play("/me Elara: I step into the light.")
+            assert sent(app) == "<<Elara speaks>>\nI step into the light."
+            app.play("/you Ryn")
+            assert sent(app) == "<<now play Ryn>>"
+            app.play("/ooc What genre is this?")
+            assert sent(app) == "<<aside: What genre is this?>>"
+        finally:
+            app.close()
 
     def test_a_stream_error_keeps_what_already_arrived(self, app: App, capsys) -> None:
         # The prose the user watched stream is in the story, error or not —
@@ -298,3 +322,8 @@ class TestClear:
         app.play("/clear")
         assert "\x1b[H\x1b[2J" in capsys.readouterr().out
         assert len(app.session.messages) == 2  # the story is untouched
+
+
+def sent(app: App) -> str:
+    """The content of the last message the server was actually given."""
+    return str(app.server.requests[-1]["messages"][-1]["content"])

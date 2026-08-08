@@ -26,7 +26,10 @@ a caption with its `URL:` and `API key:` fields, the key's value never
 displayed, the cloud catalogs' url fixed (shown dimmed, never
 walkable). Tab switches sides; ↑/↓ walk the fields; Enter edits the
 highlighted one in place (←/→ move the cursor, paste works, Enter
-saves); Delete on an api key, outside the editor, clears it. A saved
+saves); a paste onto a CLOSED field (Cmd+V, Ctrl+V) sets it outright —
+no Enter to open it, none to save, since a url or a key is pasted whole
+rather than composed, while inside the editor a paste is an ordinary
+paste; Delete on an api key, outside the editor, clears it. A saved
 url is written into config.toml surgically, a saved api key is sealed
 first (see `settings.sealed`), and a backend not configured yet gets
 its section written — that is how a cloud provider is added. Both take
@@ -73,7 +76,7 @@ from otaku.providers.registry import Registry as ProviderRegistry
 from otaku.settings import migrations, sealed
 from otaku.settings.config import ProviderConfig
 from otaku.settings.files import toml_scalar
-from otaku.terminal import latin_key
+from otaku.terminal import clipboard, latin_key
 from otaku.terminal.spinner import FRAMES as SPINNER_FRAMES
 from otaku.tui.screen import BASE_STYLE, ListScreen, bordered_box, text_line
 
@@ -651,6 +654,20 @@ class ModelPicker(ListScreen):
         self.providers.update_provider(updated)
         self._refresh_provider(name)
 
+    def _set_field(self, text: str) -> None:
+        """A paste onto a CLOSED field sets it outright: the field opens,
+        becomes the clipboard, and is saved in the one gesture — a url or
+        an api key is pasted whole, never composed, so there is nothing to
+        position and nothing to confirm. Inside the editor a paste stays
+        an ordinary paste: there the user IS composing."""
+        if self.side != "providers" or self.editing or not text:
+            return
+        self._start_field_edit()
+        if not self.editing:
+            return  # nothing walkable under the cursor
+        self.edit_buffer.document = Document(text, len(text))
+        self._finish_field_edit(save=True)
+
     def _clear_field(self) -> None:
         """Delete on an api key field, outside the editor: forget the
         stored key — the config and the running session both."""
@@ -755,6 +772,23 @@ class ModelPicker(ListScreen):
         def _clear(event: Any) -> None:
             self._clear_field()
 
+        @kb.add("c-v", filter=idle)
+        def _set_from_clipboard(event: Any) -> None:
+            # One key from clipboard to configured: no Enter to open the
+            # field, none to settle it.
+            self._set_field(clipboard.paste())
+
+        @kb.add(Keys.BracketedPaste, filter=idle)
+        def _pasted(event: Any) -> None:
+            # However the terminal chose to deliver it: many turn Ctrl+V
+            # into a paste of their own rather than sending the control
+            # byte, and then the app never sees `c-v` at all. On the
+            # models side a paste is filter text, as it has always been.
+            if self.side == "providers":
+                self._set_field(clipboard.one_line(event.data))
+            else:
+                self._type(clipboard.one_line(event.data))
+
         # While a field is being edited, every binding above is suspended —
         # keystrokes belong to the inline editor. Ctrl+C stays live.
         editing = Condition(lambda: self.editing)
@@ -799,10 +833,15 @@ class ModelPicker(ListScreen):
         def _wipe(event: Any) -> None:
             self.edit_buffer.reset()
 
+        # Inside the editor a paste is an ordinary paste — inserted at the
+        # cursor, Enter still saves. Only a CLOSED field is set outright.
         @edit_kb.add(Keys.BracketedPaste, filter=editing)
         def _paste(event: Any) -> None:
-            # A url or an api key is one line — a pasted newline is noise.
-            self.edit_buffer.insert_text(event.data.replace("\r", "").replace("\n", ""))
+            self.edit_buffer.insert_text(clipboard.one_line(event.data))
+
+        @edit_kb.add("c-v", filter=editing)
+        def _paste_key(event: Any) -> None:
+            self.edit_buffer.insert_text(clipboard.paste())
 
         @edit_kb.add(Keys.Any, filter=editing)
         def _typed(event: Any) -> None:

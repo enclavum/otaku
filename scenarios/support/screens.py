@@ -17,6 +17,13 @@ DOWN = "\x1b[B"
 RIGHT = "\x1b[C"
 DELETE = "\x1b[3~"
 CTRL_S = "\x13"
+CTRL_V = "\x16"
+
+
+def pasted(text: str) -> str:
+    """`text` as a terminal paste — the bracketed-paste sequence Cmd+V
+    (and, on many terminals, Ctrl+V) sends instead of a control byte."""
+    return f"\x1b[200~{text}\x1b[201~"
 
 
 def run_screen(keys: str, surface: Callable[[], Any], *, patience: float = 2.0) -> Any:

@@ -46,6 +46,13 @@ session-wide values (the resumed model and story, `/set` toggles) and
 
 ## Tests
 
+Every principle in `docs/core_principles.md` must be covered — that is the
+one place coverage is owed in full, and a new principle arrives with the
+test that holds it. Cover the promise, not its current wording: the
+framing templates come FROM `prompts.toml`, so the test edits the file and
+reads the wire — asserting the built-in text would pass even with the load
+path gone.
+
 Unit tests (`tests/`, `make test`) are written test-first, from the
 module's documented contract — never by reading its code, so they check
 what the module promises rather than what it happens to do — and ONLY for

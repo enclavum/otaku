@@ -13,6 +13,7 @@ self-contained.
 
 import builtins
 import re
+from collections.abc import Container
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -355,27 +356,13 @@ class StoryOps:
     # ---------- internals ----------
 
     def _fork_title(self, base: str) -> str | None:
-        """The first free "<stem> - N" counting up FROM `base`'s own
-        number: a numbered title is renumbered off its stem — never
-        suffixed again, and never below itself, so "The River - 5" forks
-        to "- 6" even while "- 4" stands free. An unnumbered title starts
-        at 2, and an untitled source forks untitled."""
-        if not base:
-            return None
-        numbered = _FORK_SUFFIX.search(base)
-        stem = base[: numbered.start()] if numbered else base
-        n = int(numbered.group(1)) + 1 if numbered else 2
-        if not stem:  # a title that is nothing but a number keeps itself
-            stem, n = base, 2
-        # Titles only — the full listing would decrypt every story's labels
-        # just to number one fork.
+        """`fork_title` over the titles already in the database. Titles
+        only — the full listing would decrypt every story's labels just to
+        number one fork."""
         # fmt: off
         rows = self._db.conn.execute("SELECT title FROM stories").fetchall()
         # fmt: on
-        taken = {self._db.unseal(title) for (title,) in rows}
-        while f"{stem} - {n}" in taken:
-            n += 1
-        return f"{stem} - {n}"
+        return fork_title(base, {self._db.unseal(title) for (title,) in rows})
 
     def _get_chain_ids(self, head_id: int | None) -> builtins.list[int]:
         """Walk the parent chain from a head; ids come back root → head."""
@@ -492,3 +479,26 @@ class MessagesOps:
         ).fetchall()
         # fmt: on
         return sum(len(self._db.unseal(row[0])) for row in rows)
+
+
+def fork_title(base: str, taken: Container[str]) -> str | None:
+    """The title a fork of `base` gets: the first name not in `taken` of
+    the form "<stem> - N", counting up FROM `base`'s own number.
+
+    A numbered title is renumbered off its stem — never suffixed again
+    ("The River - 3" forks to "- 4", never "- 3 - 2") and never below
+    itself ("The River - 5" forks to "- 6" even while "- 4" stands free).
+    An unnumbered title starts at 2, only a trailing " - <digits>" counts
+    as numbering ("Chapter 7" forks to "Chapter 7 - 2"), and an untitled
+    source forks untitled: "" in, None out.
+    """
+    if not base:
+        return None
+    numbered = _FORK_SUFFIX.search(base)
+    stem = base[: numbered.start()] if numbered else base
+    n = int(numbered.group(1)) + 1 if numbered else 2
+    if not stem:  # a title that is nothing but a number keeps itself
+        stem, n = base, 2
+    while f"{stem} - {n}" in taken:
+        n += 1
+    return f"{stem} - {n}"
