@@ -53,6 +53,15 @@ framing templates come FROM `prompts.toml`, so the test edits the file and
 reads the wire — asserting the built-in text would pass even with the load
 path gone.
 
+A test earns its place by covering what RUNNING the app cannot show. Never
+assert user-facing copy or screen appearance — a wrong sentence, a missing
+blank line, a rule that failed to draw are all seen the moment the app
+runs, and pinning them only makes rewording break the suite. Assert what
+running it cannot show: the wire, the store, the files on disk, exit
+codes, and pure logic with many cases. Where the printed text IS the
+payload (`/context` previews the wire verbatim), asserting it is asserting
+the payload, not the copy.
+
 Unit tests (`tests/`, `make test`) are written test-first, from the
 module's documented contract — never by reading its code, so they check
 what the module promises rather than what it happens to do — and ONLY for

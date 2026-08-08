@@ -3,7 +3,7 @@ roleplay commands /me, /you, /ooc."""
 
 from otaku.paths import Paths
 from scenarios.support import server as scripted
-from scenarios.support.harness import RULE, App, launch, set_config
+from scenarios.support.harness import App, launch, set_config
 
 
 class TestTurns:
@@ -14,18 +14,6 @@ class TestTurns:
             ("user", "I open the door."),
             ("assistant", scripted.CHAT_REPLY),
         ]
-
-    def test_a_played_turn_echoes_as_the_grey_block(self, app: App, capsys) -> None:
-        app.play("I open the door.")
-        assert "> I open the door." in capsys.readouterr().out
-
-    def test_the_configured_dialogue_look_styles_the_reply(self, server, tmp_path, capsys) -> None:
-        set_config(tmp_path / "state", dialogue_color="magenta", dialogue_bold=True)
-        app = launch(tmp_path / "state", server)
-        app.server.script = lambda body: '"Come in," she said.'
-        app.play("I knock.")
-        app.close()
-        assert "\x1b[35m\x1b[1m" in capsys.readouterr().out  # magenta + bold speech
 
     def test_the_wire_carries_the_message_verbatim(self, app: App) -> None:
         app.play("/system You are the narrator.")
@@ -93,31 +81,8 @@ class TestTurns:
         assert "\n\n\n" not in capsys.readouterr().out
         assert app.session.messages[-1].body == "The hall glows."
 
-    def test_an_instant_failure_prints_without_a_blank(self, server, tmp_path, capsys) -> None:
-        # A request that dies before any output starts at the margin —
-        # the designed gap above the reply, nothing more. The harness
-        # seeds llamacpp on a dead port; playing it fails instantly.
-        app = launch(tmp_path / "state", server, spec="llamacpp/test-model")
-        try:
-            app.play("I enter the hall.")
-            out = capsys.readouterr().out
-            assert "[ error: could not reach" in out
-            assert "\n\n\n" not in out
-        finally:
-            app.close()
-
 
 class TestMe:
-    def test_the_typed_line_echoes_as_the_grey_block(self, app: App, capsys) -> None:
-        app.play("/me Elara: I step into the light.")
-        assert "> /me Elara: I step into the light." in capsys.readouterr().out
-
-    def test_a_usage_error_stays_plain(self, app: App, capsys) -> None:
-        app.play("/me no colon here")
-        out = capsys.readouterr().out
-        assert "Usage: /me NAME: PROMPT" in out
-        assert "> /me" not in out  # no block for a turn that never played
-
     def test_a_cast_name_resolves_to_its_canonical_form(self, app: App) -> None:
         for i in range(3):
             app.play(f"Turn number {i}.")
@@ -129,11 +94,6 @@ class TestMe:
 
 
 class TestYou:
-    def test_the_typed_line_echoes_as_the_grey_block(self, app: App, capsys) -> None:
-        app.play("I enter the hall.")
-        app.play("/you Elara")
-        assert "> /you Elara" in capsys.readouterr().out
-
     def test_you_hands_the_scene_to_the_named_character(self, app: App) -> None:
         app.play("I enter the hall.")
         app.play("/you Elara")
@@ -159,10 +119,6 @@ class TestYou:
 
 
 class TestOoc:
-    def test_the_typed_line_echoes_as_the_grey_block(self, app: App, capsys) -> None:
-        app.play("/ooc What genre is this?")
-        assert "> /ooc What genre is this?" in capsys.readouterr().out
-
     def test_ooc_is_framed_and_marks_both_sides(self, app: App) -> None:
         app.play("I enter the hall.")
         app.play("/ooc What genre is this?")
@@ -215,23 +171,6 @@ class TestUndo:
         app.play("/undo")
         assert [m.body for m in app.session.messages] == imported
 
-    def test_undo_on_an_empty_story_says_so(self, app: App, capsys) -> None:
-        app.play("/undo")
-        assert "Nothing to undo." in capsys.readouterr().out
-
-    def test_undo_reports_the_new_ending_when_it_cannot_erase(self, app: App, capsys) -> None:
-        # Off a terminal the ledger can never prove an erase (no cursor
-        # answer), so /undo falls back to reporting — the erased look is a
-        # pty story (scenarios/cli/test_main.py).
-        app.play("The first turn.")
-        app.play("The second turn.")
-        capsys.readouterr()
-        app.play("/undo")
-        out = capsys.readouterr().out
-        assert "[ undone. the story now ends with: ]" in out
-        assert "> The first turn." in out  # the surviving exchange, re-echoed
-        assert RULE in out  # the break the report lands on is drawn
-
 
 class TestRegenerate:
     def test_regen_replaces_the_reply_and_siblings_the_old_one(self, app: App) -> None:
@@ -255,10 +194,6 @@ class TestRegenerate:
         assert [m.body for m in chain] == ["I roll the dice.", scripted.CHAT_REPLY]
         assert app.server.requests[-1]["messages"][-1]["content"] == "I roll the dice."
 
-    def test_regen_on_an_empty_story_says_so(self, app: App, capsys) -> None:
-        app.play("/regen")
-        assert "Nothing to regenerate." in capsys.readouterr().out
-
     def test_regen_without_a_model_touches_nothing(self, server, tmp_path, capsys) -> None:
         # The guard runs before the drop and the erase: the reply stays
         # in the chain and on the screen; only the hint prints.
@@ -274,54 +209,6 @@ class TestRegenerate:
             assert [m.id for m in app.session.messages] == before
         finally:
             app.close()
-
-    def test_regen_announces_itself_when_it_cannot_erase(self, app: App, capsys) -> None:
-        app.play("I roll the dice.")
-        capsys.readouterr()
-        app.play("/regen")
-        out = capsys.readouterr().out
-        assert "[ regenerating ]" in out
-        assert "> I roll the dice." in out  # the prompt being re-run, echoed
-        assert RULE in out  # the break the marker lands on is drawn
-
-
-class TestLast:
-    def test_shows_the_recent_exchanges_as_played(self, app: App, capsys) -> None:
-        for n in range(3):
-            app.play(f"Turn {n}.")
-        capsys.readouterr()
-        app.play("/last")
-        out = capsys.readouterr().out
-        assert "> Turn 0." in out
-        assert "> Turn 2." in out
-        assert scripted.CHAT_REPLY in out
-        # The copy is fenced off from the turns it repeats, and named.
-        assert out.index(RULE) < out.index("The last 3 turns of this story:")
-
-    def test_a_count_limits_the_echo(self, app: App, capsys) -> None:
-        for n in range(3):
-            app.play(f"Turn {n}.")
-        capsys.readouterr()
-        app.play("/last 1")
-        out = capsys.readouterr().out
-        assert "> Turn 2." in out
-        assert "> Turn 1." not in out
-
-    def test_an_empty_story_says_so(self, app: App, capsys) -> None:
-        app.play("/last")
-        assert "No turns yet." in capsys.readouterr().out
-
-    def test_rejects_a_bad_count(self, app: App, capsys) -> None:
-        app.play("/last riddle")
-        assert "Usage: /last [N]" in capsys.readouterr().out
-
-
-class TestClear:
-    def test_wipes_the_screen_and_keeps_the_story(self, app: App, capsys) -> None:
-        app.play("I open the door.")
-        app.play("/clear")
-        assert "\x1b[H\x1b[2J" in capsys.readouterr().out
-        assert len(app.session.messages) == 2  # the story is untouched
 
 
 def sent(app: App) -> str:

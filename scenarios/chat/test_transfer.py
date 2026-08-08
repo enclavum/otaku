@@ -12,7 +12,7 @@ from pathlib import Path
 from otaku.transfer.exports import read_story
 from otaku.transfer.imports import parse_story
 from scenarios.support import server as scripted
-from scenarios.support.harness import RULE, App
+from scenarios.support.harness import App
 
 CHAPEL = Path(__file__).parent.parent / "fixtures" / "chapel.md"
 
@@ -38,8 +38,6 @@ class TestImport:
         app.play(f"/import {CHAPEL}")
         out = capsys.readouterr().out
         assert "1 scene(s) applied verbatim" in out
-        assert "\x1b[48;2;240;240;240m" in out  # the scene echo: last turns, banded
-        assert out.index(RULE) < out.index("\x1b[48;2;240;240;240m")  # the scene is fenced off
         # A native export carries its extraction state: no pass runs, no
         # model is called — the story arrives exactly as it was.
         assert app.server.requests == []
@@ -60,10 +58,6 @@ class TestImport:
         assert capsys.readouterr().out.strip()  # refused out loud
         assert app.session.story_id is None
         assert app.server.requests == []
-
-    def test_a_bare_import_shows_usage(self, app: App, capsys) -> None:
-        app.play("/import")
-        assert "Usage: /import FILE" in capsys.readouterr().out
 
     def test_a_leading_at_is_the_completion_trigger_not_the_name(
         self, app: App, capsys, tmp_path: Path

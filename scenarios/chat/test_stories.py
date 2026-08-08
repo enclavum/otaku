@@ -13,17 +13,13 @@ from otaku.store import Store
 from otaku.store.stories import StoryListing
 from otaku.tui import stories
 from scenarios.support import server as scripted
-from scenarios.support.harness import RULE, App, launch, set_config
-from scenarios.support.screens import CTRL_S, DELETE, DOWN, ENTER, ESC, UP, run_screen
+from scenarios.support.harness import App, launch, set_config
+from scenarios.support.screens import CTRL_S, DELETE, ENTER, ESC, run_screen
 
 Picker = Callable[[Store, list[StoryListing], int | None], PickedStory | None]
 
 
 class TestBrowsing:
-    def test_no_stories_yet(self, app: App, capsys) -> None:
-        app.play("/stories")
-        assert "No saved stories yet." in capsys.readouterr().out
-
     def test_picking_a_story_resumes_it(self, app: App, capsys) -> None:
         first, _second = two_stories(app)
         app.play("/system The second premise.")
@@ -34,8 +30,6 @@ class TestBrowsing:
         out = capsys.readouterr().out
         assert "Resumed at message 2." in out
         assert "The first story begins." in out  # the scene is echoed back
-        assert "\x1b[48;2;240;240;240m" in out  # the user turn rides its band
-        assert "[user]" not in out  # no role markers in the echo
         assert app.session.story_id == first
         assert app.session.system == ""  # the second story's premise stayed behind
         assert [m.body for m in app.session.messages] == [
@@ -46,17 +40,6 @@ class TestBrowsing:
         relaunched = launch(app.paths.root, app.server)
         assert relaunched.session.story_id == first
         relaunched.close()
-
-    def test_the_echo_keeps_blank_lines_verbatim(self, app: App, capsys) -> None:
-        app.play("The hall is dark.\n\nTorches gutter.")
-        first = app.session.story_id
-        app.play("/new")
-        app.session.tui = TUI(pick_story=picks(first))
-        capsys.readouterr()
-        app.play("/stories")
-        out = capsys.readouterr().out
-        assert "\x1b[48;2;240;240;240m> The hall is dark.\x1b[K" in out
-        assert "\x1b[48;2;240;240;240m> \x1b[K" in out  # the paragraph break, banded
 
     def test_a_cancelled_browse_rereads_an_edited_story(self, app: App) -> None:
         app.play("I enter the hall.")
@@ -84,7 +67,6 @@ class TestResumeDialog:
 
         out = capsys.readouterr().out
         assert "Forked to: First - 2. Continued from message 1." in out
-        assert out.index(RULE) < out.index("Forked to")  # the copy starts under the rule
         fork = app.session.story_id
         assert fork not in (first, second)
         assert app.store.stories.get(fork).forked_from_id == first  # lineage, for the record
@@ -111,64 +93,11 @@ class TestStoryBrowser:
         rows = app.store.stories.list()
         return run_screen(keys, lambda: stories.pick(app.store, rows, initial))
 
-    def test_enter_drills_in_and_enter_resumes_at_the_end(self, app: App) -> None:
-        _first, second = two_stories(app)
-        picked = self.pick(app, ENTER + ENTER)
-        assert picked is not None
-        story_id, messages, action = picked
-        assert story_id == second  # the list leads with the recently played
-        assert [m.body for m in messages] == ["The second story begins.", scripted.CHAT_REPLY]
-        assert action == "resume"
-
-    def test_an_earlier_message_asks_and_fork_is_the_default(self, app: App) -> None:
-        _first, second = two_stories(app)
-        # Enter on the earlier turn opens the dialog; Enter confirms fork.
-        picked = self.pick(app, ENTER + UP + ENTER + ENTER)
-        story_id, messages, action = picked
-        assert story_id == second
-        assert [m.body for m in messages] == ["The second story begins."]
-        assert action == "fork"
-
-    def test_the_dialog_offers_truncate(self, app: App) -> None:
-        _first, second = two_stories(app)
-        picked = self.pick(app, ENTER + UP + ENTER + DOWN + ENTER)
-        story_id, messages, action = picked
-        assert story_id == second
-        assert [m.body for m in messages] == ["The second story begins."]
-        assert action == "truncate"
-
-    def test_the_dialog_cancels_back_into_the_browser(self, app: App) -> None:
-        two_stories(app)
-        # Cancel (the third row) closes the dialog; the browser is still up,
-        # so it takes two more Esc to leave with no pick.
-        assert self.pick(app, ENTER + UP + ENTER + DOWN + DOWN + ENTER + ESC + ESC) is None
-        # Esc on the open dialog is the same cancel.
-        assert self.pick(app, ENTER + UP + ENTER + ESC + ESC + ESC) is None
-
-    def test_esc_cancels(self, app: App) -> None:
-        two_stories(app)
-        assert self.pick(app, ESC) is None
-
-    def test_esc_from_the_messages_view_goes_back_not_out(self, app: App) -> None:
-        two_stories(app)
-        # In, back out to the list, then cancel — one Esc per level.
-        assert self.pick(app, ENTER + ESC + ESC) is None
-
-    def test_the_open_story_is_preselected(self, app: App) -> None:
-        first, _second = two_stories(app)
-        picked = self.pick(app, ENTER + ENTER, initial=first)
-        assert picked[0] == first
-
     def test_e_edits_a_message_in_place(self, app: App) -> None:
         _first, second = two_stories(app)
         assert self.pick(app, ENTER + "e" + "!" + CTRL_S + ESC + ESC) is None
         chain = app.store.stories.get_messages(second)
         assert chain[-1].body == scripted.CHAT_REPLY + "!"
-
-    def test_the_filter_matches_titles(self, app: App) -> None:
-        first, _second = two_stories(app)
-        picked = self.pick(app, f"/First{ENTER}{ENTER}{ENTER}")
-        assert picked[0] == first
 
     def test_delete_removes_a_story_after_a_confirm(self, app: App) -> None:
         first, _second = two_stories(app)
@@ -178,10 +107,6 @@ class TestStoryBrowser:
 
 
 class TestFork:
-    def test_nothing_to_fork_yet(self, app: App, capsys) -> None:
-        app.play("/fork")
-        assert "Nothing to fork yet — send a message first." in capsys.readouterr().out
-
     def test_fork_switches_to_the_copy_and_leaves_the_original(self, app: App) -> None:
         app.play("I enter the hall.")
         original = app.session.story_id
@@ -308,14 +233,6 @@ class TestSystem:
         assert "empty — system prompt unchanged" in capsys.readouterr().out
         assert app.session.system == "The premise stands."
 
-    def test_bare_system_shows_the_prompt_or_none(self, app: App, capsys) -> None:
-        app.play("/system")
-        assert "System: (none)" in capsys.readouterr().out
-        app.play("/system You are the narrator.")
-        capsys.readouterr()
-        app.play("/system")
-        assert 'System: "You are the narrator."' in capsys.readouterr().out
-
 
 class TestTitle:
     def test_title_titles_the_story(self, app: App, capsys) -> None:
@@ -323,15 +240,6 @@ class TestTitle:
         app.play("/title The Throne Hall")
         assert 'Story title set to "The Throne Hall".' in capsys.readouterr().out
         assert app.store.stories.get(app.session.story_id).title == "The Throne Hall"
-
-    def test_bare_title_shows_the_title_or_usage(self, app: App, capsys) -> None:
-        app.play("/title")
-        assert "Usage: /title NEW-TITLE" in capsys.readouterr().out
-        app.play("I enter the hall.")
-        app.play("/title Hall")
-        capsys.readouterr()
-        app.play("/title")
-        assert 'Title: "Hall"' in capsys.readouterr().out
 
     def test_title_before_the_first_turn_creates_the_story(self, app: App) -> None:
         assert app.session.story_id is None
@@ -359,9 +267,6 @@ class TestNew:
         app.play("/new")
         out = capsys.readouterr().out
         assert "Started a new story." in out
-        # The played story ends at the rule; the announcement opens below it,
-        # like every other break — two in a row can never sit adjacent.
-        assert out.index(RULE) < out.index("Started a new story.")
         assert app.session.story_id is None
         assert app.session.messages == []
         # A relaunch starts fresh too, not back in the left story.

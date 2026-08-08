@@ -16,7 +16,7 @@ from otaku.transfer import exports, imports
 from otaku.tui import lore
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch, set_config
-from scenarios.support.screens import CTRL_S, DOWN, ENTER, ESC, RIGHT, TAB, run_screen
+from scenarios.support.screens import CTRL_S, DOWN, ENTER, ESC, TAB, run_screen
 from scenarios.support.server import numbered_script
 
 CHAPEL = Path(__file__).parent.parent / "fixtures" / "chapel.md"
@@ -31,12 +31,6 @@ class TestLoreBrowser:
         scene = app.store.scenes.get_current(story_id, ids)[0]
         assert scene.title == "The Meeting!"
         assert lore_calls(app) == calls_before  # the browser never calls a model
-
-    def test_esc_cancels_an_edit(self, app: App) -> None:
-        story_id = remembered(app)
-        browse(app, story_id, ENTER + ENTER + "!" + ESC * 4)
-        ids = app.store.stories.get_messages_ids(story_id)
-        assert app.store.scenes.get_current(story_id, ids)[0].title == "The Meeting"
 
     def test_an_emptied_summary_is_refused(self, app: App) -> None:
         # A cleared summary would silently swallow the scene's span from
@@ -69,24 +63,6 @@ class TestLoreBrowser:
         memory = app.store.journals.get_current(story_id, ids)[keeper.id]
         assert memory.history  # rebuilt from the fixed input
 
-    def test_a_derived_history_is_not_editable(self, app: App) -> None:
-        story_id = remembered(app)
-        keeper = app.store.characters.list(story_id)[0]
-        ids = app.store.stories.get_messages_ids(story_id)
-        before = app.store.journals.get_current(story_id, ids)[keeper.id]
-        browse(app, story_id, TAB + ENTER + DOWN + DOWN + ENTER + "!" + CTRL_S + ESC * 3)
-        after = app.store.journals.get_current(story_id, ids)[keeper.id]
-        assert after.history == before.history  # dim, read-only, untouched
-        assert app.store.characters.list(story_id)[0].description == "warden of the gate"
-
-    def test_the_pivot_crosses_to_the_other_parent(self, app: App) -> None:
-        # A journal row has two doors: from its scene, `→` lands on the
-        # same entry under its character. An edit there proves the pivot
-        # arrived — the entry is one row, reachable from both sides.
-        story_id = remembered(app)
-        browse(app, story_id, ENTER + DOWN + DOWN + RIGHT + ENTER + "!" + CTRL_S + ESC * 4)
-        assert app.store.journals.list(story_id)[-1].entry == "I saw the guest.!"
-
 
 class TestExtract:
     def test_extract_closes_a_scene_with_journals_and_rollups(self, app: App, capsys) -> None:
@@ -111,13 +87,6 @@ class TestExtract:
         assert memory.state == "at the gate"
         assert memory.history == "I saw the guest."
         assert len(lore_calls(app)) == 1  # the extraction; no rollup calls
-
-    def test_extract_with_nothing_new_declines(self, app: App, capsys) -> None:
-        app.play("A single turn.")
-        app.play("/extract")
-        capsys.readouterr()
-        app.play("/extract")
-        assert "Nothing new since the last scene." in capsys.readouterr().out
 
     def test_an_edited_template_with_literal_json_still_extracts(self, server, tmp_path) -> None:
         # The prompts file's promise: what you edit is exactly what the

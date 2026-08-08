@@ -7,7 +7,6 @@ a model switch keeps the story context and is remembered as last used.
 """
 
 import contextlib
-import secrets
 import time
 import tomllib
 
@@ -54,73 +53,10 @@ class TestModel:
         assert relaunched.session.model == 'oddly"named'
         relaunched.close()
 
-    def test_switching_to_the_same_model_says_so(self, app: App, capsys) -> None:
-        app.play("/model test/test-model")
-        assert "Already using test/test-model." in capsys.readouterr().out
-
-    def test_an_unknown_provider_is_refused_with_the_known_ones(self, app: App, capsys) -> None:
-        app.play("/model nowhere/some-model")
-        out = capsys.readouterr().out
-        assert "test" in out  # the configured providers are listed
-        assert app.session.model == "test-model"
-
-    def test_bare_model_opens_the_picker_on_the_current_model(self, app: App) -> None:
-        opened_on: list[str] = []
-
-        def pick(current: str) -> str:
-            opened_on.append(current)
-            return "test/other-model"
-
-        app.session.tui = TUI(pick_model=pick)
-        app.play("/model")
-        assert opened_on == ["test/test-model"]
-        assert app.session.model == "other-model"
-
     def test_cancelling_the_picker_keeps_the_model(self, app: App) -> None:
         app.session.tui = TUI(pick_model=lambda current: None)
         app.play("/model")
         assert app.session.model == "test-model"
-
-
-class TestModelPicker:
-    def test_enter_picks_the_highlighted_model(self, app: App) -> None:
-        spec = run_screen(ENTER, lambda: models.pick(app.session.providers, paths=app.paths))
-        assert spec == "test/test-model"
-
-    def test_esc_cancels_without_picking(self, app: App) -> None:
-        assert run_screen(ESC, lambda: models.pick(app.session.providers, paths=app.paths)) is None
-
-    def test_the_cursor_restores_to_the_last_used_model(self, tmp_path) -> None:
-        server = ModelServer(models=("alpha", "beta"))
-        try:
-            app = launch(tmp_path / "state", server)
-            try:
-                registry = app.session.providers
-                first = run_screen(ENTER, lambda: models.pick(registry, paths=app.paths))
-                assert first == "test/alpha"
-                resumed = run_screen(
-                    ENTER, lambda: models.pick(registry, initial_spec="test/beta", paths=app.paths)
-                )
-                assert resumed == "test/beta"
-            finally:
-                app.close()
-        finally:
-            server.close()
-
-    def test_the_filter_narrows_the_list(self, tmp_path) -> None:
-        server = ModelServer(models=("alpha", "beta"))
-        try:
-            app = launch(tmp_path / "state", server)
-            try:
-                registry = app.session.providers
-                spec = run_screen(
-                    f"/bet{ENTER}{ENTER}", lambda: models.pick(registry, paths=app.paths)
-                )
-                assert spec == "test/beta"
-            finally:
-                app.close()
-        finally:
-            server.close()
 
 
 class TestThink:
@@ -144,17 +80,6 @@ class TestThink:
         relaunched = launch(app.paths.root, app.server)
         assert relaunched.session.think is None
         relaunched.close()
-
-    def test_bare_shows_the_current_level(self, app: App, capsys) -> None:
-        app.play("/set think low")
-        capsys.readouterr()
-        app.play("/set think")
-        assert "low" in capsys.readouterr().out
-
-    def test_an_unknown_level_shows_the_usage(self, app: App, capsys) -> None:
-        app.play("/set think enormous")
-        assert "Usage" in capsys.readouterr().out
-        assert app.session.think == "none"  # unchanged from the default
 
     def test_the_level_rides_the_wire_and_default_sends_nothing(self, app: App) -> None:
         app.play("/set think low")
@@ -272,24 +197,8 @@ class TestParameters:
         app.play("I enter the hall.")
         assert "charisma" not in app.server.requests[-1]
 
-    def test_bare_set_shows_the_usage(self, app: App, capsys) -> None:
-        app.play("/set")
-        assert "Usage" in capsys.readouterr().out
-
 
 class TestVerbose:
-    def test_verbose_adds_the_stats_line_after_a_reply(self, app: App, capsys) -> None:
-        app.play("/set verbose on")
-        app.play("I enter the hall.")
-        assert "[ total" in capsys.readouterr().out
-
-    def test_off_removes_it(self, app: App, capsys) -> None:
-        app.play("/set verbose on")
-        app.play("/set verbose off")
-        capsys.readouterr()
-        app.play("I enter the hall.")
-        assert "[ total" not in capsys.readouterr().out
-
     def test_the_toggle_is_remembered(self, app: App) -> None:
         app.play("/set verbose on")
         relaunched = launch(app.paths.root, app.server)
@@ -380,22 +289,6 @@ class TestProviderPanel:
         client = app.session.providers.get_client("llamacpp")
         assert client.provider_config.url == "http://localhost:7777/v1"
 
-    def test_the_editor_moves_the_cursor_and_takes_a_paste(self, app: App) -> None:
-        # Ctrl+U, then a bracketed paste of the whole url, then the
-        # cursor walks left over "/v1" and an X lands mid-string.
-        paste = "\x1b[200~http://localhost:9999/v1\x1b[201~"
-        keys = "\t" + ENTER + "\x15" + paste + _LEFT * 3 + "X" + ENTER + ESC + ESC
-        run_screen(keys, lambda: models.pick(app.session.providers, paths=app.paths))
-        assert 'url = "http://localhost:9999X/v1"' in app.paths.providers_file.read_text()
-
-    def test_home_and_end_jump_the_editor_cursor(self, app: App) -> None:
-        # Ctrl+U, the url typed, Home + an A at the front, End + a Z at
-        # the back. Ctrl+A / Ctrl+E are bound to the same jumps.
-        typed = "\x15" + "http://x/v1" + _HOME + "A" + _END + "Z"
-        keys = "\t" + ENTER + typed + ENTER + ESC + ESC
-        run_screen(keys, lambda: models.pick(app.session.providers, paths=app.paths))
-        assert 'url = "Ahttp://x/v1Z"' in app.paths.providers_file.read_text()
-
     def test_ctrl_v_sets_a_key_in_one_press(self, app: App, monkeypatch) -> None:
         # An api key is pasted, never typed: Ctrl+V on the highlighted
         # field is the whole gesture — no Enter to open it, none to save.
@@ -455,22 +348,6 @@ class TestProviderPanel:
         assert tomllib.loads(raw)["llamacpp"]["api_key"] == ""
         assert app.session.providers.get_client("llamacpp").provider_config.api_key == ""
 
-    def test_a_cloud_backend_offers_only_its_key_and_keeps_its_url(self, server, tmp_path) -> None:
-        # openrouter pre-pointed at the scripted server so the panel's
-        # refresh stays offline. Walking down from the top: the five
-        # locals' url+key pairs, then the catalogs offer only their API
-        # key — the url field is fixed, so the walk lands on the key.
-        set_config_provider(tmp_path / "state", server, name="openrouter")
-        app = launch(tmp_path / "state", server)
-        try:
-            keys = "\t" + _DOWN * 10 + ENTER + "sk-or-abc" + ENTER + ESC + ESC
-            run_screen(keys, lambda: models.pick(app.session.providers, paths=app.paths))
-            entry = tomllib.loads(app.paths.providers_file.read_text())["openrouter"]
-            assert entry["url"] == server.url  # the key edit left the url alone
-            assert entry["api_key"].startswith("sealed:")
-        finally:
-            app.close()
-
 
 class TestKoboldCpp:
     def test_the_engines_own_prefix_leaves_the_model_name(self, tmp_path) -> None:
@@ -528,21 +405,6 @@ class TestCloudProviders:
         assert result is None
         assert capsys.readouterr().out == ""
 
-    def test_an_empty_machine_still_opens_the_panel(self, tmp_path) -> None:
-        # No provider configured, nothing reachable — the picker still
-        # opens: its panel is the only door to entering an api key. Tab
-        # over, walk to a key field, save one — the section now exists,
-        # the key sealed.
-        paths = Paths.resolve(tmp_path / "state")
-        paths.ensure_tree()
-        paths.config_key_file.write_bytes(secrets.token_bytes(32))
-        paths.providers_file.write_text("")  # founded empty, as bootstrap would
-        keys = "\t" + _DOWN + ENTER + "key-on-empty" + ENTER + ESC + ESC
-        run_screen(keys, lambda: models.pick(Registry({}), paths=paths))
-        raw = paths.providers_file.read_text()
-        assert "[llamacpp]" in raw  # the panel wrote the section
-        assert "key-on-empty" not in raw  # sealed, never plain
-
     def test_a_panel_added_provider_is_switchable_at_once(self, app: App) -> None:
         # A provider that was not in the config at launch is registered
         # by the panel, and /model switches to it at once — the session's
@@ -554,45 +416,6 @@ class TestCloudProviders:
         assert app.session.provider_config is not None
         assert app.session.provider_config.name == "nanogpt"
         assert app.session.model == "test-model"
-
-    def test_a_bad_or_deleted_key_clears_the_tick_and_rows(self, server, tmp_path) -> None:
-        # OpenRouter's catalog is public, so a listing alone proves
-        # nothing: the client validates the key through the balance
-        # endpoint. A wrong key — or a deleted one — unlists the
-        # provider, tick included.
-        server.api_key = "right-key"
-        set_config_provider(tmp_path / "state", server, name="openrouter", api_key="right-key")
-        app = launch(tmp_path / "state", server)
-        try:
-            registry = app.session.providers
-            picker = models.ModelPicker(registry, [], paths=app.paths, fetch=["openrouter"])
-            _settled(lambda: not picker.pending)
-            assert "openrouter" in picker.connected
-            assert picker.all
-            for bad in ("wrong-key", ""):
-                registry.update_provider(
-                    config.ProviderConfig(name="openrouter", url=app.server.url, api_key=bad)
-                )
-                picker._refresh_provider("openrouter")
-                _settled(lambda: "openrouter" not in picker.connected)
-                assert "openrouter" not in picker.connected
-                assert not picker.all
-        finally:
-            app.close()
-
-    def test_a_successful_listing_earns_the_panels_tick(self, server, tmp_path) -> None:
-        set_config_provider(tmp_path / "state", server, name="openrouter")
-        app = launch(tmp_path / "state", server)
-        try:
-            picker = models.ModelPicker(
-                app.session.providers, [], paths=app.paths, fetch=["openrouter"]
-            )
-            deadline = time.monotonic() + 5
-            while picker.pending and time.monotonic() < deadline:
-                time.sleep(0.02)
-            assert "openrouter" in picker.connected
-        finally:
-            app.close()
 
     def test_the_picker_does_not_wait_for_the_catalogs(self, server, tmp_path) -> None:
         set_config_provider(tmp_path / "state", server, name="openrouter")

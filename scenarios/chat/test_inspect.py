@@ -127,10 +127,6 @@ class TestBalance:
         finally:
             app.close()
 
-    def test_no_reporting_provider_says_so(self, app: App, capsys) -> None:
-        app.play("/balance")
-        assert "Cannot get balances from cloud providers." in capsys.readouterr().out
-
 
 class TestInfo:
     def test_without_a_model_the_session_half_still_reports(self, server, tmp_path, capsys) -> None:
@@ -149,12 +145,6 @@ class TestInfo:
             assert "You are the narrator." in out
         finally:
             app.close()
-
-    def test_info_names_the_active_model(self, app: App, capsys) -> None:
-        app.play("I enter the hall.")
-        capsys.readouterr()
-        app.play("/info")
-        assert "test-model" in capsys.readouterr().out
 
 
 def numbers(text: str) -> list[int]:
