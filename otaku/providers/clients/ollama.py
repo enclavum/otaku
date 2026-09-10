@@ -1,17 +1,34 @@
-"""Ollama: the model registry, load/unload, sizes, and context windows via
-the native /api endpoints; chat rides the OpenAI protocol at /v1."""
+"""Ollama: the model registry, load/unload, sizes and context windows
+via the native /api endpoints, and each model's capabilities from
+/api/show; chat rides the OpenAI protocol at /v1. A thinking level
+goes out as `reasoning_effort` alone — the one knob the server reads,
+clamping what its own scale lacks (xhigh to max) rather than refusing.
+"""
 
 import os
+from dataclasses import replace
 
-import httpx
-
-from otaku.providers.base import ManagedClient, ModelInfo
+from otaku.providers import http
+from otaku.providers.client import (
+    ASK_TIMEOUT,
+    PROBE_TIMEOUT,
+    Capabilities,
+    Client,
+    Locality,
+    ModelInfo,
+)
 from otaku.settings.providers import ProviderConfig
 
+# The levels the server tells apart; xhigh is clamped to max on its side,
+# so it is not a level of its own here.
+_LEVELS: frozenset[str] = frozenset({"off", "low", "medium", "high", "max"})
 
-class OllamaClient(ManagedClient):
+
+class OllamaClient(Client):
     kind = "ollama"
     label = "Ollama"
+    locality = Locality.LOCAL
+    env_key = "OLLAMA_API_KEY"
 
     @classmethod
     def autoconfigure(cls) -> ProviderConfig:
@@ -20,35 +37,34 @@ class OllamaClient(ManagedClient):
         raw = os.environ.get("OLLAMA_HOST") or ""
         host = _parse_host(raw) or "localhost"
         port = _parse_port(raw) or 11434
-        url = f"http://{host}:{port}/v1"
-        return ProviderConfig(name=cls.kind, url=url, keep_alive="24h")
+        return ProviderConfig(
+            name=cls.kind,
+            url=f"http://{host}:{port}/v1",
+            keep_alive="24h",
+        )
+
+    @property
+    def manages_models(self) -> bool:
+        return True
 
     def load_model(self, model: str) -> None:
-        body = {
-            "model": model,
-            "prompt": "",
-            "stream": False,
-            "keep_alive": self.config.keep_alive or "24h",
-        }
-        response = httpx.post(
-            f"{self.config.base_url}/api/generate",
-            json=body,
-            headers=self._headers,
-            timeout=None,
-        )
-        response.raise_for_status()
+        self._generate_nothing(model, keep_alive=self.config.keep_alive or "24h")
 
     def unload_model(self, model: str) -> None:
-        body = {"model": model, "prompt": "", "stream": False, "keep_alive": 0}
-        response = httpx.post(
+        self._generate_nothing(model, keep_alive=0)
+
+    def _generate_nothing(self, model: str, *, keep_alive: str | int) -> None:
+        """An empty generation is how the registry is told to load a
+        model, and for how long to keep it — zero unloads it."""
+        http.post_json(
             f"{self.config.base_url}/api/generate",
-            json=body,
+            {"model": model, "prompt": "", "stream": False, "keep_alive": keep_alive},
+            name=self.config.name,
             headers=self._headers,
             timeout=None,
         )
-        response.raise_for_status()
 
-    def _list(self, timeout: float) -> list[ModelInfo]:
+    def models(self, timeout: float = ASK_TIMEOUT) -> list[ModelInfo]:
         """One row per model: names and sizes from /api/tags, load state
         and the live window from /api/ps — one call each, however long
         the registry. An unloaded model carries NO window: Ollama sizes
@@ -58,22 +74,29 @@ class OllamaClient(ManagedClient):
         ceiling, not the window — reported as one it budgeted stories
         past what the model could hold. A loaded model missing from the
         registry still belongs in the list."""
+        data = http.get_json(
+            f"{self.config.base_url}/api/tags",
+            name=self.config.name,
+            headers=self._headers,
+            timeout=timeout,
+        )
         sizes: dict[str, int] = {}
-        data = self._get_json("/api/tags", timeout=timeout)
-        if data is None:
-            raise httpx.ConnectError(f"{self.config.name} is not answering /api/tags")
-        for entry in data.get("models") or [] if isinstance(data, dict) else []:
+        entries = data.get("models") if isinstance(data, dict) else None
+        for entry in entries if isinstance(entries, list) else []:
             name = entry.get("name") or entry.get("model")
             size = entry.get("size")
             if isinstance(name, str):
                 sizes[name] = size if isinstance(size, int) and size > 0 else 0
-        running = self._running(timeout=1.5)
+        running = self._running(timeout=PROBE_TIMEOUT)
         # The listing just paid for every live window — seed the cache,
         # so the budget's ask for a loaded model never refetches it.
         for name, window in running.items():
             if window:
-                self._context_cache[name] = window
+                self._context_sizes[name] = window
         names = sorted(sizes) + sorted(set(running) - set(sizes))
+        # The registry's rows carry no capabilities, and a listing is one
+        # pass over each endpoint however long the list: the one-model
+        # ask (`_model`) reads the card instead.
         return [
             ModelInfo(
                 name=name,
@@ -84,27 +107,53 @@ class OllamaClient(ManagedClient):
             for name in names
         ]
 
+    def _model(self, name: str, timeout: float) -> ModelInfo | None:
+        row = super()._model(name, timeout)
+        return replace(row, capabilities=self._shown_capabilities(name)) if row else None
+
+    def _shown_capabilities(self, model: str) -> Capabilities:
+        """What /api/show says of one model — the card's capabilities,
+        asked one model at a time."""
+        data = http.post_json(
+            f"{self.config.base_url}/api/show",
+            {"model": model},
+            name=self.config.name,
+            headers=self._headers,
+            timeout=PROBE_TIMEOUT,
+            quiet=True,
+        )
+        caps = data.get("capabilities") if isinstance(data, dict) else None
+        if not isinstance(caps, list):
+            return Capabilities()
+        thinking = _LEVELS if "thinking" in caps else frozenset[str]()
+        return Capabilities(vision="vision" in caps, thinking=thinking)
+
+    def _context_size(self, model: str) -> int | None:
+        # Only a loaded model has a window (see `models`): unknown until
+        # then, and the base caches nothing for an unknown — so the first
+        # turn, the one whose request loads the model, budgets on the
+        # assembler's default, and the next ask reads the live figure.
+        return self._running(timeout=PROBE_TIMEOUT).get(model) or None
+
     def _running(self, timeout: float) -> dict[str, int]:
         """The loaded models with their live windows, from /api/ps: name →
         context_length, 0 where the server does not state one."""
         running: dict[str, int] = {}
-        data = self._get_json("/api/ps", timeout=timeout)
-        if not isinstance(data, dict):
-            return running
-        for entry in data.get("models") or []:
+        data = http.get_json(
+            f"{self.config.base_url}/api/ps",
+            name=self.config.name,
+            headers=self._headers,
+            timeout=timeout,
+            quiet=True,
+        )
+        entries = data.get("models") if isinstance(data, dict) else None
+        for entry in entries if isinstance(entries, list) else []:
             name = entry.get("name") or entry.get("model")
             if not name:
                 continue
             window = entry.get("context_length")
             running[str(name)] = window if isinstance(window, int) and window > 0 else 0
         return running
-
-    def _fetch_context_size(self, model: str) -> int | None:
-        # Only a loaded model has a window (see `_list`): unknown until
-        # then, and the base caches nothing for an unknown — so the first
-        # turn, the one whose request loads the model, budgets on the
-        # assembler's default, and the next ask reads the live figure.
-        return self._running(timeout=1.5).get(model) or None
 
 
 def _parse_host(value: str) -> str | None:

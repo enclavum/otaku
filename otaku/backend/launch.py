@@ -21,7 +21,8 @@ from otaku.backend.session import NO_MODEL_HINT, Refused, Session
 from otaku.encryption import AskSecret, Cipher, EncryptionError, SealedError
 from otaku.formatting import pretty_path
 from otaku.logging import ErrorLog, RequestLog, SystemLog
-from otaku.providers import ProviderConfig, Registry, autoconfigure_providers
+from otaku.providers import ProviderConfig, Registry
+from otaku.providers import autoconfigure as autoconfigure_providers
 from otaku.settings import config as config_file
 from otaku.settings import migrations, write_atomic
 from otaku.settings import prompts as prompts_file
@@ -74,7 +75,7 @@ def open_session(root: str | Path | None = None, *, ask_secret: AskSecret | None
     # which resolves its client by name.
     registry = Registry(
         providers,
-        request_log=RequestLog(paths.logs_dir, cipher),
+        request_sink=RequestLog(paths.logs_dir, cipher),
         smooth=config.smooth_streaming,
     )
     # A remembered model whose provider is still configured resumes; a

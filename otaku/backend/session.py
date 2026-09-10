@@ -29,7 +29,7 @@ from otaku.context import assembler
 from otaku.context.assembler import AssembledPrompt, ContextShape
 from otaku.formatting import pretty_path
 from otaku.logging import ErrorLog
-from otaku.providers import Locality, OpenAIClient, ProviderConfig, Registry
+from otaku.providers import Client, Locality, ProviderConfig, Registry
 from otaku.settings import models as models_file
 from otaku.settings import state as state_file
 from otaku.settings.config import Config, TerminalSettings, WebSettings
@@ -52,9 +52,12 @@ THINK_MENU: tuple[str, ...] = (THINK_DEFAULT, "none", "low", "medium", "high", "
 KNOWN_PARAMS: dict[str, type] = {
     "temperature": float,
     "top_p": float,
+    "top_k": int,
+    "min_p": float,
     "max_tokens": int,
     "presence_penalty": float,
     "frequency_penalty": float,
+    "repetition_penalty": float,
     "seed": int,
     "stop": str,
 }
@@ -403,7 +406,7 @@ class Session:
         except ValueError:
             return None
 
-    def _client(self) -> OpenAIClient | None:
+    def _client(self) -> Client | None:
         if not self.model:
             return None
         try:

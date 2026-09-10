@@ -69,7 +69,7 @@ from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.dimension import D
 from prompt_toolkit.styles import Style
 
-from otaku.backend import Locality, Provider, meminfo
+from otaku.backend import Locality, ProviderInfo, meminfo
 from otaku.backend.api import providers as api_providers
 from otaku.backend.api.providers import Engine, ProviderField
 from otaku.backend.session import Refused, Session
@@ -764,7 +764,7 @@ class ModelPicker(ListScreen):
         # its rows, the listing having nowhere to go.
         self._refresh_provider(name, settled=True)
 
-    def _fetch_rows(self, name: str) -> list[Provider]:
+    def _fetch_rows(self, name: str) -> list[ProviderInfo]:
         """One provider's fresh listing, through the picker's one query —
         every OTHER configured provider skipped, so a catalog refresh
         never costs a sweep of dead engines."""

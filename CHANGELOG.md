@@ -5,6 +5,14 @@ All notable changes to otaku are documented in this file. The format is based on
 [Semantic Versioning](https://semver.org/) — while pre-1.0, minor releases may include breaking
 changes.
 
+## [Unreleased]
+
+### Added
+
+- `/set` accepts three more sampling parameters: `top_k`, `min_p` and `repetition_penalty`. They ride through to
+  the server as sent; omlx, llama.cpp and KoboldCpp honour them, Ollama's OpenAI-compatible endpoint ignores them
+  (set those in a Modelfile instead).
+
 ## [0.4.3] - 2026-09-08
 
 **TL;DR**

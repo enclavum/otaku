@@ -11,12 +11,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Literal
 
-import httpx
-
 from otaku.backend.session import Refused, Session
 from otaku.encryption import SealedError, seal
-from otaku.formatting import printable, toml_key, toml_scalar
-from otaku.providers import CLIENTS, Locality, ManagedClient, Provider, ProviderConfig
+from otaku.formatting import toml_key, toml_scalar
+from otaku.providers import CLIENTS, Client, Locality, ProviderConfig, ProviderError, ProviderInfo
 from otaku.settings.migrations import PROMPT_CACHE_ROW, surgery
 
 # The two fields of a section a panel edits — what `save_field` and
@@ -29,8 +27,7 @@ def switch_model(session: Session, provider: str, model: str) -> str:
     models on one prompt: switch, then regenerate). Parameters follow the
     model; the switch is remembered. Returns the confirmation; raises
     Refused for an unknown provider or a no-op."""
-    known = {config.name for config in session._providers_registry.configured()}
-    if provider not in known:
+    if provider not in session._providers_registry.names():
         raise Refused(f"Unknown provider {provider!r}.")
     if f"{provider}/{model}" == session.full_model_name:
         raise Refused(f"Already using {session.full_model_name}.")
@@ -45,21 +42,22 @@ def switch_spec(session: Session, raw: str) -> str:
     lists the known providers, then wraps `switch_model`. Both frontends'
     chat boxes route here; the picker and the web PUT use the structured
     form."""
-    known = {config.name for config in session._providers_registry.configured()}
+    known = session._providers_registry.names()
     head, _, rest = raw.strip().partition("/")
     if head not in known or not rest:
-        names = ", ".join(sorted(known))
+        names = ", ".join(known)
         raise Refused(f"Use PROVIDER/MODEL (providers: {names}), or /model with no args to pick.")
     return switch_model(session, head, rest)
 
 
 def get_providers(
     session: Session, skip: set[str] | None = None
-) -> tuple[list[Provider], set[str]]:
+) -> tuple[list[ProviderInfo], set[str]]:
     """Every reachable provider with its models, plus the reachable set —
     the picker's one query; `skip` lets it fetch cloud catalogs after
     its screen is up."""
-    return session._providers_registry.get_providers(skip)
+    rows = session._providers_registry.info(skip or ())
+    return rows, {row.config.name for row in rows}
 
 
 @dataclass(frozen=True)
@@ -85,7 +83,7 @@ def configured(session: Session) -> set[str]:
     """The configured providers' names — what the panel's one-provider
     refresh skips everything but, and nothing more: the sections
     themselves come one at a time through `section`."""
-    return {config.name for config in session._providers_registry.configured()}
+    return set(session._providers_registry.names())
 
 
 def loaded_models(session: Session, provider: str) -> set[str]:
@@ -101,19 +99,16 @@ def loaded_models(session: Session, provider: str) -> set[str]:
         raise Refused(str(e)) from e
     try:
         return {model.name for model in client.models() if model.loaded}
-    except httpx.HTTPStatusError as e:
-        detail = printable(" ".join(e.response.text.split()))[:300]
-        raise Refused(f"The engine refused: {detail or e.response.status_code}") from e
-    except httpx.RequestError as e:
-        raise Refused(f"Could not reach {provider}.") from e
+    except ProviderError as e:
+        raise Refused(str(e)) from e
 
 
 def section(session: Session, provider: str) -> ProviderConfig:
     """The engine's current section when configured, its autoconfigured
     default otherwise — what the panel shows either way."""
-    configured = {config.name: config for config in session._providers_registry.configured()}
-    if provider in configured:
-        return configured[provider]
+    known = session._providers_registry.configs.get(provider)
+    if known is not None:
+        return known
     if provider in CLIENTS:
         return CLIENTS[provider].autoconfigure()
     return ProviderConfig(name=provider, url="")
@@ -160,7 +155,7 @@ def save_field(session: Session, provider: str, attr: ProviderField, value: str)
         session._paths.config_backups_dir,
         [surgery.ensure_section(provider, block), surgery.set_key(provider, attr, line)],
     )
-    session._providers_registry.update_provider(updated)
+    session._providers_registry.update(updated)
     if not written:
         # The registry took the value, the file did not — say so, or the
         # next launch silently forgets what the panel confirmed.
@@ -187,7 +182,7 @@ def clear_field(session: Session, provider: str, attr: ProviderField) -> str:
         # value stays — in the session too, so the panel stays honest.
         return "Not forgotten — providers.toml could not be written."
     cleared = replace(config, url="") if attr == "url" else replace(config, api_key="")
-    session._providers_registry.update_provider(cleared)
+    session._providers_registry.update(cleared)
     return ""
 
 
@@ -203,23 +198,21 @@ def unload(session: Session, provider: str, model: str) -> None:
     _perform(_managed(session, provider).unload_model, model, provider)
 
 
-def _managed(session: Session, provider: str) -> ManagedClient:
+def _managed(session: Session, provider: str) -> Client:
     try:
         client = session._providers_registry.get_client(provider)
     except ValueError as e:
         raise Refused(str(e)) from e
-    if not isinstance(client, ManagedClient):
+    if not client.manages_models:
         raise Refused(f"{provider} cannot load or unload models.")
     return client
 
 
 def _perform(action: Callable[[str], None], model: str, provider: str) -> None:
     """One load/unload call, its failures curated into Refused — shared
-    by both doors, so the wording cannot fork."""
+    by both doors, so the wording cannot fork. The sentence is the
+    provider package's own, which names the provider."""
     try:
         action(model)
-    except httpx.HTTPStatusError as e:
-        detail = printable(" ".join(e.response.text.split()))[:300]
-        raise Refused(f"The engine refused: {detail or e.response.status_code}") from e
-    except httpx.RequestError as e:
-        raise Refused(f"Could not reach {provider}.") from e
+    except ProviderError as e:
+        raise Refused(str(e)) from e

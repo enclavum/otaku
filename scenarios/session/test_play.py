@@ -109,6 +109,35 @@ class TestTurns:
         assert app.session.messages[-1].body == "The hall glows."
 
 
+class TestProviderFailures:
+    """What the reader is told when a turn cannot be played: the
+    provider package's own sentence, which names the provider and
+    carries the server's explanation — never a transport type."""
+
+    def test_an_error_status_names_the_provider_and_the_status(self, app: App, capsys) -> None:
+        app.server.refuse = lambda body: 503
+        app.play("I enter the hall.")
+        out = capsys.readouterr().out
+        assert "[ error: Refused by test with HTTP 503: " in out
+        assert "refused by the script" in out
+
+    def test_a_declining_model_says_so_in_its_words(self, app: App, capsys) -> None:
+        app.server.decline = "content filtered"
+        app.play("I enter the hall.")
+        assert "[ error: The model declined: content filtered ]" in capsys.readouterr().out
+
+    def test_a_dead_provider_cannot_be_reached(self, server, tmp_path, capsys) -> None:
+        dead = scripted.ModelServer()
+        dead.close()  # the port is known, and nothing answers on it
+        set_config_provider(tmp_path / "state", dead)
+        app = launch(tmp_path / "state", dead)
+        try:
+            app.play("I enter the hall.")
+            assert "[ error: Could not reach test. ]" in capsys.readouterr().out
+        finally:
+            app.close()
+
+
 class TestAttribution:
     def test_a_turn_to_openrouter_names_the_app(self, server, tmp_path) -> None:
         root = tmp_path / "state"

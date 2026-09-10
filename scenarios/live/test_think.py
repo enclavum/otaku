@@ -36,20 +36,20 @@ NONE: frozenset[str] = frozenset()
 CASES = [
     ("llamacpp", "http://127.0.0.1:8080/v1", "", "", BOTH),
     ("generic", "http://127.0.0.1:8080/v1", "", "", BOTH),
-    ("koboldcpp", "http://127.0.0.1:5001/v1", "", "", NONE),
+    ("koboldcpp", "http://127.0.0.1:5001/v1", "", "", BOTH),
     (
         "ollama",
         "http://127.0.0.1:11434/v1",
         "",
         os.environ.get("OTAKU_TEST_MODEL", "ollama/gemma3").partition("/")[2],
-        BOTH,
+        EFFORT,
     ),
     (
         "omlx",
         os.environ.get("OTAKU_LIVE_OMLX_URL", OmlxClient.autoconfigure().url),
         "",
         os.environ.get("OTAKU_LIVE_OMLX_MODEL", ""),
-        FLAG,
+        BOTH,
     ),
     (
         "lmstudio",
@@ -97,18 +97,14 @@ class TestThink:
             app.close()
 
     @pytest.mark.parametrize(("provider", "url", "key_var", "model"), _PARAMS, ids=_IDS)
-    def test_a_level_is_taken_or_refused_as_the_engine_allows(
-        self, tmp_path: Path, server, capsys, provider: str, url: str, key_var: str, model: str
+    def test_a_level_is_taken_and_carried_on_the_knobs_the_engine_reads(
+        self, tmp_path: Path, server, provider: str, url: str, key_var: str, model: str
     ) -> None:  # type: ignore[no-untyped-def]
         app = _open(tmp_path, server, provider, url, key_var, model)
         try:
             app.play("/set think high")
-            said = capsys.readouterr().out
-            if not _KNOBS[provider]:
-                # No knob to carry it: refused out loud, the setting unmoved.
-                assert said.strip()
-                assert app.session.think != "high"
-                return
+            # Never refused for the engine's sake: an engine with no knob
+            # takes the level too, and its request carries nothing.
             assert app.session.think == "high"
             app.play("Reply with one word: ready?")
             assert _replied(app)

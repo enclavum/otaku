@@ -21,7 +21,7 @@ from otaku.formatting import (
     printable,
     truncate_label,
 )
-from otaku.providers import CLIENTS, CloudClient, Locality, ProviderConfig
+from otaku.providers import CLIENTS, Locality, ProviderConfig
 
 
 @dataclass(frozen=True)
@@ -369,11 +369,11 @@ def balances(session: Session, *, probe: bool = True) -> BalanceReport:
     it and fills the figures from one probed report. The terminal asks
     plainly and gets everything in one wait."""
     registry = session._providers_registry
-    configured = {config.name for config in registry.configured()}
+    configured = set(registry.names())
 
     def account(provider: str, config: ProviderConfig) -> Balance | None:
         client = registry.get_client(provider)
-        if not isinstance(client, CloudClient):
+        if client.locality is not Locality.REMOTE:
             return None  # a local engine has no account to ask
         # What to CALL it: the engine's own caption — "OpenRouter", not
         # "openrouter". A section somebody named themselves keeps THEIR
@@ -385,7 +385,7 @@ def balances(session: Session, *, probe: bool = True) -> BalanceReport:
         # An account nobody has a key for was never asked: that is a
         # different fact from an account that would not answer, and the
         # reader can act on one of them.
-        if not config.api_key:
+        if client.key_source is None:
             return Balance(provider, named, None, NO_KEY)
         if not probe:
             return Balance(provider, named, None, "")
@@ -402,7 +402,7 @@ def balances(session: Session, *, probe: bool = True) -> BalanceReport:
     rows += [
         Balance(kind, cls.label, None, NO_KEY)
         for kind, cls in CLIENTS.items()
-        if issubclass(cls, CloudClient) and kind not in configured
+        if cls.locality is Locality.REMOTE and kind not in configured
     ]
     if not rows:
         raise Refused("No cloud providers.")
@@ -413,7 +413,7 @@ def balances(session: Session, *, probe: bool = True) -> BalanceReport:
     playing, client = session.provider, session._client()
     if client is None or not playing:
         spending = "Paid providers are charged only when you play on one."
-    elif isinstance(client, CloudClient):
+    elif client.locality is Locality.REMOTE:
         spending = f"This story runs on {playing}, and every reply is billed to that account."
     else:
         spending = (
@@ -437,7 +437,7 @@ def _model_rows(session: Session) -> tuple[tuple[str, str], ...]:
     # Two facts, not one: a frontend that wants to set the URL under the
     # backend's own line cannot split a parenthesis back apart.
     out = [("Model", session.full_model_name), ("Backend", client.kind), ("URL", config.url)]
-    if config.api_key:
+    if client.key_source is not None:
         out.append(("Auth", "api_key configured"))
     # The model's own row — load state only where loading is a real state
     # (a plain endpoint or a cloud catalog serves everything statically).
@@ -452,10 +452,7 @@ def _model_rows(session: Session) -> tuple[tuple[str, str], ...]:
     window = format_context(client.get_context_size(session.model))
     if window:
         out.append(("Context", window))
-    if client.supports_thinking:
-        out.append(("Thinking", session.think if session.think else "default"))
-    else:
-        out.append(("Thinking", "not supported"))
+    out.append(("Thinking", session.think if session.think else "default"))
     if config.keep_alive:
         out.append(("Keep-alive", str(config.keep_alive)))
     if client.cache_markers:

@@ -18,7 +18,7 @@ The layout follows the app's own seams:
 - `test_app.py` — getting a session at all: encryption, backups, resume.
 - `fixtures/` — the artifacts a synthetic string cannot stand in for: a
   real SillyTavern chat, a character card PNG, prose with real
-  typography.
+  typography, a photograph of a cat for the vision smokes.
 - `support/` — the harness, the scripted OpenAI-compatible server, and
   the pty driver.
 """

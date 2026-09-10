@@ -48,12 +48,10 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Self
 
-import httpx
-
 from otaku.context.assembler import WireTurn
 from otaku.context.syntax import OOC_FRAME, to_wire
 from otaku.formatting import format_duration, render
-from otaku.providers import DeclinedError, OpenAIClient, Stats, Text, WireMessage
+from otaku.providers import Client, ProviderError, Stats, Text, UnreachableError, WireMessage
 from otaku.store import Store
 from otaku.store.ops.lore import CharacterMemory
 from otaku.store.schema import Message
@@ -186,7 +184,7 @@ class Extractor:
     def __init__(
         self,
         store: Store,
-        client: OpenAIClient,
+        client: Client,
         model: str,
         story_id: int,
         *,
@@ -265,13 +263,13 @@ class Extractor:
         failures retry with a cancel-aware backoff; a bad HTTP status
         propagates on the first try."""
         messages = [WireTurn(role="user", body=prompt)] if isinstance(prompt, str) else prompt
-        last_exc: httpx.TransportError | None = None
+        last_exc: UnreachableError | None = None
         for attempt in range(_ATTEMPTS):
             if self._cancel.is_set():
                 return ""
             try:
                 return self._stream_once(messages, purpose, params, timeout)
-            except httpx.TransportError as e:
+            except UnreachableError as e:
                 last_exc = e
                 more = attempt + 1 < _ATTEMPTS
                 if more:
@@ -341,7 +339,7 @@ class Extractor:
             scene_started = time.monotonic()
             try:
                 closed = self._close_scene(cast, span, "lore", report)
-            except httpx.HTTPError as e:
+            except ProviderError as e:
                 self._log(
                     f"extraction failed (story {self._story_id}): {type(e).__name__} "
                     f"({format_duration(time.monotonic() - pass_started)})"
@@ -396,7 +394,7 @@ class Extractor:
         writes: characters, the scene row, journals, speakers.
 
         Returns False when cancelled mid-stream (nothing written). Raises
-        `httpx.HTTPError` (request failed) or `ValueError` (unparsable
+        `ProviderError` (request failed) or `ValueError` (unparsable
         reply) — the caller decides what that means."""
         chain = self._store.stories.get_messages_ids(self._story_id)
         current = self._store.journals.get_current(self._story_id, chain)
@@ -543,7 +541,7 @@ class Extractor:
                     render(self._settings.scene_history_template, summaries="\n\n".join(summaries)),
                     "rollup",
                 ).strip()
-            except (httpx.HTTPError, DeclinedError) as e:
+            except ProviderError as e:
                 # A decline is skipped like a transport failure: the row
                 # stays NULL and the next pass tries again — best-effort,
                 # never the whole pass.
@@ -602,7 +600,7 @@ class Extractor:
             )
             try:
                 text = self.complete(prompt, "rollup")
-            except (httpx.HTTPError, DeclinedError) as e:
+            except ProviderError as e:
                 # A decline is skipped like a transport failure: the row
                 # stays NULL and the next pass tries again.
                 self._log(
@@ -628,18 +626,18 @@ class Extractor:
         timeout: float,
     ) -> str:
         """One attempt of `complete`: stream, accumulate, record usage.
-        Raises the underlying httpx error so the wrapper can retry."""
+        Raises the provider error so the wrapper can retry."""
         buf: list[str] = []
         final: Stats | None = None
         # max_tokens bounds a repetition loop — without it a looping model
         # generates until someone kills it (streaming resets the read
         # timeout).
         params = params or {"temperature": 0.2, "max_tokens": _MAX_TOKENS}
-        stream = self._client.chat_stream(
+        stream = self._client.complete_chat(
             self._model,
             messages,
             params,
-            think="none",
+            think_level="off",
             purpose=purpose,
             timeout=timeout,
             watched=False,  # accumulated into a string; nobody watches it

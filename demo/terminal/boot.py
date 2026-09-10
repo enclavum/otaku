@@ -438,32 +438,30 @@ def _pace(seconds: float) -> None:
 def _build_demo_client():
     import demo_script
 
-    from otaku.providers.base import OpenAIClient, Stats, Text, Thinking
+    from otaku.providers.client import Client, Locality, ModelInfo
+    from otaku.providers.wire import Stats, Text, Thinking
 
-    class DemoClient(OpenAIClient):
-        """The scripted engine: the real `OpenAIClient` with the four
-        wire calls answered from `demo_script` instead of a socket. The
+    class DemoClient(Client):
+        """The scripted engine: the real `Client` with the wire calls
+        answered from `demo_script` instead of a socket. The
         orchestration above `_stream` — request logging, the thinking
         retry, cancel-and-keep on close — is the base class's own."""
 
         kind = "demo"
         label = "demo"
-        local = True
+        locality = Locality.LOCAL
 
-        def _model_names(self, timeout):
-            return [MODEL]
-
-        def _list(self, timeout):
-            from otaku.providers.base import ModelInfo
-
+        def models(self, timeout=10.0):
             # Loaded and sized like a serving engine, or /info and the
             # picker would show a model nobody started.
             return [ModelInfo(name=MODEL, context=CONTEXT_SIZE, loaded=True)]
 
-        def _fetch_context_size(self, model):
+        def _context_size(self, model):
             return CONTEXT_SIZE
 
-        def _stream(self, model, body, timeout, purpose, request_id):
+        def _generate(self, url, body, purpose, timeout, read_delta):
+            if self._request_sink is not None:
+                self._request_sink.record_request(self.config.name, purpose, body)
             thinking, text = demo_script.reply(body, purpose)
             if purpose != "chat":
                 # Background work (extraction, rollups, warm-ups) is
@@ -472,10 +470,10 @@ def _build_demo_client():
                 yield Stats(
                     prompt_tokens=_estimate(body),
                     completion_tokens=max(1, len(text) // 4),
-                    duration_seconds=0.05,
-                    context_max=CONTEXT_SIZE,
-                    generation_seconds=0.04,
                     cached_tokens=None,
+                    context_max=CONTEXT_SIZE,
+                    duration_seconds=0.05,
+                    first_token_seconds=0.01,
                 )
                 return
             start = time.monotonic()
@@ -494,10 +492,10 @@ def _build_demo_client():
             yield Stats(
                 prompt_tokens=_estimate(body),
                 completion_tokens=max(1, emitted // 4),
-                duration_seconds=end - start,
-                context_max=CONTEXT_SIZE,
-                generation_seconds=end - first,
                 cached_tokens=None,
+                context_max=CONTEXT_SIZE,
+                duration_seconds=end - start,
+                first_token_seconds=first - start,
             )
 
     def _estimate(body) -> int:
@@ -615,8 +613,9 @@ def _patch_threads() -> None:
 
     # Provider fan-out without its pool: one scripted provider answers
     # instantly, so configuration order needs no overlap.
-    def demo_map(self, fn):
-        return [fn(name, config) for name, config in list(self._providers.items())]
+    def demo_map(self, fn, names=None):
+        asked = list(self.configs) if names is None else list(names)
+        return [fn(name, self.configs[name]) for name in asked]
 
     Registry.map = demo_map
 
@@ -707,6 +706,7 @@ def main() -> None:
     backend_launch.autoconfigure_providers = lambda: {}
     providers_registry.CLIENTS[PROVIDER] = _build_demo_client()
     _patch_threads()
+
     # Two doors a tab cannot honor: /web binds a socket, and /bye — with
     # Ctrl+D, the app's own shortcut submitting /bye on an empty line —
     # would end a session only a reload can restart. Both answer with

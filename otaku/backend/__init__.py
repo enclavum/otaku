@@ -27,7 +27,7 @@ package root.
 """
 
 from otaku.encryption import EncryptionError
-from otaku.providers import Locality, ModelInfo, Provider, ProviderConfig
+from otaku.providers import Locality, ModelInfo, ProviderConfig, ProviderInfo
 from otaku.settings.config import ConfigError, TerminalSettings, WebSettings
 from otaku.store import DatabaseError
 from otaku.store.ops.stories import StoryListing
@@ -42,8 +42,8 @@ __all__ = [
     "Locality",
     "Message",
     "ModelInfo",
-    "Provider",
     "ProviderConfig",
+    "ProviderInfo",
     "Scene",
     "StoryListing",
     "TerminalSettings",

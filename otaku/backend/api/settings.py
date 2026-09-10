@@ -29,7 +29,8 @@ THINK_ALIASES = {"on": "medium", "off": "none"}
 def set_think(session: Session, raw: str) -> str:
     """A THINK_LEVELS value, an alias (on/off), or "default" (send
     nothing); "" reports where it stands. Raises Refused for an unknown
-    level, no model, or an engine without the knob."""
+    level or no model — never for the engine: a level goes out on
+    whatever knobs the engine reads, and on none where it reads none."""
     if not raw.strip():
         return f"Think: {session.think if session.think else 'default'}."
     value = THINK_ALIASES.get(raw.strip().lower(), raw.strip().lower())
@@ -38,11 +39,8 @@ def set_think(session: Session, raw: str) -> str:
         return "Think: default (nothing sent — the model decides)."
     if value not in THINK_LEVELS:
         raise Refused("Usage: /set think on|off|none|low|medium|high|max|default")
-    client = session._client()
-    if client is None:
+    if session._client() is None:
         raise Refused(NO_MODEL_HINT)
-    if value != "none" and not client.supports_thinking:
-        raise Refused(f"Thinking level cannot be set on {session.provider}.")
     session._update_state(think=value)
     return f"Think: {value}."
 

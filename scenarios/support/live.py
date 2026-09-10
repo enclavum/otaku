@@ -10,6 +10,7 @@ import httpx
 import pytest
 
 from otaku.backend.paths import Paths
+from otaku.providers import CLIENTS, UnreachableError
 from otaku.providers.clients.omlx import OmlxClient
 from otaku.settings import config as config_mod
 from otaku.settings import providers as providers_mod
@@ -68,21 +69,23 @@ def case_key(engine: str, var: str, required: frozenset[str] | set[str]) -> str:
 
 
 def case_model(engine: str, url: str, key: str, named: str) -> str:
-    """The model a case plays, the server probed first — a server that is
-    down skips the case, as the engine's own module skips. omlx plays a
-    LOADED model unless one is named (its listing carries the unloaded
-    too, and a smoke does not wait on a load); the rest play the named
-    one, else the first the endpoint lists."""
+    """The model a case plays, as the engine's own client lists it (the
+    name the client's `model` answers to — Kobold strips its prefix, say),
+    the server probed first: a server that is down skips the case, as the
+    engine's own module skips. omlx plays a LOADED model unless one is
+    named (its listing carries the unloaded too, and a smoke does not
+    wait on a load); the rest play the named one, else the first listed."""
+    client = CLIENTS[engine](ProviderConfig(name=engine, url=url, api_key=key))
+    try:
+        rows = client.models(timeout=5.0)
+    except UnreachableError:
+        pytest.skip(f"no server at {url}")
+    if named:
+        return named
     if engine == "omlx":
-        try:
-            rows = OmlxClient(ProviderConfig(name="omlx", url=url, api_key=key)).models(timeout=5.0)
-        except Exception:
-            pytest.skip(f"no server at {url}")
-        loaded = [row.name for row in rows if row.loaded]
-        if named:
-            return named
-        if not loaded:
+        rows = [row for row in rows if row.loaded]
+        if not rows:
             pytest.skip("no model loaded in omlx")
-        return loaded[0]
-    first = first_model(url, key)
-    return named or first
+    if not rows:
+        pytest.skip(f"{url} lists no models")
+    return rows[0].name

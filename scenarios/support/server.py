@@ -52,7 +52,19 @@ class ModelServer:
         # such an engine.
         self.window: int | None = None
         self.list_delay = 0.0  # seconds /models waits before answering — arrival order
+        self.list_status: int | None = None  # set → /models answers this status instead
         self.status = False  # True → serve omlx's rich /v1/models/status
+        self.types: dict[str, str] = {}  # omlx status: model_type per model ("vlm", "llm")
+        # What a listing entry carries beyond its id and context — the
+        # catalogs' capability fields, merged into the entry as sent.
+        self.extras: dict[str, dict[str, Any]] = {}
+        # llama.cpp's /props beyond the window (modalities, chat_template_caps).
+        self.props: dict[str, Any] = {}
+        self.version: dict[str, Any] | None = None  # KoboldCpp's /api/extra/version; None → 404
+        self.capabilities: dict[str, list[str]] = {}  # ollama's /api/show capabilities per model
+        self.token_count: int | None = None  # every count endpoint answers this; None → 404
+        self.router = False  # True → llama.cpp's router listing and load/unload doors
+        self.decline: str | None = None  # set → the stream is one error frame, no content
         self.credits: tuple[float, float] | None = (
             10.0,
             0.0,
@@ -81,7 +93,11 @@ class ModelServer:
                 path = self.path.split("?", 1)[0].rstrip("/")
                 outer.gets.append(path)
                 if outer.window is not None and path.endswith("/props"):
-                    self._json({"default_generation_settings": {"n_ctx": outer.window}})
+                    props = {"default_generation_settings": {"n_ctx": outer.window}}
+                    self._json({**props, **outer.props})
+                    return
+                if outer.version is not None and path.endswith("/api/extra/version"):
+                    self._json(outer.version)
                     return
                 if outer.window is not None and path.endswith("/true_max_context_length"):
                     self._json({"value": outer.window})
@@ -95,6 +111,11 @@ class ModelServer:
                                     "actual_size": outer.sizes.get(name, 1_048_576),
                                     "loaded": name in outer.loaded,
                                     "max_context_window": outer.contexts.get(name, 8192),
+                                    **(
+                                        {"model_type": outer.types[name]}
+                                        if name in outer.types
+                                        else {}
+                                    ),
                                 }
                                 for name in outer.models
                             ]
@@ -102,6 +123,10 @@ class ModelServer:
                     )
                     return
                 if path.endswith("/models"):
+                    if outer.list_status is not None:
+                        self.send_response(outer.list_status)
+                        self.end_headers()
+                        return
                     if outer.list_delay:
                         time.sleep(outer.list_delay)
                     # `context_length` rides along when a test sets it —
@@ -111,7 +136,12 @@ class ModelServer:
                         entry: dict[str, Any] = {"id": name}
                         if name in outer.contexts:
                             entry["context_length"] = outer.contexts[name]
-                        rows.append(entry)
+                        if outer.router:
+                            # The router's rows: a status object, as the
+                            # build in use spells it.
+                            state = "loaded" if name in outer.loaded else "unloaded"
+                            entry["status"] = {"value": state}
+                        rows.append({**entry, **outer.extras.get(name, {})})
                     self._json({"data": rows})
                 elif path.endswith("/credits") and outer.credits is not None:
                     if not self._authorized():
@@ -173,6 +203,52 @@ class ModelServer:
                         return
                     self._json(outer.balances)
                     return
+                posted = self.path.split("?", 1)[0].rstrip("/")
+                if outer.managed and posted.endswith("/api/show"):
+                    # Ollama's card: the capabilities of one model.
+                    self._json({"capabilities": outer.capabilities.get(str(body.get("model")), [])})
+                    return
+                if (
+                    outer.status
+                    and posted.endswith(("/load", "/unload"))
+                    and "/v1/models/" in posted
+                ):
+                    # omlx's doors: the model is in the path, the state flips.
+                    name = posted.split("/v1/models/", 1)[1].rsplit("/", 1)[0]
+                    (outer.loaded.add if posted.endswith("/load") else outer.loaded.discard)(name)
+                    self._json({"status": "ok"})
+                    return
+                if outer.managed and posted.endswith(
+                    ("/api/v1/models/load", "/api/v1/models/unload")
+                ):
+                    # LM Studio's doors: a model to load, an instance to unload.
+                    name = str(body.get("model") or body.get("instance_id"))
+                    (outer.loaded.add if posted.endswith("/load") else outer.loaded.discard)(name)
+                    self._json({})
+                    return
+                if outer.router and posted.endswith(("/models/load", "/models/unload")):
+                    # The router's doors: the order is taken at once and
+                    # the state flips with it.
+                    if posted.endswith("/models/load"):
+                        outer.loaded.add(str(body.get("model")))
+                    else:
+                        outer.loaded.discard(str(body.get("model")))
+                    self._json({"success": True})
+                    return
+                if outer.token_count is not None and posted.endswith(
+                    "/chat/completions/input_tokens"
+                ):
+                    self._json({"input_tokens": outer.token_count})  # llama.cpp, the chat body
+                    return
+                if outer.token_count is not None and posted.endswith("/tokenize"):
+                    self._json({"tokens": [0] * outer.token_count})  # llama.cpp, a raw prompt
+                    return
+                if outer.token_count is not None and posted.endswith("/api/extra/tokencount"):
+                    self._json({"value": outer.token_count})  # KoboldCpp, either shape
+                    return
+                if outer.token_count is not None and posted.endswith("/v1/messages/count_tokens"):
+                    self._json({"input_tokens": outer.token_count})  # omlx, Anthropic's shape
+                    return
                 if outer.managed and self.path.rstrip("/").endswith("/api/generate"):
                     # Ollama's load door: an empty prompt with a keep_alive
                     # loads the model; keep_alive 0 unloads it.
@@ -191,6 +267,11 @@ class ModelServer:
                     return
                 result = outer.script(body)
                 thinking, text = result if isinstance(result, tuple) else ("", result)
+                # The text wire: the raw continuation, in the completion
+                # frame's shape — no thinking delta exists there.
+                as_text = posted.endswith("/completions") and not posted.endswith(
+                    "/chat/completions"
+                )
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
                 if outer.fail_after is not None:
@@ -201,7 +282,13 @@ class ModelServer:
                 # A client hanging up mid-stream is a legitimate scenario
                 # (an interrupted reply), not server noise worth a trace.
                 with contextlib.suppress(BrokenPipeError, ConnectionResetError):
-                    if thinking:
+                    if outer.decline is not None:
+                        # A refusal frame where content would be: the
+                        # provider's own sentence, then a clean end.
+                        self._event({"error": {"message": outer.decline}})
+                        self.wfile.write(b"data: [DONE]\n\n")
+                        return
+                    if thinking and not as_text:
                         self._event({"choices": [{"delta": {"reasoning_content": thinking}}]})
                     # A few chunks, so the streaming path is exercised for real.
                     third = outer.chunk_size or max(1, len(text) // 3)
@@ -213,8 +300,9 @@ class ModelServer:
                             return
                         if outer.chunk_delay:
                             time.sleep(outer.chunk_delay)
-                        event = {"choices": [{"delta": {"content": text[i : i + third]}}]}
-                        self._event(event)
+                        piece = text[i : i + third]
+                        choice = {"text": piece} if as_text else {"delta": {"content": piece}}
+                        self._event({"choices": [choice]})
                     usage: dict[str, Any] = {"prompt_tokens": 7, "completion_tokens": 5}
                     if outer.cached_tokens is not None:
                         usage["prompt_tokens_details"] = {"cached_tokens": outer.cached_tokens}
@@ -241,7 +329,10 @@ class ModelServer:
         self.gets.clear()
 
     def close(self) -> None:
+        # The socket too, so the port is really dead afterwards: a
+        # connection is refused instead of accepted and never answered.
         self._httpd.shutdown()
+        self._httpd.server_close()
 
 
 def content_text(message: dict[str, Any]) -> str:

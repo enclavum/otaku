@@ -11,19 +11,16 @@ stream. A new reply arms the worker's idle-debounced extraction pass;
 every submission (submit, regenerate, undo) defers pending work first.
 """
 
-import contextlib
 from collections.abc import Iterator
 from dataclasses import dataclass
-
-import httpx
 
 from otaku.backend.api.cards import drop_unplayed_card
 from otaku.backend.api.lore import build_job
 from otaku.backend.session import NO_MODEL_HINT, Refused, Session
 from otaku.context import syntax
 from otaku.context.assembler import ContextOverflowError
-from otaku.formatting import format_context, printable
-from otaku.providers import ProviderConfig, Stats
+from otaku.formatting import format_context
+from otaku.providers import Stats
 from otaku.providers import Text as Text
 from otaku.providers import Thinking as Thinking
 from otaku.store.schema import Character, Message
@@ -216,11 +213,12 @@ def _reply_events(
     held = ""  # a whitespace run the stream has not yet earned sending
     final: Stats | None = None
     error: str | None = None
-    stream = client.chat_stream(
+    stream = client.complete_chat(
         session.model,
         wire,
         dict(session.params),
-        think=session.think,
+        # The setting's "none" is the package's "off".
+        think_level="off" if session.think == "none" else session.think,
         purpose="chat",
         # The thread this runs on belongs to the frontend between
         # tokens, if the frontend said what to do with it.
@@ -259,7 +257,9 @@ def _reply_events(
         _land_reply(session, content, final, reply_kind, reply_speaker)
         raise
     except Exception as e:  # the stream failed; what streamed is kept
-        error = _error_message(e, client.config)
+        # The provider package's own sentence: it names the provider and
+        # carries the server's explanation where there was one.
+        error = str(e)
     reply = _land_reply(session, content, final, reply_kind, reply_speaker)
     if error is not None:
         yield Failed(error)
@@ -327,7 +327,7 @@ def _format_stats(stats: Stats) -> str:
         # pacing outlives the cache TTL (see providers.toml prompt_cache).
         parts.append(f"cached {stats.cached_tokens} tok")
     if stats.completion_tokens is not None:
-        generation = stats.generation_seconds or stats.duration_seconds
+        generation = stats.duration_seconds - (stats.first_token_seconds or 0.0)
         if generation > 0:
             rate = stats.completion_tokens / generation
             parts.append(f"eval {stats.completion_tokens} tok @ {rate:.1f} tok/s")
@@ -341,19 +341,3 @@ def _format_stats(stats: Stats) -> str:
         else:
             parts.append(f"ctx {cap}")
     return "[ " + ", ".join(parts) + " ]"
-
-
-def _error_message(e: Exception, config: ProviderConfig) -> str:
-    """One formatter for every stream failure. A 4xx/5xx carries the
-    server's explanatory body — a bare '400 Bad Request' hides the actual
-    reason (usually context overflow)."""
-    if isinstance(e, httpx.HTTPStatusError):
-        body = ""
-        with contextlib.suppress(Exception):
-            e.response.read()  # a streamed response may not be read yet
-            body = printable(" ".join(e.response.text.split()))
-        detail = f": {body[:300]}" if body else ""
-        return f"HTTP {e.response.status_code} from {e.request.url.host}{detail}"
-    if isinstance(e, httpx.RequestError):
-        return f"could not reach {config.name} at {config.url}"
-    return str(e)

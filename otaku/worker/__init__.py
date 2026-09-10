@@ -27,7 +27,7 @@ from otaku.context import assembler
 from otaku.context.assembler import ContextShape
 from otaku.formatting import format_duration
 from otaku.logging import ErrorLog, SystemLog
-from otaku.providers import Locality, OpenAIClient, Registry
+from otaku.providers import Client, Locality, Registry
 from otaku.store import Store
 from otaku.store.schema import Message
 from otaku.worker.extraction import ExtractionSettings, Extractor, PassResult, Report
@@ -276,7 +276,7 @@ class Worker:
             self._deferred = threading.Event()
             return job
 
-    def _warm(self, store: Store, client: OpenAIClient, job: Job) -> None:
+    def _warm(self, store: Store, client: Client, job: Job) -> None:
         """Prefill the server's cache with the request the next turn will
         send — the arguments mirror the session's `assemble_story` call
         because the prompt must match byte for byte; a warm-up of a

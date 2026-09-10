@@ -161,10 +161,10 @@ class TestThink:
         finally:
             app.close()
 
-    def test_omlx_translates_the_level_to_its_template_flag(self, server, tmp_path) -> None:
-        # omlx ignores reasoning_effort; thinking is gated by the chat
-        # template's enable_thinking flag — a level enables, off disables,
-        # default sends nothing.
+    def test_omlx_gets_both_knobs_and_the_flag_gates_thinking(self, server, tmp_path) -> None:
+        # omlx reads both: the chat template's enable_thinking flag gates
+        # thinking — a level enables, off disables, default sends nothing
+        # — and the effort is mapped into the template where it takes one.
         set_config_provider(tmp_path / "state", server, name="omlx")
         app = launch(tmp_path / "state", server, spec="omlx/test-model")
         try:
@@ -172,7 +172,7 @@ class TestThink:
             app.play("I enter the hall.")
             body = app.server.requests[-1]
             assert body["chat_template_kwargs"] == {"enable_thinking": True}
-            assert "reasoning_effort" not in body
+            assert body["reasoning_effort"] == "high"
             app.play("/set think off")
             app.play("I look around.")
             assert app.server.requests[-1]["chat_template_kwargs"] == {"enable_thinking": False}
@@ -182,15 +182,53 @@ class TestThink:
         finally:
             app.close()
 
-    def test_a_provider_without_thinking_refuses_the_knob(self, server, tmp_path, capsys) -> None:
-        # KoboldCpp has no request-level thinking knob — class knowledge,
-        # not configuration, so no config flag can turn it on.
+    def test_koboldcpp_gets_both_knobs(self, server, tmp_path) -> None:
+        # KoboldCpp reads the effort as a thinking budget on every launch
+        # and the template's flag under --jinja: both go out.
         set_config_provider(tmp_path / "state", server, name="koboldcpp")
-        plain = launch(tmp_path / "state", server, spec="koboldcpp/test-model")
+        app = launch(tmp_path / "state", server, spec="koboldcpp/test-model")
+        try:
+            app.play("/set think low")
+            app.play("I enter the hall.")
+            body = app.server.requests[-1]
+            assert body["reasoning_effort"] == "low"
+            assert body["chat_template_kwargs"] == {"enable_thinking": True}
+        finally:
+            app.close()
+
+    def test_ollama_gets_the_effort_alone(self, server, tmp_path) -> None:
+        # Ollama reads reasoning_effort and nothing of the template.
+        managed = ModelServer(managed=True)
+        try:
+            set_config_provider(tmp_path / "state", managed, name="ollama")
+            app = launch(tmp_path / "state", managed, spec="ollama/test-model")
+            try:
+                app.play("/set think none")
+                app.play("I enter the hall.")
+                body = managed.requests[-1]
+                assert body["reasoning_effort"] == "none"
+                assert "chat_template_kwargs" not in body
+            finally:
+                app.close()
+        finally:
+            managed.close()
+
+    def test_a_provider_without_a_knob_takes_the_level_and_sends_nothing(
+        self, server, tmp_path
+    ) -> None:
+        # LM Studio reads no request-level thinking knob (thinking is the
+        # app's own per-model switch). The setting still takes — nothing
+        # is refused for the engine's sake — and the request carries no
+        # thinking field at all.
+        set_config_provider(tmp_path / "state", server, name="lmstudio")
+        plain = launch(tmp_path / "state", server, spec="lmstudio/test-model")
         try:
             plain.play("/set think high")
-            assert "cannot be set" in capsys.readouterr().out
-            assert plain.session.think != "high"
+            assert plain.session.think == "high"
+            plain.play("I enter the hall.")
+            body = plain.server.requests[-1]
+            assert "reasoning_effort" not in body
+            assert "chat_template_kwargs" not in body
         finally:
             plain.close()
 

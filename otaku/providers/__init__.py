@@ -1,47 +1,80 @@
 """Model servers behind the OpenAI wire protocol.
 
+One secret per module: `wire` is the protocol as pure functions and
+the types that cross it, `http` the one transport and the only home
+of httpx, `errors` what can go wrong, named, `client` the class every
+engine subclasses and its hooks, `registry` the lookup, the fan-out
+and the probe, `smoothing` the jitter buffer, and `clients/` one
+engine per module.
+
 `ProviderConfig` lives in `settings.providers` (provider settings are
 settings) and is re-exported here as part of this package's own
 signatures; the request log arrives as a sink protocol, and no file is
 ever read or written by this package.
 """
 
-from otaku.providers.base import (
-    Chunk,
-    CloudClient,
-    DeclinedError,
+from otaku.providers.client import (
+    Capabilities,
+    Client,
+    KeySource,
     Locality,
-    LocalSingleClient,
-    ManagedClient,
     ModelInfo,
-    OpenAIClient,
-    Provider,
     RequestSink,
+)
+from otaku.providers.errors import (
+    DeclinedError,
+    ProviderError,
+    StatusError,
+    UnauthorizedError,
+    UnreachableError,
+)
+from otaku.providers.registry import (
+    CLIENTS,
+    Probe,
+    ProbeOutcome,
+    ProviderInfo,
+    Registry,
+    autoconfigure,
+    probe,
+)
+from otaku.providers.wire import (
+    THINKING_LEVELS,
+    Chunk,
+    Image,
     Stats,
     Text,
     Thinking,
+    ThinkingLevel,
     WireMessage,
 )
-from otaku.providers.registry import CLIENTS, Registry, autoconfigure_providers
 from otaku.settings.providers import ProviderConfig
 
 __all__ = [
     "CLIENTS",
+    "THINKING_LEVELS",
+    "Capabilities",
     "Chunk",
-    "CloudClient",
+    "Client",
     "DeclinedError",
-    "LocalSingleClient",
+    "Image",
+    "KeySource",
     "Locality",
-    "ManagedClient",
     "ModelInfo",
-    "OpenAIClient",
-    "Provider",
+    "Probe",
+    "ProbeOutcome",
     "ProviderConfig",
+    "ProviderError",
+    "ProviderInfo",
     "Registry",
     "RequestSink",
     "Stats",
+    "StatusError",
     "Text",
     "Thinking",
+    "ThinkingLevel",
+    "UnauthorizedError",
+    "UnreachableError",
     "WireMessage",
-    "autoconfigure_providers",
+    "autoconfigure",
+    "probe",
 ]
