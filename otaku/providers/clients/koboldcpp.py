@@ -1,98 +1,122 @@
-"""KoboldCpp: one model per process, chosen at launch — no load/unload.
-Chat rides the OpenAI protocol at /v1; the native surface adds admin
-mode's active model, the true context window, the feature flags of
-`/api/extra/version` (vision among them), and a token count that
-renders a chat request the way a turn would. A thinking level goes out
-on both knobs: `reasoning_effort` becomes a thinking BUDGET on every
-launch — off is zero, low and medium a share of the output cap, high
-and above unlimited — and the template's flag is read when the server
-runs with `--jinja`.
+"""KoboldCpp: one model per process, chosen at launch — no load or
+unload. Chat rides the OpenAI protocol at /v1; the native surface adds
+admin mode's active model, the true context window, the feature flags
+of `/api/extra/version` (vision among them), and a token count that
+renders a chat request the way a turn would. A reasoning effort goes out
+on both knobs: `reasoning_effort` becomes a reasoning budget — none
+is none, low and medium a share of the reply, high and above unlimited —
+and the template's flag is read under `--jinja`.
 """
 
 from collections.abc import Sequence
 from typing import ClassVar
 
-from otaku.providers import http, wire
-from otaku.providers.client import (
-    ASK_TIMEOUT,
-    PROBE_TIMEOUT,
-    Capabilities,
-    Client,
-    Locality,
-    ModelInfo,
-)
+from otaku.providers import http
 from otaku.providers.clients import launched_port
-from otaku.providers.wire import THINKING_EFFORT_KNOB, THINKING_FLAG_KNOB, WireMessage, positive_int
+from otaku.providers.http import ASK_TIMEOUT, PROBE_TIMEOUT, positive_int
+from otaku.providers.openai import reasoning, requests
+from otaku.providers.openai.client import Locality, OpenAIClient
+from otaku.providers.openai.completion import OpenAICompletion
+from otaku.providers.openai.models import Capabilities, Listing, ModelInfo, ModelState, OpenAIModels
+from otaku.providers.openai.requests import WireMessage
 from otaku.settings.providers import ProviderConfig
 
-# The levels the budget tells apart; high and above are unlimited, which
-# is the model's own default and so not a level of its own.
-_BUDGET_LEVELS: frozenset[str] = frozenset({"off", "low", "medium"})
 
-
-class KoboldCppClient(Client):
-    kind = "koboldcpp"
-    label = "KoboldCpp"
-    locality = Locality.LOCAL
-    env_key = "KOBOLDCPP_API_KEY"
-    thinking_knobs: ClassVar[frozenset[str]] = frozenset({THINKING_EFFORT_KNOB, THINKING_FLAG_KNOB})
-    # The budget is applied on every path, the raw one included.
-    text_thinking_knobs: ClassVar[frozenset[str]] = frozenset({THINKING_EFFORT_KNOB})
-    counts_tokens = True
-
-    @classmethod
-    def autoconfigure(cls) -> ProviderConfig:
-        # Configured by launch flags — nothing on disk to detect a port
-        # from, so a running server's own flag is read, else the standard
-        # default.
-        port = launched_port("koboldcpp") or 5001
-        return ProviderConfig(name=cls.kind, url=f"http://localhost:{port}/v1")
-
-    def models(self, timeout: float = ASK_TIMEOUT) -> list[ModelInfo]:
-        """The single-model listing, the engine's own name prefix
-        stripped; admin mode's active state refines `loaded` when that
-        surface answers. The context size is the server's: one probe
-        under the first name stamps every row."""
-        active = self._active_model(timeout=PROBE_TIMEOUT)
-        names = sorted(_bare(row.name) for row in super().models(timeout))
-        size = self.get_context_size(names[0]) if names else None
-        # The feature flags are the server's too: vision means a
-        # projector was loaded beside the model.
-        version = http.get_json(
-            f"{self.config.base_url}/api/extra/version",
-            name=self.config.name,
-            headers=self._headers,
-            timeout=PROBE_TIMEOUT,
-            quiet=True,
+class KoboldCppModels(OpenAIModels):
+    def _list(self, timeout: float) -> Listing:
+        """The one loaded model, the engine's own name prefix stripped;
+        "inactive" is the server's name for none. Admin mode's active
+        model refines the state when that surface answers; the window
+        and the flags are the server's, read once for every name."""
+        names = sorted(
+            bare for listed in super()._list(timeout) if (bare := _bare(listed.name)) != "inactive"
         )
-        vision = bool(version.get("vision", True)) if isinstance(version, dict) else True
-        capabilities = Capabilities(vision=vision, thinking=_BUDGET_LEVELS)
-        return [
-            ModelInfo(
-                name=name,
-                capabilities=capabilities,
-                context=size,
-                loaded=name == active if active is not None else True,
+        if not names:
+            return []
+        active = self._active_model()
+        window = self._window()
+        capabilities = self._capabilities()
+        models = []
+        for name in names:
+            loaded = active is None or name == active
+            models.append(
+                ModelInfo(
+                    name=name,
+                    max_context_loaded=window if loaded else None,
+                    capabilities=capabilities,
+                    state=ModelState.LOADED if loaded else ModelState.UNLOADED,
+                    checked=True,
+                )
             )
-            for name in names
-        ]
+        return models
 
-    def _context_size(self, model: str) -> int | None:
-        data = http.get_json(
-            f"{self.config.base_url}/api/extra/true_max_context_length",
-            name=self.config.name,
-            headers=self._headers,
+    def _state(self, name: str) -> tuple[ModelState, int | None] | None:
+        active = self._active_model()
+        if active is not None and name != active:
+            return ModelState.UNLOADED, None
+        window = self._window()
+        if active is None and window is None:
+            return None
+        return ModelState.LOADED, window
+
+    # ---------- the native surface ----------
+
+    def _active_model(self) -> str | None:
+        """The model admin mode reports as active; "" when none is
+        ("inactive"), None when the endpoint does not answer or will not
+        say — behind `--password` a request without the key is told only
+        that a model is protected."""
+        data = self._get("/api/v1/model")
+        if isinstance(data, dict):
+            model = data.get("result")
+            if isinstance(model, str) and not model.endswith("protected-model"):
+                return "" if model == "inactive" else _bare(model)
+        return None
+
+    def _window(self) -> int | None:
+        data = self._get("/api/extra/true_max_context_length")
+        return positive_int(data.get("value")) if isinstance(data, dict) else None
+
+    def _capabilities(self) -> Capabilities:
+        """The server's feature flags: vision means a projector was
+        loaded beside the model. Every effort reaches the model as a
+        budget; the raw wire is there; decoding is constrained
+        server-side."""
+        version = self._get("/api/extra/version")
+        vision = (
+            bool(version["vision"]) if isinstance(version, dict) and "vision" in version else None
+        )
+        return Capabilities(
+            vision=vision,
+            reasoning=reasoning.ALL_EFFORTS,
+            text_completion=True,
+            structured_output=True,
+        )
+
+    def _get(self, path: str) -> object:
+        return http.get_json(
+            f"{self._config.base_url}{path}",
+            name=self._config.name,
+            headers=self._auth.headers,
             timeout=PROBE_TIMEOUT,
             quiet=True,
         )
-        return positive_int(data.get("value")) if isinstance(data, dict) else None
+
+
+class KoboldCppCompletion(OpenAICompletion):
+    chat_reasoning_knobs: ClassVar[frozenset[str]] = frozenset(
+        {reasoning.EFFORT_KNOB, reasoning.FLAG_KNOB}
+    )
+    # The budget is applied on every path, the raw one included.
+    text_reasoning_knobs: ClassVar[frozenset[str]] = frozenset({reasoning.EFFORT_KNOB})
+    can_count_tokens = True
 
     def count_chat_tokens(
         self, model: str, messages: Sequence[WireMessage], timeout: float = ASK_TIMEOUT
     ) -> int | None:
         # Given messages, the count renders them through the same
         # transform a chat turn gets, jinja template included.
-        body = {"messages": wire.chat_completion_body(model, messages, {})["messages"]}
+        body = {"messages": requests.chat_completion_body(model, messages, {})["messages"]}
         return self._count(body, timeout)
 
     def count_text_tokens(
@@ -102,36 +126,36 @@ class KoboldCppClient(Client):
 
     def _count(self, body: dict[str, object], timeout: float) -> int | None:
         data = http.post_json(
-            f"{self.config.base_url}/api/extra/tokencount",
+            f"{self._config.base_url}/api/extra/tokencount",
             body,
-            name=self.config.name,
-            headers=self._headers,
+            name=self._config.name,
+            headers=self._auth.headers,
             timeout=timeout,
             quiet=True,
         )
         count = data.get("value") if isinstance(data, dict) else None
         return count if isinstance(count, int) else None
 
-    def _active_model(self, timeout: float) -> str | None:
-        """The model admin mode reports as active; "" between swaps
-        ("inactive"), None when the endpoint does not answer."""
-        data = http.get_json(
-            f"{self.config.base_url}/api/v1/model",
-            name=self.config.name,
-            headers=self._headers,
-            timeout=timeout,
-            quiet=True,
-        )
-        if isinstance(data, dict):
-            model = data.get("result")
-            if isinstance(model, str):
-                return "" if model == "inactive" else _bare(model)
-        return None
+
+class KoboldCppClient(OpenAIClient):
+    id = "koboldcpp"
+    label = "KoboldCpp"
+    locality = Locality.LOCAL
+    env_key = "KOBOLDCPP_API_KEY"
+    models_class = KoboldCppModels
+    completion_class = KoboldCppCompletion
+
+    @classmethod
+    def autoconfigure(cls) -> ProviderConfig:
+        # Configured by launch flags, nothing on disk: a running server's
+        # own flag is read, else the standard default.
+        port = launched_port("koboldcpp") or 5001
+        return ProviderConfig(name=cls.id, url=f"http://localhost:{port}/v1")
 
 
 def _bare(name: str) -> str:
     """KoboldCpp reports its model as "koboldcpp/<name>" — its own brand
     on the id. The picker shows bare names under provider captions, so
-    the engine's prefix goes; chat is unaffected, the engine ignores the
+    the prefix goes; chat is unaffected, the engine ignores the
     request's model field."""
     return name.removeprefix("koboldcpp/")

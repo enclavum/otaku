@@ -2,17 +2,15 @@
 onto `errors`. httpx lives here and nowhere else in the package, so no
 caller ever sees a transport type.
 
-Every call names the provider (`name`) — what a failure's sentence
-names — and carries the headers the client composed. The timeout's
-connect phase is capped on its own: a dead-but-routable host — a
-mistyped LAN address, a firewalled port — hangs the handshake, and a
-flat timeout would let it hold the whole read budget; a host that
-listens at all completes the handshake in milliseconds, and a slow
-answer is not a dead host.
+Every call names the provider (`name`), for a failure's sentence, and
+carries the headers the client composed. The handshake has a cap of
+its own: a dead but routable host — a mistyped LAN address, a
+firewalled port — hangs it, and a flat timeout would let it hold the
+whole read budget, while a host that listens at all completes it in
+milliseconds.
 """
 
 import contextlib
-import json
 from collections.abc import Generator
 from typing import Any
 
@@ -21,12 +19,16 @@ import httpx
 from otaku.formatting import printable
 from otaku.providers.errors import ProviderError, StatusError, UnauthorizedError, UnreachableError
 
-_DETAIL_WIDTH = 300  # of a server's explanation, how much a sentence carries
-# The handshake's own cap (see the module docstring): a request that has
-# to get through, a stream, and a best-effort probe that must not wait.
-CONNECT_TIMEOUT = 2.0
-STREAM_CONNECT_TIMEOUT = 5.0
-QUIET_CONNECT_TIMEOUT = 1.0
+_DETAIL_WIDTH = 300  # how much of a server's explanation a sentence carries
+ASK_TIMEOUT = 10.0  # one question, one answer: a listing, a count, a balance
+PROBE_TIMEOUT = 1.5  # a best-effort native read, never worth a turn's wait
+LISTING_TIMEOUT = 5.0  # the picker's fan-out: one dead provider costs at most this
+REPLY_TIMEOUT = 600.0  # a reply, read chunk by chunk for as long as a model takes
+
+# The handshake's own cap, see the module docstring.
+CONNECT_TIMEOUT = 2.0  # a request that has to get through
+STREAM_CONNECT_TIMEOUT = 5.0  # a stream
+QUIET_CONNECT_TIMEOUT = 1.0  # a best-effort probe, which must not wait
 
 
 def get_json(
@@ -38,9 +40,8 @@ def get_json(
     connect: float = CONNECT_TIMEOUT,
     quiet: bool = False,
 ) -> Any:
-    """GET `url`, the answer parsed. Raises the error family — or,
-    `quiet`, answers None to any failure: the best-effort native reads,
-    where a server that will not say is itself an answer."""
+    """GET `url`, parsed. Raises the error family; `quiet` answers None
+    to any failure instead, for the best-effort reads."""
     return _request("GET", url, None, name, headers, timeout, connect, quiet)
 
 
@@ -54,13 +55,12 @@ def post_json(
     connect: float = CONNECT_TIMEOUT,
     quiet: bool = False,
 ) -> Any:
-    """POST `body`, the answer parsed. Raises the error family, or
-    answers None when `quiet`, as `get_json`. A None timeout waits as
-    long as the server takes — a model load."""
+    """POST `body`, parsed, as `get_json`; a None timeout waits as long
+    as a model load takes."""
     return _request("POST", url, body, name, headers, timeout, connect, quiet)
 
 
-def stream_events(
+def stream_lines(
     url: str,
     body: dict[str, Any],
     *,
@@ -68,14 +68,12 @@ def stream_events(
     headers: dict[str, str],
     timeout: float,
     connect: float = STREAM_CONNECT_TIMEOUT,
-) -> Generator[dict[str, Any], None, None]:
-    """POST `body` and yield the answer's SSE data events, one parsed
-    object each, ending at `[DONE]`. An error status is raised before
-    the first event, its explanation read while the stream is still
-    open; anything else on the wire — comment lines, keepalives, a line
-    that will not parse — is skipped, never fatal. Closing the generator
-    closes the connection, which is how a consumer stops the server's
-    generation."""
+) -> Generator[str, None, None]:
+    """POST `body` and yield the answer's non-blank lines. An error
+    status is raised before the first line; a transport failure is
+    "could not reach" before the first line and "lost the connection"
+    after; closing the generator closes the connection, which stops the
+    server's generation. What the lines mean is the protocol's."""
     started = False
     try:
         with httpx.stream(
@@ -88,23 +86,19 @@ def stream_events(
                     response.read()
                 _raise_for_status(response, name)
             for raw in response.iter_lines():
-                line = raw.strip()
-                if not line.startswith("data:"):
-                    continue
-                payload = line[len("data:") :].strip()
-                if payload == "[DONE]":
-                    return
-                try:
-                    event = json.loads(payload)
-                except json.JSONDecodeError:
-                    continue
-                if isinstance(event, dict):
+                if line := raw.strip():
                     started = True
-                    yield event
-    except httpx.HTTPError as e:
+                    yield line
+    except (httpx.HTTPError, httpx.InvalidURL) as e:
         if started:
             raise UnreachableError(f"Lost the connection to {name}.") from e
         raise UnreachableError(f"Could not reach {name}.") from e
+
+
+def positive_int(value: object) -> int | None:
+    """`value` when it is a positive int — how a count or a window is
+    taken off the untyped JSON a server answers with — else None."""
+    return value if isinstance(value, int) and value > 0 else None
 
 
 def _request(
@@ -117,10 +111,9 @@ def _request(
     connect: float,
     quiet: bool,
 ) -> Any:
-    """One request and its parsed answer, or the error its failure
-    stands for — None for any of them when `quiet`, and then with the
-    handshake capped at a second: a best-effort probe must not wait on
-    a dead host the way a request that has to get through may."""
+    """One request, parsed. `quiet` answers None to any failure, with
+    the handshake capped at a second: a best-effort probe must not wait
+    on a dead host."""
     if quiet:
         connect = QUIET_CONNECT_TIMEOUT
     try:
@@ -129,7 +122,10 @@ def _request(
         )
         _raise_for_status(response, name)
         return response.json()
-    except httpx.HTTPError as e:
+    except (httpx.HTTPError, httpx.InvalidURL) as e:
+        # InvalidURL is httpx's own for a url that cannot be spelled
+        # (a port with a letter in it) — a section's mistake, and a
+        # sentence, never a traceback.
         if quiet:
             return None
         raise UnreachableError(f"Could not reach {name}.") from e
@@ -153,7 +149,11 @@ def _raise_for_status(response: httpx.Response, name: str) -> None:
         return
     if status in (401, 403):
         raise UnauthorizedError(f"The api key was rejected by {name}.")
-    detail = _excerpt(response.text, _DETAIL_WIDTH)
+    detail = ""
+    with contextlib.suppress(httpx.StreamError):
+        # A body that could not be read (the connection dropped mid-body)
+        # is no explanation, and no reason to leave the error family.
+        detail = _excerpt(response.text, _DETAIL_WIDTH)
     raise StatusError(
         f"Refused by {name} with HTTP {status}" + (f": {detail}" if detail else "."), status
     )

@@ -11,7 +11,7 @@ proportionally instead of stalling; above it, it catches up boundedly —
 so the held lag self-stabilizes, which is the classic jitter-buffer
 tradeoff: smoothness beyond the held lag is impossible without more lag.
 
-`Thinking` deltas pass through immediately; `Stats` (or a relayed error)
+`Reasoning` deltas pass through immediately; `Stats` (or a relayed error)
 arrives after the buffered text has fully drained. The pump checks a
 done flag on every chunk and closes the source stream itself, so
 cancelling the consumer still stops the server's generation promptly.
@@ -27,7 +27,7 @@ from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from otaku.providers.wire import Chunk
+    from otaku.providers.openai.completion import Chunk
 
 _LAG = 0.25  # target display lag; flush gaps up to ~2x this are absorbed fully
 _RATE_WINDOW = 3.0  # sliding window (seconds) for the arrival-rate estimate
@@ -39,10 +39,10 @@ def smoothen(chunks: Iterator[Chunk], on_idle: Callable[[], None] | None = None)
     tick the wrapper spends waiting — before the first token and in every
     gap after it — which is the one moment a caller's own thread is
     demonstrably free while a reply is in flight."""
-    from otaku.providers.wire import Stats, Text, Thinking
+    from otaku.providers.openai.completion import Reasoning, Stats, Text
 
     buffer: list[str] = []
-    thinking: deque[Thinking] = deque()
+    reasoning: deque[Reasoning] = deque()
     lock = threading.Lock()
     done = threading.Event()
     final: list[Stats | None] = [None]
@@ -54,9 +54,9 @@ def smoothen(chunks: Iterator[Chunk], on_idle: Callable[[], None] | None = None)
                 if isinstance(chunk, Text):
                     with lock:
                         buffer.extend(chunk.text)
-                elif isinstance(chunk, Thinking):
+                elif isinstance(chunk, Reasoning):
                     with lock:
-                        thinking.append(chunk)
+                        reasoning.append(chunk)
                 elif isinstance(chunk, Stats):
                     final[0] = chunk
                 if done.is_set():  # consumer aborted — stop reading
@@ -77,13 +77,13 @@ def smoothen(chunks: Iterator[Chunk], on_idle: Callable[[], None] | None = None)
     last = time.monotonic()
     try:
         while True:
-            out_thinking: Thinking | None = None
+            out_reasoning: Reasoning | None = None
             out_text = ""
             now = time.monotonic()
             elapsed, last = now - last, now
             with lock:
-                if thinking:
-                    out_thinking = thinking.popleft()
+                if reasoning:
+                    out_reasoning = reasoning.popleft()
                 elif buffer:
                     arrived = emitted + len(buffer)
                     if not samples:
@@ -101,9 +101,9 @@ def smoothen(chunks: Iterator[Chunk], on_idle: Callable[[], None] | None = None)
                     out_text = "".join(buffer[:n])
                     del buffer[:n]
                     emitted += n
-                finished = done.is_set() and not buffer and not thinking
-            if out_thinking is not None:
-                yield out_thinking
+                finished = done.is_set() and not buffer and not reasoning
+            if out_reasoning is not None:
+                yield out_reasoning
                 continue
             if out_text:
                 yield Text(out_text)

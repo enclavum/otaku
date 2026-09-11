@@ -1,7 +1,7 @@
-"""One module per engine; `CLIENTS` in the registry maps section names
-to these classes in the panel's canonical order. Beside them, what an
-engine's `autoconfigure` consults about this machine: a local app's
-own config file, and the command lines of the engines running now."""
+"""One module per engine; the registry's `ALL_CLIENTS` maps their ids to
+the classes in the panel's canonical order. Beside them, what a local
+engine's `autoconfigure` consults about this machine: an app's own
+config file, and the command lines of the engines running now."""
 
 import functools
 import json
@@ -28,24 +28,40 @@ def read_home_json(relative: str) -> dict[str, Any]:
 
 
 def launched_port(executable: str, commands: Iterable[str] | None = None) -> int | None:
-    """The `--port` a running `executable` (its bare name) was launched
-    with — how an engine configured by launch flags is found where it
-    is. None when no such process runs, it carries no flag, or the
-    processes cannot be read; a server that is Ollama's or LM Studio's
-    own is passed over. `commands` are the command lines to read, the
-    running processes' by default."""
+    """The `--port` a running `executable` was launched with — how an
+    engine configured by launch flags is found where it is. The
+    executable is known by its bare name, however the command spells
+    it: a path with either separator, quoted or not, spaces and all;
+    Windows' `.exe`; a release build's suffix (`koboldcpp-mac-arm64`);
+    a script run by python (`python koboldcpp.py`); a positional model
+    beside it. None when no such process runs, it carries no flag, or
+    the processes cannot be read; a server that is Ollama's or LM
+    Studio's own is passed over. `commands` are the command lines to
+    read, the running processes' by default."""
     for command in _command_lines() if commands is None else commands:
-        head = command.split(maxsplit=1)[0].strip('"')
-        # The bare name however the path is spelled — either separator,
-        # with or without Windows' extension.
-        name = re.split(r"[\\/]", head)[-1]
-        name = name[: -len(".exe")] if name.lower().endswith(".exe") else name
-        if name != executable or any(mark in head for mark in _NOT_AN_ENGINE):
+        # The program part — everything before the first flag — so a
+        # path with spaces in it stays whole and its last word can end
+        # in the executable's name.
+        program = re.split(r"\s+-", command, maxsplit=1)[0]
+        if any(mark in program for mark in _NOT_AN_ENGINE):
+            continue
+        if not any(_is_named(word, executable) for word in program.split()):
             continue
         flag = re.search(r"(?:^|\s)--port[= ](\d+)\b", command)
         if flag:
             return int(flag.group(1))
     return None
+
+
+def _is_named(word: str, executable: str) -> bool:
+    """Whether a command-line word is the executable: its bare name with
+    either separator, quotes, `.exe` or `.py` stripped, and a build
+    suffix after a dash or an underscore allowed."""
+    name = re.split(r"[\\/]", word.strip('"'))[-1].lower()
+    for extension in (".exe", ".py"):
+        name = name.removesuffix(extension)
+    wanted = executable.lower()
+    return name == wanted or name.startswith((wanted + "-", wanted + "_"))
 
 
 @functools.cache
