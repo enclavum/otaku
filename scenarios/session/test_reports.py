@@ -147,6 +147,54 @@ class TestBalance:
 
 
 class TestInfo:
+    def test_the_models_capabilities_are_rows_where_the_engine_can_say(self, tmp_path) -> None:
+        # llama.cpp says what it loaded in /props: a projector means
+        # images, a template that reads reasoning_effort means every
+        # level; raw completion is its wire's own.
+        server = scripted.ModelServer()
+        server.window = 8192
+        server.props = {
+            "modalities": {"vision": True, "audio": False},
+            "chat_template_caps": {"supports_reasoning_effort": True},
+        }
+        try:
+            set_config_provider(tmp_path / "state", server, name="llamacpp")
+            app = launch(tmp_path / "state", server, spec="llamacpp/test-model")
+            try:
+                rows = _rows(reports.info(app.session))
+                assert rows["Vision"] == "yes"
+                assert rows["Text completion"] == "yes"
+                # Which efforts its template grades, the server cannot say.
+                assert rows["Reasoning efforts"] == "unknown"
+            finally:
+                app.close()
+        finally:
+            server.close()
+
+    def test_an_engine_that_names_no_efforts_reads_none(self, tmp_path) -> None:
+        # LM Studio's endpoint takes no knob: nothing sent reaches the
+        # model, which is a known "none", not an unknown.
+        server = scripted.ModelServer(managed=True)
+        try:
+            set_config_provider(tmp_path / "state", server, name="lmstudio")
+            app = launch(tmp_path / "state", server, spec="lmstudio/test-model")
+            try:
+                assert _rows(reports.info(app.session))["Reasoning efforts"] == "none"
+            finally:
+                app.close()
+        finally:
+            server.close()
+
+    def test_what_the_engine_cannot_say_is_unknown(self, app: App) -> None:
+        # The generic provider reads nothing: every capability is
+        # unknown, which the app offers nothing on, and the setting is
+        # reported regardless.
+        rows = _rows(reports.info(app.session))
+        assert (rows["Vision"], rows["Reasoning efforts"], rows["Text completion"]) == (
+            "unknown",
+        ) * 3
+        assert "Thinking" in rows
+
     def test_without_a_model_the_session_half_still_reports(self, server, tmp_path, capsys) -> None:
         # A model is one of the things /info reports, not its
         # precondition: the story and the parameters are the session's
@@ -169,3 +217,8 @@ class TestInfo:
 
 def numbers(text: str) -> list[int]:
     return [int(n) for n in re.findall(r"\d+", text)]
+
+
+def _rows(report: reports.InfoReport) -> dict[str, str]:
+    """Every labelled fact of the report, whichever block it is in."""
+    return {label: value for section in report.sections for label, value in section.rows}

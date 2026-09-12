@@ -61,7 +61,7 @@ _ALLOWED = {
     "providers": {"settings", "formatting"},
     "store": {"encryption"},
     "settings": {"formatting"},
-    "logging": {"encryption", "formatting"},
+    "logging": {"providers", "encryption", "formatting"},
     "encryption": {"formatting"},
     "update": set(),
     "formatting": set(),

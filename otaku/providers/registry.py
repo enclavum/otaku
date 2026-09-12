@@ -22,6 +22,7 @@ the launch.
 """
 
 import enum
+import threading
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -114,6 +115,7 @@ class Registry:
         self._request_sink = request_sink
         self._smooth = smooth
         self._clients: dict[str, OpenAIClient] = {}
+        self._lock = threading.Lock()  # a fan-out builds beside a panel save
 
     def list(self) -> Ids:
         """The configured providers' ids, sorted."""
@@ -123,12 +125,13 @@ class Registry:
         """The named provider's client, cached — its engine chosen by the
         name (see the module docstring); None for a provider that is not
         configured."""
-        if provider in self._clients:
-            return self._clients[provider]
-        config = self.configs.get(provider)
-        if config is None:
-            return None
-        return self._build(config)
+        with self._lock:
+            if provider in self._clients:
+                return self._clients[provider]
+            config = self.configs.get(provider)
+            if config is None:
+                return None
+            return self._build(config)
 
     def update(self, config: ProviderConfig) -> None:
         """Swap one provider's configuration for the running session and
@@ -138,8 +141,9 @@ class Registry:
         registry serves the engines' sections and founds no other."""
         if config.name not in ALL_CLIENTS:
             raise ValueError(f"no engine is named {config.name!r}")
-        self.configs[config.name] = config
-        self._build(config)
+        with self._lock:
+            self.configs[config.name] = config
+            self._build(config)
 
     def info(self, provider: str) -> ProviderInfo | None:
         """One provider's identity and models, listed now — None when it

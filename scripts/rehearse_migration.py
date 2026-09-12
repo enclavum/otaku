@@ -52,8 +52,8 @@ from scenarios.support.server import ModelServer  # noqa: E402
 # require Python >= 3.14 and are out of scope. A release already on the
 # current schema is still rehearsed — the settings, the export and the
 # read-back all matter — it simply has no ladder to run.
-VERSIONS = ("0.2.1", "0.2.2", "0.3.0", "0.4.0", "0.4.1", "0.4.2")
-PROVIDER, MODEL = "test", "test-model"
+VERSIONS = ("0.2.1", "0.2.2", "0.3.0", "0.4.0", "0.4.1", "0.4.2", "0.4.3")
+PROVIDER, MODEL = "generic", "test-model"
 WORK = Path(os.environ.get("REHEARSAL_DIR", "/tmp/otaku-rehearsal"))
 
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b[78]|\x1b\][^\x07]*\x07")

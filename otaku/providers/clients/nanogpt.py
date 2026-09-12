@@ -1,18 +1,22 @@
 """NanoGPT: a hosted catalog speaking the OpenAI protocol at
 https://nano-gpt.com/api/v1. The detailed listing names each model's
-context window — the model's own; no serving limit is stated — its
-capabilities (vision and reasoning among them) and the efforts it
-takes; the account's balance answers only a working key, which is how
-a key is checked.
+max context — the model's own; no serving limit is stated — its
+output limit, its capabilities (vision, audio, reasoning, structured
+output) and the efforts it takes, "none" among them only where the
+model takes it. The account lives on the legacy /api surface at the
+url's origin: its balance answers only a working key, which is how a
+key is checked. Cache markers are forwarded to the models that honour
+them and dropped elsewhere, as on OpenRouter.
 """
 
 from dataclasses import replace
 from typing import Any, ClassVar
+from urllib.parse import urlsplit
 
 from otaku.formatting import Money
 from otaku.providers import http
 from otaku.providers.http import ASK_TIMEOUT
-from otaku.providers.openai import reasoning
+from otaku.providers.openai import frames, reasoning
 from otaku.providers.openai.auth import OpenAIAuth
 from otaku.providers.openai.client import Locality, OpenAIClient
 from otaku.providers.openai.completion import OpenAICompletion
@@ -25,7 +29,7 @@ class NanoGptAuth(OpenAIAuth):
         # The account endpoint answers a bad key with 401; nothing else
         # is read of it here.
         http.post_json(
-            f"{self._config.base_url}/check-balance",
+            _account_url(self._config.url),
             {},
             name=self._config.name,
             headers=self.headers,
@@ -36,7 +40,7 @@ class NanoGptAuth(OpenAIAuth):
 class NanoGptModels(OpenAIModels):
     listing_keyed = True
     # The plain listing hides the model details; the flag adds each
-    # model's context window and capabilities to the entries.
+    # model's max context and capabilities to the entries.
     listing_query = "?detailed=true"
 
     def _decode(self, listed: dict[str, Any], model: ModelInfo) -> ModelInfo:
@@ -49,24 +53,49 @@ class NanoGptModels(OpenAIModels):
         elif not caps["reasoning"]:
             honoured = frozenset()
         else:
-            # The efforts it lists, and none — a model that reasons but
-            # names no efforts leaves the question open.
-            efforts = reasoning.from_wire(listed.get("reasoning_efforts") or [])
-            honoured = (efforts | {"none"}) if efforts else None
+            # The efforts it lists, as listed: "none" is among them only
+            # where the model takes it. A model that reasons but names
+            # no efforts leaves the question open.
+            honoured = reasoning.from_wire(listed.get("reasoning_efforts") or []) or None
         return replace(
             model,
+            max_output_tokens=http.positive_int(listed.get("max_output_tokens")),
             capabilities=Capabilities(
-                vision=bool(caps["vision"]) if "vision" in caps else None,
+                vision=self._flag(caps, "vision"),
+                audio=self._flag(caps, "audio_input"),
                 reasoning=honoured,
-                text_completion=True,
+                # The completions endpoint is best-effort and per model,
+                # and the catalog does not say which take it.
+                text_completion=None,
+                structured_output=self._flag(caps, "structured_output"),
             ),
         )
 
+    def _flag(self, caps: dict[str, Any], key: str) -> bool | None:
+        return bool(caps[key]) if key in caps else None
+
 
 class NanoGptCompletion(OpenAICompletion):
-    # The effort is honoured on the raw wire too: it makes the
-    # model reason, inline in the text.
+    # Inline `cache_control` reaches the models that honour it and is
+    # dropped elsewhere: marking is safe across the catalog.
+    can_mark_cache = True
+    # The effort is accepted on the raw wire too, and never derails a
+    # completion; what a model does with it there is the model's own.
     text_reasoning_knobs: ClassVar[frozenset[str]] = frozenset({reasoning.EFFORT_KNOB})
+
+    def _read_usage(self, event: dict[str, Any]) -> frames.Usage | None:
+        # The text wire reports no `usage`; its counts ride the pricing block.
+        report = frames.read_usage(event)
+        if report is not None:
+            return report
+        pricing = event.get("x_nanogpt_pricing")
+        if not isinstance(pricing, dict):
+            return None
+        counts = (
+            http.positive_int(pricing.get("inputTokens")),
+            http.positive_int(pricing.get("outputTokens")),
+        )
+        return (*counts, None) if any(count is not None for count in counts) else None
 
 
 class NanoGptClient(OpenAIClient):
@@ -89,7 +118,7 @@ class NanoGptClient(OpenAIClient):
         # dollar figure is reported — the crypto balances riding along in
         # the same payload are not otaku's business.
         data = http.post_json(
-            f"{self.config.base_url}/check-balance",
+            _account_url(self.config.url),
             {},
             name=self.config.name,
             headers=self.auth.headers,
@@ -99,3 +128,11 @@ class NanoGptClient(OpenAIClient):
         if not isinstance(data, dict) or "usd_balance" not in data:
             return None
         return Money.of(data["usd_balance"], "USD")
+
+
+def _account_url(url: str) -> str:
+    """The balance endpoint, at the url's origin: it lives on the legacy
+    /api surface, wherever the section's path points (`/api/v1`, or
+    the `/v1` shorthand the host also serves)."""
+    parts = urlsplit(url)
+    return f"{parts.scheme}://{parts.netloc}/api/check-balance"

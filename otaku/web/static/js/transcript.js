@@ -8,7 +8,7 @@
    a played line a centred interjection under a mono rubric — the
    terminal's `>` band in this medium's shape. Waiting and streaming are
    ONE state. Three kinds of line are not the story and never read as
-   it: the model's thinking, the verbose stats line, and a failure.
+   it: the model's reasoning, the verbose stats line, and a failure.
 
    It draws the undo/regen bar without knowing what those do — the
    buttons carry `data-turn` and whoever owns commands listens — which
@@ -286,7 +286,7 @@ function beginTurn(regenerate) {
      refusal comes back before anything is lost. */
   if (regenerate) holdSpace(dropLastReply);
   showTurnBar();
-  return { article, status, state, ticking, over, tail, thinking: null, prose: "" };
+  return { article, status, state, ticking, over, tail, reasoning: null, prose: "" };
 }
 
 function draw(turn, happened) {
@@ -311,13 +311,13 @@ const DRAW = {
     if (happened.note) drawn.append(element("p", "otk-turn__note", happened.note));
     transcript.insertBefore(drawn, turn.article);
   },
-  thinking(turn, happened) {
-    if (!turn.thinking) {
-      turn.thinking = element("p", "otk-thinking", "(thinking) ");
-      turn.article.prepend(turn.thinking);
+  reasoning(turn, happened) {
+    if (!turn.reasoning) {
+      turn.reasoning = element("p", "otk-reasoning", "(reasoning) ");
+      turn.article.prepend(turn.reasoning);
     }
-    turn.thinking.textContent += happened.text;
-    turn.state.textContent = "thinking";
+    turn.reasoning.textContent += happened.text;
+    turn.state.textContent = "reasoning";
   },
   text(turn, happened) {
     turn.prose += happened.text;
@@ -384,7 +384,7 @@ function endTurn(turn) {
   // the paragraph that held the answer's place, when nothing came
   for (const p of $$(".otk-prose", turn.article)) if (!p.textContent) p.remove();
   // a reply that never arrived leaves no empty block behind
-  if (!turn.prose && !$(".otk-error, .otk-verbose, .otk-thinking", turn.article)) {
+  if (!turn.prose && !$(".otk-error, .otk-verbose, .otk-reasoning", turn.article)) {
     turn.article.remove();
   } else if (turn.article.isConnected && turn.prose) {
     /* The reply landed, so the story is one turn longer than the rubric

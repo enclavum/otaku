@@ -75,7 +75,7 @@ class TestGeneric:
         try:
             rows, reachable = api_providers.get_providers(app.session)
             assert "generic" in reachable
-            generic = next(r for r in rows if r.config.name == "generic")
+            generic = next(r for r in rows if r.id == "generic")
             # The listing is the protocol's: non-empty is the promise. The
             # named model need not appear in it — a catalog's bare listing
             # is not its detailed one, and Ollama lists `name:tag` — the

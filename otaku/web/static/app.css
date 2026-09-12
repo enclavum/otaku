@@ -570,7 +570,7 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 
 /* the model's own reasoning, while it streams: not the story, and set as a
    note so it never reads as one */
-.otk-thinking {
+.otk-reasoning {
   margin: 0; font-family: var(--otk-font-prose); font-size: var(--otk-size-note);
   font-style: italic; line-height: 1.55; color: var(--otk-faint);
   border-left: var(--otk-hair) solid var(--otk-line-soft); padding-left: 11px;

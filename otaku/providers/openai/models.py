@@ -6,8 +6,8 @@ catalogue context size, the size on disk — are read once and cached
 for the session; None means not read yet. The INSTANCE's — the model's
 state, and the context size it was loaded with — belong to the engine,
 which loads and unloads on its own, so they are asked live on every
-`get` and never served from the cache. The listing is asked of the
-engine every time.
+`get`; only when the engine does not answer does the last word stand.
+The listing is asked of the engine every time.
 
 Hooks read the engine and nothing else; the public methods read and
 write the cache and call the hooks. Engines override `_list`, `_decode`,
@@ -21,6 +21,7 @@ listing.
 from __future__ import annotations
 
 import enum
+import threading
 from dataclasses import dataclass, replace
 from typing import Any, ClassVar, final
 
@@ -73,6 +74,15 @@ class ModelInfo:
     state: ModelState = ModelState.UNKNOWN
     checked: bool = False  # the per-model call (`_enhance`) has answered
 
+    @property
+    def max_context(self) -> int | None:
+        """What a request gets: the loaded instance's context size, or the
+        model's own where loading is not a thing (a catalog). None for
+        a model not loaded, or not known."""
+        if self.max_context_loaded is not None:
+            return self.max_context_loaded
+        return self.max_context_catalogue if self.state is ModelState.UNKNOWN else None
+
 
 # Named at module level, where `list` is still the builtin: the class
 # below has a method of that name.
@@ -95,8 +105,11 @@ class OpenAIModels:
         # across listings that could not read them. A listing is never
         # served from here — `list` reads it only to carry a model's own
         # facts into the next one; `get` serves the own facts from it
-        # and lays the live state over them.
+        # and lays the live state over them. The lock covers each read
+        # and write, never a call to the engine: the picker's fan-out
+        # and the session's turn share one client.
         self._cached_models: dict[str, ModelInfo] = {}
+        self._lock = threading.Lock()
 
     # ---------- the protocol ----------
 
@@ -106,18 +119,19 @@ class OpenAIModels:
         family when the engine cannot answer, and forgets nothing then."""
         listed = self._list(timeout)
         fresh: dict[str, ModelInfo] = {}
-        for model in listed:
-            # The own facts a cached entry had read and this listing
-            # lacks carry over, and `checked` with them.
-            cached = self._cached_models.get(model.name)
-            if cached is not None:
-                if model.capabilities is None:
-                    model = replace(model, capabilities=cached.capabilities)
-                if model.max_context_catalogue is None:
-                    model = replace(model, max_context_catalogue=cached.max_context_catalogue)
-                model = replace(model, checked=cached.checked)
-            fresh[model.name] = model
-        self._cached_models = fresh
+        with self._lock:
+            for model in listed:
+                # The own facts a cached entry had read and this listing
+                # lacks carry over, and `checked` with them.
+                cached = self._cached_models.get(model.name)
+                if cached is not None:
+                    if model.capabilities is None:
+                        model = replace(model, capabilities=cached.capabilities)
+                    if model.max_context_catalogue is None:
+                        model = replace(model, max_context_catalogue=cached.max_context_catalogue)
+                    model = replace(model, checked=model.checked or cached.checked)
+                fresh[model.name] = model
+            self._cached_models = fresh
         return list(fresh.values())
 
     @final
@@ -125,22 +139,23 @@ class OpenAIModels:
         """One model: the cached entry, listed first when there is none;
         `_enhance` while unchecked; its state asked live. None when the
         provider does not offer it or cannot be reached."""
-        model = self._cached_models.get(name)
+        model = self._cached_model(name)
         if model is None:
             try:
                 self.list(timeout)
             except ProviderError:
                 return None
-            model = self._cached_models.get(name)
+            model = self._cached_model(name)
             if model is None:
                 return None
         if not model.checked:
             model = self._enhance(model, timeout)
-        live = self._state(name)
+        live = self._state(model.name)
         if live is not None:
             state, max_context_loaded = live
             model = replace(model, state=state, max_context_loaded=max_context_loaded)
-        self._cached_models[name] = model
+        with self._lock:
+            self._cached_models[model.name] = model
         return model
 
     def load(self, model: str) -> None:
@@ -185,6 +200,11 @@ class OpenAIModels:
             models.append(self._decode(listed, model))
         return sorted(models, key=lambda model: model.name)
 
+    def _cached_model(self, name: str) -> ModelInfo | None:
+        with self._lock:
+            found = self._cached_models.get(name)
+            return found if found is not None else self._cached_models.get(self._canonical(name))
+
     def _decode(self, listed: dict[str, Any], model: ModelInfo) -> ModelInfo:
         """`model` with what its /models entry states beyond the protocol
         (`_list`): a catalog's capabilities, served size, output limit.
@@ -197,6 +217,12 @@ class OpenAIModels:
         surface did not answer, to be asked again. The base has nothing
         to add."""
         return replace(model, checked=True)
+
+    def _canonical(self, name: str) -> str:
+        """The listed name a shorthand stands for, which `get` falls back
+        to when `name` itself is not listed: Ollama reads a bare name
+        as its ":latest" tag. The base knows no shorthand."""
+        return name
 
     def _state(self, name: str) -> tuple[ModelState, int | None] | None:
         """The instance's facts now: (the state, the loaded context size).

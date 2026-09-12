@@ -20,24 +20,24 @@ from otaku.store.schema import Message, Scene
 def assemble(
     system: str,
     messages: list[Message],
-    context_max: int | None,
+    max_context: int | None,
     *,
     scenes: tuple = (),
     recap_header: str = "",
     head_messages: int = 20,
     min_tail_messages: int = 150,
-    max_context: int = 0,
+    max_context_setting: int = 0,
 ):
     """The doc's vocabulary over the `shape` argument, so every case
     below reads like its section."""
     shape = ContextShape(
         head_messages=head_messages,
         min_tail_messages=min_tail_messages,
-        max_context=max_context,
+        max_context_setting=max_context_setting,
         recap_header=recap_header,
         card_framing="",
     )
-    return _assemble(system, messages, context_max, scenes=scenes, shape=shape)
+    return _assemble(system, messages, max_context, scenes=scenes, shape=shape)
 
 
 class TestShortStory:
@@ -239,11 +239,11 @@ class TestRecapDegrades:
             scenes=self._scenes(),
             head_messages=5,
             min_tail_messages=10,
-            max_context=2524,
+            max_context_setting=2524,
         )
         assert prompt.history == "Arc through two."
         assert prompt.limit == 1500  # the cap minus the reserve
-        assert prompt.context_max == 131072
+        assert prompt.max_context == 131072
 
     def test_max_context_zero_means_the_whole_window(self) -> None:
         prompt = assemble(
@@ -253,7 +253,7 @@ class TestRecapDegrades:
             scenes=self._scenes(),
             head_messages=5,
             min_tail_messages=10,
-            max_context=0,
+            max_context_setting=0,
         )
         assert prompt.history == ""  # everything fits — case 4 never fires
         assert prompt.scenes_summarized == 3

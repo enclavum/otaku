@@ -3,9 +3,9 @@ puts on the wire and reads back, one class per feature, the engines
 that differ each getting their row.
 
 The chat wire: the transcript as messages, streaming with usage, a
-level on every knob the engine reads, images on the last message, one
+effort on every knob the engine reads, images on the last message, one
 retry without the knobs when a 400 refuses them, and the answer filed
-under the request. The text wire: the prompt alone, a level on the
+under the request. The text wire: the prompt alone, an effort on the
 text knobs, the continuation as text. The listing: one pass per engine,
 the rows read as far as the native API sees, capabilities decoded from
 what each engine reports and None where it reports nothing, the one
@@ -20,25 +20,26 @@ from dataclasses import dataclass, field
 import pytest
 
 from otaku.providers import (
-    CLIENTS,
+    ALL_CLIENTS,
     Capabilities,
     Chunk,
     DeclinedError,
     Image,
     KeySource,
-    ProbeOutcome,
+    ModelState,
+    ProbeStatus,
     ProviderConfig,
     ProviderError,
+    Reasoning,
     Registry,
     Stats,
     StatusError,
     Text,
-    Thinking,
     UnauthorizedError,
     UnreachableError,
     probe,
 )
-from otaku.providers.clients.generic import OpenAIClient
+from otaku.providers.clients.generic import GenericClient
 from otaku.providers.clients.koboldcpp import KoboldCppClient
 from otaku.providers.clients.llamacpp import LlamaCppClient
 from otaku.providers.clients.lmstudio import LmStudioClient
@@ -46,12 +47,10 @@ from otaku.providers.clients.nanogpt import NanoGptClient
 from otaku.providers.clients.ollama import OllamaClient
 from otaku.providers.clients.omlx import OmlxClient
 from otaku.providers.clients.openrouter import OpenRouterClient
-from otaku.providers.wire import ALL_THINKING_LEVELS
+from otaku.providers.openai.reasoning import ALL_EFFORTS
 from scenarios.support import server as scripted
-from scenarios.support.harness import launch, set_config_provider
 from scenarios.support.server import ModelServer
 
-ALL = ALL_THINKING_LEVELS
 EFFORT_NONE = {"reasoning_effort": "none"}
 FLAG_OFF = {"chat_template_kwargs": {"enable_thinking": False}}
 DEAD = "http://127.0.0.1:9/v1"
@@ -68,7 +67,7 @@ class Sink:
     """A request sink that keeps what it was told."""
 
     requests: list[dict[str, object]] = field(default_factory=list)
-    outcomes: list[str] = field(default_factory=list)
+    statuses: list[str] = field(default_factory=list)
     texts: list[str] = field(default_factory=list)
 
     def record_request(self, provider: str, purpose: str, body: dict[str, object]) -> str:
@@ -76,15 +75,15 @@ class Sink:
         return f"r{len(self.requests)}"
 
     def record_answer(self, provider: str, purpose: str, request_id: str, **kw: object) -> None:
-        self.outcomes.append(str(kw["outcome"]))
+        self.statuses.append(str(kw["status"]))
         self.texts.append(str(kw["text"]))
 
 
 class TestChatCompletion:
     def test_the_transcript_streams_with_usage_and_the_params(self, server: ModelServer) -> None:
-        client = OpenAIClient(_config(server, "generic"))
-        thinking, text, stats = _drain(
-            client.complete_chat("m", [Turn("system", "s"), Turn("user", "u")], {"top_p": 0.5})
+        client = GenericClient(_config(server, "generic"))
+        reasoning, text, stats = _drain(
+            client.completion.chat("m", [Turn("system", "s"), Turn("user", "u")], {"top_p": 0.5})
         )
         body = server.requests[-1]
         assert body["messages"] == [
@@ -92,23 +91,23 @@ class TestChatCompletion:
             {"role": "user", "content": "u"},
         ]
         assert body["stream"] is True and body["top_p"] == 0.5
-        assert text == scripted.CHAT_REPLY and thinking == ""
+        assert text == scripted.CHAT_REPLY and reasoning == ""
         assert (stats.prompt_tokens, stats.completion_tokens) == (7, 5)
-        assert stats.first_token_seconds is not None and stats.duration_seconds > 0
+        assert stats.first_token_seconds is not None and stats.total_seconds > 0
 
-    def test_thinking_streams_before_the_text(self, server: ModelServer) -> None:
+    def test_reasoning_streams_before_the_text(self, server: ModelServer) -> None:
         server.script = lambda body: ("hm", "yes")
         chunks = list(
-            OpenAIClient(_config(server, "generic")).complete_chat("m", [Turn("user", "u")], {})
+            GenericClient(_config(server, "generic")).completion.chat("m", [Turn("user", "u")], {})
         )
-        assert isinstance(chunks[0], Thinking) and chunks[0].text == "hm"
+        assert isinstance(chunks[0], Reasoning) and chunks[0].text == "hm"
         assert all(isinstance(c, Text) for c in chunks[1:-1])
         assert isinstance(chunks[-1], Stats)
 
     def test_cached_tokens_come_off_the_usage_report(self, server: ModelServer) -> None:
         server.cached_tokens = 3
         _, _, stats = _drain(
-            OpenAIClient(_config(server, "generic")).complete_chat("m", [Turn("user", "u")], {})
+            GenericClient(_config(server, "generic")).completion.chat("m", [Turn("user", "u")], {})
         )
         assert stats.cached_tokens == 3
 
@@ -116,48 +115,68 @@ class TestChatCompletion:
         ("kind", "expected"),
         [
             ("generic", {**EFFORT_NONE, **FLAG_OFF}),
-            ("llamacpp", {**EFFORT_NONE, **FLAG_OFF}),
+            ("llamacpp", FLAG_OFF),
             ("koboldcpp", {**EFFORT_NONE, **FLAG_OFF}),
-            ("omlx", {**EFFORT_NONE, **FLAG_OFF}),
+            ("omlx", FLAG_OFF),
             ("ollama", EFFORT_NONE),
             ("openrouter", EFFORT_NONE),
             ("nanogpt", EFFORT_NONE),
             ("lmstudio", {}),
         ],
     )
-    def test_a_level_goes_out_on_the_knobs_the_engine_reads(
+    def test_an_effort_goes_out_on_the_knobs_the_engine_reads(
         self, server: ModelServer, kind: str, expected: dict[str, object]
     ) -> None:
         # The table every engine is promised by: both knobs where a local
         # engine reads the template's flag, the effort alone on the
         # catalogs and Ollama, nothing where nothing on the wire reaches
         # the engine — and the turn plays in every case.
-        client = CLIENTS[kind](_config(server, kind, api_key="k"))
-        _, text, _ = _drain(client.complete_chat("m", [Turn("user", "u")], {}, think_level="off"))
+        client = ALL_CLIENTS[kind](_config(server, kind, api_key="k"))
+        _, text, _ = _drain(client.completion.chat("m", [Turn("user", "u")], {}, effort="none"))
         assert _knobs(_sent(server, "messages")) == expected
         assert text == scripted.CHAT_REPLY
 
-    def test_no_level_sends_no_knob(self, server: ModelServer) -> None:
-        _drain(OpenAIClient(_config(server, "generic")).complete_chat("m", [Turn("user", "u")], {}))
+    @pytest.mark.parametrize("kind", ["llamacpp", "omlx"])
+    def test_an_engine_that_forwards_the_template_gets_the_effort_as_a_variable(
+        self, server: ModelServer, kind: str
+    ) -> None:
+        # llama.cpp and omlx read no reasoning_effort of their own and
+        # hand chat_template_kwargs to the template verbatim: the effort
+        # rides there, beside the flag, for the templates that grade
+        # their reasoning.
+        client = ALL_CLIENTS[kind](_config(server, kind))
+        _drain(client.completion.chat("m", [Turn("user", "u")], {}, effort="high"))
+        body = _sent(server, "messages")
+        assert body["chat_template_kwargs"] == {"enable_thinking": True, "reasoning_effort": "high"}
+        assert "reasoning_effort" not in body
+
+    def test_no_effort_sends_no_knob(self, server: ModelServer) -> None:
+        _drain(
+            GenericClient(_config(server, "generic")).completion.chat("m", [Turn("user", "u")], {})
+        )
         assert "reasoning_effort" not in server.requests[-1]
         assert "chat_template_kwargs" not in server.requests[-1]
 
-    def test_a_400_to_the_knob_retries_once_without_it(self, server: ModelServer) -> None:
+    def test_a_400_naming_the_knob_retries_once_without_it(self, server: ModelServer) -> None:
+        # The retry is for a 400 about the knob, as the engine words it;
+        # one about anything else stands.
         server.refuse = lambda body: 400 if "reasoning_effort" in body else None
-        _, text, _ = _drain(
-            OpenAIClient(_config(server, "generic")).complete_chat(
-                "m", [Turn("user", "u")], {}, think_level="high"
-            )
-        )
+        server.refusal = "unknown field: reasoning_effort"
+        client = GenericClient(_config(server, "generic"))
+        _, text, _ = _drain(client.completion.chat("m", [Turn("user", "u")], {}, effort="high"))
         assert text == scripted.CHAT_REPLY
         knobbed, plain = server.requests[-2:]
         assert knobbed["reasoning_effort"] == "high" and "reasoning_effort" not in plain
+        server.refusal = "bad request"
+        with pytest.raises(StatusError):
+            _drain(client.completion.chat("m", [Turn("user", "u")], {}, effort="high"))
+        assert len(server.requests) == 3
 
     def test_a_400_after_words_arrived_is_a_failure_not_a_retry(self, server: ModelServer) -> None:
         # A second take would repeat what is already on someone's screen.
         server.fail_after = 1
-        stream = OpenAIClient(_config(server, "generic")).complete_chat(
-            "m", [Turn("user", "u")], {}, think_level="high"
+        stream = GenericClient(_config(server, "generic")).completion.chat(
+            "m", [Turn("user", "u")], {}, effort="high"
         )
         with pytest.raises(UnreachableError):
             list(stream)
@@ -166,7 +185,7 @@ class TestChatCompletion:
     def test_images_ride_on_the_last_message(self, server: ModelServer) -> None:
         image = Image(b"\x89PNG", "image/png")
         _drain(
-            OpenAIClient(_config(server, "generic")).complete_chat(
+            GenericClient(_config(server, "generic")).completion.chat(
                 "m", [Turn("user", "before"), Turn("user", "look")], {}, images=[image]
             )
         )
@@ -178,26 +197,26 @@ class TestChatCompletion:
 
     def test_openrouter_marks_the_cache_where_the_section_allows(self, server: ModelServer) -> None:
         marked = OpenRouterClient(_config(server, "openrouter", api_key="k", prompt_cache="1h"))
-        _drain(marked.complete_chat("m", [Turn("system", "s"), Turn("user", "u")], {}))
+        _drain(marked.completion.chat("m", [Turn("system", "s"), Turn("user", "u")], {}))
         content = server.requests[-1]["messages"][0]["content"]
         assert content[0]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
         off = OpenRouterClient(_config(server, "openrouter", api_key="k", prompt_cache="off"))
-        _drain(off.complete_chat("m", [Turn("system", "s"), Turn("user", "u")], {}))
+        _drain(off.completion.chat("m", [Turn("system", "s"), Turn("user", "u")], {}))
         assert server.requests[-1]["messages"][0]["content"] == "s"
 
     def test_the_answer_is_filed_however_the_stream_ends(self, server: ModelServer) -> None:
         sink = Sink()
-        client = OpenAIClient(_config(server, "generic"), request_sink=sink)
-        _drain(client.complete_chat("m", [Turn("user", "u")], {}))
+        client = GenericClient(_config(server, "generic"), request_sink=sink)
+        _drain(client.completion.chat("m", [Turn("user", "u")], {}))
         server.chunk_delay = 0.05
-        stream = client.complete_chat("m", [Turn("user", "u")], {})
+        stream = client.completion.chat("m", [Turn("user", "u")], {})
         first = next(c for c in stream if isinstance(c, Text))
         stream.close()
         server.chunk_delay = 0.0
         server.refuse = lambda body: 500
         with pytest.raises(StatusError):
-            _drain(client.complete_chat("m", [Turn("user", "u")], {}))
-        assert sink.outcomes == ["ok", "cancelled", "failed: StatusError"]
+            _drain(client.completion.chat("m", [Turn("user", "u")], {}))
+        assert sink.statuses == ["ok", "cancelled", "failed: StatusError"]
         assert sink.texts[0] == scripted.CHAT_REPLY and sink.texts[1] == first.text
 
 
@@ -205,18 +224,18 @@ class TestTextCompletion:
     def test_the_prompt_goes_alone_and_the_continuation_comes_as_text(
         self, server: ModelServer
     ) -> None:
-        client = OpenAIClient(_config(server, "generic"))
-        thinking, text, stats = _drain(client.complete_text("m", "Once upon", {"stop": ["\n"]}))
+        client = GenericClient(_config(server, "generic"))
+        reasoning, text, stats = _drain(client.completion.text("m", "Once upon", {"stop": ["\n"]}))
         body = server.requests[-1]
         assert body["prompt"] == "Once upon" and "messages" not in body
         assert body["stop"] == ["\n"] and body["stream"] is True
-        assert text == scripted.CHAT_REPLY and thinking == ""
+        assert text == scripted.CHAT_REPLY and reasoning == ""
         assert (stats.prompt_tokens, stats.completion_tokens) == (7, 5)
 
-    def test_thinking_never_arrives_apart_on_the_text_wire(self, server: ModelServer) -> None:
+    def test_reasoning_never_arrives_apart_on_the_text_wire(self, server: ModelServer) -> None:
         server.script = lambda body: ("hm", "yes")
-        chunks = list(OpenAIClient(_config(server, "generic")).complete_text("m", "p", {}))
-        assert not any(isinstance(c, Thinking) for c in chunks)
+        chunks = list(GenericClient(_config(server, "generic")).completion.text("m", "p", {}))
+        assert not any(isinstance(c, Reasoning) for c in chunks)
 
     @pytest.mark.parametrize(
         ("kind", "expected"),
@@ -231,21 +250,32 @@ class TestTextCompletion:
             ("openrouter", {}),
         ],
     )
-    def test_a_level_goes_out_on_the_text_knobs_the_engine_reads(
+    def test_an_effort_goes_out_on_the_text_knobs_the_engine_reads(
         self, server: ModelServer, kind: str, expected: dict[str, object]
     ) -> None:
-        client = CLIENTS[kind](_config(server, kind, api_key="k"))
-        _drain(client.complete_text("m", "p", {}, think_level="off"))
+        client = ALL_CLIENTS[kind](_config(server, kind, api_key="k"))
+        _drain(client.completion.text("m", "p", {}, effort="none"))
         assert _knobs(_sent(server, "prompt")) == expected
 
 
 class TestListing:
+    def test_koboldcpp_with_nothing_loaded_lists_nothing(self) -> None:
+        # "inactive" is the server's own name for no model loaded.
+        server = ModelServer(models=("koboldcpp/inactive",))
+        try:
+            assert KoboldCppClient(_config(server, "koboldcpp")).models.list() == []
+        finally:
+            server.close()
+
     def test_a_plain_listing_is_ids_and_nothing_read(self) -> None:
         server = ModelServer(models=("b", "a"))
         try:
-            rows = LmStudioClient(_config(server, "lmstudio")).models()
+            rows = LmStudioClient(_config(server, "lmstudio")).models.list()
             assert [r.name for r in rows] == ["a", "b"]
-            assert all(r.capabilities is None and r.context is None for r in rows)
+            assert all(r.capabilities is None for r in rows)
+            assert all(
+                r.max_context_catalogue is None and r.max_context_loaded is None for r in rows
+            )
         finally:
             server.close()
 
@@ -253,11 +283,13 @@ class TestListing:
         server = ModelServer(models=("a", "b"))
         server.contexts["a"] = 32_000
         try:
-            client = OpenAIClient(_config(server, "generic"))
-            rows = {r.name: r for r in client.models()}
-            assert rows["a"].context == 32_000 and rows["a"].loaded
-            assert rows["b"].context is None
-            assert client.get_context_size("a") == 32_000
+            client = GenericClient(_config(server, "generic"))
+            rows = {r.name: r for r in client.models.list()}
+            assert rows["a"].max_context_catalogue == 32_000
+            assert rows["a"].state is ModelState.UNKNOWN  # a catalog has no load state
+            assert rows["b"].max_context_catalogue is None
+            found = client.models.get("a")
+            assert found is not None and found.max_context_catalogue == 32_000
             assert sum(p.endswith("/models") for p in server.gets) == 1
         finally:
             server.close()
@@ -267,65 +299,103 @@ class TestListing:
     ) -> None:
         server.api_key = "right"
         with pytest.raises(UnauthorizedError):
-            OpenRouterClient(_config(server, "openrouter")).models()
+            OpenRouterClient(_config(server, "openrouter")).models.list()
         with pytest.raises(UnauthorizedError):
-            OpenRouterClient(_config(server, "openrouter", api_key="wrong")).models()
+            OpenRouterClient(_config(server, "openrouter", api_key="wrong")).models.list()
         assert [
             r.name
-            for r in OpenRouterClient(_config(server, "openrouter", api_key="right")).models()
+            for r in OpenRouterClient(_config(server, "openrouter", api_key="right")).models.list()
         ] == ["test-model"]
 
 
 class TestCapabilities:
-    def test_llamacpp_reads_the_modalities_and_whether_the_template_takes_an_effort(
+    def test_llamacpp_reads_the_modalities_and_cannot_say_which_efforts_reach(
         self, server: ModelServer
     ) -> None:
+        # The effort is a template variable only some templates read;
+        # the server has no word on which, so the efforts are unknown.
         server.window = 4096
-        server.props = {
-            "modalities": {"vision": False},
-            "chat_template_caps": {"supports_reasoning_effort": True},
-        }
-        row = LlamaCppClient(_config(server, "llamacpp")).models()[0]
-        assert row.capabilities == Capabilities(vision=False, thinking=ALL)
-        server.props = {"modalities": {"vision": True}, "chat_template_caps": {}}
-        row = LlamaCppClient(_config(server, "llamacpp")).models()[0]
-        assert row.capabilities == Capabilities(vision=True, thinking=frozenset({"off"}))
+        server.props = {"modalities": {"vision": False}}
+        row = LlamaCppClient(_config(server, "llamacpp")).models.list()[0]
+        assert row.capabilities == Capabilities(
+            vision=False, reasoning=None, text_completion=True, structured_output=True
+        )
+        server.props = {"modalities": {"vision": True}}
+        row = LlamaCppClient(_config(server, "llamacpp")).models.list()[0]
+        assert row.capabilities == Capabilities(
+            vision=True, reasoning=None, text_completion=True, structured_output=True
+        )
+        # Props without modalities, an older build: still the raw wire
+        # and constrained decoding, the rest unknown.
+        server.props = {}
+        row = LlamaCppClient(_config(server, "llamacpp")).models.list()[0]
+        assert row.capabilities == Capabilities(
+            vision=None, reasoning=None, text_completion=True, structured_output=True
+        )
 
-    def test_koboldcpp_reads_vision_off_its_version_and_knows_its_budget_levels(
+    def test_koboldcpp_reads_vision_off_its_version_and_knows_its_budget_efforts(
         self, server: ModelServer
     ) -> None:
         server.version = {"version": "1.120", "vision": False}
-        row = KoboldCppClient(_config(server, "koboldcpp")).models()[0]
+        row = KoboldCppClient(_config(server, "koboldcpp")).models.list()[0]
         assert row.capabilities == Capabilities(
-            vision=False, thinking=frozenset({"off", "low", "medium"})
+            vision=False, reasoning=ALL_EFFORTS, text_completion=True, structured_output=True
         )
 
-    def test_ollama_reads_the_card_for_one_model_and_never_in_the_listing(self) -> None:
-        server = ModelServer(models=("alpha", "beta"), managed=True)
+    def test_ollama_reads_the_card_for_one_model_never_in_the_listing_and_lists_no_embedder(
+        self,
+    ) -> None:
+        # The registry rows name capabilities too, but not the card's
+        # (a server we have leaves vision off Gemma 4's row): only the
+        # one-model ask reads the card, once, and a listing asks none. A
+        # row without "completion" (an embedder) plays no story and is
+        # not listed. No raw text wire: the completion is a chat turn.
+        server = ModelServer(models=("alpha", "beta", "embed"), managed=True)
         server.capabilities["alpha"] = ["completion", "vision", "thinking"]
         server.capabilities["beta"] = ["completion"]
+        server.capabilities["embed"] = ["embedding"]
         try:
             client = OllamaClient(_config(server, "ollama"))
-            assert all(r.capabilities is None for r in client.models())
+            rows = client.models.list()
+            assert [r.name for r in rows] == ["alpha", "beta"]
+            assert all(r.capabilities is None for r in rows)
             assert not any(b.get("model") for b in server.requests)
-            alpha, beta = client.model("alpha"), client.model("beta")
+            alpha, beta = client.models.get("alpha"), client.models.get("beta")
             assert alpha is not None and beta is not None
             assert alpha.capabilities == Capabilities(
-                vision=True, thinking=frozenset({"off", "low", "medium", "high", "max"})
+                vision=True,
+                reasoning=frozenset({"none", "low", "medium", "high", "max"}),
+                text_completion=False,
+                structured_output=True,
             )
-            assert beta.capabilities == Capabilities(vision=False, thinking=frozenset())
+            assert beta.capabilities == Capabilities(
+                vision=False, reasoning=frozenset(), text_completion=False, structured_output=True
+            )
+            assert client.models.get("alpha") == alpha  # the row is kept, the card asked once
+            assert len([b for b in server.requests if set(b) == {"model"}]) == 2
         finally:
             server.close()
 
-    def test_omlx_reads_the_model_type(self) -> None:
-        server = ModelServer(models=("vl", "lm", "unsaid"))
+    def test_omlx_reads_the_type_and_the_toggle_and_lists_only_language_models(self) -> None:
+        # `thinking_default`, a bool, is the template's thinking toggle:
+        # every effort reaches; absent, none does.
+        server = ModelServer(models=("vl", "lm", "unsaid", "emb", "rerank"))
         server.status = True
-        server.types = {"vl": "vlm", "lm": "llm"}
+        server.types = {"vl": "vlm", "lm": "llm", "emb": "embedding", "rerank": "reranker"}
+        server.thinking = {"vl": False}
         try:
-            rows = {r.name: r for r in OmlxClient(_config(server, "omlx")).models()}
-            assert rows["vl"].capabilities == Capabilities(vision=True)
-            assert rows["lm"].capabilities == Capabilities(vision=False)
-            assert rows["unsaid"].capabilities == Capabilities(vision=True)
+            rows = {r.name: r for r in OmlxClient(_config(server, "omlx")).models.list()}
+            assert set(rows) == {"vl", "lm", "unsaid"}  # an embedder plays no story
+            assert rows["vl"].capabilities == Capabilities(
+                vision=True, reasoning=ALL_EFFORTS, text_completion=True
+            )
+            assert rows["lm"].capabilities == Capabilities(
+                vision=False, reasoning=frozenset(), text_completion=True
+            )
+            # No type on the row: whether it sees is unknown, not assumed.
+            assert rows["unsaid"].capabilities == Capabilities(
+                vision=None, reasoning=frozenset(), text_completion=True
+            )
         finally:
             server.close()
 
@@ -334,30 +404,55 @@ class TestCapabilities:
         server.extras = {
             "free": {
                 "architecture": {"input_modalities": ["text", "image"]},
+                "supported_parameters": ["reasoning", "structured_outputs", "temperature"],
                 "reasoning": {"mandatory": False, "supported_efforts": ["low", "high", "minimal"]},
             },
             "fixed": {
                 "architecture": {"input_modalities": ["text"]},
+                "supported_parameters": ["reasoning", "temperature"],
                 "reasoning": {"mandatory": True, "supported_efforts": ["low", "medium", "high"]},
             },
             "mute": {"supported_parameters": ["temperature"]},
-            "plain": {"reasoning": {"mandatory": False}},
+            "plain": {"supported_parameters": ["reasoning"], "reasoning": {"mandatory": False}},
             "bare": {},
         }
         try:
             rows = {
                 r.name: r
-                for r in OpenRouterClient(_config(server, "openrouter", api_key="k")).models()
+                for r in OpenRouterClient(_config(server, "openrouter", api_key="k")).models.list()
             }
+            # The text wire is per model and the catalog does not say
+            # which take it: unknown on every row.
             assert rows["free"].capabilities == Capabilities(
-                vision=True, thinking=frozenset({"off", "low", "high"})
+                vision=True,
+                audio=False,
+                reasoning=frozenset({"none", "minimal", "low", "high"}),
+                text_completion=None,
+                structured_output=True,
             )
             assert rows["fixed"].capabilities == Capabilities(
-                vision=False, thinking=frozenset({"low", "medium", "high"})
+                vision=False,
+                audio=False,
+                reasoning=frozenset({"low", "medium", "high"}),
+                text_completion=None,
+                structured_output=False,
             )
-            assert rows["mute"].capabilities == Capabilities(vision=True, thinking=frozenset())
-            assert rows["plain"].capabilities == Capabilities(vision=True, thinking=ALL)
-            assert rows["bare"].capabilities == Capabilities(vision=True, thinking=ALL)
+            # No modalities named, no reasoning object: what a row does
+            # not say is unknown, not allowed.
+            assert rows["mute"].capabilities == Capabilities(
+                vision=None, reasoning=frozenset(), text_completion=None, structured_output=False
+            )
+            # A reasoning object naming no efforts: no effort selection,
+            # so only off reaches.
+            assert rows["plain"].capabilities == Capabilities(
+                vision=None,
+                reasoning=frozenset({"none"}),
+                text_completion=None,
+                structured_output=False,
+            )
+            assert rows["bare"].capabilities == Capabilities(
+                vision=None, reasoning=None, text_completion=None, structured_output=None
+            )
         finally:
             server.close()
 
@@ -365,7 +460,12 @@ class TestCapabilities:
         server = ModelServer(models=("seeing", "fixed", "mute", "bare"))
         server.extras = {
             "seeing": {
-                "capabilities": {"vision": True, "reasoning": True},
+                "capabilities": {
+                    "vision": True,
+                    "audio_input": False,
+                    "reasoning": True,
+                    "structured_output": True,
+                },
                 "reasoning_efforts": ["low", "high"],
             },
             "fixed": {"capabilities": {"vision": False, "reasoning": True}},
@@ -374,79 +474,138 @@ class TestCapabilities:
         }
         try:
             rows = {
-                r.name: r for r in NanoGptClient(_config(server, "nanogpt", api_key="k")).models()
+                r.name: r
+                for r in NanoGptClient(_config(server, "nanogpt", api_key="k")).models.list()
             }
+            # The efforts as listed, "none" among them only where the
+            # model takes it; the text wire is per model, unsaid.
             assert rows["seeing"].capabilities == Capabilities(
-                vision=True, thinking=frozenset({"off", "low", "high"})
+                vision=True,
+                audio=False,
+                reasoning=frozenset({"low", "high"}),
+                text_completion=None,
+                structured_output=True,
             )
-            assert rows["fixed"].capabilities == Capabilities(vision=False, thinking=ALL)
-            assert rows["mute"].capabilities == Capabilities(vision=False, thinking=frozenset())
+            # Reasons, but names no efforts: which efforts reach is unknown.
+            assert rows["fixed"].capabilities == Capabilities(
+                vision=False, reasoning=None, text_completion=None
+            )
+            assert rows["mute"].capabilities == Capabilities(
+                vision=False, reasoning=frozenset(), text_completion=None
+            )
             assert rows["bare"].capabilities is None
         finally:
             server.close()
 
+    def test_lmstudio_reads_vision_off_its_registry_and_takes_no_effort(self) -> None:
+        # Its endpoint has no reasoning knob: nothing sent reaches the
+        # model, a known "none". Vision is the registry's word, and a
+        # registry that says nothing of it leaves it unknown.
+        server = ModelServer(models=("seeing", "blind", "unsaid"), managed=True)
+        server.capabilities = {"seeing": ["vision"], "blind": []}
+        try:
+            rows = {r.name: r for r in LmStudioClient(_config(server, "lmstudio")).models.list()}
+            assert rows["seeing"].capabilities == Capabilities(
+                vision=True, reasoning=frozenset(), text_completion=True, structured_output=True
+            )
+            assert rows["blind"].capabilities == Capabilities(
+                vision=False, reasoning=frozenset(), text_completion=True, structured_output=True
+            )
+            assert rows["unsaid"].capabilities == Capabilities(
+                vision=None, reasoning=frozenset(), text_completion=True, structured_output=True
+            )
+        finally:
+            server.close()
+
     def test_the_generic_provider_reads_nothing(self, server: ModelServer) -> None:
-        assert OpenAIClient(_config(server, "generic")).models()[0].capabilities is None
+        assert GenericClient(_config(server, "generic")).models.list()[0].capabilities is None
 
 
 class TestTokenCounts:
     def test_llamacpp_counts_the_chat_body_and_a_raw_prompt(self, server: ModelServer) -> None:
         server.token_count = 42
         client = LlamaCppClient(_config(server, "llamacpp"))
-        assert client.count_chat_tokens("m", [Turn("system", "s"), Turn("user", "u")]) == 42
+        assert (
+            client.completion.count_chat_tokens("m", [Turn("system", "s"), Turn("user", "u")]) == 42
+        )
         counted = server.requests[-1]
         assert counted["messages"] == [
             {"role": "system", "content": "s"},
             {"role": "user", "content": "u"},
         ]
         assert "stream" not in counted
-        assert client.count_text_tokens("m", "raw") == 42
-        assert server.requests[-1] == {"model": "m", "content": "raw"}
+        assert client.completion.count_text_tokens("m", "raw") == 42
+        # As the text wire tokenizes: the special tokens (BOS) counted in.
+        assert server.requests[-1] == {"model": "m", "content": "raw", "add_special": True}
 
     def test_koboldcpp_counts_either_shape(self, server: ModelServer) -> None:
         server.token_count = 7
         client = KoboldCppClient(_config(server, "koboldcpp"))
-        assert client.count_chat_tokens("m", [Turn("user", "u")]) == 7
+        assert client.completion.count_chat_tokens("m", [Turn("user", "u")]) == 7
         assert server.requests[-1] == {"messages": [{"role": "user", "content": "u"}]}
-        assert client.count_text_tokens("m", "raw") == 7
+        assert client.completion.count_text_tokens("m", "raw") == 7
         assert server.requests[-1] == {"prompt": "raw"}
 
-    def test_omlx_counts_a_chat_with_the_system_text_apart(self, server: ModelServer) -> None:
+    def test_omlx_counts_a_loaded_chat_with_the_system_text_apart(
+        self, server: ModelServer
+    ) -> None:
+        # The count resolves the engine, which loads the model: an
+        # unloaded one is not counted.
         server.token_count = 9
+        server.status = True
         client = OmlxClient(_config(server, "omlx"))
-        assert client.count_chat_tokens("m", [Turn("system", "s"), Turn("user", "u")]) == 9
+        turns = [Turn("system", "s"), Turn("user", "u")]
+        assert client.completion.count_chat_tokens("test-model", turns) is None
+        server.loaded.add("test-model")
+        assert client.completion.count_chat_tokens("test-model", turns) == 9
         assert server.requests[-1] == {
-            "model": "m",
+            "model": "test-model",
             "messages": [{"role": "user", "content": "u"}],
             "system": "s",
         }
-        assert client.count_text_tokens("m", "raw") is None
+        assert client.completion.count_text_tokens("test-model", "raw") is None
 
     @pytest.mark.parametrize("kind", ["generic", "ollama", "lmstudio", "openrouter", "nanogpt"])
     def test_the_others_count_nothing(self, server: ModelServer, kind: str) -> None:
         server.token_count = 5
-        client = CLIENTS[kind](_config(server, kind, api_key="k"))
-        assert client.counts_tokens is False
-        assert client.count_chat_tokens("m", [Turn("user", "u")]) is None
-        assert client.count_text_tokens("m", "raw") is None
+        client = ALL_CLIENTS[kind](_config(server, kind, api_key="k"))
+        assert client.completion.can_count_tokens is False
+        assert client.completion.count_chat_tokens("m", [Turn("user", "u")]) is None
+        assert client.completion.count_text_tokens("m", "raw") is None
 
     def test_a_server_without_the_endpoint_counts_none(self, server: ModelServer) -> None:
         client = LlamaCppClient(_config(server, "llamacpp"))
-        assert client.counts_tokens is True
-        assert client.count_chat_tokens("m", [Turn("user", "u")]) is None
+        assert client.completion.can_count_tokens is True
+        assert client.completion.count_chat_tokens("m", [Turn("user", "u")]) is None
 
 
 class TestLoadUnload:
+    def test_omlx_orders_nothing_its_state_already_satisfies(self) -> None:
+        # omlx evicts on its own and refuses an unload of what is not
+        # loaded: a stale row's Unload is a no-op, not a 400.
+        server = ModelServer(models=("a",))
+        server.status = True
+        try:
+            client = OmlxClient(_config(server, "omlx"))
+            posted = len(server.requests)
+            client.models.unload("a")
+            client.models.load("a")
+            client.models.load("a")
+            assert len(server.requests) == posted + 1  # the one load that was needed
+            assert server.loaded == {"a"}
+        finally:
+            server.close()
+
     def test_omlx_loads_and_unloads_by_path(self) -> None:
         server = ModelServer(models=("a",))
         server.status = True
         try:
             client = OmlxClient(_config(server, "omlx"))
-            assert client.manages_models
-            client.load_model("a")
-            assert client.models()[0].loaded
-            client.unload_model("a")
-            assert not client.models()[0].loaded
+            assert client.models.can_manage
+            client.models.load("a")
+            assert client.models.list()[0].state is ModelState.LOADED
+            client.models.unload("a")
+            assert client.models.list()[0].state is ModelState.UNLOADED
         finally:
             server.close()
 
@@ -454,7 +613,7 @@ class TestLoadUnload:
         server = ModelServer(models=("a",), managed=True)
         try:
             client = LmStudioClient(_config(server, "lmstudio"))
-            client.load_model("a")
+            client.models.load("a")
             assert "a" in server.loaded
         finally:
             server.close()
@@ -465,31 +624,94 @@ class TestLoadUnload:
         server.loaded.add("a")
         try:
             client = LlamaCppClient(_config(server, "llamacpp"))
-            assert client.manages_models is False  # nothing listed yet
-            rows = {r.name: r for r in client.models()}
-            assert client.manages_models is True
-            assert rows["a"].loaded and not rows["b"].loaded
-            client.load_model("b")
+            assert client.models.can_manage is False  # nothing listed yet
+            rows = {r.name: r for r in client.models.list()}
+            assert client.models.can_manage is True
+            assert rows["a"].state is ModelState.LOADED and rows["b"].state is ModelState.UNLOADED
+            client.models.load("b")
             assert server.loaded == {"a", "b"}
-            client.unload_model("a")
+            client.models.unload("a")
             assert server.loaded == {"b"}
+        finally:
+            server.close()
+
+    def test_a_llamacpp_router_reports_a_load_that_failed(self) -> None:
+        # The router takes the order and the model's own server dies:
+        # the row ends unloaded with the exit code, and so does the call.
+        server = ModelServer(models=("a", "broken"))
+        server.router = True
+        server.router_failed.add("broken")
+        try:
+            client = LlamaCppClient(_config(server, "llamacpp"))
+            client.models.list()
+            with pytest.raises(ProviderError) as failed:
+                client.models.load("broken")
+            assert str(failed.value) == "broken did not load on llamacpp (exit code 1)."
+        finally:
+            server.close()
+
+    def test_a_llamacpp_router_waits_for_a_load_already_in_flight(self) -> None:
+        # The router autoloads on any request for a model, its props
+        # probe included; a load order on a row saying "loading" would
+        # be refused, so it is waited for instead.
+        server = ModelServer(models=("a",))
+        server.router = True
+        server.router_loading.add("a")
+        try:
+            client = LlamaCppClient(_config(server, "llamacpp"))
+            client.models.list()
+            posted = len(server.requests)
+            client.models.load("a")
+            assert len(server.requests) == posted  # no order, only the wait
+            assert server.loaded == {"a"}
+        finally:
+            server.close()
+
+    def test_a_llamacpp_router_row_carries_the_window_the_props_gave(self) -> None:
+        server = ModelServer(models=("a", "b"))
+        server.router = True
+        server.loaded.add("a")
+        server.window = 4096
+        try:
+            rows = {r.name: r for r in LlamaCppClient(_config(server, "llamacpp")).models.list()}
+            assert rows["a"].max_context_loaded == 4096
+            assert rows["b"].max_context_loaded is None
+        finally:
+            server.close()
+
+    def test_a_llamacpp_router_counts_a_sleeping_model_as_loaded(self) -> None:
+        # Put to sleep idle, woken by the next request: a server is
+        # behind it, so it is loaded, and a load order would be refused.
+        server = ModelServer(models=("a", "b"))
+        server.router = True
+        server.loaded.add("a")
+        server.router_sleeping.add("a")
+        try:
+            client = LlamaCppClient(_config(server, "llamacpp"))
+            rows = {r.name: r for r in client.models.list()}
+            assert rows["a"].state is ModelState.LOADED and rows["b"].state is ModelState.UNLOADED
+            posted = len(server.requests)
+            client.models.load("a")  # nothing to do, nothing sent
+            assert len(server.requests) == posted
+            client.models.unload("a")
+            assert server.loaded == set()
         finally:
             server.close()
 
     def test_a_single_llamacpp_server_refuses_a_load(self, server: ModelServer) -> None:
         server.window = 4096
         client = LlamaCppClient(_config(server, "llamacpp"))
-        client.models()
-        assert client.manages_models is False
+        client.models.list()
+        assert client.models.can_manage is False
         with pytest.raises(ProviderError, match="cannot be loaded or unloaded"):
-            client.load_model("test-model")
+            client.models.load("test-model")
 
     @pytest.mark.parametrize("kind", ["generic", "koboldcpp", "openrouter", "nanogpt"])
     def test_the_others_refuse_a_load(self, server: ModelServer, kind: str) -> None:
-        client = CLIENTS[kind](_config(server, kind))
-        assert client.manages_models is False
+        client = ALL_CLIENTS[kind](_config(server, kind))
+        assert client.models.can_manage is False
         with pytest.raises(ProviderError):
-            client.load_model("m")
+            client.models.load("m")
 
 
 class TestKeys:
@@ -498,23 +720,23 @@ class TestKeys:
     ) -> None:
         monkeypatch.setenv("OPENROUTER_API_KEY", "from-env")
         registry = Registry({"openrouter": _config(server, "openrouter")})
-        _drain(registry.get_client("openrouter").complete_chat("m", [Turn("user", "u")], {}))
+        _drain(registry.get("openrouter").completion.chat("m", [Turn("user", "u")], {}))
         assert server.request_headers[-1]["Authorization"] == "Bearer from-env"
-        assert registry.key_source("openrouter") is KeySource.ENV
+        assert registry.get("openrouter").auth.key_source is KeySource.ENV
         registry.update(_config(server, "openrouter", api_key="typed"))
-        _drain(registry.get_client("openrouter").complete_chat("m", [Turn("user", "u")], {}))
+        _drain(registry.get("openrouter").completion.chat("m", [Turn("user", "u")], {}))
         assert server.request_headers[-1]["Authorization"] == "Bearer typed"
-        assert registry.key_source("openrouter") is KeySource.SECTION
+        assert registry.get("openrouter").auth.key_source is KeySource.CONFIG
         registry.update(_config(server, "openrouter"))
-        _drain(registry.get_client("openrouter").complete_chat("m", [Turn("user", "u")], {}))
+        _drain(registry.get("openrouter").completion.chat("m", [Turn("user", "u")], {}))
         assert server.request_headers[-1]["Authorization"] == "Bearer from-env"
 
     def test_no_key_sends_no_authorization(self, server: ModelServer, monkeypatch) -> None:
-        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-        client = OpenAIClient(_config(server, "generic"))
-        _drain(client.complete_chat("m", [Turn("user", "u")], {}))
+        monkeypatch.delenv("GENERIC_API_KEY", raising=False)
+        client = GenericClient(_config(server, "generic"))
+        _drain(client.completion.chat("m", [Turn("user", "u")], {}))
         assert "Authorization" not in server.request_headers[-1]
-        assert client.key_source is None
+        assert client.auth.key_source is None
 
     def test_a_cleared_key_in_the_panel_uncovers_the_variable(
         self, server: ModelServer, tmp_path, monkeypatch
@@ -522,6 +744,7 @@ class TestKeys:
         # The user's story: a key typed in the panel is forgotten, and
         # the shell's stands in again on the very next turn.
         from otaku.backend.api import providers as api_providers
+        from scenarios.support.harness import launch, set_config_provider
 
         monkeypatch.setenv("OPENROUTER_API_KEY", "from-env")
         server.api_key = "from-env"
@@ -542,35 +765,52 @@ class TestKeys:
 
 class TestProbe:
     def test_a_provider_that_answers(self, server: ModelServer, monkeypatch) -> None:
-        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        monkeypatch.delenv("GENERIC_API_KEY", raising=False)
         found = probe(_config(server, "generic"))
-        assert found.outcome is ProbeOutcome.OK and found.models_count == 1
+        assert found.status is ProbeStatus.OK and found.models_count == 1
         assert found.key_source is None
 
     def test_a_provider_that_lists_nothing(self) -> None:
         server = ModelServer(models=())
         try:
-            assert probe(_config(server, "generic")).outcome is ProbeOutcome.EMPTY
+            assert probe(_config(server, "generic")).status is ProbeStatus.EMPTY
         finally:
             server.close()
 
     def test_a_dead_port(self) -> None:
         found = probe(ProviderConfig(name="llamacpp", url=DEAD))
-        assert found.outcome is ProbeOutcome.UNREACHABLE
+        assert found.status is ProbeStatus.UNREACHABLE
         assert found.message == "Could not reach llamacpp."
 
     def test_a_key_that_is_missing_or_wrong(self, server: ModelServer) -> None:
         server.api_key = "right"
         missing = probe(_config(server, "openrouter"))
         wrong = probe(_config(server, "openrouter", api_key="wrong"))
-        assert missing.outcome is ProbeOutcome.UNAUTHORIZED and missing.key_source is None
-        assert wrong.outcome is ProbeOutcome.UNAUTHORIZED and wrong.key_source is KeySource.SECTION
-        assert probe(_config(server, "openrouter", api_key="right")).outcome is ProbeOutcome.OK
+        assert missing.status is ProbeStatus.UNAUTHORIZED and missing.key_source is None
+        assert wrong.status is ProbeStatus.UNAUTHORIZED and wrong.key_source is KeySource.CONFIG
+        assert probe(_config(server, "openrouter", api_key="right")).status is ProbeStatus.OK
+
+    def test_a_keyed_catalog_that_cannot_be_reached_is_unreachable_not_rejected(self) -> None:
+        # The key is checked against the account first; a dead network
+        # there is a dead network, never a wrong key.
+        found = probe(ProviderConfig(name="openrouter", url=DEAD, api_key="k"))
+        assert found.status is ProbeStatus.UNREACHABLE
+        assert found.message == "Could not reach openrouter."
+
+    def test_a_url_that_cannot_be_spelled_is_unreachable(self) -> None:
+        found = probe(ProviderConfig(name="llamacpp", url="http://localhost:8o80/v1"))
+        assert found.status is ProbeStatus.UNREACHABLE
+        assert found.message == "Could not reach llamacpp."
+
+    def test_a_name_no_engine_answers_to_is_an_error(self) -> None:
+        found = probe(ProviderConfig(name="mybox", url="http://localhost:1/v1"))
+        assert found.status is ProbeStatus.ERROR
+        assert found.message == "No engine is named mybox."
 
     def test_a_server_that_answers_with_an_error(self, server: ModelServer) -> None:
         server.list_status = 503
         found = probe(_config(server, "generic"))
-        assert found.outcome is ProbeOutcome.ERROR
+        assert found.status is ProbeStatus.ERROR
         assert "HTTP 503" in found.message
 
     def test_the_probe_never_touches_the_environment_of_another_engine(
@@ -602,11 +842,11 @@ class TestBalance:
 
 class TestFailures:
     def test_a_dead_host_cannot_be_reached(self) -> None:
-        client = OpenAIClient(ProviderConfig(name="generic", url=DEAD))
+        client = GenericClient(ProviderConfig(name="generic", url=DEAD))
         with pytest.raises(UnreachableError) as listing:
-            client.models()
+            client.models.list()
         with pytest.raises(UnreachableError) as turn:
-            _drain(client.complete_chat("m", [Turn("user", "u")], {}))
+            _drain(client.completion.chat("m", [Turn("user", "u")], {}))
         assert str(listing.value) == str(turn.value) == "Could not reach generic."
 
     def test_an_error_status_carries_the_status_and_the_servers_words(
@@ -615,7 +855,9 @@ class TestFailures:
         server.refuse = lambda body: 503
         with pytest.raises(StatusError) as caught:
             _drain(
-                OpenAIClient(_config(server, "generic")).complete_chat("m", [Turn("user", "u")], {})
+                GenericClient(_config(server, "generic")).completion.chat(
+                    "m", [Turn("user", "u")], {}
+                )
             )
         assert caught.value.status == 503
         assert (
@@ -628,23 +870,43 @@ class TestFailures:
         server.refuse = lambda body: 401
         with pytest.raises(UnauthorizedError, match="rejected by generic"):
             _drain(
-                OpenAIClient(_config(server, "generic")).complete_chat("m", [Turn("user", "u")], {})
+                GenericClient(_config(server, "generic")).completion.chat(
+                    "m", [Turn("user", "u")], {}
+                )
             )
 
     def test_a_refusal_frame_is_the_model_declining(self, server: ModelServer) -> None:
         server.decline = "content filtered"
         with pytest.raises(DeclinedError, match="The model declined: content filtered"):
             _drain(
-                OpenAIClient(_config(server, "generic")).complete_chat("m", [Turn("user", "u")], {})
+                GenericClient(_config(server, "generic")).completion.chat(
+                    "m", [Turn("user", "u")], {}
+                )
             )
 
     def test_a_connection_lost_mid_stream_says_so(self, server: ModelServer) -> None:
         server.fail_after = 1
         with pytest.raises(UnreachableError) as lost:
             _drain(
-                OpenAIClient(_config(server, "generic")).complete_chat("m", [Turn("user", "u")], {})
+                GenericClient(_config(server, "generic")).completion.chat(
+                    "m", [Turn("user", "u")], {}
+                )
             )
         assert str(lost.value) == "Lost the connection to generic."
+
+    def test_a_stream_that_ends_without_done_is_a_lost_connection(
+        self, server: ModelServer
+    ) -> None:
+        # Every engine sends [DONE] on a clean end; Ollama closes without
+        # it after a runner's error mid-reply — the words that came are
+        # not an answer, and the log must not say ok.
+        server.no_done = True
+        log = Sink()
+        client = GenericClient(_config(server, "generic"), request_sink=log)
+        with pytest.raises(UnreachableError) as lost:
+            _drain(client.completion.chat("m", [Turn("user", "u")], {}))
+        assert str(lost.value) == "Lost the connection to generic."
+        assert log.statuses == ["failed: UnreachableError"]
 
 
 def _config(server: ModelServer, kind: str, **fields: str) -> ProviderConfig:
@@ -663,14 +925,14 @@ def _knobs(body: dict[str, object]) -> dict[str, object]:
 
 
 def _drain(stream: Iterator[Chunk]) -> tuple[str, str, Stats]:
-    """A stream run to its end: the thinking, the text, the stats."""
-    thinking, text, stats = [], [], None
+    """A stream run to its end: the reasoning, the text, the stats."""
+    reasoning, text, stats = [], [], None
     for chunk in stream:
-        if isinstance(chunk, Thinking):
-            thinking.append(chunk.text)
+        if isinstance(chunk, Reasoning):
+            reasoning.append(chunk.text)
         elif isinstance(chunk, Text):
             text.append(chunk.text)
         else:
             stats = chunk
     assert stats is not None, "a stream ends with its stats"
-    return "".join(thinking), "".join(text), stats
+    return "".join(reasoning), "".join(text), stats

@@ -28,13 +28,14 @@ pytestmark = pytest.mark.live
 BOTH = frozenset({"reasoning_effort", "enable_thinking"})
 EFFORT = frozenset({"reasoning_effort"})
 FLAG = frozenset({"enable_thinking"})
+TEMPLATE = frozenset({"enable_thinking", "template_reasoning_effort"})
 NONE: frozenset[str] = frozenset()
 # (provider, url, the env var of its key or "", the model named or "",
 # the knobs the provider is promised — `providers.base.thinking_knobs`).
 # The generic case is a llama-server reached through the protocol alone:
 # the setup the "think none does nothing" report came from.
 CASES = [
-    ("llamacpp", "http://127.0.0.1:8080/v1", "", "", BOTH),
+    ("llamacpp", "http://127.0.0.1:8080/v1", "", "", TEMPLATE),
     ("generic", "http://127.0.0.1:8080/v1", "", "", BOTH),
     ("koboldcpp", "http://127.0.0.1:5001/v1", "", "", BOTH),
     (
@@ -49,7 +50,7 @@ CASES = [
         os.environ.get("OTAKU_LIVE_OMLX_URL", OmlxClient.autoconfigure().url),
         "",
         os.environ.get("OTAKU_LIVE_OMLX_MODEL", ""),
-        BOTH,
+        TEMPLATE,
     ),
     (
         "lmstudio",
@@ -129,8 +130,13 @@ def _expected(knobs: frozenset[str], think: str) -> dict[str, object]:
     out: dict[str, object] = {}
     if "reasoning_effort" in knobs:
         out["reasoning_effort"] = think
+    template: dict[str, object] = {}
     if "enable_thinking" in knobs:
-        out["chat_template_kwargs"] = {"enable_thinking": think != "none"}
+        template["enable_thinking"] = think != "none"
+    if "template_reasoning_effort" in knobs and think != "none":
+        template["reasoning_effort"] = think
+    if template:
+        out["chat_template_kwargs"] = template
     return out
 
 

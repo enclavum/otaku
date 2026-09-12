@@ -31,7 +31,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from otaku import __version__
-from otaku.backend import Journal, Locality, Message, commands, meminfo
+from otaku.backend import Journal, Locality, Message, ModelState, commands, meminfo
 from otaku.backend.api import cards as api_cards
 from otaku.backend.api import lore as api_lore
 from otaku.backend.api import play as api_play
@@ -42,7 +42,7 @@ from otaku.backend.api import stories as api_stories
 from otaku.backend.api import transfer as api_transfer
 from otaku.backend.api.cards import PreparedCard
 from otaku.backend.api.lore import FieldKind, WorkerRun
-from otaku.backend.api.play import Declined, Done, Failed, PlayEvent, Recorded, Text, Thinking
+from otaku.backend.api.play import Declined, Done, Failed, PlayEvent, Reasoning, Recorded, Text
 from otaku.backend.api.providers import Engine
 from otaku.backend.commands import COMMANDS, PROSE_DESCRIPTION
 from otaku.backend.session import KNOWN_PARAMS, THINK_MENU, Refused, Session
@@ -132,12 +132,12 @@ def facts(session: Session) -> dict[str, Any]:
     The knobs are NOT here — they are `settings`, and a figure with two
     homes has two truths — and neither is the premise, which belongs to
     the story that is sent with it."""
-    window = session.context_size()
+    max_context = session.max_context()
     return {
         "version": __version__,
         "model": session.model or "(no model)",
         "engine": session.engine,
-        "context": format_context(window) if window else "",
+        "max_context": format_context(max_context) if max_context else "",
         "story": api_stories.headline(session),
         "story_id": session.story_id,
         # How many, so the runhead needs no chain.
@@ -332,8 +332,8 @@ def _providers(session: Session, scope: str = "") -> dict[str, Any]:
     whose url could point anywhere — a provider's name only it (the
     one-provider refresh a Test connection is), "" the whole set."""
     engines = api_providers.engines(session)
-    catalogs = {engine.name for engine in engines if engine.locality is not Locality.LOCAL}
-    everyone = {engine.name for engine in engines} | api_providers.configured(session)
+    catalogs = {engine.id for engine in engines if engine.locality is not Locality.LOCAL}
+    everyone = {engine.id for engine in engines} | api_providers.configured(session)
     if scope == "local":
         asked = everyone - catalogs
     elif scope == "cloud":
@@ -352,17 +352,19 @@ def _providers(session: Session, scope: str = "") -> dict[str, Any]:
     # to fix, and `get_providers` returns only the reachable.
     models: dict[str, list[dict[str, Any]]] = {name: [] for name in asked}
     for row in rows:
-        models.setdefault(row.config.name, []).extend(
+        models.setdefault(row.id, []).extend(
             {
                 "name": model.name,
-                "loaded": model.loaded if row.can_load_unload else True,
-                "can_load_unload": row.can_load_unload,
+                "loaded": model.state is ModelState.LOADED if row.can_manage else True,
+                "can_manage": row.can_manage,
                 "size": format_size(model.size) if model.size else "",
-                "context": format_context(model.context) if model.context else "",
+                "max_context_catalogue": format_context(model.max_context_catalogue)
+                if model.max_context_catalogue
+                else "",
             }
             for model in row.models
         )
-    known = {engine.name: engine for engine in engines}
+    known = {engine.id: engine for engine in engines}
     # The engines in their own order, then whatever else is configured,
     # by name — the terminal's `order.get(name, len(order))` — and only
     # the slice that was asked: a scoped answer carries no card it did
@@ -370,8 +372,8 @@ def _providers(session: Session, scope: str = "") -> dict[str, Any]:
     # SAYS its position too, because the page asks in two phases and the
     # order runs across both: the generic provider is first in the
     # panel and last to answer.
-    rank = {engine.name: i for i, engine in enumerate(engines)}
-    named = [engine.name for engine in engines if engine.name in asked]
+    rank = {engine.id: i for i, engine in enumerate(engines)}
+    named = [engine.id for engine in engines if engine.id in asked]
     named += sorted(name for name in models if name not in known)
     return {
         "current": session.full_model_name,
@@ -400,7 +402,7 @@ def _engine(
     where it runs."""
     section = api_providers.section(session, name)
     return {
-        "name": name,
+        "id": name,
         "label": engine.label if engine is not None else name,
         "order": order,
         "locality": (engine.locality if engine is not None else Locality.UNKNOWN).value,
@@ -424,7 +426,7 @@ def settings(session: Session) -> dict[str, Any]:
         "autocorrect": session.autocorrect,
         "notification": session.notification,
         # Tokens the prompt may use at most; 0 = the model's whole window.
-        "max_context": session.max_context,
+        "max_context": session.max_context_setting,
         "model": session.model,
         "parameters": [
             {"name": name, "value": str(session.params.get(name, "")), "type": kind.__name__}
@@ -928,8 +930,8 @@ def event(happened: PlayEvent) -> dict[str, Any]:
             # `note` is the record's own dim line (a /roll's dice); ""
             # rides along so the shape never depends on the turn.
             return {"type": "recorded", "turn": _turn(happened.message), "note": happened.note}
-        case Thinking():
-            return {"type": "thinking", "text": happened.text}
+        case Reasoning():
+            return {"type": "reasoning", "text": happened.text}
         case Text():
             return {"type": "text", "text": happened.text}
         case Declined():

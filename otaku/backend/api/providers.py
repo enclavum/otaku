@@ -14,7 +14,15 @@ from typing import Literal
 from otaku.backend.session import Refused, Session
 from otaku.encryption import SealedError, seal
 from otaku.formatting import toml_key, toml_scalar
-from otaku.providers import CLIENTS, Client, Locality, ProviderConfig, ProviderError, ProviderInfo
+from otaku.providers import (
+    ALL_CLIENTS,
+    Locality,
+    ModelState,
+    OpenAIClient,
+    ProviderConfig,
+    ProviderError,
+    ProviderInfo,
+)
 from otaku.settings.migrations import PROMPT_CACHE_ROW, surgery
 
 # The two fields of a section a panel edits — what `save_field` and
@@ -27,7 +35,7 @@ def switch_model(session: Session, provider: str, model: str) -> str:
     models on one prompt: switch, then regenerate). Parameters follow the
     model; the switch is remembered. Returns the confirmation; raises
     Refused for an unknown provider or a no-op."""
-    if provider not in session._providers_registry.names():
+    if provider not in session._providers_registry.list():
         raise Refused(f"Unknown provider {provider!r}.")
     if f"{provider}/{model}" == session.full_model_name:
         raise Refused(f"Already using {session.full_model_name}.")
@@ -42,7 +50,7 @@ def switch_spec(session: Session, raw: str) -> str:
     lists the known providers, then wraps `switch_model`. Both frontends'
     chat boxes route here; the picker and the web PUT use the structured
     form."""
-    known = session._providers_registry.names()
+    known = session._providers_registry.list()
     head, _, rest = raw.strip().partition("/")
     if head not in known or not rest:
         names = ", ".join(known)
@@ -56,18 +64,20 @@ def get_providers(
     """Every reachable provider with its models, plus the reachable set —
     the picker's one query; `skip` lets it fetch cloud catalogs after
     its screen is up."""
-    rows = session._providers_registry.info(skip or ())
-    return rows, {row.config.name for row in rows}
+    registry = session._providers_registry
+    asked = [name for name in registry.list() if name not in (skip or ())]
+    rows = [row for row in registry.map(registry.info, asked) if row is not None]
+    return rows, {row.id for row in rows}
 
 
 @dataclass(frozen=True)
 class Engine:
-    """One supported engine, as the provider panel captions it — name
-    (the section key), label (the project's own spelling), and where it
-    runs (a catalog's url is fixed and its models billed; the generic
-    provider's url could name either, so it says unknown)."""
+    """One supported engine, as the provider panel captions it — its id
+    (which names its section), label (the project's own spelling), and
+    where it runs (a catalog's url is fixed and its models billed; the
+    generic provider's url could name either, so it says unknown)."""
 
-    name: str
+    id: str
     label: str
     locality: Locality
 
@@ -76,14 +86,14 @@ def engines(session: Session) -> list[Engine]:
     """The supported engines in the panel's canonical order — the ONE
     source of the captions and the where-it-runs split, so no frontend
     keeps its own table."""
-    return [Engine(cls.kind, cls.label, cls.locality) for cls in CLIENTS.values()]
+    return [Engine(cls.id, cls.label, cls.locality) for cls in ALL_CLIENTS.values()]
 
 
 def configured(session: Session) -> set[str]:
     """The configured providers' names — what the panel's one-provider
     refresh skips everything but, and nothing more: the sections
     themselves come one at a time through `section`."""
-    return set(session._providers_registry.names())
+    return set(session._providers_registry.list())
 
 
 def loaded_models(session: Session, provider: str) -> set[str]:
@@ -93,25 +103,25 @@ def loaded_models(session: Session, provider: str) -> set[str]:
     slowest it ever is). Raises Refused when it cannot be reached: a
     refresh that failed quietly would leave the panel claiming the
     opposite of what just happened."""
+    client = session._providers_registry.get(provider)
+    if client is None:
+        raise Refused(f"Unknown provider {provider!r}.")
     try:
-        client = session._providers_registry.get_client(provider)
-    except ValueError as e:
-        raise Refused(str(e)) from e
-    try:
-        return {model.name for model in client.models() if model.loaded}
+        return {m.name for m in client.models.list() if m.state is ModelState.LOADED}
     except ProviderError as e:
         raise Refused(str(e)) from e
 
 
 def section(session: Session, provider: str) -> ProviderConfig:
     """The engine's current section when configured, its autoconfigured
-    default otherwise — what the panel shows either way."""
+    default otherwise — what the panel shows either way. Raises Refused
+    for a name no engine answers to: a section is its engine's name."""
     known = session._providers_registry.configs.get(provider)
     if known is not None:
         return known
-    if provider in CLIENTS:
-        return CLIENTS[provider].autoconfigure()
-    return ProviderConfig(name=provider, url="")
+    if provider not in ALL_CLIENTS:
+        raise Refused(f"No engine is named {provider}.")
+    return ALL_CLIENTS[provider].autoconfigure()
 
 
 def save_field(session: Session, provider: str, attr: ProviderField, value: str) -> str:
@@ -148,7 +158,7 @@ def save_field(session: Session, provider: str, attr: ProviderField, value: str)
     # by concatenation is a way to write any row anywhere in the file,
     # and this one takes its name from a request.
     block = f"[{toml_key(provider)}]\nurl = {toml_scalar(config.url)}\n" + 'api_key = ""'
-    if provider in CLIENTS and CLIENTS[provider].cache_markers:
+    if provider in ALL_CLIENTS and ALL_CLIENTS[provider].completion_class.can_mark_cache:
         block += "\n" + PROMPT_CACHE_ROW
     written = surgery.update_providers(
         session._paths.providers_file,
@@ -191,19 +201,18 @@ def load(session: Session, provider: str, model: str) -> None:
     failure raises Refused with the curated sentence (not managed, the
     engine unreachable, the engine's own error text) — no transport
     exception type ever crosses the boundary."""
-    _perform(_managed(session, provider).load_model, model, provider)
+    _perform(_managed(session, provider).models.load, model, provider)
 
 
 def unload(session: Session, provider: str, model: str) -> None:
-    _perform(_managed(session, provider).unload_model, model, provider)
+    _perform(_managed(session, provider).models.unload, model, provider)
 
 
-def _managed(session: Session, provider: str) -> Client:
-    try:
-        client = session._providers_registry.get_client(provider)
-    except ValueError as e:
-        raise Refused(str(e)) from e
-    if not client.manages_models:
+def _managed(session: Session, provider: str) -> OpenAIClient:
+    client = session._providers_registry.get(provider)
+    if client is None:
+        raise Refused(f"Unknown provider {provider!r}.")
+    if not client.models.can_manage:
         raise Refused(f"{provider} cannot load or unload models.")
     return client
 

@@ -19,7 +19,7 @@ import time
 from collections.abc import Iterator
 from typing import Any, Self
 
-from otaku.backend.api.play import Declined, Done, Failed, PlayEvent, Recorded, Text, Thinking
+from otaku.backend.api.play import Declined, Done, Failed, PlayEvent, Reasoning, Recorded, Text
 from otaku.console.sound import ring
 from otaku.formatting import printable
 from otaku.terminal.chat.chat import Chat
@@ -81,7 +81,7 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                     if event.note:
                         out.write(f"{DIM}[ {event.note} ]{RESET}\n\n")
                     spinner.start()
-                elif isinstance(event, Thinking):
+                elif isinstance(event, Reasoning):
                     if not in_thinking:
                         out.write(DIM + "(thinking) ")
                         in_thinking = True

@@ -118,7 +118,7 @@ class TestProviderFailures:
         app.server.refuse = lambda body: 503
         app.play("I enter the hall.")
         out = capsys.readouterr().out
-        assert "[ error: Refused by test with HTTP 503: " in out
+        assert "[ error: Refused by generic with HTTP 503: " in out
         assert "refused by the script" in out
 
     def test_a_declining_model_says_so_in_its_words(self, app: App, capsys) -> None:
@@ -133,7 +133,7 @@ class TestProviderFailures:
         app = launch(tmp_path / "state", dead)
         try:
             app.play("I enter the hall.")
-            assert "[ error: Could not reach test. ]" in capsys.readouterr().out
+            assert "[ error: Could not reach generic. ]" in capsys.readouterr().out
         finally:
             app.close()
 

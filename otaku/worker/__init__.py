@@ -27,7 +27,7 @@ from otaku.context import assembler
 from otaku.context.assembler import ContextShape
 from otaku.formatting import format_duration
 from otaku.logging import ErrorLog, SystemLog
-from otaku.providers import Client, Locality, Registry
+from otaku.providers import Locality, OpenAIClient, ProviderError, Registry
 from otaku.store import Store
 from otaku.store.schema import Message
 from otaku.worker.extraction import ExtractionSettings, Extractor, PassResult, Report
@@ -210,7 +210,9 @@ class Worker:
                         self._set_status("")  # a new pass supersedes a held failure
                         if store is None:
                             store = self._store_factory()
-                        client = self._providers.get_client(job.provider)
+                        client = self._providers.get(job.provider)
+                        if client is None:
+                            raise ProviderError(f"Unknown provider {job.provider!r}.")
                         extractor = Extractor(
                             store,
                             client,
@@ -246,7 +248,7 @@ class Worker:
                         with contextlib.suppress(Exception):
                             job.on_done(result, report)
                     with contextlib.suppress(Exception):
-                        if result is PassResult.CLOSED and store is not None:
+                        if result is PassResult.CLOSED and store is not None and client is not None:
                             self._warm(store, client, job)
                 finally:
                     # Idle — unless the pass failed, in which case its
@@ -276,7 +278,7 @@ class Worker:
             self._deferred = threading.Event()
             return job
 
-    def _warm(self, store: Store, client: Client, job: Job) -> None:
+    def _warm(self, store: Store, client: OpenAIClient, job: Job) -> None:
         """Prefill the server's cache with the request the next turn will
         send — the arguments mirror the session's `assemble_story` call
         because the prompt must match byte for byte; a warm-up of a
@@ -297,9 +299,10 @@ class Worker:
         self._log.record(f"warm-up started (story {job.story_id})")
         self._set_status("warming the prompt cache")
         try:
-            context = client.get_context_size(job.model)
+            found = client.models.get(job.model)
+            max_context = found.max_context if found else None
         except Exception:
-            context = None
+            max_context = None
         try:
             wire = assembler.assemble_story(
                 store,
@@ -307,7 +310,7 @@ class Worker:
                 system=job.system,
                 messages=job.messages,
                 shape=job.shape,
-                context_max=context,
+                max_context=max_context,
             ).messages
         except assembler.ContextOverflowError:
             # Nothing sendable to warm with — the next turn will say so.

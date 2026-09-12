@@ -69,7 +69,7 @@ from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.dimension import D
 from prompt_toolkit.styles import Style
 
-from otaku.backend import Locality, ProviderInfo, meminfo
+from otaku.backend import Locality, ModelState, ProviderInfo, meminfo
 from otaku.backend.api import providers as api_providers
 from otaku.backend.api.providers import Engine, ProviderField
 from otaku.backend.session import Refused, Session
@@ -190,9 +190,9 @@ class ModelEntry:
     provider_name: str
     model: str
     loaded: bool
-    can_load_unload: bool = True  # False → served statically
+    can_manage: bool = True  # False → served statically
     size_bytes: int | None = None  # None when the provider doesn't expose it
-    context: int | None = None  # the model's context window, when reported
+    max_context_catalogue: int | None = None  # the model's own maximum, when its engine states it
     # A row with no disk to weigh — a catalog's, or the generic
     # provider's: normal weight, no size.
     cloud: bool = False
@@ -214,8 +214,8 @@ class ModelPicker(ListScreen):
         # The panel vocabulary — captions, order, and where each runs —
         # from the backend's one source.
         self.engines = engines
-        self._order = {engine.name: i for i, engine in enumerate(engines)}
-        self._captions = {engine.name: engine.label for engine in engines}
+        self._order = {engine.id: i for i, engine in enumerate(engines)}
+        self._captions = {engine.id: engine.label for engine in engines}
         # Names whose last listing succeeded — the panel's tick: the
         # provider answered, and with the right key where one is needed.
         self.connected: set[str] = set(connected or ())
@@ -231,7 +231,7 @@ class ModelPicker(ListScreen):
         # the key handling swaps), the inline editor.
         self.side: str = "models"
         self.fields: list[tuple[str, ProviderField]] = [
-            (engine.name, attr)
+            (engine.id, attr)
             for engine in engines
             for attr in _ATTRS
             if attr != "url" or engine.locality is not Locality.REMOTE
@@ -351,7 +351,7 @@ class ModelPicker(ListScreen):
         labels = [truncate(e.model, self._name_width()) for e in rows]
         # A catalog row has no size at all — not even the unknown dash.
         sizes = ["" if e.cloud else format_size(e.size_bytes) for e in rows]
-        contexts = [format_context(e.context) for e in rows]
+        contexts = [format_context(e.max_context_catalogue) for e in rows]
         width = self._row_width()
 
         out: StyleAndTextTuples = []
@@ -404,7 +404,7 @@ class ModelPicker(ListScreen):
             segments = ["↑/↓ navigate", "/ filter"]
             # Load/unload only appear when the SELECTED model's engine
             # supports them.
-            if self.filtered and self.filtered[self.cursor].can_load_unload:
+            if self.filtered and self.filtered[self.cursor].can_manage:
                 segments += ["l load", "u unload"]
             segments += ["enter select", "tab providers", "esc quit"]
             txt = " " + " · ".join(segments)
@@ -445,12 +445,12 @@ class ModelPicker(ListScreen):
         field, the API key field (its value never displayed), a blank."""
         out: StyleAndTextTuples = []
         for engine in self.engines:
-            config = api_providers.section(self.session, engine.name)
-            if engine.name in self.pending:
+            config = api_providers.section(self.session, engine.id)
+            if engine.id in self.pending:
                 # Still being listed: the answer decides the other two, so
                 # say so here rather than let the name read as a verdict.
                 out.append(("class:preview.muted", engine.label + " - loading…"))
-            elif engine.name in self.connected:
+            elif engine.id in self.connected:
                 out.append(("class:preview.title", engine.label))
                 out.append(("class:tick", " ✓"))
             else:
@@ -458,8 +458,8 @@ class ModelPicker(ListScreen):
                 out.append(("class:preview.muted", engine.label))
             out.append(("", "\n"))
             out.append(("class:preview.body", "\n"))
-            out.extend(self._field_line(engine.name, "url", config.url))
-            out.extend(self._field_line(engine.name, "api_key", "(set)" if config.api_key else ""))
+            out.extend(self._field_line(engine.id, "url", config.url))
+            out.extend(self._field_line(engine.id, "api_key", "(set)" if config.api_key else ""))
             out.append(("class:preview.body", "\n"))
         return out
 
@@ -628,7 +628,7 @@ class ModelPicker(ListScreen):
         if not self.filtered:
             return
         entry = self.filtered[self.cursor]
-        if entry.loaded or not entry.can_load_unload:
+        if entry.loaded or not entry.can_manage:
             # Loaded — or a statically served engine (llama.cpp, a
             # KoboldCpp between admin swaps): the engine serves what it
             # serves, so Enter just picks.
@@ -641,7 +641,7 @@ class ModelPicker(ListScreen):
         if self.in_filter or self.confirming_action or not self.filtered:
             return
         entry = self.filtered[self.cursor]
-        if not entry.can_load_unload or entry.loaded:
+        if not entry.can_manage or entry.loaded:
             return  # can't load this engine, or already loaded — a no-op
         self.confirming_action = "load"
         self.confirming_entry = entry
@@ -650,7 +650,7 @@ class ModelPicker(ListScreen):
         if self.in_filter or self.confirming_action or not self.filtered:
             return
         entry = self.filtered[self.cursor]
-        if not entry.can_load_unload or not entry.loaded:
+        if not entry.can_manage or not entry.loaded:
             return  # can't unload this engine, or not loaded — a no-op
         self.confirming_action = "unload"
         self.confirming_entry = entry
@@ -817,10 +817,10 @@ class ModelPicker(ListScreen):
                     full_spec=f"{name}/{model.name}",
                     provider_name=name,
                     model=model.name,
-                    loaded=model.loaded if row.can_load_unload else True,
-                    can_load_unload=row.can_load_unload,
+                    loaded=model.state is ModelState.LOADED if row.can_manage else True,
+                    can_manage=row.can_manage,
                     size_bytes=model.size,
-                    context=model.context,
+                    max_context_catalogue=model.max_context_catalogue,
                     cloud=row.locality is not Locality.LOCAL,
                 )
                 for row in fetched

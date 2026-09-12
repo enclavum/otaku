@@ -7,4 +7,4 @@ The layout, the import rules, and the control-flow diagram are CLAUDE.md's
 wholesale at the end of the restructure (the Phase 3 rename).
 """
 
-__version__ = "0.4.3"
+__version__ = "0.5.0"

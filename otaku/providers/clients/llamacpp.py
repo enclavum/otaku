@@ -1,63 +1,47 @@
 """llama.cpp's server (`llama-server`), in either of its two modes: one
 model chosen at launch, or the router (`--models-dir`), which fronts a
 folder of models and loads and unloads them by name. Chat rides the
-OpenAI protocol at /v1; the native surface adds `/props` (the loaded
-window and the modalities), `/tokenize`, the chat request's token
-count, and the router's `/models` family. A reasoning effort rides in
-`chat_template_kwargs` alone: the flag gates reasoning, the effort is a
-template variable. A router's listing entries carry a `status`, which
-is how the mode is told: `can_manage` is settled by the first listing
-and false until then.
+OpenAI protocol at /v1. The listing carries what a model half needs
+— the loaded context size, the model's ceiling and its size in `meta`, and
+in router mode the modalities of every entry — so `/props` is read
+once per listing, for the modalities in single mode, and nothing is
+read for a single server's state, which never changes. A router's
+entries carry a `status`, which is how the mode is told: `can_manage`
+is settled by the first listing and false until then. In router mode
+any request for an unloaded model loads it, so the counts ask not to.
+`/v1/models` is exempt from the server's key check and `/props` is
+not, so with a key configured that one read is also the key check —
+or a wrong key would show only at the first turn.
 """
 
 import time
-from collections.abc import Sequence
-from dataclasses import replace
+from collections.abc import Callable, Sequence
 from typing import Any, ClassVar
-from urllib.parse import quote
 
 from otaku.providers import http
 from otaku.providers.clients import launched_port
-from otaku.providers.errors import ProviderError
+from otaku.providers.errors import ProviderError, StatusError, UnreachableError
 from otaku.providers.http import ASK_TIMEOUT, PROBE_TIMEOUT, positive_int
 from otaku.providers.openai import reasoning, requests
-from otaku.providers.openai.auth import OpenAIAuth
 from otaku.providers.openai.client import Locality, OpenAIClient
 from otaku.providers.openai.completion import OpenAICompletion
 from otaku.providers.openai.models import Capabilities, Listing, ModelInfo, ModelState, OpenAIModels
 from otaku.providers.openai.requests import WireMessage
 from otaku.settings.providers import ProviderConfig
 
-_LOAD_POLL_SECONDS = 0.5  # how often a router is asked whether a load is done
+_LOAD_POLL_SECONDS = 0.5  # how often a router is asked whether an order is done
+_SILENCE_BUDGET = 10.0  # how long a router may leave polls unanswered before the order is lost
 # A router entry's words for a model with a server behind it: loaded, or
 # put to sleep idle (`--sleep-idle-seconds`) and woken by the next request.
 _RUNNING = frozenset({"loaded", "sleeping"})
 
 
 class LlamaCppModels(OpenAIModels):
-    """One class facing the client, one of two behind it: every listing
-    tells the mode and swaps the one in force, so a server restarted
-    the other way is followed."""
-
-    def __init__(self, config: ProviderConfig, auth: OpenAIAuth) -> None:
-        super().__init__(config, auth)
-        self._mode: LlamaCppSingleModels | LlamaCppRouterModels = LlamaCppSingleModels(config, auth)
-
-    @property
-    def can_manage(self) -> bool:
-        return isinstance(self._mode, LlamaCppRouterModels)
-
-    def load(self, model: str) -> None:
-        if isinstance(self._mode, LlamaCppRouterModels):
-            return self._mode.load(model)
-        super().load(model)
-
-    def unload(self, model: str) -> None:
-        if isinstance(self._mode, LlamaCppRouterModels):
-            return self._mode.unload(model)
-        super().unload(model)
-
-    # ---------- the hooks ----------
+    """The reads both modes share: the listing, which also tells the
+    mode — a router's entries carry a `status` — and `/props`. Every
+    listing swaps the instance to the mode's own class, so a server
+    restarted the other way is followed; the cache and the lock stay.
+    A fresh client is a single server until a listing says otherwise."""
 
     def _list(self, timeout: float) -> Listing:
         data = http.get_json(
@@ -66,115 +50,179 @@ class LlamaCppModels(OpenAIModels):
             headers=self._auth.headers,
             timeout=timeout,
         )
-        raw = data.get("data") if isinstance(data, dict) else None
-        entries = [e for e in raw or [] if isinstance(e, dict) and isinstance(e.get("id"), str)]
+        # With a key the props read is loud, so a wrong key raises here;
+        # without one, a server that lacks /props is a server without
+        # modalities.
+        props = http.get_json(
+            f"{self._config.base_url}/props",
+            name=self._config.name,
+            headers=self._auth.headers,
+            timeout=timeout,
+            quiet=not self._auth.api_key,
+        )
+        entries = self._entries_of(data)
         is_router = any("status" in entry for entry in entries)
-        if is_router != isinstance(self._mode, LlamaCppRouterModels):
-            mode = LlamaCppRouterModels if is_router else LlamaCppSingleModels
-            self._mode = mode(self._config, self._auth)
-        return self._mode.list(entries, timeout)
+        self.__class__ = LlamaCppRouterModels if is_router else LlamaCppSingleModels
+        return self._listing(entries, props)
 
-    def _enhance(self, model: ModelInfo, timeout: float) -> ModelInfo:
-        return self._mode.enhance(model)
+    def _listing(self, entries: list[dict[str, Any]], props: Any) -> Listing:
+        """The entries as the mode reads them — each mode's own."""
+        raise NotImplementedError
 
-    def _state(self, name: str) -> tuple[ModelState, int | None] | None:
-        return self._mode.state(name)
+    def _entries_of(self, data: object) -> list[dict[str, Any]]:
+        raw = data.get("data") if isinstance(data, dict) else None
+        return [e for e in raw or [] if isinstance(e, dict) and isinstance(e.get("id"), str)]
+
+    def _meta_of(self, entry: dict[str, Any]) -> tuple[int | None, int | None, int | None]:
+        """(the loaded context size, the model's ceiling, the size on
+        disk) from an entry's `meta`: `n_ctx` is per slot, what one
+        request gets."""
+        meta = entry.get("meta")
+        if not isinstance(meta, dict):
+            return None, None, None
+        return (
+            positive_int(meta.get("n_ctx")),
+            positive_int(meta.get("n_ctx_train")),
+            positive_int(meta.get("size")),
+        )
+
+    def _capabilities_of(self, modalities: object) -> Capabilities:
+        """What the modalities say — a router entry's `input_modalities`
+        list, or a props object's `modalities` flags; neither leaves
+        vision and audio unknown. The raw wire is always there and
+        decoding is constrained server-side; which efforts the template
+        grades, the server cannot say."""
+        vision: bool | None
+        audio: bool | None
+        if isinstance(modalities, list):
+            vision, audio = "image" in modalities, "audio" in modalities
+        elif isinstance(modalities, dict):
+            vision = bool(modalities.get("vision")) if "vision" in modalities else None
+            audio = bool(modalities.get("audio")) if "audio" in modalities else None
+        else:
+            vision = audio = None
+        return Capabilities(
+            vision=vision, audio=audio, text_completion=True, structured_output=True
+        )
 
 
-class LlamaCppSingleModels:
-    """One model, loaded at launch: the server's `/props` says everything,
-    and one probe stamps every listed name."""
+class LlamaCppSingleModels(LlamaCppModels):
+    """One model, loaded at launch, its state never changing: the
+    listing's one entry carries its loaded context size, ceiling and
+    size, `/props` its modalities, and every listed name is that
+    model's. Nothing is asked live, nothing is managed."""
 
-    def __init__(self, config: ProviderConfig, auth: OpenAIAuth) -> None:
-        self._config = config
-        self._auth = auth
+    def _listing(self, entries: list[dict[str, Any]], props: Any) -> Listing:
+        if not entries:
+            return []
+        max_context_loaded, ceiling, size = self._meta_of(entries[0])
+        # Props without `modalities` are a build older than mid-2025:
+        # still llama.cpp, vision and audio unknown. No props, nothing
+        # is known.
+        answered = isinstance(props, dict)
+        modalities = props.get("modalities") if answered else None
+        return [
+            ModelInfo(
+                name=str(entry["id"]),
+                size=size,
+                max_context_catalogue=ceiling,
+                max_context_loaded=max_context_loaded,
+                capabilities=self._capabilities_of(modalities) if answered else None,
+                state=ModelState.LOADED,
+                checked=answered,
+            )
+            for entry in sorted(entries, key=lambda entry: str(entry["id"]))
+        ]
 
-    def list(self, entries: list[dict[str, Any]], timeout: float) -> Listing:
-        names = sorted(str(entry["id"]) for entry in entries)
-        props = self._props(timeout) if names else None
-        listed = [ModelInfo(name=name, state=ModelState.LOADED) for name in names]
-        return [_with_props(model, props) if props else model for model in listed]
 
-    def enhance(self, model: ModelInfo) -> ModelInfo:
-        props = self._props(PROBE_TIMEOUT)
-        return _with_props(model, props) if props else model
-
-    def state(self, name: str) -> tuple[ModelState, int | None] | None:
-        props = self._props(PROBE_TIMEOUT)
-        return (ModelState.LOADED, _window_of(props)) if props else None
-
-    def _props(self, timeout: float) -> dict[str, Any] | None:
-        return _get_props(self._config, self._auth, f"{self._config.base_url}/props", timeout)
-
-
-class LlamaCppRouterModels:
+class LlamaCppRouterModels(LlamaCppModels):
     """A folder of models, each with a server of its own that the router
-    starts on demand — on any request for it, `/props` included, so
-    props are read only for a model the router says is running. An
-    order is taken at once and carried out after: a load or unload
-    waits on the entry's status."""
+    starts on demand — on any request for it, so nothing here asks for
+    a model the router does not say is running. An order is taken at
+    once and carried out after: a load or unload waits on the entry's
+    status, and a poll the router leaves unanswered is waited out."""
 
-    def __init__(self, config: ProviderConfig, auth: OpenAIAuth) -> None:
-        self._config = config
-        self._auth = auth
+    @property
+    def can_manage(self) -> bool:
+        return True
 
-    def list(self, entries: list[dict[str, Any]], timeout: float) -> Listing:
+    def load(self, model: str) -> None:
+        status = self._status_of(self._entry(model) or {})
+        if status in _RUNNING:
+            return
+        # A load already in flight — the router autoloads on any request
+        # for the model — is one to wait for, not to order again; the
+        # router's own word for that, when the probe missed it, is the
+        # 400 "already running".
+        if status != "loading":
+            try:
+                http.post_json(
+                    f"{self._config.base_url}/models/load",
+                    {"model": model},
+                    name=self._config.name,
+                    headers=self._auth.headers,
+                    timeout=None,
+                )
+            except StatusError as e:
+                if e.status != 400:
+                    raise
+        entry = self._wait(model, lambda status: status == "loading")
+        if self._status_of(entry) not in _RUNNING:
+            status_object = entry.get("status")
+            code = status_object.get("exit_code") if isinstance(status_object, dict) else None
+            suffix = f" (exit code {code})" if isinstance(code, int) else ""
+            raise ProviderError(f"{model} did not load on {self._config.name}{suffix}.")
+
+    def unload(self, model: str) -> None:
+        status = self._status_of(self._entry(model) or {})
+        if status not in _RUNNING and status != "loading":
+            return  # nothing running to stop
+        http.post_json(
+            f"{self._config.base_url}/models/unload",
+            {"model": model},
+            name=self._config.name,
+            headers=self._auth.headers,
+            timeout=None,
+        )
+        self._wait(model, lambda status: status in _RUNNING or status == "loading")
+
+    # ---------- the hooks ----------
+
+    def _listing(self, entries: list[dict[str, Any]], props: Any) -> Listing:
+        # Every entry states its modalities; the loaded context size,
+        # ceiling and size are merged in for a running one.
         models = []
         for entry in entries:
-            name, state = str(entry["id"]), _state_of(entry)
-            model = ModelInfo(name=name, state=state)
-            props = self._props(name, timeout) if state is ModelState.LOADED else None
-            models.append(_with_props(model, props) if props else model)
+            max_context_loaded, ceiling, size = self._meta_of(entry)
+            architecture = entry.get("architecture")
+            modalities = (
+                architecture.get("input_modalities") if isinstance(architecture, dict) else None
+            )
+            models.append(
+                ModelInfo(
+                    name=str(entry["id"]),
+                    size=size,
+                    max_context_catalogue=ceiling,
+                    max_context_loaded=max_context_loaded,
+                    capabilities=self._capabilities_of(modalities),
+                    state=self._state_of(entry),
+                    checked=True,
+                )
+            )
         return sorted(models, key=lambda model: model.name)
 
-    def enhance(self, model: ModelInfo) -> ModelInfo:
-        if _state_of(self._entry(model.name)) is not ModelState.LOADED:
-            return model  # props would load it; asked again once it is
-        props = self._props(model.name, PROBE_TIMEOUT)
-        return _with_props(model, props) if props else model
-
-    def state(self, name: str) -> tuple[ModelState, int | None] | None:
+    def _state(self, name: str) -> tuple[ModelState, int | None] | None:
         entry = self._entry(name)
         if entry is None:
             return None
-        state = _state_of(entry)
-        props = self._props(name, PROBE_TIMEOUT) if state is ModelState.LOADED else None
-        return state, _window_of(props)
+        return self._state_of(entry), self._meta_of(entry)[0]
 
-    def load(self, model: str) -> None:
-        self._action("load", model)
-
-    def unload(self, model: str) -> None:
-        self._action("unload", model)
-
-    def _action(self, action: str, model: str) -> None:
-        """An order the state already satisfies is nothing to do (the
-        router would refuse it); a load already in flight is one to
-        wait for, not to order again. A load that ends anything but
-        running failed, and says so with the exit code the router kept."""
-        status = _status_of(self._entry(model))
-        if (status in _RUNNING) == (action == "load"):
-            return
-        if not (action == "load" and status == "loading"):
-            http.post_json(
-                f"{self._config.base_url}/models/{action}",
-                {"model": model},
-                name=self._config.name,
-                headers=self._auth.headers,
-                timeout=None,
-            )
-        if action == "load":
-            while _status_of(entry := self._entry(model)) == "loading":
-                time.sleep(_LOAD_POLL_SECONDS)
-            if _status_of(entry) not in _RUNNING:
-                code = _exit_code_of(entry)
-                suffix = f" (exit code {code})" if code is not None else ""
-                raise ProviderError(f"{model} did not load on {self._config.name}{suffix}.")
-        else:
-            while _status_of(self._entry(model)) in _RUNNING:
-                time.sleep(_LOAD_POLL_SECONDS)
+    # ---------- the router's own ----------
 
     def _entry(self, model: str) -> dict[str, Any] | None:
+        """The model's entry in the listing now, as a probe: {} when the
+        router lists no such model, None when it did not answer — which
+        the polling tells apart."""
         data = http.get_json(
             f"{self._config.url}/models",
             name=self._config.name,
@@ -182,16 +230,43 @@ class LlamaCppRouterModels:
             timeout=PROBE_TIMEOUT,
             quiet=True,
         )
-        raw = data.get("data") if isinstance(data, dict) else None
-        for entry in raw or []:
-            if isinstance(entry, dict) and entry.get("id") == model:
-                return entry
-        return None
+        if not isinstance(data, dict):
+            return None
+        return next((e for e in self._entries_of(data) if e.get("id") == model), {})
 
-    def _props(self, model: str, timeout: float) -> dict[str, Any] | None:
-        # The name rides as a query, which is how a router forwards a GET.
-        url = f"{self._config.base_url}/props?model={quote(model, safe='')}"
-        return _get_props(self._config, self._auth, url, timeout)
+    def _wait(self, model: str, pending: Callable[[str | None], bool]) -> dict[str, Any]:
+        """The model's entry once its status is no longer `pending`. A
+        poll the router does not answer — it holds its lock while a
+        child spawns — is waited out, up to a budget of silence."""
+        silence = 0.0
+        while True:
+            entry = self._entry(model)
+            if entry is None:
+                silence += _LOAD_POLL_SECONDS
+                if silence > _SILENCE_BUDGET:
+                    raise UnreachableError(f"{self._config.name} stopped answering.")
+            elif not pending(self._status_of(entry)):
+                return entry
+            else:
+                silence = 0.0
+            time.sleep(_LOAD_POLL_SECONDS)
+
+    def _status_of(self, entry: dict[str, Any]) -> str | None:
+        """An entry's status word, `status.value`; None for a model the
+        router does not list."""
+        status = entry.get("status")
+        value = status.get("value") if isinstance(status, dict) else None
+        return value if isinstance(value, str) else None
+
+    def _state_of(self, entry: dict[str, Any]) -> ModelState:
+        """The status word as a state; a model the router does not list
+        is unloaded, since it lists every model it fronts."""
+        status = self._status_of(entry)
+        if status in _RUNNING:
+            return ModelState.LOADED
+        if status == "loading":
+            return ModelState.LOADING
+        return ModelState.UNLOADED
 
 
 class LlamaCppCompletion(OpenAICompletion):
@@ -207,11 +282,12 @@ class LlamaCppCompletion(OpenAICompletion):
         self, model: str, messages: Sequence[WireMessage], timeout: float = ASK_TIMEOUT
     ) -> int | None:
         # The same body a turn would send, streaming fields aside, so the
-        # count is of what the template renders for it.
+        # count is of what the template renders for it. A router must
+        # not load the model for a count.
         body = requests.chat_completion_body(model, messages, {})
         request = {k: v for k, v in body.items() if k not in ("stream", "stream_options")}
         data = http.post_json(
-            f"{self._config.url}/chat/completions/input_tokens",
+            f"{self._config.url}/chat/completions/input_tokens?autoload=false",
             request,
             name=self._config.name,
             headers=self._auth.headers,
@@ -225,7 +301,7 @@ class LlamaCppCompletion(OpenAICompletion):
         self, model: str, prompt: str, timeout: float = ASK_TIMEOUT
     ) -> int | None:
         data = http.post_json(
-            f"{self._config.base_url}/tokenize",
+            f"{self._config.base_url}/tokenize?autoload=false",
             # The model rides in the body, which is how a router forwards
             # a POST; a single server ignores it. `add_special` adds the
             # BOS the text wire counts and /tokenize leaves out.
@@ -238,86 +314,27 @@ class LlamaCppCompletion(OpenAICompletion):
         tokens = data.get("tokens") if isinstance(data, dict) else None
         return len(tokens) if isinstance(tokens, list) else None
 
+    def _convert_params(self, params: dict[str, object]) -> dict[str, object]:
+        # `repetition_penalty` under the name the server reads.
+        if "repetition_penalty" not in params:
+            return params
+        spelled = dict(params)
+        spelled["repeat_penalty"] = spelled.pop("repetition_penalty")
+        return spelled
+
 
 class LlamaCppClient(OpenAIClient):
     id = "llamacpp"
     label = "llama.cpp"
     locality = Locality.LOCAL
     env_key = "LLAMACPP_API_KEY"
-    models_class = LlamaCppModels
+    models_class = LlamaCppSingleModels
     completion_class = LlamaCppCompletion
 
     @classmethod
     def autoconfigure(cls) -> ProviderConfig:
         # Configured by launch flags, nothing on disk: a running server's
-        # own flag is read, else the standard default.
-        port = launched_port("llama-server") or 8080
+        # own flag is read, else the standard default. The server is
+        # `llama-server`, or the unified binary's `llama serve`.
+        port = launched_port("llama-server") or launched_port("llama serve") or 8080
         return ProviderConfig(name=cls.id, url=f"http://localhost:{port}/v1")
-
-
-def _get_props(
-    config: ProviderConfig, auth: OpenAIAuth, url: str, timeout: float
-) -> dict[str, Any] | None:
-    data = http.get_json(url, name=config.name, headers=auth.headers, timeout=timeout, quiet=True)
-    return data if isinstance(data, dict) else None
-
-
-def _with_props(model: ModelInfo, props: dict[str, Any]) -> ModelInfo:
-    """`model` as a server's props describe it: loaded, with its window
-    and its capabilities, checked."""
-    return replace(
-        model,
-        max_context_loaded=_window_of(props),
-        capabilities=_capabilities_of(props),
-        state=ModelState.LOADED,
-        checked=True,
-    )
-
-
-def _capabilities_of(props: dict[str, Any]) -> Capabilities:
-    """What a server's props say its model can do: the modalities. The
-    raw wire is always there and decoding is constrained server-side;
-    which efforts the template grades, the server cannot say."""
-    modalities = props.get("modalities")
-    if not isinstance(modalities, dict):
-        modalities = {}
-    return Capabilities(
-        vision=bool(modalities.get("vision")) if "vision" in modalities else None,
-        audio=bool(modalities.get("audio")) if "audio" in modalities else None,
-        text_completion=True,
-        structured_output=True,
-    )
-
-
-def _window_of(props: dict[str, Any] | None) -> int | None:
-    """The loaded context size a server's props report — per slot, which
-    is what one request gets."""
-    settings = props.get("default_generation_settings") if props is not None else None
-    return positive_int(settings.get("n_ctx")) if isinstance(settings, dict) else None
-
-
-def _state_of(entry: dict[str, Any] | None) -> ModelState:
-    """A router entry's status as a state; no entry is unloaded, since
-    the router lists every model it fronts."""
-    status = _status_of(entry)
-    if status in _RUNNING:
-        return ModelState.LOADED
-    if status == "loading":
-        return ModelState.LOADING
-    return ModelState.UNLOADED
-
-
-def _status_of(entry: dict[str, Any] | None) -> str | None:
-    """A router entry's status word — a plain string, or an object whose
-    `value` it is, depending on the build; None for no entry."""
-    status = entry.get("status") if entry else None
-    if isinstance(status, dict):
-        status = status.get("value")
-    return status if isinstance(status, str) else None
-
-
-def _exit_code_of(entry: dict[str, Any] | None) -> int | None:
-    """The exit code a router keeps on a failed entry's status object."""
-    status = entry.get("status") if entry else None
-    code = status.get("exit_code") if isinstance(status, dict) else None
-    return code if isinstance(code, int) else None

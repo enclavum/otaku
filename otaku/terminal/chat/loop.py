@@ -75,7 +75,7 @@ def run(session: Session) -> None:
                     version=__version__,
                     model=session.model or "(no model)",
                     engine=session.engine,
-                    context=session.context_size(),
+                    max_context=session.max_context(),
                     story=truncate_label(api_stories.headline(session), api_stories.LABEL_WIDTH),
                 )
             )

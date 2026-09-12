@@ -12,8 +12,8 @@
 // the picker's switch, load and unload have something real to do.
 export const PROVIDER = "demo";
 const MODELS = [
-  { name: "demo-model", loaded: true, can_load_unload: true, size: "4.7 GB", context: "32K" },
-  { name: "demo-model-mini", loaded: false, can_load_unload: true, size: "1.9 GB", context: "8K" },
+  { name: "demo-model", loaded: true, can_manage: true, size: "4.7 GB", max_context_catalogue: "32K" },
+  { name: "demo-model-mini", loaded: false, can_manage: true, size: "1.9 GB", max_context_catalogue: "8K" },
 ];
 // The window the fixtures' context previews were captured under
 // (scripts/demo_fixtures.py) — the two must agree, or the demo's own
@@ -71,7 +71,7 @@ export function facts(version) {
     version,
     model: state.model,
     engine: "demo",
-    context: model ? model.context : "",
+    max_context: model ? model.max_context_catalogue : "",
     story: story ? label(story) : "",
     story_id: state.open,
     turns: story ? story.turns.length : 0,
@@ -157,7 +157,7 @@ export function providers(scope = "") {
   }
   const all = allProviders();
   if (scope && scope !== "local") {
-    const named = all.engines.filter((engine) => engine.name === scope);
+    const named = all.engines.filter((engine) => engine.id === scope);
     // a name nothing is configured under answers 404, as the product does
     if (!named.length) return null;
     return { ...all, engines: named };
@@ -171,7 +171,7 @@ function allProviders() {
     memory: memory().memory,
     engines: [
       {
-        name: PROVIDER,
+        id: PROVIDER,
         label: "Demo",
         order: 8, // a hand-written section sorts after the eight engines, as in the product
         locality: "unknown", // the product cannot say where such a section runs
@@ -348,7 +348,13 @@ export function info(version) {
           ["Model", `${PROVIDER}/${state.model}`],
           ["Backend", "demo (a model that lives in the page)"],
           ["Context", modelRow().context],
-          ["Thinking", "not supported"],
+          // The product's capability rows, as the page's own model
+          // honestly answers them: it takes no images, no effort reaches
+          // it, and it completes no raw text.
+          ["Vision", "no"],
+          ["Reasoning efforts", "none"],
+          ["Text completion", "no"],
+          ["Thinking", "default"],
         ],
         note: "",
       },
@@ -503,7 +509,7 @@ export function switchModel(provider, model) {
 
 export function loadModel(model, wanted) {
   const row = MODELS.find((m) => m.name === model);
-  if (!row || !row.can_load_unload) return refuse(`${PROVIDER} cannot load or unload models.`);
+  if (!row || !row.can_manage) return refuse(`${PROVIDER} cannot load or unload models.`);
   row.loaded = wanted;
   return say(wanted ? `Loaded ${model}.` : `Unloaded ${model}.`);
 }

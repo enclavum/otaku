@@ -10,7 +10,7 @@ import httpx
 import pytest
 
 from otaku.backend.paths import Paths
-from otaku.providers import CLIENTS, UnreachableError
+from otaku.providers import ALL_CLIENTS, ModelState, UnreachableError
 from otaku.providers.clients.omlx import OmlxClient
 from otaku.settings import config as config_mod
 from otaku.settings import providers as providers_mod
@@ -24,7 +24,7 @@ def live_app(
     tmp_path: Path, server: ModelServer, provider_config: ProviderConfig, model: str
 ) -> App:
     """The real app over `provider_config`, set to play `model`. The scripted
-    `server` carries only the harness plumbing (its "test" provider);
+    `server` carries only the harness plumbing (its "generic" provider);
     the story itself goes to the live endpoint."""
     root = tmp_path / "state"
     paths = Paths.resolve(root)
@@ -75,15 +75,16 @@ def case_model(engine: str, url: str, key: str, named: str) -> str:
     engine's own module skips. omlx plays a LOADED model unless one is
     named (its listing carries the unloaded too, and a smoke does not
     wait on a load); the rest play the named one, else the first listed."""
-    client = CLIENTS[engine](ProviderConfig(name=engine, url=url, api_key=key))
+    client = ALL_CLIENTS[engine](ProviderConfig(name=engine, url=url, api_key=key))
     try:
-        rows = client.models(timeout=5.0)
+        rows = client.models.list(timeout=5.0)
     except UnreachableError:
         pytest.skip(f"no server at {url}")
     if named:
-        return named
+        # As listed: Ollama tags a bare name ":latest".
+        return next((r.name for r in rows if r.name in (named, f"{named}:latest")), named)
     if engine == "omlx":
-        rows = [row for row in rows if row.loaded]
+        rows = [row for row in rows if row.state is ModelState.LOADED]
         if not rows:
             pytest.skip("no model loaded in omlx")
     if not rows:

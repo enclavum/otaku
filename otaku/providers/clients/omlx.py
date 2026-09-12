@@ -14,14 +14,16 @@ from otaku.providers import http
 from otaku.providers.clients import read_home_json
 from otaku.providers.http import ASK_TIMEOUT, PROBE_TIMEOUT, positive_int
 from otaku.providers.openai import reasoning
+from otaku.providers.openai.auth import OpenAIAuth
 from otaku.providers.openai.client import Locality, OpenAIClient
 from otaku.providers.openai.completion import OpenAICompletion
 from otaku.providers.openai.models import Capabilities, Listing, ModelInfo, ModelState, OpenAIModels
 from otaku.providers.openai.requests import WireMessage
 from otaku.settings.providers import ProviderConfig
 
-# The types a chat can be had with; the rest (embedding, reranker, the
-# audio kinds, the markitdown pseudo-model) answer a chat with a 400.
+# The types a chat can be had with; the embedding, reranker and audio
+# kinds answer a chat with a 400, and the markitdown pseudo-model with a
+# document conversion.
 _LANGUAGE_MODELS = frozenset({"llm", "vlm"})
 
 
@@ -39,54 +41,46 @@ class OmlxModels(OpenAIModels):
     # ---------- the hooks ----------
 
     def _list(self, timeout: float) -> Listing:
-        """Everything from the one /v1/models/status pass: id, type, size,
-        state, and the model's maximum window, which a loaded instance
-        serves whole. No status surface — not an omlx server — falls to
-        the plain names; a dead server raises out of them."""
-        entries = self._status(timeout)
+        """Everything from the one /v1/models/status pass; a model the
+        operator hid, or a speculative drafter, is not offered. No status
+        surface — not an omlx server — falls to the plain names; a dead
+        server raises out of them."""
+        entries = _status(self._config, self._auth, timeout)
         if not entries:
             return super()._list(timeout)
         models = []
         for entry in entries:
             model_id = entry.get("id")
-            if not isinstance(model_id, str):
+            if not isinstance(model_id, str) or entry.get("is_hidden") or entry.get("is_helper"):
                 continue
             kind = entry.get("model_type")
             if isinstance(kind, str) and kind and kind not in _LANGUAGE_MODELS:
                 continue
-            # Only a VLM takes images; a type the status does not state
-            # leaves the question open.
-            vision = kind == "vlm" if isinstance(kind, str) and kind else None
-            window = positive_int(entry.get("max_context_window"))
-            loaded = bool(entry.get("loaded"))
+            state, max_context_loaded = self._state_of(entry)
             models.append(
                 ModelInfo(
                     name=model_id,
-                    size=positive_int(entry.get("actual_size") or entry.get("estimated_size")),
-                    max_context_catalogue=window,
-                    max_context_loaded=window if loaded else None,
-                    capabilities=Capabilities(vision=vision, text_completion=True),
-                    state=ModelState.LOADED if loaded else ModelState.UNLOADED,
+                    size=positive_int(entry.get("estimated_size")),  # the weights on disk
+                    max_context_catalogue=positive_int(entry.get("model_context_length")),
+                    max_context_loaded=max_context_loaded,
+                    capabilities=self._capabilities_of(entry),
+                    state=state,
                     checked=True,
                 )
             )
         return sorted(models, key=lambda model: model.name)
 
     def _state(self, name: str) -> tuple[ModelState, int | None] | None:
-        entry = self._status_entry(name)
-        if entry is None:
-            return None
-        if bool(entry.get("loaded")):
-            return ModelState.LOADED, positive_int(entry.get("max_context_window"))
-        return ModelState.UNLOADED, None
+        entry = _status_entry(self._config, self._auth, name)
+        return self._state_of(entry) if entry is not None else None
 
     # ---------- the native surface ----------
 
     def _model_action(self, action: str, model: str) -> None:
-        # omlx evicts on its own (idle, LRU, memory pressure) and refuses
-        # an order its state already satisfies: ask first, order only
-        # what is not so.
-        entry = self._status_entry(model)
+        # omlx evicts on its own (idle, LRU, memory pressure); an unload
+        # of what is not loaded is a 400, a load of what is a no-op: ask
+        # first, order only what is not so.
+        entry = _status_entry(self._config, self._auth, model)
         if entry is not None and bool(entry.get("loaded")) == (action == "load"):
             return
         http.post_json(
@@ -97,21 +91,29 @@ class OmlxModels(OpenAIModels):
             timeout=None,
         )
 
-    def _status_entry(self, model: str) -> dict[str, Any] | None:
-        return next((e for e in self._status(PROBE_TIMEOUT) or [] if e.get("id") == model), None)
+    def _state_of(self, entry: dict[str, Any]) -> tuple[ModelState, int | None]:
+        """The instance's facts off a status entry: loaded, with the
+        context size it serves — `max_context_window`, the serving cap,
+        never the model's own length — or loading, or unloaded."""
+        if entry.get("loaded"):
+            return ModelState.LOADED, positive_int(entry.get("max_context_window"))
+        if entry.get("is_loading"):
+            return ModelState.LOADING, None
+        return ModelState.UNLOADED, None
 
-    def _status(self, timeout: float) -> list[dict[str, Any]] | None:
-        """The status listing's entries; None when the server did not
-        answer, or has no such surface."""
-        data = http.get_json(
-            f"{self._config.base_url}/v1/models/status",
-            name=self._config.name,
-            headers=self._auth.headers,
-            timeout=timeout,
-            quiet=True,
+    def _capabilities_of(self, entry: dict[str, Any]) -> Capabilities:
+        """Only a VLM takes images, and a type the status does not state
+        leaves the question open. `thinking_default` is whether the
+        template has the thinking toggle at all: None, and no effort
+        reaches the model; a bool, and every effort does, as on or off."""
+        kind = entry.get("model_type")
+        vision = kind == "vlm" if isinstance(kind, str) and kind else None
+        toggle = entry.get("thinking_default")
+        return Capabilities(
+            vision=vision,
+            reasoning=reasoning.ALL_EFFORTS if isinstance(toggle, bool) else frozenset(),
+            text_completion=True,
         )
-        models = data.get("models") if isinstance(data, dict) else None
-        return [m for m in models if isinstance(m, dict)] if isinstance(models, list) else None
 
 
 class OmlxCompletion(OpenAICompletion):
@@ -123,6 +125,11 @@ class OmlxCompletion(OpenAICompletion):
     def count_chat_tokens(
         self, model: str, messages: Sequence[WireMessage], timeout: float = ASK_TIMEOUT
     ) -> int | None:
+        # The count resolves the engine, which loads the model; a count
+        # is never worth a load.
+        entry = _status_entry(self._config, self._auth, model)
+        if entry is None or not entry.get("loaded"):
+            return None
         # Anthropic's shape: the system text apart, the turns as messages.
         system = "\n\n".join(m.body for m in messages if m.role == "system")
         turns = [{"role": m.role, "content": m.body} for m in messages if m.role != "system"]
@@ -160,3 +167,25 @@ class OmlxClient(OpenAIClient):
         key = auth.get("api_key") if isinstance(auth, dict) else None
         url = f"http://localhost:{port if isinstance(port, int) else 8000}/v1"
         return ProviderConfig(name=cls.id, url=url, api_key=str(key) if key else "")
+
+
+def _status(
+    config: ProviderConfig, auth: OpenAIAuth, timeout: float
+) -> list[dict[str, Any]] | None:
+    """The status listing's entries; None when the server did not answer,
+    or has no such surface."""
+    data = http.get_json(
+        f"{config.base_url}/v1/models/status",
+        name=config.name,
+        headers=auth.headers,
+        timeout=timeout,
+        quiet=True,
+    )
+    models = data.get("models") if isinstance(data, dict) else None
+    return [m for m in models if isinstance(m, dict)] if isinstance(models, list) else None
+
+
+def _status_entry(config: ProviderConfig, auth: OpenAIAuth, model: str) -> dict[str, Any] | None:
+    return next(
+        (e for e in _status(config, auth, PROBE_TIMEOUT) or [] if e.get("id") == model), None
+    )

@@ -70,7 +70,7 @@ class SessionFacts:
     version: str
     model: str  # "(no model)" when none
     engine: str  # the kind of server behind it; "" when none
-    context: int | None  # the loaded window, when a LOCAL engine answers
+    max_context: int | None  # the context the model gets, when a LOCAL engine answers
     story: str  # the story's name, cut by the caller; "" when it has none
 
 
@@ -107,8 +107,8 @@ def render_terminal(facts: SessionFacts) -> str:
     engine."""
     style = _style()
     details = [f"{style.gray}{facts.engine}{style.reset}" if facts.engine else ""]
-    if facts.context:
-        details.append(f"{style.gray}{format_context(facts.context)} context{style.reset}")
+    if facts.max_context:
+        details.append(f"{style.gray}{format_context(facts.max_context)} context{style.reset}")
     return _render(
         facts.version,
         [

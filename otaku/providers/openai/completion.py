@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from typing import Any, ClassVar, Protocol, final
 
 from otaku.providers import http, smoothing
-from otaku.providers.errors import DeclinedError, StatusError, UnreachableError
+from otaku.providers.errors import DeclinedError, ProviderError, StatusError, UnreachableError
 from otaku.providers.http import ASK_TIMEOUT, REPLY_TIMEOUT
 from otaku.providers.openai import frames, reasoning, requests
 from otaku.providers.openai.auth import OpenAIAuth
@@ -139,7 +139,11 @@ class OpenAICompletion:
         message; `watched=False` skips the pacing for a call nobody
         watches, so its cancel is not delayed."""
         body = requests.chat_completion_body(
-            model, messages, params, images=images, cache_ttl=self._cache_ttl()
+            model,
+            messages,
+            self._convert_params(params),
+            images=images,
+            cache_ttl=self._cache_ttl(),
         )
         knobs = reasoning.fields(effort, self.chat_reasoning_knobs)
         url = f"{self._config.url}/chat/completions"
@@ -164,7 +168,7 @@ class OpenAICompletion:
         engine's text knobs. Whatever the model reasons arrives
         inline, in the text — nothing stands between the prompt and
         the model to tell a thought from the rest."""
-        body = requests.text_completion_body(model, prompt, params)
+        body = requests.text_completion_body(model, prompt, self._convert_params(params))
         knobs = reasoning.fields(effort, self.text_reasoning_knobs)
         url = f"{self._config.url}/completions"
         stream = self._stream(url, body, knobs, purpose, timeout, frames.completion_delta)
@@ -207,11 +211,12 @@ class OpenAICompletion:
         read_delta: _DeltaReader,
     ) -> Iterator[Chunk]:
         """The request with its reasoning `knobs`, and — should a 400
-        refuse it before anything streamed — once more without them:
-        "none" cannot be sent to a model whose reasoning is mandatory,
-        and some engines reject the field outright. A take that yielded
-        is never retried, since its words are on someone's screen. No
-        knobs, one take."""
+        refuse it before anything streamed, naming a knob — once more
+        without them: "none" cannot be sent to a model whose reasoning
+        is mandatory, and some engines reject the field outright. A 400
+        that names no knob (a context overflow) is the answer, sent
+        once; a take that yielded is never retried, since its words are
+        on someone's screen. No knobs, one take."""
         if not knobs:
             yield from self._generate(url, body, purpose, timeout, read_delta)
             return
@@ -225,7 +230,8 @@ class OpenAICompletion:
                     yielded = True
                     yield chunk
         except StatusError as e:
-            if yielded or e.status != 400:
+            knob_refused = any(word in str(e).lower() for word in self._refusal_words(knobs))
+            if yielded or e.status != 400 or not knob_refused:
                 raise
             yield from self._generate(url, body, purpose, timeout, read_delta)
 
@@ -258,12 +264,13 @@ class OpenAICompletion:
         try:
             try:
                 for event in events:
-                    usage = frames.read_usage(event)
+                    usage = self._read_usage(event)
                     if usage is not None:
                         stats.prompt_tokens, stats.completion_tokens, cached = usage
                         if cached is not None:
                             stats.cached_tokens = cached
-                    if sentence := frames.trouble(event):
+                    sentence = frames.trouble(event)
+                    if sentence and sentence not in trouble:
                         trouble.append(sentence)
                     thought, content = read_delta(event)
                     if (thought or content) and stats.first_token_seconds is None:
@@ -281,18 +288,17 @@ class OpenAICompletion:
                 if not trouble:
                     raise
             if trouble:
-                raise DeclinedError("The model declined: " + "; ".join(trouble))
+                raise DeclinedError("The model declined: " + "".join(trouble))
             status = "ok"
         except Exception as e:
             status = f"failed: {type(e).__name__}"
             raise
         finally:
             # Deterministically, not at collection: the connection closes
-            # the moment the consumer lets go, and the server stops. The
-            # answer is filed BEFORE the final yield, so a consumer that
-            # takes the last Text and never pulls the stats still leaves
-            # a finished answer in the log.
-            lines.close()
+            # the moment the consumer lets go, and the server stops. A
+            # close that fails is no reason to leave the answer unfiled.
+            with contextlib.suppress(ProviderError):
+                lines.close()
             stats.total_seconds = time.monotonic() - start
             if self._request_sink is not None and request_id:
                 self._request_sink.record_answer(
@@ -305,6 +311,19 @@ class OpenAICompletion:
                     reasoning="".join(thoughts),
                 )
         yield stats
+
+    @staticmethod
+    def _refusal_words(knobs: dict[str, object]) -> set[str]:
+        """The field names a refusal of `knobs` would mention: each key,
+        nested ones included, and the stems a sentence uses without the
+        field — OpenRouter's "reasoning" for a mandatory one, Ollama's
+        "thinking" for a model without any."""
+        words = {"reasoning", "thinking"}
+        for key, value in knobs.items():
+            words.add(key)
+            if isinstance(value, dict):
+                words.update(value)
+        return words
 
     @staticmethod
     def _events(lines: Iterator[str], name: str) -> Generator[dict[str, Any], None, None]:
@@ -327,3 +346,16 @@ class OpenAICompletion:
             if isinstance(event, dict):
                 yield event
         raise UnreachableError(f"Lost the connection to {name}.")
+
+    # ---------- the hooks ----------
+
+    def _convert_params(self, params: dict[str, object]) -> dict[str, object]:
+        """The sampling params as this engine spells them: the app sends
+        `repetition_penalty`, which llama.cpp and LM Studio read only as
+        `repeat_penalty`. The base spells nothing differently."""
+        return params
+
+    def _read_usage(self, event: dict[str, Any]) -> frames.Usage | None:
+        """The usage report on a frame, or None: the protocol's `usage`
+        object, which is all the base reads."""
+        return frames.read_usage(event)

@@ -29,7 +29,7 @@ from otaku.context import assembler
 from otaku.context.assembler import AssembledPrompt, ContextShape
 from otaku.formatting import pretty_path
 from otaku.logging import ErrorLog
-from otaku.providers import Client, Locality, ProviderConfig, Registry
+from otaku.providers import Locality, OpenAIClient, ProviderConfig, Registry
 from otaku.settings import models as models_file
 from otaku.settings import state as state_file
 from otaku.settings.config import Config, TerminalSettings, WebSettings
@@ -189,7 +189,7 @@ class Session:
         section somebody named themselves is not named after its engine.
         "" while no model is selected."""
         client = self._client()
-        return client.kind if client is not None else ""
+        return client.id if client is not None else ""
 
     @property
     def on_cloud(self) -> bool:
@@ -244,7 +244,7 @@ class Session:
         return self._state.notification
 
     @property
-    def max_context(self) -> int:
+    def max_context_setting(self) -> int:
         """Tokens the prompt may use at most — config.toml's [context]
         value, which /set max_context edits in place; 0 means the
         model's whole window."""
@@ -279,8 +279,8 @@ class Session:
 
     # ---------- what frontends may call ----------
 
-    def context_size(self) -> int | None:
-        """The loaded model's window, for a header to state — None when
+    def max_context(self) -> int | None:
+        """The context the model gets, for a header to state — None when
         nobody can say. Best-effort and never blocking on the internet:
         a CLOUD catalog is not asked, because its answer lives across
         the internet and a launch does not wait for that; the generic
@@ -290,9 +290,10 @@ class Session:
         if client is None or client.locality is Locality.REMOTE:
             return None
         try:
-            return client.get_context_size(self.model)
+            found = client.models.get(self.model)
         except Exception:
             return None
+        return found.max_context if found else None
 
     def start_worker(self) -> None:
         """Start the background actor — called once by the frontend, the
@@ -379,7 +380,7 @@ class Session:
         with contextlib.suppress(Exception):
             self._store.history.add(text)
 
-    def assemble(self, context_max: int | None) -> AssembledPrompt:
+    def assemble(self, max_context: int | None) -> AssembledPrompt:
         """The next request — the one binding of the session's fields to
         `assembler.assemble_story`, so the turn, the preview, and every
         other call site can never disagree on what is sent. Raises
@@ -391,7 +392,7 @@ class Session:
             system=self._system,
             messages=list(self._messages),
             shape=self._shape(),
-            context_max=context_max,
+            max_context=max_context,
         )
 
     # ---------- state primitives (backend package internal) ----------
@@ -401,18 +402,13 @@ class Session:
         the registry by name — never a snapshot."""
         if not self.provider:
             return None
-        try:
-            return self._providers_registry.get_client(self.provider).config
-        except ValueError:
-            return None
+        client = self._providers_registry.get(self.provider)
+        return client.config if client is not None else None
 
-    def _client(self) -> Client | None:
+    def _client(self) -> OpenAIClient | None:
         if not self.model:
             return None
-        try:
-            return self._providers_registry.get_client(self.provider)
-        except ValueError:
-            return None
+        return self._providers_registry.get(self.provider)
 
     def _shape(self) -> ContextShape:
         """The assembly shape: config's window settings + the prompts'
@@ -420,7 +416,7 @@ class Session:
         return ContextShape(
             head_messages=self._config.head_messages,
             min_tail_messages=self._config.min_tail_messages,
-            max_context=self.max_context,
+            max_context_setting=self.max_context_setting,
             recap_header=self._prompts.recap_header,
             card_framing=self._prompts.card_framing,
         )

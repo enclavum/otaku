@@ -79,6 +79,8 @@ def _mark_cache(wire: list[dict[str, object]], ttl: str) -> None:
         marker["ttl"] = "1h"
 
     def marked(row: dict[str, object]) -> dict[str, object]:
+        if not row["content"]:
+            return row  # an empty text part is refused by the catalogs
         part = {"type": "text", "text": row["content"], "cache_control": dict(marker)}
         return {**row, "content": [part]}
 
@@ -92,7 +94,11 @@ def _with_images(message: dict[str, object], images: Sequence[Image]) -> dict[st
     """`message` with the images appended as content parts, the text
     becoming a part of its own where it was a plain string."""
     content = message["content"]
-    parts = list(content) if isinstance(content, list) else [{"type": "text", "text": content}]
+    if isinstance(content, list):
+        parts = list(content)
+    else:
+        # An empty text part is refused by the catalogs; no words, no part.
+        parts = [{"type": "text", "text": content}] if content else []
     for image in images:
         encoded = base64.b64encode(image.data).decode("ascii")
         url = f"data:{image.media_type};base64,{encoded}"

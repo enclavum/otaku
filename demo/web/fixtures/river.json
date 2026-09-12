@@ -1,12 +1,13 @@
 {
  "facts": {
-  "version": "0.4.3",
+  "version": "0.5.0",
   "model": "",
   "engine": "",
-  "context": "",
+  "max_context": "32K",
   "story": "The River That Forgot Its Name",
   "story_id": 1,
-  "turns": 14
+  "turns": 14,
+  "context": ""
  },
  "story": {
   "id": 1,

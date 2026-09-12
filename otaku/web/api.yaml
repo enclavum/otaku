@@ -103,7 +103,7 @@ openapi: 3.1.0
 
 info:
   title: otaku web API
-  version: 0.4.2
+  version: 0.5.0
   contact:
     name: otaku
     url: https://otaku.sh
@@ -1330,7 +1330,7 @@ components:
             tail_setting: { type: integer, description: "The configured min_tail_messages." }
             system_tokens: { type: integer }
             transcript_tokens: { type: integer }
-            limit: { type: integer, description: "What the prompt measured against — the smaller of the model's window and max_context, minus the reply reserve." }
+            limit: { type: integer, description: "What the prompt measured against — the smaller of the context a request gets (the loaded size, or the model's own on a catalog) and max_context, minus the reply reserve." }
             kept: { type: integer, description: "Derived: head + tail." }
             total_tokens: { type: integer, description: "Derived: system + transcript." }
             used: { type: integer, description: "Derived: percent of the limit." }
@@ -1422,7 +1422,7 @@ components:
               description: 'The record''s own dim line — the dice a /roll rolled; "" otherwise.'
         - type: object
           properties:
-            type: { const: thinking }
+            type: { const: reasoning }
             text: { type: string }
         - type: object
           properties:
@@ -1474,7 +1474,7 @@ components:
           items:
             type: object
             properties:
-              name: { type: string }
+              id: { type: string, description: "The engine's id, which names its section." }
               label: { type: string }
               order:
                 type: integer
@@ -1500,10 +1500,15 @@ components:
                   type: object
                   properties:
                     name: { type: string }
-                    loaded: { type: boolean }
-                    can_load_unload: { type: boolean }
+                    loaded:
+                      type: boolean
+                      description: >
+                        Whether an instance serves it now — one still
+                        loading is not loaded. Always true where the engine
+                        serves what it serves (can_manage false).
+                    can_manage: { type: boolean }
                     size: { type: string }
-                    context: { type: string }
+                    max_context_catalogue: { type: string, description: "The model's own maximum context, formatted; \"\" when the engine states none." }
 
     Scene:
       type: object
@@ -1535,7 +1540,13 @@ components:
         version: { type: string }
         model: { type: string, description: "The bare model name; \"(no model)\" when none." }
         engine: { type: string }
-        context: { type: string, description: "The window, formatted; \"\" when unknown." }
+        max_context:
+          type: string
+          description: >
+            The context a request gets, formatted: the loaded instance's
+            size, or the model's own where nothing loads (the generic
+            provider's rows). "" when unknown — and always for a hosted
+            catalog, which a launch never asks across the internet.
         story: { type: string, description: "The open story's name; \"\" when none." }
         story_id: { type: [integer, "null"] }
         turns: { type: integer, description: "How many, so the runhead needs no chain." }

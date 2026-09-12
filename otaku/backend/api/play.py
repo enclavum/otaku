@@ -2,7 +2,7 @@
 the takes over it (regenerate, undo).
 
 The stream is the frontend's to drive: iterate to render, close to
-cancel. The event vocabulary lives here, `Text` and `Thinking` included
+cancel. The event vocabulary lives here, `Text` and `Reasoning` included
 (re-exported from providers — members of this module's union). Closing
 mid-stream keeps and records what arrived — Ctrl+C and Ctrl+R are the
 frontend closing the generator; a Ctrl+R then simply calls `regenerate`
@@ -20,9 +20,9 @@ from otaku.backend.session import NO_MODEL_HINT, Refused, Session
 from otaku.context import syntax
 from otaku.context.assembler import ContextOverflowError
 from otaku.formatting import format_context
+from otaku.providers import Reasoning as Reasoning
 from otaku.providers import Stats
 from otaku.providers import Text as Text
-from otaku.providers import Thinking as Thinking
 from otaku.store.schema import Character, Message
 
 
@@ -64,7 +64,7 @@ class Done:
     stats: str
 
 
-PlayEvent = Recorded | Text | Thinking | Declined | Failed | Done
+PlayEvent = Recorded | Text | Reasoning | Declined | Failed | Done
 
 
 def submit(session: Session, line: str) -> Iterator[PlayEvent]:
@@ -75,7 +75,7 @@ def submit(session: Session, line: str) -> Iterator[PlayEvent]:
     function that validates and returns the inner generator, never a
     generator itself. Then: the typed name settles to the cast's
     spelling, the turn records, Recorded is yielded, and the reply
-    streams as Thinking/Text deltas, Failed on a stream error, Done at
+    streams as Reasoning/Text deltas, Failed on a stream error, Done at
     the end. With no model selected the turn is still recorded — it is
     story — and Declined(NO_MODEL_HINT) ends the stream after Recorded.
     Closing the generator mid-stream records the partial reply and its
@@ -91,7 +91,7 @@ def submit(session: Session, line: str) -> Iterator[PlayEvent]:
 
 def regenerate(session: Session) -> Iterator[PlayEvent]:
     """Re-run the last prompt: the standing reply becomes a sibling and
-    the fresh take streams (Text/Thinking/Failed/Done — no Recorded; the
+    the fresh take streams (Text/Reasoning/Failed/Done — no Recorded; the
     prompt is already on screen or in `session.messages`). The dropped
     reply's kind and speaker are re-derived from the prompt, exactly as
     when it first played. Raises Refused when there is no model or
@@ -203,7 +203,9 @@ def _reply_events(
         yield Declined(NO_MODEL_HINT)
         return
     try:
-        wire = session.assemble(client.get_context_size(session.model)).messages
+        found = client.models.get(session.model)
+        max_context = found.max_context if found else None
+        wire = session.assemble(max_context).messages
     except ContextOverflowError as e:
         # The turn is recorded — it is story — and plays once the limit
         # is raised or more scenes close. The sentence is the assembler's.
@@ -213,12 +215,11 @@ def _reply_events(
     held = ""  # a whitespace run the stream has not yet earned sending
     final: Stats | None = None
     error: str | None = None
-    stream = client.complete_chat(
+    stream = client.completion.chat(
         session.model,
         wire,
         dict(session.params),
-        # The setting's "none" is the package's "off".
-        think_level="off" if session.think == "none" else session.think,
+        effort=session.think,
         purpose="chat",
         # The thread this runs on belongs to the frontend between
         # tokens, if the frontend said what to do with it.
@@ -227,7 +228,7 @@ def _reply_events(
     try:
         try:
             for chunk in stream:
-                if isinstance(chunk, Thinking):
+                if isinstance(chunk, Reasoning):
                     yield chunk
                 elif isinstance(chunk, Text):
                     # Some models pad the reply with blank lines. The text
@@ -264,7 +265,7 @@ def _reply_events(
     if error is not None:
         yield Failed(error)
         return
-    stats = _format_stats(final) if session.verbose and final is not None else ""
+    stats = _format_stats(final, max_context) if session.verbose and final is not None else ""
     yield Done(reply=reply, stats=stats)
 
 
@@ -304,22 +305,23 @@ def _land_reply(
             prompt_tokens=final.prompt_tokens,
             completion_tokens=final.completion_tokens,
             cached_tokens=final.cached_tokens,
-            duration_seconds=final.duration_seconds,
+            duration_seconds=final.total_seconds,
         )
     if reply is not None and session._config.lore_enabled and session.story_id is not None:
         session._worker.schedule(build_job(session))
     return reply
 
 
-def _format_stats(stats: Stats) -> str:
+def _format_stats(stats: Stats, max_context: int | None) -> str:
     """The verbose stats line:
 
         [ total 1.3s, prompt 40 tok, eval 37 tok @ 35.2 tok/s, ctx 12% / 32K ]
 
     `total` is wall-clock for the whole request; the rate is computed over
     the decode-only span (excluding prefill and time-to-first-token) so it
-    reflects generation speed. Fields with no underlying value are skipped."""
-    parts: list[str] = [f"total {stats.duration_seconds:.1f}s"]
+    reflects generation speed; `max_context` is the context the prompt
+    is measured against. Fields with no underlying value are skipped."""
+    parts: list[str] = [f"total {stats.total_seconds:.1f}s"]
     if stats.prompt_tokens is not None:
         parts.append(f"prompt {stats.prompt_tokens} tok")
     if stats.cached_tokens is not None:
@@ -327,16 +329,16 @@ def _format_stats(stats: Stats) -> str:
         # pacing outlives the cache TTL (see providers.toml prompt_cache).
         parts.append(f"cached {stats.cached_tokens} tok")
     if stats.completion_tokens is not None:
-        generation = stats.duration_seconds - (stats.first_token_seconds or 0.0)
+        generation = stats.total_seconds - (stats.first_token_seconds or 0.0)
         if generation > 0:
             rate = stats.completion_tokens / generation
             parts.append(f"eval {stats.completion_tokens} tok @ {rate:.1f} tok/s")
         else:
             parts.append(f"eval {stats.completion_tokens} tok")
-    if stats.context_max:
-        cap = format_context(stats.context_max)
-        if stats.prompt_tokens is not None and stats.context_max > 0:
-            pct = stats.prompt_tokens / stats.context_max * 100
+    if max_context:
+        cap = format_context(max_context)
+        if stats.prompt_tokens is not None:
+            pct = stats.prompt_tokens / max_context * 100
             parts.append(f"ctx {pct:.0f}% / {cap}")
         else:
             parts.append(f"ctx {cap}")

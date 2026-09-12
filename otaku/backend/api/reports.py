@@ -21,7 +21,7 @@ from otaku.formatting import (
     printable,
     truncate_label,
 )
-from otaku.providers import CLIENTS, Locality, ProviderConfig
+from otaku.providers import ALL_CLIENTS, Locality, ModelState, reasoning
 
 
 @dataclass(frozen=True)
@@ -97,9 +97,10 @@ def context(session: Session) -> ContextReport:
     stands, over the assembler's default window — what WOULD be sent is
     a question that needs no server."""
     client = session._client()
-    window = client.get_context_size(session.model) if client is not None else None
+    found = client.models.get(session.model) if client is not None else None
+    max_context = found.max_context if found else None
     try:
-        prompt = session.assemble(window)
+        prompt = session.assemble(max_context)
     except ContextOverflowError as e:
         # The preview of a request that would not be sent is its refusal.
         raise Refused(str(e)) from e
@@ -303,7 +304,7 @@ def info(session: Session) -> InfoReport:
     if session._client() is None:
         model = InfoSection(note=NO_MODEL_HINT)
     else:
-        model = InfoSection(rows=_model_rows(session))
+        model = InfoSection(rows=_model_info(session))
     return InfoReport((state, model, InfoSection(rows=_session_rows(session))))
 
 
@@ -369,23 +370,22 @@ def balances(session: Session, *, probe: bool = True) -> BalanceReport:
     it and fills the figures from one probed report. The terminal asks
     plainly and gets everything in one wait."""
     registry = session._providers_registry
-    configured = set(registry.names())
+    configured = set(registry.list())
 
-    def account(provider: str, config: ProviderConfig) -> Balance | None:
-        client = registry.get_client(provider)
-        if client.locality is not Locality.REMOTE:
+    def account(provider: str) -> Balance | None:
+        client = registry.get(provider)
+        if client is None or client.locality is not Locality.REMOTE:
             return None  # a local engine has no account to ask
         # What to CALL it: the engine's own caption — "OpenRouter", not
         # "openrouter". A section somebody named themselves keeps THEIR
         # name, with the engine in brackets: two sections of one kind
         # are two accounts, and a report of balances that cannot tell
         # them apart is a report of one number twice.
-        kind, label = type(client).kind, type(client).label
-        named = label if provider == kind else f"{provider} ({label})"
+        named = client.label if provider == client.id else f"{provider} ({client.label})"
         # An account nobody has a key for was never asked: that is a
         # different fact from an account that would not answer, and the
         # reader can act on one of them.
-        if client.key_source is None:
+        if client.auth.key_source is None:
             return Balance(provider, named, None, NO_KEY)
         if not probe:
             return Balance(provider, named, None, "")
@@ -400,9 +400,9 @@ def balances(session: Session, *, probe: bool = True) -> BalanceReport:
     # is still an account a reader may be about to open: it belongs in
     # the list, with nothing in it.
     rows += [
-        Balance(kind, cls.label, None, NO_KEY)
-        for kind, cls in CLIENTS.items()
-        if cls.locality is Locality.REMOTE and kind not in configured
+        Balance(id, cls.label, None, NO_KEY)
+        for id, cls in ALL_CLIENTS.items()
+        if cls.locality is Locality.REMOTE and id not in configured
     ]
     if not rows:
         raise Refused("No cloud providers.")
@@ -426,7 +426,16 @@ def balances(session: Session, *, probe: bool = True) -> BalanceReport:
 # ---------- report internals ----------
 
 
-def _model_rows(session: Session) -> tuple[tuple[str, str], ...]:
+# A model's load state as the Loaded row says it.
+_STATE_WORDS = {
+    ModelState.LOADED: "yes",
+    ModelState.UNLOADED: "no",
+    ModelState.LOADING: "loading",
+    ModelState.UNKNOWN: "unknown",
+}
+
+
+def _model_info(session: Session) -> tuple[tuple[str, str], ...]:
     """The active model's block of `info` — the caller checked a model
     is active."""
     client = session._client()
@@ -436,30 +445,51 @@ def _model_rows(session: Session) -> tuple[tuple[str, str], ...]:
     config = client.config
     # Two facts, not one: a frontend that wants to set the URL under the
     # backend's own line cannot split a parenthesis back apart.
-    out = [("Model", session.full_model_name), ("Backend", client.kind), ("URL", config.url)]
-    if client.key_source is not None:
+    out = [("Model", session.full_model_name), ("Backend", client.id), ("URL", config.url)]
+    if client.auth.key_source is not None:
         out.append(("Auth", "api_key configured"))
-    # The model's own row — load state only where loading is a real state
-    # (a plain endpoint or a cloud catalog serves everything statically).
-    # A cloud catalog has neither a load state nor a size to report, and
-    # asking costs a full catalog fetch: skip what would print nothing.
-    # The generic provider has neither either, wherever its url points.
-    row = client.model(session.model) if client.locality is Locality.LOCAL else None
-    if row is not None:
-        out.append(("Loaded", "yes" if row.loaded else "no"))
-    if row is not None and row.size:
-        out.append(("Size", format_size(row.size)))
-    window = format_context(client.get_context_size(session.model))
-    if window:
-        out.append(("Context", window))
+    # The model's own row. Load state and size only where loading is a
+    # real state (a cloud catalog serves everything statically); the
+    # capabilities from any engine that reports them, a catalog included
+    # — that one costs a full catalog fetch, and /info is the place to
+    # pay it. The generic provider reports none of these, wherever its
+    # url points, so it is not asked.
+    row = client.models.get(session.model) if client.locality is not Locality.UNKNOWN else None
+    if row is not None and client.locality is Locality.LOCAL:
+        out.append(("Loaded", _STATE_WORDS[row.state]))
+        if row.size:
+            out.append(("Size", format_size(row.size)))
+    # Two sizes, each when known: the model's own, and what the loaded
+    # instance serves — what a request gets, and what the budget reads.
+    if ceiling := format_context(row.max_context_catalogue if row else None):
+        out.append(("Context", ceiling))
+    if window := format_context(row.max_context_loaded if row else None):
+        out.append(("Loaded context", window))
+    # What the model can do, as the engine says it — one fact per row,
+    # "unknown" where the engine could not say (and the app offers
+    # nothing on it). The efforts are listed in the wire's order; an
+    # engine no effort reaches lists none.
+    caps = row.capabilities if row is not None else None
+    out.append(("Vision", _yes_no(caps.vision if caps else None)))
+    efforts = caps.reasoning if caps else None
+    if efforts is None:
+        out.append(("Reasoning efforts", "unknown"))
+    else:
+        named = ", ".join(effort for effort in reasoning.EFFORTS if effort in efforts)
+        out.append(("Reasoning efforts", named or "none"))
+    out.append(("Text completion", _yes_no(caps.text_completion if caps else None)))
     out.append(("Thinking", session.think if session.think else "default"))
     if config.keep_alive:
         out.append(("Keep-alive", str(config.keep_alive)))
-    if client.cache_markers:
+    if client.completion.can_mark_cache:
         # Displayed here, decided in providers.toml — the keep_alive
         # pattern: behaviour keys are read in /info, edited in the file.
         out.append(("Prompt cache", config.prompt_cache or "5m"))
     return tuple(out)
+
+
+def _yes_no(fact: bool | None) -> str:
+    return "unknown" if fact is None else ("yes" if fact else "no")
 
 
 def _session_rows(session: Session) -> tuple[tuple[str, str], ...]:

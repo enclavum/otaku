@@ -5,13 +5,91 @@ All notable changes to otaku are documented in this file. The format is based on
 [Semantic Versioning](https://semver.org/) — while pre-1.0, minor releases may include breaking
 changes.
 
-## [Unreleased]
+## [0.5.0] - [Planned]
+
+**TL;DR**
+
+- The providers layer is rewritten from scratch. Models report which reasoning efforts reach them and what else they can do.
+- Three more sampling parameters: `top_k`, `min_p` and `repetition_penalty`.
+- Provider API keys can come from environment variables.
+- llama.cpp's router mode: its models listed, loaded and unloaded from the picker.
+
+Full list of changes: [CHANGELOG.md](https://github.com/enclavum/otaku/blob/main/CHANGELOG.md)
 
 ### Added
 
-- `/set` accepts three more sampling parameters: `top_k`, `min_p` and `repetition_penalty`. They ride through to
-  the server as sent; omlx, llama.cpp and KoboldCpp honour them, Ollama's OpenAI-compatible endpoint ignores them
-  (set those in a Modelfile instead).
+- A cloud key can live in the shell instead of `providers.toml`: OpenRouter reads
+  `OPENROUTER_API_KEY`, NanoGPT `NANOGPT_API_KEY`, LM Studio `LMSTUDIO_API_KEY`, omlx
+  `OMLX_API_KEY`, Ollama `OLLAMA_API_KEY`, llama.cpp `LLAMACPP_API_KEY`, KoboldCpp
+  `KOBOLDCPP_API_KEY`, and the Generic OpenAI provider `GENERIC_API_KEY`. A key typed into the
+  provider panel wins over the variable, and clearing it there uncovers the variable again; the
+  variable is never written to the file. `/info` and `/balance` count a key from either source.
+- When the llama.cpp or KoboldCpp section is first written, it takes the port the server was
+  actually launched with, read off the running process, rather than the engine's default — a
+  release build's name (`koboldcpp-mac-arm64`), a `python koboldcpp.py` launch and a path with
+  spaces in it included.
+- llama.cpp in router mode (`llama-server --models-dir`) lists the directory's models in the
+  picker and loads and unloads them there, the way Ollama and omlx do. A model the router put to
+  sleep counts as loaded, and a load that failed says so with the exit code.
+- `/info` reports what the model can do as its engine says it: whether it takes images, which
+  reasoning efforts reach it, and whether it completes raw text — `yes`, `no`, the efforts, or
+  `unknown` where the engine cannot say, which is the Generic OpenAI provider's every row and
+  llama.cpp's and omlx's efforts. Unknown is never taken for allowed. Text completion is `no` on
+  Ollama: its `/v1/completions` wraps the prompt as a chat turn and thinks unseen, so no raw
+  continuation exists there.
+- `/set` accepts three more sampling parameters: `top_k`, `min_p` and `repetition_penalty`. omlx and
+  KoboldCpp take them as sent; llama.cpp and LM Studio spell the penalty `repeat_penalty`, and the provider
+  sends it so; Ollama's OpenAI-compatible endpoint ignores all three (set those in a Modelfile instead).
+
+### Changed
+
+- A model's context size is two figures, not one: the model's own maximum, as its catalog or
+  card states it, and the context size the loaded instance serves, which is what a request gets
+  and what the context budget reads, under the `max_context` setting as before. The picker's
+  column shows the model's own — KoboldCpp states none, and Ollama's arrives from the card once
+  `/info` has asked for it — and `/info` shows both when known.
+- A request refused with a 400 goes out again without the reasoning knobs only when the server's
+  message names them — a model whose reasoning is mandatory refusing `none`, an engine that
+  rejects the field. A context overflow fails at once instead of going out twice.
+- `/set think` is no longer refused on KoboldCpp or LM Studio. A level goes out on whatever
+  knobs the engine reads — KoboldCpp takes `reasoning_effort` and the template's flag, and its
+  newer builds spend it as a thinking budget — and where an engine reads none, as LM Studio's
+  endpoint does, the setting is kept and nothing is sent: thinking there is the app's own
+  per-model switch.
+- A failed turn, a refused load and a provider panel that cannot save now say one sentence in
+  the provider's own words: which provider could not be reached, which HTTP status it refused
+  with and what the server said, whose key was rejected, or that the model declined and why.
+- The web API spells its provider and model fields the way the backend does: an engine card's
+  `name` is `id`, a model's `can_load_unload` is `can_manage` and its `context` is
+  `max_context_catalogue`, the session's `context` is `max_context`, and the play event
+  `thinking` is `reasoning`. The page's `.otk-thinking` class, which a `custom.css` may target,
+  is `.otk-reasoning`.
+- Request-log lines file an answer's `status` and `reasoning` where they filed `outcome` and
+  `thinking`; lines written before still read.
+
+### Fixed
+
+- The thinking level never reached llama.cpp or omlx as an effort: both forward
+  `chat_template_kwargs` into the chat template and read no `reasoning_effort` of their own, so
+  only the on/off flag ever arrived, and 0.4.3's "llama.cpp takes the levels" was wrong. The
+  effort now rides into the template as a variable, beside the flag, for the templates that
+  grade their thinking (gpt-oss's); a template that reads none still gets on and off.
+- A reply cut short by the engine mid-stream — Ollama's runner failing, say — was filed as a
+  complete answer. A stream that ends without the protocol's `[DONE]` is now a lost connection.
+- `OLLAMA_HOST` is read the way Ollama reads it: an `http://` or `https://` scheme is kept and
+  supplies the port when none is written, a path is kept, a bare IPv6 address is bracketed, and
+  a bare number is a host, as it is to Ollama.
+- The picker offered models no story can be played on: Ollama's embedding models, and omlx's
+  embedding, reranker and audio models, each answering the first turn with a 400. They are no
+  longer listed. KoboldCpp with nothing loaded listed a model named `inactive`; it lists none.
+- A KoboldCpp generation that failed on the server ended as a complete reply: it stops with
+  `finish_reason: error` and no error text, which now reads as the model declining.
+- A provider url that cannot be spelled (a letter in the port) was a traceback; it is the
+  provider's could-not-reach sentence.
+- A section url a proxy redirects — `http` to `https`, a trailing slash — was taken as the
+  answer and failed as not JSON. Redirects are followed.
+- A key with a character a header cannot carry, a pasted non-breaking space say, was a
+  traceback. It is a sentence naming the position.
 
 ## [0.4.3] - 2026-09-08
 

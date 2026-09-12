@@ -5,7 +5,7 @@ smoke.mjs for its two implementations).
 
 The philosophy is demo.js's, one layer down: the web demo is the real
 page with `fetch` faked in the browser; this is the real TUI with the
-provider faked under `providers.registry.CLIENTS`. Everything between —
+provider faked under `providers.registry.ALL_CLIENTS`. Everything between —
 the chat loop, the ledger, the prompt, the store, the context assembler,
 extraction — is the product's own code, imported unmodified.
 
@@ -438,31 +438,33 @@ def _pace(seconds: float) -> None:
 def _build_demo_client():
     import demo_script
 
-    from otaku.providers.client import Client, Locality, ModelInfo
-    from otaku.providers.wire import Stats, Text, Thinking
+    from otaku.providers.openai.client import Locality, OpenAIClient
+    from otaku.providers.openai.completion import OpenAICompletion, Reasoning, Stats, Text
+    from otaku.providers.openai.models import ModelInfo, ModelState, OpenAIModels
 
-    class DemoClient(Client):
-        """The scripted engine: the real `Client` with the wire calls
-        answered from `demo_script` instead of a socket. The
-        orchestration above `_stream` — request logging, the thinking
-        retry, cancel-and-keep on close — is the base class's own."""
-
-        kind = "demo"
-        label = "demo"
-        locality = Locality.LOCAL
-
-        def models(self, timeout=10.0):
+    class DemoModels(OpenAIModels):
+        def _list(self, timeout):
             # Loaded and sized like a serving engine, or /info and the
             # picker would show a model nobody started.
-            return [ModelInfo(name=MODEL, context=CONTEXT_SIZE, loaded=True)]
+            return [
+                ModelInfo(
+                    name=MODEL,
+                    max_context_catalogue=CONTEXT_SIZE,
+                    max_context_loaded=CONTEXT_SIZE,
+                    state=ModelState.LOADED,
+                    checked=True,
+                )
+            ]
 
-        def _context_size(self, model):
-            return CONTEXT_SIZE
+    class DemoCompletion(OpenAICompletion):
+        """The wire calls answered from `demo_script` instead of a
+        socket. The orchestration above `_generate` — the reasoning
+        retry, cancel-and-keep on close — is the base class's own."""
 
         def _generate(self, url, body, purpose, timeout, read_delta):
             if self._request_sink is not None:
-                self._request_sink.record_request(self.config.name, purpose, body)
-            thinking, text = demo_script.reply(body, purpose)
+                self._request_sink.record_request(self._config.name, purpose, body)
+            reasoning, text = demo_script.reply(body, purpose)
             if purpose != "chat":
                 # Background work (extraction, rollups, warm-ups) is
                 # nobody's screen: answer whole, at once.
@@ -471,17 +473,16 @@ def _build_demo_client():
                     prompt_tokens=_estimate(body),
                     completion_tokens=max(1, len(text) // 4),
                     cached_tokens=None,
-                    context_max=CONTEXT_SIZE,
-                    duration_seconds=0.05,
                     first_token_seconds=0.01,
+                    total_seconds=0.05,
                 )
                 return
             start = time.monotonic()
             _pace(_FIRST_TOKEN_WAIT)
             first = time.monotonic()
-            if thinking:
-                for chunk in _chunks(thinking):
-                    yield Thinking(text=chunk)
+            if reasoning:
+                for chunk in _chunks(reasoning):
+                    yield Reasoning(text=chunk)
                     _pace(_CHUNK_WAIT)
             emitted = 0
             for chunk in _chunks(text):
@@ -493,10 +494,19 @@ def _build_demo_client():
                 prompt_tokens=_estimate(body),
                 completion_tokens=max(1, emitted // 4),
                 cached_tokens=None,
-                context_max=CONTEXT_SIZE,
-                duration_seconds=end - start,
                 first_token_seconds=first - start,
+                total_seconds=end - start,
             )
+
+    class DemoClient(OpenAIClient):
+        """The scripted engine: the real client with its two halves
+        answering from the script."""
+
+        id = "demo"
+        label = "demo"
+        locality = Locality.LOCAL
+        models_class = DemoModels
+        completion_class = DemoCompletion
 
     def _estimate(body) -> int:
         total = 0
@@ -582,7 +592,7 @@ def _patch_threads() -> None:
         try:
             try:
                 store = self._store_factory()
-                client = self._providers.get_client(job.provider)
+                client = self._providers.get(job.provider)
                 extractor = Extractor(
                     store,
                     client,
@@ -704,7 +714,7 @@ def main() -> None:
     # No local engines to detect: first-run and the ensure-providers
     # migration would otherwise write sections probing this machine.
     backend_launch.autoconfigure_providers = lambda: {}
-    providers_registry.CLIENTS[PROVIDER] = _build_demo_client()
+    providers_registry.ALL_CLIENTS[PROVIDER] = _build_demo_client()
     _patch_threads()
 
     # Two doors a tab cannot honor: /web binds a socket, and /bye — with

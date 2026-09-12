@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from otaku.backend.api import providers as api_providers
+from otaku.providers import ModelState
 from otaku.providers.clients.omlx import OmlxClient
 from scenarios.support.live import live_app as build_app
 
@@ -32,19 +33,19 @@ class TestOmlx:
 
     def test_the_listing_marks_the_loaded_model(self, live_app) -> None:  # type: ignore[no-untyped-def]
         providers, _ = api_providers.get_providers(live_app.session)
-        engine = next(r for r in providers if r.config.name == "omlx")
+        engine = next(r for r in providers if r.id == "omlx")
         assert engine.models
-        assert any(row.loaded for row in engine.models)
+        assert any(row.state is ModelState.LOADED for row in engine.models)
 
 
 @pytest.fixture
 def live_app(tmp_path: Path, server):  # type: ignore[no-untyped-def]
     provider_config = replace(_AUTO, url=URL)
     try:
-        rows = OmlxClient(provider_config).models(timeout=3.0)
+        rows = OmlxClient(provider_config).models.list(timeout=3.0)
     except Exception:
         pytest.skip(f"no server at {URL}")
-    loaded = [row for row in rows if row.loaded]
+    loaded = [row for row in rows if row.state is ModelState.LOADED]
     if not loaded and not MODEL:
         pytest.skip("no model loaded in omlx")
     app = build_app(tmp_path, server, provider_config, MODEL or loaded[0].name)

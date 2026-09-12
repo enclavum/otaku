@@ -51,7 +51,7 @@ from typing import Self
 from otaku.context.assembler import WireTurn
 from otaku.context.syntax import OOC_FRAME, to_wire
 from otaku.formatting import format_duration, render
-from otaku.providers import Client, ProviderError, Stats, Text, UnreachableError, WireMessage
+from otaku.providers import OpenAIClient, ProviderError, Stats, Text, UnreachableError, WireMessage
 from otaku.store import Store
 from otaku.store.ops.lore import CharacterMemory
 from otaku.store.schema import Message
@@ -184,7 +184,7 @@ class Extractor:
     def __init__(
         self,
         store: Store,
-        client: Client,
+        client: OpenAIClient,
         model: str,
         story_id: int,
         *,
@@ -633,11 +633,11 @@ class Extractor:
         # generates until someone kills it (streaming resets the read
         # timeout).
         params = params or {"temperature": 0.2, "max_tokens": _MAX_TOKENS}
-        stream = self._client.complete_chat(
+        stream = self._client.completion.chat(
             self._model,
             messages,
             params,
-            think_level="off",
+            effort="none",
             purpose=purpose,
             timeout=timeout,
             watched=False,  # accumulated into a string; nobody watches it
@@ -663,7 +663,7 @@ class Extractor:
                 prompt_tokens=final.prompt_tokens,
                 completion_tokens=final.completion_tokens,
                 cached_tokens=final.cached_tokens,
-                duration_seconds=final.duration_seconds,
+                duration_seconds=final.total_seconds,
             )
         return "".join(buf)
 

@@ -26,9 +26,9 @@ class TestKoboldCpp:
 
     def test_the_context_window_reads_from_the_extra_api(self, live_app) -> None:  # type: ignore[no-untyped-def]
         rows, _ = api_providers.get_providers(live_app.session)
-        engine = next(r for r in rows if r.config.name == "koboldcpp")
+        engine = next(r for r in rows if r.id == "koboldcpp")
         row = next(m for m in engine.models if m.name == live_app.session.model)
-        assert row.context  # the /api/extra window rode the listing
+        assert row.max_context_loaded  # the /api/extra window rode the listing
 
 
 @pytest.fixture

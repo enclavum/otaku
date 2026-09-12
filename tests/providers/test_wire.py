@@ -26,6 +26,7 @@ from otaku.providers.wire import (
     THINKING_EFFORT_KNOB,
     THINKING_FLAG_KNOB,
     THINKING_LEVELS,
+    THINKING_TEMPLATE_EFFORT_KNOB,
     Image,
 )
 
@@ -40,6 +41,7 @@ BOTH = frozenset({THINKING_EFFORT_KNOB, THINKING_FLAG_KNOB})
 EFFORT = frozenset({THINKING_EFFORT_KNOB})
 FLAG = frozenset({THINKING_FLAG_KNOB})
 NONE: frozenset[str] = frozenset()
+TEMPLATE = frozenset({THINKING_FLAG_KNOB, THINKING_TEMPLATE_EFFORT_KNOB})
 
 
 class TestVocabulary:
@@ -75,8 +77,22 @@ class TestThinkingFields:
             "chat_template_kwargs": {"enable_thinking": False},
         }
 
+    def test_the_template_effort_rides_beside_the_flag_for_a_level_and_not_for_off(self) -> None:
+        # The effort as a template variable: what a template that grades
+        # its thinking reads. "off" is the flag's to say alone.
+        assert wire.thinking_fields("high", TEMPLATE) == {
+            "chat_template_kwargs": {"enable_thinking": True, "reasoning_effort": "high"}
+        }
+        assert wire.thinking_fields("off", TEMPLATE) == {
+            "chat_template_kwargs": {"enable_thinking": False}
+        }
+        # Never as a request field: the engines that read the template
+        # variable ignore or drop the field.
+        assert "reasoning_effort" not in wire.thinking_fields("max", TEMPLATE)
+
     def test_no_level_sends_nothing_whatever_the_knobs(self) -> None:
         assert wire.thinking_fields(None, BOTH) == {}
+        assert wire.thinking_fields(None, TEMPLATE) == {}
 
     def test_no_knob_gets_nothing_whatever_the_level(self) -> None:
         assert wire.thinking_fields("max", NONE) == {}
@@ -213,6 +229,19 @@ class TestReadUsage:
         assert wire.read_usage({"usage": {"prompt_tokens": "10"}}) == (None, None, None)
         assert wire.read_usage({"usage": {"prompt_tokens_details": {}}}) == (None, None, None)
 
+    def test_anthropics_spelling_is_the_fallback_even_beside_openais_details(self) -> None:
+        # A proxy that emits both: OpenAI's details without a cached
+        # count must not hide Anthropic's.
+        event = {
+            "usage": {
+                "prompt_tokens": 9,
+                "completion_tokens": 1,
+                "prompt_tokens_details": {"audio_tokens": 0},
+                "cache_read_input_tokens": 7,
+            }
+        }
+        assert wire.read_usage(event) == (9, 1, 7)
+
 
 class TestFrames:
     def test_a_chat_frame_yields_thinking_under_either_name_and_text(self) -> None:
@@ -237,6 +266,13 @@ class TestFrames:
         assert wire.trouble({"choices": [{"delta": {"refusal": "no"}}]}) == "no"
         assert wire.trouble({"choices": [{"delta": {"content": "fine"}}]}) == ""
         assert wire.trouble({"error": {}}) == ""
+
+    def test_a_stop_with_an_error_reason_is_trouble(self) -> None:
+        # KoboldCpp's failed generation: no error frame, a finish_reason
+        # of "error", then a clean end — not an ok reply.
+        event = {"choices": [{"delta": {}, "finish_reason": "error"}]}
+        assert wire.trouble(event) == "the generation stopped with an error"
+        assert wire.trouble({"choices": [{"delta": {}, "finish_reason": "stop"}]}) == ""
 
 
 class TestPositiveInt:

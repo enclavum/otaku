@@ -273,8 +273,8 @@ def reply(body: dict, purpose: str) -> tuple[str, str]:
 
 def _play(prompt: str, body: dict) -> tuple[str, str]:
     thinking = ""
-    # "none" is the app ACTIVELY disabling thinking (providers.base
-    # `_apply_thinking`), and it is the default — only a real level asks.
+    # "none" is the app ACTIVELY disabling reasoning, and it is the
+    # default — only a real effort asks.
     if body.get("reasoning_effort") not in (None, "none"):
         thinking = "The mapmaker holds her ground; the river wants to be believed. Stay in the water's voice, keep the map at the center. "
     # The same last line asked twice is a regenerate: answer the standing

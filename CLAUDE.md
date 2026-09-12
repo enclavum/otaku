@@ -55,7 +55,7 @@ review:
     providers  → settings (its ProviderConfig and sections live there), formatting
     store      → encryption
     settings   → formatting
-    logging    → encryption, formatting
+    logging    → providers (the request log's Stats), encryption, formatting
     encryption → formatting
     update     → (nothing)
     formatting → (nothing)
@@ -146,11 +146,17 @@ recency, "extracted 4m ago") is allowed.
 
 ### Providers
 
+A provider section's name IS its engine: `[generic]`, `[llamacpp]`,
+`[koboldcpp]`, `[ollama]`, `[omlx]`, `[lmstudio]`, `[openrouter]`,
+`[nanogpt]` — `providers.registry.ALL_CLIENTS`. A section under any other
+name is not served; the registry lists it in `ignored` and the launch
+says so. One section per engine (a second server of one kind is a
+feature not built).
+
 A client declares where its server runs as `providers.Locality`:
 `LOCAL` (the engines on this machine), `REMOTE` (the hosted catalogs)
 or `UNKNOWN` — the generic provider (`clients/generic.py`, the
-`[generic]` section, first in the panel) is a url and cannot say, and
-neither can a hand-written section, which the same client serves.
+`[generic]` section, first in the panel) is a url and cannot say.
 Every reader picks its safe side for `UNKNOWN`: what costs money or
 waits on the internet (the worker's warm-up, the info report's listing,
 the page's second listing phase) treats it as remote; what edits (the
@@ -163,12 +169,23 @@ shortcut on purpose.
 
 A protected name (`_leading_underscore`) marks what is not part of a
 module's surface. Two named extensions: SUBCLASS HOOKS declared by a
-base class (`_fetch_context_size`, the `ListScreen` `_on_*` contract) —
+base class (`providers.openai.models.OpenAIModels._state`, the `ListScreen`
+`_on_*` contract) —
 "for subclasses, not callers", every hook declared on the base so the
 extension surface is visible in one place — and BACKEND-PACKAGE-PRIVATE
 names on `Session` (`session._store`, `_record_turn`): the backend's own
 modules are the implementation and may use them; frontends never do
 (test-enforced: no `session._` outside `otaku/backend`).
+
+A BOOLEAN property is never named by a noun or a verb. One that says
+whether the object IS something is `is_…` (`_is_router`); one that
+says whether it CAN do something is `can_…` (`can_manage`,
+`can_count_tokens`, `can_mark_cache`); an adjective or a participle
+stands on its own (`checked`, `fresh`, `quiet`). So
+`manages_models` and `counts_tokens` are not booleans' names. The one
+exception is a CAPABILITY (`Capabilities.vision`, `text_completion`): those
+are the trade's own words, spelled as every engine spells them.
+Applied in `otaku/providers` so far; a new boolean anywhere follows it.
 
 ### Inside the terminal
 
@@ -447,7 +464,7 @@ mechanics live in the module docstrings:
 
   `demo/terminal/` is the demo's sibling for the OTHER frontend: the
   REAL terminal frontend on Pyodide in a Web Worker, xterm.js as the
-  screen, with the provider faked at `providers.registry.CLIENTS`
+  screen, with the provider faked at `providers.registry.ALL_CLIENTS`
   (`demo/terminal/boot.py` says how, seam by seam). The demos have ONE
   procedure, and it lives in the site repo: otaku.sh's `demos/build.sh
   <otaku checkout>` regenerates the fixtures, runs this repo's

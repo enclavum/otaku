@@ -22,7 +22,7 @@ from otaku.encryption import AskSecret, Cipher, EncryptionError, SealedError
 from otaku.formatting import pretty_path
 from otaku.logging import ErrorLog, RequestLog, SystemLog
 from otaku.providers import ProviderConfig, Registry
-from otaku.providers import autoconfigure as autoconfigure_providers
+from otaku.providers import autoconfigure_local as autoconfigure_providers
 from otaku.settings import config as config_file
 from otaku.settings import migrations, write_atomic
 from otaku.settings import prompts as prompts_file
@@ -78,6 +78,11 @@ def open_session(root: str | Path | None = None, *, ask_secret: AskSecret | None
         request_sink=RequestLog(paths.logs_dir, cipher),
         smooth=config.smooth_streaming,
     )
+    # A section no engine is named for is not served, and the file is
+    # the user's: it stays, and the launch says it is being passed over.
+    notices += [
+        f"Ignoring provider section [{name}]: no engine is named so." for name in registry.ignored
+    ]
     # A remembered model whose provider is still configured resumes; a
     # stale one is reported and skipped — the session opens modelless
     # and every model-facing door says so until a pick.

@@ -117,13 +117,13 @@ function buildModels(state, notice) {
   footnote(popup, notice || `${local} on this machine · ${remote} over the wire`);
 
   const use = async (entry) => {
-    const { notice: said } = await api.switchModel(entry.engine.name, entry.model.name);
+    const { notice: said } = await api.switchModel(entry.engine.id, entry.model.name);
     closeAll();
     await landed(said, { redraw: "always" });
   };
 
   const setLoaded = async (entry, wanted) => {
-    if (!entry?.model.can_load_unload) return;
+    if (!entry?.model.can_manage) return;
     /* Asked first, as the terminal's picker asks: a load takes the
        engine's memory and its time, and `u` sits one key beside `l`. */
     const verb = wanted ? "Load" : "Unload";
@@ -139,7 +139,7 @@ function buildModels(state, notice) {
       $('[data-choice="cancel"]', dialog).textContent = "Cancel";
     });
     if (choice !== "confirm") return;
-    const answer = await api.setLoaded(entry.engine.name, entry.model.name, wanted);
+    const answer = await api.setLoaded(entry.engine.id, entry.model.name, wanted);
     /* One flag on one model changed, so that is what changes here:
        asking the catalogs again costs every provider a round trip to
        redraw a lamp, and moves the list under the reader. Only when the
@@ -165,7 +165,7 @@ function buildModels(state, notice) {
     drawRow: (entry) => modelRow(entry, panel.current),
     drawPreview: (entry) => modelDetail(pane, entry, panel.current, { use, setLoaded }),
     onOpen: use,
-    onMove: (entry) => (state.picked = `${entry.engine.name}/${entry.model.name}`),
+    onMove: (entry) => (state.picked = `${entry.engine.id}/${entry.model.name}`),
     onKey: (event, entry) => {
       if (event.key !== "l" && event.key !== "u") return false;
       guard(setLoaded)(entry, event.key === "l");
@@ -180,19 +180,19 @@ function buildModels(state, notice) {
   });
   // Open where the reader was — or on the model the session is playing,
   // the way back to it.
-  view.select((entry) => `${entry.engine.name}/${entry.model.name}` === wanted);
+  view.select((entry) => `${entry.engine.id}/${entry.model.name}` === wanted);
 
 }
 
 function modelRow(entry, current) {
   const lamp = span("otk-row__lamp", "");
-  const managed = entry.model.can_load_unload;
+  const managed = entry.model.can_manage;
   if (managed && entry.model.loaded) lamp.append(span("otk-dot otk-dot--sm", ""));
   const button = row(
     lamp,
     span("otk-row__title", entry.model.name),
     span("otk-row__num otk-row__num--size", entry.model.size),
-    span("otk-row__num otk-row__num--count", entry.model.context),
+    span("otk-row__num otk-row__num--count", entry.model.max_context_catalogue),
   );
   button.classList.add("otk-row--indent", "otk-row--mono");
   /* Bold is loaded, dim is not, and only where loading is a thing that
@@ -200,19 +200,19 @@ function modelRow(entry, current) {
      say something true of nothing. */
   button.classList.toggle("is-loaded", managed && entry.model.loaded);
   button.classList.toggle("is-dim", managed && !entry.model.loaded);
-  if (`${entry.engine.name}/${entry.model.name}` === current) button.append(span("otk-tag", "chosen"));
+  if (`${entry.engine.id}/${entry.model.name}` === current) button.append(span("otk-tag", "chosen"));
   return button;
 }
 
 function modelDetail(pane, entry, current, { use, setLoaded }) {
-  const managed = entry.model.can_load_unload;
+  const managed = entry.model.can_manage;
   const where = whereItRuns(entry.engine);
   const state = !managed ? "" : entry.model.loaded ? " · loaded" : " · not loaded";
-  const chosen = `${entry.engine.name}/${entry.model.name}` === current;
+  const chosen = `${entry.engine.id}/${entry.model.name}` === current;
 
   const facts = element("div", "otk-detail__section");
   if (entry.model.size) facts.append(fact("size", entry.model.size));
-  if (entry.model.context) facts.append(fact("context", entry.model.context));
+  if (entry.model.max_context_catalogue) facts.append(fact("max context", entry.model.max_context_catalogue));
   facts.append(fact("provider", entry.engine.label));
 
   // Pinned under the pane: the row above is a name of any length, and
@@ -290,11 +290,11 @@ function buildProviders(state, notice) {
     },
     drawPreview: (entry) => providerDetail(state, pane, entry.engine),
     onOpen: () => $("[data-detail] input", pane)?.focus(),
-    onMove: (entry) => (state.pickedProvider = entry.engine.name),
+    onMove: (entry) => (state.pickedProvider = entry.engine.id),
   });
   // A rebuild — a save's, a test's, a tab switched away and back —
   // stays on the provider it was about.
-  if (wanted) view.select((entry) => entry.engine.name === wanted);
+  if (wanted) view.select((entry) => entry.engine.id === wanted);
 }
 
 function providerDetail(state, pane, engine) {
@@ -482,7 +482,7 @@ function saveOnEnter(state, input, engine, attr) {
          key, which the route clears. */
       const value = pending(input, engine, attr);
       if (value === null) return;
-      const { notice } = await api.saveProviderField(engine.name, attr, value);
+      const { notice } = await api.saveProviderField(engine.id, attr, value);
       await refreshProvider(state, engine, notice);
     }),
   );
@@ -505,7 +505,7 @@ async function saveProvider(state, engine) {
   for (const [input, attr] of [[url, "url"], [key, "api_key"]]) {
     const value = pending(input, engine, attr);
     if (value === null) continue;
-    const { notice } = await api.saveProviderField(engine.name, attr, value);
+    const { notice } = await api.saveProviderField(engine.id, attr, value);
     notices.push(notice);
   }
   await refreshProvider(state, engine, notices.join(" ") || "Nothing to save.");
@@ -523,10 +523,10 @@ function testProvider(state, engine) {
   });
   // A local engine answers in milliseconds, and a question asked and
   // answered inside one frame reads as nothing having happened.
-  const asking = Promise.all([api.provider(engine.name), _beat(_ASKING_MS)]).then(([fresh]) => fresh);
+  const asking = Promise.all([api.provider(engine.id), _beat(_ASKING_MS)]).then(([fresh]) => fresh);
   asking.then(
     guard((fresh) => {
-      const found = fresh.engines.find((entry) => entry.name === engine.name);
+      const found = fresh.engines.find((entry) => entry.id === engine.id);
       patch(state, engine, found);
       const models = found?.models.length ?? 0;
       // The dialog the reader is already looking at becomes the answer.
@@ -550,8 +550,8 @@ function testProvider(state, engine) {
 async function refreshProvider(state, engine, notice) {
   /* One provider re-asked and patched into the panel, wherever it now
      stands — the terminal's own one-provider refresh, over the wire. */
-  const fresh = await api.provider(engine.name);
-  patch(state, engine, fresh.engines.find((entry) => entry.name === engine.name));
+  const fresh = await api.provider(engine.id);
+  patch(state, engine, fresh.engines.find((entry) => entry.id === engine.id));
   state.build("providers", notice);
 }
 
@@ -561,7 +561,7 @@ function patch(state, engine, found) {
   if (!found) return;
   state.panel = {
     ...state.panel,
-    engines: state.panel.engines.map((entry) => (entry.name === engine.name ? found : entry)),
+    engines: state.panel.engines.map((entry) => (entry.id === engine.id ? found : entry)),
   };
 }
 

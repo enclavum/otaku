@@ -28,7 +28,7 @@ let drawn = null;
 const GONE = "otaku is down";
 
 export function showFacts(facts) {
-  const engine = [facts.engine, facts.context && `${facts.context} context`]
+  const engine = [facts.engine, facts.max_context && `${facts.max_context} context`]
     .filter(Boolean)
     .join(" · ");
   const fields = {

@@ -104,7 +104,7 @@ def set_max_context(session: Session, raw: str) -> str:
             ) from None
         if tokens < 0:
             raise Refused("Max context cannot be negative — 0 means the model's whole window.")
-        changed = tokens != session.max_context
+        changed = tokens != session.max_context_setting
         session._config = replace(session._config, max_context=tokens)
         # fmt: off
         if changed and not surgery.update_config(
@@ -122,7 +122,7 @@ def set_max_context(session: Session, raw: str) -> str:
                 f"config.toml could not be written."
             )
         # fmt: on
-    return f"Max context: {_stands(session.max_context)}."
+    return f"Max context: {_stands(session.max_context_setting)}."
 
 
 def _stands(tokens: int) -> str:

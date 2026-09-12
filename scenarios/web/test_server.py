@@ -175,8 +175,8 @@ class TestReading:
         answer = page.patch("/api/providers/openrouter", {"api_key": ""})
         assert not answer.get("refused")
         assert tomllib.loads(providers.read_text())["openrouter"]["api_key"] == ""
-        page.patch("/api/providers/test", {"url": ""})
-        assert tomllib.loads(providers.read_text())["test"]["url"] == ""
+        page.patch("/api/providers/generic", {"url": ""})
+        assert tomllib.loads(providers.read_text())["generic"]["url"] == ""
 
     def test_the_settings_read_carries_the_shared_effort_ladder(self, page: Page) -> None:
         # The order is declared ONCE, below both frontends — the page
@@ -305,9 +305,9 @@ class TestWrites:
         # `encodeURIComponent` — `llama3:8b` is the ordinary local model,
         # not the exotic one. Undecoded, the escape reaches the engine as
         # part of the name and nothing it asks for exists.
-        plain = page.get("/api/providers/test")
+        plain = page.get("/api/providers/generic")
         assert plain["engines"], "the fixture's provider should be there"
-        assert page.get("/api/providers/te%73t") == plain
+        assert page.get("/api/providers/gener%69c") == plain
 
     def test_a_fault_answers_in_the_body_whatever_the_reason_says(self, page: Page) -> None:
         # The reason carries a story title, a character name, a
@@ -488,7 +488,7 @@ class TestWhoIsAsking:
                 "/api/providers/demo",
                 method="POST",
                 headers={"Origin": "http://evil.example"},
-                data=b'{"provider":"test","field":"url","value":"http://attacker.example/v1"}',
+                data=b'{"provider":"generic","field":"url","value":"http://attacker.example/v1"}',
             )
             == 403
         )
@@ -533,9 +533,9 @@ class TestThePicker:
         # session is PLAYING on it, so a picker without it is a picker
         # with no way back to the story's own model.
         panel = page.get("/api/providers")
-        mine = next(engine for engine in panel["engines"] if engine["name"] == "test")
+        mine = next(engine for engine in panel["engines"] if engine["id"] == "generic")
         assert [model["name"] for model in mine["models"]] == ["test-model"]
-        assert panel["current"] == "test/test-model"
+        assert panel["current"] == "generic/test-model"
         assert mine["connected"] is True
         assert mine["locality"] == "unknown"  # a hand-written section: nobody can say
 
@@ -544,8 +544,8 @@ class TestThePicker:
         # the generic provider first and unable to say, an engine on this
         # machine, a catalog over the wire.
         panel = page.get("/api/providers")
-        assert panel["engines"][0]["name"] == "generic"
-        by_name = {engine["name"]: engine["locality"] for engine in panel["engines"]}
+        assert panel["engines"][0]["id"] == "generic"
+        by_name = {engine["id"]: engine["locality"] for engine in panel["engines"]}
         assert by_name["generic"] == "unknown"
         assert by_name["llamacpp"] == "local"
         assert by_name["openrouter"] == "remote"
@@ -555,15 +555,14 @@ class TestThePicker:
         # the generic provider answers in the second phase and belongs
         # first, a hand-written section last. Sorting both answers by it
         # restores the unscoped panel exactly.
-        whole = [engine["name"] for engine in page.get("/api/providers")["engines"]]
+        whole = [engine["id"] for engine in page.get("/api/providers")["engines"]]
         local = page.get("/api/providers?scope=local")["engines"]
         cloud = page.get("/api/providers?scope=cloud")["engines"]
-        assert {engine["name"] for engine in cloud} >= {"generic", "openrouter", "nanogpt"}
-        assert all(engine["name"] not in {"generic", "openrouter"} for engine in local)
-        merged = sorted(local + cloud, key=lambda engine: (engine["order"], engine["name"]))
-        assert [engine["name"] for engine in merged] == whole
-        assert merged[0]["name"] == "generic" and merged[0]["order"] == 0
-        assert merged[-1]["name"] == "test"  # the harness's own section, after every engine
+        assert {engine["id"] for engine in cloud} >= {"generic", "openrouter", "nanogpt"}
+        assert all(engine["id"] not in {"generic", "openrouter"} for engine in local)
+        merged = sorted(local + cloud, key=lambda engine: (engine["order"], engine["id"]))
+        assert [engine["id"] for engine in merged] == whole
+        assert merged[0]["id"] == "generic" and merged[0]["order"] == 0
 
 
 class TestOpenToTheNetwork:
@@ -584,7 +583,7 @@ class TestOpenToTheNetwork:
                 "/api/providers/demo",
                 method="POST",
                 headers={"Host": "otaku.lan:9600", "Origin": "http://otaku.lan:8080"},
-                data=b'{"provider":"test","field":"url","value":"http://attacker.example/v1"}',
+                data=b'{"provider":"generic","field":"url","value":"http://attacker.example/v1"}',
             )
             == 403
         )

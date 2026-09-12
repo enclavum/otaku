@@ -34,7 +34,7 @@ from otaku.terminal.chat import loop
 from otaku.terminal.chat.chat import Chat
 from scenarios.support.server import ModelServer
 
-PROVIDER = "test"
+PROVIDER = "generic"
 MODEL = "test-model"
 SPEC = f"{PROVIDER}/{MODEL}"
 
@@ -138,7 +138,7 @@ def set_config_provider(
     """Point a provider at the scripted server's port — set into whatever
     files are there. `name` picks the client the registry builds (a
     provider named "ollama" or "omlx" gets its managed engine, the
-    default "test" the generic one)."""
+    default "generic" the generic one)."""
     paths = Paths.resolve(root)
     paths.ensure_tree()
     # The sealing key as a file, pre-seeded: a scenario that seals must

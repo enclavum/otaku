@@ -26,6 +26,16 @@
    "type": "float"
   },
   {
+   "name": "top_k",
+   "value": "",
+   "type": "int"
+  },
+  {
+   "name": "min_p",
+   "value": "",
+   "type": "float"
+  },
+  {
    "name": "max_tokens",
    "value": "",
    "type": "int"
@@ -37,6 +47,11 @@
   },
   {
    "name": "frequency_penalty",
+   "value": "",
+   "type": "float"
+  },
+  {
+   "name": "repetition_penalty",
    "value": "",
    "type": "float"
   },

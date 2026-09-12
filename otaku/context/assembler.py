@@ -18,8 +18,9 @@ its cases so the two read side by side:
 - case 6 (nothing left to degrade): the assembly refuses —
   `ContextOverflowError`, the sentence to show riding it.
 
-The limit is the smaller of the model's window and the `max_context`
-setting (0 = the window), minus a reserve for the model's reply — sized
+The limit is the smaller of the model's max context and the
+`max_context` setting (0 = the model's), minus a reserve for the model's
+reply — sized
 from the story's own recent replies, so a terse story reserves little
 and a florid one enough. Card rows are never summarized and never
 dropped: a card in a replaced scene floats to the front of the recap,
@@ -49,7 +50,7 @@ from otaku.context.cards import card_to_wire
 from otaku.store import Store
 from otaku.store.schema import Message, Scene
 
-_DEFAULT_CONTEXT = 8_192  # when the engine doesn't expose the loaded window
+_DEFAULT_CONTEXT = 8_192  # when the engine states no max context
 # The reply reserve is sized from the story itself: the longest of the
 # last _RESERVE_SAMPLE assistant replies, _RESERVE_HEADROOM on top.
 _RESERVE_SAMPLE = 5
@@ -75,7 +76,7 @@ class ContextShape:
     # defaults here would be a second copy of theirs.
     head_messages: int
     min_tail_messages: int  # the tail never targets fewer; case 5 lowers it in emergencies
-    max_context: int  # tokens the prompt may use at most; 0 = the window
+    max_context_setting: int  # tokens the prompt may use at most; 0 = the model's max context
     recap_header: str
     card_framing: str  # the card block template, for composing card rows
 
@@ -97,8 +98,8 @@ class AssembledPrompt:
     """The wire-ready request plus the numbers behind it."""
 
     messages: list[WireTurn]  # [system?] + the wire turns
-    context_max: int  # the model's window
-    limit: int  # what the prompt measured against: min(window, max_context) - reply reserve
+    max_context: int  # the model's, or the default where it states none
+    limit: int  # what the prompt measured against: min(max_context, setting) - reply reserve
     system_tokens: int
     transcript_tokens: int  # head + recap + tail estimate
     head_count: int  # verbatim opening messages on the wire
@@ -128,7 +129,7 @@ def assemble_story(
     system: str,
     messages: list[Message],
     shape: ContextShape,
-    context_max: int | None,
+    max_context: int | None,
 ) -> AssembledPrompt:
     """The next request over the story's CURRENT scenes and card
     archives — the one door every call site (the turn, the preview, the
@@ -142,7 +143,7 @@ def assemble_story(
     return _assemble(
         system,
         _composed_cards(store, story_id, messages, shape.card_framing),
-        context_max,
+        max_context,
         scenes=scenes,
         shape=shape,
     )
@@ -154,7 +155,7 @@ def assemble_story(
 def _assemble(
     system: str,
     messages: list[Message],
-    context_max: int | None,
+    max_context: int | None,
     *,
     scenes: Sequence[Scene] = (),
     shape: ContextShape,
@@ -166,15 +167,16 @@ def _assemble(
     sent, so the preview needs no heading of its own. Raises
     `ContextOverflowError` (case 6) when even the case-5 floor cannot
     fit."""
-    window = context_max or _DEFAULT_CONTEXT
-    limit = min(window, shape.max_context) if shape.max_context else window
+    max_context = max_context or _DEFAULT_CONTEXT
+    setting = shape.max_context_setting
+    limit = min(max_context, setting) if setting else max_context
     limit = max(0, limit - _response_reserve(messages))
     system_tokens = estimate_tokens(system) if system else 0
     budget = max(0, limit - system_tokens)
 
     for tail_target in _tail_ladder(shape.min_tail_messages):  # case 5
         prompt = _compose(
-            system, messages, scenes, shape, tail_target, budget, window, limit, system_tokens
+            system, messages, scenes, shape, tail_target, budget, max_context, limit, system_tokens
         )
         if prompt.transcript_tokens <= budget:
             return prompt
@@ -214,7 +216,7 @@ def _compose(
     shape: ContextShape,
     tail_target: int,
     budget: int,
-    window: int,
+    max_context: int,
     limit: int,
     system_tokens: int,
 ) -> AssembledPrompt:
@@ -247,7 +249,7 @@ def _compose(
     wire.extend(_wire_turns(head + recap_rows + tail))
     return AssembledPrompt(
         messages=wire,
-        context_max=window,
+        max_context=max_context,
         limit=limit,
         system_tokens=system_tokens,
         transcript_tokens=head_tokens + recap_tokens + tail_tokens,

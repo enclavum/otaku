@@ -21,7 +21,15 @@ from pathlib import Path
 
 import pytest
 
-from otaku.providers import CLIENTS, Client, Image, Locality, ProviderConfig, Text, Thinking
+from otaku.providers import (
+    ALL_CLIENTS,
+    Image,
+    Locality,
+    OpenAIClient,
+    ProviderConfig,
+    Reasoning,
+    Text,
+)
 from otaku.providers.clients.omlx import OmlxClient
 from scenarios.support.live import case_key, case_model
 
@@ -86,34 +94,35 @@ def case(request):  # type: ignore[no-untyped-def]
     engine, url, key_var, model = request.param
     key = case_key(engine, key_var, _REQUIRED_KEYS)
     model = case_model(engine, url, key, model)
-    client = CLIENTS[engine](ProviderConfig(name=engine, url=url, api_key=key))
+    client = ALL_CLIENTS[engine](ProviderConfig(name=engine, url=url, api_key=key))
     return client, model
 
 
 class TestMatrix:
     def test_the_one_model_row_is_read(self, case) -> None:  # type: ignore[no-untyped-def]
         client, model = case
-        row = client.model(model)
+        row = client.models.get(model)
         assert row is not None and row.name == model
         # An engine that reports capabilities decodes them; the generic
         # provider is the one that reports nothing.
-        if client.kind != "generic":
+        if client.id != "generic":
             assert row.capabilities is not None
 
-    def test_off_stops_thinking_and_a_level_rides_the_wire(self, case) -> None:  # type: ignore[no-untyped-def]
+    def test_none_stops_reasoning_and_an_effort_rides_the_wire(self, case) -> None:  # type: ignore[no-untyped-def]
         client, model = case
-        row = client.model(model)
-        thinking, text = _turn(client, model, PUZZLE, "off")
+        row = client.models.get(model)
+        reasoning, text = _turn(client, model, PUZZLE, "none")
         assert text.strip()
-        if row is not None and row.capabilities is not None and "off" in row.capabilities.thinking:
-            assert thinking == "", "the model thought although off was sent"
+        honoured = row.capabilities.reasoning if row and row.capabilities else None
+        if honoured and "none" in honoured:
+            assert reasoning == "", "the model reasoned although none was sent"
         _, text = _turn(client, model, PUZZLE, "high")
         assert text.strip()
 
     def test_a_text_completion_answers_as_text(self, case) -> None:  # type: ignore[no-untyped-def]
         client, model = case
         chunks = list(
-            client.complete_text(
+            client.completion.text(
                 model,
                 "The capital of France is",
                 {"max_tokens": 8, "temperature": 0},
@@ -121,22 +130,22 @@ class TestMatrix:
             )
         )
         assert "".join(c.text for c in chunks if isinstance(c, Text)).strip()
-        assert not any(isinstance(c, Thinking) for c in chunks)
+        assert not any(isinstance(c, Reasoning) for c in chunks)
 
     def test_a_vision_model_sees_the_cat(self, case) -> None:  # type: ignore[no-untyped-def]
         client, model = case
-        row = client.model(model)
+        row = client.models.get(model)
         if row is None or row.capabilities is None or not row.capabilities.vision:
             pytest.skip(f"{model} does not take images, or its engine cannot say")
         messages = [
             Turn("system", "Answer with one word."),
             Turn("user", "What animal is this?"),
         ]
-        chunks = client.complete_chat(
+        chunks = client.completion.chat(
             model,
             messages,
             {"max_tokens": 200, "temperature": 0},
-            think_level="off",
+            effort="none",
             images=[Image(CAT.read_bytes(), "image/jpeg")],
             watched=False,
         )
@@ -147,20 +156,20 @@ class TestMatrix:
         client, model = case
         messages = [Turn("system", "s"), Turn("user", "Hello there.")]
         chat, text = (
-            client.count_chat_tokens(model, messages),
-            client.count_text_tokens(model, "Hello"),
+            client.completion.count_chat_tokens(model, messages),
+            client.completion.count_text_tokens(model, "Hello"),
         )
-        if not client.counts_tokens:
+        if not client.completion.can_count_tokens:
             assert chat is None and text is None
             return
         # llama.cpp's chat count needs a build with the endpoint; its raw
         # count and the others' counts are always there.
-        if client.kind == "llamacpp":
+        if client.id == "llamacpp":
             assert isinstance(text, int) and text > 0
             assert chat is None or chat > 0
-        elif client.kind == "koboldcpp":
+        elif client.id == "koboldcpp":
             assert isinstance(chat, int) and isinstance(text, int)
-        elif client.kind == "omlx":
+        elif client.id == "omlx":
             assert isinstance(chat, int) and text is None
 
     def test_a_catalog_has_a_balance_and_a_local_engine_has_none(self, case) -> None:  # type: ignore[no-untyped-def]
@@ -172,15 +181,15 @@ class TestMatrix:
             assert money is None
 
 
-def _turn(client: Client, model: str, prompt: str, level: str) -> tuple[str, str]:
-    """One turn at `level`: (thinking, text) as they streamed."""
+def _turn(client: OpenAIClient, model: str, prompt: str, effort: str) -> tuple[str, str]:
+    """One turn at `effort`: (reasoning, text) as they streamed."""
     messages = [Turn("system", "You are a careful assistant."), Turn("user", prompt)]
-    thinking, text = [], []
-    for chunk in client.complete_chat(
-        model, messages, {"max_tokens": 800, "temperature": 0}, think_level=level, watched=False
+    reasoning, text = [], []
+    for chunk in client.completion.chat(
+        model, messages, {"max_tokens": 800, "temperature": 0}, effort=effort, watched=False
     ):
-        if isinstance(chunk, Thinking):
-            thinking.append(chunk.text)
+        if isinstance(chunk, Reasoning):
+            reasoning.append(chunk.text)
         elif isinstance(chunk, Text):
             text.append(chunk.text)
-    return "".join(thinking), "".join(text)
+    return "".join(reasoning), "".join(text)

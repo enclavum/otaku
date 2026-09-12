@@ -15,6 +15,7 @@ from typing import Any
 # The bundles whose own llama-server children listen on ports of their
 # own: theirs, never an engine to configure.
 _NOT_AN_ENGINE = ("Ollama.app", "LM Studio.app", ".lmstudio")
+_PORT_FLAG = re.compile(r"(?:^|\s)--port[= ](\d+)\b")
 
 
 def read_home_json(relative: str) -> dict[str, Any]:
@@ -31,37 +32,43 @@ def launched_port(executable: str, commands: Iterable[str] | None = None) -> int
     """The `--port` a running `executable` was launched with — how an
     engine configured by launch flags is found where it is. The
     executable is known by its bare name, however the command spells
-    it: a path with either separator, quoted or not, spaces and all;
-    Windows' `.exe`; a release build's suffix (`koboldcpp-mac-arm64`);
-    a script run by python (`python koboldcpp.py`); a positional model
-    beside it. None when no such process runs, it carries no flag, or
-    the processes cannot be read; a server that is Ollama's or LM
-    Studio's own is passed over. `commands` are the command lines to
-    read, the running processes' by default."""
+    it (see `_is_named`); a subcommand may follow it ("llama serve").
+    None when no such process runs, it carries no flag, or the
+    processes cannot be read. `commands` are the command lines to read,
+    the running processes' by default."""
+    name, *subcommand = executable.lower().split()
     for command in _command_lines() if commands is None else commands:
-        # The program part — everything before the first flag — so a
-        # path with spaces in it stays whole and its last word can end
-        # in the executable's name.
-        program = re.split(r"\s+-", command, maxsplit=1)[0]
-        if any(mark in program for mark in _NOT_AN_ENGINE):
-            continue
-        if not any(_is_named(word, executable) for word in program.split()):
-            continue
-        flag = re.search(r"(?:^|\s)--port[= ](\d+)\b", command)
-        if flag:
-            return int(flag.group(1))
+        if _runs(command, name, subcommand):
+            flag = _PORT_FLAG.search(command)
+            if flag:
+                return int(flag.group(1))
     return None
 
 
-def _is_named(word: str, executable: str) -> bool:
-    """Whether a command-line word is the executable: its bare name with
-    either separator, quotes, `.exe` or `.py` stripped, and a build
-    suffix after a dash or an underscore allowed."""
-    name = re.split(r"[\\/]", word.strip('"'))[-1].lower()
-    for extension in (".exe", ".py"):
-        name = name.removesuffix(extension)
-    wanted = executable.lower()
-    return name == wanted or name.startswith((wanted + "-", wanted + "_"))
+def _runs(command: str, name: str, subcommand: list[str]) -> bool:
+    """Whether `command` is `name` running, with `subcommand` right after
+    it. Only the program part is read — the words before the first
+    flag, so a path with spaces stays whole — and a server bundled by
+    another app (Ollama's, LM Studio's) is not the engine."""
+    program = re.split(r"\s+-", command, maxsplit=1)[0]
+    if any(mark in program for mark in _NOT_AN_ENGINE):
+        return False
+    words = program.split()
+    for i, word in enumerate(words):
+        following = words[i + 1 : i + 1 + len(subcommand)]  # as many words as the subcommand has
+        if _is_named(word, name) and following == subcommand:
+            return True
+    return False
+
+
+def _is_named(word: str, name: str) -> bool:
+    """Whether a command-line word is the executable `name`: its bare
+    name — the last path segment, unquoted, lowercase, without `.exe`
+    or `.py` — is `name`, or `name` with a build suffix
+    (`koboldcpp-mac-arm64`)."""
+    bare = re.split(r"[\\/]", word.strip('"'))[-1].lower()
+    bare = bare.removesuffix(".exe").removesuffix(".py")
+    return bare == name or bare.startswith((f"{name}-", f"{name}_"))
 
 
 @functools.cache

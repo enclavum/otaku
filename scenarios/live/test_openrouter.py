@@ -22,9 +22,9 @@ pytestmark = pytest.mark.live
 
 class TestOpenRouter:
     def test_the_catalog_lists_with_context_windows(self, client: OpenRouterClient) -> None:
-        rows = client.models()
+        rows = client.models.list()
         assert rows
-        assert any(row.context for row in rows)
+        assert any(row.max_context_catalogue for row in rows)
 
     def test_the_balance_reads_in_dollars(self, client: OpenRouterClient) -> None:
         money = client.balance()

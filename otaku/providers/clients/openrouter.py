@@ -1,6 +1,6 @@
 """OpenRouter: a hosted catalog over many upstream providers, speaking
 the OpenAI protocol at https://openrouter.ai/api/v1. The catalog names
-each model's context window and the one its top provider serves it
+each model's max context and the one its top provider serves it
 with, its input modalities, and — in its `reasoning` object — the
 efforts it takes and whether reasoning is mandatory; the account's
 balance answers only a working key, which is how a key is checked, the
@@ -69,7 +69,9 @@ class OpenRouterModels(OpenAIModels):
                 vision="image" in modalities if isinstance(modalities, list) else None,
                 audio="audio" in modalities if isinstance(modalities, list) else None,
                 reasoning=_reasoning_of(listed),
-                text_completion=True,
+                # The completions endpoint is per model and the catalog
+                # does not say which take it.
+                text_completion=None,
                 structured_output=(
                     "structured_outputs" in parameters or "response_format" in parameters
                     if isinstance(parameters, list)
@@ -104,40 +106,54 @@ class OpenRouterClient(OpenAIClient):
         return ProviderConfig(name=cls.id, url="https://openrouter.ai/api/v1")
 
     def balance(self, timeout: float = ASK_TIMEOUT) -> Money | None:
-        # /credits reports lifetime purchases and spend, in dollars.
+        # /credits reports the account's lifetime purchases and spend, in
+        # dollars; /key what this key may still spend, when it is capped
+        # below that. What is left is the tighter of the two.
+        credits = self._account("/v1/credits", timeout)
+        total = Money.of(credits.get("total_credits"))
+        used = Money.of(credits.get("total_usage"))
+        if total is None or used is None:
+            return None
+        left = Money(total.amount - used.amount, total.currency)
+        cap = Money.of(self._account("/v1/key", timeout).get("limit_remaining"))
+        if cap is not None and cap.amount < left.amount:
+            return Money(cap.amount, left.currency)
+        return left
+
+    def _account(self, path: str, timeout: float) -> dict[str, Any]:
+        """The `data` object of an account endpoint, {} when it will not say."""
         data = http.get_json(
-            f"{self.config.base_url}/v1/credits",
+            f"{self.config.base_url}{path}",
             name=self.config.name,
             headers=self.auth.headers,
             timeout=timeout,
             quiet=True,
         )
-        credits = data.get("data") if isinstance(data, dict) else None
-        if not isinstance(credits, dict):
-            return None
-        total = Money.of(credits.get("total_credits"))
-        used = Money.of(credits.get("total_usage"))
-        if total is None or used is None:
-            return None
-        # What is LEFT: purchased minus spent, in the currency both are in.
-        return Money(total.amount - used.amount, total.currency)
+        inner = data.get("data") if isinstance(data, dict) else None
+        return inner if isinstance(inner, dict) else {}
 
 
 def _reasoning_of(listed: dict[str, Any]) -> frozenset[str] | None:
-    """The efforts a catalog model honours: its `reasoning` object names
-    them and says whether reasoning is mandatory, in which case "none" is
-    not among them. An object that names none (Gemma 4's) still takes
-    every effort — it becomes a budget there — so it leaves them all. A
-    model without one that does not take the reasoning parameter cannot
-    reason at all; one that says neither cannot be read."""
-    spec = listed.get("reasoning")
-    if isinstance(spec, dict):
-        efforts = reasoning.from_wire(spec.get("supported_efforts") or []) or reasoning.ALL_EFFORTS
-        return efforts - {"none"} if spec.get("mandatory") else efforts | {"none"}
+    """The efforts a catalog model honours, as its `reasoning` object
+    states them. `supported_efforts` names them; null means every
+    effort; OMITTED means the model exposes no effort selection, so
+    only off reaches it — "none" alone, and nothing when reasoning is
+    mandatory. A model whose parameters do not take `reasoning` cannot
+    reason, object or not; one that says neither cannot be read."""
     parameters = listed.get("supported_parameters")
-    if isinstance(parameters, list):
-        return frozenset() if "reasoning" not in parameters else reasoning.ALL_EFFORTS
-    return None
+    can_reason = isinstance(parameters, list) and "reasoning" in parameters
+    spec = listed.get("reasoning")
+    if not isinstance(spec, dict):
+        if not isinstance(parameters, list):
+            return None
+        return reasoning.ALL_EFFORTS if can_reason else frozenset()
+    if not can_reason:
+        return frozenset()
+    mandatory = bool(spec.get("mandatory"))
+    if "supported_efforts" not in spec:
+        return frozenset() if mandatory else frozenset({"none"})
+    efforts = reasoning.from_wire(spec.get("supported_efforts") or []) or reasoning.ALL_EFFORTS
+    return efforts - {"none"} if mandatory else efforts | {"none"}
 
 
 def _top_provider_int(top: object, key: str) -> int | None:

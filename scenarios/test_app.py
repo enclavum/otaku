@@ -178,7 +178,7 @@ class TestRequestLog:
         answer = next(
             e for e in entries if e.kind == "answer" and e.request_id == request.request_id
         )
-        assert answer.outcome == "ok"
+        assert answer.status == "ok"
         assert answer.seconds is not None and answer.seconds >= 0
         assert answer.first_token_seconds is not None
         assert (answer.prompt_tokens, answer.completion_tokens) == (7, 5)  # the scripted usage
@@ -191,7 +191,7 @@ class TestRequestLog:
         log = backend_launch.request_log(app.paths.root)
         stamp = datetime.now().astimezone().strftime("%Y%m%d")
         answer = next(e for e in log.read(stamp) if e.kind == "answer")
-        assert answer.outcome.startswith("failed")
+        assert answer.status.startswith("failed")
         assert answer.body is not None
         assert answer.body["text"]  # what had arrived rides the record
 
@@ -748,8 +748,8 @@ class TestFirstLaunch:
         set_config(tmp_path / "state", seed_sample=True)
         app = launch(tmp_path / "state", server, spec="")
         try:
-            app.play("/model test/test-model")
-            assert f"Switched to {BOLD}test/test-model{RESET}." in capsys.readouterr().out
+            app.play("/model generic/test-model")
+            assert f"Switched to {BOLD}generic/test-model{RESET}." in capsys.readouterr().out
             app.play("I climb toward the voice.")
             assert app.session.messages[-1].body == scripted.CHAT_REPLY
         finally:

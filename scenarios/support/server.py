@@ -25,6 +25,7 @@ from typing import Any
 CHAT_REPLY = "The light went out, and something stirred in the dark."
 STORY_SO_FAR = "The guest reached the gate and met the Keeper."
 CHARACTER_HISTORY = "The Keeper remembers the guest."
+REFUSAL = "refused by the script"  # what a refused POST's error message says
 EXTRACTION = {
     "scene": {"title": "The Meeting", "summary": "A guest came in and met the Keeper."},
     "speakers": [],
@@ -47,14 +48,15 @@ class ModelServer:
         self.loaded: set[str] = set()
         self.sizes: dict[str, int] = {}  # reported bytes per model; absent → 1 MB
         self.contexts: dict[str, int] = {}  # context per model; absent → 8192
-        # A single-model engine's one loaded window, served on llama.cpp's
-        # /props and KoboldCpp's true_max_context_length; None → 404, not
-        # such an engine.
+        # A single-model engine's one loaded window: llama.cpp's listing
+        # `meta` and /props, KoboldCpp's true_max_context_length; None →
+        # 404, not such an engine.
         self.window: int | None = None
         self.list_delay = 0.0  # seconds /models waits before answering — arrival order
         self.list_status: int | None = None  # set → /models answers this status instead
         self.status = False  # True → serve omlx's rich /v1/models/status
         self.types: dict[str, str] = {}  # omlx status: model_type per model ("vlm", "llm")
+        self.thinking: dict[str, bool] = {}  # omlx status: thinking_default per model
         # What a listing entry carries beyond its id and context — the
         # catalogs' capability fields, merged into the entry as sent.
         self.extras: dict[str, dict[str, Any]] = {}
@@ -64,6 +66,10 @@ class ModelServer:
         self.capabilities: dict[str, list[str]] = {}  # ollama's /api/show capabilities per model
         self.token_count: int | None = None  # every count endpoint answers this; None → 404
         self.router = False  # True → llama.cpp's router listing and load/unload doors
+        self.router_failed: set[str] = set()  # names whose load ends failed, unloaded
+        self.router_sleeping: set[str] = set()  # loaded names the router put to sleep
+        self.router_loading: set[str] = set()  # names loading by themselves: loaded once listed
+        self.no_done = False  # True → the stream ends cleanly without [DONE]
         self.decline: str | None = None  # set → the stream is one error frame, no content
         self.credits: tuple[float, float] | None = (
             10.0,
@@ -79,6 +85,7 @@ class ModelServer:
         # None serves. Per request, so a test can refuse the knobbed
         # request and serve its bare retry.
         self.refuse: Callable[[dict[str, Any]], int | None] = lambda body: None
+        self.refusal = REFUSAL  # the message a refusal carries; a test makes it an engine's
         self.requests: list[dict[str, Any]] = []
         self.request_headers: list[dict[str, str]] = []  # one row per POST, same order
         self.gets: list[str] = []  # every GET path, in order
@@ -108,13 +115,55 @@ class ModelServer:
                             "models": [
                                 {
                                     "id": name,
-                                    "actual_size": outer.sizes.get(name, 1_048_576),
+                                    "estimated_size": outer.sizes.get(name, 1_048_576),
                                     "loaded": name in outer.loaded,
+                                    "is_loading": False,
+                                    "model_context_length": outer.contexts.get(name, 8192),
                                     "max_context_window": outer.contexts.get(name, 8192),
                                     **(
                                         {"model_type": outer.types[name]}
                                         if name in outer.types
                                         else {}
+                                    ),
+                                    **(
+                                        {"thinking_default": outer.thinking[name]}
+                                        if name in outer.thinking
+                                        else {}
+                                    ),
+                                }
+                                for name in outer.models
+                            ]
+                        }
+                    )
+                    return
+                if outer.managed and path.endswith("/api/v1/models"):
+                    # LM Studio's registry: one entry per model, its
+                    # capabilities where a test named them, a loaded
+                    # instance (id = the name) where it is loaded.
+                    self._json(
+                        {
+                            "models": [
+                                {
+                                    "key": name,
+                                    "type": "llm",
+                                    "size_bytes": outer.sizes.get(name, 1_048_576),
+                                    "max_context_length": outer.contexts.get(name, 8192),
+                                    **(
+                                        {"capabilities": {"vision": "vision" in caps}}
+                                        if (caps := outer.capabilities.get(name)) is not None
+                                        else {}
+                                    ),
+                                    "loaded_instances": (
+                                        [
+                                            {
+                                                "id": name,
+                                                "config": {
+                                                    "context_length": outer.contexts.get(name, 8192)
+                                                },
+                                            }
+                                        ]
+                                        if name in outer.loaded
+                                        else []
                                     ),
                                 }
                                 for name in outer.models
@@ -140,7 +189,36 @@ class ModelServer:
                             # The router's rows: a status object, as the
                             # build in use spells it.
                             state = "loaded" if name in outer.loaded else "unloaded"
+                            if name in outer.router_sleeping and name in outer.loaded:
+                                state = "sleeping"
+                            if name in outer.router_loading:
+                                # In flight on its own (the router autoloads);
+                                # the next listing finds it loaded.
+                                state = "loading"
+                                outer.router_loading.discard(name)
+                                outer.loaded.add(name)
                             entry["status"] = {"value": state}
+                            if name in outer.router_failed:
+                                entry["status"]["failed"] = True
+                                entry["status"]["exit_code"] = 1
+                            # The router names every entry's modalities.
+                            entry["architecture"] = {
+                                "input_modalities": ["text"]
+                                + (
+                                    ["image"]
+                                    if "vision" in outer.capabilities.get(name, [])
+                                    else []
+                                )
+                            }
+                        if outer.window is not None and (not outer.router or name in outer.loaded):
+                            # llama.cpp's meta, on an entry with a server
+                            # behind it: the slot's window, the trained
+                            # length, the size on disk.
+                            entry["meta"] = {
+                                "n_ctx": outer.window,
+                                "n_ctx_train": outer.contexts.get(name, 8192),
+                                "size": outer.sizes.get(name, 1_048_576),
+                            }
                         rows.append({**entry, **outer.extras.get(name, {})})
                     self._json({"data": rows})
                 elif path.endswith("/credits") and outer.credits is not None:
@@ -162,10 +240,20 @@ class ModelServer:
                         }
                     )
                 elif outer.managed and path.endswith("/api/tags"):
+                    # Ollama's registry: a row names capabilities too, as the
+                    # test set them for the card.
                     self._json(
                         {
                             "models": [
-                                {"name": name, "size": outer.sizes.get(name, 1_000_000)}
+                                {
+                                    "name": name,
+                                    "size": outer.sizes.get(name, 1_000_000),
+                                    **(
+                                        {"capabilities": outer.capabilities[name]}
+                                        if name in outer.capabilities
+                                        else {}
+                                    ),
+                                }
                                 for name in outer.models
                             ]
                         }
@@ -205,8 +293,16 @@ class ModelServer:
                     return
                 posted = self.path.split("?", 1)[0].rstrip("/")
                 if outer.managed and posted.endswith("/api/show"):
-                    # Ollama's card: the capabilities of one model.
-                    self._json({"capabilities": outer.capabilities.get(str(body.get("model")), [])})
+                    # Ollama's card: the capabilities of one model, and its
+                    # trained context length where a test set one.
+                    name = str(body.get("model"))
+                    card: dict[str, Any] = {"capabilities": outer.capabilities.get(name, [])}
+                    if name in outer.contexts:
+                        card["model_info"] = {
+                            "general.architecture": "llama",
+                            "llama.context_length": outer.contexts[name],
+                        }
+                    self._json(card)
                     return
                 if (
                     outer.status
@@ -230,7 +326,8 @@ class ModelServer:
                     # The router's doors: the order is taken at once and
                     # the state flips with it.
                     if posted.endswith("/models/load"):
-                        outer.loaded.add(str(body.get("model")))
+                        if str(body.get("model")) not in outer.router_failed:
+                            outer.loaded.add(str(body.get("model")))
                     else:
                         outer.loaded.discard(str(body.get("model")))
                     self._json({"success": True})
@@ -263,7 +360,7 @@ class ModelServer:
                     self.send_response(status)
                     self.send_header("Content-Type", "application/json")
                     self.end_headers()
-                    self.wfile.write(b'{"error": {"message": "refused by the script"}}')
+                    self.wfile.write(json.dumps({"error": {"message": outer.refusal}}).encode())
                     return
                 result = outer.script(body)
                 thinking, text = result if isinstance(result, tuple) else ("", result)
@@ -307,7 +404,8 @@ class ModelServer:
                     if outer.cached_tokens is not None:
                         usage["prompt_tokens_details"] = {"cached_tokens": outer.cached_tokens}
                     self._event({"choices": [{"delta": {}}], "usage": usage})
-                    self.wfile.write(b"data: [DONE]\n\n")
+                    if not outer.no_done:
+                        self.wfile.write(b"data: [DONE]\n\n")
 
             def _event(self, payload: dict[str, Any]) -> None:
                 self.wfile.write(b"data: " + json.dumps(payload).encode() + b"\n\n")
@@ -324,6 +422,7 @@ class ModelServer:
     def reset(self) -> None:
         self.script = default_script
         self.refuse = lambda body: None
+        self.refusal = REFUSAL
         self.requests.clear()
         self.request_headers.clear()
         self.gets.clear()
