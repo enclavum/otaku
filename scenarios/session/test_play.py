@@ -437,7 +437,7 @@ class TestPromptCache:
     """The prompt-cache breakpoints a marked provider's requests carry:
     the system row and the final row as content parts with
     `cache_control`, the middle plain strings — and none of it where the
-    engine cannot honour markers or the section said off. The wire is
+    provider cannot honour markers or the section said off. The wire is
     the whole assertion."""
 
     def test_an_openrouter_request_carries_the_markers(self, server, tmp_path) -> None:
@@ -472,9 +472,9 @@ class TestPromptCache:
         finally:
             app.close()
 
-    def test_a_local_engine_sends_plain_strings(self, app: App) -> None:
+    def test_a_local_provider_sends_plain_strings(self, app: App) -> None:
         # The capability is class knowledge: no section key can make a
-        # local engine mark, and its wire stays exactly as it was.
+        # local provider mark, and its wire stays exactly as it was.
         app.play("I enter the hall.")
         sent = scripted.chat_request(app.server, "I enter the hall.")["messages"]
         assert all(isinstance(m["content"], str) for m in sent)

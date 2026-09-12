@@ -69,8 +69,8 @@ class SessionFacts:
 
     version: str
     model: str  # "(no model)" when none
-    engine: str  # the kind of server behind it; "" when none
-    max_context: int | None  # the context the model gets, when a LOCAL engine answers
+    provider: str  # the provider serving it; "" when none
+    max_context: int | None  # the context the model gets, when a LOCAL provider answers
     story: str  # the story's name, cut by the caller; "" when it has none
 
 
@@ -104,9 +104,9 @@ _PLAIN = _Style()
 def render_terminal(facts: SessionFacts) -> str:
     """The banner a chat session opens with. Its three lines are what
     that session IS: the story being played, on what model, through what
-    engine."""
+    provider."""
     style = _style()
-    details = [f"{style.gray}{facts.engine}{style.reset}" if facts.engine else ""]
+    details = [f"{style.gray}{facts.provider}{style.reset}" if facts.provider else ""]
     if facts.max_context:
         details.append(f"{style.gray}{format_context(facts.max_context)} context{style.reset}")
     return _render(

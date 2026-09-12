@@ -33,9 +33,9 @@ class TestLmStudio:
 
     def test_the_registry_lists_rich_models(self, live_app) -> None:  # type: ignore[no-untyped-def]
         providers, _ = api_providers.get_providers(live_app.session)
-        engine = next(r for r in providers if r.id == "lmstudio")
-        assert engine.models
-        assert all(row.name for row in engine.models)
+        provider = next(r for r in providers if r.id == "lmstudio")
+        assert provider.models
+        assert all(row.name for row in provider.models)
 
 
 @pytest.fixture

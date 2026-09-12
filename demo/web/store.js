@@ -8,7 +8,7 @@
    so the demo answers exactly as the product would; anything the demo
    deliberately cannot do says so honestly and points at the install. */
 
-// What the fake engine claims to be. One provider with two models, so
+// What the fake provider claims to be. One provider with two models, so
 // the picker's switch, load and unload have something real to do.
 export const PROVIDER = "demo";
 const MODELS = [
@@ -70,7 +70,7 @@ export function facts(version) {
   return {
     version,
     model: state.model,
-    engine: "demo",
+    provider: "demo",
     max_context: model ? model.max_context_catalogue : "",
     story: story ? label(story) : "",
     story_id: state.open,
@@ -149,18 +149,18 @@ export function memory() {
 }
 
 export function providers(scope = "") {
-  // The product answers in two phases — the local engines now, the
-  // cloud catalogs after. The demo has no cloud half, and says so with
-  // an empty second phase rather than doubled engines.
+  // The product answers in two phases — the providers on this machine
+  // now, the cloud catalogs after. The demo has no cloud half, and says
+  // so with an empty second phase rather than doubled providers.
   if (scope === "cloud") {
-    return { current: `${PROVIDER}/${state.model}`, memory: memory().memory, engines: [] };
+    return { current: `${PROVIDER}/${state.model}`, memory: memory().memory, providers: [] };
   }
   const all = allProviders();
   if (scope && scope !== "local") {
-    const named = all.engines.filter((engine) => engine.id === scope);
+    const named = all.providers.filter((provider) => provider.id === scope);
     // a name nothing is configured under answers 404, as the product does
     if (!named.length) return null;
-    return { ...all, engines: named };
+    return { ...all, providers: named };
   }
   return all;
 }
@@ -169,11 +169,11 @@ function allProviders() {
   return {
     current: `${PROVIDER}/${state.model}`,
     memory: memory().memory,
-    engines: [
+    providers: [
       {
         id: PROVIDER,
         label: "Demo",
-        order: 8, // a hand-written section sorts after the eight engines, as in the product
+        order: 8, // a hand-written section sorts after the eight supported providers, as in the product
         locality: "unknown", // the product cannot say where such a section runs
         connected: true,
         url: "in this browser tab",
@@ -189,8 +189,8 @@ function allProviders() {
         ["lmstudio", "LM Studio", "http://localhost:1234/v1", "local"],
         ["openrouter", "OpenRouter", "https://openrouter.ai/api/v1", "remote"],
         ["nanogpt", "NanoGPT", "https://nano-gpt.com/api/v1", "remote"],
-      ].map(([name, labelled, url, locality], order) => ({
-        name,
+      ].map(([id, labelled, url, locality], order) => ({
+        id,
         label: labelled,
         order,
         locality,
@@ -347,7 +347,7 @@ export function info(version) {
         rows: [
           ["Model", `${PROVIDER}/${state.model}`],
           ["Backend", "demo (a model that lives in the page)"],
-          ["Context", modelRow().context],
+          ["Max context", modelRow().max_context_catalogue],
           // The product's capability rows, as the page's own model
           // honestly answers them: it takes no images, no effort reaches
           // it, and it completes no raw text.
@@ -609,7 +609,7 @@ const _KNOBS = {
     const value = raw.trim().toLowerCase();
     if (["off", "none", "0"].includes(value)) {
       state.settings.max_context = 0;
-      return say("Max context: the model's whole window.");
+      return say("Max context: 0 (the model's own max context).");
     }
     if (!/^\d+$/.test(value)) return refuse("Usage: /set max_context TOKENS|off");
     state.settings.max_context = Number.parseInt(value, 10);

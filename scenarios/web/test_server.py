@@ -128,7 +128,7 @@ class TestReading:
         # The bare model in the header, the provider beside it — the
         # banner's own split, which the page draws in two places.
         assert facts["model"] == "test-model"
-        assert facts["engine"]
+        assert facts["provider"]
 
     def test_the_turns_are_the_story_as_the_store_has_it(self, page: Page) -> None:
         page.play("I listen at the culvert mouth.")
@@ -306,7 +306,7 @@ class TestWrites:
         # not the exotic one. Undecoded, the escape reaches the engine as
         # part of the name and nothing it asks for exists.
         plain = page.get("/api/providers/generic")
-        assert plain["engines"], "the fixture's provider should be there"
+        assert plain["providers"], "the fixture's provider should be there"
         assert page.get("/api/providers/gener%69c") == plain
 
     def test_a_fault_answers_in_the_body_whatever_the_reason_says(self, page: Page) -> None:
@@ -529,23 +529,23 @@ class TestWhoIsAsking:
 class TestThePicker:
     def test_a_provider_configured_by_hand_is_in_the_picker(self, page: Page) -> None:
         # The scenario's own provider is a hand-written section named
-        # `test` — not one of the engines otaku ships a client for. The
+        # `test` — not one of the providers otaku ships a client for. The
         # session is PLAYING on it, so a picker without it is a picker
         # with no way back to the story's own model.
         panel = page.get("/api/providers")
-        mine = next(engine for engine in panel["engines"] if engine["id"] == "generic")
+        mine = next(p for p in panel["providers"] if p["id"] == "generic")
         assert [model["name"] for model in mine["models"]] == ["test-model"]
         assert panel["current"] == "generic/test-model"
         assert mine["connected"] is True
         assert mine["locality"] == "unknown"  # a hand-written section: nobody can say
 
-    def test_the_panel_says_where_each_engine_runs(self, page: Page) -> None:
+    def test_the_panel_says_where_each_provider_runs(self, page: Page) -> None:
         # The vocabulary the page's captions and the demo's fake read:
-        # the generic provider first and unable to say, an engine on this
+        # the generic provider first and unable to say, a provider on this
         # machine, a catalog over the wire.
         panel = page.get("/api/providers")
-        assert panel["engines"][0]["id"] == "generic"
-        by_name = {engine["id"]: engine["locality"] for engine in panel["engines"]}
+        assert panel["providers"][0]["id"] == "generic"
+        by_name = {p["id"]: p["locality"] for p in panel["providers"]}
         assert by_name["generic"] == "unknown"
         assert by_name["llamacpp"] == "local"
         assert by_name["openrouter"] == "remote"
@@ -555,13 +555,13 @@ class TestThePicker:
         # the generic provider answers in the second phase and belongs
         # first, a hand-written section last. Sorting both answers by it
         # restores the unscoped panel exactly.
-        whole = [engine["id"] for engine in page.get("/api/providers")["engines"]]
-        local = page.get("/api/providers?scope=local")["engines"]
-        cloud = page.get("/api/providers?scope=cloud")["engines"]
-        assert {engine["id"] for engine in cloud} >= {"generic", "openrouter", "nanogpt"}
-        assert all(engine["id"] not in {"generic", "openrouter"} for engine in local)
-        merged = sorted(local + cloud, key=lambda engine: (engine["order"], engine["id"]))
-        assert [engine["id"] for engine in merged] == whole
+        whole = [p["id"] for p in page.get("/api/providers")["providers"]]
+        local = page.get("/api/providers?scope=local")["providers"]
+        cloud = page.get("/api/providers?scope=cloud")["providers"]
+        assert {p["id"] for p in cloud} >= {"generic", "openrouter", "nanogpt"}
+        assert all(p["id"] not in {"generic", "openrouter"} for p in local)
+        merged = sorted(local + cloud, key=lambda p: (p["order"], p["id"]))
+        assert [p["id"] for p in merged] == whole
         assert merged[0]["id"] == "generic" and merged[0]["order"] == 0
 
 

@@ -28,13 +28,13 @@ let drawn = null;
 const GONE = "otaku is down";
 
 export function showFacts(facts) {
-  const engine = [facts.engine, facts.max_context && `${facts.max_context} context`]
+  const provider = [facts.provider, facts.max_context && `${facts.max_context} context`]
     .filter(Boolean)
     .join(" · ");
   const fields = {
     version: `v${facts.version}`,
     model: facts.model,
-    engine: engine,
+    provider: provider,
     story: label(facts.story) || "No story yet",
     turns: facts.turns ? `${facts.turns} messages` : "",
   };

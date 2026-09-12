@@ -43,7 +43,7 @@ from otaku.backend.api import transfer as api_transfer
 from otaku.backend.api.cards import PreparedCard
 from otaku.backend.api.lore import FieldKind, WorkerRun
 from otaku.backend.api.play import Declined, Done, Failed, PlayEvent, Reasoning, Recorded, Text
-from otaku.backend.api.providers import Engine
+from otaku.backend.api.providers import SupportedProvider
 from otaku.backend.commands import COMMANDS, PROSE_DESCRIPTION
 from otaku.backend.session import KNOWN_PARAMS, THINK_MENU, Refused, Session
 from otaku.formatting import Money, format_context, format_size
@@ -126,7 +126,7 @@ class NotFound(Exception):  # noqa: N818 — a 404 is an expected answer, not an
 
 def facts(session: Session) -> dict[str, Any]:
     """What the rail and the runhead draw, without reading a story or
-    probing an engine. Best-effort like the terminal's own opening: a
+    probing a provider. Best-effort like the terminal's own opening: a
     cloud catalog is never asked for its context window here.
 
     The knobs are NOT here — they are `settings`, and a figure with two
@@ -136,7 +136,7 @@ def facts(session: Session) -> dict[str, Any]:
     return {
         "version": __version__,
         "model": session.model or "(no model)",
-        "engine": session.engine,
+        "provider": session.provider,
         "max_context": format_context(max_context) if max_context else "",
         "story": api_stories.headline(session),
         "story_id": session.story_id,
@@ -310,30 +310,30 @@ def _memory(session: Session) -> dict[str, Any]:
     """The machine's memory alone — the same gauge the picker opens with
     (`backend.meminfo`), on its own so the page can watch it fill while a
     model loads. Reading it costs one syscall; asking `providers` for it
-    would re-probe every engine a second."""
+    would re-probe every provider a second."""
     return {"memory": meminfo.gauge()}
 
 
 def _providers(session: Session, scope: str = "") -> dict[str, Any]:
     """The model picker: every reachable provider's models under their
-    engine captions, and the panel's field rows. An api key's VALUE is
+    provider captions, and the panel's field rows. An api key's VALUE is
     never sent — only whether one is set.
 
-    Every CONFIGURED provider, not only the engines otaku ships a client
+    Every CONFIGURED provider, not only the ones otaku ships a client
     for: a section somebody added by hand is a provider they play on,
-    and the terminal lists those after the engines, by name. A picker
+    and the terminal lists those after the supported ones, by name. A picker
     that hides the model the session is using is a picker with no way
     back to it.
 
     `scope` is which slice to ask — the terminal's own two-phase rule
-    (its picker opens on the engines on this machine and lets the rest
+    (its picker opens on the providers on this machine and lets the rest
     answer after): "local" probes and lists everything but the catalogs,
     "cloud" only those — the hosted ones and the generic provider,
     whose url could point anywhere — a provider's name only it (the
     one-provider refresh a Test connection is), "" the whole set."""
-    engines = api_providers.engines(session)
-    catalogs = {engine.id for engine in engines if engine.locality is not Locality.LOCAL}
-    everyone = {engine.id for engine in engines} | api_providers.configured(session)
+    providers = api_providers.supported(session)
+    catalogs = {p.id for p in providers if p.locality is not Locality.LOCAL}
+    everyone = {p.id for p in providers} | api_providers.configured(session)
     if scope == "local":
         asked = everyone - catalogs
     elif scope == "cloud":
@@ -364,16 +364,16 @@ def _providers(session: Session, scope: str = "") -> dict[str, Any]:
             }
             for model in row.models
         )
-    known = {engine.id: engine for engine in engines}
-    # The engines in their own order, then whatever else is configured,
+    known = {p.id: p for p in providers}
+    # The supported providers in their own order, then whatever else is configured,
     # by name — the terminal's `order.get(name, len(order))` — and only
     # the slice that was asked: a scoped answer carries no card it did
     # not probe, so the page never draws a lamp nobody checked. Each card
     # SAYS its position too, because the page asks in two phases and the
     # order runs across both: the generic provider is first in the
     # panel and last to answer.
-    rank = {engine.id: i for i, engine in enumerate(engines)}
-    named = [engine.id for engine in engines if engine.id in asked]
+    rank = {p.id: i for i, p in enumerate(providers)}
+    named = [p.id for p in providers if p.id in asked]
     named += sorted(name for name in models if name not in known)
     return {
         "current": session.full_model_name,
@@ -381,31 +381,31 @@ def _providers(session: Session, scope: str = "") -> dict[str, Any]:
         # fills a machine up. Said below both frontends, so the terminal's
         # gauge and the page's are one sentence (`backend.meminfo`).
         "memory": meminfo.gauge(),
-        "engines": [
-            _engine(session, name, known.get(name), rank.get(name, len(rank)), models, reachable)
+        "providers": [
+            _card(session, name, known.get(name), rank.get(name, len(rank)), models, reachable)
             for name in named
         ],
     }
 
 
-def _engine(
+def _card(
     session: Session,
     name: str,
-    engine: Engine | None,
+    provider: SupportedProvider | None,
     order: int,
     models: dict[str, list[dict[str, Any]]],
     reachable: set[str] | frozenset[str],
 ) -> dict[str, Any]:
     """One provider as the picker draws it. A configured section that is
-    not one of the engines has no catalog entry to describe it, so it
-    speaks for itself: its own name, what its config says, and no idea
-    where it runs."""
+    not one of the supported providers has no roster entry to describe
+    it, so it speaks for itself: its own name, what its config says, and
+    no idea where it runs."""
     section = api_providers.section(session, name)
     return {
         "id": name,
-        "label": engine.label if engine is not None else name,
+        "label": provider.label if provider is not None else name,
         "order": order,
-        "locality": (engine.locality if engine is not None else Locality.UNKNOWN).value,
+        "locality": (provider.locality if provider is not None else Locality.UNKNOWN).value,
         "connected": name in reachable,
         "url": section.url,
         "has_key": bool(section.api_key),
@@ -425,7 +425,7 @@ def settings(session: Session) -> dict[str, Any]:
         "verbose": session.verbose,
         "autocorrect": session.autocorrect,
         "notification": session.notification,
-        # Tokens the prompt may use at most; 0 = the model's whole window.
+        # Tokens the prompt may use at most; 0 = the model's own max context.
         "max_context": session.max_context_setting,
         "model": session.model,
         "parameters": [

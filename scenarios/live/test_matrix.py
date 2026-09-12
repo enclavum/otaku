@@ -7,12 +7,12 @@ Per provider, on the model its case names: the one-model row and its
 capabilities decoded; a turn at "off" with no thinking echo where the
 model can be switched off, and at "high" with the level on the wire; a
 text completion answering as text; the cat photo to a model that takes
-images, answered with the word; the token counts where the engine
+images, answered with the word; the token counts where the provider
 counts; the balance where there is an account. Marked `live`; a case
 skips itself when its server is down or its key is not set. Same knobs
 as the other smokes: the local engines via scripts/live-providers.sh,
 the catalogs via OPENROUTER_API_KEY and NANOGPT_API_KEY, LM Studio via
-LMSTUDIO_API_KEY, a model per engine via OTAKU_LIVE_<ENGINE>_MODEL.
+LMSTUDIO_API_KEY, a model per provider via OTAKU_LIVE_<PROVIDER>_MODEL.
 """
 
 import os
@@ -90,11 +90,11 @@ class Turn:
 
 @pytest.fixture(params=CASES, ids=_IDS)
 def case(request):  # type: ignore[no-untyped-def]
-    """One engine's client and model, or a skip with the reason."""
-    engine, url, key_var, model = request.param
-    key = case_key(engine, key_var, _REQUIRED_KEYS)
-    model = case_model(engine, url, key, model)
-    client = ALL_CLIENTS[engine](ProviderConfig(name=engine, url=url, api_key=key))
+    """One provider's client and model, or a skip with the reason."""
+    provider, url, key_var, model = request.param
+    key = case_key(provider, key_var, _REQUIRED_KEYS)
+    model = case_model(provider, url, key, model)
+    client = ALL_CLIENTS[provider](ProviderConfig(name=provider, url=url, api_key=key))
     return client, model
 
 
@@ -103,7 +103,7 @@ class TestMatrix:
         client, model = case
         row = client.models.get(model)
         assert row is not None and row.name == model
-        # An engine that reports capabilities decodes them; the generic
+        # A provider that reports capabilities decodes them; the generic
         # provider is the one that reports nothing.
         if client.id != "generic":
             assert row.capabilities is not None
@@ -136,7 +136,7 @@ class TestMatrix:
         client, model = case
         row = client.models.get(model)
         if row is None or row.capabilities is None or not row.capabilities.vision:
-            pytest.skip(f"{model} does not take images, or its engine cannot say")
+            pytest.skip(f"{model} does not take images, or its provider cannot say")
         messages = [
             Turn("system", "Answer with one word."),
             Turn("user", "What animal is this?"),

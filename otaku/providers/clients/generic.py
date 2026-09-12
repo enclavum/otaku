@@ -1,6 +1,6 @@
 """The generic provider: any server behind the OpenAI protocol, by url
 and key, over the protocol alone. The base listing reads /models, with
-the model's own ceiling where an entry carries `context_length`, and
+the model's own max context where an entry carries `context_length`, and
 nothing an engine's API would add — no state, no sizes, every
 capability unknown, which a reader treats as no. The url may name a
 local engine as well as a catalog, so a reasoning effort goes out on

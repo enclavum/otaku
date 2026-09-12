@@ -140,7 +140,7 @@ class Registry:
         business. Raises ValueError for a name no engine answers to: the
         registry serves the engines' sections and founds no other."""
         if config.name not in ALL_CLIENTS:
-            raise ValueError(f"no engine is named {config.name!r}")
+            raise ValueError(f"no supported provider is named {config.name!r}")
         with self._lock:
             self.configs[config.name] = config
             self._build(config)
@@ -191,7 +191,7 @@ def probe(config: ProviderConfig, *, timeout: float = LISTING_TIMEOUT) -> Probe:
     an empty listing are ANSWERS, each with the sentence that says it."""
     cls = ALL_CLIENTS.get(config.name)
     if cls is None:
-        return Probe(ProbeStatus.ERROR, 0, None, f"No engine is named {config.name}.")
+        return Probe(ProbeStatus.ERROR, 0, None, f"No supported provider is named {config.name}.")
     client = cls(config)
     source = client.auth.key_source
     try:

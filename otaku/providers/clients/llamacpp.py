@@ -2,10 +2,11 @@
 model chosen at launch, or the router (`--models-dir`), which fronts a
 folder of models and loads and unloads them by name. Chat rides the
 OpenAI protocol at /v1. The listing carries what a model half needs
-— the loaded context size, the model's ceiling and its size in `meta`, and
-in router mode the modalities of every entry — so `/props` is read
-once per listing, for the modalities in single mode, and nothing is
-read for a single server's state, which never changes. A router's
+— the loaded context size, the model's own max context and its size
+in `meta`, and in router mode the modalities of every entry — so
+`/props` is read once per listing, for the modalities in single mode,
+and nothing is read for a single server's state, which never changes.
+A router's
 entries carry a `status`, which is how the mode is told: `can_manage`
 is settled by the first listing and false until then. In router mode
 any request for an unloaded model loads it, so the counts ask not to.
@@ -74,9 +75,9 @@ class LlamaCppModels(OpenAIModels):
         return [e for e in raw or [] if isinstance(e, dict) and isinstance(e.get("id"), str)]
 
     def _meta_of(self, entry: dict[str, Any]) -> tuple[int | None, int | None, int | None]:
-        """(the loaded context size, the model's ceiling, the size on
-        disk) from an entry's `meta`: `n_ctx` is per slot, what one
-        request gets."""
+        """(the loaded context size, the model's own max context, the
+        size on disk) from an entry's `meta`: `n_ctx` is per slot, what
+        one request gets."""
         meta = entry.get("meta")
         if not isinstance(meta, dict):
             return None, None, None
@@ -108,14 +109,14 @@ class LlamaCppModels(OpenAIModels):
 
 class LlamaCppSingleModels(LlamaCppModels):
     """One model, loaded at launch, its state never changing: the
-    listing's one entry carries its loaded context size, ceiling and
-    size, `/props` its modalities, and every listed name is that
-    model's. Nothing is asked live, nothing is managed."""
+    listing's one entry carries its loaded context size, its own max
+    context and size, `/props` its modalities, and every listed name
+    is that model's. Nothing is asked live, nothing is managed."""
 
     def _listing(self, entries: list[dict[str, Any]], props: Any) -> Listing:
         if not entries:
             return []
-        max_context_loaded, ceiling, size = self._meta_of(entries[0])
+        max_context_loaded, max_context_catalogue, size = self._meta_of(entries[0])
         # Props without `modalities` are a build older than mid-2025:
         # still llama.cpp, vision and audio unknown. No props, nothing
         # is known.
@@ -125,7 +126,7 @@ class LlamaCppSingleModels(LlamaCppModels):
             ModelInfo(
                 name=str(entry["id"]),
                 size=size,
-                max_context_catalogue=ceiling,
+                max_context_catalogue=max_context_catalogue,
                 max_context_loaded=max_context_loaded,
                 capabilities=self._capabilities_of(modalities) if answered else None,
                 state=ModelState.LOADED,
@@ -189,11 +190,11 @@ class LlamaCppRouterModels(LlamaCppModels):
     # ---------- the hooks ----------
 
     def _listing(self, entries: list[dict[str, Any]], props: Any) -> Listing:
-        # Every entry states its modalities; the loaded context size,
-        # ceiling and size are merged in for a running one.
+        # Every entry states its modalities; the loaded context size, the
+        # model's own max context and size are merged in for a running one.
         models = []
         for entry in entries:
-            max_context_loaded, ceiling, size = self._meta_of(entry)
+            max_context_loaded, max_context_catalogue, size = self._meta_of(entry)
             architecture = entry.get("architecture")
             modalities = (
                 architecture.get("input_modalities") if isinstance(architecture, dict) else None
@@ -202,7 +203,7 @@ class LlamaCppRouterModels(LlamaCppModels):
                 ModelInfo(
                     name=str(entry["id"]),
                     size=size,
-                    max_context_catalogue=ceiling,
+                    max_context_catalogue=max_context_catalogue,
                     max_context_loaded=max_context_loaded,
                     capabilities=self._capabilities_of(modalities),
                     state=self._state_of(entry),

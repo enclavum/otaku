@@ -71,22 +71,23 @@ def get_providers(
 
 
 @dataclass(frozen=True)
-class Engine:
-    """One supported engine, as the provider panel captions it — its id
-    (which names its section), label (the project's own spelling), and
-    where it runs (a catalog's url is fixed and its models billed; the
-    generic provider's url could name either, so it says unknown)."""
+class SupportedProvider:
+    """One provider otaku ships a client for, as the provider panel
+    captions it — its id (which names its section), label (the
+    project's own spelling), and where it runs (a catalog's url is
+    fixed and its models billed; the generic provider's url could name
+    either, so it says unknown)."""
 
     id: str
     label: str
     locality: Locality
 
 
-def engines(session: Session) -> list[Engine]:
-    """The supported engines in the panel's canonical order — the ONE
+def supported(session: Session) -> list[SupportedProvider]:
+    """The supported providers in the panel's canonical order — the ONE
     source of the captions and the where-it-runs split, so no frontend
     keeps its own table."""
-    return [Engine(cls.id, cls.label, cls.locality) for cls in ALL_CLIENTS.values()]
+    return [SupportedProvider(cls.id, cls.label, cls.locality) for cls in ALL_CLIENTS.values()]
 
 
 def configured(session: Session) -> set[str]:
@@ -97,8 +98,8 @@ def configured(session: Session) -> set[str]:
 
 
 def loaded_models(session: Session, provider: str) -> set[str]:
-    """Which of an engine's models are loaded right now — the picker's
-    read-back after a load or unload, asked of that ONE engine with the
+    """Which of a provider's models are loaded right now — the picker's
+    read-back after a load or unload, asked of that ONE provider with the
     listing's own patience (a server that just loaded a model is the
     slowest it ever is). Raises Refused when it cannot be reached: a
     refresh that failed quietly would leave the panel claiming the
@@ -113,14 +114,15 @@ def loaded_models(session: Session, provider: str) -> set[str]:
 
 
 def section(session: Session, provider: str) -> ProviderConfig:
-    """The engine's current section when configured, its autoconfigured
+    """The provider's current section when configured, its autoconfigured
     default otherwise — what the panel shows either way. Raises Refused
-    for a name no engine answers to: a section is its engine's name."""
+    for a name no supported provider answers to: a section is its
+    provider's name."""
     known = session._providers_registry.configs.get(provider)
     if known is not None:
         return known
     if provider not in ALL_CLIENTS:
-        raise Refused(f"No engine is named {provider}.")
+        raise Refused(f"No supported provider is named {provider}.")
     return ALL_CLIENTS[provider].autoconfigure()
 
 
@@ -148,9 +150,9 @@ def save_field(session: Session, provider: str, attr: ProviderField, value: str)
             raise Refused(f"Save failed: {e}") from e
         line = f"api_key = {toml_scalar(sealed_value)}"
         updated = replace(config, api_key=value)
-    # An engine not in providers.toml yet gets its section written
-    # first — this is how a cloud provider is added deliberately. An
-    # engine that honours cache breakpoints is founded with the
+    # A provider not in providers.toml yet gets its section written
+    # first — this is how a cloud provider is added deliberately. A
+    # provider that honours cache breakpoints is founded with the
     # prompt_cache row, the same line the upgrade migration writes, so
     # the setting is visible in the file however the section got there.
     # The name is QUOTED, as every other writer of this file quotes it
@@ -197,9 +199,10 @@ def clear_field(session: Session, provider: str, attr: ProviderField) -> str:
 
 
 def load(session: Session, provider: str, model: str) -> None:
-    """Load on a managed engine; blocks until the server answers. Every
-    failure raises Refused with the curated sentence (not managed, the
-    engine unreachable, the engine's own error text) — no transport
+    """Load on a provider that manages its models; blocks until the
+    server answers. Every failure raises Refused with the curated
+    sentence (not managed, the provider unreachable, the server's own
+    error text) — no transport
     exception type ever crosses the boundary."""
     _perform(_managed(session, provider).models.load, model, provider)
 

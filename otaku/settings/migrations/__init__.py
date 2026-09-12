@@ -126,7 +126,7 @@ _CONFIG_MIGRATIONS: list[Migration] = [
         "max_context",
         row(
             "max_context = 0",
-            "the prompt may use at most this many tokens; 0 = the model's whole window",
+            "the prompt may use at most this many tokens; 0 = the model's own max context",
         ),
         after="min_tail_messages",
     ),
@@ -189,12 +189,12 @@ def _provider_migrations(
     of them — and runs after the move from an old config, so it cleans a
     section the same way wherever the section came from."""
     return [
-        # 0.2.2 — thinking support became class knowledge of the engine.
+        # 0.2.2 — thinking support became class knowledge of the provider.
         drop_key_everywhere("supports_thinking"),
         # 0.2.2 — api keys live sealed; a plain one (hand-typed, or left
         # by a launch that could not seal) is sealed as soon as possible.
         seal_api_keys(seal, is_sealed),
-        # 0.4.0 — prompt caching arrives, on where the engine honours
+        # 0.4.0 — prompt caching arrives, on where the provider honours
         # cache breakpoints: the key lands in the file so an upgrader
         # SEES the setting exists; what a user already set stays. Named
         # sections only — the section's name is what picks the marking
@@ -220,7 +220,7 @@ def migrate(
     config table, the provider move, the providers table (plain api
     keys sealed — `is_sealed` rides with `seal` so the migration skips
     sealed keys itself; an unsealable line stays for the next launch),
-    the given engines' sections ensured, the
+    the given providers' sections ensured, the
     prompt-template refreshes. providers.toml itself converges too:
     missing beside an existing config — a crash between the first-run
     writes, a hand deletion — it is founded empty here, for the ensured

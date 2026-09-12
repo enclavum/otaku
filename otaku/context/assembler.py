@@ -50,7 +50,7 @@ from otaku.context.cards import card_to_wire
 from otaku.store import Store
 from otaku.store.schema import Message, Scene
 
-_DEFAULT_CONTEXT = 8_192  # when the engine states no max context
+_DEFAULT_CONTEXT = 8_192  # when the provider states no max context
 # The reply reserve is sized from the story itself: the longest of the
 # last _RESERVE_SAMPLE assistant replies, _RESERVE_HEADROOM on top.
 _RESERVE_SAMPLE = 5

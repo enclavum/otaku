@@ -183,15 +183,6 @@ class Session:
         return self._state.provider
 
     @property
-    def engine(self) -> str:
-        """The KIND of server behind the model — "ollama", "generic" — as
-        against `provider`, which is the section that configured it: a
-        section somebody named themselves is not named after its engine.
-        "" while no model is selected."""
-        client = self._client()
-        return client.id if client is not None else ""
-
-    @property
     def on_cloud(self) -> bool:
         """Whether the story is played against a hosted catalog — the
         prompt marker's question, answered per turn. The generic provider
@@ -247,7 +238,7 @@ class Session:
     def max_context_setting(self) -> int:
         """Tokens the prompt may use at most — config.toml's [context]
         value, which /set max_context edits in place; 0 means the
-        model's whole window."""
+        model's own max context."""
         return self._config.max_context
 
     @property

@@ -1,6 +1,6 @@
 """Thinking through every provider, live: `/set think none` plays a turn
-with no thinking echo, a level plays or is refused as the engine allows,
-and the request that left carries exactly the knobs the engine is
+with no thinking echo, a level plays or is refused as the provider allows,
+and the request that left carries exactly the knobs the provider is
 promised — read back from the state dir's own request log, the one
 record of what left the machine. Marked `live`; each case skips itself
 when its server is down or its key is not set, as the generic smokes do.
@@ -9,7 +9,7 @@ What is NOT asserted: that a level makes the model think. Whether it
 does is the model's own choice per turn (Gemma 4 thinks on roughly half
 of them), so the echo at a level would be a coin toss; the knobs on the
 wire are the promise, and "none" is the one setting whose effect is
-checked — no echo, on every engine that can stop at all.
+checked — no echo, on every provider that can stop at all.
 """
 
 import json
@@ -104,7 +104,7 @@ class TestThink:
         app = _open(tmp_path, server, provider, url, key_var, model)
         try:
             app.play("/set think high")
-            # Never refused for the engine's sake: an engine with no knob
+            # Never refused for the provider's sake: a provider with no knob
             # takes the level too, and its request carries nothing.
             assert app.session.think == "high"
             app.play("Reply with one word: ready?")
@@ -144,7 +144,7 @@ def _carried(app, provider: str) -> dict[str, object]:  # type: ignore[no-untype
     """The thinking fields on the LAST turn request that left for
     `provider`, from the state dir's request log. A 400 on the knob makes
     otaku send the turn again without it, so the turn's FIRST request is
-    the one read: the knobs are what left, whatever the engine said."""
+    the one read: the knobs are what left, whatever the provider said."""
     bodies = []
     for path in sorted(app.paths.logs_dir.glob("requests-*.jsonl")):
         for line in path.read_text(encoding="utf-8").splitlines():

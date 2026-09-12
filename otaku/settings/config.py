@@ -109,7 +109,7 @@ class Config:
             "[context]",
             row(f"head_messages = {self.head_messages}", "opening messages kept verbatim in the prompt"),
             row(f"min_tail_messages = {self.min_tail_messages}", "at least this many recent messages kept verbatim"),
-            row(f"max_context = {self.max_context}", "the prompt may use at most this many tokens; 0 = the model's whole window"),
+            row(f"max_context = {self.max_context}", "the prompt may use at most this many tokens; 0 = the model's own max context"),
             "",
             "[lore_extraction]",
             row(f"enabled = {toml_scalar(self.lore_enabled)}", "extract lore on idle (/extract always works)"),

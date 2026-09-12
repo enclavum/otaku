@@ -851,7 +851,7 @@ paths:
           schema: { type: string, enum: [local, cloud] }
           description: >
             Which slice to probe and list — the terminal's own two-phase
-            rule: "local" the engines on this machine, "cloud" the rest
+            rule: "local" the providers on this machine, "cloud" the rest
             (the hosted catalogs and the generic provider, whose url could
             point anywhere), absent the whole set. A single provider is
             /api/providers/{provider}.
@@ -873,7 +873,7 @@ paths:
       description: |
         A provider that answers with models is configured and one that
         does not is not; the test IS this read. Same envelope as the
-        collection, one engine in it.
+        collection, one provider in it.
       responses:
         "200":
           description: One provider, re-probed — which is what a Test connection is.
@@ -912,7 +912,7 @@ paths:
     patch:
       operationId: patchProviderModel
       tags: [Models]
-      summary: Load or unload a model on a managed engine
+      summary: Load or unload a model on a provider that manages models
       description: |
         Residency is a property of the model, so it is a PATCH of one.
         A long one: loading holds the session's thread, and every GET
@@ -990,7 +990,7 @@ paths:
       summary: The machine's memory gauge, alone
       description: >
         The same figure the picker opens with, on its own so the page can
-        watch it while a model loads — one syscall, no engine probed.
+        watch it while a model loads — one syscall, no provider probed.
       responses:
         default: { $ref: "#/components/responses/Failed" }
         "200":
@@ -1162,7 +1162,7 @@ paths:
         The value's type is the knob's: a word for `think` (one of the
         ladder in `Settings.think_levels`), a boolean for the three
         toggles, an integer for `max_context` where 0 means the model's
-        whole window. Per-model inference parameters are not here — they
+        own max context. Per-model inference parameters are not here — they
         belong to a model, and live under the session's model.
       requestBody:
         content:
@@ -1280,7 +1280,7 @@ components:
             type: object
             properties:
               provider: { type: string, description: "The config section's own name — what a reader would type." }
-              label: { type: string, description: "The engine's caption, for a frontend that captions rather than keys." }
+              label: { type: string, description: "The provider's caption, for a frontend that captions rather than keys." }
               money:
                 description: What the account has left; null when it would not say.
                 oneOf:
@@ -1469,25 +1469,25 @@ components:
         /api/machine and nothing carries a second copy.
       properties:
         current: { type: string, description: '"provider/model"; "" without a model.' }
-        engines:
+        providers:
           type: array
           items:
             type: object
             properties:
-              id: { type: string, description: "The engine's id, which names its section." }
+              id: { type: string, description: "The provider's id, which names its section." }
               label: { type: string }
               order:
                 type: integer
                 description: >
-                  The card's position in the panel — the engines in their
-                  canonical order, then hand-written sections, which share
+                  The card's position in the panel — the supported providers
+                  in their canonical order, then hand-written sections, which share
                   one rank and sort by name. Runs across the two scoped
                   phases, so the page merges them by it.
               locality:
                 type: string
                 enum: [local, remote, unknown]
                 description: >
-                  Where the engine runs, as its client knows it: the
+                  Where the provider's server runs, as its client knows it: the
                   generic provider (and a hand-written section) cannot say.
                   The url is editable unless remote; sizes and load state
                   exist only when local.
@@ -1504,11 +1504,11 @@ components:
                       type: boolean
                       description: >
                         Whether an instance serves it now — one still
-                        loading is not loaded. Always true where the engine
+                        loading is not loaded. Always true where the provider
                         serves what it serves (can_manage false).
                     can_manage: { type: boolean }
                     size: { type: string }
-                    max_context_catalogue: { type: string, description: "The model's own maximum context, formatted; \"\" when the engine states none." }
+                    max_context_catalogue: { type: string, description: "The model's own maximum context, formatted; \"\" when the provider states none." }
 
     Scene:
       type: object
@@ -1533,13 +1533,13 @@ components:
       type: object
       description: |
         What the rail and the runhead draw, without reading a story or
-        probing an engine. The knobs are NOT here — they are
+        probing a provider. The knobs are NOT here — they are
         `/api/settings`, and a figure with two homes has two truths; nor
         is the premise, which is the open story's and comes with it.
       properties:
         version: { type: string }
         model: { type: string, description: "The bare model name; \"(no model)\" when none." }
-        engine: { type: string }
+        provider: { type: string, description: "The provider serving the model; \"\" without a model." }
         max_context:
           type: string
           description: >
@@ -1562,7 +1562,7 @@ components:
         verbose: { type: boolean }
         autocorrect: { type: boolean }
         notification: { type: boolean }
-        max_context: { type: integer, description: "Tokens the prompt may use at most; 0 = the model's whole window." }
+        max_context: { type: integer, description: "Tokens the prompt may use at most; 0 = the model's own max context." }
         model: { type: string, description: "Whose parameters these are — the read is a snapshot, and a switch mid-slip would silently retitle it." }
         parameters:
           type: array

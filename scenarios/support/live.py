@@ -56,26 +56,26 @@ def require_env(name: str) -> str:
     return value
 
 
-def case_key(engine: str, var: str, required: frozenset[str] | set[str]) -> str:
-    """The key an engine's case carries: required for a catalog (pytest
-    skips without it), optional for an engine that may or may not demand
+def case_key(provider: str, var: str, required: frozenset[str] | set[str]) -> str:
+    """The key a provider's case carries: required for a catalog (pytest
+    skips without it), optional for a provider that may or may not demand
     one, the one omlx's own autoconfiguration reads off the machine, none
     for the rest."""
-    if engine == "omlx":
+    if provider == "omlx":
         return OmlxClient.autoconfigure().api_key
     if not var:
         return ""
     return require_env(var) if var in required else os.environ.get(var, "")
 
 
-def case_model(engine: str, url: str, key: str, named: str) -> str:
-    """The model a case plays, as the engine's own client lists it (the
+def case_model(provider: str, url: str, key: str, named: str) -> str:
+    """The model a case plays, as the provider's own client lists it (the
     name the client's `model` answers to — Kobold strips its prefix, say),
     the server probed first: a server that is down skips the case, as the
-    engine's own module skips. omlx plays a LOADED model unless one is
+    provider's own module skips. omlx plays a LOADED model unless one is
     named (its listing carries the unloaded too, and a smoke does not
     wait on a load); the rest play the named one, else the first listed."""
-    client = ALL_CLIENTS[engine](ProviderConfig(name=engine, url=url, api_key=key))
+    client = ALL_CLIENTS[provider](ProviderConfig(name=provider, url=url, api_key=key))
     try:
         rows = client.models.list(timeout=5.0)
     except UnreachableError:
@@ -83,7 +83,7 @@ def case_model(engine: str, url: str, key: str, named: str) -> str:
     if named:
         # As listed: Ollama tags a bare name ":latest".
         return next((r.name for r in rows if r.name in (named, f"{named}:latest")), named)
-    if engine == "omlx":
+    if provider == "omlx":
         rows = [row for row in rows if row.state is ModelState.LOADED]
         if not rows:
             pytest.skip("no model loaded in omlx")

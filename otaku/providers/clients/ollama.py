@@ -1,6 +1,7 @@
 """Ollama: the registry, load and unload, sizes and the loaded context sizes
-via the native /api endpoints, each model's capabilities and ceiling
-from its card at /api/show; chat rides the OpenAI protocol at /v1. A
+via the native /api endpoints, each model's capabilities and its own
+max context from its card at /api/show; chat rides the OpenAI protocol
+at /v1. A
 reasoning effort goes out as `reasoning_effort` alone, the one knob the
 server reads; it takes none, low, medium, high and max, and answers
 400 to any other word, which the take then sends again without the
@@ -109,8 +110,8 @@ class OllamaModels(OpenAIModels):
 
     def _enhance(self, model: ModelInfo, timeout: float) -> ModelInfo:
         """The card: capabilities and the trained context length, the
-        ceiling — never the loaded size, which Ollama sets at load time from
-        a server-wide default clamped to it."""
+        model's own max context — never the loaded size, which Ollama
+        sets at load time from a server-wide default clamped to it."""
         data = http.post_json(
             f"{self._config.base_url}/api/show",
             {"model": model.name},

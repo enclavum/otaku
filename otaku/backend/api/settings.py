@@ -29,8 +29,8 @@ THINK_ALIASES = {"on": "medium", "off": "none"}
 def set_think(session: Session, raw: str) -> str:
     """A THINK_LEVELS value, an alias (on/off), or "default" (send
     nothing); "" reports where it stands. Raises Refused for an unknown
-    level or no model — never for the engine: a level goes out on
-    whatever knobs the engine reads, and on none where it reads none."""
+    level or no model — never for the provider: a level goes out on
+    whatever knobs the provider reads, and on none where it reads none."""
     if not raw.strip():
         return f"Think: {session.think if session.think else 'default'}."
     value = THINK_ALIASES.get(raw.strip().lower(), raw.strip().lower())
@@ -90,7 +90,7 @@ def set_notification(session: Session, raw: str) -> str:
 
 def set_max_context(session: Session, raw: str) -> str:
     """Tokens the prompt may use at most: a number, 0 = the model's
-    whole window; "" reports where it stands. The one /set that edits
+    own max context; "" reports where it stands. The one /set that edits
     config.toml — [context] is the setting's single home — surgically,
     the pre-edit file backed up, the session updated in the same call;
     a write that could not land is SAID, not swallowed."""
@@ -100,10 +100,10 @@ def set_max_context(session: Session, raw: str) -> str:
             tokens = int(value)
         except ValueError:
             raise Refused(
-                "Usage: /set max_context <tokens> — 0 = the model's whole window"
+                "Usage: /set max_context <tokens> — 0 = the model's own max context"
             ) from None
         if tokens < 0:
-            raise Refused("Max context cannot be negative — 0 means the model's whole window.")
+            raise Refused("Max context cannot be negative — 0 means the model's own max context.")
         changed = tokens != session.max_context_setting
         session._config = replace(session._config, max_context=tokens)
         # fmt: off
@@ -113,7 +113,7 @@ def set_max_context(session: Session, raw: str) -> str:
             [
                 surgery.set_key("context", "max_context", row(
                     f"max_context = {tokens}",
-                    "the prompt may use at most this many tokens; 0 = the model's whole window",
+                    "the prompt may use at most this many tokens; 0 = the model's own max context",
                 ))
             ],
         ):
@@ -127,7 +127,7 @@ def set_max_context(session: Session, raw: str) -> str:
 
 def _stands(tokens: int) -> str:
     if tokens == 0:
-        return "0 (the model's whole window)"
+        return "0 (the model's own max context)"
     return f"{tokens:,} tokens"
 
 

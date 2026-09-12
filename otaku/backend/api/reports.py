@@ -311,7 +311,7 @@ def info(session: Session) -> InfoReport:
 @dataclass(frozen=True)
 class Balance:
     provider: str  # the configured section's name
-    label: str  # what to CALL it: the engine's own caption
+    label: str  # what to CALL it: the provider's own caption
     money: Money | None  # None when the account would not say
     note: str = ""  # why there is no figure \u2014 never empty when money is None
 
@@ -362,7 +362,8 @@ def balances(session: Session, *, probe: bool = True) -> BalanceReport:
     keeps its row with a dash, because a report of only what answered
     cannot be told apart from one that found nothing — and the row with
     the dash is usually the one the reader came to look at. The cloud
-    catalogs are asked concurrently; a local engine has no account.
+    catalogs are asked concurrently; a provider on this machine has
+    no account.
 
     `probe=False` asks no network at all and returns the ROSTER — each
     keyed row with no figure and an EMPTY note, meaning "not asked yet"
@@ -375,10 +376,10 @@ def balances(session: Session, *, probe: bool = True) -> BalanceReport:
     def account(provider: str) -> Balance | None:
         client = registry.get(provider)
         if client is None or client.locality is not Locality.REMOTE:
-            return None  # a local engine has no account to ask
-        # What to CALL it: the engine's own caption — "OpenRouter", not
+            return None  # a provider on this machine has no account to ask
+        # What to CALL it: the provider's own caption — "OpenRouter", not
         # "openrouter". A section somebody named themselves keeps THEIR
-        # name, with the engine in brackets: two sections of one kind
+        # name, with the provider in brackets: two sections of one kind
         # are two accounts, and a report of balances that cannot tell
         # them apart is a report of one number twice.
         named = client.label if provider == client.id else f"{provider} ({client.label})"
@@ -396,7 +397,7 @@ def balances(session: Session, *, probe: bool = True) -> BalanceReport:
         return Balance(provider, named, money, "" if money else NO_ANSWER)
 
     rows = [row for row in registry.map(account) if row]
-    # A cloud engine otaku ships a client for and nobody has configured
+    # A cloud provider otaku ships a client for and nobody has configured
     # is still an account a reader may be about to open: it belongs in
     # the list, with nothing in it.
     rows += [
@@ -450,7 +451,7 @@ def _model_info(session: Session) -> tuple[tuple[str, str], ...]:
         out.append(("Auth", "api_key configured"))
     # The model's own row. Load state and size only where loading is a
     # real state (a cloud catalog serves everything statically); the
-    # capabilities from any engine that reports them, a catalog included
+    # capabilities from any provider that reports them, a catalog included
     # — that one costs a full catalog fetch, and /info is the place to
     # pay it. The generic provider reports none of these, wherever its
     # url points, so it is not asked.
@@ -459,16 +460,19 @@ def _model_info(session: Session) -> tuple[tuple[str, str], ...]:
         out.append(("Loaded", _STATE_WORDS[row.state]))
         if row.size:
             out.append(("Size", format_size(row.size)))
-    # Two sizes, each when known: the model's own, and what the loaded
-    # instance serves — what a request gets, and what the budget reads.
-    if ceiling := format_context(row.max_context_catalogue if row else None):
-        out.append(("Context", ceiling))
-    if window := format_context(row.max_context_loaded if row else None):
-        out.append(("Loaded context", window))
-    # What the model can do, as the engine says it — one fact per row,
-    # "unknown" where the engine could not say (and the app offers
-    # nothing on it). The efforts are listed in the wire's order; an
-    # engine no effort reaches lists none.
+    # What a request gets — the loaded instance's context size, or the
+    # model's own where nothing loads — and the model's own beside it
+    # when it is known and differs.
+    max_context = format_context(row.max_context if row else None)
+    if max_context:
+        out.append(("Max context", max_context))
+    catalogue = format_context(row.max_context_catalogue if row else None)
+    if catalogue and catalogue != max_context:
+        out.append(("Model context", catalogue))
+    # What the model can do, as the provider says it — one fact per row,
+    # "unknown" where the provider could not say (and the app offers
+    # nothing on it). The efforts are listed in the wire's order; a
+    # provider no effort reaches lists none.
     caps = row.capabilities if row is not None else None
     out.append(("Vision", _yes_no(caps.vision if caps else None)))
     efforts = caps.reasoning if caps else None

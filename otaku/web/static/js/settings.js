@@ -13,8 +13,8 @@ import * as api from "./api.js";
 import { editable, footnote, guard, popups, wiring } from "./browser.js";
 import { $, $$, element, span } from "./dom.js";
 
-// What a knob nobody has set reads as — the model's own value, or its
-// whole window. Either is an absence, and is drawn like one.
+// What a knob nobody has set reads as — the model's own value, or the
+// model's own max context. Either is an absence, and is drawn like one.
 const DEFAULT_VALUE = "default";
 
 export async function openSettings(answered = "") {
@@ -90,7 +90,7 @@ export async function openSettings(answered = "") {
 }
 
 /* What a typed knob's field shows, read off the settings: the limit is
-   a figure or nothing (0 is the model's whole window — an absence, so the
+   a figure or nothing (0 is the model's own max context — an absence, so the
    field is EMPTY and says `default` the way an unset parameter does), a
    parameter its value or nothing. */
 const stands = {

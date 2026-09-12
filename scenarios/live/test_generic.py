@@ -1,6 +1,6 @@
-"""The generic provider's smokes: every engine otaku has a native client
+"""The generic provider's smokes: every provider otaku has a native client
 for, reached through the protocol alone — the section named "generic",
-the engine's own url pasted in. What must hold everywhere: the models
+the provider's own url pasted in. What must hold everywhere: the models
 list, a turn streams and persists. Marked `live`; each case skips itself
 when its server is down or its key is not set (scripts/live-providers.sh
 launches the local engines; OPENROUTER_API_KEY / NANOGPT_API_KEY reach
@@ -20,8 +20,8 @@ from scenarios.support.live import live_app as build_app
 
 pytestmark = pytest.mark.live
 
-# (engine, url, the env var of its key or "", the env var naming a model
-# or a default) — the same choices the engine's own module makes, so a
+# (provider, url, the env var of its key or "", the env var naming a model
+# or a default) — the same choices the provider's own module makes, so a
 # case costs what that module's does.
 CASES = [
     ("llamacpp", "http://127.0.0.1:8080/v1", "", ""),
@@ -62,13 +62,13 @@ _REQUIRED_KEYS = {"OPENROUTER_API_KEY", "NANOGPT_API_KEY"}  # a catalog answers 
 
 class TestGeneric:
     @pytest.mark.parametrize(
-        ("engine", "url", "key_var", "model"), CASES, ids=[c[0] for c in CASES]
+        ("provider", "url", "key_var", "model"), CASES, ids=[c[0] for c in CASES]
     )
-    def test_every_engine_lists_and_plays_through_the_protocol_alone(
-        self, tmp_path: Path, server, engine: str, url: str, key_var: str, model: str
+    def test_every_provider_lists_and_plays_through_the_protocol_alone(
+        self, tmp_path: Path, server, provider: str, url: str, key_var: str, model: str
     ) -> None:  # type: ignore[no-untyped-def]
-        key = case_key(engine, key_var, _REQUIRED_KEYS)
-        model = case_model(engine, url, key, model)
+        key = case_key(provider, key_var, _REQUIRED_KEYS)
+        model = case_model(provider, url, key, model)
         app = build_app(
             tmp_path, server, ProviderConfig(name="generic", url=url, api_key=key), model
         )

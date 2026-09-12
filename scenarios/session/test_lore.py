@@ -777,13 +777,13 @@ class TestWarmUp:
     """The post-close prompt warm-up exists for a LOCAL server's prefix
     cache. A cloud provider has no per-session cache the request could
     warm — sending it there bills a full context window for one token —
-    so the close warms local engines and never a hosted catalog."""
+    so the close warms local providers and never a hosted catalog."""
 
     def test_a_local_close_warms_the_next_prompt(
         self, server: scripted.ModelServer, tmp_path: Path
     ) -> None:
         # The same scripted server behind a provider the registry builds
-        # as an engine ON THIS MACHINE — the section's NAME picks the
+        # as a provider ON THIS MACHINE — the section's NAME picks the
         # class.
         root = tmp_path / "state"
         set_config_provider(root, server, name="llamacpp")

@@ -499,7 +499,7 @@ def _build_demo_client():
             )
 
     class DemoClient(OpenAIClient):
-        """The scripted engine: the real client with its two halves
+        """The scripted provider: the real client with its two halves
         answering from the script."""
 
         id = "demo"

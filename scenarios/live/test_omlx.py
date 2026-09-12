@@ -33,9 +33,9 @@ class TestOmlx:
 
     def test_the_listing_marks_the_loaded_model(self, live_app) -> None:  # type: ignore[no-untyped-def]
         providers, _ = api_providers.get_providers(live_app.session)
-        engine = next(r for r in providers if r.id == "omlx")
-        assert engine.models
-        assert any(row.state is ModelState.LOADED for row in engine.models)
+        provider = next(r for r in providers if r.id == "omlx")
+        assert provider.models
+        assert any(row.state is ModelState.LOADED for row in provider.models)
 
 
 @pytest.fixture

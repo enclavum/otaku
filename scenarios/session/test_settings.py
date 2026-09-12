@@ -119,10 +119,10 @@ class TestThink:
         assert "chat_template_kwargs" not in app.server.requests[-1]
 
     def test_a_400_to_the_knob_retries_once_without_it(self, app: App) -> None:
-        # Engines differ on the knob: a reasoning-mandatory model refuses
-        # "none", some engines reject the field outright — either way a
+        # Providers differ on the knob: a reasoning-mandatory model refuses
+        # "none", some providers reject the field outright — either way a
         # 400 before any content. The same request goes again with no
-        # thinking field, and the engine's own default answers.
+        # thinking field, and the provider's own default answers.
         app.play("/set think low")
         app.server.refuse = lambda body: 400 if "reasoning_effort" in body else None
         app.server.refusal = "unknown field: reasoning_effort"
@@ -230,7 +230,7 @@ class TestThink:
     ) -> None:
         # LM Studio reads no request-level thinking knob (thinking is the
         # app's own per-model switch). The setting still takes — nothing
-        # is refused for the engine's sake — and the request carries no
+        # is refused for the provider's sake — and the request carries no
         # thinking field at all.
         set_config_provider(tmp_path / "state", server, name="lmstudio")
         plain = launch(tmp_path / "state", server, spec="lmstudio/test-model")
@@ -358,7 +358,7 @@ class TestMaxContext:
         migrated = app.paths.config_file.read_text()
         assert "max_context = 32000" in migrated
         assert migrated.count("max_context") == 1  # edited in place, not appended
-        assert "0 = the model's whole window" in migrated  # the comment rides it
+        assert "0 = the model's own max context" in migrated  # the comment rides it
         assert any(app.paths.config_backups_dir.iterdir())  # the pre-edit file waits
         relaunched = launch(app.paths.root, app.server)
         assert relaunched.session.max_context_setting == 32000
@@ -408,9 +408,9 @@ class TestManagedPicker:
         empty list. Built HERE, inside the app session, because
         prompt_toolkit binds an Application's input when it is built; the
         queued keys wait in the pipe meanwhile."""
-        engines = api_providers.engines(app.session)
+        supported = api_providers.supported(app.session)
         picker = screen_models.ModelPicker(
-            app.session, engines, [], initial_spec="ollama/alpha", fetch=["ollama"]
+            app.session, supported, [], initial_spec="ollama/alpha", fetch=["ollama"]
         )
         deadline = time.monotonic() + 5
         while picker.pending and time.monotonic() < deadline:
@@ -498,9 +498,9 @@ class TestManagedPicker:
         app = launch(root, server, spec="ollama/beta")
 
         def settled() -> str | None:
-            engines = api_providers.engines(app.session)
+            supported = api_providers.supported(app.session)
             picker = screen_models.ModelPicker(
-                app.session, engines, [], initial_spec="ollama/beta", fetch=["ollama", "generic"]
+                app.session, supported, [], initial_spec="ollama/beta", fetch=["ollama", "generic"]
             )
             deadline = time.monotonic() + 5
             while picker.pending and time.monotonic() < deadline:
@@ -562,7 +562,7 @@ class TestProviderPanel:
         next turn would send its api key."""
         hostile = 'pwn]\n[openrouter]\nurl = "http://attacker"\n[x'
         before = app.paths.providers_file.read_text()
-        # A section is its engine's name, so a name no engine answers to
+        # A section is its provider's name, so a name no supported provider answers to
         # is refused before anything is written — nothing conjured out
         # of its rows, and the file as it was.
         with pytest.raises(Refused):
@@ -627,7 +627,7 @@ class TestProviderPanel:
     def test_delete_outside_the_editor_clears_the_url_too(self, app: App) -> None:
         # Two rows down is llama.cpp's URL, which the harness pre-seeds:
         # Delete forgets it in the file and the session both, and the
-        # engine, with nowhere to ask, is no longer connected.
+        # provider, with nowhere to ask, is no longer connected.
         keys = "\t" + _DOWN + _DOWN + _DEL + ESC + ESC
         run_screen(keys, lambda: screen_models.pick(app.session))
         raw = app.paths.providers_file.read_text()
@@ -649,11 +649,11 @@ class TestGenericProvider:
     in the panel, and unable to say where its server runs."""
 
     def test_it_is_first_in_the_panel_and_cannot_say_where_it_runs(self, app: App) -> None:
-        engines = api_providers.engines(app.session)
-        assert engines[0].id == "generic"
-        assert engines[0].locality is Locality.UNKNOWN
-        # The engines know: the ones on this machine, the catalogs.
-        by_name = {engine.id: engine.locality for engine in engines}
+        supported = api_providers.supported(app.session)
+        assert supported[0].id == "generic"
+        assert supported[0].locality is Locality.UNKNOWN
+        # The supported providers know: the ones on this machine, the catalogs.
+        by_name = {p.id: p.locality for p in supported}
         assert by_name["llamacpp"] is Locality.LOCAL
         assert by_name["openrouter"] is Locality.REMOTE
 
@@ -692,7 +692,7 @@ class TestGenericProvider:
     def test_a_section_under_any_other_name_is_passed_over_and_said_so(
         self, server, tmp_path
     ) -> None:
-        # A section is its engine's name; one under any other name is
+        # A section is its provider's name; one under any other name is
         # not served — the file keeps it, the launch names it.
         set_config_provider(tmp_path / "state", server, name="mybox")
         app = launch(tmp_path / "state", server)
@@ -728,7 +728,7 @@ class TestLlamaCpp:
 
 class TestKoboldCpp:
     def test_the_window_is_asked_once_for_every_row(self, tmp_path) -> None:
-        # The same rule as llama.cpp's, held separately: this engine lists
+        # The same rule as llama.cpp's, held separately: this provider lists
         # its own way (the prefix, admin mode's active model).
         server = ModelServer(models=("koboldcpp/a", "koboldcpp/b", "koboldcpp/c"))
         server.window = 2048
@@ -798,7 +798,7 @@ class TestCloudProviders:
         app = launch(tmp_path / "state", dead, spec=None)
         try:
             capsys.readouterr()
-            # The pick's pre-screen sweep waits out the dead engines'
+            # The pick's pre-screen sweep waits out the dead providers'
             # connect timeouts (up to ~5s on macOS, where a closed local
             # port hangs rather than refuses) BEFORE the screen opens —
             # the launch's own behavior; the patience covers it.
@@ -827,8 +827,8 @@ class TestCloudProviders:
             assert "openrouter" not in reachable
             # ...and the picker fetches them after opening: the rows land
             # in the background and the pending mark drains.
-            engines = api_providers.engines(app.session)
-            picker = screen_models.ModelPicker(app.session, engines, [], fetch=["openrouter"])
+            supported = api_providers.supported(app.session)
+            picker = screen_models.ModelPicker(app.session, supported, [], fetch=["openrouter"])
             deadline = time.monotonic() + 5
             while picker.pending and time.monotonic() < deadline:
                 time.sleep(0.02)

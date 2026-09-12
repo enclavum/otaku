@@ -65,7 +65,7 @@ class ModelInfo:
 
     name: str
     size: int | None = None  # bytes on disk; local engines only
-    max_context_catalogue: int | None = None  # the model's own ceiling
+    max_context_catalogue: int | None = None  # the model's own max context
     max_context_loaded: int | None = None  # what the loaded instance serves
     # The most a reply may run, where a catalog states it (OpenRouter's
     # top_provider.max_completion_tokens); the local engines set none.

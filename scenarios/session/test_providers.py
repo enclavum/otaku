@@ -1,14 +1,14 @@
-"""The providers package against a real protocol peer: what each engine
-puts on the wire and reads back, one class per feature, the engines
+"""The providers package against a real protocol peer: what each provider
+puts on the wire and reads back, one class per feature, the providers
 that differ each getting their row.
 
 The chat wire: the transcript as messages, streaming with usage, a
-effort on every knob the engine reads, images on the last message, one
+effort on every knob the provider reads, images on the last message, one
 retry without the knobs when a 400 refuses them, and the answer filed
 under the request. The text wire: the prompt alone, an effort on the
-text knobs, the continuation as text. The listing: one pass per engine,
+text knobs, the continuation as text. The listing: one pass per provider,
 the rows read as far as the native API sees, capabilities decoded from
-what each engine reports and None where it reports nothing, the one
+what each provider reports and None where it reports nothing, the one
 model ask reading Ollama's card. The counts, the loads, the keys, the
 probe, the balance, and the error family, each with its sentence.
 """
@@ -124,13 +124,13 @@ class TestChatCompletion:
             ("lmstudio", {}),
         ],
     )
-    def test_an_effort_goes_out_on_the_knobs_the_engine_reads(
+    def test_an_effort_goes_out_on_the_knobs_the_provider_reads(
         self, server: ModelServer, kind: str, expected: dict[str, object]
     ) -> None:
-        # The table every engine is promised by: both knobs where a local
-        # engine reads the template's flag, the effort alone on the
+        # The table every provider is promised by: both knobs where a
+        # local engine reads the template's flag, the effort alone on the
         # catalogs and Ollama, nothing where nothing on the wire reaches
-        # the engine — and the turn plays in every case.
+        # the provider — and the turn plays in every case.
         client = ALL_CLIENTS[kind](_config(server, kind, api_key="k"))
         _, text, _ = _drain(client.completion.chat("m", [Turn("user", "u")], {}, effort="none"))
         assert _knobs(_sent(server, "messages")) == expected
@@ -158,7 +158,7 @@ class TestChatCompletion:
         assert "chat_template_kwargs" not in server.requests[-1]
 
     def test_a_400_naming_the_knob_retries_once_without_it(self, server: ModelServer) -> None:
-        # The retry is for a 400 about the knob, as the engine words it;
+        # The retry is for a 400 about the knob, as the server words it;
         # one about anything else stands.
         server.refuse = lambda body: 400 if "reasoning_effort" in body else None
         server.refusal = "unknown field: reasoning_effort"
@@ -802,10 +802,10 @@ class TestProbe:
         assert found.status is ProbeStatus.UNREACHABLE
         assert found.message == "Could not reach llamacpp."
 
-    def test_a_name_no_engine_answers_to_is_an_error(self) -> None:
+    def test_a_name_no_supported_provider_answers_to_is_an_error(self) -> None:
         found = probe(ProviderConfig(name="mybox", url="http://localhost:1/v1"))
         assert found.status is ProbeStatus.ERROR
-        assert found.message == "No engine is named mybox."
+        assert found.message == "No supported provider is named mybox."
 
     def test_a_server_that_answers_with_an_error(self, server: ModelServer) -> None:
         server.list_status = 503
@@ -897,7 +897,7 @@ class TestFailures:
     def test_a_stream_that_ends_without_done_is_a_lost_connection(
         self, server: ModelServer
     ) -> None:
-        # Every engine sends [DONE] on a clean end; Ollama closes without
+        # Every provider sends [DONE] on a clean end; Ollama closes without
         # it after a runner's error mid-reply — the words that came are
         # not an answer, and the log must not say ok.
         server.no_done = True

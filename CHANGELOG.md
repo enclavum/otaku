@@ -59,11 +59,11 @@ Full list of changes: [CHANGELOG.md](https://github.com/enclavum/otaku/blob/main
 - A failed turn, a refused load and a provider panel that cannot save now say one sentence in
   the provider's own words: which provider could not be reached, which HTTP status it refused
   with and what the server said, whose key was rejected, or that the model declined and why.
-- The web API spells its provider and model fields the way the backend does: an engine card's
-  `name` is `id`, a model's `can_load_unload` is `can_manage` and its `context` is
-  `max_context_catalogue`, the session's `context` is `max_context`, and the play event
-  `thinking` is `reasoning`. The page's `.otk-thinking` class, which a `custom.css` may target,
-  is `.otk-reasoning`.
+- The web API spells its provider and model fields the way the backend does: the panel's
+  `engines` array is `providers` and a card's `name` is `id`, a model's `can_load_unload` is
+  `can_manage` and its `context` is `max_context_catalogue`, the session's `context` is
+  `max_context` and its `engine` is `provider`, and the play event `thinking` is `reasoning`.
+  The page's `.otk-thinking` class, which a `custom.css` may target, is `.otk-reasoning`.
 - Request-log lines file an answer's `status` and `reasoning` where they filed `outcome` and
   `thinking`; lines written before still read.
 

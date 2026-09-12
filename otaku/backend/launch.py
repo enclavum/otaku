@@ -78,10 +78,11 @@ def open_session(root: str | Path | None = None, *, ask_secret: AskSecret | None
         request_sink=RequestLog(paths.logs_dir, cipher),
         smooth=config.smooth_streaming,
     )
-    # A section no engine is named for is not served, and the file is
-    # the user's: it stays, and the launch says it is being passed over.
+    # A section named for no supported provider is not served, and the
+    # file is the user's: it stays, and the launch says it is passed over.
     notices += [
-        f"Ignoring provider section [{name}]: no engine is named so." for name in registry.ignored
+        f"Ignoring provider section [{name}]: no supported provider is named so."
+        for name in registry.ignored
     ]
     # A remembered model whose provider is still configured resumes; a
     # stale one is reported and skipped — the session opens modelless
