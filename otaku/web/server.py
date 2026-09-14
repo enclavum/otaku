@@ -40,8 +40,10 @@ that anything in it wins. The token contract it writes against is
 """
 
 import contextlib
+import http.cookies
 import json
 import re
+import ssl
 import sys
 import threading
 import time
@@ -53,10 +55,10 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from otaku.backend import WebSettings
+from otaku.backend import WebSettings, passwords
 from otaku.backend.api.play import PlayEvent
 from otaku.backend.session import Refused, Session
-from otaku.web import api
+from otaku.web import api, auth
 from otaku.web.thread import SessionRunner, StoppingError
 
 __all__ = ["LOOPBACK", "Hooks", "bind"]
@@ -176,12 +178,12 @@ _ASSETS: dict[str, tuple[str, str, str]] = {
     **{f"/{name}": (name, _WOFF2, _IMMUTABLE) for name in _FONTS},
 }
 
-# The page's beat. Neither lane, because it never takes the session's
-# THREAD: the handler answers it itself, from what can be read from
-# anywhere — that the server is up, what the background worker is doing,
-# and what it has said. A session busy with a reply is still a running
-# otaku, and this is how the page knows.
-_ALIVE = "/api/alive"
+# What the backend is doing, as the page asks every few seconds. Neither
+# lane, because it never takes the session's THREAD: the handler answers
+# it itself, from what can be read from anywhere. That it is answered at
+# all is how the page knows otaku is there — a session busy with a reply
+# is still a running otaku.
+_STATUS = "/api/status"
 
 # The other request the page makes that nobody asked for: held open for
 # as long as the tab is, and answered a filename at a time as the files
@@ -192,12 +194,37 @@ _WATCH = "/api/watch"
 # document and the twenty files that came with it, and only the document
 # is news — and neither is the page's own housekeeping, which is a beat
 # every few seconds and one stream that never ends.
-_QUIET = (set(_ASSETS) | {"/custom.css", _ALIVE, _WATCH}) - {"/"}
+_QUIET = (set(_ASSETS) | {"/custom.css", _STATUS, _WATCH}) - {"/"}
+
+# Signing in, as one address with three methods: GET says whether a
+# password is asked for and whether this browser is through it, POST takes
+# the password and sets the cookie, DELETE takes the cookie away. Answered
+# without a credential, since the first two are how one is got and the
+# third has nothing to protect.
+_LOGIN = "/api/login"
+
+# What is answered without a credential at all, and why each is: the
+# packaged page and the reader's own files carry nothing of anybody's, and
+# the page has to LOAD before it can ask for a password; the watch stream
+# names only files the page is made of, and a refusal would end an
+# EventSource for good rather than let it retry once the reader is in.
+# `/api/status` is deliberately not here — it says what the background
+# worker is doing, which is the session's.
+_OPEN = set(_ASSETS) | {"/custom.css", _WATCH, _LOGIN}
 
 # How a request ENDS when the reader closes a tab, reloads mid-reply or
-# stops otaku while the page is still streaming. Every one of these is
-# ordinary here, and none of them is a crash to report.
-_DISCONNECTED = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError)
+# stops otaku while the page is still streaming — and, under TLS, how one
+# never starts: a plain `http://` paste against this port, a scanner, any
+# client with no cipher in common all raise SSLError out of the
+# handshake. Every one of these is ordinary here, and none of them is a
+# crash to report.
+_DISCONNECTED = (
+    BrokenPipeError,
+    ConnectionResetError,
+    ConnectionAbortedError,
+    TimeoutError,
+    ssl.SSLError,
+)
 
 # The spellings of "this machine" — all of them reachable as `localhost`,
 # which is what the printed address READS as (`web.run.address`, this
@@ -239,12 +266,23 @@ def bind(
     pending: api.Pending,
     custom_web_dir: Path,
     hooks: Hooks,
+    tls_context: ssl.SSLContext | None = None,
+    password_hash: str | None = None,
 ) -> "_Server":
     """The socket, and everything a handler needs behind it. What it
     raises is the socket's own OSError — turning the address that could
     not be honoured into a sentence is `web.run`'s, which is also why
     this is a separate function: the caller catches exactly the
-    binding."""
+    binding.
+
+    `tls_context` is what every accepted connection is wrapped in, and None is
+    the plain server. Whether there is one at all is the configuration's
+    (`[web] https`), and finding a certificate to build it from happened
+    before this was called — nothing here can fail for want of one.
+
+    `password_hash` is the hash of `[web] password` the launch made —
+    never the typed password (`backend.passwords`). None is the default
+    configuration, where nobody is asked for anything."""
     return _Server(
         (config.host, config.port),
         _Handler,
@@ -252,6 +290,8 @@ def bind(
         pending=pending,
         custom_web_dir=custom_web_dir,
         hooks=hooks,
+        tls_context=tls_context,
+        password_hash=password_hash,
     )
 
 
@@ -274,12 +314,16 @@ class _Server(ThreadingHTTPServer):
         pending: api.Pending,
         custom_web_dir: Path,
         hooks: Hooks,
+        tls_context: ssl.SSLContext | None = None,
+        password_hash: str | None = None,
     ) -> None:
         super().__init__(bound, handler)
         self.runner = runner
         self.pending = pending
         self.custom_web_dir = custom_web_dir
         self.hooks = hooks
+        self.tls_context = tls_context
+        self.password_hash = password_hash
         # The names this server answers to: the configured one, and every
         # spelling of the machine it runs on. A request addressed to
         # anything else did not come from a reader typing an address.
@@ -310,6 +354,28 @@ class _Server(ThreadingHTTPServer):
         # would do nothing and the only way out of a wedged engine would
         # be `kill`.
         self.stopping = threading.Event()
+
+    def get_request(self) -> tuple[Any, Any]:
+        """The accepted connection, wrapped when this server serves TLS —
+        and NOT handshaken here. This runs on the accept loop, where one
+        client that opens a connection and then says nothing would hold
+        every other connection out; the handshake is a conversation, so
+        it belongs on the thread this connection is about to get."""
+        conn, addr = super().get_request()
+        if self.tls_context is None:
+            return conn, addr
+        return self.tls_context.wrap_socket(
+            conn, server_side=True, do_handshake_on_connect=False
+        ), addr
+
+    def finish_request(self, request: Any, client_address: Any) -> None:
+        """The handshake, on this connection's own thread, before the
+        handler reads a byte of it. What it raises is SSLError, which is
+        the answer to a plain `http://` paste against this port as much
+        as to a scanner — ordinary, and quiet by `_DISCONNECTED`."""
+        if self.tls_context is not None:
+            request.do_handshake()
+        super().finish_request(request, client_address)
 
     def handle_error(self, request: Any, client_address: Any) -> None:
         """What escaped a handler. The stdlib prints a traceback per
@@ -345,11 +411,13 @@ class _Handler(BaseHTTPRequestHandler):
     # ---------- routing ----------
 
     def do_GET(self) -> None:
-        if not self._still_serving() or not self._from_this_machine():
-            return
         path = self._path()
-        if path == _ALIVE:
-            self._beat()
+        if not self._admitted(path):
+            return
+        if path == _LOGIN:
+            self._signed_in()
+        elif path == _STATUS:
+            self._status()
         elif path == _WATCH:
             self._watch_stream()
         elif (extraction := _EXTRACTION.match(path)) is not None:
@@ -374,12 +442,15 @@ class _Handler(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def do_POST(self) -> None:
-        if not self._writing():
+        path = self._path()
+        if not self._admitted(path):
             return
-        path, body = self._path(), self._body()
+        body = self._body()
+        if path == _LOGIN:
+            self._sign_in(body)
         # The two that answer with a STREAM rather than a payload, so
         # neither can be a row in the table.
-        if path == "/api/play":
+        elif path == "/api/play":
             self._play(str(body.get("line", "")))
         elif path == "/api/play/last":
             self._play("", regenerate=True)
@@ -387,21 +458,44 @@ class _Handler(BaseHTTPRequestHandler):
             self._route(body)
 
     def do_PUT(self) -> None:
-        if self._writing():
-            self._route(self._body())
+        path = self._path()
+        if not self._admitted(path):
+            return
+        self._route(self._body())
 
     def do_PATCH(self) -> None:
-        if self._writing():
-            self._route(self._body())
+        path = self._path()
+        if not self._admitted(path):
+            return
+        self._route(self._body())
 
     def do_DELETE(self) -> None:
-        if self._writing():
-            self._route(self._body())
+        path = self._path()
+        if not self._admitted(path):
+            return
+        # Read whether it is needed or not: a body left in the socket is
+        # the first bytes of the NEXT request on a kept-alive connection,
+        # which then arrives as a method called `{}GET`.
+        body = self._body()
+        if path == _LOGIN:
+            self._sign_out()
+        else:
+            self._route(body)
 
-    def _writing(self) -> bool:
-        """Every method but GET moves the story, so every one of them
-        answers to both guards."""
-        return self._still_serving() and self._from_this_machine() and self._from_our_page()
+    def _admitted(self, path: str) -> bool:
+        """Whether this request may be answered at all — the same guards,
+        in the same order, for every method, each of them answering its
+        own refusal. What differs between a read and a write is decided
+        INSIDE the guard it concerns (`_from_our_page`), not by which
+        methods call which guards. The login is a request like any other
+        here — a page of another origin must not get to guess at the
+        password — and is let through only by `_authorized`."""
+        return (
+            self._still_serving()
+            and self._from_this_machine()
+            and self._from_our_page()
+            and self._authorized(path)
+        )
 
     def _still_serving(self) -> bool:
         """Whether this server is still the one to ask. A stopped server
@@ -450,16 +544,81 @@ class _Handler(BaseHTTPRequestHandler):
             return lambda session: call(session, ask, self.server.pending)
         return lambda session: call(session, ask)
 
-    def _beat(self) -> None:
-        """The page's "are you still there", and what it can be told
-        without asking for the session's thread: what the background
-        worker is doing, and anything it has said since the last beat.
+    def _status(self) -> None:
+        """What the backend is doing and has to say, told without asking
+        for the session's thread: its one-line status, and anything it
+        has said since the page last asked.
         Reaching this at all is the first answer — an otaku deep in a
         reply is still a running otaku — and the other two ride along
         because a reader with the page open should learn that a pass ran
         the same way a terminal does, rather than finding the lore there
         later."""
         self._json({"status": self.server.hooks.working(), "notices": self.server.hooks.sayings()})
+
+    def _signed_in(self) -> None:
+        """What a page needs before it draws anything: whether this otaku
+        asks for a password at all, and whether this browser is already
+        through it. The page cannot tell the second for itself — the
+        cookie is `HttpOnly`, which is the point of it."""
+        password_hash = self.server.password_hash
+        self._json(
+            {
+                "required": password_hash is not None,
+                "signed_in": password_hash is not None
+                and auth.verify_token(self._cookie_token(), password_hash),
+            }
+        )
+
+    def _sign_in(self, body: dict[str, Any]) -> None:
+        """A password in, a cookie out — the only way to get one.
+
+        Answered on THIS thread and in neither lane: it never touches the
+        session, and the derivation below would otherwise queue behind a
+        reply and stop the story for as long as it takes.
+
+        The typed password is checked against the stored hash, never
+        against a password: there is none in the file to compare with. That
+        check is slow and memory-hard by design, and its cost is the whole
+        of the rate limiting — a couple of dozen guesses a second, and no
+        state to keep to do it.
+
+        A wrong password is an authentication failure and answers 401, with
+        the sentence in the body. Signing in where no password is set is
+        not: nothing is wrong with the caller, so that stays a refusal."""
+        password_hash = self.server.password_hash
+        if password_hash is None:
+            self._json({"notice": "This otaku asks for no password.", "refused": True})
+            return
+        given = str(body.get("password", ""))
+        if not passwords.check(given, password_hash):
+            self._json({"notice": "Check the password and try again.", "refused": True}, status=401)
+            return
+        # The cookie lasts as long as the token in it, so the browser never
+        # holds one the server would refuse.
+        lifetime = auth.LONG_LIFETIME if body.get("remember") is True else auth.SHORT_LIFETIME
+        self._set_cookie(auth.generate_token(password_hash, lifetime), lifetime)
+
+    def _sign_out(self) -> None:
+        """The cookie taken away. Only the server can: the page is not
+        allowed to see it, let alone clear it. A stateless token copied
+        elsewhere stays good until it runs out — this is about what the
+        browser keeps offering, not about the credential."""
+        self._set_cookie("", 0)
+
+    def _set_cookie(self, value: str, age: int) -> None:
+        """The answer to a sign-in or a sign-out: `{}`, carrying the one
+        `Set-Cookie` this server ever sends, set and cleared alike — the
+        attributes must match for a clearing to reach the cookie it means.
+
+        Named for the PORT, because a browser scopes cookies by host and
+        not by port: two otakus on one machine would otherwise take each
+        other's. `Secure` only under TLS, since a browser drops a secure
+        cookie that arrives over plain http. An age of 0 clears it."""
+        parts = [f"{_cookie_name(self.server)}={value}", "Path=/", "HttpOnly", "SameSite=Strict"]
+        if self.server.tls_context is not None:
+            parts.append("Secure")
+        parts.append(f"Max-Age={age}")
+        self._json({}, headers=(("Set-Cookie", "; ".join(parts)),))
 
     # ---------- who is asking ----------
 
@@ -480,6 +639,39 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_error(421, "Misdirected Request")
         return False
 
+    def _authorized(self, path: str) -> bool:
+        """Whether whoever is asking has shown they know the password.
+
+        True for everyone when none is set, which is the default and the
+        whole of what a loopback otaku ever needed. `_OPEN` says what is
+        answered anyway, and the reader's own typefaces go with their
+        stylesheet — both are files they put there themselves.
+
+        401 with NO `WWW-Authenticate`: send one and the browser opens
+        its own credential dialog over the page, which has a login of its
+        own and a name for what it is asking for."""
+        password_hash = self.server.password_hash
+        if password_hash is None or path in _OPEN or path.startswith(_CUSTOM_FONTS):
+            return True
+        if auth.verify_token(self._cookie_token(), password_hash):
+            return True
+        self.send_error(401, "Unauthorized")
+        return False
+
+    def _cookie_token(self) -> str:
+        """The token off this server's cookie — "" when there is none, or
+        when the header does not parse, which `auth.verify_token` refuses like
+        any other non-token. Anything that can reach the port can send a
+        Cookie header, so a malformed one is an ordinary refusal and not
+        a crash."""
+        jar = http.cookies.SimpleCookie()
+        try:
+            jar.load(self.headers.get("Cookie", ""))
+        except http.cookies.CookieError:
+            return ""
+        morsel = jar.get(_cookie_name(self.server))
+        return morsel.value if morsel is not None else ""
+
     def _from_our_page(self) -> bool:
         """Whether a WRITE came from otaku's own page.
 
@@ -498,7 +690,15 @@ class _Handler(BaseHTTPRequestHandler):
         port included.
 
         A request with neither header is not a browser (curl, a script
-        on this machine); the bind is what guards those."""
+        on this machine); the bind is what guards those.
+
+        A READ needs no proof: a page of another origin can make the
+        browser send one but cannot see the answer, and a GET moves
+        nothing (the METHOD is the lane). Asking it of reads would refuse
+        the reader following a link to otaku from another site, whose
+        document request arrives `cross-site`."""
+        if self.command == "GET":
+            return True
         site = self.headers.get("Sec-Fetch-Site")
         if site in ("same-origin", "none"):
             return True
@@ -853,6 +1053,12 @@ def _named(host: str) -> str:
     `[::1]:9600` and a bare `[::1]` are the same machine."""
     name = host.rsplit(":", 1)[0] if ":" in host.rsplit("]", 1)[-1] else host
     return name.strip("[]")
+
+
+def _cookie_name(server: "_Server") -> str:
+    """This server's cookie: one per port, since the browser keeps one
+    jar per host whatever the port."""
+    return f"otaku-{server.server_address[1]}"
 
 
 # ---------- the watch poller ----------

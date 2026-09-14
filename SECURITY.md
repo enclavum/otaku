@@ -50,15 +50,43 @@ history. The log directory is yours to prune.
 
 ## The web interface
 
-`otaku web` serves one open session over plain HTTP. It has no accounts and no login: whoever can
-reach the port has the session — every story, the ability to play, and the provider fields. That
-is the design, and what holds it is where it listens: loopback, port 9600, unless you say
-otherwise in `configs/config.toml`'s `[web]` section. Pointing it at another interface publishes
-an unauthenticated app to that network, over a connection nothing encrypts — a deliberate choice
-for a network you trust, and not one to make on a shared or public one.
+`otaku web` serves one open session to a browser. By default it listens on loopback, port 9600,
+over plain HTTP, and asks for no password: whoever can reach the port has the session — every
+story, the ability to play, and the provider fields. On loopback that means programs on this
+machine, and that is the design.
 
-Loopback is not the whole defence, because the browser that reads the page also reads everything
-else. Two guards sit in front of every request:
+Reaching it from another machine is a decision made in `configs/config.toml`'s `[web]` section,
+and two settings beside `host` exist for it.
+
+- **`https = true`** serves over TLS. otaku generates a self-signed certificate into the state
+  dir's `cert/` on first use and never writes over it after, so a certificate of your own
+  (mkcert, `tailscale cert`) simply goes in its place. A self-signed certificate encrypts the
+  connection but proves nothing about who is on the other end: every browser warns once, and
+  clicking through a warning you did not expect accepts an impersonator as readily as otaku.
+- **`password`** makes the page ask for one. The right password earns a signed token in an
+  `HttpOnly`, `SameSite=Strict` cookie — kept 30 days when "stay signed in" is ticked, 4 hours
+  when it is not. Every API request without a good token is refused (401); the
+  page itself loads without one.
+
+Neither protects against the following:
+
+- **Without `https`, everything crosses the network readable** — the password at sign-in, the
+  cookie on every request after it, and every story. A captured cookie is a working credential
+  until it expires.
+- **Signing out revokes nothing.** It clears this browser's cookie. The server keeps no sessions,
+  so a copied token stays good until its expiry; changing the password is what invalidates every
+  token at once.
+- **Guessing is slowed, not stopped.** The password is stored as a salted scrypt hash, which
+  limits guessing to a couple of dozen attempts a second — a short or common password will not
+  survive that. Anyone who can read `config.toml` can guess offline against the hash, and can
+  sign tokens without guessing at all.
+- **Browsers scope cookies by host, not by port.** Every other web app served from the same
+  host receives the cookie too.
+
+On a network you do not control, set both, and prefer a certificate your browser already trusts.
+
+Loopback is not the whole defence either, because the browser that reads the page also reads
+everything else. Two guards sit in front of every request:
 
 - **DNS rebinding.** A name that resolves to 127.0.0.1 lets a page you are reading address your
   otaku. A request whose `Host` is not this machine is refused (421) — except under a wildcard
@@ -67,7 +95,8 @@ else. Two guards sit in front of every request:
   its damage without ever reading the answer. Every write must carry `Sec-Fetch-Site: same-origin`
   or an `Origin` equal to the one it was addressed to; anything else is refused (403). A request
   with neither header is not a browser (curl, a script on this machine) and is let through — the
-  bind is what guards those.
+  bind is what guards those. A read is not asked: another page can cause one but cannot see the
+  answer, and a read changes nothing.
 
 What may be served is a closed table of files, so no request can compose its way to
 `configs/providers.toml`, and the page is never sent an api key's value — only whether one is set.
@@ -80,7 +109,8 @@ above, with its own key, and independent of `[encryption]` being enabled at all.
 lives in the OS keychain (macOS `security`, Linux `secret-tool`), one item per state dir; on a
 machine without a keychain tool — every Windows machine, as above — it falls back to
 `configs/config.key` at mode `0600`, which Windows does not enforce. A key pasted into the file
-as plain text is sealed automatically at the next launch.
+as plain text is sealed automatically at the next launch, and the dated backup that edit leaves
+in `configs/backups/` has the key replaced with `[REDACTED]`.
 
 Leaking `providers.toml` alone therefore leaks no credentials. The same limits as above apply:
 an attacker running as your logged-in user can read the keychain item, and a running process's

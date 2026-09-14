@@ -26,7 +26,17 @@ export function whenLost(callback) {
   onLost = callback;
 }
 
-async function ask(path, options) {
+/* What a refused credential waits on: a promise that settles once the
+   reader is signed in again. Set from above, the way the two hooks
+   above are, so this file still imports nothing — the sign-in itself
+   comes back through here. */
+let onUnauthorized = null;
+
+export function whenUnauthorized(callback) {
+  onUnauthorized = callback;
+}
+
+async function ask(path, options, retried = false) {
   let response;
   try {
     response = await fetch(path, options);
@@ -37,6 +47,39 @@ async function ask(path, options) {
     throw e;
   }
   onReach();
+  /* A sign-in refused: the wrong password answers 401 WITH its sentence,
+     which is how it is told from a request that needs one. It goes back
+     to the caller as an answer, never to the sign-in below — that would
+     leave the dialog waiting on itself. */
+  const answered = response.headers.get("Content-Type")?.startsWith("application/json");
+  if (response.status === 401 && answered) return response;
+  if (response.status === 401 && onUnauthorized && !retried) {
+    /* Signed out, or the cookie ran out. The reader signs in and the
+       request is asked again as if nothing had happened, so no caller
+       learns there was a dialog in between — and every request refused
+       meanwhile waits on the same sign-in rather than opening its own.
+       Once only: a second refusal is not a sign-in problem. */
+    await onUnauthorized();
+    return ask(path, options, true);
+  }
+  /* 401 and 403 are ANSWERS, not faults: the server understood and said
+     no. 401 is a token missing, wrong or out of date; 403 is a write
+     that could not show it came from this page. Neither is a bug, so
+     neither goes to the console as one, and nothing is SAID for either
+     — the sentence below would blame otaku for deciding, and a reader
+     can do nothing with the other one.
+
+     The message is EMPTY on purpose, which is this page's way of saying
+     nothing (`landed("")`): several catch sites show `e.message` with no
+     flag to consult, and one of them would otherwise put a status code
+     in front of a reader. What rides instead is the status, for a
+     caller to act on — 401 is where the login belongs — and the request
+     itself is in the network tab for anybody debugging. */
+  if (response.status === 401 || response.status === 403) {
+    const refused = new Error("");
+    refused.status = response.status;
+    throw refused;
+  }
   if (!response.ok) {
     /* A fault, not a refusal — a refusal comes back 200 with the
        backend's own sentence. There is none for this, so the page says
@@ -75,11 +118,20 @@ const query = (pairs) => {
 
 // ---------- the server, not the session ----------
 
-/** The beat: is otaku there, what is the background worker doing, and
-    what has it said since the last one. Answered by the server itself,
-    so it is true mid-reply as much as idle — and it is the only request
-    the page makes that nobody asked for. */
-export const alive = () => get("/api/alive");
+/** Whether this otaku asks for a password, and whether this browser is
+    already through it — the page cannot read its own cookie to say. */
+export const loginState = () => get("/api/login");
+/** The password, and whether to stay signed in for 30 days rather than
+    4 hours. A wrong one answers 401 with its sentence, which comes back
+    as an answer, not an error. */
+export const signIn = (password, remember) => post("/api/login", { password, remember });
+export const signOut = () => remove("/api/login");
+
+/** What the backend is doing, and what it has said since the page last
+    asked. Answered by the server itself, so it is true mid-reply as much
+    as idle — and being answered at all is how the page knows otaku is
+    there. The only request the page makes that nobody asked for. */
+export const status = () => get("/api/status");
 
 // ---------- playing ----------
 

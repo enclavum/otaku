@@ -9,7 +9,20 @@ changes.
 
 **TL;DR**
 
-- The providers layer is rewritten from scratch. Models report which reasoning efforts reach them and what else they can do.
+Web UI:
+
+- **The web interface can now serve over HTTPS**. Turn on the setting in
+  `~/.otaku/configs/config.toml` and otaku will automatically generate a self-signed certificate,
+  which you can also replace with your own if you need to. Browsers will show warnings about an
+  untrusted certificate. It's unavoidable if the certificate is self-signed, but TLS protection is
+  still real — _you should turn it on if you run otaku over a public network_.
+- **The web interface can be password-protected** — set the password in the same config file.
+  _It's also a must if you run otaku over a public network_.
+
+Backend:
+
+- The providers layer is rewritten from scratch. Models report which reasoning efforts reach them
+  and what else they can do (vision, audio, etc.).
 - Three more sampling parameters: `top_k`, `min_p` and `repetition_penalty`.
 - Provider API keys can come from environment variables.
 - llama.cpp's router mode: its models listed, loaded and unloaded from the picker.
@@ -37,9 +50,24 @@ Full list of changes: [CHANGELOG.md](https://github.com/enclavum/otaku/blob/main
   llama.cpp's and omlx's efforts. Unknown is never taken for allowed. Text completion is `no` on
   Ollama: its `/v1/completions` wraps the prompt as a chat turn and thinks unseen, so no raw
   continuation exists there.
-- `/set` accepts three more sampling parameters: `top_k`, `min_p` and `repetition_penalty`. omlx and
-  KoboldCpp take them as sent; llama.cpp and LM Studio spell the penalty `repeat_penalty`, and the provider
-  sends it so; Ollama's OpenAI-compatible endpoint ignores all three (set those in a Modelfile instead).
+- `/set` accepts three more sampling parameters: `top_k`, `min_p` and `repetition_penalty`. omlx
+  and KoboldCpp take them as sent; llama.cpp and LM Studio spell the penalty `repeat_penalty`, and
+  the provider sends it so; Ollama's OpenAI-compatible endpoint ignores all three (set those in a
+  Modelfile instead).
+- A provider failure is filed in the error log with its traceback — a server that could not be
+  reached or refused a request, a rejected key, a model that would not load, a reply that broke
+  off — under the provider's name and what the request was for, so the reason behind a dash in
+  the picker or a failed turn can be read after the fact.
+- `otaku web` serves over HTTPS with `https = true` in `[web]`. A self-signed certificate is
+  generated into the state dir's `cert/` the first time it is needed and kept from then on; a
+  certificate of your own — mkcert, `tailscale cert` — replaces the two files there. A folder
+  holding only one of them, or a pair that will not load, stops the launch with a sentence rather
+  than being written over.
+- `password` in `[web]` makes the page ask for it before it shows anything. A sign-in lasts 4
+  hours, or 30 days with "stay signed in" ticked, and Sign out sits at the foot of the contents.
+  A password typed into `config.toml` is replaced by an scrypt hash at the next launch.
+- The address `otaku web` prints says when a password is set, and on an address other than this
+  machine's, what it is missing — TLS, a password — whichever banner size is on.
 
 ### Changed
 
@@ -65,7 +93,9 @@ Full list of changes: [CHANGELOG.md](https://github.com/enclavum/otaku/blob/main
   `max_context` and its `engine` is `provider`, and the play event `thinking` is `reasoning`.
   The page's `.otk-thinking` class, which a `custom.css` may target, is `.otk-reasoning`.
 - Request-log lines file an answer's `status` and `reasoning` where they filed `outcome` and
-  `thinking`; lines written before still read.
+  `thinking`, and a failed answer's status carries the provider's sentence rather than the
+  exception's name; lines written before still read.
+- The web API's status endpoint is `/api/status`; it was `/api/alive`.
 
 ### Fixed
 
@@ -90,6 +120,9 @@ Full list of changes: [CHANGELOG.md](https://github.com/enclavum/otaku/blob/main
   answer and failed as not JSON. Redirects are followed.
 - A key with a character a header cannot carry, a pasted non-breaking space say, was a
   traceback. It is a sentence naming the position.
+- A launch that sealed an API key typed into `providers.toml` left the plain key behind in the
+  dated backup it wrote to `configs/backups/`. A secret an edit replaces is now redacted in that
+  backup, and one it leaves alone is kept.
 
 ## [0.4.3] - 2026-09-08
 

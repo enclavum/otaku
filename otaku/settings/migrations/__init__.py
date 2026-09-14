@@ -15,6 +15,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from otaku.settings import row, write_atomic
+from otaku.settings.migrations.config_file import hash_plain_password
 from otaku.settings.migrations.prompt_texts import (
     EXTRACT_0_2_2,
     EXTRACT_0_3_0,
@@ -89,7 +90,7 @@ _CONFIG_MIGRATIONS: list[Migration] = [
         "[web]\n"
         + row(
             'host = "127.0.0.1"',
-            "where `otaku web` listens; anything but 127.0.0.1 opens it to the network",
+            "where `otaku web` listens",
         )
         + "\n"
         + row("port = 9600", "…and on which port"),
@@ -139,6 +140,30 @@ _CONFIG_MIGRATIONS: list[Migration] = [
         lambda value: row(
             f"min_tail_messages = {value}", "at least this many recent messages kept verbatim"
         ),
+    ),
+    # 0.5.0 — the web frontend learns TLS and a password, both off. A
+    # config written before them was written for a loopback server,
+    # where neither buys anything; the keys land so an upgrader SEES
+    # that the choice exists once their host stops being loopback.
+    ensure_key(
+        "web",
+        "https",
+        row(
+            "https = false",
+            "RECOMMENDED to turn on when the host is not local; the certificate lives in "
+            "cert/: drop in your own, or one is generated",
+        ),
+        after="port",
+    ),
+    ensure_key(
+        "web",
+        "password",
+        row(
+            'password = ""',
+            "RECOMMENDED to set when the host is not local; typed in plain text, it is "
+            "replaced by its hash at the next launch",
+        ),
+        after="https",
     ),
 ]
 
@@ -215,9 +240,13 @@ def migrate(
     provider_defaults: dict[str, ProviderConfig],
     seal: Callable[[str], str],
     is_sealed: Callable[[str], bool],
+    hash: Callable[[str], str],
+    is_hashed: Callable[[str], bool],
 ) -> None:
     """The whole launch step over the settings files, in order: the
-    config table, the provider move, the providers table (plain api
+    config table (a typed web password replaced by its hash last,
+    `hash` riding with `is_hashed` the way `seal` rides
+    with `is_sealed`), the provider move, the providers table (plain api
     keys sealed — `is_sealed` rides with `seal` so the migration skips
     sealed keys itself; an unsealable line stays for the next launch),
     the given providers' sections ensured, the
@@ -226,7 +255,13 @@ def migrate(
     writes, a hand deletion — it is founded empty here, for the ensured
     sections to fill. A missing config is bootstrap's business, and
     failures are swallowed — a migration is never worth a launch."""
-    update_config(config_path, backups_dir, _CONFIG_MIGRATIONS)
+    # The password is hashed after the shape moves, so a config that is
+    # still gaining its [web] rows has them before this looks for one.
+    update_config(
+        config_path,
+        backups_dir,
+        [*_CONFIG_MIGRATIONS, hash_plain_password(hash, is_hashed)],
+    )
     move_providers(config_path, providers_path, backups_dir)
     if config_path.exists() and not providers_path.exists():
         with contextlib.suppress(OSError):

@@ -1,5 +1,8 @@
 <!doctype html>
-<html lang="en">
+<!-- `data-booting` until the page knows whether a password is asked for:
+     the shell stays unseen, so a sign-in does not open over a page that
+     has already flashed up behind it (`app.boot` takes it off). -->
+<html lang="en" data-booting>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -66,6 +69,10 @@
       <span class="otk-toc__gap"></span>
       <button type="button" class="otk-toc__row" data-command="/set"><span>Settings</span></button>
       <button type="button" class="otk-toc__row" data-command="/help"><span>Help</span></button>
+      <!-- Only ever drawn when a password is set and the reader is through
+           it. Not a command: the terminal has no session to leave. -->
+      <span class="otk-toc__gap" data-signed-in hidden></span>
+      <button type="button" class="otk-toc__row" data-sign-out hidden><span>Sign out</span></button>
     </div>
 
     <!-- STATUS. One reserved line: it holds its height when empty, so nothing
@@ -424,6 +431,38 @@
 <!-- the drop-zone dialog: a card in, with the name it speaks to on its face
      — the one question a card import asks, answered where the card is
      chosen -->
+<!-- The one dialog with no way out: there is nothing behind it to go
+     back to, so it carries no Cancel and its backdrop hides the page
+     rather than dimming it. -->
+<dialog class="otk-dialog otk-dialog--bare" data-dialog="login" data-fixed aria-labelledby="otk-login-title">
+  <span class="otk-eyebrow">otaku</span>
+  <span class="otk-dialog__name" id="otk-login-title">Sign in</span>
+
+  <div class="otk-field-stack">
+    <label class="otk-label" for="otk-login-password">password</label>
+    <input class="otk-field" id="otk-login-password" type="password"
+           autocomplete="current-password" required autofocus
+           aria-describedby="otk-login-refused">
+    <!-- Shown only after a refusal, under the field it is about — and here
+         at all rather than in the status line, which is behind this. -->
+    <p class="otk-meta otk-field-error" id="otk-login-refused" data-error hidden></p>
+  </div>
+
+  <label class="otk-check-row">
+    <input class="otk-check" type="checkbox" data-remember checked>
+    <!-- The two lifetimes are the server's (`web.auth`); the label says
+         whichever the box stands for. -->
+    <span class="otk-meta" data-remember-label
+          data-on="stay signed in for 30 days" data-off="stay signed in for 4 hours">stay signed in for 30 days</span>
+  </label>
+
+  <p class="otk-note">You can change the password in config.toml.</p>
+
+  <div class="otk-dialog__foot">
+    <button type="button" class="otk-btn otk-btn--primary" data-choice="sign-in">Continue</button>
+  </div>
+</dialog>
+
 <dialog class="otk-dialog" data-dialog="card" aria-labelledby="otk-card-title">
   <span class="otk-eyebrow" data-title id="otk-card-title">Import a character card</span>
 

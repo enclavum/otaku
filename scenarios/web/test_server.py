@@ -97,13 +97,13 @@ class TestServing:
 
 
 class TestTheHeartbeat:
-    """`/api/alive` is how a tab that is asking for nothing else learns
-    that otaku stopped — and what the background worker is doing while
-    nobody asked. It is in neither lane, and the difference shows
+    """`/api/status` is how a tab that is asking for nothing else learns
+    that otaku stopped — and what the backend is doing while nobody
+    asked. It is in neither lane, and the difference shows
     exactly when the session's thread is not free."""
 
     def test_it_answers_what_can_be_answered_off_the_session_s_thread(self, page: Page) -> None:
-        beat = page.get("/api/alive")
+        beat = page.get("/api/status")
         assert beat == {"status": "", "notices": []}
 
     def test_it_answers_while_a_reply_is_streaming(self, page: Page, server: ModelServer) -> None:
@@ -116,7 +116,7 @@ class TestTheHeartbeat:
         replying.start()
         try:
             time.sleep(0.5)
-            assert page.status("/api/alive") == 200
+            assert page.status("/api/status") == 200
             assert replying.is_alive(), "the reply was over — the story proves nothing"
         finally:
             replying.join(timeout=30)
@@ -457,9 +457,10 @@ def _polled(page: Page, timeout: float = 30.0) -> str:
 
 
 class TestWhoIsAsking:
-    """The page has no login, and it does not need one — but a page on
-    another origin, in the same browser, must not be able to drive it.
-    A write can do its damage without ever reading the answer."""
+    """With no password set the page asks nobody who they are — but a
+    page on another origin, in the same browser, must still not be able
+    to drive it. A write can do its damage without ever reading the
+    answer; a read cannot, and is not asked."""
 
     def test_a_cross_site_write_is_refused(self, page: Page) -> None:
         # What an auto-submitting form on another site sends. It cannot
@@ -506,6 +507,15 @@ class TestWhoIsAsking:
             )
             == 200
         )
+
+    def test_following_a_link_from_another_site_opens_the_page(self, page: Page) -> None:
+        # A read moves nothing and its answer cannot be seen from the page
+        # that caused it, so it is not asked where it came from — or a
+        # reader could not open otaku from a link somewhere else.
+        navigated = {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate"}
+        assert page.status("/", headers=navigated) == 200
+        fetched = {"Sec-Fetch-Site": "cross-site", "Origin": "http://elsewhere.example"}
+        assert page.status("/api/session", headers=fetched) == 200
 
     def test_a_request_addressed_to_another_name_is_misdirected(self, page: Page) -> None:
         # DNS rebinding is the one attack a loopback bind does not stop:

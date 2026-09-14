@@ -1000,7 +1000,7 @@ _Flow = Callable[[Session, Ask, Pending], Any]
 # `ask.params[name]`. The paths that span two requests are `FLOWS`, below.
 #
 # Four paths are NOT here, because none of them touch the session's
-# thread: `/api/alive` and `/api/watch` never do, `GET .../extraction`
+# thread: `/api/status` and `/api/watch` never do, `GET .../extraction`
 # reads a run's own channel-safe poll, and the two that PLAY answer with
 # a stream rather than a payload. The server holds those itself.
 ROUTES: dict[tuple[str, str], _Route] = {

@@ -378,6 +378,10 @@ _PAGE = {
     "settings": {"api", "browser", "dom", "table"},
     "reports": {"api", "browser", "dom", "format"},
     "transfer": {"api", "browser", "dom", "shell", "status"},
+    # The sign-in dialog and the rail's way out. Below the frame, beside
+    # `api`: `app` hands it to `api.whenUnauthorized`, so a refused
+    # request can wait on it without `api` importing anything.
+    "login": {"api", "dom"},
     "commands": {
         "api",
         "browser",
@@ -401,6 +405,7 @@ _PAGE = {
         "commands",
         "composer",
         "dom",
+        "login",
         "shell",
         "table",
         "transcript",
@@ -552,14 +557,16 @@ def _spec_paths() -> list[str]:
 
 
 def _served_paths() -> set[str]:
-    """Every path the code answers: both API tables, plus the four the
-    server holds itself — the heartbeat, the watch stream, the extraction
-    poll (a run's own channel-safe poll, never the session's thread) and
-    the two that PLAY, which answer with a stream rather than a payload."""
+    """Every path the code answers: both API tables, plus the ones the
+    server holds itself — the heartbeat, the watch stream, signing in,
+    the extraction poll (a run's own channel-safe poll, never the
+    session's thread) and the two that PLAY, which answer with a stream
+    rather than a payload."""
     tables = {template for _, template in {**web_api.ROUTES, **web_api.FLOWS}}
     return tables | {
-        "/api/alive",
+        "/api/status",
         "/api/watch",
+        "/api/login",
         "/api/stories/{story}/extraction",
         "/api/play",
         "/api/play/last",

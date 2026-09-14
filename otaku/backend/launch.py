@@ -15,6 +15,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from otaku import encryption
+from otaku.backend import passwords
 from otaku.backend.api import transfer
 from otaku.backend.paths import Paths
 from otaku.backend.session import NO_MODEL_HINT, Refused, Session
@@ -165,9 +166,10 @@ def _load_config(paths: Paths) -> tuple[Config, dict[str, ProviderConfig], list[
     conversion anywhere), and the notices to show: the files written at
     first run, migrated to the current shape always — first run
     included, so an autoconfigured plain api key (omlx's, say) is sealed
-    by the very launch that wrote it — and sealed api keys resolved for
-    the session (one that will not open is warned about and its provider
-    runs keyless). Raises ConfigError when a file does not parse."""
+    by the very launch that wrote it, and a typed web password replaced
+    by its hash — and sealed api keys resolved for the session (one
+    that will not open is warned about and its provider runs keyless).
+    Raises ConfigError when a file does not parse."""
     paths.ensure_tree()
     notices: list[str] = []
     if not paths.config_file.exists():
@@ -183,8 +185,16 @@ def _load_config(paths: Paths) -> tuple[Config, dict[str, ProviderConfig], list[
         provider_defaults=autoconfigure_providers(),
         seal=_sealer(paths),
         is_sealed=encryption.is_sealed,
+        hash=passwords.hash,
+        is_hashed=passwords.is_hashed,
     )
     config = config_file.load(paths.config_file)
+    if config.web_password and not passwords.is_hashed(config.web_password):
+        # The migration left it plain — the file could not be written, or
+        # the value is not a string: hashed in memory for this session, and
+        # in the file by the next launch that can. Nothing past this line
+        # sees it typed.
+        config = replace(config, web_password=passwords.hash(config.web_password))
     providers = providers_file.load(paths.providers_file)
     resolved, key_warnings = _resolve_api_keys(paths, providers)
     return config, resolved, notices + key_warnings

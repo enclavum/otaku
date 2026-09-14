@@ -133,7 +133,7 @@ info:
     `GET /api/balance`, and
     `PATCH /api/providers/{provider}/models/{model}`.
 
-    *Neither.* `/api/alive` and `/api/watch`, answered by the handler
+    *Neither.* `/api/status` and `/api/watch`, answered by the handler
     thread and never touching the session — which is what makes the
     heartbeat an answer about the SERVER rather than about the story.
 
@@ -1183,24 +1183,25 @@ paths:
 
   # ---------- Neither lane: the server, not the session ----------
 
-  /api/alive:
+  /api/status:
     get:
-      operationId: getAlive
+      operationId: getStatus
       tags: [Server]
-      summary: The page's heartbeat
+      summary: What the backend is doing
       description: |
         Answered by the handler thread itself, never the session — an
         otaku deep in a reply still answers, which is what makes this
-        an answer about the SERVER. Carries the background worker's
-        one-line status and the sentences it has said since the last
-        beat.
+        an answer about the SERVER. Carries the backend's one-line
+        status and the sentences it has said since the page last asked.
+        The page asks every few seconds; being answered is how it knows
+        otaku is there.
       responses:
         default: { $ref: "#/components/responses/Failed" }
         "200":
-          description: The page's heartbeat.
+          description: What the backend is doing.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Alive" }
+              schema: { $ref: "#/components/schemas/Status" }
 
   /api/watch:
     get:
@@ -1222,6 +1223,73 @@ paths:
           content:
             text/event-stream: {}
 
+  /api/login:
+    get:
+      operationId: getLogin
+      tags: [Server]
+      summary: Whether a password is asked for, and whether this browser is through it
+      description: |
+        Answered without a credential, by the handler thread itself. The
+        page asks before it draws anything: the cookie is `HttpOnly`, so
+        whether it holds a good one is the server's to say.
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: Whether a password is asked for, and whether this browser is through it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginState" }
+    post:
+      operationId: postLogin
+      tags: [Server]
+      summary: Sign in
+      description: |
+        The password in the body, answered without a credential and in
+        neither lane. A good one answers `{}` with the token in an
+        `HttpOnly`, `SameSite=Strict` cookie named for the port — `Secure`
+        under TLS, kept 30 days when `remember` is true and 4 hours when
+        it is not. A wrong one answers 401 with a
+        Notice. With no password configured, every attempt is a refusal.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password: { type: string }
+                remember: { type: boolean }
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: "Signed in (`{}` and the cookie), or refused because no password is set (a Notice)."
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                  - $ref: "#/components/schemas/Notice"
+        "401":
+          description: Not the password. No cookie is set, and no `WWW-Authenticate` is sent.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Notice" }
+    delete:
+      operationId: deleteLogin
+      tags: [Server]
+      summary: Sign out
+      description: |
+        Answers `{}` and clears the cookie — the page cannot, since it is
+        not allowed to see it. The token itself is stateless: a copy kept
+        elsewhere stays good until it runs out.
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: Signed out.
+          content:
+            application/json:
+              schema: { type: object }
+
 components:
   responses:
     Answered:
@@ -1236,8 +1304,9 @@ components:
     Failed:
       description: |
         The request was not answered, and the STATUS says why: 400 a
-        malformed request, 403 a write from somewhere that is not
-        otaku's page, 404 a path or subject that is not there, 421 a
+        malformed request, 401 no credential where a password is asked
+        for (with no `WWW-Authenticate`, so no browser dialog), 403 a
+        write from somewhere that is not otaku's page, 404 a path or subject that is not there, 421 a
         Host that does not name this machine, 500 a bug, 503 a server on
         its way out. There is no body — deliberately. otaku has one
         client on one machine: a refusal a reader should SEE comes back
@@ -1247,16 +1316,16 @@ components:
 
   # Alphabetical.
   schemas:
-    Alive:
+    Status:
       type: object
       properties:
         status:
           type: string
-          description: The background worker's one-line account; "" when idle.
+          description: The backend's one-line account of what it is doing; "" when idle.
         notices:
           type: array
           items: { type: string }
-          description: What the worker has said since the last beat.
+          description: What the backend has said since the page last asked.
 
     Balance:
       type: object
@@ -1397,6 +1466,17 @@ components:
         amount: { type: string, example: "4.82" }
         currency: { type: string, example: "USD" }
         text: { type: string, example: "$4.82" }
+
+    LoginState:
+      type: object
+      required: [required, signed_in]
+      properties:
+        required:
+          type: boolean
+          description: Whether `[web] password` is set, so the page asks for it.
+        signed_in:
+          type: boolean
+          description: Whether this request carried a good credential; always false when `required` is false.
 
     Notice:
       type: object

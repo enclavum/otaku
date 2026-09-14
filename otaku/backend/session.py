@@ -262,11 +262,18 @@ class Session:
     @property
     def custom_web_dir(self) -> Path:
         """The reader's OWN directory in the state dir — the stylesheet
-        and typefaces the page loads last, which otaku never writes. The
-        one path a frontend is handed: it is the one part of the tree
-        that belongs to the reader rather than the app, and the rest of
-        the layout stays the composition root's."""
+        and typefaces the page loads last, which otaku never writes. One
+        of the two paths a frontend is handed, and handed because it
+        belongs to the reader rather than to the app; the rest of the
+        layout stays the composition root's."""
         return self._paths.custom_web_dir
+
+    @property
+    def cert_dir(self) -> Path:
+        """Where the web frontend's TLS pair lives. The other path handed
+        out, for the opposite reason: the medium's own file, which only
+        the frontend that speaks HTTP has any use for."""
+        return self._paths.cert_dir
 
     # ---------- what frontends may call ----------
 

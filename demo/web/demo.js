@@ -550,7 +550,15 @@ window.fetch = async (input, init) => {
   if (!path.startsWith("/api/")) return realFetch(input, init);
   await ready;
   const query = new URLSearchParams(url.split("?")[1] ?? "");
-  if (path === "/api/alive") return json({ status: store.status(), notices: [] });
+  if (path === "/api/status") return json({ status: store.status(), notices: [] });
+  // The demo asks for no password, so this is the product's answer for an
+  // otaku with none set: nothing to sign in to, and every attempt refused.
+  if (path === "/api/login") {
+    const method = (init && init.method) || "GET";
+    if (method === "GET") return json({ required: false, signed_in: false });
+    if (method === "POST") return json({ notice: "This otaku asks for no password.", refused: true });
+    return json({});
+  }
   const method = (init && init.method) || "GET";
   const body = init && init.body ? JSON.parse(init.body) : {};
   // The two that answer with a STREAM rather than a payload.

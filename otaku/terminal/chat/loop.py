@@ -14,7 +14,6 @@ as it was.
 
 import sys
 
-from otaku import __version__
 from otaku.backend.api import play as api_play
 from otaku.backend.api import stories as api_stories
 from otaku.backend.session import Refused, Session
@@ -72,7 +71,6 @@ def run(session: Session) -> None:
         print(
             banner.render_terminal(
                 banner.SessionFacts(
-                    version=__version__,
                     model=session.model or "(no model)",
                     provider=session.provider,
                     max_context=session.max_context(),

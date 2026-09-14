@@ -19,8 +19,10 @@ looks, off the session rather than out of the file.
 """
 
 import contextlib
+import ipaddress
 import os
 import signal
+import ssl
 import sys
 import threading
 from collections.abc import Callable
@@ -28,11 +30,11 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from otaku import __version__
 from otaku.backend import WebSettings
 from otaku.backend.session import Session
 from otaku.console import banner, sound, ticker
 from otaku.web import api
+from otaku.web.cert import CertError, get_context
 from otaku.web.server import LOOPBACK, Hooks, bind
 from otaku.web.thread import SessionRunner
 
@@ -83,12 +85,18 @@ def run(
     # configuration's and not the socket's answer: a reader can be
     # opening the page while the first request is still arriving. The
     # banner is the same mark a chat session opens with and answers to
-    # the same setting; without it, one line saying the same things.
-    url = address(config)
-    if session.terminal.show_banner:
-        print(banner.render_web(__version__, url, full=full))
-    else:
-        print(f"web ui is available on: {url}  (ctrl+c to stop)")
+    # the same setting, which decides its STYLE rather than whether the
+    # address is said at all.
+    size: banner.WebBannerSize = (
+        ("full" if session.terminal.show_banner else "line") if full else "short"
+    )
+    print(
+        banner.render_web(
+            address(config),
+            address_notes(config),
+            size=size,
+        )
+    )
     # The last few requests, kept under the address and rewritten in
     # place: proof that the browser is reaching this server, in a
     # terminal that stays the height it started at. It owns the terminal
@@ -113,6 +121,7 @@ def run(
             session,
             config,
             session.custom_web_dir,
+            session.cert_dir,
             show=tail.show,
             stopping=stopping,
         )
@@ -154,24 +163,34 @@ def settings(
 
 def address(config: WebSettings) -> str:
     """The URL that address READS as — what the terminal prints and a
-    reader pastes.
-
-    A NAME, not a number: every loopback spelling reaches this server,
-    and `localhost` is the one a person reads and a browser bar shows
-    back. An address that names a real interface stays as it was
-    configured; that one was a decision. Port 80 is what a bare `http://`
-    already means, so printing it is printing the default twice, and
-    there is no trailing slash: the root is where a bare host goes, and
-    a slash is one more character between a reader and a working
-    paste."""
+    reader pastes."""
+    scheme = "https" if config.https else "http"
     reachable = "localhost" if config.host in LOOPBACK else config.host
-    return f"http://{reachable}" if config.port == 80 else f"http://{reachable}:{config.port}"
+    if config.port == (443 if config.https else 80):
+        return f"{scheme}://{reachable}"
+    return f"{scheme}://{reachable}:{config.port}"
+
+
+def address_notes(config: WebSettings) -> str:
+    """What the banner says after the address: that a password is set, and
+    — off loopback — what the address is missing. `<b>…</b>` marks what
+    is bold; how bold looks is the banner's (`banner.render_web`)."""
+    notes = ""
+    if config.password:
+        notes = " (password set)"
+    missing = [
+        name for name, on in (("no TLS", config.https), ("no password", config.password)) if not on
+    ]
+    if missing and not _is_loopback(config.host):
+        notes += f"<b> - public, yet with {' and '.join(missing)}</b> - set in config.toml"
+    return notes
 
 
 def serve(
     session: Session,
     config: WebSettings,
     custom_web_dir: Path,
+    cert_dir: Path,
     *,
     show: Callable[[str], None] | None = None,
     stopping: Callable[[], None] | None = None,
@@ -181,8 +200,10 @@ def serve(
     under `run`, the background worker started here for the same reason
     `chat.run` starts it. `config` is the configured address (`settings`
     above); `custom_web_dir` is the state dir's own web directory, where
-    the reader's `custom.css` lives and nothing else is ever read from.
-    Closing the session stays the caller's, like every other frontend's.
+    the reader's `custom.css` lives and nothing else is ever read from;
+    `cert_dir` is where the TLS pair lives, read only when the address
+    says https. Closing the session stays the caller's, like every other
+    frontend's.
 
     Nothing here is printed. `show` is handed one line per request worth
     showing and `stopping` the moment the reader asks for the door —
@@ -201,6 +222,7 @@ def serve(
     # until it asks, so the sentences wait in the mailbox and go out on
     # the heartbeat it is already making.
     sayings = _Sayings()
+    tls_context = _get_tls_context(config, cert_dir, session, show)
     try:
         server = bind(
             config,
@@ -224,6 +246,8 @@ def serve(
                 # sound machinery is the one the chat already rings.
                 ring=lambda: sound.ring(session.terminal.notification_sound),
             ),
+            tls_context,
+            config.password or None,
         )
     except OSError as e:
         # The address is configuration, and configuration that cannot be
@@ -271,6 +295,50 @@ def serve(
         # The borrowed hooks go back to whoever held them before.
         session.set_on_idle(was_idle)
         session.set_on_notice(was_notice)
+
+
+def _is_loopback(host: str) -> bool:
+    """Whether this address reaches THIS MACHINE ONLY.
+
+    Not `server.LOOPBACK`, which is the wider question that one asks —
+    every spelling that ARRIVES here, the wildcards among them, because
+    a wildcard bind does answer as localhost too. Here `0.0.0.0` is the
+    most exposed address there is, so it has to come out false, and a
+    set that contains it is the wrong set.
+
+    A name is never resolved: that is a DNS call at the launch, and the
+    only name worth the trouble is the one everybody means by it."""
+    name = host.strip("[]")
+    if name == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(name).is_loopback
+    except ValueError:
+        return False
+
+
+def _get_tls_context(
+    config: WebSettings,
+    cert_dir: Path,
+    session: Session,
+    show: Callable[[str], None] | None,
+) -> ssl.SSLContext | None:
+    """What every accepted connection is wrapped in, or None where the
+    address is a plain one. Asked for before the socket is, so a
+    configuration that cannot be served under never gets as far as
+    printing an address nobody can open.
+
+    A failure here is the reader's to act on and not a crash to dump:
+    the traceback goes to the error log the way every contained crash
+    does, and what comes back out is the sentence plus where to read the
+    rest."""
+    if not config.https:
+        return None
+    try:
+        return get_context(cert_dir, show)
+    except CertError as e:
+        where = session.record_crash("web certificate", e)
+        raise ServeError(f"{e}" + (f" (recorded in {where})" if where else "")) from e
 
 
 class _Sayings:

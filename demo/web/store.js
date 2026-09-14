@@ -35,7 +35,7 @@ const state = {
   usage: [], // one row per completed reply: {story, prompt, completion, seconds}
   syntax: null, // the story's typed language, for the menu and the sheet
   contextFixtures: new Map(), // id → captured preview, served until that story moves
-  status: "", // what /api/alive reports the worker doing
+  status: "", // what /api/status reports the worker doing
 };
 
 export function seed(fixtures) {

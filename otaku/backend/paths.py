@@ -93,6 +93,16 @@ class Paths:
         empty stylesheet."""
         return self.root / "web"
 
+    # cert/ — what `otaku web` serves under when https is on
+
+    @property
+    def cert_dir(self) -> Path:
+        """The TLS pair the web frontend serves under. Created on the
+        first launch that needs it rather than with the rest of the tree,
+        and never written over once it holds a pair — so a certificate
+        the reader drops in here is the one that is served."""
+        return self.root / "cert"
+
     # database/ — the story store
 
     @property

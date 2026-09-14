@@ -102,7 +102,7 @@ export function watchServer(boot) {
   let beating = ""; // the worker's line, while the page is showing it
   setInterval(async () => {
     try {
-      const beat = await api.alive();
+      const beat = await api.status();
       /* Every sentence of the beat, not the last: the beat DRAINS the
          worker's mailbox, so one shown is the rest lost forever. One
          line holds them ellipsised, and hovering reads them whole

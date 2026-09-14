@@ -203,6 +203,9 @@
    ========================================================================== */
 *, *::before, *::after { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
+/* unseen until the page knows whether it must ask for a password first;
+   opacity rather than visibility, so the shell can still take focus */
+html[data-booting] .otk-app { opacity: 0; }
 body {
   background: var(--otk-desk);
   color: var(--otk-body);
@@ -884,6 +887,20 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
 .otk-dialog__foot { display: flex; align-items: center; gap: 8px; padding-top: 14px; border-top: var(--otk-hair) solid var(--otk-line-soft); }
 .otk-dialog__foot .otk-btn:first-of-type { margin-left: auto; }
 .otk-dialog__escape { font-family: var(--otk-font-mono); font-size: var(--otk-size-foot); letter-spacing: var(--otk-track-foot); text-transform: uppercase; color: var(--otk-faint); }
+/* the dialog that stands in FRONT of the page rather than over it: the
+   desk flat behind it, because what it covers cannot be used yet */
+.otk-dialog--bare::backdrop { background: var(--otk-desk); backdrop-filter: none; }
+/* a label over its field, and under it a refusal when there is one */
+.otk-field-stack { display: flex; flex-direction: column; gap: 6px; }
+.otk-field-error { margin: 0; color: var(--otk-danger); }
+/* a squared checkbox — nothing on this page is round but the dots */
+.otk-check-row { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.otk-check { appearance: none; position: relative; width: 15px; height: 15px; margin: 0; flex: none; background: var(--otk-paper); border: var(--otk-hair) solid var(--otk-line); cursor: pointer; }
+.otk-check::before, .otk-check::after { content: ""; position: absolute; left: 1px; top: 6px; width: 11px; height: 2px; background: var(--otk-ink); opacity: 0; }
+.otk-check::before { transform: rotate(45deg); }
+.otk-check::after { transform: rotate(-45deg); }
+.otk-check:checked { border-color: var(--otk-ink); }
+.otk-check:checked::before, .otk-check:checked::after { opacity: 1; }
 /* a choice between two outcomes is two boxes, not two buttons */
 .otk-choices { display: flex; flex-direction: column; gap: 8px; }
 .otk-choice { display: flex; flex-direction: column; gap: 2px; border: var(--otk-hair) solid var(--otk-line); padding: 11px 14px; }
