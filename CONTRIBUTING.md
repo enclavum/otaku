@@ -1,6 +1,10 @@
 # Contributing to otaku
 
-otaku is a focused project — an LLM frontend for roleplay. Contributions that keep it sharp are very welcome.
+otaku is a focused project — an LLM frontend for roleplay.
+
+At this stage of the project, until the core features have fully settled, I gladly accept pull
+requests with bug fixes, but I'd like to add new features or update existing ones myself. Feel
+free to request them in issues.
 
 ## Development setup
 
