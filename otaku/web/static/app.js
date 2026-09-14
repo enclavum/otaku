@@ -16,13 +16,13 @@
 
 import * as api from "./js/api.js";
 import { closeAll } from "./js/browser.js";
-import { keepsScreen, openMessages, run as runCommand } from "./js/commands.js";
+import { editTurn, keepsScreen, openMessages, run as runCommand } from "./js/commands.js";
 import { showSignOut, signIn, signOut } from "./js/login.js";
 import { focusComposer, primeHistory, wire as wireComposer } from "./js/composer.js";
 import { $, $$, watchTextareas } from "./js/dom.js";
 import { disconnected, showFacts, watchServer, wireTheme } from "./js/shell.js";
 import { load as loadTable } from "./js/table.js";
-import { showTurns } from "./js/transcript.js";
+import { showTurns, whenEdited } from "./js/transcript.js";
 import { watchForChanges } from "./js/watch.js";
 
 async function boot() {
@@ -62,6 +62,8 @@ function shown() {
 
 function start() {
   api.whenUnauthorized(signIn);
+  // the transcript draws a turn as an editor and hands the write here
+  whenEdited(editTurn);
   wireComposer();
   wireTheme();
   watchTextareas();

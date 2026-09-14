@@ -525,6 +525,22 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
    family, centred because the turn is */
 .otk-turn__note { margin: 0; font-family: var(--otk-font-mono); font-size: var(--otk-size-mono-sm); color: var(--otk-faint); font-variant-numeric: tabular-nums; }
 
+/* A stored turn is the dossier's editor in the flow (`.otk-edit`). Its label
+   line would add a row under every turn, so it hangs in the gap below the
+   turn instead, where it costs no layout. Its words stand the dossier's 6px
+   clear of the field, so the open field's ground does not reach them, and
+   6 + 18 fills the 24px between turns. */
+.otk-reply, .otk-turn { position: relative; }
+.otk-edit--turn { max-width: none; }
+.otk-edit--turn .otk-edit__hint { position: absolute; top: 100%; left: 0; right: 0; height: 24px; padding-top: 6px; }
+/* A double click on the text opens a turn, so its edit verb is never shown —
+   kept, because it is what the double click takes. Save and cancel still
+   come out while the field is open. */
+.otk-edit--turn .otk-edit__verb--edit { display: none; }
+/* a played line keeps its own centred measure, block and field alike; its
+   verbs hang off the turn, as a reply's do, so they stand in one place */
+.otk-turn .otk-edit--turn { width: 100%; max-width: 430px; }
+
 /* =============================================================================
    GENERATING, AND THE OTHER TWO KINDS OF LINE
 

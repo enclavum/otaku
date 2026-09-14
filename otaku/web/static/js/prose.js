@@ -60,6 +60,30 @@ export function typeset(paragraph) {
   return { spoken, nodes: parts.map((part) => draw(part, spoken)) };
 }
 
+/** A whole message as NODES for one `pre-wrap` block, typeset paragraph
+    by paragraph. The blank lines between paragraphs, and the whitespace
+    around each, stay the characters they are: a field holding the same
+    text breaks at the same places, which is what lets a message be
+    corrected where it is read without a word moving. */
+export function typesetBody(text) {
+  return text.split(/(\n\s*\n)/).flatMap((part, i) => {
+    const core = part.trim();
+    if (i % 2 || !core) return [document.createTextNode(part)];
+    const lead = part.slice(0, part.indexOf(core));
+    const trail = part.slice(lead.length + core.length);
+    const { spoken, nodes } = typeset(core);
+    // one accent, two shapes: an all-speech paragraph takes it whole, a
+    // mixed one a run at a time
+    let drawn = nodes;
+    if (spoken) {
+      const whole = element("span", "otk-prose--dialogue");
+      whole.append(...nodes);
+      drawn = [whole];
+    }
+    return [document.createTextNode(lead), ...drawn, document.createTextNode(trail)];
+  });
+}
+
 function draw(run, wholeParagraphSpoken) {
   let node = document.createTextNode(run.text);
   if (run.code) node = wrap("code", "otk-code", node);

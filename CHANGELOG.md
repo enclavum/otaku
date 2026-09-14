@@ -18,6 +18,9 @@ Web UI:
   still real — _you should turn it on if you run otaku over a public network_.
 - **The web interface can be password-protected** — set the password in the same config file.
   _It's also a must if you run otaku over a public network_.
+- Edit messages directly in the transcript by double-clicking them. Double-clicking to edit various
+  fields now also works in the stories browser, but there, unlike in the transcript, not all fields
+  can be edited — look for the edit button.
 - Fixed a scrolling issue while an LLM response is streaming.
 
 Backend:

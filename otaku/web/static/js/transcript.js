@@ -1,8 +1,9 @@
 /* How a turn looks — stored or arriving.
 
-   Bodies cross from the backend VERBATIM: this file decides where a
-   paragraph breaks, how a slash token is drawn and where the caret
-   rides, and rewrites none of the text itself.
+   Bodies cross from the backend VERBATIM: this file decides how a slash
+   token is drawn and where the caret rides, and rewrites none of the
+   text itself — a message is one `pre-wrap` block, its line breaks the
+   text's own.
 
    The page draws the story as a book does: a reply is prose in the flow,
    a played line a centred interjection under a mono rubric — the
@@ -11,12 +12,14 @@
    it: the model's reasoning, the verbose stats line, and a failure.
 
    It draws the undo/regen bar without knowing what those do — the
-   buttons carry `data-turn` and whoever owns commands listens — which
-   keeps this a drawing, not a controller. */
+   buttons carry `data-turn` and whoever owns commands listens — and a
+   stored turn as the dossier's editor, handing the write to whoever
+   `whenEdited` names, which keeps this a drawing, not a controller. */
 
 import * as api from "./api.js";
+import { editable, edited } from "./browser.js";
 import { $, $$, element, span } from "./dom.js";
-import { typeset } from "./prose.js";
+import { typesetBody } from "./prose.js";
 import { tell, working } from "./status.js";
 import { isToken } from "./table.js";
 
@@ -35,6 +38,9 @@ let playing = false;
 // the rubric's number for the NEXT drawn turn, counted the way the story
 // browser counts messages
 let ordinal = 0;
+
+// who writes a corrected turn (`whenEdited`)
+let saveEdit = null;
 
 export const isPlaying = () => playing;
 
@@ -62,7 +68,7 @@ export function showTurns(turns, { keepPlace = false } = {}) {
     stats line, a roll's dice. A page that is not the store's turns with
     the end cut off is drawn again instead. */
 export function takeBack(turns) {
-  const drawn = $$(".otk-turn, .otk-reply", transcript).filter((a) => !a.dataset.unstored);
+  const drawn = storedTurns();
   const same = turns.every(
     (turn, i) => drawn[i] && (turn.role === "user") === drawn[i].classList.contains("otk-turn"),
   );
@@ -83,6 +89,29 @@ export function takeBack(turns) {
 
 export function clear() {
   transcript.replaceChildren();
+}
+
+/** Who writes a corrected turn: handed the turn's place among the stored
+    turns, the text the page drew it from, and the new text, and answering
+    as `browser.editable`'s `save` does. */
+export function whenEdited(save) {
+  saveEdit = save;
+}
+
+/** A turn corrected elsewhere — the dossier — shown where the transcript
+    draws it: `position` counts stored turns from 1, as the dossier does. */
+export function showCorrected(position, text) {
+  const turn = storedTurns()[position - 1];
+  const field = turn && $("textarea.otk-editable", turn);
+  if (!field) return;
+  field._settle(text);
+  $(".otk-reader", turn)._repaint();
+}
+
+/** The drawn turns the store holds, in its order: a failed attempt keeps
+    its block to say so but stores nothing (`endTurn` marks those). */
+function storedTurns() {
+  return $$(".otk-turn, .otk-reply", transcript).filter((a) => !a.dataset.unstored);
 }
 
 /** Send while the box is the reader's, Stop while the model has it. */
@@ -220,14 +249,28 @@ function drawTurn(turn, position) {
   if (turn.role === "user") {
     const article = element("article", "otk-turn");
     const rubric = element("span", "otk-turn__rubric", `◆ ${position} · you`);
-    const line = element("p", "otk-turn__body");
-    line.append(...withSlashTokens(turn.body));
-    article.append(rubric, line);
+    article.append(rubric, correctable("otk-turn__body", turn.body, withSlashTokens));
     return article;
   }
   const article = element("article", "otk-reply");
-  drawProse(article, turn.body);
+  article.append(correctable("otk-prose", turn.body, typesetBody));
   return article;
+}
+
+function correctable(className, body, nodesOf) {
+  /* A stored turn is corrected where it is read, as the dossier corrects
+     one (`story.reader`): the block that reads and the field that edits
+     wear one class in one box, both keeping the text's own line breaks,
+     so opening it moves nothing but what the marks and faces change. */
+  const read = element("div", `otk-editable ${className} otk-typeset`);
+  const both = element("div", "otk-reader");
+  const field = editable(className, {
+    text: body,
+    save: (text) => saveEdit(storedTurns().indexOf(both.closest("article")), field._stored(), text),
+  });
+  both._repaint = () => read.replaceChildren(...nodesOf(field.value));
+  both.append(read, field);
+  return edited(both, "", "otk-edit--turn");
 }
 
 function withSlashTokens(line) {
@@ -240,27 +283,10 @@ function withSlashTokens(line) {
   });
 }
 
-function drawProse(article, text, { streaming = false } = {}) {
-  /* The reply as it stands, re-typeset from the whole text rather than
-     appended to: a paragraph break arrives mid-stream like any other
-     character, and only the whole text knows where the breaks are. */
-  const paragraphs = text.split(/\n\s*\n/).filter((part) => part.trim());
-  const drawn = $$(".otk-prose", article);
-  paragraphs.forEach((paragraph, i) => {
-    const p = drawn[i] ?? article.insertBefore(element("p"), $(".otk-generating__status", article));
-    // one accent, two shapes: an all-speech paragraph takes it whole, a
-    // mixed one a run at a time
-    const { spoken, nodes } = typeset(paragraph.trim());
-    p.className = spoken ? "otk-prose otk-prose--dialogue" : "otk-prose";
-    p.replaceChildren(...nodes);
-  });
-  // the caret rides the end of what has arrived
-  $(".otk-caret", article)?.remove();
-  if (streaming) {
-    const caret = element("span", "otk-caret");
-    caret.setAttribute("aria-hidden", "true");
-    ($$(".otk-prose", article).at(-1) ?? article).append(caret);
-  }
+function caret() {
+  const it = element("span", "otk-caret");
+  it.setAttribute("aria-hidden", "true");
+  return it;
 }
 
 function showTurnBar() {
@@ -339,16 +365,14 @@ function beginTurn(regenerate) {
   article.setAttribute("aria-busy", "true");
   // Waiting and writing are ONE state: the caret holds the answer's
   // place from the first moment, with the status line under it.
-  const held = element("p", "otk-prose");
-  const caret = element("span", "otk-caret");
-  caret.setAttribute("aria-hidden", "true");
-  held.append(caret);
+  const block = element("div", "otk-editable otk-prose otk-typeset");
+  block.append(caret());
   const state = element("span", "otk-generating__text", "waiting");
   const elapsed = element("span", "otk-generating__text otk-generating__elapsed", "0.0s");
   const status = element("div", "otk-generating__status");
   status.setAttribute("aria-hidden", "true");
   status.append(element("span", "otk-generating__rule"), state, elapsed);
-  article.append(held, status);
+  article.append(block, status);
   const started = Date.now();
   const ticking = setInterval(() => {
     elapsed.textContent = `${((Date.now() - started) / 1000).toFixed(1)}s`;
@@ -359,7 +383,7 @@ function beginTurn(regenerate) {
      refusal comes back before anything is lost. */
   if (regenerate) holdSpace(dropLastReply);
   showTurnBar();
-  return { article, status, state, ticking, over, reasoning: null, prose: "" };
+  return { article, block, status, state, ticking, over, reasoning: null, prose: "" };
 }
 
 function draw(turn, happened) {
@@ -402,7 +426,10 @@ const DRAW = {
   text(turn, happened) {
     turn.prose += happened.text;
     turn.state.textContent = "writing";
-    drawProse(turn.article, turn.prose, { streaming: true });
+    /* Typeset again from the whole text rather than appended to: a quote
+       or a mark closes mid-stream, and only the whole text knows what it
+       closed. The caret rides the end of what has arrived. */
+    turn.block.replaceChildren(...typesetBody(turn.prose), caret());
   },
   declined(turn, happened) {
     turn.article.append(failure("The model declined", happened.reason));
@@ -461,9 +488,11 @@ function endTurn(turn) {
   turn.article.classList.add("otk-generating--idle");
   turn.article.classList.remove("is-streaming");
   turn.article.setAttribute("aria-busy", "false");
-  $(".otk-caret", turn.article)?.remove();
-  // the paragraph that held the answer's place, when nothing came
-  for (const p of $$(".otk-prose", turn.article)) if (!p.textContent) p.remove();
+  /* What arrived is stored exactly as it streamed, so it becomes the
+     same editor a stored reply is drawn as, in the same box; the block
+     that held the answer's place goes when nothing came. */
+  if (turn.prose) turn.block.replaceWith(correctable("otk-prose", turn.prose, typesetBody));
+  else turn.block.remove();
   // a reply that never arrived leaves no empty block behind
   if (!turn.prose && !$(".otk-error, .otk-verbose, .otk-reasoning", turn.article)) {
     turn.article.remove();

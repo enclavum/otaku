@@ -299,9 +299,8 @@ export function browser(popup, options) {
 
     Ctrl+S saves, a one-line value is finished by Enter, and Esc puts the
     stored text back. Clicking away SAVES, as Enter would — a value typed
-    and walked away from is a value meant. A field wrapped by `edited` is
-    the exception: its verbs open and close it, so clicking away leaves
-    it open.
+    and walked away from is a value meant; a field wrapped by `edited` is
+    closed by that save too.
 
     `save` is handed the new text and returns the backend's ANSWER: one
     marked `refused` keeps the field open with the words still in it. */
@@ -322,6 +321,8 @@ export function editable(className, { text, save: write, readonly = false, line 
     text = stored ?? "";
     field.value = text;
   };
+  // what the store holds, as far as this field knows
+  field._stored = () => text;
   /* Answers whether the field is FINISHED: a refusal is reported and
      leaves it open with the words still in it, which a write that did
      not happen must never cost. `save` returns the backend's answer for
@@ -363,10 +364,15 @@ export function editable(className, { text, save: write, readonly = false, line 
   const wrapper = () => field.closest(".otk-edit");
   const finish = () => (wrapper() ? wrapper()._close() : field.blur());
 
-  field.addEventListener("blur", () => {
-    // A field nothing else closes is finished by leaving it. Refused,
-    // the words stay where they are, as they do after Enter.
-    if (!wrapper()) field._commit();
+  field.addEventListener("blur", async () => {
+    /* Leaving a field finishes it; refused, the words stay where they
+       are, as they do after Enter. A wrapped one is finished only while
+       open — its own closing blurs it — and not when the WINDOW loses
+       focus: the reader went to copy something, or to a file dialog. */
+    const box = wrapper();
+    if (!box) return field._commit();
+    if (!box.dataset.editing || !document.hasFocus()) return;
+    if (await field._commit()) box._close();
   });
   field.addEventListener("keydown", async (event) => {
     if (event.key === "Escape") {
@@ -393,9 +399,10 @@ export function editable(className, { text, save: write, readonly = false, line 
     holds, and the verbs that open and close it.
 
     Until `edit` is taken the field is INERT — it cannot be typed in,
-    tabbed to, or opened by a click on the text — and only `save` or
-    `cancel` closes it again. The line holds one height in every state,
-    so no state of the field moves a word around it.
+    tabbed to, or opened by a single click on the text; a double click
+    takes the verb, with the caret where the pointer was — and `save`,
+    `cancel` or a click away closes it again. The line holds one height
+    in every state, so no state of the field moves a word around it.
 
     Two MODES, two ELEMENTS: what is read is a paragraph, what is edited
     is a field. A readonly field standing in for the paragraph would
@@ -456,6 +463,8 @@ export function edited(field, name, extra = "") {
     box.dataset.editing = "true";
     input.readOnly = false;
     input.tabIndex = 0;
+    // shown only now, so a browser without `field-sizing` sizes it now
+    autosize(input);
     input.focus();
     // Opened to be continued, not retyped: the caret lands at the end.
     input.setSelectionRange(input.value.length, input.value.length);
@@ -472,6 +481,22 @@ export function edited(field, name, extra = "") {
     box._close();
   });
 
+  /* A double click on what is read is the verb, taken, with the caret
+     where the pointer was rather than at the end — measured before the
+     verb swaps the paragraph out for the field. The second press would
+     select a word first, for a frame before the swap. */
+  const read = $(".otk-typeset", shown);
+  read.addEventListener("mousedown", (event) => {
+    if (event.detail > 1) event.preventDefault();
+  });
+  read.addEventListener("dblclick", (event) => {
+    const at = drawnOffset(read, event.clientX, event.clientY);
+    open.click();
+    if (at === null) return;
+    const caret = storedOffset(input.value, read.textContent, at);
+    input.setSelectionRange(caret, caret);
+  });
+
   const verbs = element("span", "otk-edit__verbs");
   verbs.append(open, save, cancel);
   const hint = element("span", "otk-edit__hint");
@@ -479,6 +504,34 @@ export function edited(field, name, extra = "") {
   box.append(shown, hint);
   box._close();
   return box;
+}
+
+/** Where in a drawn paragraph the pointer is, as a count of the
+    characters before it; null when it is not over the paragraph's text. */
+function drawnOffset(paragraph, x, y) {
+  const position = document.caretPositionFromPoint?.(x, y);
+  const range = position ? null : document.caretRangeFromPoint?.(x, y);
+  const node = position?.offsetNode ?? range?.startContainer;
+  if (!node || !paragraph.contains(node)) return null;
+  const before = document.createRange();
+  before.setStart(paragraph, 0);
+  before.setEnd(node, position?.offset ?? range.startOffset);
+  return before.toString().length;
+}
+
+/** The place in the stored text of a place in the drawn one. What is drawn
+    is the stored text, or the stored text with typeset marks taken out —
+    every drawn character is a stored one, in order — so walking the two
+    together finds it. A caret before a drawn character stands after the
+    marks that open it; a placeholder drawn for an empty value lands at 0. */
+function storedOffset(stored, drawn, at) {
+  let j = 0;
+  for (let i = 0; i < at && i < drawn.length; i++) {
+    while (j < stored.length && stored[j] !== drawn[i]) j++;
+    j++;
+  }
+  if (at < drawn.length) while (j < stored.length && stored[j] !== drawn[at]) j++;
+  return Math.min(j, stored.length);
 }
 
 /** One of the markup's ask dialogs, by name. Its buttons carry
