@@ -58,14 +58,12 @@ export async function refresh() {
     always asked again; the transcript is redrawn only when the story it
     draws is no longer the one that is open, because a redraw costs the
     reader their place. */
-export async function landed(notice, { redraw = "if-moved", keepPlace = false } = {}) {
+export async function landed(notice, { redraw = "if-moved" } = {}) {
   const facts = await api.facts();
   const moved = facts.story_id !== drawn;
   showFacts(facts);
   if (redraw === "always" || (redraw === "if-moved" && moved)) {
-    // `keepPlace` is for a write that TAKES something away: what is
-    // above it must not move, and the space it emptied stays open.
-    showTurns(await api.turns(), { keepPlace });
+    showTurns(await api.turns());
   }
   tell(notice);
 }

@@ -18,6 +18,7 @@ Web UI:
   still real — _you should turn it on if you run otaku over a public network_.
 - **The web interface can be password-protected** — set the password in the same config file.
   _It's also a must if you run otaku over a public network_.
+- Fixed a scrolling issue while an LLM response is streaming.
 
 Backend:
 

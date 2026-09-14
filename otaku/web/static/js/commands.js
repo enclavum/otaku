@@ -17,7 +17,7 @@ import { landed, refresh, watchExtraction } from "./shell.js";
 import { openStories } from "./stories.js";
 import { confirmFork, openStory } from "./story.js";
 import { tell } from "./status.js";
-import { clear, isPlaying, play, stopPlaying } from "./transcript.js";
+import { clear, isPlaying, play, stopPlaying, takeBack } from "./transcript.js";
 import { exportStory, importCard, importDocument } from "./transfer.js";
 
 const SCREENS = {
@@ -186,7 +186,8 @@ async function undo() {
      prompt, and the FLAG is what says so; the page never reads the
      wording. */
   const answer = await api.undo();
-  await landed("", { redraw: "always", keepPlace: true });
+  if (!answer.refused) takeBack(await api.turns());
+  await landed("");
   if (answer.refused) tell(answer.notice);
 }
 

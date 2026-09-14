@@ -42,7 +42,7 @@ export const isPlaying = () => playing;
 
 export function showTurns(turns, { keepPlace = false } = {}) {
   /* `keepPlace` is for a redraw the reader did not ask to be moved by —
-     an undo, a regenerate: the turns change, the scroll does not. */
+     a refused regenerate: the turns change, the scroll does not. */
   ordinal = turns.length;
   const drawn = turns.map((turn, i) => drawTurn(turn, i + 1));
   if (keepPlace) {
@@ -53,7 +53,32 @@ export function showTurns(turns, { keepPlace = false } = {}) {
   release();
   transcript.replaceChildren(...drawn);
   showTurnBar();
-  toBottom({ force: true });
+  toBottom();
+}
+
+/** An undo, drawn: the turns past what the store still holds come off
+    where they stand, as the terminal erases the exchange in place, and
+    the turns left keep what only a live reply draws beside them — the
+    stats line, a roll's dice. A page that is not the store's turns with
+    the end cut off is drawn again instead. */
+export function takeBack(turns) {
+  const drawn = $$(".otk-turn, .otk-reply", transcript).filter((a) => !a.dataset.unstored);
+  const same = turns.every(
+    (turn, i) => drawn[i] && (turn.role === "user") === drawn[i].classList.contains("otk-turn"),
+  );
+  if (!same) {
+    showTurns(turns, { keepPlace: true });
+    return;
+  }
+  const kept = drawn[turns.length - 1];
+  const gone = [];
+  let node = kept ? kept.nextElementSibling : transcript.firstElementChild;
+  for (; node; node = node.nextElementSibling) {
+    if (!node.classList.contains("otk-gap")) gone.push(node);
+  }
+  ordinal = turns.length;
+  holdSpace(() => gone.forEach((each) => each.remove()));
+  showTurnBar();
 }
 
 export function clear() {
@@ -87,30 +112,40 @@ export function stopPlaying() {
    one screenful. A BLOCK rather than padding on the flow: padding is
    part of the scroller's own box, and a scroller that grows takes the
    page with it. `overflow-anchor` is off in the stylesheet so Chrome and
-   Firefox do not fight this with anchoring of their own. */
+   Firefox do not fight this with anchoring of their own.
 
-let holdAt = null; // the scroll position being protected, null when none
+   Where we are is where the reader is NOW, not where they were when the
+   space opened: they may scroll away while it is held, so the block is
+   only ever resized and the page never scrolls to keep it. */
+
+let holding = false; // whether a block is held open after the last turn
 
 function holdSpace(change) {
   const top = transcript.scrollTop;
   change();
-  holdAt = top;
-  reserve();
+  holding = true;
+  reserve(top);
+  // measuring laid out the shorter flow and clamped the position
+  transcript.scrollTop = top;
 }
 
-function reserve() {
-  if (holdAt === null) return;
+function reserve(top = transcript.scrollTop) {
+  if (!holding) return;
   const gap = room();
-  gap.style.height = "0px";
-  const needed = Math.max(0, holdAt + transcript.clientHeight - transcript.scrollHeight);
+  // Where the block starts, not the scroll height less the block: that is
+  // never less than the view, so it cannot measure a story that fits.
+  const view = transcript.getBoundingClientRect();
+  const story =
+    gap.getBoundingClientRect().top - view.top - transcript.clientTop + transcript.scrollTop +
+    parseFloat(getComputedStyle(transcript).paddingBottom);
+  const needed = Math.max(0, top + transcript.clientHeight - story);
   gap.style.height = `${needed}px`;
-  transcript.scrollTop = holdAt;
   // caught up: holding now only keeps a scrollbar longer than the story
   if (!needed) release();
 }
 
 function release() {
-  holdAt = null;
+  holding = false;
   room().style.height = "0px";
 }
 
@@ -132,11 +167,51 @@ function atTail() {
   return transcript.scrollHeight - empty - transcript.scrollTop - transcript.clientHeight < 120;
 }
 
-function toBottom({ force = false } = {}) {
-  /* Only when the reader is already there: a story being read further up
-     must not be yanked down by an undo or a re-run. `force` is the one
-     case that is the reader asking — a line they just sent. */
-  if (force || atTail()) transcript.scrollTop = transcript.scrollHeight;
+/* ---------- following a reply down ----------
+
+   A reply carries the reader down only while they stay at the end: any
+   scroll up — wheel, trackpad, scrollbar, key — lets go of them, and
+   scrolling back to the end takes them along again. Whether they were
+   at the tail when the line went out decides where it starts.
+
+   The page's own jump must not swallow the reader's scroll, so it waits
+   for the next frame — the browser reports where the reader went BEFORE
+   frame callbacks run — and records where it left the flow. A move up
+   from there is the reader's, unless it lands on the very end: that is
+   the browser clamping a flow that got shorter. */
+
+const REJOIN = 32; // about a line of prose from the end counts as at it
+
+let following = false; // whether the reply in flight carries the reader down
+let lastTop = 0; // where the flow was last seen, moved by either side
+let snap = 0; // the frame a jump waits for, 0 when none
+
+transcript.addEventListener(
+  "scroll",
+  () => {
+    const top = transcript.scrollTop;
+    const left = transcript.scrollHeight - top - transcript.clientHeight;
+    if (top < lastTop && left >= 1) following = false;
+    else if (left <= REJOIN) following = true;
+    lastTop = top;
+  },
+  { passive: true },
+);
+
+function toBottom() {
+  transcript.scrollTop = transcript.scrollHeight;
+  lastTop = transcript.scrollTop;
+}
+
+function follow() {
+  // While space is held the flow does not move — the text is going where
+  // the reader is already looking. Once that space is filled the flow
+  // follows it down, for as long as the reader stays with it.
+  if (snap) return;
+  snap = requestAnimationFrame(() => {
+    snap = 0;
+    if (!holding && following) toBottom();
+  });
 }
 
 // ---------- drawing a turn ----------
@@ -243,12 +318,10 @@ export async function play(line, { regenerate = false } = {}) {
 }
 
 function beginTurn(regenerate) {
-  /* A played line is the reader asking for something new at the bottom;
-     a regenerate is not — it redraws into the space the old take was
-     read in, and follows the text down only once that space is filled,
-     and only for a reader who was at the tail. Measured before anything
-     moves. */
-  const tail = atTail();
+  /* The reply follows only a reader who was at the tail. A regenerate
+     also redraws into the space the old take was read in, and follows
+     only once that space is filled. Measured before anything moves. */
+  following = atTail();
   playing = true;
   arriving = new AbortController();
   let over;
@@ -286,18 +359,19 @@ function beginTurn(regenerate) {
      refusal comes back before anything is lost. */
   if (regenerate) holdSpace(dropLastReply);
   showTurnBar();
-  return { article, status, state, ticking, over, tail, reasoning: null, prose: "" };
+  return { article, status, state, ticking, over, reasoning: null, prose: "" };
 }
 
 function draw(turn, happened) {
   // A regenerate sends no Recorded — its prompt is already on screen —
   // so the block joins the flow at the first sign of the reply, or it
-  // would stream into nothing.
-  if (!turn.article.isConnected) transcript.append(turn.article);
+  // would stream into nothing. Ahead of the held space, which belongs
+  // last: behind it, its empty block would sit between two turns.
+  if (!turn.article.isConnected) transcript.insertBefore(turn.article, $(".otk-gap", transcript));
   DRAW[happened.type]?.(turn, happened);
   // what arrives goes into the space the old take was read in
   reserve();
-  follow(turn);
+  follow();
 }
 
 // One drawer per event kind — `web.api.event`'s closed union, drawn.
@@ -309,6 +383,12 @@ const DRAW = {
        Drawn at record time the way the terminal prints its dim block:
        a redraw from the store does not carry it, and neither keeps it. */
     if (happened.note) drawn.append(element("p", "otk-turn__note", happened.note));
+    /* The line takes the place of the row the reply above kept when it
+       landed: the flow grows by more than the row, so nothing moves. */
+    const above = turn.article.previousElementSibling;
+    if (above?.classList.contains("otk-generating--idle")) {
+      $(".otk-generating__status", above)?.remove();
+    }
     transcript.insertBefore(drawn, turn.article);
   },
   reasoning(turn, happened) {
@@ -376,7 +456,8 @@ function endTurn(turn) {
   working(false);
   // what the page had to say about the attempt is over with it
   tell("");
-  // the status row STAYS, hidden, so nothing above it moves
+  // the status row STAYS, hidden, so nothing above it moves — until the
+  // next line takes its place (`recorded`)
   turn.article.classList.add("otk-generating--idle");
   turn.article.classList.remove("is-streaming");
   turn.article.setAttribute("aria-busy", "false");
@@ -400,14 +481,7 @@ function endTurn(turn) {
     turn.article.dataset.unstored = "true";
   }
   showTurnBar();
-  follow(turn);
-}
-
-function follow(turn) {
-  // While space is held the flow does not move — the text is going where
-  // the reader is already looking. Once that space is filled the flow
-  // follows it down, for whoever was at the tail to begin with.
-  if (holdAt === null && turn.tail) toBottom({ force: true });
+  follow();
 }
 
 /* the standing reply comes off, so the fresh take streams in its place
