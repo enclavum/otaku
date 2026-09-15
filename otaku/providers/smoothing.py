@@ -34,11 +34,21 @@ _RATE_WINDOW = 3.0  # sliding window (seconds) for the arrival-rate estimate
 _TICK = 0.02  # emit cadence
 
 
-def smoothen(chunks: Iterator[Chunk], on_idle: Callable[[], None] | None = None) -> Iterator[Chunk]:
+def smoothen(
+    chunks: Iterator[Chunk],
+    on_idle: Callable[[], bool | None] | None = None,
+    cut: Callable[[], None] | None = None,
+) -> Iterator[Chunk]:
     """`chunks` re-timed into an even flow. `on_idle` is called on every
     tick the wrapper spends waiting — before the first token and in every
     gap after it — which is the one moment a caller's own thread is
-    demonstrably free while a reply is in flight."""
+    demonstrably free while a reply is in flight; it may answer False to
+    say nobody reads any more (a closed tab), and the stream ends there,
+    the source cut. `cut` is called from the consumer's thread the moment
+    it lets go while the pump still reads: it must wake the pump's read
+    wherever it is blocked, or the source stays open until the engine's
+    next word — a whole prefill, spent for nobody, with the next turn
+    queued behind it."""
     from otaku.providers.openai.completion import Reasoning, Stats, Text
 
     buffer: list[str] = []
@@ -115,7 +125,8 @@ def smoothen(chunks: Iterator[Chunk], on_idle: Callable[[], None] | None = None)
                 # never be the thing that breaks a reply, so what it
                 # raises stops with it.
                 with contextlib.suppress(Exception):
-                    on_idle()
+                    if on_idle() is False:
+                        return  # nobody reads: the cut below stops the source
             time.sleep(_TICK)
         if error[0] is not None:
             raise error[0]
@@ -123,6 +134,8 @@ def smoothen(chunks: Iterator[Chunk], on_idle: Callable[[], None] | None = None)
             yield final[0]
     finally:
         done.set()  # stop the pump if the consumer aborted mid-stream
+        if cut is not None and worker.is_alive():
+            cut()
 
 
 def _pace(backlog: int, rate: float) -> float:

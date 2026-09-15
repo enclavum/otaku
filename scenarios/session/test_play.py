@@ -480,6 +480,36 @@ class TestPromptCache:
         assert all(isinstance(m["content"], str) for m in sent)
 
 
+class TestCancelAndKeep:
+    def test_a_ctrl_c_in_the_wait_keeps_the_partial_with_smoothing_on(
+        self, server, tmp_path
+    ) -> None:
+        # With smoothing on, the wait is the wrapper's own tick inside the
+        # play's frame, and that is where a Ctrl+C lands: what streamed
+        # must be recorded all the same, the way a closed stream's is.
+        server.script = lambda body: "The light went out, and something stirred in the dark. " * 8
+        server.chunk_size = 6
+        server.chunk_delay = 0.03
+        set_config(tmp_path / "state", smooth_streaming=True)
+        app = launch(tmp_path / "state", server)
+        try:
+            ticks = 0
+
+            def interrupt() -> None:
+                nonlocal ticks
+                ticks += 1
+                if ticks == 40:  # some 0.8 s into the reply: words have streamed
+                    raise KeyboardInterrupt
+
+            app.session.set_on_idle(interrupt)
+            app.play("I enter the hall.")
+            reply = app.store.stories.get_messages(app.session.story_id)[-1]
+            assert reply.role == "assistant"
+            assert 0 < len(reply.body) < len(server.script({}))
+        finally:
+            app.close()
+
+
 def _cloud(server: scripted.ModelServer, tmp_path: Path, *, prompt_cache: str = "") -> App:
     """The app over a provider the registry builds as the marking cloud
     client — the section's NAME picks the class."""

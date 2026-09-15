@@ -7,6 +7,8 @@ store, never on the screen.
 """
 
 import base64
+import json
+import socket
 import threading
 import time
 import tomllib
@@ -15,8 +17,9 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from otaku.backend.session import KNOWN_PARAMS, THINK_MENU
+from scenarios.support.harness import set_config
 from scenarios.support.server import ModelServer
-from scenarios.web.conftest import Page
+from scenarios.web.conftest import Page, serving
 
 SERAPHINA = Path(__file__).parent.parent / "fixtures" / "seraphina.png"
 
@@ -219,6 +222,36 @@ class TestReading:
 
 
 class TestPlaying:
+    def test_a_page_that_hangs_up_in_the_wait_frees_the_session_at_once(
+        self, server: ModelServer, tmp_path: Path
+    ) -> None:
+        # Before the first token nothing is written to the page, so its
+        # leaving could only be seen at the first frame. The wait asks
+        # every tick instead: the reply ends the moment the page is gone,
+        # its request cut, and the session's thread is free for the next
+        # write instead of queued behind a prefill nobody wants.
+        smoothed = serving(
+            server, tmp_path, prepare=lambda root: set_config(root, smooth_streaming=True)
+        )
+        with smoothed as page:
+            server.headers_delay = 3.0
+            parts = urlsplit(page.url)
+            assert parts.hostname and parts.port
+            raw = socket.create_connection((parts.hostname, parts.port), timeout=5)
+            body = json.dumps({"line": "I enter the hall."}).encode()
+            raw.sendall(
+                f"POST /api/play HTTP/1.1\r\nHost: {parts.netloc}\r\n"
+                f"Content-Type: application/json\r\nContent-Length: {len(body)}\r\n"
+                "Connection: close\r\n\r\n".encode()
+                + body
+            )
+            time.sleep(0.5)  # the reply is in the wait for the first token
+            raw.close()
+            started = time.monotonic()
+            page.put("/api/settings/think", {"value": "default"})  # a write: the thread in turn
+            assert time.monotonic() - started < 1.5  # never the server's three seconds
+            server.headers_delay = 0.0
+
     def test_a_line_plays_and_lands_in_the_store(self, page: Page) -> None:
         events = page.play("I unroll the county survey.")
         kinds = [event["type"] for event in events]

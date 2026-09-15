@@ -101,7 +101,7 @@ class Session:
     _notify: Callable[[str], None] | None
     # What to do with this thread while a reply is waited on — a
     # frontend that runs its own work on it attaches one (`set_on_idle`).
-    _on_idle: Callable[[], None] | None
+    _on_idle: Callable[[], bool | None] | None
     # Product state (read through the properties below). The model is
     # `_state`'s — it is what state.toml remembers, and the halves the
     # app works in are its own to split.
@@ -334,13 +334,19 @@ class Session:
         """The status repaint hook (thread-safe on the caller's side)."""
         self._worker.on_status = repaint
 
-    def set_on_idle(self, tick: Callable[[], None] | None) -> Callable[[], None] | None:
+    def set_on_idle(
+        self, tick: Callable[[], bool | None] | None
+    ) -> Callable[[], bool | None] | None:
         """What to do with this thread while a reply is being waited on.
         Called on the session's OWN thread, many times a second, from
         the moment a request goes out until the last token — a frontend
         that shares that thread (the web serves its reads on it) uses
-        this to stay answerable while the model talks. Whatever it
-        raises is swallowed: a hook may not break a reply.
+        this to stay answerable while the model talks. It may answer
+        False to say nobody reads the reply any more (a page that hung
+        up): the reply ends at once, its request cut and what arrived
+        kept. The terminal needs no answer, its Ctrl+C lands in the wait
+        itself. Whatever the hook raises is swallowed: it may not break
+        a reply.
 
         Returns the hook it replaces, so a frontend borrowing the
         session for a while (`/web`) can put the owner's back."""

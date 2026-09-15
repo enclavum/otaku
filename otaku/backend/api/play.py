@@ -252,9 +252,11 @@ def _reply_events(
             close = getattr(stream, "close", None)
             if callable(close):
                 close()
-    except GeneratorExit:
-        # The frontend closed the stream mid-way: cancel-and-keep. No
-        # more yields are possible — record and re-raise.
+    except (GeneratorExit, KeyboardInterrupt):
+        # The frontend closed the stream mid-way, or the terminal's
+        # Ctrl+C landed in the wait itself, inside this frame — the same
+        # cancel-and-keep. No more yields are possible: record and
+        # re-raise.
         _land_reply(session, content, final, reply_kind, reply_speaker)
         raise
     except Exception as e:  # the stream failed; what streamed is kept

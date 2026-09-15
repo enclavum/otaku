@@ -14,6 +14,7 @@ probe, the balance, and the error family, each with its sentence.
 """
 
 import base64
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -246,6 +247,45 @@ class TestChatCompletion:
         off = OpenRouterClient(_config(server, "openrouter", api_key="k", prompt_cache="off"))
         _drain(off.completion.chat("m", [Turn("system", "s"), Turn("user", "u")], {}))
         assert server.requests[-1]["messages"][0]["content"] == "s"
+
+    def test_a_cancel_while_smoothing_cuts_the_wait_for_the_first_token(
+        self, server: ModelServer
+    ) -> None:
+        # With smoothing on the reader waits in a pump thread, and the
+        # consumer's cancel must reach the socket — before the first
+        # token above all, where llama.cpp and Ollama have not even sent
+        # their headers — or the engine finishes the prefill for nobody
+        # and the next turn queues behind it. The interrupt arrives the
+        # way the terminal's ctrl-c does: in the consumer's thread, while
+        # the wrapper ticks.
+        sink = Sink()
+        client = GenericClient(_config(server, "generic"), request_sink=sink, smooth=True)
+        server.headers_delay = 3.0
+        try:
+            started = time.monotonic()
+            stream = client.completion.chat("m", [Turn("user", "u")], {}, on_idle=_interrupt)
+            with pytest.raises(_Interrupted):
+                next(stream)
+            assert _filed(sink, "cancelled", within=1.0)
+            assert time.monotonic() - started < 2.0  # never the server's three seconds
+        finally:
+            server.headers_delay = 0.0
+
+    def test_a_cancel_while_smoothing_cuts_a_gap_between_words(self, server: ModelServer) -> None:
+        # The web's path: the consumer closes the stream after words
+        # came, in a gap the pump is blocked in.
+        sink = Sink()
+        client = GenericClient(_config(server, "generic"), request_sink=sink, smooth=True)
+        server.chunk_delay = 1.5
+        try:
+            stream = client.completion.chat("m", [Turn("user", "u")], {})
+            started = time.monotonic()
+            next(c for c in stream if isinstance(c, Text))
+            stream.close()
+            assert _filed(sink, "cancelled", within=1.0)
+            assert time.monotonic() - started < 3.0  # one chunk's wait, not two
+        finally:
+            server.chunk_delay = 0.0
 
     def test_the_answer_is_filed_however_the_stream_ends(self, server: ModelServer) -> None:
         sink = Sink()
@@ -1329,6 +1369,27 @@ class TestFailures:
 
 def _config(server: ModelServer, kind: str, **fields: str) -> ProviderConfig:
     return ProviderConfig(name=kind, url=server.url, **fields)  # type: ignore[arg-type]
+
+
+class _Interrupted(BaseException):
+    """The terminal's ctrl-c, as a test can raise it: no Exception, so
+    the wrapper's idle hook does not swallow it, and not the real
+    KeyboardInterrupt, which would stop the run."""
+
+
+def _interrupt() -> None:
+    raise _Interrupted
+
+
+def _filed(sink: Sink, status: str, *, within: float) -> bool:
+    """Whether the take filed `status` within `within` seconds: the
+    filing happens in the pump's thread, after the cut wakes it."""
+    deadline = time.monotonic() + within
+    while time.monotonic() < deadline:
+        if sink.statuses and sink.statuses[-1] == status:
+            return True
+        time.sleep(0.01)
+    return False
 
 
 def _sent(server: ModelServer, shape: str) -> dict[str, object]:

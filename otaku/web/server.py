@@ -43,6 +43,7 @@ import contextlib
 import http.cookies
 import json
 import re
+import select
 import ssl
 import sys
 import threading
@@ -859,6 +860,11 @@ class _Handler(BaseHTTPRequestHandler):
         it — the last event, a closed tab, a failure — the generator is
         closed, which is what records a partial reply."""
         self._streaming = True
+        # Between frames the page can only be seen to be gone by a
+        # write; before the first token there is none. So for this reply
+        # the idle hook drains and then answers whether the page is still
+        # there, and a vanished page ends the reply at once.
+        was_idle = session.set_on_idle(self._drain_and_look)
         try:
             # Inside the try from the first byte: the header flush is a
             # socket write too, and a tab that RST'd while this job sat
@@ -893,6 +899,7 @@ class _Handler(BaseHTTPRequestHandler):
             # a crash would log a traceback per reload.
             return
         finally:
+            session.set_on_idle(was_idle)
             events.close()  # type: ignore[attr-defined]
         # The turn ran to its natural end and the reader has the whole
         # reply — the moment the screen wants them back. Not on a Stop or
@@ -900,6 +907,21 @@ class _Handler(BaseHTTPRequestHandler):
         # or left — the terminal's own "not after a Ctrl+C" rule.
         if session.notification:
             self.server.hooks.ring()
+
+    def _drain_and_look(self) -> bool:
+        """The idle hook for one reply: the runner's drain, then whether
+        the page is still at the other end. The request is read in full
+        before the reply starts, so a socket that becomes readable during
+        it can only carry the peer's close (a closed tab, an aborted
+        fetch); a server asked to stop counts as gone too."""
+        self.server.runner.drain()
+        if self.server.stopping.is_set():
+            return False
+        try:
+            readable, _, _ = select.select([self.connection], [], [], 0)
+        except (OSError, ValueError):
+            return False
+        return not readable
 
     # ---------- the watch stream ----------
 

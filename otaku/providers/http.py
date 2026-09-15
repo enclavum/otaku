@@ -35,11 +35,14 @@ all completes it in milliseconds.
 from __future__ import annotations
 
 import contextlib
+import socket
+import threading
 import time
-from collections.abc import Generator
+from collections.abc import Generator, Iterable
 from pathlib import Path
 from typing import Any, Protocol
 
+import httpcore
 import httpx
 
 from otaku.formatting import format_seconds, printable
@@ -135,7 +138,7 @@ class Http:
         return self._request("POST", url, body, purpose, timeout, quiet)
 
     def stream(
-        self, url: str, body: dict[str, Any], *, timeout: float
+        self, url: str, body: dict[str, Any], *, timeout: float, cut: Cut | None = None
     ) -> Generator[str, None, None]:
         """POST `body` and yield the answer's non-blank lines. `timeout`
         is the longest silence the read waits out, never a budget: a
@@ -144,20 +147,25 @@ class Http:
         before the first line; a transport failure is "could not reach"
         before the first line and "lost the connection" after; closing
         the generator closes the connection, which stops the server's
-        generation. What the lines mean is the protocol's, and a failure
+        generation. `cut`, when given, is armed with the connection: cut
+        from another thread, the read ends as `StreamCut`, the reader's
+        own doing. What the lines mean is the protocol's, and a failure
         is the caller's to file."""
         name = self._name
         started = False
         capped = self._cap(timeout) or timeout
         try:
-            with httpx.stream(
-                "POST",
-                url,
-                json=body,
-                headers=self._headers,
-                timeout=_timeout(capped, _STREAM_CONNECT_TIMEOUT),
-                follow_redirects=True,
-            ) as response:
+            with (
+                self._client(cut) as client,
+                client.stream(
+                    "POST",
+                    url,
+                    json=body,
+                    headers=self._headers,
+                    timeout=_timeout(capped, _STREAM_CONNECT_TIMEOUT),
+                    follow_redirects=True,
+                ) as response,
+            ):
                 if response.status_code >= 300:
                     # Read now, while the stream is open: the explanation
                     # must still be there once the connection closes.
@@ -170,20 +178,29 @@ class Http:
                 rest = ""
                 for text in response.iter_text():
                     rest += text
-                    while (cut := rest.find("\n")) != -1:
-                        line, rest = rest[:cut], rest[cut + 1 :]
+                    while (at := rest.find("\n")) != -1:
+                        line, rest = rest[:at], rest[at + 1 :]
                         if line := line.strip():
                             started = True
                             yield line
                 if line := rest.strip():
                     started = True
                     yield line
+                if cut is not None and cut.asked:
+                    # A body that ends right after the cut ended by it —
+                    # whatever the framing made of the closed socket: a
+                    # chunked answer breaks off, one read to the close ends.
+                    raise StreamCut
         except httpx.ReadTimeout as e:
+            if cut is not None and cut.asked:
+                raise StreamCut from e
             sentence = _STALLED if started else _SILENT
             raise UnreachableError(
                 sentence.format(name=name, seconds=format_seconds(capped))
             ) from e
         except (httpx.HTTPError, httpx.InvalidURL) as e:
+            if cut is not None and cut.asked:
+                raise StreamCut from e
             if started:
                 raise UnreachableError(f"Lost the connection to {name}.") from e
             raise UnreachableError(f"Could not reach {name}.") from e
@@ -253,6 +270,19 @@ class Http:
             self.record(e, purpose)
             raise
 
+    def _client(self, cut: Cut | None) -> httpx.Client:
+        """A client for one stream: httpx's own, or one whose connections
+        the cut can reach. httpx takes no network backend of its own, so
+        the pool is swapped under its transport, the attribute it keeps
+        it under; the pool is built as httpx builds it, a backend added."""
+        if cut is None:
+            return httpx.Client()
+        transport = httpx.HTTPTransport()
+        transport._pool = httpcore.ConnectionPool(
+            ssl_context=httpx.create_ssl_context(), network_backend=_Cutting(cut)
+        )
+        return httpx.Client(transport=transport)
+
     def _cap(self, timeout: float | None) -> float | None:
         """`timeout` under the budget: the shorter of the two, or the one
         there is. Raises UnreachableError once the budget is spent."""
@@ -262,6 +292,65 @@ class Http:
         if remaining <= 0:
             raise UnreachableError(_SPENT.format(name=self._name))
         return remaining if timeout is None else min(timeout, remaining)
+
+
+class Cut:
+    """The door to cut a stream from another thread — the consumer's,
+    while a pump thread reads it. `cut()` shuts the connection's socket
+    down, which wakes a read blocked anywhere, the wait for the first
+    byte included: llama.cpp and Ollama send their headers with the
+    first token, so during a prefill there is no response to close. The
+    stream then ends as the reader's own doing (`StreamCut`), never as
+    the transport's failure. Armed by the transport at connect time; a
+    cut asked before the connection exists lands the moment it does."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._socket: socket.socket | None = None
+        self.asked = False
+
+    def cut(self) -> None:
+        with self._lock:
+            self.asked = True
+            self._shutdown()
+
+    def _arm(self, sock: socket.socket) -> None:
+        with self._lock:
+            self._socket = sock
+            if self.asked:
+                self._shutdown()
+
+    def _shutdown(self) -> None:
+        if self._socket is not None:
+            with contextlib.suppress(OSError):
+                self._socket.shutdown(socket.SHUT_RDWR)
+
+
+class StreamCut(Exception):  # noqa: N818 — the reader's own doing, not an error
+    """What `stream` raises in place of the transport's failure when the
+    cut it was handed had been asked for."""
+
+
+class _Cutting(httpcore.SyncBackend):
+    """httpcore's network backend, handing every socket it opens to the
+    cut — the one place a connection is reachable before its response."""
+
+    def __init__(self, cut: Cut) -> None:
+        self._cut = cut
+
+    def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Iterable[Any] | None = None,
+    ) -> httpcore.NetworkStream:
+        stream = super().connect_tcp(
+            host, port, timeout=timeout, local_address=local_address, socket_options=socket_options
+        )
+        self._cut._arm(stream.get_extra_info("socket"))
+        return stream
 
 
 def positive_int(value: object) -> int | None:

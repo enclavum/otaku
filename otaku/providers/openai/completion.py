@@ -23,7 +23,7 @@ from typing import Any, ClassVar, Protocol, final
 
 from otaku.providers import smoothing
 from otaku.providers.errors import DeclinedError, ProviderError, StatusError, UnreachableError
-from otaku.providers.http import ASK_TIMEOUT, REPLY_TIMEOUT, Http
+from otaku.providers.http import ASK_TIMEOUT, REPLY_TIMEOUT, Cut, Http, StreamCut
 from otaku.providers.openai import frames, reasoning, requests
 from otaku.providers.openai.requests import Image, WireMessage
 from otaku.settings.providers import ProviderConfig
@@ -151,17 +151,22 @@ class OpenAICompletion:
         timeout: float = REPLY_TIMEOUT,
         purpose: str = "chat",
         watched: bool = True,
-        on_idle: Callable[[], None] | None = None,
+        on_idle: Callable[[], bool | None] | None = None,
     ) -> Iterator[Chunk]:
         """Stream one chat completion: Reasoning and Text deltas, then a
         final Stats. `effort` is a `reasoning.EFFORTS` word, sent on
         every knob the engine reads; `images` ride on the last
         message; `watched=False` skips the pacing for a call nobody
-        watches, so its cancel is not delayed."""
+        watches, so its cancel is not delayed. With the pacing on, the
+        wait is spent ticking `on_idle`, which may answer False to say
+        nobody reads any more — the stream ends as cancelled then, its
+        request cut; without it, the caller's own thread is in the read
+        and nothing ticks."""
         body, knobs = self._chat_request(model, messages, params, effort=effort, images=images)
         url = f"{self._config.url}/chat/completions"
-        stream = self._stream(url, body, knobs, purpose, timeout, frames.chat_delta)
-        return smoothing.smoothen(stream, on_idle) if watched and self._smooth else stream
+        cut = Cut() if watched and self._smooth else None
+        stream = self._stream(url, body, knobs, purpose, timeout, frames.chat_delta, cut)
+        return stream if cut is None else smoothing.smoothen(stream, on_idle, cut.cut)
 
     @final
     def text(
@@ -174,7 +179,7 @@ class OpenAICompletion:
         timeout: float = REPLY_TIMEOUT,
         purpose: str = "chat",
         watched: bool = True,
-        on_idle: Callable[[], None] | None = None,
+        on_idle: Callable[[], bool | None] | None = None,
     ) -> Iterator[Chunk]:
         """Stream one text completion: the prompt continued where it
         ends, Text deltas then a final Stats. `effort` goes out on the
@@ -184,8 +189,9 @@ class OpenAICompletion:
         body = requests.text_completion_body(model, prompt, self._convert_params(params))
         knobs = reasoning.fields(effort, self.text_reasoning_knobs)
         url = f"{self._config.url}/completions"
-        stream = self._stream(url, body, knobs, purpose, timeout, frames.completion_delta)
-        return smoothing.smoothen(stream, on_idle) if watched and self._smooth else stream
+        cut = Cut() if watched and self._smooth else None
+        stream = self._stream(url, body, knobs, purpose, timeout, frames.completion_delta, cut)
+        return stream if cut is None else smoothing.smoothen(stream, on_idle, cut.cut)
 
     def count_chat_tokens(
         self,
@@ -252,6 +258,7 @@ class OpenAICompletion:
         purpose: str,
         timeout: float,
         read_delta: _DeltaReader,
+        cut: Cut | None = None,
     ) -> Iterator[Chunk]:
         """The request with its reasoning `knobs`, and — should a 400
         refuse it before anything streamed, naming a knob — once more
@@ -264,9 +271,9 @@ class OpenAICompletion:
         without the knobs was no failure."""
         try:
             if not knobs:
-                yield from self._generate(url, body, purpose, timeout, read_delta)
+                yield from self._generate(url, body, purpose, timeout, read_delta, cut)
                 return
-            knobbed = self._generate(url, {**body, **knobs}, purpose, timeout, read_delta)
+            knobbed = self._generate(url, {**body, **knobs}, purpose, timeout, read_delta, cut)
             yielded = False
             try:
                 # Closed the moment the consumer lets go, not at collection:
@@ -283,7 +290,7 @@ class OpenAICompletion:
                 knob_refused = any(word in sentence for word in self._refusal_words(knobs))
                 if yielded or e.status != 400 or not knob_refused:
                     raise
-                yield from self._generate(url, body, purpose, timeout, read_delta)
+                yield from self._generate(url, body, purpose, timeout, read_delta, cut)
         except ProviderError as e:
             self._http.record(e, purpose)
             raise
@@ -295,11 +302,13 @@ class OpenAICompletion:
         purpose: str,
         timeout: float,
         read_delta: _DeltaReader,
+        cut: Cut | None = None,
     ) -> Generator[Chunk, None, None]:
         """One take: the request recorded, the wire read, and the answer
         filed under the request's id — once, however it ends: the clean
-        end, the consumer closing it (the cancel-and-keep door), or a
-        failure. What had arrived rides along either way."""
+        end, the consumer closing it (the cancel-and-keep door), a cut
+        it asked for from another thread, or a failure. What had
+        arrived rides along either way."""
         name = self._config.name
         request_id = ""
         if self._request_sink is not None:
@@ -309,7 +318,7 @@ class OpenAICompletion:
         text: list[str] = []
         thoughts: list[str] = []
         trouble: list[str] = []
-        lines = self._http.stream(url, body, timeout=timeout)
+        lines = self._http.stream(url, body, timeout=timeout, cut=cut)
         events = self._events(lines, name)
         # A close before the end is a cancel: GeneratorExit is no
         # Exception, so it leaves the word as it is.
@@ -349,6 +358,8 @@ class OpenAICompletion:
             if trouble:
                 raise DeclinedError(" ".join(trouble))
             status = "ok"
+        except StreamCut:
+            return  # the consumer cut the read: cancelled, as the word stands
         except Exception as e:
             # The provider's sentence where there is one; a bug's type name.
             status = f"failed: {e if isinstance(e, ProviderError) else type(e).__name__}"

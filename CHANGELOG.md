@@ -11,11 +11,11 @@ changes.
 
 Web UI:
 
-- The web interface can now serve over HTTPS. Turn on the setting in
-  `~/.otaku/configs/config.toml` and otaku will automatically generate a self-signed certificate,
-  which you can also replace with your own if you need to. Browsers will show warnings about an
-  untrusted certificate. It's unavoidable if the certificate is self-signed, but TLS protection is
-  still real — _you should turn it on if you run otaku over a public network_.
+- The web interface can now serve over HTTPS. Turn on `https` in
+  `~/.otaku/configs/config.toml` and otaku generates a self-signed certificate, which you can
+  also replace with your own if you need to. Browsers will show warnings about an untrusted
+  certificate. That is unavoidable with a self-signed certificate, but the encryption is real —
+  _you should turn it on if you run otaku over a public network_.
 - The web interface can be password-protected — set the password in the same config file.
   _It's also a must if you run otaku over a public network_.
 - Edit messages directly in the transcript by double-clicking them. Double-clicking to edit various
@@ -123,6 +123,14 @@ Full list of changes: [CHANGELOG.md](https://github.com/enclavum/otaku/blob/main
   grade their thinking (gpt-oss's); a template that reads none still gets on and off.
 - A reply cut short by the engine mid-stream — Ollama's runner failing, say — was filed as a
   complete answer. A stream that ends without the protocol's `[DONE]` is now a lost connection.
+- With smoothing on, cancelling a reply while the model was still reading the prompt did not
+  reach the engine: the connection stayed open until the first token came, the engine finished
+  the prefill for nobody, and the next turn queued behind it. The cancel now cuts the connection
+  at once, before the first byte included; the page's Stop reaches it during that wait too, where
+  it used to be noticed only at the first token.
+- A Ctrl+C mid-reply with smoothing on kept the words on screen but not in the story: the
+  interrupt landed inside the wait, past the point that records a cut-off reply. It is recorded
+  now, as a closed stream's partial is.
 - `OLLAMA_HOST` is read the way Ollama reads it: an `http://` or `https://` scheme is kept and
   supplies the port when none is written, a path is kept, a bare IPv6 address is bracketed, and
   a bare number is a host, as it is to Ollama.

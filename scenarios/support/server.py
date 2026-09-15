@@ -89,6 +89,9 @@ class ModelServer:
         self.balances: dict[str, Any] = {"usd_balance": "10"}  # nanogpt check-balance; empty → 404
         self.api_key: str | None = None  # set → balance endpoints demand this Bearer key
         self.chunk_delay = 0.0
+        # seconds before the chat answer's headers: llama.cpp's and
+        # Ollama's prefill, which sends nothing until the first token
+        self.headers_delay = 0.0
         self.cached_tokens: int | None = None
         # set → the text wire's last frame carries NanoGPT's pricing block
         # (inputTokens, outputTokens) and no usage report
@@ -433,6 +436,8 @@ class ModelServer:
                     # object and no stream (LM Studio's).
                     self._json({"error": outer.flat_error})
                     return
+                if outer.headers_delay:
+                    time.sleep(outer.headers_delay)
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
                 if outer.fail_after is not None:
