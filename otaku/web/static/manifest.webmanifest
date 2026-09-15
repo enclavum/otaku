@@ -1,0 +1,6 @@
+{
+  "name": "otaku",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone"
+}

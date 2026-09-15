@@ -1,8 +1,9 @@
-/* The help docket: the language, and the two keys that go with it.
+/* The help docket: the language, the two keys that go with it, and what
+   the transcript answers to.
 
    What a reader needs written down is what they cannot see on the page:
-   the words a line may open or close with, and the two verbs that have
-   a key. Everything else IS on the page — a row in the contents, a
+   the words a line may open or close with, the two verbs that have a
+   key, and the double click that opens a message — no button says so. Everything else IS on the page — a row in the contents, a
    button on its panel, a hint under the box — which is what the footer
    says.
 
@@ -29,6 +30,10 @@ const _KEYS = {
     [["ctrl", "u"], "take back the last exchange"],
   ],
 };
+
+/* What the transcript answers to, in a section of its own after the
+   language: the page's gestures, not a word typed. */
+const _TRANSCRIPT = [["double-click", "edit a message in place"]];
 
 /* What each row of the language means, by its token. */
 const _MEANS = {
@@ -74,6 +79,14 @@ export function openHelp() {
     if (row.args) label.append(span("otk-keys__plus", row.args));
     grid.append(label, span("otk-keys__meaning", _MEANS[row.token] ?? ""));
   }
+
+  const gestures = element("div", "otk-keys-grid");
+  for (const [gesture, meaning] of _TRANSCRIPT) {
+    gestures.append(keys(span("otk-key", gesture)), span("otk-keys__meaning", meaning));
+  }
+  const transcript = element("div", "otk-v otk-v--md");
+  transcript.append(span("otk-label", "Transcript"), gestures);
+  blocks.push(element("div", "otk-rule--double"), transcript);
 
   body.replaceChildren(...blocks);
   /* `showModal` focuses the first focusable descendant unless something

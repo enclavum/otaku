@@ -76,6 +76,7 @@ _JS = "text/javascript; charset=utf-8"
 _EVENT_STREAM = "text/event-stream"
 _JSON = "application/json; charset=utf-8"
 _WOFF2 = "font/woff2"
+_MANIFEST = "application/manifest+json"
 
 # The lane is the METHOD. A GET only READS the session and is answered on
 # the read queue — during a reply as well as between them, which is what
@@ -174,6 +175,8 @@ _FONTS = _packaged("fonts", suffix=".woff2")
 _ASSETS: dict[str, tuple[str, str, str]] = {
     "/": ("index.html", _HTML, _NO_STORE),
     "/app.css": ("app.css", _CSS, _NO_STORE),
+    # what a home screen reads to open the page as an app of its own
+    "/manifest.webmanifest": ("manifest.webmanifest", _MANIFEST, _NO_STORE),
     **{f"/{name}": (name, _JS, _NO_STORE) for name in _SCRIPTS},
     **{f"/{name}": (name, _WOFF2, _IMMUTABLE) for name in _FONTS},
 }

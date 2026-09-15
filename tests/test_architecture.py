@@ -361,7 +361,9 @@ _PAGE = {
     "status": {"dom"},
     "watch": {"dom"},
     "prose": {"dom"},
-    "transcript": {"api", "dom", "prose", "status", "table"},
+    # `browser` for the kit's editor: a stored turn is corrected where it
+    # is read, as the dossier corrects one. The kit is below the frame.
+    "transcript": {"api", "browser", "dom", "prose", "status", "table"},
     "browser": {"dom", "status"},
     # `format` for the runhead's story name: a title is cut the same way
     # wherever the page writes one.

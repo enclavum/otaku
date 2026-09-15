@@ -33,7 +33,6 @@ import { $, $$, actionButton, element, pickFile, row, span } from "./dom.js";
 import { ago, excerpt, label } from "./format.js";
 import { typeset } from "./prose.js";
 import { landed } from "./shell.js";
-import { showCorrected } from "./transcript.js";
 
 /* What a premise may be read from: the two shapes a person keeps prose
    in, and nothing else. A file picker offers anything, and a `.png` read
@@ -315,12 +314,13 @@ async function saveMessage(view, message, text) {
       message.haystack = `${text} ${message.speaker ?? ""}`.toLowerCase();
       const line = $(`[data-pane="messages"] .otk-row[data-id="${message.id}"] .otk-row__title`, view.popup);
       if (line) line.textContent = excerpt(text, 300);
-      // the open story's transcript reads the same turn
-      if (view.inside) showCorrected(message.position, text);
     },
   );
-  // the story's name falls back to its first line, so the runhead asks again
-  if (!answer.refused) await landed("");
+  /* The story's name falls back to its first line, so the runhead asks
+     again; and the open story's transcript reads the same turn. */
+  if (!answer.refused) {
+    await landed("", { corrected: view.inside ? [message.position, text] : null });
+  }
   return answer;
 }
 

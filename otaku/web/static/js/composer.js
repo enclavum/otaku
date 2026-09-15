@@ -19,6 +19,10 @@ import { stopPlaying } from "./transcript.js";
 const composer = $(".otk-composer__input textarea");
 const menu = $(".otk-prefixes");
 
+// A finger for a pointer means an on-screen keyboard — the test `app.js`
+// makes before it focuses the box.
+const _TOUCH = window.matchMedia("(pointer: coarse)");
+
 /* What the menu says about each opener, and which half of the language
    it belongs to. A menu row has one line to say what a word DOES —
    `/help` is where the table's full sentence is read — so the caption is
@@ -175,6 +179,10 @@ function onKey(event) {
     return;
   }
   if (event.key === "Enter" && !event.shiftKey) {
+    /* On a touch screen Enter is the keyboard's only way to a new line,
+       so there it writes one and Send sends; a keyboard attached to the
+       device still sends with ctrl or ⌘. */
+    if (_TOUCH.matches && !event.ctrlKey && !event.metaKey) return;
     event.preventDefault();
     submit(composer.value);
   }

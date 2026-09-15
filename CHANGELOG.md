@@ -11,17 +11,26 @@ changes.
 
 Web UI:
 
-- **The web interface can now serve over HTTPS**. Turn on the setting in
+- The web interface can now serve over HTTPS. Turn on the setting in
   `~/.otaku/configs/config.toml` and otaku will automatically generate a self-signed certificate,
   which you can also replace with your own if you need to. Browsers will show warnings about an
   untrusted certificate. It's unavoidable if the certificate is self-signed, but TLS protection is
   still real — _you should turn it on if you run otaku over a public network_.
-- **The web interface can be password-protected** — set the password in the same config file.
+- The web interface can be password-protected — set the password in the same config file.
   _It's also a must if you run otaku over a public network_.
 - Edit messages directly in the transcript by double-clicking them. Double-clicking to edit various
   fields now also works in the stories browser, but there, unlike in the transcript, not all fields
   can be edited — look for the edit button.
 - Fixed a scrolling issue while an LLM response is streaming.
+
+Mobile:
+
+- The web interface has been optimized for mobile: removed unnecessary elements to free up space on
+  screen.
+- iPhone: the site can be added to the home screen to launch in full-screen mode. Open the site,
+  tap Share → Add to Home Screen → Open as Web App → Add.
+- Android and iPad: added a full-screen button.
+- Enter starts a new line; the Send button sends.
 
 Backend:
 

@@ -381,6 +381,8 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
   font-family: var(--otk-font-mono); font-size: var(--otk-size-foot);
   letter-spacing: 0.1em; text-transform: uppercase; color: var(--otk-faint);
 }
+/* a touch screen has no key to name, as with the composer's hints */
+@media (pointer: coarse) { .otk-btn__key { display: none; } }
 
 .otk-field {
   display: block; width: 100%;
@@ -468,6 +470,8 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 .otk-switch { position: relative; width: 18px; height: 36px; flex: none; padding: 0; background: var(--otk-well); border: var(--otk-hair) solid var(--otk-line); border-radius: 999px; cursor: pointer; }
 .otk-switch__knob { position: absolute; left: 3px; top: 3px; width: 10px; height: 10px; border-radius: 50%; background: var(--otk-faint); transition: top 120ms ease, background 120ms ease; }
 .otk-switch[aria-checked="true"] .otk-switch__knob { top: 21px; }
+/* full screen, beside the theme switch, drawn in the sun and moon's ink */
+.otk-fullscreen { flex: none; display: flex; padding: 6px 6px 6px 0; line-height: 1; color: var(--otk-faint); cursor: pointer; }
 .otk-switch:hover .otk-switch__knob { background: var(--otk-accent); }
 
 .otk-rail { display: flex; flex-direction: column; padding: 30px 0 22px; overflow: hidden; }
@@ -666,6 +670,9 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 .otk-composer__verbs { flex: 0 1 auto; margin-left: auto; display: flex; align-items: center; gap: 7px; }
 .otk-hints { margin: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 16px; font-family: var(--otk-font-mono); font-size: var(--otk-size-tag); letter-spacing: var(--otk-track-foot); text-transform: uppercase; color: var(--otk-faint); }
 .otk-hints > * { white-space: nowrap; }
+/* A touch screen has no keys to hint at, and on a phone the row costs lines
+   the story needs; the menu still opens on a typed `/`. */
+@media (pointer: coarse) { .otk-hints { display: none; } }
 /* A hint that is a button reads as one of the row, not as a control in it:
    the UA stylesheet resets casing and tracking on a form control, so they
    are taken back from the line. */
@@ -714,6 +721,8 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
 .otk-panel__head .otk-btn:first-of-type { margin-left: auto; }
 .otk-panel__head > .otk-push ~ .otk-btn { margin-left: 0; }
 .otk-panel__head .otk-eyebrow { min-width: 0; overflow: hidden; white-space: nowrap; }
+/* on a narrow screen the title gives way, never a button's words */
+.otk-panel__head .otk-btn { flex: none; }
 .otk-panel__head > .otk-note { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .otk-tabs { flex: none; display: flex; align-items: center; gap: 36px; padding: 0 var(--otk-panel-pad); border-bottom: var(--otk-hair) solid var(--otk-line-soft); }
@@ -967,6 +976,9 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
 .otk-keys__plus { padding-left: 6px; font-family: var(--otk-font-mono); font-size: var(--otk-size-label); color: var(--otk-faint); }
 .otk-keys-grid { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 11px 30px; align-items: baseline; }
 .otk-keys__meaning { font-family: var(--otk-font-prose); font-size: var(--otk-size-read); color: var(--otk-muted); }
+/* A key box sits on its row's baseline and hangs below it, so the help
+   sheet's last row needs room of its own above the docket's foot. */
+[data-help-body] > :last-child { margin-bottom: 16px; }
 
 /* inside a docket */
 .otk-leader__aside { align-self: flex-end; font-family: var(--otk-font-mono); font-size: var(--otk-size-small); color: var(--otk-faint); }
@@ -1017,8 +1029,12 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
 
 /* =============================================================================
    RESPONSIVE — the shell folds before the page does
+
+   A phone turned on its side is wider than either width below, and still a
+   phone: a touch screen too short to be anything else takes both layouts,
+   so turning it changes nothing.
    ========================================================================== */
-@media (max-width: 1100px) {
+@media (max-width: 1100px), (pointer: coarse) and (max-height: 540px) {
   .otk-app { grid-template-columns: var(--otk-spine-w) minmax(0, 1fr); }
   .otk-rail { display: none; }
   .otk-spine__toggle { display: block; }
@@ -1032,7 +1048,7 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
   .otk-col__scroll, .otk-detail__scroll { flex: 0 0 auto; overflow: visible; }
   .otk-margin { display: none; }
 }
-@media (max-width: 720px) {
+@media (max-width: 720px), (pointer: coarse) and (max-height: 540px) {
   .otk-spine { display: flex; flex-direction: row; align-items: center; gap: 14px; height: 48px; padding: 0 14px; border-right: 0; border-bottom: var(--otk-hair) solid var(--otk-line); }
   .otk-spine__name, .otk-spine__dots { display: none; }
   .otk-theme { flex-direction: row; gap: 8px; margin: 0 0 0 auto; padding: 0; }
@@ -1049,6 +1065,15 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
   .otk-main { padding: 0; }
   .otk-panel, .otk-panel--wide, .otk-panel--read { width: 100vw; height: 100dvh; border: 0; }
   .otk-docket { max-width: 100vw; }
+  /* wrapped under the input, the verbs stand centred on their own line;
+     beside it, the input takes the room and they stay at its end */
+  .otk-composer__verbs { margin: 0 auto; }
+  /* the story's name and count above the transcript cost a phone a line of
+     story; the story browser still says both */
+  .otk-runhead { display: none; }
+  /* and a story's "read through · unread" beside its tabs; the scene index
+     still marks what is not read yet */
+  [data-popup="/story"] .otk-tabs__aside { display: none; }
 }
 @media print {
   .otk-spine, .otk-rail, .otk-composer, dialog { display: none !important; }

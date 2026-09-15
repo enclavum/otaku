@@ -20,7 +20,7 @@ import { editTurn, keepsScreen, openMessages, run as runCommand } from "./js/com
 import { showSignOut, signIn, signOut } from "./js/login.js";
 import { focusComposer, primeHistory, wire as wireComposer } from "./js/composer.js";
 import { $, $$, watchTextareas } from "./js/dom.js";
-import { disconnected, showFacts, watchServer, wireTheme } from "./js/shell.js";
+import { disconnected, showFacts, watchServer, wireFullscreen, wireTheme } from "./js/shell.js";
 import { load as loadTable } from "./js/table.js";
 import { showTurns, whenEdited } from "./js/transcript.js";
 import { watchForChanges } from "./js/watch.js";
@@ -66,6 +66,7 @@ function start() {
   whenEdited(editTurn);
   wireComposer();
   wireTheme();
+  wireFullscreen();
   watchTextareas();
   /* The page opens with the caret where the story is written, so the
      first keystroke is the first word. Not on a phone: a focused box
@@ -123,8 +124,9 @@ function start() {
     if (turn && turn.getAttribute("aria-disabled") !== "true") {
       runCommand(turn.dataset.turn === "undo" ? "/undo" : "/regen");
       // Either verb is about the last exchange, and the next one is
-      // typed: the caret comes back to the box.
-      focusComposer();
+      // typed: the caret comes back to the box — not on a touch screen,
+      // where focus raises the keyboard over the reply about to be read.
+      if (!window.matchMedia("(pointer: coarse)").matches) focusComposer();
     }
   });
 
