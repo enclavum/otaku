@@ -35,7 +35,7 @@ from otaku.settings.providers import ProviderConfig
 
 
 @dataclass(frozen=True)
-class Capabilities:
+class ModelCapabilities:
     """What a model can do, as its engine reports it. None: the engine
     cannot say, which a reader treats as no. `reasoning` is the set of
     efforts honoured, "none" among them when reasoning can be switched
@@ -74,7 +74,7 @@ class ModelInfo:
     # The most a reply may run, where a catalog states it (OpenRouter's
     # top_provider.max_completion_tokens); the local engines set none.
     max_output_tokens: int | None = None
-    capabilities: Capabilities | None = None
+    capabilities: ModelCapabilities | None = None
     state: ModelState = ModelState.UNKNOWN
 
     @property

@@ -14,7 +14,7 @@ from http.client import HTTPConnection
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from otaku.backend.session import THINK_MENU
+from otaku.backend.session import KNOWN_PARAMS, THINK_MENU
 from scenarios.support.server import ModelServer
 from scenarios.web.conftest import Page
 
@@ -548,6 +548,19 @@ class TestThePicker:
         assert panel["current"] == "generic/test-model"
         assert mine["connected"] is True
         assert mine["locality"] == "unknown"  # a hand-written section: nobody can say
+        # What it can do rides the card, never a model: the generic
+        # provider manages nothing, counts nothing exactly, marks no
+        # cache, and sends every parameter the app knows, in /set's order.
+        assert mine["capabilities"] == {
+            "tokenizer": False,
+            "prompt_cache": False,
+            "model_management": False,
+            "supported_params": list(KNOWN_PARAMS),
+        }
+        assert mine["models"][0]["capabilities"] is None  # it says nothing of its models
+        assert "can_manage" not in mine["models"][0]
+        unanswered = next(p for p in panel["providers"] if p["id"] == "llamacpp")
+        assert unanswered["capabilities"] is None
 
     def test_the_panel_says_where_each_provider_runs(self, page: Page) -> None:
         # The vocabulary the page's captions and the demo's fake read:

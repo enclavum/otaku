@@ -11,10 +11,29 @@
 // What the fake provider claims to be. One provider with two models, so
 // the picker's switch, load and unload have something real to do.
 export const PROVIDER = "demo";
+// What a local engine states of its models, in the product's shape.
+const MODEL_CAPABILITIES = {
+  vision: false,
+  audio: false,
+  reasoning: [],
+  text_completion: true,
+  structured_output: true,
+};
 const MODELS = [
-  { name: "demo-model", loaded: true, can_manage: true, size: "4.7 GB", max_context_catalogue: "32K" },
-  { name: "demo-model-mini", loaded: false, can_manage: true, size: "1.9 GB", max_context_catalogue: "8K" },
+  { name: "demo-model", loaded: true, size: "4.7 GB", max_context_catalogue: "32K", capabilities: { ...MODEL_CAPABILITIES } },
+  { name: "demo-model-mini", loaded: false, size: "1.9 GB", max_context_catalogue: "8K", capabilities: { ...MODEL_CAPABILITIES } },
 ];
+// What the demo's provider can do: it manages models, counts nothing
+// exactly, marks no cache, and reads every parameter the product knows.
+const CAPABILITIES = {
+  tokenizer: false,
+  prompt_cache: false,
+  model_management: true,
+  supported_params: [
+    "temperature", "top_p", "top_k", "min_p", "max_tokens",
+    "presence_penalty", "frequency_penalty", "repetition_penalty", "seed", "stop",
+  ],
+};
 // The window the fixtures' context previews were captured under
 // (scripts/demo_fixtures.py) — the two must agree, or the demo's own
 // numbers argue with the captured ledes.
@@ -178,7 +197,8 @@ function allProviders() {
         connected: true,
         url: "in this browser tab",
         has_key: false,
-        models: MODELS.map((m) => ({ ...m })),
+        capabilities: { ...CAPABILITIES, supported_params: [...CAPABILITIES.supported_params] },
+        models: MODELS.map((m) => ({ ...m, capabilities: { ...m.capabilities } })),
       },
       ...[
         ["generic", "Generic OpenAI provider", "", "unknown"],
@@ -197,6 +217,7 @@ function allProviders() {
         connected: false,
         url,
         has_key: false,
+        capabilities: null, // a provider that did not answer states nothing
         models: [],
       })),
     ],
@@ -509,7 +530,7 @@ export function switchModel(provider, model) {
 
 export function loadModel(model, wanted) {
   const row = MODELS.find((m) => m.name === model);
-  if (!row || !row.can_manage) return refuse(`${PROVIDER} cannot load or unload models.`);
+  if (!row || !CAPABILITIES.model_management) return refuse(`${PROVIDER} cannot load or unload models.`);
   row.loaded = wanted;
   return say(wanted ? `Loaded ${model}.` : `Unloaded ${model}.`);
 }

@@ -19,7 +19,7 @@ from otaku.providers.openai import frames, reasoning
 from otaku.providers.openai.auth import OpenAIAuth
 from otaku.providers.openai.client import Locality, OpenAIClient
 from otaku.providers.openai.completion import PROTOCOL_PARAMS, SAMPLER_PARAMS, OpenAICompletion
-from otaku.providers.openai.models import Capabilities, ModelInfo, OpenAIModels
+from otaku.providers.openai.models import ModelCapabilities, ModelInfo, OpenAIModels
 from otaku.settings.providers import ProviderConfig
 
 
@@ -53,7 +53,7 @@ class NanoGptModels(OpenAIModels):
             honoured = reasoning.from_wire(listed.get("reasoning_efforts") or []) or None
         return replace(
             model,
-            capabilities=Capabilities(
+            capabilities=ModelCapabilities(
                 vision=self._flag(caps, "vision"),
                 audio=self._flag(caps, "audio_input"),
                 reasoning=honoured,

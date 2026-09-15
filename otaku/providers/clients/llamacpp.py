@@ -25,7 +25,13 @@ from otaku.providers.http import ASK_TIMEOUT, PROBE_TIMEOUT, Http, positive_int
 from otaku.providers.openai import reasoning
 from otaku.providers.openai.client import Locality, OpenAIClient
 from otaku.providers.openai.completion import PROTOCOL_PARAMS, SAMPLER_PARAMS, OpenAICompletion
-from otaku.providers.openai.models import Capabilities, Listing, ModelInfo, ModelState, OpenAIModels
+from otaku.providers.openai.models import (
+    Listing,
+    ModelCapabilities,
+    ModelInfo,
+    ModelState,
+    OpenAIModels,
+)
 from otaku.providers.openai.requests import Image, WireMessage
 from otaku.settings.providers import ProviderConfig
 
@@ -95,7 +101,7 @@ class LlamaCppModels(OpenAIModels):
             positive_int(meta.get("size")),
         )
 
-    def _capabilities_of(self, modalities: object) -> Capabilities:
+    def _capabilities_of(self, modalities: object) -> ModelCapabilities:
         """What the modalities say — a router entry's `input_modalities`
         list, or a props object's `modalities` flags; neither leaves
         vision and audio unknown. The raw wire is always there and
@@ -110,7 +116,7 @@ class LlamaCppModels(OpenAIModels):
             audio = bool(modalities.get("audio")) if "audio" in modalities else None
         else:
             vision = audio = None
-        return Capabilities(
+        return ModelCapabilities(
             vision=vision, audio=audio, text_completion=True, structured_output=True
         )
 

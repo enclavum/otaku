@@ -815,8 +815,10 @@ class ModelPicker(ListScreen):
                     full_spec=f"{name}/{model.name}",
                     provider_name=name,
                     model=model.name,
-                    loaded=model.state is ModelState.LOADED if row.can_manage else True,
-                    can_manage=row.can_manage,
+                    loaded=model.state is ModelState.LOADED
+                    if row.capabilities.model_management
+                    else True,
+                    can_manage=row.capabilities.model_management,
                     size_bytes=model.size,
                     max_context_catalogue=model.max_context_catalogue,
                     cloud=row.locality is not Locality.LOCAL,

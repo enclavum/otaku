@@ -21,7 +21,13 @@ from otaku.providers.http import ASK_TIMEOUT, PROBE_TIMEOUT, Http, positive_int
 from otaku.providers.openai import reasoning
 from otaku.providers.openai.client import Locality, OpenAIClient
 from otaku.providers.openai.completion import PROTOCOL_PARAMS, SAMPLER_PARAMS, OpenAICompletion
-from otaku.providers.openai.models import Capabilities, Listing, ModelInfo, ModelState, OpenAIModels
+from otaku.providers.openai.models import (
+    Listing,
+    ModelCapabilities,
+    ModelInfo,
+    ModelState,
+    OpenAIModels,
+)
 from otaku.providers.openai.requests import Image, WireMessage
 from otaku.settings.providers import ProviderConfig
 
@@ -78,7 +84,7 @@ class KoboldCppModels(OpenAIModels):
             f"{self._config.base_url}/api/extra/version", timeout=PROBE_TIMEOUT, quiet=True
         )
         capabilities = (
-            Capabilities(
+            ModelCapabilities(
                 vision=bool(version["vision"]) if "vision" in version else None,
                 audio=bool(version["audio"]) if "audio" in version else None,
                 reasoning=reasoning.ALL_EFFORTS,

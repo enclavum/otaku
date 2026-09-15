@@ -4,14 +4,16 @@ the key's environment variable) plus the configuration. It owns the
 `auth` (the key in force), the one transport built on it, and the two
 halves, `models` and `completion`, each built from the class the engine
 names; the halves are unrelated, read only what they are handed, and
-the client is the one that knows both. A local engine's url names its
+the client is the one that knows both — and composes, from their
+facts, `ProviderCapabilities`: what the provider can do, as one object
+for the rest of the app. A local engine's url names its
 server, and the surfaces hang off it: the native ones at the root, the
 OpenAI one at /v1 — whatever was typed. The account's balance, which
 only a catalog has, is the client's own.
 """
 
 import enum
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import ClassVar
 
 from otaku.formatting import Money
@@ -32,6 +34,19 @@ class Locality(enum.Enum):
     LOCAL = "local"
     REMOTE = "remote"
     UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class ProviderCapabilities:
+    """What a provider can do, as one object for the rest of the app —
+    the mirror of `ModelCapabilities`. Composed by the client from the
+    halves' own facts, each kept where the wire it describes is read;
+    nothing is decided here."""
+
+    tokenizer: bool  # the engine lends its own: the counts answer
+    prompt_cache: bool  # breakpoints are honoured
+    model_management: bool  # `load` and `unload` work
+    supported_params: frozenset[str]  # the app's parameters the wire reads
 
 
 class OpenAIClient:
@@ -66,6 +81,18 @@ class OpenAIClient:
         self.models = self.models_class(config, self.auth, self._http)
         self.completion = self.completion_class(
             config, self._http, request_sink=request_sink, smooth=smooth
+        )
+
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        """What this provider can do, composed on every read: one fact is
+        live — a llama.cpp client cannot manage models until a listing
+        has told it whether it fronts a router."""
+        return ProviderCapabilities(
+            tokenizer=self.completion.can_count_tokens,
+            prompt_cache=self.completion.can_mark_cache,
+            model_management=self.models.can_manage,
+            supported_params=self.completion.supported_params,
         )
 
     @classmethod

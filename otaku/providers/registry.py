@@ -39,7 +39,7 @@ from otaku.providers.clients.openrouter import OpenRouterClient
 from otaku.providers.errors import ProviderError, UnauthorizedError, UnreachableError
 from otaku.providers.http import LISTING_TIMEOUT, ErrorSink
 from otaku.providers.openai.auth import KeySource
-from otaku.providers.openai.client import Locality, OpenAIClient
+from otaku.providers.openai.client import Locality, OpenAIClient, ProviderCapabilities
 from otaku.providers.openai.completion import RequestSink
 from otaku.providers.openai.models import ModelInfo
 from otaku.settings.providers import ProviderConfig
@@ -68,7 +68,7 @@ class ProviderInfo:
     label: str
     locality: Locality
     key_source: KeySource | None
-    can_manage: bool
+    capabilities: ProviderCapabilities
     models: list[ModelInfo]
 
 
@@ -163,7 +163,7 @@ class Registry:
             client.label,
             client.locality,
             client.auth.key_source,
-            client.models.can_manage,
+            client.capabilities,
             models,
         )
 

@@ -17,7 +17,13 @@ from otaku.providers.http import ASK_TIMEOUT, PROBE_TIMEOUT, Http, positive_int
 from otaku.providers.openai import reasoning
 from otaku.providers.openai.client import Locality, OpenAIClient
 from otaku.providers.openai.completion import PROTOCOL_PARAMS, OpenAICompletion
-from otaku.providers.openai.models import Capabilities, Listing, ModelInfo, ModelState, OpenAIModels
+from otaku.providers.openai.models import (
+    Listing,
+    ModelCapabilities,
+    ModelInfo,
+    ModelState,
+    OpenAIModels,
+)
 from otaku.settings.providers import ProviderConfig
 
 
@@ -144,14 +150,14 @@ class LmStudioModels(OpenAIModels):
         listed = entry.get("loaded_instances")
         return [i for i in listed if isinstance(i, dict)] if isinstance(listed, list) else []
 
-    def _capabilities_of(self, entry: dict[str, Any]) -> Capabilities:
+    def _capabilities_of(self, entry: dict[str, Any]) -> ModelCapabilities:
         """What a registry entry says: vision from its capabilities;
         whether an effort is honoured it does not say (see the module);
         the raw wire is there; decoding is constrained server-side
         (`response_format`)."""
         caps = entry.get("capabilities")
         vision = bool(caps["vision"]) if isinstance(caps, dict) and "vision" in caps else None
-        return Capabilities(vision=vision, text_completion=True, structured_output=True)
+        return ModelCapabilities(vision=vision, text_completion=True, structured_output=True)
 
 
 class LmStudioCompletion(OpenAICompletion):

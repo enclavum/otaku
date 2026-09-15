@@ -22,11 +22,11 @@ import pytest
 
 from otaku.providers import (
     ALL_CLIENTS,
-    Capabilities,
     Chunk,
     DeclinedError,
     Image,
     KeySource,
+    ModelCapabilities,
     ModelState,
     ProbeStatus,
     ProviderConfig,
@@ -415,19 +415,19 @@ class TestCapabilities:
         server.window = 4096
         server.props = {"modalities": {"vision": False}}
         row = LlamaCppClient(_config(server, "llamacpp")).models.list()[0]
-        assert row.capabilities == Capabilities(
+        assert row.capabilities == ModelCapabilities(
             vision=False, reasoning=None, text_completion=True, structured_output=True
         )
         server.props = {"modalities": {"vision": True}}
         row = LlamaCppClient(_config(server, "llamacpp")).models.list()[0]
-        assert row.capabilities == Capabilities(
+        assert row.capabilities == ModelCapabilities(
             vision=True, reasoning=None, text_completion=True, structured_output=True
         )
         # Props without modalities, an older build: still the raw wire
         # and constrained decoding, the rest unknown.
         server.props = {}
         row = LlamaCppClient(_config(server, "llamacpp")).models.list()[0]
-        assert row.capabilities == Capabilities(
+        assert row.capabilities == ModelCapabilities(
             vision=None, reasoning=None, text_completion=True, structured_output=True
         )
 
@@ -436,7 +436,7 @@ class TestCapabilities:
     ) -> None:
         server.version = {"version": "1.120", "vision": False, "audio": True}
         row = KoboldCppClient(_config(server, "koboldcpp")).models.list()[0]
-        assert row.capabilities == Capabilities(
+        assert row.capabilities == ModelCapabilities(
             vision=False,
             audio=True,
             reasoning=ALL_EFFORTS,
@@ -486,14 +486,14 @@ class TestCapabilities:
             assert not any(b.get("model") for b in server.requests)
             alpha, beta = client.models.get("alpha"), client.models.get("beta")
             assert alpha is not None and beta is not None
-            assert alpha.capabilities == Capabilities(
+            assert alpha.capabilities == ModelCapabilities(
                 vision=True,
                 audio=False,
                 reasoning=frozenset({"none", "low", "medium", "high", "max"}),
                 text_completion=False,
                 structured_output=True,
             )
-            assert beta.capabilities == Capabilities(
+            assert beta.capabilities == ModelCapabilities(
                 vision=False,
                 audio=False,
                 reasoning=frozenset(),
@@ -570,14 +570,14 @@ class TestCapabilities:
         try:
             rows = {r.name: r for r in OmlxClient(_config(server, "omlx")).models.list()}
             assert set(rows) == {"vl", "lm", "unsaid"}  # an embedder plays no story
-            assert rows["vl"].capabilities == Capabilities(
+            assert rows["vl"].capabilities == ModelCapabilities(
                 vision=True, reasoning=ALL_EFFORTS, text_completion=True, structured_output=True
             )
-            assert rows["lm"].capabilities == Capabilities(
+            assert rows["lm"].capabilities == ModelCapabilities(
                 vision=False, reasoning=frozenset(), text_completion=True, structured_output=True
             )
             # No type on the row: whether it sees is unknown, not assumed.
-            assert rows["unsaid"].capabilities == Capabilities(
+            assert rows["unsaid"].capabilities == ModelCapabilities(
                 vision=None, reasoning=frozenset(), text_completion=True, structured_output=True
             )
         finally:
@@ -642,14 +642,14 @@ class TestCapabilities:
             }
             # The text wire is per model and the catalog does not say
             # which take it: unknown on every row.
-            assert rows["free"].capabilities == Capabilities(
+            assert rows["free"].capabilities == ModelCapabilities(
                 vision=True,
                 audio=False,
                 reasoning=frozenset({"none", "minimal", "low", "high"}),
                 text_completion=None,
                 structured_output=True,
             )
-            assert rows["fixed"].capabilities == Capabilities(
+            assert rows["fixed"].capabilities == ModelCapabilities(
                 vision=False,
                 audio=False,
                 reasoning=frozenset({"low", "medium", "high"}),
@@ -658,22 +658,22 @@ class TestCapabilities:
             )
             # No modalities named, no reasoning object: what a row does
             # not say is unknown, not allowed.
-            assert rows["mute"].capabilities == Capabilities(
+            assert rows["mute"].capabilities == ModelCapabilities(
                 vision=None, reasoning=frozenset(), text_completion=None, structured_output=False
             )
             # A reasoning object naming no efforts: no selection among
             # them, so every effort reaches as on — and none as off, unless
             # reasoning is mandatory.
-            assert rows["plain"].capabilities == Capabilities(
+            assert rows["plain"].capabilities == ModelCapabilities(
                 vision=None, reasoning=ALL_EFFORTS, text_completion=None, structured_output=False
             )
-            assert rows["forced"].capabilities == Capabilities(
+            assert rows["forced"].capabilities == ModelCapabilities(
                 vision=None,
                 reasoning=ALL_EFFORTS - {"none"},
                 text_completion=None,
                 structured_output=False,
             )
-            assert rows["bare"].capabilities == Capabilities(
+            assert rows["bare"].capabilities == ModelCapabilities(
                 vision=None, reasoning=None, text_completion=None, structured_output=None
             )
         finally:
@@ -706,7 +706,7 @@ class TestCapabilities:
             }
             # The efforts as listed, "none" among them only where the
             # model takes it; the text wire is per model, unsaid.
-            assert rows["seeing"].capabilities == Capabilities(
+            assert rows["seeing"].capabilities == ModelCapabilities(
                 vision=True,
                 audio=False,
                 reasoning=frozenset({"low", "high"}),
@@ -714,15 +714,15 @@ class TestCapabilities:
                 structured_output=True,
             )
             # Reasons, but names no efforts: which efforts reach is unknown.
-            assert rows["fixed"].capabilities == Capabilities(
+            assert rows["fixed"].capabilities == ModelCapabilities(
                 vision=False, reasoning=None, text_completion=None
             )
-            assert rows["mute"].capabilities == Capabilities(
+            assert rows["mute"].capabilities == ModelCapabilities(
                 vision=False, reasoning=frozenset(), text_completion=None
             )
             # A null flag is the catalog's "unknown", not a no; the output
             # limit is read whether or not the flags are there.
-            assert rows["unsure"].capabilities == Capabilities(text_completion=None)
+            assert rows["unsure"].capabilities == ModelCapabilities(text_completion=None)
             assert rows["unsure"].max_output_tokens == 4096
             assert rows["bare"].capabilities is None
             assert rows["bare"].max_output_tokens == 8192
@@ -737,13 +737,13 @@ class TestCapabilities:
         server.capabilities = {"seeing": ["vision"], "blind": []}
         try:
             rows = {r.name: r for r in LmStudioClient(_config(server, "lmstudio")).models.list()}
-            assert rows["seeing"].capabilities == Capabilities(
+            assert rows["seeing"].capabilities == ModelCapabilities(
                 vision=True, text_completion=True, structured_output=True
             )
-            assert rows["blind"].capabilities == Capabilities(
+            assert rows["blind"].capabilities == ModelCapabilities(
                 vision=False, text_completion=True, structured_output=True
             )
-            assert rows["unsaid"].capabilities == Capabilities(
+            assert rows["unsaid"].capabilities == ModelCapabilities(
                 vision=None, text_completion=True, structured_output=True
             )
         finally:
@@ -1160,7 +1160,12 @@ class TestProbe:
         assert found.status is ProbeStatus.UNREACHABLE
         assert found.message == "Could not reach llamacpp."
 
-    def test_a_key_that_is_missing_or_wrong(self, server: ModelServer) -> None:
+    def test_a_key_that_is_missing_or_wrong(
+        self, server: ModelServer, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A shell that carries the catalog's key would stand in for the
+        # missing one; the story is about a section with none.
+        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
         server.api_key = "right"
         missing = probe(_config(server, "openrouter"))
         wrong = probe(_config(server, "openrouter", api_key="wrong"))

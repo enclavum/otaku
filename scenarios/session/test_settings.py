@@ -788,7 +788,7 @@ class TestCloudProviders:
             try:
                 rows, _ = api_providers.get_providers(app.session)
                 catalog = next(r for r in rows if r.id == "openrouter")
-                assert catalog.can_manage is False
+                assert catalog.capabilities.model_management is False
                 by_name = {m.name: m for m in catalog.models}
                 assert by_name["gpt-alpha"].max_context_catalogue == 128_000
                 assert by_name["gpt-alpha"].size is None

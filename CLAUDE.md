@@ -183,7 +183,7 @@ says whether it CAN do something is `can_…` (`can_manage`,
 `can_count_tokens`, `can_mark_cache`); an adjective or a participle
 stands on its own (`checked`, `fresh`, `quiet`). So
 `manages_models` and `counts_tokens` are not booleans' names. The one
-exception is a CAPABILITY (`Capabilities.vision`, `text_completion`): those
+exception is a CAPABILITY (`ModelCapabilities.vision`, `text_completion`): those
 are the trade's own words, spelled as every engine spells them.
 Applied in `otaku/providers` so far; a new boolean anywhere follows it.
 

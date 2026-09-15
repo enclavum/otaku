@@ -24,7 +24,13 @@ from otaku.providers.errors import ProviderError
 from otaku.providers.http import PROBE_TIMEOUT, Http, positive_int
 from otaku.providers.openai.auth import OpenAIAuth
 from otaku.providers.openai.client import Locality, OpenAIClient
-from otaku.providers.openai.models import Capabilities, Listing, ModelInfo, ModelState, OpenAIModels
+from otaku.providers.openai.models import (
+    Listing,
+    ModelCapabilities,
+    ModelInfo,
+    ModelState,
+    OpenAIModels,
+)
 from otaku.settings.providers import ProviderConfig
 
 # The words the server accepts; any other is a 400.
@@ -156,7 +162,9 @@ class OllamaModels(OpenAIModels):
         self._carded.add(name)
         return replace(
             fresh,
-            capabilities=self._capabilities_of(caps) if isinstance(caps, list) else Capabilities(),
+            capabilities=self._capabilities_of(caps)
+            if isinstance(caps, list)
+            else ModelCapabilities(),
             max_context_catalogue=max_context_catalogue,
         )
 
@@ -203,13 +211,13 @@ class OllamaModels(OpenAIModels):
             return ModelState.UNKNOWN
         return ModelState.LOADED if name in running else ModelState.UNLOADED
 
-    def _capabilities_of(self, caps: list[Any]) -> Capabilities:
+    def _capabilities_of(self, caps: list[Any]) -> ModelCapabilities:
         """A card's capability words as ours. No raw text wire: Ollama's
         /v1/completions wraps the prompt as one chat turn and thinks
         unseen. Decoding is constrained server-side (`format`) for every
         model."""
         reasoning = _EFFORTS if "thinking" in caps else frozenset[str]()
-        return Capabilities(
+        return ModelCapabilities(
             vision="vision" in caps,
             audio="audio" in caps,
             reasoning=reasoning,

@@ -123,7 +123,7 @@ function buildModels(state, notice) {
   };
 
   const setLoaded = async (entry, wanted) => {
-    if (!entry?.model.can_manage) return;
+    if (!entry?.provider.capabilities?.model_management) return;
     /* Asked first, as the terminal's picker asks: a load takes the
        engine's memory and its time, and `u` sits one key beside `l`. */
     const verb = wanted ? "Load" : "Unload";
@@ -186,7 +186,7 @@ function buildModels(state, notice) {
 
 function modelRow(entry, current) {
   const lamp = span("otk-row__lamp", "");
-  const managed = entry.model.can_manage;
+  const managed = entry.provider.capabilities?.model_management;
   if (managed && entry.model.loaded) lamp.append(span("otk-dot otk-dot--sm", ""));
   const button = row(
     lamp,
@@ -205,7 +205,7 @@ function modelRow(entry, current) {
 }
 
 function modelDetail(pane, entry, current, { use, setLoaded }) {
-  const managed = entry.model.can_manage;
+  const managed = entry.provider.capabilities?.model_management;
   const where = whereItRuns(entry.provider);
   const state = !managed ? "" : entry.model.loaded ? " · loaded" : " · not loaded";
   const chosen = `${entry.provider.id}/${entry.model.name}` === current;

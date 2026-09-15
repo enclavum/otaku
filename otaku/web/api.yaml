@@ -1574,6 +1574,20 @@ components:
               connected: { type: boolean }
               url: { type: string }
               has_key: { type: boolean, description: "Whether a key is SET — never the value." }
+              capabilities:
+                type: object
+                nullable: true
+                description: >
+                  What the provider can do, as its client states it; null on
+                  a card whose provider did not answer.
+                properties:
+                  tokenizer: { type: boolean, description: "The engine lends its own tokenizer: token counts are exact." }
+                  prompt_cache: { type: boolean, description: "Prompt-cache breakpoints are honoured." }
+                  model_management: { type: boolean, description: "Load and unload work; false where the provider serves what it serves." }
+                  supported_params:
+                    type: array
+                    items: { type: string }
+                    description: "The /set parameters the wire reads, in the vocabulary's order; one outside it goes out and is dropped unread."
               models:
                 type: array
                 items:
@@ -1585,10 +1599,26 @@ components:
                       description: >
                         Whether an instance serves it now — one still
                         loading is not loaded. Always true where the provider
-                        serves what it serves (can_manage false).
-                    can_manage: { type: boolean }
+                        does not manage models.
                     size: { type: string }
                     max_context_catalogue: { type: string, description: "The model's own maximum context, formatted; \"\" when the provider states none." }
+                    capabilities:
+                      type: object
+                      nullable: true
+                      description: >
+                        What the model can do, as the provider states it: each
+                        flag null where it cannot say; null altogether where it
+                        says nothing of the model.
+                      properties:
+                        vision: { type: boolean, nullable: true }
+                        audio: { type: boolean, nullable: true }
+                        reasoning:
+                          type: array
+                          nullable: true
+                          items: { type: string }
+                          description: "The efforts honoured, weakest to strongest, \"none\" among them where reasoning switches off; empty where none reaches; null where unknown."
+                        text_completion: { type: boolean, nullable: true }
+                        structured_output: { type: boolean, nullable: true }
 
     Scene:
       type: object

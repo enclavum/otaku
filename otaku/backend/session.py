@@ -29,7 +29,7 @@ from otaku.context import assembler
 from otaku.context.assembler import AssembledPrompt, ContextShape
 from otaku.formatting import pretty_path
 from otaku.logging import ErrorLog
-from otaku.providers import Locality, OpenAIClient, ProviderConfig, Registry
+from otaku.providers import Locality, OpenAIClient, ProviderConfig, Registry, reasoning
 from otaku.settings import models as models_file
 from otaku.settings import state as state_file
 from otaku.settings.config import Config, TerminalSettings, WebSettings
@@ -46,6 +46,10 @@ from otaku.worker import Worker
 # two consistent. The typed sugar (`on`/`off`) is the command surface's
 # and stays out of a menu of VALUES.
 THINK_MENU: tuple[str, ...] = (THINK_DEFAULT, "none", "low", "medium", "high", "xhigh", "max")
+
+# The reasoning efforts in the wire's order, weakest to strongest, for
+# a frontend listing the ones a model honours.
+EFFORTS: tuple[str, ...] = reasoning.EFFORTS
 
 # The inference parameters otaku understands, and how each is read from
 # the saved file or a `/set parameter` argument.

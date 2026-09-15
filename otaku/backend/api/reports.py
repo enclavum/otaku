@@ -485,7 +485,7 @@ def _model_info(session: Session) -> tuple[tuple[str, str], ...]:
     out.append(("Thinking", session.think if session.think else "default"))
     if config.keep_alive:
         out.append(("Keep-alive", str(config.keep_alive)))
-    if client.completion.can_mark_cache:
+    if client.capabilities.prompt_cache:
         # Displayed here, decided in providers.toml — the keep_alive
         # pattern: behaviour keys are read in /info, edited in the file.
         out.append(("Prompt cache", config.prompt_cache or "5m"))

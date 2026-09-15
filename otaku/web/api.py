@@ -31,7 +31,15 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from otaku import __version__
-from otaku.backend import Journal, Locality, Message, ModelState, commands, meminfo
+from otaku.backend import (
+    Journal,
+    Locality,
+    Message,
+    ModelInfo,
+    ModelState,
+    commands,
+    meminfo,
+)
 from otaku.backend.api import cards as api_cards
 from otaku.backend.api import lore as api_lore
 from otaku.backend.api import play as api_play
@@ -45,7 +53,7 @@ from otaku.backend.api.lore import FieldKind, WorkerRun
 from otaku.backend.api.play import Declined, Done, Failed, PlayEvent, Reasoning, Recorded, Text
 from otaku.backend.api.providers import SupportedProvider
 from otaku.backend.commands import COMMANDS, PROSE_DESCRIPTION
-from otaku.backend.session import KNOWN_PARAMS, THINK_MENU, Refused, Session
+from otaku.backend.session import EFFORTS, KNOWN_PARAMS, THINK_MENU, Refused, Session
 from otaku.formatting import Money, format_context, format_size
 
 __all__ = [
@@ -351,16 +359,27 @@ def _providers(session: Session, scope: str = "") -> dict[str, Any]:
     # whose server is down is exactly the one a reader opens the picker
     # to fix, and `get_providers` returns only the reachable.
     models: dict[str, list[dict[str, Any]]] = {name: [] for name in asked}
+    # What each provider can do, for the cards that answered; a card
+    # whose provider did not carries null.
+    abilities: dict[str, dict[str, Any] | None] = dict.fromkeys(asked)
     for row in rows:
+        abilities[row.id] = {
+            "tokenizer": row.capabilities.tokenizer,
+            "prompt_cache": row.capabilities.prompt_cache,
+            "model_management": row.capabilities.model_management,
+            "supported_params": [p for p in KNOWN_PARAMS if p in row.capabilities.supported_params],
+        }
         models.setdefault(row.id, []).extend(
             {
                 "name": model.name,
-                "loaded": model.state is ModelState.LOADED if row.can_manage else True,
-                "can_manage": row.can_manage,
+                "loaded": model.state is ModelState.LOADED
+                if row.capabilities.model_management
+                else True,
                 "size": format_size(model.size) if model.size else "",
                 "max_context_catalogue": format_context(model.max_context_catalogue)
                 if model.max_context_catalogue
                 else "",
+                "capabilities": _model_capabilities(model),
             }
             for model in row.models
         )
@@ -382,9 +401,36 @@ def _providers(session: Session, scope: str = "") -> dict[str, Any]:
         # gauge and the page's are one sentence (`backend.meminfo`).
         "memory": meminfo.gauge(),
         "providers": [
-            _card(session, name, known.get(name), rank.get(name, len(rank)), models, reachable)
+            _card(
+                session,
+                name,
+                known.get(name),
+                rank.get(name, len(rank)),
+                abilities,
+                models,
+                reachable,
+            )
             for name in named
         ],
+    }
+
+
+def _model_capabilities(model: ModelInfo) -> dict[str, Any] | None:
+    """What the model can do, as the page reads it: each flag as the
+    provider states it, null where it cannot say; the efforts in the
+    wire's order, weakest to strongest; null altogether where the
+    provider says nothing of the model."""
+    caps = model.capabilities
+    if caps is None:
+        return None
+    return {
+        "vision": caps.vision,
+        "audio": caps.audio,
+        "reasoning": [e for e in EFFORTS if e in caps.reasoning]
+        if caps.reasoning is not None
+        else None,
+        "text_completion": caps.text_completion,
+        "structured_output": caps.structured_output,
     }
 
 
@@ -393,6 +439,7 @@ def _card(
     name: str,
     provider: SupportedProvider | None,
     order: int,
+    abilities: dict[str, dict[str, Any] | None],
     models: dict[str, list[dict[str, Any]]],
     reachable: set[str] | frozenset[str],
 ) -> dict[str, Any]:
@@ -409,6 +456,7 @@ def _card(
         "connected": name in reachable,
         "url": section.url,
         "has_key": bool(section.api_key),
+        "capabilities": abilities.get(name),
         "models": models.get(name, []),
     }
 

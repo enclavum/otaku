@@ -16,7 +16,13 @@ from otaku.providers.http import ASK_TIMEOUT, PROBE_TIMEOUT, Http, positive_int
 from otaku.providers.openai import reasoning
 from otaku.providers.openai.client import Locality, OpenAIClient
 from otaku.providers.openai.completion import PROTOCOL_PARAMS, SAMPLER_PARAMS, OpenAICompletion
-from otaku.providers.openai.models import Capabilities, Listing, ModelInfo, ModelState, OpenAIModels
+from otaku.providers.openai.models import (
+    Listing,
+    ModelCapabilities,
+    ModelInfo,
+    ModelState,
+    OpenAIModels,
+)
 from otaku.providers.openai.requests import Image, WireMessage
 from otaku.settings.providers import ProviderConfig
 
@@ -108,7 +114,7 @@ class OmlxModels(OpenAIModels):
             state = ModelState.UNLOADED
         return state, positive_int(entry.get("max_context_window"))
 
-    def _capabilities_of(self, entry: dict[str, Any]) -> Capabilities:
+    def _capabilities_of(self, entry: dict[str, Any]) -> ModelCapabilities:
         """Only a VLM takes images, and a type the status does not state
         leaves the question open. `thinking_default` is whether the
         template has the thinking toggle at all: None, and no effort
@@ -118,7 +124,7 @@ class OmlxModels(OpenAIModels):
         kind = entry.get("model_type")
         vision = kind == "vlm" if isinstance(kind, str) and kind else None
         toggle = entry.get("thinking_default")
-        return Capabilities(
+        return ModelCapabilities(
             vision=vision,
             reasoning=reasoning.ALL_EFFORTS if isinstance(toggle, bool) else frozenset(),
             text_completion=True,

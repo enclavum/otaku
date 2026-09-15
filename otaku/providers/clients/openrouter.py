@@ -20,7 +20,7 @@ from otaku.providers.openai import reasoning
 from otaku.providers.openai.auth import OpenAIAuth
 from otaku.providers.openai.client import Locality, OpenAIClient
 from otaku.providers.openai.completion import PROTOCOL_PARAMS, SAMPLER_PARAMS, OpenAICompletion
-from otaku.providers.openai.models import Capabilities, ModelInfo, OpenAIModels
+from otaku.providers.openai.models import ModelCapabilities, ModelInfo, OpenAIModels
 from otaku.settings.providers import ProviderConfig
 
 # OpenRouter attributes a request to the app that sent it, by three
@@ -63,7 +63,7 @@ class OpenRouterModels(OpenAIModels):
             model,
             max_context_loaded=self._top_provider_int(top, "context_length"),
             max_output_tokens=self._top_provider_int(top, "max_completion_tokens"),
-            capabilities=Capabilities(
+            capabilities=ModelCapabilities(
                 vision="image" in modalities if isinstance(modalities, list) else None,
                 audio="audio" in modalities if isinstance(modalities, list) else None,
                 reasoning=self._reasoning_of(listed),

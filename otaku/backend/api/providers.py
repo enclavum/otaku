@@ -215,7 +215,7 @@ def _managed(session: Session, provider: str) -> OpenAIClient:
     client = session._providers_registry.get(provider)
     if client is None:
         raise Refused(f"Unknown provider {provider!r}.")
-    if not client.models.can_manage:
+    if not client.capabilities.model_management:
         raise Refused(f"{provider} cannot load or unload models.")
     return client
 

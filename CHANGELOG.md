@@ -105,7 +105,10 @@ Full list of changes: [CHANGELOG.md](https://github.com/enclavum/otaku/blob/main
   `engines` array is `providers` and a card's `name` is `id`, a model's `can_load_unload` is
   `can_manage` and its `context` is `max_context_catalogue`, the session's `context` is
   `max_context` and its `engine` is `provider`, and the play event `thinking` is `reasoning`.
-  The page's `.otk-thinking` class, which a `custom.css` may target, is `.otk-reasoning`.
+  A provider card carries a `capabilities` object — whether it manages models, counts tokens
+  exactly, honours prompt-cache marks, and which `/set` parameters its wire reads — and each of
+  its models carries its own: vision, audio, the reasoning efforts, text completion, structured
+  output. The page's `.otk-thinking` class, which a `custom.css` may target, is `.otk-reasoning`.
 - Request-log lines file an answer's `status` and `reasoning` where they filed `outcome` and
   `thinking`, and a failed answer's status carries the provider's sentence rather than the
   exception's name; lines written before still read.
