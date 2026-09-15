@@ -11,8 +11,7 @@ from dataclasses import replace
 from typing import Any
 
 from otaku.formatting import Money
-from otaku.providers import http
-from otaku.providers.http import ASK_TIMEOUT
+from otaku.providers.http import ASK_TIMEOUT, Http, positive_int
 from otaku.providers.openai import reasoning
 from otaku.providers.openai.auth import OpenAIAuth
 from otaku.providers.openai.client import Locality, OpenAIClient
@@ -40,15 +39,10 @@ class OpenRouterAuth(OpenAIAuth):
     def headers(self) -> dict[str, str]:
         return {**super().headers, **_ATTRIBUTION}
 
-    def verify_key(self, timeout: float) -> None:
+    def verify_key(self, http: Http) -> None:
         # The account endpoint answers a bad key with 401; nothing else
         # is read of it here.
-        http.get_json(
-            f"{self._config.base_url}/v1/credits",
-            name=self._config.name,
-            headers=self.headers,
-            timeout=timeout,
-        )
+        http.get(f"{self._config.base_url}/v1/credits")
 
 
 class OpenRouterModels(OpenAIModels):
@@ -109,26 +103,22 @@ class OpenRouterClient(OpenAIClient):
         # /credits reports the account's lifetime purchases and spend, in
         # dollars; /key what this key may still spend, when it is capped
         # below that. What is left is the tighter of the two.
-        credits = self._account("/v1/credits", timeout)
+        http = self._http.within(timeout)
+        credits = self._account("/v1/credits", http)
         total = Money.of(credits.get("total_credits"))
         used = Money.of(credits.get("total_usage"))
         if total is None or used is None:
             return None
         left = Money(total.amount - used.amount, total.currency)
-        cap = Money.of(self._account("/v1/key", timeout).get("limit_remaining"))
+        cap = Money.of(self._account("/v1/key", http).get("limit_remaining"))
         if cap is not None and cap.amount < left.amount:
             return Money(cap.amount, left.currency)
         return left
 
-    def _account(self, path: str, timeout: float) -> dict[str, Any]:
-        """The `data` object of an account endpoint, {} when it will not say."""
-        data = http.get_json(
-            f"{self.config.base_url}{path}",
-            name=self.config.name,
-            headers=self.auth.headers,
-            timeout=timeout,
-            quiet=True,
-        )
+    def _account(self, path: str, http: Http) -> dict[str, Any]:
+        """The `data` object of an account endpoint, asked through the
+        balance's view; {} when it will not say."""
+        data = http.get(f"{self.config.base_url}{path}", quiet=True)
         inner = data.get("data") if isinstance(data, dict) else None
         return inner if isinstance(inner, dict) else {}
 
@@ -159,4 +149,4 @@ def _reasoning_of(listed: dict[str, Any]) -> frozenset[str] | None:
 def _top_provider_int(top: object, key: str) -> int | None:
     """A figure off the entry's `top_provider` object, the provider a
     request is routed to first."""
-    return http.positive_int(top.get(key)) if isinstance(top, dict) else None
+    return positive_int(top.get(key)) if isinstance(top, dict) else None

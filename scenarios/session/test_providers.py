@@ -16,6 +16,7 @@ probe, the balance, and the error family, each with its sentence.
 import base64
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import pytest
 
@@ -77,6 +78,17 @@ class Sink:
     def record_answer(self, provider: str, purpose: str, request_id: str, **kw: object) -> None:
         self.statuses.append(str(kw["status"]))
         self.texts.append(str(kw["text"]))
+
+
+class Errors:
+    """An error sink that keeps what it was told."""
+
+    def __init__(self) -> None:
+        self.filed: list[tuple[str, BaseException]] = []
+
+    def record(self, context: str, exc: BaseException) -> Path:
+        self.filed.append((context, exc))
+        return Path()
 
 
 class TestChatCompletion:
@@ -216,7 +228,8 @@ class TestChatCompletion:
         server.refuse = lambda body: 500
         with pytest.raises(StatusError):
             _drain(client.completion.chat("m", [Turn("user", "u")], {}))
-        assert sink.statuses == ["ok", "cancelled", "failed: StatusError"]
+        assert sink.statuses[:2] == ["ok", "cancelled"]
+        assert sink.statuses[2].startswith("failed: Refused by generic with HTTP 500")
         assert sink.texts[0] == scripted.CHAT_REPLY and sink.texts[1] == first.text
 
 
@@ -679,6 +692,56 @@ class TestLoadUnload:
         finally:
             server.close()
 
+    def test_a_llamacpp_router_hides_a_projector(self) -> None:
+        # A top-level mmproj file is listed by the router as a model,
+        # and loading it fails with an exit code; its name is llama.cpp's
+        # own rule for a projector.
+        server = ModelServer(models=("a", "mmproj-a.gguf"))
+        server.router = True
+        try:
+            client = LlamaCppClient(_config(server, "llamacpp"))
+            assert [r.name for r in client.models.list()] == ["a"]
+            assert client.models.get("mmproj-a.gguf") is None
+        finally:
+            server.close()
+        # A folder of nothing but a projector is still a router.
+        alone = ModelServer(models=("mmproj-a.gguf",))
+        alone.router = True
+        try:
+            client = LlamaCppClient(_config(alone, "llamacpp"))
+            assert client.models.list() == []
+            assert client.models.can_manage is True
+        finally:
+            alone.close()
+
+    def test_a_llamacpp_router_get_learns_the_models_own_facts_after_a_load(self) -> None:
+        # The router states a model's size and max context only while it
+        # runs, so a listing before the load reads none; the first `get`
+        # after it carries both, without another listing.
+        server = ModelServer(models=("a",))
+        server.router = True
+        server.window = 4096
+        server.contexts["a"] = 32768
+        server.sizes["a"] = 5_000_000
+        try:
+            client = LlamaCppClient(_config(server, "llamacpp"))
+            before = client.models.get("a")
+            assert before is not None
+            assert (before.size, before.max_context_catalogue) == (None, None)
+            client.models.load("a")
+            after = client.models.get("a")
+            assert after is not None
+            assert (after.state, after.max_context_loaded) == (ModelState.LOADED, 4096)
+            assert (after.size, after.max_context_catalogue) == (5_000_000, 32768)
+            # Unloaded, the router states neither again; the listing
+            # keeps what `get` learned.
+            client.models.unload("a")
+            relisted = {r.name: r for r in client.models.list()}
+            assert (relisted["a"].size, relisted["a"].max_context_catalogue) == (5_000_000, 32768)
+            assert relisted["a"].max_context_loaded is None
+        finally:
+            server.close()
+
     def test_a_llamacpp_router_counts_a_sleeping_model_as_loaded(self) -> None:
         # Put to sleep idle, woken by the next request: a server is
         # behind it, so it is loaded, and a load order would be refused.
@@ -906,7 +969,35 @@ class TestFailures:
         with pytest.raises(UnreachableError) as lost:
             _drain(client.completion.chat("m", [Turn("user", "u")], {}))
         assert str(lost.value) == "Lost the connection to generic."
-        assert log.statuses == ["failed: UnreachableError"]
+        assert log.statuses == ["failed: Lost the connection to generic."]
+
+    def test_a_failure_is_filed_under_the_provider_and_its_purpose(
+        self, server: ModelServer
+    ) -> None:
+        # Filed before it raises, a listing's and a stream's alike, with
+        # the exception itself so a traceback can follow it.
+        errors = Errors()
+        dead = GenericClient(ProviderConfig(name="generic", url=DEAD), error_sink=errors)
+        with pytest.raises(UnreachableError):
+            dead.models.list()
+        client = GenericClient(_config(server, "generic"), error_sink=errors)
+        server.refuse = lambda body: 500
+        with pytest.raises(StatusError):
+            _drain(client.completion.chat("m", [Turn("user", "u")], {}))
+        assert [context for context, _ in errors.filed] == ["generic [listing]", "generic [chat]"]
+        assert [type(exc) for _, exc in errors.filed] == [UnreachableError, StatusError]
+
+    def test_a_retried_knob_and_a_quiet_read_file_nothing(self, server: ModelServer) -> None:
+        # The 400 a take sends again without the knobs was no failure,
+        # and a best-effort read answers None without a word.
+        errors = Errors()
+        client = GenericClient(_config(server, "generic"), error_sink=errors)
+        server.refuse = lambda body: 400 if "reasoning_effort" in body else None
+        server.refusal = "unknown field: reasoning_effort"
+        _drain(client.completion.chat("m", [Turn("user", "u")], {}, effort="low"))
+        counting = LlamaCppClient(ProviderConfig(name="llamacpp", url=DEAD), error_sink=errors)
+        assert counting.completion.count_text_tokens("m", "p") is None
+        assert errors.filed == []
 
 
 def _config(server: ModelServer, kind: str, **fields: str) -> ProviderConfig:

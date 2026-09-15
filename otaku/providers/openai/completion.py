@@ -8,9 +8,10 @@ A stream yields `Reasoning` and `Text` deltas, then one `Stats`. A 400
 to the reasoning knobs is retried once without them; a stream that
 ends without `[DONE]` is a lost connection; closing a stream closes
 the connection, which stops the server. Every request and its answer
-are filed with the `RequestSink`; bursty output is paced (`smoothing`)
-unless nobody watches. The half reads the server off its config and
-the headers off its auth; it knows nothing of the model half.
+are filed with the `RequestSink`, a stream's failure with the
+transport, past the retry; bursty output is paced (`smoothing`) unless
+nobody watches. The half reads the server off its config and asks it
+through the transport it is handed; it knows nothing of the model half.
 """
 
 import contextlib
@@ -20,11 +21,10 @@ from collections.abc import Callable, Generator, Iterator, Sequence
 from dataclasses import dataclass
 from typing import Any, ClassVar, Protocol, final
 
-from otaku.providers import http, smoothing
+from otaku.providers import smoothing
 from otaku.providers.errors import DeclinedError, ProviderError, StatusError, UnreachableError
-from otaku.providers.http import ASK_TIMEOUT, REPLY_TIMEOUT
+from otaku.providers.http import ASK_TIMEOUT, REPLY_TIMEOUT, Http
 from otaku.providers.openai import frames, reasoning, requests
-from otaku.providers.openai.auth import OpenAIAuth
 from otaku.providers.openai.requests import Image, WireMessage
 from otaku.settings.providers import ProviderConfig
 
@@ -65,10 +65,11 @@ Chunk = Text | Reasoning | Stats
 
 class RequestSink(Protocol):
     """Where requests and their answers are recorded — the injected
-    seam the session's request log satisfies. `record_request` returns
+    seam the session's request log satisfies, a mirror of
+    `logging.RequestLog` method for method. `record_request` returns
     the id the answer is later filed under; `record_answer` files what
-    the stream came to: the status, its `Stats`, the answer's text
-    and reasoning."""
+    the stream came to: the status, its `Stats`, the answer's text and
+    reasoning."""
 
     def record_request(self, provider: str, purpose: str, body: dict[str, object]) -> str: ...
 
@@ -107,13 +108,13 @@ class OpenAICompletion:
     def __init__(
         self,
         config: ProviderConfig,
-        auth: OpenAIAuth,
+        http: Http,
         *,
         request_sink: RequestSink | None,
         smooth: bool,
     ) -> None:
         self._config = config
-        self._auth = auth
+        self._http = http
         self._request_sink = request_sink
         self._smooth = smooth
 
@@ -216,24 +217,30 @@ class OpenAICompletion:
         is mandatory, and some engines reject the field outright. A 400
         that names no knob (a context overflow) is the answer, sent
         once; a take that yielded is never retried, since its words are
-        on someone's screen. No knobs, one take."""
-        if not knobs:
-            yield from self._generate(url, body, purpose, timeout, read_delta)
-            return
-        knobbed = self._generate(url, {**body, **knobs}, purpose, timeout, read_delta)
-        yielded = False
+        on someone's screen. No knobs, one take. A failure is filed as
+        it escapes — past the retry, so a 400 that was sent again
+        without the knobs was no failure."""
         try:
-            # Closed the moment the consumer lets go, not at collection:
-            # cancel-and-keep records the partial right then.
-            with contextlib.closing(knobbed):
-                for chunk in knobbed:
-                    yielded = True
-                    yield chunk
-        except StatusError as e:
-            knob_refused = any(word in str(e).lower() for word in self._refusal_words(knobs))
-            if yielded or e.status != 400 or not knob_refused:
-                raise
-            yield from self._generate(url, body, purpose, timeout, read_delta)
+            if not knobs:
+                yield from self._generate(url, body, purpose, timeout, read_delta)
+                return
+            knobbed = self._generate(url, {**body, **knobs}, purpose, timeout, read_delta)
+            yielded = False
+            try:
+                # Closed the moment the consumer lets go, not at collection:
+                # cancel-and-keep records the partial right then.
+                with contextlib.closing(knobbed):
+                    for chunk in knobbed:
+                        yielded = True
+                        yield chunk
+            except StatusError as e:
+                knob_refused = any(word in str(e).lower() for word in self._refusal_words(knobs))
+                if yielded or e.status != 400 or not knob_refused:
+                    raise
+                yield from self._generate(url, body, purpose, timeout, read_delta)
+        except ProviderError as e:
+            self._http.record(e, purpose)
+            raise
 
     def _generate(
         self,
@@ -256,7 +263,7 @@ class OpenAICompletion:
         text: list[str] = []
         thoughts: list[str] = []
         trouble: list[str] = []
-        lines = http.stream_lines(url, body, name=name, headers=self._auth.headers, timeout=timeout)
+        lines = self._http.stream(url, body, timeout=timeout)
         events = self._events(lines, name)
         # A close before the end is a cancel: GeneratorExit is no
         # Exception, so it leaves the word as it is.
@@ -291,7 +298,8 @@ class OpenAICompletion:
                 raise DeclinedError("The model declined: " + "".join(trouble))
             status = "ok"
         except Exception as e:
-            status = f"failed: {type(e).__name__}"
+            # The provider's sentence where there is one; a bug's type name.
+            status = f"failed: {e if isinstance(e, ProviderError) else type(e).__name__}"
             raise
         finally:
             # Deterministically, not at collection: the connection closes

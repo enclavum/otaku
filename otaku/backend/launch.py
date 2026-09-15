@@ -74,9 +74,11 @@ def open_session(root: str | Path | None = None, *, ask_secret: AskSecret | None
     # edited there is visible everywhere at once. The invariant: names
     # are the stable handle — a config may swap under a running pass,
     # which resolves its client by name.
+    errors = ErrorLog(paths.logs_dir)
     registry = Registry(
         providers,
         request_sink=RequestLog(paths.logs_dir, cipher),
+        error_sink=errors,
         smooth=config.smooth_streaming,
     )
     # A section named for no supported provider is not served, and the
@@ -116,7 +118,7 @@ def open_session(root: str | Path | None = None, *, ask_secret: AskSecret | None
         lambda: Store.open(paths.database_file, cipher, backups_dir=paths.backups_dir, keep=0),
         registry,
         system_log,
-        errors=ErrorLog(paths.logs_dir),
+        errors=errors,
         idle_seconds=config.idle_seconds,
     )
     try:

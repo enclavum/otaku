@@ -10,11 +10,9 @@ from collections.abc import Sequence
 from typing import Any, ClassVar
 from urllib.parse import quote
 
-from otaku.providers import http
 from otaku.providers.clients import read_home_json
-from otaku.providers.http import ASK_TIMEOUT, PROBE_TIMEOUT, positive_int
+from otaku.providers.http import ASK_TIMEOUT, PROBE_TIMEOUT, Http, positive_int
 from otaku.providers.openai import reasoning
-from otaku.providers.openai.auth import OpenAIAuth
 from otaku.providers.openai.client import Locality, OpenAIClient
 from otaku.providers.openai.completion import OpenAICompletion
 from otaku.providers.openai.models import Capabilities, Listing, ModelInfo, ModelState, OpenAIModels
@@ -40,14 +38,14 @@ class OmlxModels(OpenAIModels):
 
     # ---------- the hooks ----------
 
-    def _list(self, timeout: float) -> Listing:
+    def _list(self, http: Http) -> Listing:
         """Everything from the one /v1/models/status pass; a model the
         operator hid, or a speculative drafter, is not offered. No status
         surface — not an omlx server — falls to the plain names; a dead
         server raises out of them."""
-        entries = _status(self._config, self._auth, timeout)
+        entries = _status(http, self._config.base_url)
         if not entries:
-            return super()._list(timeout)
+            return super()._list(http)
         models = []
         for entry in entries:
             model_id = entry.get("id")
@@ -65,14 +63,16 @@ class OmlxModels(OpenAIModels):
                     max_context_loaded=max_context_loaded,
                     capabilities=self._capabilities_of(entry),
                     state=state,
-                    checked=True,
                 )
             )
         return sorted(models, key=lambda model: model.name)
 
-    def _state(self, name: str) -> tuple[ModelState, int | None] | None:
-        entry = _status_entry(self._config, self._auth, name)
-        return self._state_of(entry) if entry is not None else None
+    def _get(self, name: str, http: Http) -> ModelInfo | None:
+        entry = _status_entry(http, self._config.base_url, name)
+        if entry is None:
+            return None
+        state, max_context_loaded = self._state_of(entry)
+        return ModelInfo(name=name, max_context_loaded=max_context_loaded, state=state)
 
     # ---------- the native surface ----------
 
@@ -80,15 +80,13 @@ class OmlxModels(OpenAIModels):
         # omlx evicts on its own (idle, LRU, memory pressure); an unload
         # of what is not loaded is a 400, a load of what is a no-op: ask
         # first, order only what is not so.
-        entry = _status_entry(self._config, self._auth, model)
+        entry = _status_entry(self._http, self._config.base_url, model)
         if entry is not None and bool(entry.get("loaded")) == (action == "load"):
             return
-        http.post_json(
+        self._http.post(
             f"{self._config.base_url}/v1/models/{quote(model, safe='')}/{action}",
             {},
-            name=self._config.name,
-            headers=self._auth.headers,
-            timeout=None,
+            purpose=action,
         )
 
     def _state_of(self, entry: dict[str, Any]) -> tuple[ModelState, int | None]:
@@ -127,7 +125,7 @@ class OmlxCompletion(OpenAICompletion):
     ) -> int | None:
         # The count resolves the engine, which loads the model; a count
         # is never worth a load.
-        entry = _status_entry(self._config, self._auth, model)
+        entry = _status_entry(self._http, self._config.base_url, model)
         if entry is None or not entry.get("loaded"):
             return None
         # Anthropic's shape: the system text apart, the turns as messages.
@@ -136,13 +134,8 @@ class OmlxCompletion(OpenAICompletion):
         body: dict[str, Any] = {"model": model, "messages": turns}
         if system:
             body["system"] = system
-        data = http.post_json(
-            f"{self._config.base_url}/v1/messages/count_tokens",
-            body,
-            name=self._config.name,
-            headers=self._auth.headers,
-            timeout=timeout,
-            quiet=True,
+        data = self._http.post(
+            f"{self._config.base_url}/v1/messages/count_tokens", body, timeout=timeout, quiet=True
         )
         count = data.get("input_tokens") if isinstance(data, dict) else None
         return count if isinstance(count, int) else None
@@ -169,23 +162,15 @@ class OmlxClient(OpenAIClient):
         return ProviderConfig(name=cls.id, url=url, api_key=str(key) if key else "")
 
 
-def _status(
-    config: ProviderConfig, auth: OpenAIAuth, timeout: float
-) -> list[dict[str, Any]] | None:
+def _status(http: Http, base_url: str, timeout: float | None = None) -> list[dict[str, Any]] | None:
     """The status listing's entries; None when the server did not answer,
-    or has no such surface."""
-    data = http.get_json(
-        f"{config.base_url}/v1/models/status",
-        name=config.name,
-        headers=auth.headers,
-        timeout=timeout,
-        quiet=True,
-    )
+    or has no such surface. Shared by the two halves, so `http` is
+    whichever is asking: a listing's view, or the transport with a cap."""
+    data = http.get(f"{base_url}/v1/models/status", timeout=timeout, quiet=True)
     models = data.get("models") if isinstance(data, dict) else None
     return [m for m in models if isinstance(m, dict)] if isinstance(models, list) else None
 
 
-def _status_entry(config: ProviderConfig, auth: OpenAIAuth, model: str) -> dict[str, Any] | None:
-    return next(
-        (e for e in _status(config, auth, PROBE_TIMEOUT) or [] if e.get("id") == model), None
-    )
+def _status_entry(http: Http, base_url: str, model: str) -> dict[str, Any] | None:
+    entries = _status(http, base_url, timeout=PROBE_TIMEOUT) or []
+    return next((e for e in entries if e.get("id") == model), None)

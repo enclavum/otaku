@@ -17,9 +17,8 @@ import time
 from dataclasses import replace
 from typing import Any
 
-from otaku.providers import http
 from otaku.providers.errors import ProviderError
-from otaku.providers.http import PROBE_TIMEOUT, positive_int
+from otaku.providers.http import PROBE_TIMEOUT, Http, positive_int
 from otaku.providers.openai.auth import OpenAIAuth
 from otaku.providers.openai.client import Locality, OpenAIClient
 from otaku.providers.openai.models import Capabilities, Listing, ModelInfo, ModelState, OpenAIModels
@@ -32,9 +31,10 @@ _UNLOAD_POLL_SECONDS = 0.25
 
 
 class OllamaModels(OpenAIModels):
-    def __init__(self, config: ProviderConfig, auth: OpenAIAuth) -> None:
-        super().__init__(config, auth)
+    def __init__(self, config: ProviderConfig, auth: OpenAIAuth, http: Http) -> None:
+        super().__init__(config, auth, http)
         self._remote: set[str] = set()  # served by ollama.com, as of the last listing
+        self._carded: set[str] = set()  # whose card has answered, this session
 
     @property
     def can_manage(self) -> bool:
@@ -42,24 +42,24 @@ class OllamaModels(OpenAIModels):
 
     def load(self, model: str) -> None:
         self._refuse_remote(model)
-        self._generate_nothing(model, keep_alive=self._config.keep_alive or "24h")
+        self._generate_nothing(model, keep_alive=self._config.keep_alive or "24h", purpose="load")
 
     def unload(self, model: str) -> None:
         # Answered as soon as the runner is told to expire; the scheduler
         # unloads after, so the picker's read-back is waited for.
         self._refuse_remote(model)
-        self._generate_nothing(model, keep_alive=0)
+        self._generate_nothing(model, keep_alive=0, purpose="unload")
         deadline = time.monotonic() + _UNLOAD_WAIT_SECONDS
         names = {model, self._canonical(model)}  # the door takes either spelling
         while time.monotonic() < deadline:
-            running = self._running()
+            running = self._running(self._http)
             if running is not None and names.isdisjoint(running):
                 return
             time.sleep(_UNLOAD_POLL_SECONDS)
 
     # ---------- the hooks ----------
 
-    def _list(self, timeout: float) -> Listing:
+    def _list(self, http: Http) -> Listing:
         """Names and sizes from /api/tags, state and loaded context size from /api/ps,
         one call each however long the registry. A tags entry names
         capabilities too, but not the card's (a server here said of
@@ -70,12 +70,7 @@ class OllamaModels(OpenAIModels):
         it, its card is an internet round-trip, so the entry's own word
         is taken and its state stays unknown. A loaded model missing
         from the registry still belongs in the list."""
-        data = http.get_json(
-            f"{self._config.base_url}/api/tags",
-            name=self._config.name,
-            headers=self._auth.headers,
-            timeout=timeout,
-        )
+        data = http.get(f"{self._config.base_url}/api/tags")
         sizes: dict[str, int | None] = {}
         remote: dict[str, ModelInfo] = {}
         entries = data.get("models") if isinstance(data, dict) else None
@@ -87,15 +82,14 @@ class OllamaModels(OpenAIModels):
             if entry.get("remote_host"):
                 remote[name] = ModelInfo(
                     name=name,
-                    capabilities=_capabilities_of(caps) if isinstance(caps, list) else None,
-                    checked=True,
+                    capabilities=self._capabilities_of(caps) if isinstance(caps, list) else None,
                 )
                 continue
             if isinstance(caps, list) and "completion" not in caps:
                 continue
             sizes[name] = positive_int(entry.get("size"))
         self._remote = set(remote)
-        running = self._running() or {}
+        running = self._running(http) or {}
         names = sorted(sizes) + sorted(set(running) - set(sizes))
         local = [
             ModelInfo(
@@ -108,27 +102,46 @@ class OllamaModels(OpenAIModels):
         ]
         return local + [remote[name] for name in sorted(remote)]
 
-    def _enhance(self, model: ModelInfo, timeout: float) -> ModelInfo:
-        """The card: capabilities and the trained context length, the
-        model's own max context — never the loaded size, which Ollama
-        sets at load time from a server-wide default clamped to it."""
-        data = http.post_json(
-            f"{self._config.base_url}/api/show",
-            {"model": model.name},
-            name=self._config.name,
-            headers=self._auth.headers,
-            timeout=timeout,  # a cold card reads the model's header first
-            quiet=True,
+    def _get(self, name: str, http: Http) -> ModelInfo | None:
+        """/api/ps for the instance, and — once a session, the first time
+        it answers — the card: capabilities and the trained context
+        length, the model's own max context, never the loaded size,
+        which Ollama sets at load time from a server-wide default
+        clamped to it. The model's view carries the whole budget: a cold
+        card reads the model's header first. A model ollama.com serves
+        has neither: nothing runs here for it."""
+        if name in self._remote:
+            return ModelInfo(name=name, state=ModelState.UNKNOWN)
+        running = self._running(http)
+        if running is None:
+            return None
+        fresh = ModelInfo(
+            name=name,
+            max_context_loaded=running.get(name),
+            state=ModelState.LOADED if name in running else ModelState.UNLOADED,
         )
+        if name in self._carded:
+            return fresh
+        data = http.post(f"{self._config.base_url}/api/show", {"model": name}, quiet=True)
         if not isinstance(data, dict):
-            return model
+            return fresh
         caps = data.get("capabilities")
         info = data.get("model_info")
+        # The trained length is under the architecture's own key
+        # ("gemma3.context_length") — or any key so named, when the
+        # architecture is not stated.
+        max_context_catalogue = None
+        if isinstance(info, dict):
+            arch = info.get("general.architecture")
+            keyed = info.get(f"{arch}.context_length") if isinstance(arch, str) else None
+            if keyed is None:
+                keyed = next((v for k, v in info.items() if k.endswith(".context_length")), None)
+            max_context_catalogue = positive_int(keyed)
+        self._carded.add(name)
         return replace(
-            model,
-            capabilities=_capabilities_of(caps) if isinstance(caps, list) else Capabilities(),
-            max_context_catalogue=_context_length_of(info) if isinstance(info, dict) else None,
-            checked=True,
+            fresh,
+            capabilities=self._capabilities_of(caps) if isinstance(caps, list) else Capabilities(),
+            max_context_catalogue=max_context_catalogue,
         )
 
     def _canonical(self, name: str) -> str:
@@ -137,44 +150,27 @@ class OllamaModels(OpenAIModels):
         _, _, tail = name.rpartition("/")
         return name if ":" in tail else f"{name}:latest"
 
-    def _state(self, name: str) -> tuple[ModelState, int | None] | None:
-        if name in self._remote:
-            return ModelState.UNKNOWN, None
-        running = self._running()
-        if running is None:
-            return None
-        if name in running:
-            return ModelState.LOADED, running[name]
-        return ModelState.UNLOADED, None
-
     # ---------- the native surface ----------
 
     def _refuse_remote(self, model: str) -> None:
         if model in self._remote or self._canonical(model) in self._remote:
             raise ProviderError(f"{model} is served by ollama.com; there is nothing to load.")
 
-    def _generate_nothing(self, model: str, *, keep_alive: str | int) -> None:
+    def _generate_nothing(self, model: str, *, keep_alive: str | int, purpose: str) -> None:
         """An empty generation is how the registry is told to load a
         model, and for how long to keep it — zero unloads it."""
-        http.post_json(
+        self._http.post(
             f"{self._config.base_url}/api/generate",
             {"model": model, "prompt": "", "stream": False, "keep_alive": keep_alive},
-            name=self._config.name,
-            headers=self._auth.headers,
-            timeout=None,
+            purpose=purpose,
         )
 
-    def _running(self) -> dict[str, int | None] | None:
+    def _running(self, http: Http) -> dict[str, int | None] | None:
         """The loaded models with their context sizes, from /api/ps: name →
         context_length, None where the server states none. None
-        altogether when the server did not answer."""
-        data = http.get_json(
-            f"{self._config.base_url}/api/ps",
-            name=self._config.name,
-            headers=self._auth.headers,
-            timeout=PROBE_TIMEOUT,
-            quiet=True,
-        )
+        altogether when the server did not answer. `http` is the
+        view of the ask that is running, the listing's or the model's."""
+        data = http.get(f"{self._config.base_url}/api/ps", timeout=PROBE_TIMEOUT, quiet=True)
         if not isinstance(data, dict):
             return None
         running: dict[str, int | None] = {}
@@ -184,6 +180,19 @@ class OllamaModels(OpenAIModels):
             if isinstance(name, str):
                 running[name] = positive_int(entry.get("context_length"))
         return running
+
+    def _capabilities_of(self, caps: list[Any]) -> Capabilities:
+        """A card's capability words as ours. No raw text wire: Ollama's
+        /v1/completions wraps the prompt as one chat turn and thinks
+        unseen. Decoding is constrained server-side (`format`) for every
+        model."""
+        reasoning = _EFFORTS if "thinking" in caps else frozenset[str]()
+        return Capabilities(
+            vision="vision" in caps,
+            reasoning=reasoning,
+            text_completion=False,
+            structured_output=True,
+        )
 
 
 class OllamaClient(OpenAIClient):
@@ -203,27 +212,6 @@ class OllamaClient(OpenAIClient):
             url=f"{scheme}://{host}:{port}{path}/v1",
             keep_alive="24h",
         )
-
-
-def _capabilities_of(caps: list[Any]) -> Capabilities:
-    """A card's capability words as ours. No raw text wire: Ollama's
-    /v1/completions wraps the prompt as one chat turn and thinks unseen.
-    Decoding is constrained server-side (`format`) for every model."""
-    reasoning = _EFFORTS if "thinking" in caps else frozenset[str]()
-    return Capabilities(
-        vision="vision" in caps, reasoning=reasoning, text_completion=False, structured_output=True
-    )
-
-
-def _context_length_of(info: dict[str, Any]) -> int | None:
-    """The trained context length a card's model_info states, under the
-    architecture's own key ("gemma3.context_length") — or any key so
-    named, when the architecture is not stated."""
-    arch = info.get("general.architecture")
-    keyed = info.get(f"{arch}.context_length") if isinstance(arch, str) else None
-    if keyed is None:
-        keyed = next((v for k, v in info.items() if k.endswith(".context_length")), None)
-    return positive_int(keyed)
 
 
 def _parse_ollama_host(value: str) -> tuple[str, str, int, str]:

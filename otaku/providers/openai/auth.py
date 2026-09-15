@@ -8,6 +8,7 @@ service reads.
 import enum
 import os
 
+from otaku.providers.http import Http
 from otaku.settings.providers import ProviderConfig
 
 
@@ -51,7 +52,8 @@ class OpenAIAuth:
         miss a call site."""
         return {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
 
-    def verify_key(self, timeout: float) -> None:
+    def verify_key(self, http: Http) -> None:
         """Raises UnauthorizedError when the server does not accept the
-        key in force, UnreachableError when nothing answered. The base
-        has nothing to ask."""
+        key in force, UnreachableError when nothing answered. `http` is
+        the caller's view: the check spends from the sequence's budget
+        and files under its purpose. The base has nothing to ask."""

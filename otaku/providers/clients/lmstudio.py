@@ -7,9 +7,8 @@ reported as honoured, whatever the model could do.
 
 from typing import Any, ClassVar
 
-from otaku.providers import http
 from otaku.providers.clients import read_home_json
-from otaku.providers.http import ASK_TIMEOUT, PROBE_TIMEOUT, positive_int
+from otaku.providers.http import ASK_TIMEOUT, PROBE_TIMEOUT, Http, positive_int
 from otaku.providers.openai.client import Locality, OpenAIClient
 from otaku.providers.openai.completion import OpenAICompletion
 from otaku.providers.openai.models import Capabilities, Listing, ModelInfo, ModelState, OpenAIModels
@@ -24,44 +23,38 @@ class LmStudioModels(OpenAIModels):
     def load(self, model: str) -> None:
         # Idempotent on purpose: LM Studio's /load is not — repeated
         # calls stack 'model:2', ':3', … instances.
-        entry = self._entry_of(model, ASK_TIMEOUT, quiet=False)
+        entry = self._entry_of(model, self._http.within(ASK_TIMEOUT, "load"), quiet=False)
         if entry is not None and entry.get("loaded_instances"):
             return
-        http.post_json(
-            f"{self._config.base_url}/api/v1/models/load",
-            {"model": model},
-            name=self._config.name,
-            headers=self._auth.headers,
-            timeout=None,
+        self._http.post(
+            f"{self._config.base_url}/api/v1/models/load", {"model": model}, purpose="load"
         )
 
     def unload(self, model: str) -> None:
         # /unload takes an instance id: every loaded instance of the
         # model is unloaded in turn. The registry is read with its
         # errors on: a door that cannot read must say so, not do nothing.
-        entry = self._entry_of(model, ASK_TIMEOUT, quiet=False)
+        entry = self._entry_of(model, self._http.within(ASK_TIMEOUT, "unload"), quiet=False)
         for instance in (entry.get("loaded_instances") or []) if entry is not None else []:
             instance_id = instance.get("id")
             if not isinstance(instance_id, str):
                 continue
-            http.post_json(
+            self._http.post(
                 f"{self._config.base_url}/api/v1/models/unload",
                 {"instance_id": instance_id},
-                name=self._config.name,
-                headers=self._auth.headers,
-                timeout=None,
+                purpose="unload",
             )
 
     # ---------- the hooks ----------
 
-    def _list(self, timeout: float) -> Listing:
+    def _list(self, http: Http) -> Listing:
         """Everything from the one /api/v1/models pass: key, size,
         capabilities, the model's maximum, and a loaded instance's
         configured context size. No such surface — not LM Studio — falls to
         the plain names; a dead server raises out of them."""
-        entries = self._registry(timeout)
+        entries = self._registry(http)
         if not entries:
-            return super()._list(timeout)
+            return super()._list(http)
         models = []
         for entry in entries:
             key = entry.get("key")
@@ -78,35 +71,38 @@ class LmStudioModels(OpenAIModels):
                     state=ModelState.LOADED
                     if entry.get("loaded_instances")
                     else ModelState.UNLOADED,
-                    checked=True,
                 )
             )
         return sorted(models, key=lambda model: model.name)
 
-    def _state(self, name: str) -> tuple[ModelState, int | None] | None:
-        entry = self._entry_of(name, PROBE_TIMEOUT)
+    def _get(self, name: str, http: Http) -> ModelInfo | None:
+        entry = self._entry_of(name, http, timeout=PROBE_TIMEOUT)
         if entry is None:
             return None
         if entry.get("loaded_instances"):
-            return ModelState.LOADED, self._max_context_loaded_of(entry)
-        return ModelState.UNLOADED, None
+            return ModelInfo(
+                name=name,
+                max_context_loaded=self._max_context_loaded_of(entry),
+                state=ModelState.LOADED,
+            )
+        return ModelInfo(name=name, state=ModelState.UNLOADED)
 
     # ---------- the native surface ----------
 
-    def _entry_of(self, model: str, timeout: float, *, quiet: bool = True) -> dict[str, Any] | None:
-        entries = self._registry(timeout, quiet=quiet) or []
+    def _entry_of(
+        self, model: str, http: Http, *, timeout: float | None = None, quiet: bool = True
+    ) -> dict[str, Any] | None:
+        entries = self._registry(http, timeout=timeout, quiet=quiet) or []
         return next((e for e in entries if e.get("key") == model), None)
 
-    def _registry(self, timeout: float, *, quiet: bool = True) -> list[dict[str, Any]] | None:
-        """The registry's entries; None when the server did not answer,
-        or has no such surface. Not `quiet`, a failure raises."""
-        data = http.get_json(
-            f"{self._config.base_url}/api/v1/models",
-            name=self._config.name,
-            headers=self._auth.headers,
-            timeout=timeout,
-            quiet=quiet,
-        )
+    def _registry(
+        self, http: Http, *, timeout: float | None = None, quiet: bool = True
+    ) -> list[dict[str, Any]] | None:
+        """The registry's entries, asked through the caller's view, under
+        `timeout` where the read has a cap of its own; None when the
+        server did not answer, or has no such surface. Not `quiet`, a
+        failure raises."""
+        data = http.get(f"{self._config.base_url}/api/v1/models", timeout=timeout, quiet=quiet)
         models = data.get("models") if isinstance(data, dict) else None
         return [m for m in models if isinstance(m, dict)] if isinstance(models, list) else None
 

@@ -19,10 +19,9 @@ import time
 from collections.abc import Callable, Sequence
 from typing import Any, ClassVar
 
-from otaku.providers import http
 from otaku.providers.clients import launched_port
 from otaku.providers.errors import ProviderError, StatusError, UnreachableError
-from otaku.providers.http import ASK_TIMEOUT, PROBE_TIMEOUT, positive_int
+from otaku.providers.http import ASK_TIMEOUT, PROBE_TIMEOUT, Http, positive_int
 from otaku.providers.openai import reasoning, requests
 from otaku.providers.openai.client import Locality, OpenAIClient
 from otaku.providers.openai.completion import OpenAICompletion
@@ -44,35 +43,35 @@ class LlamaCppModels(OpenAIModels):
     restarted the other way is followed; the cache and the lock stay.
     A fresh client is a single server until a listing says otherwise."""
 
-    def _list(self, timeout: float) -> Listing:
-        data = http.get_json(
-            f"{self._config.url}/models",
-            name=self._config.name,
-            headers=self._auth.headers,
-            timeout=timeout,
-        )
+    def _list(self, http: Http) -> Listing:
+        data = http.get(f"{self._config.url}/models")
         # With a key the props read is loud, so a wrong key raises here;
         # without one, a server that lacks /props is a server without
         # modalities.
-        props = http.get_json(
-            f"{self._config.base_url}/props",
-            name=self._config.name,
-            headers=self._auth.headers,
-            timeout=timeout,
-            quiet=not self._auth.api_key,
-        )
+        props = http.get(f"{self._config.base_url}/props", quiet=not self._auth.api_key)
         entries = self._entries_of(data)
+        # Told by the raw entries, projectors included: a folder of
+        # nothing but a projector is still a router.
         is_router = any("status" in entry for entry in entries)
         self.__class__ = LlamaCppRouterModels if is_router else LlamaCppSingleModels
-        return self._listing(entries, props)
+        return self._listing([e for e in entries if not self._is_projector(e)], props)
 
     def _listing(self, entries: list[dict[str, Any]], props: Any) -> Listing:
         """The entries as the mode reads them — each mode's own."""
         raise NotImplementedError
 
     def _entries_of(self, data: object) -> list[dict[str, Any]]:
+        """The listing's entries with a string id."""
         raw = data.get("data") if isinstance(data, dict) else None
         return [e for e in raw or [] if isinstance(e, dict) and isinstance(e.get("id"), str)]
+
+    def _is_projector(self, entry: dict[str, Any]) -> bool:
+        """Whether an entry is a projector, not a model: a router lists a
+        top-level `mmproj-*.gguf` as one (llama.cpp pairs a projector
+        with its model only inside a subfolder) and loading it fails
+        with an exit code. The name is llama.cpp's own rule for telling
+        one."""
+        return "mmproj" in str(entry["id"]).lower()
 
     def _meta_of(self, entry: dict[str, Any]) -> tuple[int | None, int | None, int | None]:
         """(the loaded context size, the model's own max context, the
@@ -130,7 +129,6 @@ class LlamaCppSingleModels(LlamaCppModels):
                 max_context_loaded=max_context_loaded,
                 capabilities=self._capabilities_of(modalities) if answered else None,
                 state=ModelState.LOADED,
-                checked=answered,
             )
             for entry in sorted(entries, key=lambda entry: str(entry["id"]))
         ]
@@ -148,7 +146,7 @@ class LlamaCppRouterModels(LlamaCppModels):
         return True
 
     def load(self, model: str) -> None:
-        status = self._status_of(self._entry(model) or {})
+        status = self._status_of(self._entry(model, self._http) or {})
         if status in _RUNNING:
             return
         # A load already in flight — the router autoloads on any request
@@ -157,35 +155,29 @@ class LlamaCppRouterModels(LlamaCppModels):
         # 400 "already running".
         if status != "loading":
             try:
-                http.post_json(
-                    f"{self._config.base_url}/models/load",
-                    {"model": model},
-                    name=self._config.name,
-                    headers=self._auth.headers,
-                    timeout=None,
+                self._http.post(
+                    f"{self._config.base_url}/models/load", {"model": model}, purpose="load"
                 )
             except StatusError as e:
                 if e.status != 400:
                     raise
-        entry = self._wait(model, lambda status: status == "loading")
+        entry = self._wait(model, lambda status: status == "loading", "load")
         if self._status_of(entry) not in _RUNNING:
             status_object = entry.get("status")
             code = status_object.get("exit_code") if isinstance(status_object, dict) else None
             suffix = f" (exit code {code})" if isinstance(code, int) else ""
-            raise ProviderError(f"{model} did not load on {self._config.name}{suffix}.")
+            failed = ProviderError(f"{model} did not load on {self._config.name}{suffix}.")
+            self._http.record(failed, "load")
+            raise failed
 
     def unload(self, model: str) -> None:
-        status = self._status_of(self._entry(model) or {})
+        status = self._status_of(self._entry(model, self._http) or {})
         if status not in _RUNNING and status != "loading":
             return  # nothing running to stop
-        http.post_json(
-            f"{self._config.base_url}/models/unload",
-            {"model": model},
-            name=self._config.name,
-            headers=self._auth.headers,
-            timeout=None,
+        self._http.post(
+            f"{self._config.base_url}/models/unload", {"model": model}, purpose="unload"
         )
-        self._wait(model, lambda status: status in _RUNNING or status == "loading")
+        self._wait(model, lambda status: status in _RUNNING or status == "loading", "unload")
 
     # ---------- the hooks ----------
 
@@ -207,45 +199,54 @@ class LlamaCppRouterModels(LlamaCppModels):
                     max_context_loaded=max_context_loaded,
                     capabilities=self._capabilities_of(modalities),
                     state=self._state_of(entry),
-                    checked=True,
                 )
             )
         return sorted(models, key=lambda model: model.name)
 
-    def _state(self, name: str) -> tuple[ModelState, int | None] | None:
-        entry = self._entry(name)
+    def _get(self, name: str, http: Http) -> ModelInfo | None:
+        entry = self._entry(name, http)
         if entry is None:
             return None
-        return self._state_of(entry), self._meta_of(entry)[0]
+        # The meta rides only while the model runs: the first read after
+        # a load is where its own size and max context become known.
+        max_context_loaded, max_context_catalogue, size = self._meta_of(entry)
+        return ModelInfo(
+            name=name,
+            size=size,
+            max_context_catalogue=max_context_catalogue,
+            max_context_loaded=max_context_loaded,
+            state=self._state_of(entry),
+        )
 
     # ---------- the router's own ----------
 
-    def _entry(self, model: str) -> dict[str, Any] | None:
-        """The model's entry in the listing now, as a probe: {} when the
-        router lists no such model, None when it did not answer — which
-        the polling tells apart."""
-        data = http.get_json(
-            f"{self._config.url}/models",
-            name=self._config.name,
-            headers=self._auth.headers,
-            timeout=PROBE_TIMEOUT,
-            quiet=True,
-        )
+    def _entry(self, model: str, http: Http) -> dict[str, Any] | None:
+        """The model's entry in the listing now, as a probe through
+        `http` — the model's view, or the transport itself while a load
+        polls: {} when the router lists no such model, None when it did
+        not answer — which the polling tells apart."""
+        data = http.get(f"{self._config.url}/models", timeout=PROBE_TIMEOUT, quiet=True)
         if not isinstance(data, dict):
             return None
-        return next((e for e in self._entries_of(data) if e.get("id") == model), {})
+        entries = (e for e in self._entries_of(data) if not self._is_projector(e))
+        return next((e for e in entries if e.get("id") == model), {})
 
-    def _wait(self, model: str, pending: Callable[[str | None], bool]) -> dict[str, Any]:
+    def _wait(
+        self, model: str, pending: Callable[[str | None], bool], purpose: str
+    ) -> dict[str, Any]:
         """The model's entry once its status is no longer `pending`. A
         poll the router does not answer — it holds its lock while a
-        child spawns — is waited out, up to a budget of silence."""
+        child spawns — is waited out, up to a budget of silence, then
+        filed under `purpose`."""
         silence = 0.0
         while True:
-            entry = self._entry(model)
+            entry = self._entry(model, self._http)
             if entry is None:
                 silence += _LOAD_POLL_SECONDS
                 if silence > _SILENCE_BUDGET:
-                    raise UnreachableError(f"{self._config.name} stopped answering.")
+                    lost = UnreachableError(f"{self._config.name} stopped answering.")
+                    self._http.record(lost, purpose)
+                    raise lost
             elif not pending(self._status_of(entry)):
                 return entry
             else:
@@ -287,11 +288,9 @@ class LlamaCppCompletion(OpenAICompletion):
         # not load the model for a count.
         body = requests.chat_completion_body(model, messages, {})
         request = {k: v for k, v in body.items() if k not in ("stream", "stream_options")}
-        data = http.post_json(
+        data = self._http.post(
             f"{self._config.url}/chat/completions/input_tokens?autoload=false",
             request,
-            name=self._config.name,
-            headers=self._auth.headers,
             timeout=timeout,
             quiet=True,
         )
@@ -301,14 +300,12 @@ class LlamaCppCompletion(OpenAICompletion):
     def count_text_tokens(
         self, model: str, prompt: str, timeout: float = ASK_TIMEOUT
     ) -> int | None:
-        data = http.post_json(
+        data = self._http.post(
             f"{self._config.base_url}/tokenize?autoload=false",
             # The model rides in the body, which is how a router forwards
             # a POST; a single server ignores it. `add_special` adds the
             # BOS the text wire counts and /tokenize leaves out.
             {"model": model, "content": prompt, "add_special": True},
-            name=self._config.name,
-            headers=self._auth.headers,
             timeout=timeout,
             quiet=True,
         )

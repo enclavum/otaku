@@ -2,20 +2,23 @@
 model can do.
 
 Two kinds of fact, two rules. The MODEL's own — capabilities, the
-catalogue context size, the size on disk — are read once and cached
-for the session; None means not read yet. The INSTANCE's — the model's
-state, and the context size it was loaded with — belong to the engine,
-which loads and unloads on its own, so they are asked live on every
-`get`; only when the engine does not answer does the last word stand.
-The listing is asked of the engine every time.
+catalogue context size, the size on disk — are asked for once and
+cached for the session; None means not read yet, and a later read
+that states one fills it in. The INSTANCE's — the model's state, and
+the context size it was loaded with — belong to the engine, which
+loads and unloads on its own, so they are asked live on every `get`;
+what the engine does not answer keeps its last word. The listing is
+asked of the engine every time. `_merge` is the one rule of both,
+serving the listing and the one-model read alike.
 
-Hooks read the engine and nothing else; the public methods read and
-write the cache and call the hooks. Engines override `_list`, `_decode`,
-`_enhance`, `_state` and, where they manage models, `load` and
-`unload`; a catalog sets `listing_keyed` and `listing_query` instead of
-a listing of its own. The half reads the server off its config and the
-key off its auth, which it asks to verify the key before a keyed
-listing.
+Hooks read the engine and nothing else, through the view they are
+handed — one budget and one purpose for the whole ask; the public
+methods make the view, read and write the cache and call the hooks.
+Engines override `_list`, `_get`, `_decode`, `_canonical` and, where
+they manage models, `load` and `unload`; a catalog sets `listing_keyed`
+and `listing_query` instead of a listing of its own. The half reads the
+server off its config and the key off its auth, which it asks to verify
+the key before a keyed listing.
 """
 
 from __future__ import annotations
@@ -25,9 +28,8 @@ import threading
 from dataclasses import dataclass, replace
 from typing import Any, ClassVar, final
 
-from otaku.providers import http
 from otaku.providers.errors import ProviderError, UnauthorizedError
-from otaku.providers.http import ASK_TIMEOUT
+from otaku.providers.http import ASK_TIMEOUT, Http, positive_int
 from otaku.providers.openai.auth import OpenAIAuth
 from otaku.settings.providers import ProviderConfig
 
@@ -72,7 +74,6 @@ class ModelInfo:
     max_output_tokens: int | None = None
     capabilities: Capabilities | None = None
     state: ModelState = ModelState.UNKNOWN
-    checked: bool = False  # the per-model call (`_enhance`) has answered
 
     @property
     def max_context(self) -> int | None:
@@ -98,14 +99,15 @@ class OpenAIModels:
     # What /models wants appended for the details (NanoGPT's).
     listing_query: ClassVar[str] = ""
 
-    def __init__(self, config: ProviderConfig, auth: OpenAIAuth) -> None:
+    def __init__(self, config: ProviderConfig, auth: OpenAIAuth, http: Http) -> None:
         self._config = config
         self._auth = auth
+        self._http = http
         # The last listing, by name, with the model's own facts kept
         # across listings that could not read them. A listing is never
         # served from here — `list` reads it only to carry a model's own
-        # facts into the next one; `get` serves the own facts from it
-        # and lays the live state over them. The lock covers each read
+        # facts into the next one; `get` serves the cached entry with
+        # the engine's word merged over it. The lock covers each read
         # and write, never a call to the engine: the picker's fan-out
         # and the session's turn share one client.
         self._cached_models: dict[str, ModelInfo] = {}
@@ -117,28 +119,21 @@ class OpenAIModels:
     def list(self, timeout: float = ASK_TIMEOUT) -> Listing:
         """The listing, asked of the engine every time. Raises the error
         family when the engine cannot answer, and forgets nothing then."""
-        listed = self._list(timeout)
+        listed = self._list(self._http.within(timeout, "listing"))
         fresh: dict[str, ModelInfo] = {}
         with self._lock:
             for model in listed:
-                # The own facts a cached entry had read and this listing
-                # lacks carry over, and `checked` with them.
                 cached = self._cached_models.get(model.name)
-                if cached is not None:
-                    if model.capabilities is None:
-                        model = replace(model, capabilities=cached.capabilities)
-                    if model.max_context_catalogue is None:
-                        model = replace(model, max_context_catalogue=cached.max_context_catalogue)
-                    model = replace(model, checked=model.checked or cached.checked)
-                fresh[model.name] = model
+                fresh[model.name] = model if cached is None else self._merge(cached, model)
             self._cached_models = fresh
         return list(fresh.values())
 
     @final
     def get(self, name: str, timeout: float = ASK_TIMEOUT) -> ModelInfo | None:
-        """One model: the cached entry, listed first when there is none;
-        `_enhance` while unchecked; its state asked live. None when the
-        provider does not offer it or cannot be reached."""
+        """One model as the engine reports it now: the cached entry,
+        listed first when there is none, with the engine's word (`_get`)
+        merged over it. None when the provider does not offer it or
+        cannot be reached."""
         model = self._cached_model(name)
         if model is None:
             try:
@@ -148,12 +143,9 @@ class OpenAIModels:
             model = self._cached_model(name)
             if model is None:
                 return None
-        if not model.checked:
-            model = self._enhance(model, timeout)
-        live = self._state(model.name)
-        if live is not None:
-            state, max_context_loaded = live
-            model = replace(model, state=state, max_context_loaded=max_context_loaded)
+        fresh = self._get(model.name, self._http.within(timeout, "model"))
+        if fresh is not None:
+            model = self._merge(model, fresh)
         with self._lock:
             self._cached_models[model.name] = model
         return model
@@ -171,23 +163,40 @@ class OpenAIModels:
         """Whether `load` and `unload` work here."""
         return False
 
+    # ---------- the cache: one rule, one lookup ----------
+
+    @final
+    def _merge(self, cached: ModelInfo, fresh: ModelInfo) -> ModelInfo:
+        """`cached` brought up to date with `fresh`, the one rule of what
+        an entry means: the instance's facts are the engine's word now,
+        and so is each of the model's own that `fresh` states — the
+        cache fills in the ones it did not state this time. None is the
+        one "not stated" value: no fact here is ever 0."""
+        return replace(
+            fresh,
+            size=fresh.size or cached.size,
+            max_context_catalogue=fresh.max_context_catalogue or cached.max_context_catalogue,
+            max_output_tokens=fresh.max_output_tokens or cached.max_output_tokens,
+            capabilities=fresh.capabilities or cached.capabilities,
+        )
+
+    def _cached_model(self, name: str) -> ModelInfo | None:
+        with self._lock:
+            found = self._cached_models.get(name)
+            return found if found is not None else self._cached_models.get(self._canonical(name))
+
     # ---------- the hooks: each reads the engine and nothing else ----------
 
-    def _list(self, timeout: float) -> Listing:
-        """The engine's listing. The base reads the OpenAI /models:
-        `context_length` as the catalogue size, `_decode` for what else
-        an entry carries."""
+    def _list(self, http: Http) -> Listing:
+        """The engine's listing, asked through the listing's view. The
+        base reads the OpenAI /models: `context_length` as the catalogue
+        size, `_decode` for what else an entry carries."""
         config = self._config
         if self.listing_keyed:
             if not self._auth.api_key:
                 raise UnauthorizedError(f"No api key for {config.name}.")
-            self._auth.verify_key(timeout)
-        data = http.get_json(
-            f"{config.url}/models{self.listing_query}",
-            name=config.name,
-            headers=self._auth.headers,
-            timeout=timeout,
-        )
+            self._auth.verify_key(http)
+        data = http.get(f"{config.url}/models{self.listing_query}")
         raw = data.get("data") if isinstance(data, dict) else None
         models = []
         for listed in raw if isinstance(raw, list) else []:
@@ -195,15 +204,21 @@ class OpenAIModels:
                 continue
             model = ModelInfo(
                 str(listed["id"]),
-                max_context_catalogue=http.positive_int(listed.get("context_length")),
+                max_context_catalogue=positive_int(listed.get("context_length")),
             )
             models.append(self._decode(listed, model))
         return sorted(models, key=lambda model: model.name)
 
-    def _cached_model(self, name: str) -> ModelInfo | None:
-        with self._lock:
-            found = self._cached_models.get(name)
-            return found if found is not None else self._cached_models.get(self._canonical(name))
+    def _get(self, name: str, http: Http) -> ModelInfo | None:
+        """What the engine says of `name` now, asked through the model's
+        view and built from that alone: the instance's facts — the
+        state, the loaded context size — and whatever of the model's own
+        the same surfaces state (the router's meta while the model runs,
+        Ollama's card). None when the engine has no live surface, as a
+        catalog has none, or did not answer this time: the cached word
+        stands then. UNKNOWN is a state, not a missed answer. The base
+        has no live surface."""
+        return None
 
     def _decode(self, listed: dict[str, Any], model: ModelInfo) -> ModelInfo:
         """`model` with what its /models entry states beyond the protocol
@@ -211,22 +226,8 @@ class OpenAIModels:
         The base reads nothing more."""
         return model
 
-    def _enhance(self, model: ModelInfo, timeout: float) -> ModelInfo:
-        """`model` with what a per-model call adds beyond the listing
-        (Ollama's card), `checked`; unchanged, still unchecked, when the
-        surface did not answer, to be asked again. The base has nothing
-        to add."""
-        return replace(model, checked=True)
-
     def _canonical(self, name: str) -> str:
         """The listed name a shorthand stands for, which `get` falls back
         to when `name` itself is not listed: Ollama reads a bare name
         as its ":latest" tag. The base knows no shorthand."""
         return name
-
-    def _state(self, name: str) -> tuple[ModelState, int | None] | None:
-        """The instance's facts now: (the state, the loaded context size).
-        None when the engine has no live surface, or it did not answer
-        this time; the last word stands then. UNKNOWN is a state, not a
-        missed answer."""
-        return None

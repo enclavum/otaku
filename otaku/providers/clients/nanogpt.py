@@ -14,8 +14,7 @@ from typing import Any, ClassVar
 from urllib.parse import urlsplit
 
 from otaku.formatting import Money
-from otaku.providers import http
-from otaku.providers.http import ASK_TIMEOUT
+from otaku.providers.http import ASK_TIMEOUT, Http, positive_int
 from otaku.providers.openai import frames, reasoning
 from otaku.providers.openai.auth import OpenAIAuth
 from otaku.providers.openai.client import Locality, OpenAIClient
@@ -25,16 +24,10 @@ from otaku.settings.providers import ProviderConfig
 
 
 class NanoGptAuth(OpenAIAuth):
-    def verify_key(self, timeout: float) -> None:
+    def verify_key(self, http: Http) -> None:
         # The account endpoint answers a bad key with 401; nothing else
         # is read of it here.
-        http.post_json(
-            _account_url(self._config.url),
-            {},
-            name=self._config.name,
-            headers=self.headers,
-            timeout=timeout,
-        )
+        http.post(_account_url(self._config.url), {})
 
 
 class NanoGptModels(OpenAIModels):
@@ -59,7 +52,7 @@ class NanoGptModels(OpenAIModels):
             honoured = reasoning.from_wire(listed.get("reasoning_efforts") or []) or None
         return replace(
             model,
-            max_output_tokens=http.positive_int(listed.get("max_output_tokens")),
+            max_output_tokens=positive_int(listed.get("max_output_tokens")),
             capabilities=Capabilities(
                 vision=self._flag(caps, "vision"),
                 audio=self._flag(caps, "audio_input"),
@@ -92,8 +85,8 @@ class NanoGptCompletion(OpenAICompletion):
         if not isinstance(pricing, dict):
             return None
         counts = (
-            http.positive_int(pricing.get("inputTokens")),
-            http.positive_int(pricing.get("outputTokens")),
+            positive_int(pricing.get("inputTokens")),
+            positive_int(pricing.get("outputTokens")),
         )
         return (*counts, None) if any(count is not None for count in counts) else None
 
@@ -117,14 +110,7 @@ class NanoGptClient(OpenAIClient):
         # The account balance lives on the legacy /api surface. Only the
         # dollar figure is reported — the crypto balances riding along in
         # the same payload are not otaku's business.
-        data = http.post_json(
-            _account_url(self.config.url),
-            {},
-            name=self.config.name,
-            headers=self.auth.headers,
-            timeout=timeout,
-            quiet=True,
-        )
+        data = self._http.post(_account_url(self.config.url), {}, timeout=timeout, quiet=True)
         if not isinstance(data, dict) or "usd_balance" not in data:
             return None
         return Money.of(data["usd_balance"], "USD")

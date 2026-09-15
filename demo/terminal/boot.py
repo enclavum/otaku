@@ -443,7 +443,7 @@ def _build_demo_client():
     from otaku.providers.openai.models import ModelInfo, ModelState, OpenAIModels
 
     class DemoModels(OpenAIModels):
-        def _list(self, timeout):
+        def _list(self, http):
             # Loaded and sized like a serving engine, or /info and the
             # picker would show a model nobody started.
             return [
@@ -452,7 +452,6 @@ def _build_demo_client():
                     max_context_catalogue=CONTEXT_SIZE,
                     max_context_loaded=CONTEXT_SIZE,
                     state=ModelState.LOADED,
-                    checked=True,
                 )
             ]
 

@@ -13,7 +13,7 @@ and all.
 
 The `Registry` is composed by the backend package and injected
 everywhere a client is resolved: the configured providers, the
-request-log sink, the smoothing flag, and the per-provider client
+request-log and error-log sinks, the smoothing flag, and the per-provider client
 cache. File persistence is NOT here — the panel saves write through
 settings and then call `update_provider`. Nothing here ever blocks or
 exits the app: an unreachable provider is skipped in fan-outs, and a
@@ -37,7 +37,7 @@ from otaku.providers.clients.ollama import OllamaClient
 from otaku.providers.clients.omlx import OmlxClient
 from otaku.providers.clients.openrouter import OpenRouterClient
 from otaku.providers.errors import ProviderError, UnauthorizedError, UnreachableError
-from otaku.providers.http import LISTING_TIMEOUT
+from otaku.providers.http import LISTING_TIMEOUT, ErrorSink
 from otaku.providers.openai.auth import KeySource
 from otaku.providers.openai.client import Locality, OpenAIClient
 from otaku.providers.openai.completion import RequestSink
@@ -107,12 +107,14 @@ class Registry:
         configs: dict[str, ProviderConfig],
         *,
         request_sink: RequestSink | None = None,
+        error_sink: ErrorSink | None = None,
         smooth: bool = True,
     ) -> None:
         # The sections an engine serves, and the names of those none does.
         self.configs = {name: config for name, config in configs.items() if name in ALL_CLIENTS}
         self.ignored: tuple[str, ...] = tuple(sorted(set(configs) - set(ALL_CLIENTS)))
         self._request_sink = request_sink
+        self._error_sink = error_sink
         self._smooth = smooth
         self._clients: dict[str, OpenAIClient] = {}
         self._lock = threading.Lock()  # a fan-out builds beside a panel save
@@ -178,7 +180,10 @@ class Registry:
 
     def _build(self, config: ProviderConfig) -> OpenAIClient:
         client = ALL_CLIENTS[config.name](
-            config, request_sink=self._request_sink, smooth=self._smooth
+            config,
+            request_sink=self._request_sink,
+            error_sink=self._error_sink,
+            smooth=self._smooth,
         )
         self._clients[config.name] = client
         return client

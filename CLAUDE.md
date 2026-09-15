@@ -169,7 +169,7 @@ shortcut on purpose.
 
 A protected name (`_leading_underscore`) marks what is not part of a
 module's surface. Two named extensions: SUBCLASS HOOKS declared by a
-base class (`providers.openai.models.OpenAIModels._state`, the `ListScreen`
+base class (`providers.openai.models.OpenAIModels._get`, the `ListScreen`
 `_on_*` contract) —
 "for subclasses, not callers", every hook declared on the base so the
 extension surface is visible in one place — and BACKEND-PACKAGE-PRIVATE

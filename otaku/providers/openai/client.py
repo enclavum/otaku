@@ -1,18 +1,18 @@
 """The client: who the engine is and what it owns. The identity is
 class knowledge (its id, the panel's caption, where the server runs,
 the key's environment variable) plus the configuration. It owns the
-`auth` (the key in force) and the two halves, `models` and
-`completion`, each built from the class the engine names; the halves
-are unrelated, read only the config and the auth, and the client is
-the one that knows both. The account's balance, which only a catalog
-has, is the client's own.
+`auth` (the key in force), the one transport built on it, and the two
+halves, `models` and `completion`, each built from the class the engine
+names; the halves are unrelated, read only what they are handed, and
+the client is the one that knows both. The account's balance, which
+only a catalog has, is the client's own.
 """
 
 import enum
 from typing import ClassVar
 
 from otaku.formatting import Money
-from otaku.providers.http import ASK_TIMEOUT
+from otaku.providers.http import ASK_TIMEOUT, ErrorSink, Http
 from otaku.providers.openai.auth import OpenAIAuth
 from otaku.providers.openai.completion import OpenAICompletion, RequestSink
 from otaku.providers.openai.models import OpenAIModels
@@ -49,13 +49,15 @@ class OpenAIClient:
         config: ProviderConfig,
         *,
         request_sink: RequestSink | None = None,
+        error_sink: ErrorSink | None = None,
         smooth: bool = False,
     ) -> None:
         self.config = config
         self.auth = self.auth_class(config, self.env_key)
-        self.models = self.models_class(config, self.auth)
+        self._http = Http(config.name, self.auth.headers, error_sink)
+        self.models = self.models_class(config, self.auth, self._http)
         self.completion = self.completion_class(
-            config, self.auth, request_sink=request_sink, smooth=smooth
+            config, self._http, request_sink=request_sink, smooth=smooth
         )
 
     @classmethod

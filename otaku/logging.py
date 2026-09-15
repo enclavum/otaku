@@ -121,7 +121,7 @@ class Entry:
     body: dict[str, object] | None  # None when the body cannot be read back
     kind: str = "request"  # "request" | "answer" (absent in old lines = request)
     request_id: str = ""  # pairs an answer to its request; "" in old lines
-    status: str = ""  # answers: "ok", "cancelled", or "failed: <type>"
+    status: str = ""  # answers: "ok", "cancelled", or "failed: <the provider's sentence>"
     seconds: float | None = None  # answers: request start → stream end
     first_token_seconds: float | None = None  # answers: the prefill wait
     prompt_tokens: int | None = None
