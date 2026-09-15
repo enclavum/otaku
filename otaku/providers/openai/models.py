@@ -68,7 +68,9 @@ class ModelInfo:
     name: str
     size: int | None = None  # bytes on disk; local engines only
     max_context_catalogue: int | None = None  # the model's own max context
-    max_context_loaded: int | None = None  # what the loaded instance serves
+    # What the loaded instance serves — or, on an engine that loads on
+    # demand under a cap it states beforehand (omlx), what a request gets.
+    max_context_loaded: int | None = None
     # The most a reply may run, where a catalog states it (OpenRouter's
     # top_provider.max_completion_tokens); the local engines set none.
     max_output_tokens: int | None = None
@@ -77,9 +79,10 @@ class ModelInfo:
 
     @property
     def max_context(self) -> int | None:
-        """What a request gets: the loaded instance's context size, or the
-        model's own where loading is not a thing (a catalog). None for
-        a model not loaded, or not known."""
+        """What a request gets: the loaded instance's context size (the
+        cap a request would load under, where the engine states one), or
+        the model's own where loading is not a thing (a catalog). None
+        for a model not loaded, or not known."""
         if self.max_context_loaded is not None:
             return self.max_context_loaded
         return self.max_context_catalogue if self.state is ModelState.UNKNOWN else None
@@ -134,13 +137,13 @@ class OpenAIModels:
         listed first when there is none, with the engine's word (`_get`)
         merged over it. None when the provider does not offer it or
         cannot be reached."""
-        model = self._cached_model(name)
+        model = self.cached(name)
         if model is None:
             try:
                 self.list(timeout)
             except ProviderError:
                 return None
-            model = self._cached_model(name)
+            model = self.cached(name)
             if model is None:
                 return None
         fresh = self._get(model.name, self._http.within(timeout, "model"))
@@ -149,6 +152,17 @@ class OpenAIModels:
         with self._lock:
             self._cached_models[model.name] = model
         return model
+
+    @final
+    def cached(self, name: str) -> ModelInfo | None:
+        """The model as last listed or read, nothing asked of the engine —
+        for a reader that must not wait on the wire, the launch's banner
+        on a provider whose url could name a catalog. Under `name` or the
+        listed name it stands for (`_canonical`). None before anything
+        listed it."""
+        with self._lock:
+            found = self._cached_models.get(name)
+            return found if found is not None else self._cached_models.get(self._canonical(name))
 
     def load(self, model: str) -> None:
         """Blocks until the engine answers. Raises the error family; the
@@ -163,7 +177,7 @@ class OpenAIModels:
         """Whether `load` and `unload` work here."""
         return False
 
-    # ---------- the cache: one rule, one lookup ----------
+    # ---------- the cache: one rule ----------
 
     @final
     def _merge(self, cached: ModelInfo, fresh: ModelInfo) -> ModelInfo:
@@ -179,11 +193,6 @@ class OpenAIModels:
             max_output_tokens=fresh.max_output_tokens or cached.max_output_tokens,
             capabilities=fresh.capabilities or cached.capabilities,
         )
-
-    def _cached_model(self, name: str) -> ModelInfo | None:
-        with self._lock:
-            found = self._cached_models.get(name)
-            return found if found is not None else self._cached_models.get(self._canonical(name))
 
     # ---------- the hooks: each reads the engine and nothing else ----------
 

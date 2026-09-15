@@ -55,6 +55,7 @@ class ModelServer:
         self.list_delay = 0.0  # seconds /models waits before answering — arrival order
         self.list_status: int | None = None  # set → /models answers this status instead
         self.status = False  # True → serve omlx's rich /v1/models/status
+        self.status_code: int | None = None  # set → /models/status answers this status instead
         self.types: dict[str, str] = {}  # omlx status: model_type per model ("vlm", "llm")
         self.thinking: dict[str, bool] = {}  # omlx status: thinking_default per model
         # What a listing entry carries beyond its id and context — the
@@ -63,14 +64,24 @@ class ModelServer:
         # llama.cpp's /props beyond the window (modalities, chat_template_caps).
         self.props: dict[str, Any] = {}
         self.version: dict[str, Any] | None = None  # KoboldCpp's /api/extra/version; None → 404
+        # KoboldCpp's /api/v1/model `result` — "koboldcpp/<name>", "inactive",
+        # or the mask a wrong key gets; None → 404
+        self.kobold_model: str | None = None
         self.capabilities: dict[str, list[str]] = {}  # ollama's /api/show capabilities per model
+        self.remote: set[str] = set()  # ollama tags: the names served by ollama.com
+        self.unload_status: int | None = None  # set → LM Studio's /unload answers this status
+        self.ps_status: int | None = None  # set → /api/ps answers this status instead
         self.token_count: int | None = None  # every count endpoint answers this; None → 404
         self.router = False  # True → llama.cpp's router listing and load/unload doors
         self.router_failed: set[str] = set()  # names whose load ends failed, unloaded
         self.router_sleeping: set[str] = set()  # loaded names the router put to sleep
         self.router_loading: set[str] = set()  # names loading by themselves: loaded once listed
+        self.router_downloading: set[str] = set()  # names fetched first: loading once listed
         self.no_done = False  # True → the stream ends cleanly without [DONE]
         self.decline: str | None = None  # set → the stream is one error frame, no content
+        # set → a chat POST is answered 200 with this bare `{"error": …}`
+        # object and no stream: LM Studio's answer to a wrong path
+        self.flat_error: str | None = None
         self.credits: tuple[float, float] | None = (
             10.0,
             0.0,
@@ -78,7 +89,10 @@ class ModelServer:
         self.balances: dict[str, Any] = {"usd_balance": "10"}  # nanogpt check-balance; empty → 404
         self.api_key: str | None = None  # set → balance endpoints demand this Bearer key
         self.chunk_delay = 0.0
-        self.cached_tokens: int | None = None  # set → usage reports this many cached
+        self.cached_tokens: int | None = None
+        # set → the text wire's last frame carries NanoGPT's pricing block
+        # (inputTokens, outputTokens) and no usage report
+        self.pricing: tuple[int, int] | None = None  # set → usage reports this many cached
         self.chunk_size: int | None = None  # stream in pieces this long; None → thirds
         self.fail_after: int | None = None  # abort the stream after N content chunks
         # Answer a chat POST with this status instead of serving it;
@@ -88,6 +102,7 @@ class ModelServer:
         self.refusal = REFUSAL  # the message a refusal carries; a test makes it an engine's
         self.requests: list[dict[str, Any]] = []
         self.request_headers: list[dict[str, str]] = []  # one row per POST, same order
+        self.posts: list[str] = []  # every POST path, same order
         self.gets: list[str] = []  # every GET path, in order
         self.script: Callable[[dict[str, Any]], str | tuple[str, str]] = default_script
         outer = self
@@ -100,16 +115,25 @@ class ModelServer:
                 path = self.path.split("?", 1)[0].rstrip("/")
                 outer.gets.append(path)
                 if outer.window is not None and path.endswith("/props"):
+                    if not self._authorized():
+                        return  # llama.cpp's key check covers /props, never /v1/models
                     props = {"default_generation_settings": {"n_ctx": outer.window}}
                     self._json({**props, **outer.props})
                     return
                 if outer.version is not None and path.endswith("/api/extra/version"):
                     self._json(outer.version)
                     return
+                if outer.kobold_model is not None and path.endswith("/api/v1/model"):
+                    self._json({"result": outer.kobold_model})
+                    return
                 if outer.window is not None and path.endswith("/true_max_context_length"):
                     self._json({"value": outer.window})
                     return
                 if outer.status and path.endswith("/models/status"):
+                    if outer.status_code is not None:
+                        self.send_response(outer.status_code)
+                        self.end_headers()
+                        return
                     self._json(
                         {
                             "models": [
@@ -139,7 +163,10 @@ class ModelServer:
                 if outer.managed and path.endswith("/api/v1/models"):
                     # LM Studio's registry: one entry per model, its
                     # capabilities where a test named them, a loaded
-                    # instance (id = the name) where it is loaded.
+                    # instance (id = the name) where it is loaded. Behind
+                    # the token, as LM Studio's is.
+                    if not self._authorized():
+                        return
                     self._json(
                         {
                             "models": [
@@ -191,7 +218,13 @@ class ModelServer:
                             state = "loaded" if name in outer.loaded else "unloaded"
                             if name in outer.router_sleeping and name in outer.loaded:
                                 state = "sleeping"
-                            if name in outer.router_loading:
+                            if name in outer.router_downloading:
+                                # Fetched first (a build past b9290); the
+                                # next listing finds it loading.
+                                state = "downloading"
+                                outer.router_downloading.discard(name)
+                                outer.router_loading.add(name)
+                            elif name in outer.router_loading:
                                 # In flight on its own (the router autoloads);
                                 # the next listing finds it loaded.
                                 state = "loading"
@@ -221,12 +254,22 @@ class ModelServer:
                             }
                         rows.append({**entry, **outer.extras.get(name, {})})
                     self._json({"data": rows})
+                elif path.endswith("/v1/key"):
+                    # OpenRouter's key endpoint: the key's own facts, behind
+                    # the key; nothing a test reads yet.
+                    if not self._authorized():
+                        return
+                    self._json({"data": {"limit": None, "limit_remaining": None, "usage": 0}})
                 elif path.endswith("/credits") and outer.credits is not None:
                     if not self._authorized():
                         return
                     total, used = outer.credits
                     self._json({"data": {"total_credits": total, "total_usage": used}})
                 elif outer.managed and path.endswith("/api/ps"):
+                    if outer.ps_status is not None:
+                        self.send_response(outer.ps_status)
+                        self.end_headers()
+                        return
                     self._json(
                         {
                             "models": [
@@ -241,7 +284,8 @@ class ModelServer:
                     )
                 elif outer.managed and path.endswith("/api/tags"):
                     # Ollama's registry: a row names capabilities too, as the
-                    # test set them for the card.
+                    # test set them for the card, and the trained length
+                    # where a test set a context; a remote row is ollama.com's.
                     self._json(
                         {
                             "models": [
@@ -251,6 +295,16 @@ class ModelServer:
                                     **(
                                         {"capabilities": outer.capabilities[name]}
                                         if name in outer.capabilities
+                                        else {}
+                                    ),
+                                    **(
+                                        {"details": {"context_length": outer.contexts[name]}}
+                                        if name in outer.contexts
+                                        else {}
+                                    ),
+                                    **(
+                                        {"remote_host": "ollama.com"}
+                                        if name in outer.remote
                                         else {}
                                     ),
                                 }
@@ -286,6 +340,7 @@ class ModelServer:
                 body = json.loads(self.rfile.read(length) or b"{}")
                 outer.requests.append(body)
                 outer.request_headers.append(dict(self.headers))
+                outer.posts.append(self.path.split("?", 1)[0].rstrip("/"))
                 if outer.balances and self.path.rstrip("/").endswith("/check-balance"):
                     if not self._authorized():
                         return
@@ -318,6 +373,10 @@ class ModelServer:
                     ("/api/v1/models/load", "/api/v1/models/unload")
                 ):
                     # LM Studio's doors: a model to load, an instance to unload.
+                    if outer.unload_status is not None and posted.endswith("/unload"):
+                        self.send_response(outer.unload_status)
+                        self.end_headers()
+                        return
                     name = str(body.get("model") or body.get("instance_id"))
                     (outer.loaded.add if posted.endswith("/load") else outer.loaded.discard)(name)
                     self._json({})
@@ -369,6 +428,11 @@ class ModelServer:
                 as_text = posted.endswith("/completions") and not posted.endswith(
                     "/chat/completions"
                 )
+                if outer.flat_error is not None:
+                    # A wrong path's answer: a 200 with a bare error
+                    # object and no stream (LM Studio's).
+                    self._json({"error": outer.flat_error})
+                    return
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
                 if outer.fail_after is not None:
@@ -400,10 +464,15 @@ class ModelServer:
                         piece = text[i : i + third]
                         choice = {"text": piece} if as_text else {"delta": {"content": piece}}
                         self._event({"choices": [choice]})
-                    usage: dict[str, Any] = {"prompt_tokens": 7, "completion_tokens": 5}
-                    if outer.cached_tokens is not None:
-                        usage["prompt_tokens_details"] = {"cached_tokens": outer.cached_tokens}
-                    self._event({"choices": [{"delta": {}}], "usage": usage})
+                    if as_text and outer.pricing is not None:
+                        prompt_count, completion_count = outer.pricing
+                        pricing = {"inputTokens": prompt_count, "outputTokens": completion_count}
+                        self._event({"choices": [{"text": ""}], "x_nanogpt_pricing": pricing})
+                    else:
+                        usage: dict[str, Any] = {"prompt_tokens": 7, "completion_tokens": 5}
+                        if outer.cached_tokens is not None:
+                            usage["prompt_tokens_details"] = {"cached_tokens": outer.cached_tokens}
+                        self._event({"choices": [{"delta": {}}], "usage": usage})
                     if not outer.no_done:
                         self.wfile.write(b"data: [DONE]\n\n")
 
@@ -425,6 +494,7 @@ class ModelServer:
         self.refusal = REFUSAL
         self.requests.clear()
         self.request_headers.clear()
+        self.posts.clear()
         self.gets.clear()
 
     def close(self) -> None:

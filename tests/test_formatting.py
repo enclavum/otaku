@@ -7,6 +7,7 @@ from otaku.formatting import (
     decode_text,
     flatten,
     format_context,
+    format_seconds,
     format_size,
     pretty_path,
     printable,
@@ -110,6 +111,22 @@ class TestFormatSize:
 
     def test_shows_a_dash_for_zero(self) -> None:
         assert format_size(0) == "—"
+
+
+class TestFormatSeconds:
+    def test_whole_seconds_from_ten_up(self) -> None:
+        assert format_seconds(30) == "30 seconds"
+        assert format_seconds(10.4) == "10 seconds"
+
+    def test_tenths_below_ten(self) -> None:
+        assert format_seconds(0.5) == "0.5 seconds"
+        assert format_seconds(2.5) == "2.5 seconds"
+
+    def test_a_round_figure_drops_its_tenth(self) -> None:
+        assert format_seconds(5.0) == "5 seconds"
+
+    def test_one_second_is_singular(self) -> None:
+        assert format_seconds(1.0) == "1 second"
 
 
 class TestFormatContext:

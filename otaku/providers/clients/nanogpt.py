@@ -18,7 +18,7 @@ from otaku.providers.http import ASK_TIMEOUT, Http, positive_int
 from otaku.providers.openai import frames, reasoning
 from otaku.providers.openai.auth import OpenAIAuth
 from otaku.providers.openai.client import Locality, OpenAIClient
-from otaku.providers.openai.completion import OpenAICompletion
+from otaku.providers.openai.completion import PROTOCOL_PARAMS, SAMPLER_PARAMS, OpenAICompletion
 from otaku.providers.openai.models import Capabilities, ModelInfo, OpenAIModels
 from otaku.settings.providers import ProviderConfig
 
@@ -37,11 +37,12 @@ class NanoGptModels(OpenAIModels):
     listing_query = "?detailed=true"
 
     def _decode(self, listed: dict[str, Any], model: ModelInfo) -> ModelInfo:
+        model = replace(model, max_output_tokens=positive_int(listed.get("max_output_tokens")))
         caps = listed.get("capabilities")
         if not isinstance(caps, dict):
             return model
         honoured: frozenset[str] | None
-        if "reasoning" not in caps:
+        if self._flag(caps, "reasoning") is None:
             honoured = None
         elif not caps["reasoning"]:
             honoured = frozenset()
@@ -52,7 +53,6 @@ class NanoGptModels(OpenAIModels):
             honoured = reasoning.from_wire(listed.get("reasoning_efforts") or []) or None
         return replace(
             model,
-            max_output_tokens=positive_int(listed.get("max_output_tokens")),
             capabilities=Capabilities(
                 vision=self._flag(caps, "vision"),
                 audio=self._flag(caps, "audio_input"),
@@ -65,10 +65,14 @@ class NanoGptModels(OpenAIModels):
         )
 
     def _flag(self, caps: dict[str, Any], key: str) -> bool | None:
-        return bool(caps[key]) if key in caps else None
+        """A capability flag as stated; None for one absent or null —
+        the catalog's "unknown" — or of no bool shape."""
+        value = caps.get(key)
+        return value if isinstance(value, bool) else None
 
 
 class NanoGptCompletion(OpenAICompletion):
+    supported_params = PROTOCOL_PARAMS | SAMPLER_PARAMS
     # Inline `cache_control` reaches the models that honour it and is
     # dropped elsewhere: marking is safe across the catalog.
     can_mark_cache = True

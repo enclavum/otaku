@@ -102,12 +102,12 @@ class TestThink:
 
     def test_the_level_rides_the_wire_and_default_sends_nothing(self, app: App) -> None:
         # The scripted server is a generic provider, whose url could name
-        # a local engine as well as a catalog: both knobs go out.
+        # a local engine as well as a catalog: every knob goes out.
         app.play("/set think low")
         app.play("I enter the hall.")
         body = app.server.requests[-1]
         assert body["reasoning_effort"] == "low"
-        assert body["chat_template_kwargs"] == {"enable_thinking": True}
+        assert body["chat_template_kwargs"] == {"enable_thinking": True, "reasoning_effort": "low"}
         app.play("/set think none")
         app.play("I listen.")
         body = app.server.requests[-1]
@@ -225,13 +225,9 @@ class TestThink:
         finally:
             managed.close()
 
-    def test_a_provider_without_a_knob_takes_the_level_and_sends_nothing(
-        self, server, tmp_path
-    ) -> None:
-        # LM Studio reads no request-level thinking knob (thinking is the
-        # app's own per-model switch). The setting still takes — nothing
-        # is refused for the provider's sake — and the request carries no
-        # thinking field at all.
+    def test_lmstudio_takes_the_level_and_sends_the_effort_alone(self, server, tmp_path) -> None:
+        # LM Studio reads `reasoning_effort` and no template knob: the
+        # level goes out by name and nothing else rides with it.
         set_config_provider(tmp_path / "state", server, name="lmstudio")
         plain = launch(tmp_path / "state", server, spec="lmstudio/test-model")
         try:
@@ -239,7 +235,7 @@ class TestThink:
             assert plain.session.think == "high"
             plain.play("I enter the hall.")
             body = plain.server.requests[-1]
-            assert "reasoning_effort" not in body
+            assert body["reasoning_effort"] == "high"
             assert "chat_template_kwargs" not in body
         finally:
             plain.close()
@@ -702,6 +698,25 @@ class TestGenericProvider:
             assert tomllib.loads(app.paths.providers_file.read_text())["mybox"]
         finally:
             app.close()
+
+    def test_the_launch_never_lists_the_generic_provider_for_its_window(self, tmp_path) -> None:
+        # Its url could name a catalog across the internet: the header's
+        # window comes from the cache alone, None before a listing warmed it.
+        server = ModelServer(models=("a",))
+        server.contexts["a"] = 32_000
+        try:
+            set_config_provider(tmp_path / "state", server, name="generic")
+            app = launch(tmp_path / "state", server, spec="generic/a")
+            try:
+                asked = len(server.gets)
+                assert app.session.max_context() is None
+                assert server.gets[asked:] == []
+                api_providers.get_providers(app.session)
+                assert app.session.max_context() == 32_000
+            finally:
+                app.close()
+        finally:
+            server.close()
 
 
 class TestLlamaCpp:

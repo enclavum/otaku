@@ -42,7 +42,7 @@ from typing import Any, Protocol
 
 import httpx
 
-from otaku.formatting import printable
+from otaku.formatting import format_seconds, printable
 from otaku.providers.errors import ProviderError, StatusError, UnauthorizedError, UnreachableError
 
 ASK_TIMEOUT = 10.0  # one question, one answer: a listing, a count, a balance
@@ -59,7 +59,8 @@ _DETAIL_WIDTH = 300  # how much of a server's explanation a sentence carries
 
 # The sentences for what never reached the server, or never came back.
 _UNSENDABLE = "A request to {name} could not be encoded: {detail}"
-_SILENT = "{name} took the request but did not answer within {seconds:.0f} seconds."
+_SILENT = "{name} took the request but did not answer within {seconds}."
+_STALLED = "{name} went quiet mid-reply: nothing for {seconds}."
 _SPENT = "{name} did not answer in time."
 
 
@@ -147,13 +148,14 @@ class Http:
         is the caller's to file."""
         name = self._name
         started = False
+        capped = self._cap(timeout) or timeout
         try:
             with httpx.stream(
                 "POST",
                 url,
                 json=body,
                 headers=self._headers,
-                timeout=_timeout(self._cap(timeout), _STREAM_CONNECT_TIMEOUT),
+                timeout=_timeout(capped, _STREAM_CONNECT_TIMEOUT),
                 follow_redirects=True,
             ) as response:
                 if response.status_code >= 300:
@@ -177,7 +179,10 @@ class Http:
                     started = True
                     yield line
         except httpx.ReadTimeout as e:
-            raise UnreachableError(_SILENT.format(name=name, seconds=timeout)) from e
+            sentence = _STALLED if started else _SILENT
+            raise UnreachableError(
+                sentence.format(name=name, seconds=format_seconds(capped))
+            ) from e
         except (httpx.HTTPError, httpx.InvalidURL) as e:
             if started:
                 raise UnreachableError(f"Lost the connection to {name}.") from e
@@ -225,7 +230,10 @@ class Http:
                 _raise_for_status(response, name)
                 return response.json()
             except httpx.ReadTimeout as e:
-                raise UnreachableError(_SILENT.format(name=name, seconds=capped)) from e
+                assert capped is not None  # a read without a timeout never times out
+                raise UnreachableError(
+                    _SILENT.format(name=name, seconds=format_seconds(capped))
+                ) from e
             except (httpx.HTTPError, httpx.InvalidURL) as e:
                 # InvalidURL is httpx's own for a url that cannot be spelled
                 # (a port with a letter in it) — a section's mistake, and a
@@ -235,11 +243,10 @@ class Http:
                 # Raised before anything is sent: a header carries ASCII only.
                 raise ProviderError(_UNSENDABLE.format(name=name, detail=e)) from e
             except ValueError as e:
-                # The call returned, so `response` is bound: the body would not parse.
+                # The call returned, so `response` is bound: the body would
+                # not parse. Not a status error — the status was fine.
                 head = _excerpt(response.text, 20)
-                raise StatusError(
-                    f"The answer from {name} is not JSON: {head!r}", response.status_code
-                ) from e
+                raise ProviderError(f"The answer from {name} is not JSON: {head!r}") from e
         except ProviderError as e:
             if quiet:
                 return None
@@ -259,8 +266,9 @@ class Http:
 
 def positive_int(value: object) -> int | None:
     """`value` when it is a positive int — how a count or a context size is
-    taken off the untyped JSON a server answers with — else None."""
-    return value if isinstance(value, int) and value > 0 else None
+    taken off the untyped JSON a server answers with — else None. A bool
+    is an int to Python and never a count."""
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
 
 
 def _raise_for_status(response: httpx.Response, name: str) -> None:
@@ -279,6 +287,15 @@ def _raise_for_status(response: httpx.Response, name: str) -> None:
         # A body that could not be read (the connection dropped mid-body)
         # is no explanation, and no reason to leave the error family.
         detail = _excerpt(response.text, _DETAIL_WIDTH)
+        # The message of the `{"error": …}` object every server in this
+        # family answers with, out of its envelope — and away from the
+        # account id some carry beside it.
+        with contextlib.suppress(ValueError):
+            data = response.json()
+            failure = data.get("error") if isinstance(data, dict) else None
+            message = failure.get("message") if isinstance(failure, dict) else failure
+            if isinstance(message, str) and message:
+                detail = _excerpt(message, _DETAIL_WIDTH)
     raise StatusError(
         f"Refused by {name} with HTTP {status}" + (f": {detail}" if detail else "."), status
     )

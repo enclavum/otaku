@@ -29,14 +29,15 @@ BOTH = frozenset({"reasoning_effort", "enable_thinking"})
 EFFORT = frozenset({"reasoning_effort"})
 FLAG = frozenset({"enable_thinking"})
 TEMPLATE = frozenset({"enable_thinking", "template_reasoning_effort"})
-NONE: frozenset[str] = frozenset()
+ALL = BOTH | TEMPLATE  # the generic provider: permissive, every knob
 # (provider, url, the env var of its key or "", the model named or "",
-# the knobs the provider is promised — `providers.base.thinking_knobs`).
-# The generic case is a llama-server reached through the protocol alone:
-# the setup the "think none does nothing" report came from.
+# the knobs the provider is promised — the completion half's
+# `chat_reasoning_knobs`). The generic case is a llama-server reached
+# through the protocol alone: the setup the "think none does nothing"
+# report came from.
 CASES = [
     ("llamacpp", "http://127.0.0.1:8080/v1", "", "", TEMPLATE),
-    ("generic", "http://127.0.0.1:8080/v1", "", "", BOTH),
+    ("generic", "http://127.0.0.1:8080/v1", "", "", ALL),
     ("koboldcpp", "http://127.0.0.1:5001/v1", "", "", BOTH),
     (
         "ollama",
@@ -57,7 +58,7 @@ CASES = [
         "http://127.0.0.1:1234/v1",
         "LMSTUDIO_API_KEY",
         os.environ.get("OTAKU_LIVE_LMSTUDIO_MODEL", ""),
-        NONE,
+        EFFORT,
     ),
     (
         "openrouter",

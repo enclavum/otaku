@@ -472,7 +472,7 @@ def _model_info(session: Session) -> tuple[tuple[str, str], ...]:
     # What the model can do, as the provider says it — one fact per row,
     # "unknown" where the provider could not say (and the app offers
     # nothing on it). The efforts are listed in the wire's order; a
-    # provider no effort reaches lists none.
+    # model no effort reaches supports none.
     caps = row.capabilities if row is not None else None
     out.append(("Vision", _yes_no(caps.vision if caps else None)))
     efforts = caps.reasoning if caps else None
@@ -480,7 +480,7 @@ def _model_info(session: Session) -> tuple[tuple[str, str], ...]:
         out.append(("Reasoning efforts", "unknown"))
     else:
         named = ", ".join(effort for effort in reasoning.EFFORTS if effort in efforts)
-        out.append(("Reasoning efforts", named or "none"))
+        out.append(("Reasoning efforts", named or "no efforts supported"))
     out.append(("Text completion", _yes_no(caps.text_completion if caps else None)))
     out.append(("Thinking", session.think if session.think else "default"))
     if config.keep_alive:

@@ -76,6 +76,24 @@ class TestLaunchedPort:
     def test_a_positional_model_beside_the_name_is_fine(self) -> None:
         assert launched_port("koboldcpp", ["koboldcpp gemma.gguf --port 5008"]) == 5008
 
+    def test_koboldcpps_positional_port_counts_when_no_flag_does(self) -> None:
+        # KoboldCpp's own docs spell the port positionally, after the model.
+        assert launched_port("koboldcpp", ["koboldcpp gemma.gguf 5014"]) == 5014
+        assert launched_port("koboldcpp", ["/opt/koboldcpp-mac-arm64 m.gguf 5015 --admin"]) == 5015
+        # The flag wins; a number behind a flag is that flag's, not a port.
+        assert launched_port("koboldcpp", ["koboldcpp gemma.gguf 5014 --port 5009"]) == 5009
+        assert launched_port("llama-server", ["/opt/bin/llama-server -c 4096 -m x.gguf"]) is None
+
+    def test_the_lowest_port_wins_over_a_routers_children(self) -> None:
+        # A router's children are llama-servers too, on ephemeral ports,
+        # and `ps` lists them in no particular order.
+        child = (
+            "/opt/homebrew/bin/llama-server --host 127.0.0.1 --port 62266 --alias a --model a.gguf"
+        )
+        parent = "/opt/homebrew/bin/llama-server --models-dir /models --port 8091"
+        assert launched_port("llama-server", [child, parent]) == 8091
+        assert launched_port("llama-server", [parent, child]) == 8091
+
 
 class TestOllamaHost:
     def test_empty_is_the_local_default(self) -> None:

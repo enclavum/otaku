@@ -282,13 +282,17 @@ class Session:
         nobody can say. Best-effort and never blocking on the internet:
         a CLOUD catalog is not asked, because its answer lives across
         the internet and a launch does not wait for that; the generic
-        provider answers from its cache alone, nothing over the wire.
+        provider, whose url could name one, answers from its cache
+        alone, nothing over the wire — None until a listing warmed it.
         Not a property: a local engine is asked over its own socket."""
         client = self._client()
         if client is None or client.locality is Locality.REMOTE:
             return None
         try:
-            found = client.models.get(self.model)
+            if client.locality is Locality.UNKNOWN:
+                found = client.models.cached(self.model)
+            else:
+                found = client.models.get(self.model)
         except Exception:
             return None
         return found.max_context if found else None

@@ -7,7 +7,8 @@ Four kinds, by where the failure came from:
 - `UnreachableError` — no server answered: a refused connection, a
   timeout, a network that is not there, a connection lost mid-stream.
 - `UnauthorizedError` — the server answered that the key is missing or
-  wrong (401, 403), or a catalog that needs a key was asked without one.
+  wrong (401; a 403 is the request refused, not the key), or a
+  catalog that needs a key was asked without one.
 - `StatusError` — the server answered with any other error status;
   `status` says which, the sentence carries its explanation.
 - `DeclinedError` — the model itself answered with a refusal or an

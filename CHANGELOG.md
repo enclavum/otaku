@@ -52,8 +52,10 @@ Full list of changes: [CHANGELOG.md](https://github.com/enclavum/otaku/blob/main
   variable is never written to the file. `/info` and `/balance` count a key from either source.
 - When the llama.cpp or KoboldCpp section is first written, it takes the port the server was
   actually launched with, read off the running process, rather than the engine's default — a
-  release build's name (`koboldcpp-mac-arm64`), a `python koboldcpp.py` launch and a path with
-  spaces in it included.
+  release build's name (`koboldcpp-mac-arm64`), a `python koboldcpp.py` launch, a path with
+  spaces in it and KoboldCpp's port written positionally, as its own docs spell it, included;
+  where several servers of the name run, the lowest port, since a llama.cpp router's children
+  sit on ephemeral ones.
 - llama.cpp in router mode (`llama-server --models-dir`) lists the directory's models in the
   picker and loads and unloads them there, the way Ollama and omlx do. A model the router put to
   sleep counts as loaded, and a load that failed says so with the exit code.
@@ -93,10 +95,9 @@ Full list of changes: [CHANGELOG.md](https://github.com/enclavum/otaku/blob/main
   message names them — a model whose reasoning is mandatory refusing `none`, an engine that
   rejects the field. A context overflow fails at once instead of going out twice.
 - `/set think` is no longer refused on KoboldCpp or LM Studio. A level goes out on whatever
-  knobs the engine reads — KoboldCpp takes `reasoning_effort` and the template's flag, and its
-  newer builds spend it as a thinking budget — and where an engine reads none, as LM Studio's
-  endpoint does, the setting is kept and nothing is sent: thinking there is the app's own
-  per-model switch.
+  knobs the engine reads: KoboldCpp takes `reasoning_effort` and the template's flag, and its
+  newer builds spend it as a thinking budget; LM Studio takes `reasoning_effort` since its 0.4.8
+  and hands it to the models that expose reasoning, ignoring it on the others.
 - A failed turn, a refused load and a provider panel that cannot save now say one sentence in
   the provider's own words: which provider could not be reached, which HTTP status it refused
   with and what the server said, whose key was rejected, or that the model declined and why.
@@ -126,7 +127,11 @@ Full list of changes: [CHANGELOG.md](https://github.com/enclavum/otaku/blob/main
   embedding, reranker and audio models, each answering the first turn with a 400. They are no
   longer listed. KoboldCpp with nothing loaded listed a model named `inactive`; it lists none.
 - A KoboldCpp generation that failed on the server ended as a complete reply: it stops with
-  `finish_reason: error` and no error text, which now reads as the model declining.
+  `finish_reason: error` and no error text, which now ends the turn as a reply that broke off.
+- A local engine's url typed without `/v1` listed its models — Ollama's and LM Studio's native
+  surfaces answer at the root — and then failed every turn with a 404. The OpenAI surface of
+  llama.cpp, KoboldCpp, Ollama, omlx and LM Studio is now taken at `/v1` under whatever url the
+  section names; `/info` shows the url in use.
 - A provider url that cannot be spelled (a letter in the port) was a traceback; it is the
   provider's could-not-reach sentence.
 - A section url a proxy redirects — `http` to `https`, a trailing slash — was taken as the

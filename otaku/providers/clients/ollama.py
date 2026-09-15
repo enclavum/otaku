@@ -1,13 +1,16 @@
 """Ollama: the registry, load and unload, sizes and the loaded context sizes
 via the native /api endpoints, each model's capabilities and its own
-max context from its card at /api/show; chat rides the OpenAI protocol
-at /v1. A
-reasoning effort goes out as `reasoning_effort` alone, the one knob the
-server reads; it takes none, low, medium, high and max, and answers
-400 to any other word, which the take then sends again without the
-knob. A model served by ollama.com (`remote_host` on its entry) is
-listed as the registry describes it, its state unknown and nothing to
-load: every request for it is proxied.
+max context from its card at /api/show — the registry row states the
+max context too, on a model a recent Ollama pulled; chat rides the
+OpenAI protocol at /v1, which reads the protocol's parameters and nothing beyond
+them — `top_k`, `min_p` and `repetition_penalty` go out and are
+dropped unread, as the base's `supported_params` says. A reasoning effort
+goes out as `reasoning_effort` alone, the one knob the server reads;
+it takes none, low, medium, high and max, and answers 400 to any
+other word, which the take then sends again without the knob. A model
+served by ollama.com (`remote_host` on its entry) is listed as the
+registry describes it, its state unknown and nothing to load: every
+request for it is proxied.
 """
 
 import contextlib
@@ -60,43 +63,58 @@ class OllamaModels(OpenAIModels):
     # ---------- the hooks ----------
 
     def _list(self, http: Http) -> Listing:
-        """Names and sizes from /api/tags, state and loaded context size from /api/ps,
-        one call each however long the registry. A tags entry names
-        capabilities too, but not the card's (a server here said of
-        Gemma 4 "completion, tools, thinking" where the card adds
-        vision), so only what an entry cannot get wrong is read off it:
-        an embedding model has no "completion" and plays no story. A
+        """Names, sizes and the model's own max context from /api/tags,
+        state and loaded context size from /api/ps, one call each
+        however long the registry. A tags entry names capabilities too,
+        but not the card's (a server here said of Gemma 4 "completion,
+        tools, thinking" where the card adds vision), so only what an
+        entry cannot get wrong is read off it: an embedding model has
+        no "completion" and plays no story, wherever it is served; and
+        `details.context_length` is the trained length, which a recent
+        pull records and an older one leaves for the card to say. A
         model with a `remote_host` is ollama.com's: no runner ever lists
         it, its card is an internet round-trip, so the entry's own word
         is taken and its state stays unknown. A loaded model missing
-        from the registry still belongs in the list."""
+        from the registry still belongs in the list; a listed one that
+        plays no story does not come back through ps. A ps probe that
+        did not answer leaves every state unknown."""
         data = http.get(f"{self._config.base_url}/api/tags")
+        seen: set[str] = set()
         sizes: dict[str, int | None] = {}
+        contexts: dict[str, int | None] = {}
         remote: dict[str, ModelInfo] = {}
         entries = data.get("models") if isinstance(data, dict) else None
         for entry in entries if isinstance(entries, list) else []:
             name = entry.get("name") or entry.get("model")
             if not isinstance(name, str):
                 continue
+            seen.add(name)
             caps = entry.get("capabilities")
+            if isinstance(caps, list) and "completion" not in caps:
+                continue
+            details = entry.get("details")
+            context = (
+                positive_int(details.get("context_length")) if isinstance(details, dict) else None
+            )
             if entry.get("remote_host"):
                 remote[name] = ModelInfo(
                     name=name,
+                    max_context_catalogue=context,
                     capabilities=self._capabilities_of(caps) if isinstance(caps, list) else None,
                 )
                 continue
-            if isinstance(caps, list) and "completion" not in caps:
-                continue
             sizes[name] = positive_int(entry.get("size"))
+            contexts[name] = context
         self._remote = set(remote)
-        running = self._running(http) or {}
-        names = sorted(sizes) + sorted(set(running) - set(sizes))
+        running = self._running(http)
+        names = sorted(sizes) + sorted(set(running or {}) - seen)
         local = [
             ModelInfo(
                 name=name,
                 size=sizes.get(name),
-                max_context_loaded=running.get(name),
-                state=ModelState.LOADED if name in running else ModelState.UNLOADED,
+                max_context_catalogue=contexts.get(name),
+                max_context_loaded=running.get(name) if running else None,
+                state=self._state_of(running, name),
             )
             for name in names
         ]
@@ -116,9 +134,7 @@ class OllamaModels(OpenAIModels):
         if running is None:
             return None
         fresh = ModelInfo(
-            name=name,
-            max_context_loaded=running.get(name),
-            state=ModelState.LOADED if name in running else ModelState.UNLOADED,
+            name=name, max_context_loaded=running.get(name), state=self._state_of(running, name)
         )
         if name in self._carded:
             return fresh
@@ -181,6 +197,12 @@ class OllamaModels(OpenAIModels):
                 running[name] = positive_int(entry.get("context_length"))
         return running
 
+    def _state_of(self, running: dict[str, int | None] | None, name: str) -> ModelState:
+        """Loaded or not by the ps listing; unknown when ps did not answer."""
+        if running is None:
+            return ModelState.UNKNOWN
+        return ModelState.LOADED if name in running else ModelState.UNLOADED
+
     def _capabilities_of(self, caps: list[Any]) -> Capabilities:
         """A card's capability words as ours. No raw text wire: Ollama's
         /v1/completions wraps the prompt as one chat turn and thinks
@@ -189,6 +211,7 @@ class OllamaModels(OpenAIModels):
         reasoning = _EFFORTS if "thinking" in caps else frozenset[str]()
         return Capabilities(
             vision="vision" in caps,
+            audio="audio" in caps,
             reasoning=reasoning,
             text_completion=False,
             structured_output=True,

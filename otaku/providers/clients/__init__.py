@@ -29,36 +29,51 @@ def read_home_json(relative: str) -> dict[str, Any]:
 
 
 def launched_port(executable: str, commands: Iterable[str] | None = None) -> int | None:
-    """The `--port` a running `executable` was launched with — how an
-    engine configured by launch flags is found where it is. The
-    executable is known by its bare name, however the command spells
-    it (see `_is_named`); a subcommand may follow it ("llama serve").
-    None when no such process runs, it carries no flag, or the
-    processes cannot be read. `commands` are the command lines to read,
-    the running processes' by default."""
+    """The port a running `executable` was launched on — its `--port`
+    flag, else KoboldCpp's positional (`koboldcpp model.gguf 5001`, as
+    its own docs spell it) — how an engine configured by launch flags
+    is found where it is. The executable is known by its bare name,
+    however the command spells it (see `_is_named`); a subcommand may
+    follow it ("llama serve"). Where several run, the lowest port: a
+    router's children are servers of the same name on ephemeral ports,
+    and `ps` lists them in no particular order. None when no such
+    process runs, none carries a port, or the processes cannot be read.
+    `commands` are the command lines to read, the running processes' by
+    default."""
     name, *subcommand = executable.lower().split()
+    ports = []
     for command in _command_lines() if commands is None else commands:
         if _runs(command, name, subcommand):
             flag = _PORT_FLAG.search(command)
-            if flag:
-                return int(flag.group(1))
-    return None
+            positional = next(
+                (int(word) for word in _before_flags(command) if word.isdigit()), None
+            )
+            port = int(flag.group(1)) if flag else positional
+            if port is not None:
+                ports.append(port)
+    return min(ports, default=None)
 
 
 def _runs(command: str, name: str, subcommand: list[str]) -> bool:
     """Whether `command` is `name` running, with `subcommand` right after
-    it. Only the program part is read — the words before the first
-    flag, so a path with spaces stays whole — and a server bundled by
-    another app (Ollama's, LM Studio's) is not the engine."""
-    program = re.split(r"\s+-", command, maxsplit=1)[0]
-    if any(mark in program for mark in _NOT_AN_ENGINE):
+    it. Only the words before the first flag are read, so a path with
+    spaces stays whole; a server bundled by another app (Ollama's, LM
+    Studio's) is not the engine."""
+    words = _before_flags(command)
+    if any(mark in " ".join(words) for mark in _NOT_AN_ENGINE):
         return False
-    words = program.split()
     for i, word in enumerate(words):
         following = words[i + 1 : i + 1 + len(subcommand)]  # as many words as the subcommand has
         if _is_named(word, name) and following == subcommand:
             return True
     return False
+
+
+def _before_flags(command: str) -> list[str]:
+    """The command line's words before its first flag: the executable,
+    a subcommand, a positional argument; a path with spaces stays whole
+    among them."""
+    return re.split(r"\s+-", command, maxsplit=1)[0].split()
 
 
 def _is_named(word: str, name: str) -> bool:

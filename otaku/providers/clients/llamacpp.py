@@ -4,17 +4,17 @@ folder of models and loads and unloads them by name. Chat rides the
 OpenAI protocol at /v1. The listing carries what a model half needs
 — the loaded context size, the model's own max context and its size
 in `meta`, and in router mode the modalities of every entry — so
-`/props` is read once per listing, for the modalities in single mode,
-and nothing is read for a single server's state, which never changes.
-A router's
+`/props` is read once per listing: the modalities in single mode, and
+the key check in both, `/v1/models` being exempt from the server's key
+check where `/props` is not, so a wrong key, or none where one is
+demanded, shows at the listing rather than at the first turn. Nothing
+is read for a single server's state, which never changes. A router's
 entries carry a `status`, which is how the mode is told: `can_manage`
 is settled by the first listing and false until then. In router mode
 any request for an unloaded model loads it, so the counts ask not to.
-`/v1/models` is exempt from the server's key check and `/props` is
-not, so with a key configured that one read is also the key check —
-or a wrong key would show only at the first turn.
 """
 
+import re
 import time
 from collections.abc import Callable, Sequence
 from typing import Any, ClassVar
@@ -22,11 +22,11 @@ from typing import Any, ClassVar
 from otaku.providers.clients import launched_port
 from otaku.providers.errors import ProviderError, StatusError, UnreachableError
 from otaku.providers.http import ASK_TIMEOUT, PROBE_TIMEOUT, Http, positive_int
-from otaku.providers.openai import reasoning, requests
+from otaku.providers.openai import reasoning
 from otaku.providers.openai.client import Locality, OpenAIClient
-from otaku.providers.openai.completion import OpenAICompletion
+from otaku.providers.openai.completion import PROTOCOL_PARAMS, SAMPLER_PARAMS, OpenAICompletion
 from otaku.providers.openai.models import Capabilities, Listing, ModelInfo, ModelState, OpenAIModels
-from otaku.providers.openai.requests import WireMessage
+from otaku.providers.openai.requests import Image, WireMessage
 from otaku.settings.providers import ProviderConfig
 
 _LOAD_POLL_SECONDS = 0.5  # how often a router is asked whether an order is done
@@ -34,6 +34,9 @@ _SILENCE_BUDGET = 10.0  # how long a router may leave polls unanswered before th
 # A router entry's words for a model with a server behind it: loaded, or
 # put to sleep idle (`--sleep-idle-seconds`) and woken by the next request.
 _RUNNING = frozenset({"loaded", "sleeping"})
+# Its words for a load under way — fetched first, where a build past
+# b9290 downloads on demand — that an order waits on, not repeats.
+_PENDING = frozenset({"downloading", "downloaded", "loading"})
 
 
 class LlamaCppModels(OpenAIModels):
@@ -45,10 +48,15 @@ class LlamaCppModels(OpenAIModels):
 
     def _list(self, http: Http) -> Listing:
         data = http.get(f"{self._config.url}/models")
-        # With a key the props read is loud, so a wrong key raises here;
-        # without one, a server that lacks /props is a server without
-        # modalities.
-        props = http.get(f"{self._config.base_url}/props", quiet=not self._auth.api_key)
+        # Loud: a 401 is the key's verdict, wrong or missing. A 404 alone
+        # is tolerated — a build without /props is still llama.cpp, its
+        # modalities unknown.
+        try:
+            props = http.get(f"{self._config.base_url}/props")
+        except StatusError as e:
+            if e.status != 404:
+                raise
+            props = None
         entries = self._entries_of(data)
         # Told by the raw entries, projectors included: a folder of
         # nothing but a projector is still a router.
@@ -69,8 +77,9 @@ class LlamaCppModels(OpenAIModels):
         """Whether an entry is a projector, not a model: a router lists a
         top-level `mmproj-*.gguf` as one (llama.cpp pairs a projector
         with its model only inside a subfolder) and loading it fails
-        with an exit code. The name is llama.cpp's own rule for telling
-        one."""
+        with an exit code. The name is how llama.cpp tells one, read
+        here in any case and in either mode: a projector is no model
+        wherever it is listed."""
         return "mmproj" in str(entry["id"]).lower()
 
     def _meta_of(self, entry: dict[str, Any]) -> tuple[int | None, int | None, int | None]:
@@ -110,7 +119,12 @@ class LlamaCppSingleModels(LlamaCppModels):
     """One model, loaded at launch, its state never changing: the
     listing's one entry carries its loaded context size, its own max
     context and size, `/props` its modalities, and every listed name
-    is that model's. Nothing is asked live, nothing is managed."""
+    is that model's — a listing that came back long, a catalog's url
+    pasted into the section, still costs the one probe, stamped on
+    every row. The name is the model file's: a build past b9290 lists
+    the whole path, and the server serves its one model whatever a
+    request names, so the file name every build agrees on is what a
+    section remembers. Nothing is asked live, nothing is managed."""
 
     def _listing(self, entries: list[dict[str, Any]], props: Any) -> Listing:
         if not entries:
@@ -121,17 +135,23 @@ class LlamaCppSingleModels(LlamaCppModels):
         # is known.
         answered = isinstance(props, dict)
         modalities = props.get("modalities") if answered else None
-        return [
-            ModelInfo(
-                name=str(entry["id"]),
-                size=size,
-                max_context_catalogue=max_context_catalogue,
-                max_context_loaded=max_context_loaded,
-                capabilities=self._capabilities_of(modalities) if answered else None,
-                state=ModelState.LOADED,
-            )
-            for entry in sorted(entries, key=lambda entry: str(entry["id"]))
-        ]
+        return sorted(
+            (
+                ModelInfo(
+                    # The file name, however the build lists it: the name
+                    # alone (b9290) or the whole path (past it), either
+                    # separator.
+                    name=re.split(r"[\\/]", str(entry["id"]))[-1],
+                    size=size,
+                    max_context_catalogue=max_context_catalogue,
+                    max_context_loaded=max_context_loaded,
+                    capabilities=self._capabilities_of(modalities) if answered else None,
+                    state=ModelState.LOADED,
+                )
+                for entry in entries
+            ),
+            key=lambda model: model.name,
+        )
 
 
 class LlamaCppRouterModels(LlamaCppModels):
@@ -146,22 +166,24 @@ class LlamaCppRouterModels(LlamaCppModels):
         return True
 
     def load(self, model: str) -> None:
-        status = self._status_of(self._entry(model, self._http) or {})
+        entry = self._entry(model, self._http)
+        if entry == {}:
+            # The router lists every model it fronts. A name it does not
+            # — a top-level projector's, a typo — would spawn a child
+            # doomed to die, or draw a 404 spelled "File Not Found".
+            unknown = ProviderError(f"{model} is not offered by {self._config.name}.")
+            self._http.record(unknown, "load")
+            raise unknown
+        status = self._status_of(entry or {})
         if status in _RUNNING:
             return
-        # A load already in flight — the router autoloads on any request
-        # for the model — is one to wait for, not to order again; the
-        # router's own word for that, when the probe missed it, is the
-        # 400 "already running".
-        if status != "loading":
-            try:
-                self._http.post(
-                    f"{self._config.base_url}/models/load", {"model": model}, purpose="load"
-                )
-            except StatusError as e:
-                if e.status != 400:
-                    raise
-        entry = self._wait(model, lambda status: status == "loading", "load")
+        # A load under way — the router autoloads on any request for the
+        # model — is one to wait for, not to order again. The order goes
+        # out quietly: the router's own word for one the probe missed is
+        # a 400, no failure, and the poll judges what became of it.
+        if status not in _PENDING:
+            self._http.post(f"{self._config.base_url}/models/load", {"model": model}, quiet=True)
+        entry = self._wait(model, lambda status: status in _PENDING, "load")
         if self._status_of(entry) not in _RUNNING:
             status_object = entry.get("status")
             code = status_object.get("exit_code") if isinstance(status_object, dict) else None
@@ -172,12 +194,20 @@ class LlamaCppRouterModels(LlamaCppModels):
 
     def unload(self, model: str) -> None:
         status = self._status_of(self._entry(model, self._http) or {})
-        if status not in _RUNNING and status != "loading":
-            return  # nothing running to stop
-        self._http.post(
-            f"{self._config.base_url}/models/unload", {"model": model}, purpose="unload"
-        )
-        self._wait(model, lambda status: status in _RUNNING or status == "loading", "unload")
+        if status not in _RUNNING and status not in _PENDING:
+            return  # nothing running, or on its way, to stop
+        # A 400 is the router saying the model stopped between the probe
+        # and the order — evicted, reaped asleep — which is what was
+        # asked for. Loud otherwise: an order that failed would leave the
+        # poll waiting on a model that never stops.
+        try:
+            self._http.post(
+                f"{self._config.base_url}/models/unload", {"model": model}, purpose="unload"
+            )
+        except StatusError as e:
+            if e.status != 400:
+                raise
+        self._wait(model, lambda status: status in _RUNNING or status in _PENDING, "unload")
 
     # ---------- the hooks ----------
 
@@ -238,19 +268,21 @@ class LlamaCppRouterModels(LlamaCppModels):
         poll the router does not answer — it holds its lock while a
         child spawns — is waited out, up to a budget of silence, then
         filed under `purpose`."""
-        silence = 0.0
+        quiet_since: float | None = None  # when the router's silence began
         while True:
             entry = self._entry(model, self._http)
             if entry is None:
-                silence += _LOAD_POLL_SECONDS
-                if silence > _SILENCE_BUDGET:
+                now = time.monotonic()
+                if quiet_since is None:
+                    quiet_since = now
+                elif now - quiet_since > _SILENCE_BUDGET:
                     lost = UnreachableError(f"{self._config.name} stopped answering.")
                     self._http.record(lost, purpose)
                     raise lost
             elif not pending(self._status_of(entry)):
                 return entry
             else:
-                silence = 0.0
+                quiet_since = None
             time.sleep(_LOAD_POLL_SECONDS)
 
     def _status_of(self, entry: dict[str, Any]) -> str | None:
@@ -266,36 +298,46 @@ class LlamaCppRouterModels(LlamaCppModels):
         status = self._status_of(entry)
         if status in _RUNNING:
             return ModelState.LOADED
-        if status == "loading":
+        if status in ("loading", "downloading"):
             return ModelState.LOADING
         return ModelState.UNLOADED
 
 
 class LlamaCppCompletion(OpenAICompletion):
+    supported_params = PROTOCOL_PARAMS | SAMPLER_PARAMS
     # The template's flag is what stops Gemma 4 and its kind; the effort
     # rides beside it as a template variable, for the templates that
     # read one. A request-level reasoning_effort is not read.
     chat_reasoning_knobs: ClassVar[frozenset[str]] = frozenset(
         {reasoning.FLAG_KNOB, reasoning.TEMPLATE_EFFORT_KNOB}
     )
+    # The chat count needs a build past b9290 (June 2026); an older one
+    # answers None and the caller keeps its estimate.
     can_count_tokens = True
 
     def count_chat_tokens(
-        self, model: str, messages: Sequence[WireMessage], timeout: float = ASK_TIMEOUT
+        self,
+        model: str,
+        messages: Sequence[WireMessage],
+        *,
+        effort: str | None = None,
+        images: Sequence[Image] = (),
+        timeout: float = ASK_TIMEOUT,
     ) -> int | None:
-        # The same body a turn would send, streaming fields aside, so the
-        # count is of what the template renders for it. A router must
-        # not load the model for a count.
-        body = requests.chat_completion_body(model, messages, {})
-        request = {k: v for k, v in body.items() if k not in ("stream", "stream_options")}
+        # The same body a turn would send, knobs included and streaming
+        # fields aside, so the count is of what the template renders for
+        # it. A router must not load the model for a count.
+        body, knobs = self._chat_request(model, messages, {}, effort=effort, images=images)
+        request = {
+            k: v for k, v in {**body, **knobs}.items() if k not in ("stream", "stream_options")
+        }
         data = self._http.post(
             f"{self._config.url}/chat/completions/input_tokens?autoload=false",
             request,
             timeout=timeout,
             quiet=True,
         )
-        count = data.get("input_tokens") if isinstance(data, dict) else None
-        return count if isinstance(count, int) else None
+        return positive_int(data.get("input_tokens")) if isinstance(data, dict) else None
 
     def count_text_tokens(
         self, model: str, prompt: str, timeout: float = ASK_TIMEOUT

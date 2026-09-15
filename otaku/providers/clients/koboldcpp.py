@@ -1,14 +1,15 @@
 """KoboldCpp: one model per process, chosen at launch — no load or
 unload. Chat rides the OpenAI protocol at /v1; the native surface adds
-admin mode's active model, the true max context length, the feature flags
-of `/api/extra/version` (vision among them), and a token count that
-renders a chat request the way a turn would. A reasoning effort goes out
-on both knobs: `reasoning_effort` becomes a reasoning budget — none is
-none, minimal a tenth of the reply, low a quarter, medium half, high
-and above unlimited — and the template's flag is read under `--jinja`.
-Every native read is exempt from the server's password, so the key is
-verified against admin's model endpoint, which masks its answer for a
-wrong one.
+KoboldAI's model endpoint (the active model, admin mode or not), the
+true max context length, the feature flags of `/api/extra/version`
+(vision and audio among them), and a token count that renders a chat
+request the way a turn would. A reasoning effort goes out on both
+knobs: `reasoning_effort` becomes a reasoning budget — none is none,
+minimal a tenth of the reply, low a quarter, medium half, high and
+above unlimited — and the template's flag is read under `--jinja` from
+1.120 on. The native reads are exempt from the server's password, the
+token count apart, so the key is judged by the model endpoint, which
+masks its answer for a key it does not accept.
 """
 
 from collections.abc import Sequence
@@ -17,69 +18,75 @@ from typing import ClassVar
 from otaku.providers.clients import launched_port
 from otaku.providers.errors import UnauthorizedError
 from otaku.providers.http import ASK_TIMEOUT, PROBE_TIMEOUT, Http, positive_int
-from otaku.providers.openai import reasoning, requests
-from otaku.providers.openai.auth import OpenAIAuth
+from otaku.providers.openai import reasoning
 from otaku.providers.openai.client import Locality, OpenAIClient
-from otaku.providers.openai.completion import OpenAICompletion
+from otaku.providers.openai.completion import PROTOCOL_PARAMS, SAMPLER_PARAMS, OpenAICompletion
 from otaku.providers.openai.models import Capabilities, Listing, ModelInfo, ModelState, OpenAIModels
-from otaku.providers.openai.requests import WireMessage
+from otaku.providers.openai.requests import Image, WireMessage
 from otaku.settings.providers import ProviderConfig
 
-# The listing's names that are no model: the server's word for nothing
-# loaded, and router mode's two orders.
+# The listing's names that are no model, as the server spells them —
+# never behind its "koboldcpp/" prefix, which only a model gets: its
+# word for nothing loaded, and router mode's two orders.
 _NOT_A_MODEL = frozenset({"inactive", "initial_model", "unload_model"})
-
-
-class KoboldCppAuth(OpenAIAuth):
-    def verify_key(self, http: Http) -> None:
-        # Admin's model endpoint answers everyone, but masks the name as
-        # "protected-model" when a password is set and this key is not
-        # it — the one place a wrong key shows before a turn. Quiet: a
-        # server without the endpoint has nothing to verify, and a dead
-        # one fails the listing that follows.
-        data = http.get(f"{self._config.base_url}/api/v1/model", quiet=True)
-        result = data.get("result") if isinstance(data, dict) else None
-        if isinstance(result, str) and result.endswith("protected-model"):
-            rejected = UnauthorizedError(f"The api key was rejected by {self._config.name}.")
-            http.record(rejected)
-            raise rejected
+# What the model endpoint answers, behind `--password`, a key it does
+# not accept.
+_PROTECTED = "koboldcpp/protected-model"
 
 
 class KoboldCppModels(OpenAIModels):
     def _list(self, http: Http) -> Listing:
         """The one loaded model, the engine's own name prefix stripped;
-        "inactive" is the server's name for none. Admin mode's active
-        model refines the state when that surface answers; the loaded
-        context size and the flags are the server's, read once for every
-        name — five reads, one budget."""
-        self._auth.verify_key(http)
+        "inactive" is the server's name for none. The model endpoint is
+        read once for two things: the key — a masked answer is a key
+        the server rejects, or none configured — and the active model,
+        which refines the state when the endpoint answers; the loaded
+        context size and the flags are the server's, read once for
+        every name. Four reads, one budget."""
+        named = self._model_named(http)
+        if named == _PROTECTED:
+            rejected = UnauthorizedError(
+                f"No api key for {self._config.name}."
+                if self._auth.key_source is None
+                else f"The api key was rejected by {self._config.name}."
+            )
+            http.record(rejected)
+            raise rejected
+        # KoboldCpp brands its ids "koboldcpp/<name>"; the picker shows
+        # bare names under provider captions, so the prefix goes. Chat is
+        # unaffected: outside router mode the engine ignores the request's
+        # model field.
         names = sorted(
-            bare
+            listed.name.removeprefix("koboldcpp/")
             for listed in super()._list(http)
-            if (bare := _bare(listed.name)) not in _NOT_A_MODEL
+            if listed.name not in _NOT_A_MODEL
         )
         if not names:
             return []
-        active = self._active_model(http)
-        sizing = http.get(
-            f"{self._config.base_url}/api/extra/true_max_context_length",
-            timeout=PROBE_TIMEOUT,
-            quiet=True,
-        )
-        max_context_loaded = positive_int(sizing.get("value")) if isinstance(sizing, dict) else None
+        if named is None:
+            active = None  # no model endpoint: the one model listed is the loaded one
+        else:
+            # "inactive" is the server's word for none: no name matches it.
+            active = "" if named == "inactive" else named.removeprefix("koboldcpp/")
+        max_context_loaded = self._loaded_size(http)
         # The server's feature flags: vision means a projector was loaded
-        # beside the model. Every effort reaches the model as a budget;
-        # the raw wire is there; decoding is constrained server-side.
+        # beside the model, audio that it hears. Every effort reaches the
+        # model as a budget; the raw wire is there; decoding is
+        # constrained server-side. A probe that did not answer states
+        # nothing, and the cache keeps what an earlier one read.
         version = http.get(
             f"{self._config.base_url}/api/extra/version", timeout=PROBE_TIMEOUT, quiet=True
         )
-        capabilities = Capabilities(
-            vision=bool(version["vision"])
-            if isinstance(version, dict) and "vision" in version
-            else None,
-            reasoning=reasoning.ALL_EFFORTS,
-            text_completion=True,
-            structured_output=True,
+        capabilities = (
+            Capabilities(
+                vision=bool(version["vision"]) if "vision" in version else None,
+                audio=bool(version["audio"]) if "audio" in version else None,
+                reasoning=reasoning.ALL_EFFORTS,
+                text_completion=True,
+                structured_output=True,
+            )
+            if isinstance(version, dict)
+            else None
         )
         models = []
         for name in names:
@@ -95,36 +102,45 @@ class KoboldCppModels(OpenAIModels):
         return models
 
     def _get(self, name: str, http: Http) -> ModelInfo | None:
-        active = self._active_model(http)
-        if active is not None and name != active:
+        named = self._model_named(http)
+        if named is None:
+            return None
+        if named == _PROTECTED:
+            return ModelInfo(name=name, state=ModelState.UNKNOWN)  # a key it does not accept
+        if named == "inactive" or name != named.removeprefix("koboldcpp/"):
             return ModelInfo(name=name, state=ModelState.UNLOADED)
+        max_context_loaded = self._loaded_size(http)
+        if max_context_loaded is None:
+            return None  # the sizing probe missed: the last word stands
+        return ModelInfo(name=name, max_context_loaded=max_context_loaded, state=ModelState.LOADED)
+
+    # ---------- the native surface ----------
+
+    def _model_named(self, http: Http) -> str | None:
+        """What KoboldAI's model endpoint names: `koboldcpp/<name>` for
+        the model loaded, "inactive" for none, `_PROTECTED` behind
+        `--password` for a key it does not accept — or None when it
+        does not answer. `http` is the view of the ask that is running,
+        the listing's or the model's."""
+        data = http.get(f"{self._config.base_url}/api/v1/model", timeout=PROBE_TIMEOUT, quiet=True)
+        named = data.get("result") if isinstance(data, dict) else None
+        return named if isinstance(named, str) else None
+
+    def _loaded_size(self, http: Http) -> int | None:
+        """The context size the loaded model serves, off the true max
+        context length; None when the probe did not answer."""
         sizing = http.get(
             f"{self._config.base_url}/api/extra/true_max_context_length",
             timeout=PROBE_TIMEOUT,
             quiet=True,
         )
-        max_context_loaded = positive_int(sizing.get("value")) if isinstance(sizing, dict) else None
-        if active is None and max_context_loaded is None:
-            return None
-        return ModelInfo(name=name, max_context_loaded=max_context_loaded, state=ModelState.LOADED)
-
-    # ---------- the native surface ----------
-
-    def _active_model(self, http: Http) -> str | None:
-        """The model admin mode reports as active; "" when none is
-        ("inactive"), None when the endpoint does not answer or will not
-        say — behind `--password` a request without the key is told only
-        that a model is protected. `http` is the view of the ask that is
-        running, the listing's or the model's."""
-        data = http.get(f"{self._config.base_url}/api/v1/model", timeout=PROBE_TIMEOUT, quiet=True)
-        if isinstance(data, dict):
-            model = data.get("result")
-            if isinstance(model, str) and not model.endswith("protected-model"):
-                return "" if model == "inactive" else _bare(model)
-        return None
+        return positive_int(sizing.get("value")) if isinstance(sizing, dict) else None
 
 
 class KoboldCppCompletion(OpenAICompletion):
+    # `frequency_penalty` stands in for `presence_penalty` where that
+    # one is not sent: read, as one sampler.
+    supported_params = PROTOCOL_PARAMS | SAMPLER_PARAMS
     chat_reasoning_knobs: ClassVar[frozenset[str]] = frozenset(
         {reasoning.EFFORT_KNOB, reasoning.FLAG_KNOB}
     )
@@ -133,12 +149,20 @@ class KoboldCppCompletion(OpenAICompletion):
     can_count_tokens = True
 
     def count_chat_tokens(
-        self, model: str, messages: Sequence[WireMessage], timeout: float = ASK_TIMEOUT
+        self,
+        model: str,
+        messages: Sequence[WireMessage],
+        *,
+        effort: str | None = None,
+        images: Sequence[Image] = (),
+        timeout: float = ASK_TIMEOUT,
     ) -> int | None:
         # Given messages, the count renders them through the same
-        # transform a chat turn gets, jinja template included.
-        body = {"messages": requests.chat_completion_body(model, messages, {})["messages"]}
-        return self._count(body, timeout)
+        # transform a chat turn gets, jinja template included — the
+        # template's default, though: the endpoint reads no template
+        # kwargs, and it renders an image as a placeholder line.
+        body, _ = self._chat_request(model, messages, {}, effort=effort, images=images)
+        return self._count({"messages": body["messages"]}, timeout)
 
     def count_text_tokens(
         self, model: str, prompt: str, timeout: float = ASK_TIMEOUT
@@ -149,8 +173,7 @@ class KoboldCppCompletion(OpenAICompletion):
         data = self._http.post(
             f"{self._config.base_url}/api/extra/tokencount", body, timeout=timeout, quiet=True
         )
-        count = data.get("value") if isinstance(data, dict) else None
-        return count if isinstance(count, int) else None
+        return positive_int(data.get("value")) if isinstance(data, dict) else None
 
 
 class KoboldCppClient(OpenAIClient):
@@ -158,22 +181,12 @@ class KoboldCppClient(OpenAIClient):
     label = "KoboldCpp"
     locality = Locality.LOCAL
     env_key = "KOBOLDCPP_API_KEY"
-    auth_class = KoboldCppAuth
     models_class = KoboldCppModels
     completion_class = KoboldCppCompletion
 
     @classmethod
     def autoconfigure(cls) -> ProviderConfig:
         # Configured by launch flags, nothing on disk: a running server's
-        # own flag is read, else the standard default.
+        # own port is read, else the standard default.
         port = launched_port("koboldcpp") or 5001
         return ProviderConfig(name=cls.id, url=f"http://localhost:{port}/v1")
-
-
-def _bare(name: str) -> str:
-    """KoboldCpp reports its model as "koboldcpp/<name>" — its own brand
-    on the id. The picker shows bare names under provider captions, so
-    the prefix goes; chat is unaffected, the engine ignores the
-    request's model field outside router mode, where the field names
-    the model to swap to."""
-    return name.removeprefix("koboldcpp/")

@@ -124,7 +124,7 @@ class TestProviderFailures:
     def test_a_declining_model_says_so_in_its_words(self, app: App, capsys) -> None:
         app.server.decline = "content filtered"
         app.play("I enter the hall.")
-        assert "[ error: The model declined: content filtered ]" in capsys.readouterr().out
+        assert "[ error: The reply broke off: content filtered ]" in capsys.readouterr().out
 
     def test_a_dead_provider_cannot_be_reached(self, server, tmp_path, capsys) -> None:
         dead = scripted.ModelServer()

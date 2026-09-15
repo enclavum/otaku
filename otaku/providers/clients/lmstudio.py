@@ -1,16 +1,22 @@
 """LM Studio: the registry, load and unload, sizes, context sizes and each
 model's capabilities via its /api/v1/models surface; chat rides the
-OpenAI protocol at /v1. Reasoning is the app's own per-model switch:
-nothing on the wire reaches it, so no knob is sent and no effort is
-reported as honoured, whatever the model could do.
+OpenAI protocol at /v1. A reasoning effort goes out as
+`reasoning_effort`, which the server takes since its 0.4.8 — none,
+minimal, low, medium, high, xhigh; any other word is a 400, which the
+take then sends again without the knob — and hands to the models that
+expose reasoning, ignoring it on the others (Gemma 4 here answered the
+same at none and at high). Which models those are the registry does
+not say, so no effort is reported as honoured or not.
 """
 
 from typing import Any, ClassVar
 
 from otaku.providers.clients import read_home_json
+from otaku.providers.errors import StatusError
 from otaku.providers.http import ASK_TIMEOUT, PROBE_TIMEOUT, Http, positive_int
+from otaku.providers.openai import reasoning
 from otaku.providers.openai.client import Locality, OpenAIClient
-from otaku.providers.openai.completion import OpenAICompletion
+from otaku.providers.openai.completion import PROTOCOL_PARAMS, OpenAICompletion
 from otaku.providers.openai.models import Capabilities, Listing, ModelInfo, ModelState, OpenAIModels
 from otaku.settings.providers import ProviderConfig
 
@@ -35,25 +41,38 @@ class LmStudioModels(OpenAIModels):
         # model is unloaded in turn. The registry is read with its
         # errors on: a door that cannot read must say so, not do nothing.
         entry = self._entry_of(model, self._http.within(ASK_TIMEOUT, "unload"), quiet=False)
-        for instance in (entry.get("loaded_instances") or []) if entry is not None else []:
+        for instance in self._instances(entry) if entry is not None else []:
             instance_id = instance.get("id")
             if not isinstance(instance_id, str):
                 continue
-            self._http.post(
-                f"{self._config.base_url}/api/v1/models/unload",
-                {"instance_id": instance_id},
-                purpose="unload",
-            )
+            try:
+                self._http.post(
+                    f"{self._config.base_url}/api/v1/models/unload",
+                    {"instance_id": instance_id},
+                    purpose="unload",
+                )
+            except StatusError as e:
+                # Gone between the read and the order — LM Studio's own
+                # idle unload: the state asked for.
+                if e.status != 404:
+                    raise
 
     # ---------- the hooks ----------
 
     def _list(self, http: Http) -> Listing:
         """Everything from the one /api/v1/models pass: key, size,
         capabilities, the model's maximum, and a loaded instance's
-        configured context size. No such surface — not LM Studio — falls to
-        the plain names; a dead server raises out of them."""
-        entries = self._registry(http)
-        if not entries:
+        configured context size. Loud: a server that refuses the key, or
+        fails, is the listing's own sentence. A 404, or an answer that
+        is not the registry's — no such surface, not LM Studio — falls
+        to the plain names."""
+        try:
+            entries = self._registry(http, quiet=False)
+        except StatusError as e:
+            if e.status != 404:
+                raise
+            entries = None
+        if entries is None:
             return super()._list(http)
         models = []
         for entry in entries:
@@ -110,26 +129,36 @@ class LmStudioModels(OpenAIModels):
         """The context size a loaded instance was configured with; None
         without an instance — the model's maximum is not what an
         instance gets."""
-        for instance in entry.get("loaded_instances") or []:
-            config = instance.get("config") or {}
-            length = positive_int(config.get("context_length"))
+        for instance in self._instances(entry):
+            config = instance.get("config")
+            length = (
+                positive_int(config.get("context_length")) if isinstance(config, dict) else None
+            )
             if length:
                 return length
         return None
 
+    def _instances(self, entry: dict[str, Any]) -> list[dict[str, Any]]:
+        """The entry's loaded instances, each one an object; anything
+        else on the list is skipped."""
+        listed = entry.get("loaded_instances")
+        return [i for i in listed if isinstance(i, dict)] if isinstance(listed, list) else []
+
     def _capabilities_of(self, entry: dict[str, Any]) -> Capabilities:
-        """What a registry entry says: vision from its capabilities; no
-        effort reaches the model (the app's switch); the raw wire is
-        there; decoding is constrained server-side (`response_format`)."""
+        """What a registry entry says: vision from its capabilities;
+        whether an effort is honoured it does not say (see the module);
+        the raw wire is there; decoding is constrained server-side
+        (`response_format`)."""
         caps = entry.get("capabilities")
         vision = bool(caps["vision"]) if isinstance(caps, dict) and "vision" in caps else None
-        return Capabilities(
-            vision=vision, reasoning=frozenset(), text_completion=True, structured_output=True
-        )
+        return Capabilities(vision=vision, text_completion=True, structured_output=True)
 
 
 class LmStudioCompletion(OpenAICompletion):
-    chat_reasoning_knobs: ClassVar[frozenset[str]] = frozenset()
+    # Its endpoint documents `top_k` and `repeat_penalty` beyond the
+    # protocol, and no `min_p`.
+    supported_params = PROTOCOL_PARAMS | {"top_k", "repetition_penalty"}
+    chat_reasoning_knobs: ClassVar[frozenset[str]] = frozenset({reasoning.EFFORT_KNOB})
 
     def _convert_params(self, params: dict[str, object]) -> dict[str, object]:
         if "repetition_penalty" not in params:

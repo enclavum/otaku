@@ -4,11 +4,14 @@ the key's environment variable) plus the configuration. It owns the
 `auth` (the key in force), the one transport built on it, and the two
 halves, `models` and `completion`, each built from the class the engine
 names; the halves are unrelated, read only what they are handed, and
-the client is the one that knows both. The account's balance, which
+the client is the one that knows both. A local engine's url names its
+server, and the surfaces hang off it: the native ones at the root, the
+OpenAI one at /v1 — whatever was typed. The account's balance, which
 only a catalog has, is the client's own.
 """
 
 import enum
+from dataclasses import replace
 from typing import ClassVar
 
 from otaku.formatting import Money
@@ -52,6 +55,11 @@ class OpenAIClient:
         error_sink: ErrorSink | None = None,
         smooth: bool = False,
     ) -> None:
+        if self.locality is Locality.LOCAL and config.url:
+            # A url typed without /v1 lists — Ollama's and LM Studio's
+            # roots answer — and then fails every turn with a 404.
+            root = config.url.rstrip("/").removesuffix("/v1")
+            config = replace(config, url=f"{root}/v1")
         self.config = config
         self.auth = self.auth_class(config, self.env_key)
         self._http = Http(config.name, self.auth.headers, error_sink)

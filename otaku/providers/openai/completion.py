@@ -86,8 +86,27 @@ class RequestSink(Protocol):
     ) -> None: ...
 
 
+# The parameters every OpenAI endpoint reads, by the app's names — the
+# ones `/set` takes (`backend.session.KNOWN_PARAMS`), which the body
+# carries as they are.
+PROTOCOL_PARAMS: frozenset[str] = frozenset(
+    {"temperature", "top_p", "max_tokens", "presence_penalty", "frequency_penalty", "seed", "stop"}
+)
+# The three beyond the protocol, llama.cpp's samplers by name; an engine
+# declares the ones its endpoint reads.
+SAMPLER_PARAMS: frozenset[str] = frozenset({"top_k", "min_p", "repetition_penalty"})
+
+
 class OpenAICompletion:
     # ---------- class knowledge: what is true of the engine's wire ----------
+
+    # The parameters the wire reads, out of the app's. One outside the
+    # set goes out and is dropped unread — the engine keeps its default
+    # — which is what a reader states before sending it. The base is
+    # the protocol's own, which every endpoint reads (Ollama's reads
+    # nothing more); an engine adds what its server reads beyond it.
+    # `_convert_params` respells, it never adds or drops.
+    supported_params: ClassVar[frozenset[str]] = PROTOCOL_PARAMS
 
     # Honours prompt-cache breakpoints (`cache_control` on content
     # parts: Anthropic's marking, forwarded by OpenRouter). The
@@ -139,14 +158,7 @@ class OpenAICompletion:
         every knob the engine reads; `images` ride on the last
         message; `watched=False` skips the pacing for a call nobody
         watches, so its cancel is not delayed."""
-        body = requests.chat_completion_body(
-            model,
-            messages,
-            self._convert_params(params),
-            images=images,
-            cache_ttl=self._cache_ttl(),
-        )
-        knobs = reasoning.fields(effort, self.chat_reasoning_knobs)
+        body, knobs = self._chat_request(model, messages, params, effort=effort, images=images)
         url = f"{self._config.url}/chat/completions"
         stream = self._stream(url, body, knobs, purpose, timeout, frames.chat_delta)
         return smoothing.smoothen(stream, on_idle) if watched and self._smooth else stream
@@ -176,10 +188,18 @@ class OpenAICompletion:
         return smoothing.smoothen(stream, on_idle) if watched and self._smooth else stream
 
     def count_chat_tokens(
-        self, model: str, messages: Sequence[WireMessage], timeout: float = ASK_TIMEOUT
+        self,
+        model: str,
+        messages: Sequence[WireMessage],
+        *,
+        effort: str | None = None,
+        images: Sequence[Image] = (),
+        timeout: float = ASK_TIMEOUT,
     ) -> int | None:
         """How many tokens the chat wire would spend on `messages`, as
-        the engine itself counts them — None where it cannot say, which
+        the engine itself counts them, of the request a turn would send:
+        `effort` on the knobs and `images` on the last message, where
+        the engine's count renders them. None where it cannot say, which
         the base cannot. Best effort: a caller keeps its estimate for
         None."""
         return None
@@ -192,6 +212,28 @@ class OpenAICompletion:
         return None
 
     # ---------- streaming ----------
+
+    def _chat_request(
+        self,
+        model: str,
+        messages: Sequence[WireMessage],
+        params: dict[str, object],
+        *,
+        effort: str | None,
+        images: Sequence[Image],
+    ) -> tuple[dict[str, object], dict[str, object]]:
+        """The chat request as the wire gets it: the body, and the
+        reasoning knobs beside it — apart, since a 400 to the knobs
+        sends the body again without them. What a turn sends, and what
+        a count is asked to count."""
+        body = requests.chat_completion_body(
+            model,
+            messages,
+            self._convert_params(params),
+            images=images,
+            cache_ttl=self._cache_ttl(),
+        )
+        return body, reasoning.fields(effort, self.chat_reasoning_knobs)
 
     def _cache_ttl(self) -> str | None:
         """The prompt-cache TTL to mark with, or None: the engine must
@@ -234,7 +276,11 @@ class OpenAICompletion:
                         yielded = True
                         yield chunk
             except StatusError as e:
-                knob_refused = any(word in str(e).lower() for word in self._refusal_words(knobs))
+                # Less the model's own name: an id may spell "thinking"
+                # (NanoGPT's `:thinking` models) and a 400 that echoes it
+                # — a context overflow — names no knob.
+                sentence = str(e).lower().replace(str(body.get("model", "")).lower(), "")
+                knob_refused = any(word in sentence for word in self._refusal_words(knobs))
                 if yielded or e.status != 400 or not knob_refused:
                     raise
                 yield from self._generate(url, body, purpose, timeout, read_delta)
@@ -273,7 +319,13 @@ class OpenAICompletion:
                 for event in events:
                     usage = self._read_usage(event)
                     if usage is not None:
-                        stats.prompt_tokens, stats.completion_tokens, cached = usage
+                        # Each count as the report states it: a later
+                        # report that states one alone leaves the others.
+                        prompt, completion, cached = usage
+                        if prompt is not None:
+                            stats.prompt_tokens = prompt
+                        if completion is not None:
+                            stats.completion_tokens = completion
                         if cached is not None:
                             stats.cached_tokens = cached
                     sentence = frames.trouble(event)
@@ -289,13 +341,13 @@ class OpenAICompletion:
                         text.append(content)
                         yield Text(content)
             except UnreachableError:
-                # An engine that reports a refusal mid-stream (llama.cpp)
-                # ends without [DONE]: the refusal is the answer, not
-                # the lost connection that follows it.
+                # An engine that reports its trouble mid-stream (llama.cpp)
+                # ends without [DONE]: the trouble is the answer, not the
+                # lost connection that follows it.
                 if not trouble:
                     raise
             if trouble:
-                raise DeclinedError("The model declined: " + "".join(trouble))
+                raise DeclinedError(" ".join(trouble))
             status = "ok"
         except Exception as e:
             # The provider's sentence where there is one; a bug's type name.
@@ -337,33 +389,46 @@ class OpenAICompletion:
     def _events(lines: Iterator[str], name: str) -> Generator[dict[str, Any], None, None]:
         """The protocol's frames off a stream's lines: each `data:` line's
         JSON, up to `[DONE]`; anything else — comments, keepalives, a line
-        that will not parse — is skipped. Lines that run out without
-        `[DONE]` are a lost connection: every engine sends it on a clean
-        end, and Ollama closes without it after swallowing a runner's error
-        mid-reply."""
+        that will not parse — is skipped, except a bare JSON object
+        carrying `error`: a server that answers a wrong path with a 200
+        and one of those (LM Studio's "Unexpected endpoint") sent a frame
+        in all but name, and its sentence beats "lost the connection".
+        Lines that run out without `[DONE]` are a lost connection: every
+        engine sends it on a clean end, and Ollama closes without it
+        after swallowing a runner's error mid-reply."""
         for line in lines:
             if not line.startswith("data:"):
+                event = _object(line)
+                if event is not None and "error" in event:
+                    yield event
                 continue
             payload = line[len("data:") :].strip()
             if payload == "[DONE]":
                 return
-            try:
-                event = json.loads(payload)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(event, dict):
+            event = _object(payload)
+            if event is not None:
                 yield event
         raise UnreachableError(f"Lost the connection to {name}.")
 
     # ---------- the hooks ----------
 
     def _convert_params(self, params: dict[str, object]) -> dict[str, object]:
-        """The sampling params as this engine spells them: the app sends
+        """The params as this engine spells them: the app sends
         `repetition_penalty`, which llama.cpp and LM Studio read only as
-        `repeat_penalty`. The base spells nothing differently."""
+        `repeat_penalty`. A respelling only — what the engine reads at
+        all is `supported_params`. The base spells nothing differently."""
         return params
 
     def _read_usage(self, event: dict[str, Any]) -> frames.Usage | None:
         """The usage report on a frame, or None: the protocol's `usage`
         object, which is all the base reads."""
         return frames.read_usage(event)
+
+
+def _object(text: str) -> dict[str, Any] | None:
+    """`text` as the JSON object it is, or None: not JSON, or not an object."""
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None

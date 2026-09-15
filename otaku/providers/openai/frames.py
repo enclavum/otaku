@@ -35,25 +35,26 @@ def completion_delta(event: dict[str, Any]) -> tuple[str, str]:
 
 
 def trouble(event: dict[str, Any]) -> str:
-    """The provider's own sentence when a frame is a refusal or an
-    in-stream error instead of content, "" otherwise — or ours, when a
-    frame only stops with a `finish_reason` that is trouble: "error"
-    (KoboldCpp's failed generation, which then ends cleanly) or
-    "content_filter". Swallowed, such a frame would end the stream as
-    an "ok" reply."""
+    """The sentence a frame is trouble by, "" otherwise. The model's own
+    refusal — a `refusal` delta, or a stop by `content_filter` — is
+    "The model declined: …"; a server's in-stream error — an `error`
+    object or string in place of content, or a stop by `finish_reason`
+    "error" (KoboldCpp's failed generation, which then ends cleanly) —
+    is "The reply broke off: …", in the server's words where it gave
+    any. Swallowed, such a frame would end the stream as an "ok" reply."""
     failure = event.get("error")
     if isinstance(failure, dict) and failure.get("message"):
-        return str(failure["message"])
+        return f"The reply broke off: {failure['message']}"
     if isinstance(failure, str) and failure:
-        return failure
+        return f"The reply broke off: {failure}"
     choice = _choice(event)
     delta = choice.get("delta")
     if isinstance(delta, dict) and delta.get("refusal"):
-        return str(delta["refusal"])
+        return f"The model declined: {delta['refusal']}"
     if choice.get("finish_reason") == "error":
-        return "the generation stopped with an error"
+        return "The reply broke off: the generation stopped with an error"
     if choice.get("finish_reason") == "content_filter":
-        return "the reply was filtered"
+        return "The model declined: the reply was filtered"
     return ""
 
 

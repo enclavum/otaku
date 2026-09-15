@@ -171,15 +171,32 @@ class TestInfo:
         finally:
             server.close()
 
-    def test_an_engine_that_names_no_efforts_reads_none(self, tmp_path) -> None:
-        # LM Studio's endpoint takes no knob: nothing sent reaches the
-        # model, which is a known "none", not an unknown.
+    def test_an_engine_that_names_no_efforts_says_so(self, tmp_path) -> None:
+        # omlx's status states the thinking toggle; a template without
+        # one takes no effort at all, which is a known nothing, not an
+        # unknown.
+        server = scripted.ModelServer()
+        server.status = True
+        try:
+            set_config_provider(tmp_path / "state", server, name="omlx")
+            app = launch(tmp_path / "state", server, spec="omlx/test-model")
+            try:
+                row = _rows(reports.info(app.session))["Reasoning efforts"]
+                assert row == "no efforts supported"
+            finally:
+                app.close()
+        finally:
+            server.close()
+
+    def test_an_engine_that_cannot_say_which_efforts_reach_reads_unknown(self, tmp_path) -> None:
+        # LM Studio takes the effort word but its registry does not say
+        # which models honour it.
         server = scripted.ModelServer(managed=True)
         try:
             set_config_provider(tmp_path / "state", server, name="lmstudio")
             app = launch(tmp_path / "state", server, spec="lmstudio/test-model")
             try:
-                assert _rows(reports.info(app.session))["Reasoning efforts"] == "none"
+                assert _rows(reports.info(app.session))["Reasoning efforts"] == "unknown"
             finally:
                 app.close()
         finally:

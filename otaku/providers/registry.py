@@ -108,7 +108,7 @@ class Registry:
         *,
         request_sink: RequestSink | None = None,
         error_sink: ErrorSink | None = None,
-        smooth: bool = True,
+        smooth: bool = False,
     ) -> None:
         # The sections an engine serves, and the names of those none does.
         self.configs = {name: config for name, config in configs.items() if name in ALL_CLIENTS}
