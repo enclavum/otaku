@@ -397,6 +397,28 @@ class TestConfigMigration:
             assert section in rendered
         assert set(providers) == {"llamacpp", "koboldcpp", "ollama", "omlx", "lmstudio"}
 
+    def test_a_catalog_whose_key_the_shell_carries_is_founded_at_launch(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # Setting the variable is the deliberate act that adds a cloud
+        # provider: its section lands with the fixed url and no key —
+        # the key is read at request time, never written — complete with
+        # the prompt_cache row in the same launch. A later launch that
+        # finds a variable founds the section then.
+        paths = Paths.resolve(tmp_path / "state")
+        paths.ensure_tree()
+        paths.config_key_file.write_bytes(secrets.token_bytes(32))
+        _cfg, providers = load_config(paths)
+        assert "openrouter" not in providers and "nanogpt" not in providers
+        monkeypatch.setenv("OPENROUTER_API_KEY", "from-env")
+        _cfg, providers = load_config(paths)
+        assert providers["openrouter"].url == "https://openrouter.ai/api/v1"
+        assert providers["openrouter"].api_key == ""
+        rendered = paths.providers_file.read_text()
+        assert "from-env" not in rendered
+        assert rendered.index("[openrouter]") < rendered.index("prompt_cache")
+        assert "[nanogpt]" not in rendered
+
     def test_a_locale_encoded_config_from_windows_0_3_0_heals_to_utf8(
         self, server: ModelServer, tmp_path
     ) -> None:

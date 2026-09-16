@@ -87,7 +87,7 @@ class RequestSink(Protocol):
 
 
 # The parameters every OpenAI endpoint reads, by the app's names — the
-# ones `/set` takes (`backend.session.KNOWN_PARAMS`), which the body
+# ones `/set` takes (`backend.session.PARAMETERS`), which the body
 # carries as they are.
 PROTOCOL_PARAMS: frozenset[str] = frozenset(
     {"temperature", "top_p", "max_tokens", "presence_penalty", "frequency_penalty", "seed", "stop"}
@@ -100,10 +100,13 @@ SAMPLER_PARAMS: frozenset[str] = frozenset({"top_k", "min_p", "repetition_penalt
 class OpenAICompletion:
     # ---------- class knowledge: what is true of the engine's wire ----------
 
-    # The parameters the wire reads, out of the app's. One outside the
-    # set goes out and is dropped unread — the engine keeps its default
-    # — which is what a reader states before sending it. The base is
-    # the protocol's own, which every endpoint reads (Ollama's reads
+    # The parameters the wire reads, out of the app's — and the only
+    # ones that go out (`_wire_params`): one outside the set is left
+    # behind, since the engine would keep its default either way and a
+    # strict server would refuse the field. A model is served by more
+    # than one provider and its saved parameters are one set, so the
+    # app hands every one over and the engine takes its own. The base
+    # is the protocol's own, which every endpoint reads (Ollama's reads
     # nothing more); an engine adds what its server reads beyond it.
     # `_convert_params` respells, it never adds or drops.
     supported_params: ClassVar[frozenset[str]] = PROTOCOL_PARAMS
@@ -186,7 +189,7 @@ class OpenAICompletion:
         engine's text knobs. Whatever the model reasons arrives
         inline, in the text — nothing stands between the prompt and
         the model to tell a thought from the rest."""
-        body = requests.text_completion_body(model, prompt, self._convert_params(params))
+        body = requests.text_completion_body(model, prompt, self._wire_params(params))
         knobs = reasoning.fields(effort, self.text_reasoning_knobs)
         url = f"{self._config.url}/completions"
         cut = Cut() if watched and self._smooth else None
@@ -219,6 +222,11 @@ class OpenAICompletion:
 
     # ---------- streaming ----------
 
+    def _wire_params(self, params: dict[str, object]) -> dict[str, object]:
+        """The params as they go out: the ones this engine reads
+        (`supported_params`), spelled its way (`_convert_params`)."""
+        return self._convert_params({k: v for k, v in params.items() if k in self.supported_params})
+
     def _chat_request(
         self,
         model: str,
@@ -235,7 +243,7 @@ class OpenAICompletion:
         body = requests.chat_completion_body(
             model,
             messages,
-            self._convert_params(params),
+            self._wire_params(params),
             images=images,
             cache_ttl=self._cache_ttl(),
         )

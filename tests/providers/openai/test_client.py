@@ -1,7 +1,9 @@
 """The client: who the engine is, the url rule for a local one, and what
 it can do composed as one object."""
 
-from otaku.providers import Locality, ProviderCapabilities, ProviderConfig
+import pytest
+
+from otaku.providers import KeySource, Locality, ProviderCapabilities, ProviderConfig
 from otaku.providers.openai.client import OpenAIClient
 from otaku.providers.openai.completion import PROTOCOL_PARAMS
 
@@ -16,6 +18,7 @@ class _Catalog(OpenAIClient):
     id = "catalog"
     label = "Catalog"
     locality = Locality.REMOTE
+    env_key = "OTAKU_TEST_CATALOG_KEY"
 
 
 class _Somewhere(OpenAIClient):
@@ -30,6 +33,18 @@ class TestIdentity:
 
     def test_the_default_section_names_the_engine_and_no_url(self) -> None:
         assert _Engine.autoconfigure() == ProviderConfig(name="engine", url="")
+
+    def test_where_a_sections_key_would_come_from(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Answered off the section alone, saved or not: the section's key
+        # first, the variable when it has none, nothing when neither.
+        bare = _Catalog.autoconfigure()
+        typed = ProviderConfig(name="catalog", url="", api_key="typed")
+        monkeypatch.setenv(_Catalog.env_key, "from-env")
+        assert _Catalog.key_source(bare) is KeySource.ENV
+        assert _Catalog.key_source(typed) is KeySource.CONFIG
+        monkeypatch.delenv(_Catalog.env_key)
+        assert _Catalog.key_source(bare) is None
+        assert _Catalog.key_source(typed) is KeySource.CONFIG
 
     def test_the_locality_words_are_the_wires(self) -> None:
         assert {member.value for member in Locality} == {"local", "remote", "unknown"}

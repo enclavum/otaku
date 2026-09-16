@@ -53,7 +53,7 @@ from otaku.backend.api.lore import FieldKind, WorkerRun
 from otaku.backend.api.play import Declined, Done, Failed, PlayEvent, Reasoning, Recorded, Text
 from otaku.backend.api.providers import SupportedProvider
 from otaku.backend.commands import COMMANDS, PROSE_DESCRIPTION
-from otaku.backend.session import EFFORTS, KNOWN_PARAMS, THINK_MENU, Refused, Session
+from otaku.backend.session import EFFORTS, PARAMETERS, THINK_UNSET, Refused, Session
 from otaku.formatting import Money, format_context, format_size
 
 __all__ = [
@@ -325,7 +325,7 @@ def _memory(session: Session) -> dict[str, Any]:
 def _providers(session: Session, scope: str = "") -> dict[str, Any]:
     """The model picker: every reachable provider's models under their
     provider captions, and the panel's field rows. An api key's VALUE is
-    never sent — only whether one is set.
+    never sent — only where it comes from.
 
     Every CONFIGURED provider, not only the ones otaku ships a client
     for: a section somebody added by hand is a provider they play on,
@@ -367,7 +367,7 @@ def _providers(session: Session, scope: str = "") -> dict[str, Any]:
             "tokenizer": row.capabilities.tokenizer,
             "prompt_cache": row.capabilities.prompt_cache,
             "model_management": row.capabilities.model_management,
-            "supported_params": [p for p in KNOWN_PARAMS if p in row.capabilities.supported_params],
+            "supported_params": [p for p in PARAMETERS if p in row.capabilities.supported_params],
         }
         models.setdefault(row.id, []).extend(
             {
@@ -379,6 +379,9 @@ def _providers(session: Session, scope: str = "") -> dict[str, Any]:
                 "max_context_catalogue": format_context(model.max_context_catalogue)
                 if model.max_context_catalogue
                 else "",
+                "max_context_loaded": format_context(model.max_context_loaded)
+                if model.max_context_loaded
+                else "",
                 "capabilities": _model_capabilities(model),
             }
             for model in row.models
@@ -389,8 +392,8 @@ def _providers(session: Session, scope: str = "") -> dict[str, Any]:
     # the slice that was asked: a scoped answer carries no card it did
     # not probe, so the page never draws a lamp nobody checked. Each card
     # SAYS its position too, because the page asks in two phases and the
-    # order runs across both: the generic provider is first in the
-    # panel and last to answer.
+    # order runs across both: the generic provider, asked in the second
+    # phase, sits between the engines on this machine and the catalogs.
     rank = {p.id: i for i, p in enumerate(providers)}
     named = [p.id for p in providers if p.id in asked]
     named += sorted(name for name in models if name not in known)
@@ -448,6 +451,7 @@ def _card(
     it, so it speaks for itself: its own name, what its config says, and
     no idea where it runs."""
     section = api_providers.section(session, name)
+    source = api_providers.key_source(session, name)
     return {
         "id": name,
         "label": provider.label if provider is not None else name,
@@ -455,7 +459,7 @@ def _card(
         "locality": (provider.locality if provider is not None else Locality.UNKNOWN).value,
         "connected": name in reachable,
         "url": section.url,
-        "has_key": bool(section.api_key),
+        "key_source": source.value if source is not None else None,
         "capabilities": abilities.get(name),
         "models": models.get(name, []),
     }
@@ -466,19 +470,30 @@ def settings(session: Session) -> dict[str, Any]:
     it persists, which is a real distinction: the toggles are
     session-wide, the parameters per model."""
     return {
-        "think": session.think or "default",
-        # The ladder in its one shared order (`backend.session`) — the
-        # segmented control draws it, never re-sorts it.
-        "think_levels": THINK_MENU,
+        "think": session.think or THINK_UNSET,
+        # What the model takes, in the ladder's one shared order
+        # (`api.settings.think_levels`) — the segmented control draws it,
+        # never re-sorts it.
+        "think_levels": api_settings.think_levels(session),
         "verbose": session.verbose,
         "autocorrect": session.autocorrect,
         "notification": session.notification,
         # Tokens the prompt may use at most; 0 = the model's own max context.
         "max_context": session.max_context_setting,
         "model": session.model,
+        # The parameters the provider in use reads
+        # (`api.settings.parameter_names`), never one its wire would drop.
         "parameters": [
-            {"name": name, "value": str(session.params.get(name, "")), "type": kind.__name__}
-            for name, kind in KNOWN_PARAMS.items()
+            {
+                "name": name,
+                "value": str(session.params.get(name, "")),
+                "type": PARAMETERS[name].kind.__name__,
+                # The bounds the setter holds a value to, null where none:
+                # the page's placeholder, its sign rule and its mark.
+                "min": PARAMETERS[name].low,
+                "max": PARAMETERS[name].high,
+            }
+            for name in api_settings.parameter_names(session)
         ],
     }
 

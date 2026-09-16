@@ -1573,7 +1573,14 @@ components:
                   exist only when local.
               connected: { type: boolean }
               url: { type: string }
-              has_key: { type: boolean, description: "Whether a key is SET — never the value." }
+              key_source:
+                type: string
+                nullable: true
+                enum: [config, env]
+                description: >
+                  Where the key in force comes from — the section's, or the
+                  engine's environment variable — never the value; null where
+                  there is none.
               capabilities:
                 type: object
                 nullable: true
@@ -1587,7 +1594,7 @@ components:
                   supported_params:
                     type: array
                     items: { type: string }
-                    description: "The /set parameters the wire reads, in the vocabulary's order; one outside it goes out and is dropped unread."
+                    description: "The /set parameters the wire reads, in the vocabulary's order; one outside it is not sent."
               models:
                 type: array
                 items:
@@ -1602,6 +1609,7 @@ components:
                         does not manage models.
                     size: { type: string }
                     max_context_catalogue: { type: string, description: "The model's own maximum context, formatted; \"\" when the provider states none." }
+                    max_context_loaded: { type: string, description: "What the running instance serves, formatted; \"\" while none runs or the engine does not say." }
                     capabilities:
                       type: object
                       nullable: true
@@ -1668,7 +1676,11 @@ components:
         think_levels:
           type: array
           items: { type: string }
-          description: The effort ladder in its one shared order (backend.session.THINK_MENU).
+          description: >
+            The levels /set think takes on the session's model, in the ladder's
+            one shared order (backend.api.settings.think_levels): unset always,
+            then those the provider says reach the model — every level where it
+            cannot say.
         verbose: { type: boolean }
         autocorrect: { type: boolean }
         notification: { type: boolean }
@@ -1676,12 +1688,18 @@ components:
         model: { type: string, description: "Whose parameters these are — the read is a snapshot, and a switch mid-slip would silently retitle it." }
         parameters:
           type: array
+          description: >
+            The parameters the session's provider reads (its card's
+            `supported_params`), in the vocabulary's order — never one its
+            wire would drop.
           items:
             type: object
             properties:
               name: { type: string }
               value: { type: string, description: '"" when at the model''s own default.' }
               type: { type: string, description: "float / int / str — how a typed value parses." }
+              min: { type: number, nullable: true, description: "The least the setter takes; null for no floor." }
+              max: { type: number, nullable: true, description: "The most the setter takes; null for no ceiling." }
 
     Story:
       type: object

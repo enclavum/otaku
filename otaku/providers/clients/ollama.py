@@ -3,8 +3,8 @@ via the native /api endpoints, each model's capabilities and its own
 max context from its card at /api/show — the registry row states the
 max context too, on a model a recent Ollama pulled; chat rides the
 OpenAI protocol at /v1, which reads the protocol's parameters and nothing beyond
-them — `top_k`, `min_p` and `repetition_penalty` go out and are
-dropped unread, as the base's `supported_params` says. A reasoning effort
+them — `top_k`, `min_p` and `repetition_penalty` are not sent, as the
+base's `supported_params` says. A reasoning effort
 goes out as `reasoning_effort` alone, the one knob the server reads;
 it takes none, low, medium, high and max, and answers 400 to any
 other word, which the take then sends again without the knob. A model

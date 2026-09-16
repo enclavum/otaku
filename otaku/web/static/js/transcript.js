@@ -380,17 +380,25 @@ function beginTurn(regenerate) {
   /* A regenerate takes the standing reply off the screen before the
      request is away: the take being replaced must not sit there while
      the model thinks. The backend validates a regenerate eagerly, so a
-     refusal comes back before anything is lost. */
-  if (regenerate) holdSpace(dropLastReply);
+     refusal comes back before anything is lost. The waiting block goes
+     in its place in the same move — a regenerate sends no Recorded for
+     the block to join the flow on (`draw`), and the wait must show from
+     the first moment here as it does on a send. */
+  if (regenerate) {
+    holdSpace(() => {
+      dropLastReply();
+      transcript.insertBefore(article, $(".otk-gap", transcript));
+    });
+  }
   showTurnBar();
   return { article, block, status, state, ticking, over, reasoning: null, prose: "" };
 }
 
 function draw(turn, happened) {
-  // A regenerate sends no Recorded — its prompt is already on screen —
-  // so the block joins the flow at the first sign of the reply, or it
-  // would stream into nothing. Ahead of the held space, which belongs
-  // last: behind it, its empty block would sit between two turns.
+  // A send's block joins the flow on its first event, the Recorded that
+  // draws the line above it; a regenerate's is in place already
+  // (`beginTurn`). Ahead of the held space, which belongs last: behind
+  // it, the block would sit between two turns.
   if (!turn.article.isConnected) transcript.insertBefore(turn.article, $(".otk-gap", transcript));
   DRAW[happened.type]?.(turn, happened);
   // what arrives goes into the space the old take was read in

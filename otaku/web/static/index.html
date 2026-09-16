@@ -157,11 +157,12 @@
 
 <!-- level 1: every story -->
 <dialog class="otk-panel" data-popup="/stories" aria-label="Stories">
-  <header class="otk-panel__head">
+  <header class="otk-panel__head otk-panel__head--centered">
     <span class="otk-eyebrow">Stories</span>
-    <span class="otk-push"></span>
-    <button type="button" class="otk-btn" data-command="/new">New</button>
-    <button type="button" class="otk-btn" data-command="/import">Import</button>
+    <span class="otk-panel__middle">
+      <button type="button" class="otk-btn" data-command="/new">New</button>
+      <button type="button" class="otk-btn" data-command="/import">Import</button>
+    </span>
     <button type="button" class="otk-btn otk-close">Close <span class="otk-btn__key">esc</span></button>
   </header>
 

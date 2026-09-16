@@ -156,7 +156,8 @@ feature not built).
 A client declares where its server runs as `providers.Locality`:
 `LOCAL` (the engines on this machine), `REMOTE` (the hosted catalogs)
 or `UNKNOWN` — the generic provider (`clients/generic.py`, the
-`[generic]` section, first in the panel) is a url and cannot say.
+`[generic]` section, between the local engines and the catalogs in the
+panel) is a url and cannot say.
 Every reader picks its safe side for `UNKNOWN`: what costs money or
 waits on the internet (the worker's warm-up, the info report's listing,
 the page's second listing phase) treats it as remote; what edits (the

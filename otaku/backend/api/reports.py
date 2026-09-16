@@ -8,7 +8,7 @@ Neither invents a fact, neither rewords a sentence, and the two cannot
 drift because the text is rendered from the facts beside it.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 
 from otaku.backend.api import stories
 from otaku.backend.session import NO_MODEL_HINT, Refused, Session
@@ -21,7 +21,7 @@ from otaku.formatting import (
     printable,
     truncate_label,
 )
-from otaku.providers import ALL_CLIENTS, Locality, ModelState, reasoning
+from otaku.providers import ALL_CLIENTS, Locality, ModelCapabilities, ModelState, reasoning
 
 
 @dataclass(frozen=True)
@@ -444,9 +444,7 @@ def _model_info(session: Session) -> tuple[tuple[str, str], ...]:
     # The registry's copy, not a snapshot: a URL or key edited in the
     # picker panel shows here immediately.
     config = client.config
-    # Two facts, not one: a frontend that wants to set the URL under the
-    # backend's own line cannot split a parenthesis back apart.
-    out = [("Model", session.full_model_name), ("Backend", client.id), ("URL", config.url)]
+    out = [("Backend", f"{client.id} ({config.url})"), ("Model", session.model)]
     if client.auth.key_source is not None:
         out.append(("Auth", "api_key configured"))
     # The model's own row. Load state and size only where loading is a
@@ -460,29 +458,28 @@ def _model_info(session: Session) -> tuple[tuple[str, str], ...]:
         out.append(("Loaded", _STATE_WORDS[row.state]))
         if row.size:
             out.append(("Size", format_size(row.size)))
-    # What a request gets — the loaded instance's context size, or the
-    # model's own where nothing loads — and the model's own beside it
-    # when it is known and differs.
-    max_context = format_context(row.max_context if row else None)
-    if max_context:
-        out.append(("Max context", max_context))
+    # The model's own context size where known, and — only when the
+    # loaded instance was given a different one — what a request
+    # actually gets: the loaded size, or the model's own where nothing
+    # loads.
     catalogue = format_context(row.max_context_catalogue if row else None)
-    if catalogue and catalogue != max_context:
-        out.append(("Model context", catalogue))
-    # What the model can do, as the provider says it — one fact per row,
-    # "unknown" where the provider could not say (and the app offers
-    # nothing on it). The efforts are listed in the wire's order; a
-    # model no effort reaches supports none.
+    if catalogue:
+        out.append(("Max context", catalogue))
+    loaded = format_context(row.max_context if row else None)
+    if loaded and loaded != catalogue:
+        out.append(("Served max context", loaded))
+    # What the model can do, as the provider says it: the efforts that
+    # reach it, in the wire's order, then the capabilities it has, in
+    # the dataclass's — "unknown" where the provider could not say (and
+    # the app offers nothing on it).
     caps = row.capabilities if row is not None else None
-    out.append(("Vision", _yes_no(caps.vision if caps else None)))
     efforts = caps.reasoning if caps else None
     if efforts is None:
         out.append(("Reasoning efforts", "unknown"))
     else:
         named = ", ".join(effort for effort in reasoning.EFFORTS if effort in efforts)
-        out.append(("Reasoning efforts", named or "no efforts supported"))
-    out.append(("Text completion", _yes_no(caps.text_completion if caps else None)))
-    out.append(("Thinking", session.think if session.think else "default"))
+        out.append(("Reasoning efforts", named or "not supported"))
+    out.append(("Capabilities", _capability_words(caps)))
     if config.keep_alive:
         out.append(("Keep-alive", str(config.keep_alive)))
     if client.capabilities.prompt_cache:
@@ -492,8 +489,30 @@ def _model_info(session: Session) -> tuple[tuple[str, str], ...]:
     return tuple(out)
 
 
-def _yes_no(fact: bool | None) -> str:
-    return "unknown" if fact is None else ("yes" if fact else "no")
+# How the Capabilities row spells a field where the dataclass's own name
+# is not the reader's word; the rest read as their name with the
+# underscore dropped.
+_CAPABILITY_REWORDING = {"structured_output": "json output"}
+
+
+def _capability_words(caps: ModelCapabilities | None) -> str:
+    """The capabilities the model has, in the dataclass's order and the
+    reader's words — reasoning left out, the efforts having a row of
+    their own; "none" when the provider knows of none, "unknown" when
+    it could not say."""
+    if caps is None:
+        return "unknown"
+    facts = [
+        (field.name, getattr(caps, field.name))
+        for field in fields(caps)
+        if field.name != "reasoning"
+    ]
+    named = ", ".join(
+        _CAPABILITY_REWORDING.get(name, name.replace("_", " ")) for name, fact in facts if fact
+    )
+    if named:
+        return named
+    return "none" if any(fact is not None for _, fact in facts) else "unknown"
 
 
 def _session_rows(session: Session) -> tuple[tuple[str, str], ...]:

@@ -22,6 +22,7 @@ the launch.
 """
 
 import enum
+import os
 import threading
 from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
@@ -47,12 +48,12 @@ from otaku.settings.providers import ProviderConfig
 _T = TypeVar("_T")  # Registry.map's result type
 
 ALL_CLIENTS: dict[str, type[OpenAIClient]] = {
-    GenericClient.id: GenericClient,
     LlamaCppClient.id: LlamaCppClient,
     KoboldCppClient.id: KoboldCppClient,
     OllamaClient.id: OllamaClient,
     OmlxClient.id: OmlxClient,
     LmStudioClient.id: LmStudioClient,
+    GenericClient.id: GenericClient,
     OpenRouterClient.id: OpenRouterClient,
     NanoGptClient.id: NanoGptClient,
 }
@@ -216,16 +217,19 @@ def probe(config: ProviderConfig, *, timeout: float = LISTING_TIMEOUT) -> Probe:
     )
 
 
-def autoconfigure_local() -> dict[str, ProviderConfig]:
-    """The first-run provider sections: one per local engine, present
-    whether or not the engine is installed, each with its configuration
-    (port, api key) detected from the machine. Runs only at the one
-    first-run config write; the file is the user's thereafter."""
-    configured = (
-        LlamaCppClient.autoconfigure(),
-        KoboldCppClient.autoconfigure(),
-        OllamaClient.autoconfigure(),
-        OmlxClient.autoconfigure(),
-        LmStudioClient.autoconfigure(),
-    )
-    return {config.name: config for config in configured}
+def autoconfigure() -> dict[str, ProviderConfig]:
+    """The provider sections every launch makes sure of, in the panel's
+    order: one per local engine, installed or not, its port and key
+    detected from the machine; and one per cloud catalog whose key the
+    shell carries, on its fixed endpoint with no key in the section —
+    the variable is read at request time, never written, and setting
+    it is the deliberate act that adds a catalog. What first run
+    writes, and what a later launch founds where missing, so a catalog
+    appears the first launch that finds its variable and stays. The
+    generic provider is never founded: its url is nobody's to guess."""
+    return {
+        cls.id: cls.autoconfigure()
+        for cls in ALL_CLIENTS.values()
+        if cls.locality is Locality.LOCAL
+        or (cls.locality is Locality.REMOTE and cls.env_key and os.environ.get(cls.env_key))
+    }

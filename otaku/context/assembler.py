@@ -169,8 +169,9 @@ def _assemble(
     fit."""
     max_context = max_context or _DEFAULT_CONTEXT
     setting = shape.max_context_setting
-    limit = min(max_context, setting) if setting else max_context
-    limit = max(0, limit - _response_reserve(messages))
+    # The context in force: the model's, or the setting where it is lower.
+    context = min(max_context, setting) if setting else max_context
+    limit = max(0, context - _response_reserve(messages))
     system_tokens = estimate_tokens(system) if system else 0
     budget = max(0, limit - system_tokens)
 
@@ -180,11 +181,14 @@ def _assemble(
         )
         if prompt.transcript_tokens <= budget:
             return prompt
-    # Case 6: nothing left to degrade — refuse with directions.
+    # Case 6: nothing left to degrade — refuse with directions, and the
+    # two figures that did not meet: the smallest the story gets, and
+    # the context it had to fit.
+    needed = prompt.transcript_tokens + system_tokens
     raise ContextOverflowError(
-        f"The story does not fit the context limit ({limit:,} tokens) even fully summarized "
-        f"and with the tail reduced — raise it (/set max_context) or run /extract to close "
-        f"more scenes."
+        f"The story does not fit the context limit: it needs {needed:,} tokens even fully "
+        f"summarized and with the tail reduced, and the context is {context:,} tokens — raise "
+        f"it or run /extract to close more scenes."
     )
 
 

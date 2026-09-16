@@ -1,7 +1,8 @@
 """The session's knobs: the /set family.
 
 Values persist where they belong — state.toml for session-wide toggles,
-models.toml per model, and never in the user-owned config, with ONE
+models.toml per model (the parameters and the thinking level), and
+never in the user-owned config, with ONE
 exception: `max_context` LIVES in config.toml's [context] beside
 head_messages and min_tail_messages (docs/context_design.md's home for it),
 so /set max_context edits that file surgically — the picker's
@@ -13,36 +14,76 @@ Refused for what it declines.
 
 from dataclasses import replace
 
-from otaku.backend.session import KNOWN_PARAMS, NO_MODEL_HINT, Refused, Session
+from otaku.backend.session import (
+    EFFORTS,
+    NO_MODEL_HINT,
+    PARAMETERS,
+    THINK_MENU,
+    Refused,
+    Session,
+)
 from otaku.settings import models as models_file
 from otaku.settings import row
 from otaku.settings.migrations import surgery
-from otaku.settings.state import THINK_DEFAULT, THINK_LEVELS
+from otaku.settings.models import THINK_KEY, THINK_UNSET
 
 _ON = ("on", "true", "yes")
 _OFF = ("off", "false", "no")
-# The typed sugar over the stored levels — a command-surface convenience,
-# where THINK_LEVELS is what state.toml may hold.
-THINK_ALIASES = {"on": "medium", "off": "none"}
+
+
+def think_levels(session: Session) -> tuple[str, ...]:
+    """What /set think takes on the model in use, in the menu's order:
+    "unset" always (no level: nothing sent), then the levels the provider says
+    reach the model — every level where it cannot say, or has not
+    listed the model yet, so an engine that reports nothing loses
+    nothing. Both frontends' menus read this."""
+    client = session._client()
+    found = client.models.cached(session.model) if client is not None else None
+    efforts = found.capabilities.reasoning if found and found.capabilities else None
+    if efforts is None:
+        return THINK_MENU
+    return (THINK_UNSET, *(level for level in THINK_MENU if level in efforts))
+
+
+def parameter_names(session: Session) -> tuple[str, ...]:
+    """The /set parameters the provider in use reads, in PARAMETERS's
+    order (`ProviderCapabilities.supported_params`) — every one while
+    no model is selected, so a menu with nobody to ask still names
+    them. Both frontends' menus read this. A list, never a gate: any
+    known parameter may be set — one model is served by more than one
+    provider, and they read different sets — and the wire sends the
+    ones this provider reads."""
+    client = session._client()
+    if client is None:
+        return tuple(PARAMETERS)
+    supported = client.capabilities.supported_params
+    return tuple(name for name in PARAMETERS if name in supported)
 
 
 def set_think(session: Session, raw: str) -> str:
-    """A THINK_LEVELS value, an alias (on/off), or "default" (send
-    nothing); "" reports where it stands. Raises Refused for an unknown
-    level or no model — never for the provider: a level goes out on
-    whatever knobs the provider reads, and on none where it reads none."""
+    """One of the wire's efforts, saved for the model in use, or "unset",
+    which forgets it — the level follows the model, as its parameters do;
+    "" reports where it stands and what the model
+    takes (`think_levels`). Raises Refused for an unknown word, a level
+    the model does not take, or no model — never for the provider: a
+    level goes out on whatever knobs the provider reads, and on none
+    where it reads none."""
+    levels = think_levels(session)
+    listed = ", ".join(levels)
     if not raw.strip():
-        return f"Think: {session.think if session.think else 'default'}."
-    value = THINK_ALIASES.get(raw.strip().lower(), raw.strip().lower())
-    if value == THINK_DEFAULT:
-        session._update_state(think=THINK_DEFAULT)
-        return "Think: default (nothing sent — the model decides)."
-    if value not in THINK_LEVELS:
-        raise Refused("Usage: /set think on|off|none|low|medium|high|max|default")
+        current = session.think if session.think else THINK_UNSET
+        return f"Think: {current}. Levels for this model: {listed}."
+    value = raw.strip().lower()
+    if value != THINK_UNSET and value not in EFFORTS:
+        raise Refused(f"Usage: /set think {'|'.join(levels)}")
     if session._client() is None:
         raise Refused(NO_MODEL_HINT)
-    session._update_state(think=value)
-    return f"Think: {value}."
+    if value not in levels:
+        raise Refused(f"{session.model} does not take {value}. Levels for this model: {listed}.")
+    session._think = value
+    if value == THINK_UNSET:
+        return f"Think: unset{_save_model_settings(session)}"
+    return f"Think: {value}{_save_model_settings(session)}"
 
 
 def set_verbose(session: Session, raw: str) -> str:
@@ -132,10 +173,11 @@ def _stands(tokens: int) -> str:
 
 
 def set_parameter(session: Session, raw: str) -> str:
-    """`<name> [value]` over KNOWN_PARAMS: set it ("reset" returns the
+    """`<name> [value]` over PARAMETERS: set it ("reset" returns the
     model's own default; a bare name reports where it stands; "" lists
     what is set), auto-saved per model. Raises Refused for an unknown
-    name or an unparsable value."""
+    name, an unparsable value, or one outside the parameter's bounds
+    (`Parameter`)."""
     tokens = raw.split()
     if not tokens:
         if not session.params:
@@ -145,8 +187,8 @@ def set_parameter(session: Session, raw: str) -> str:
     if session._client() is None:
         raise Refused(NO_MODEL_HINT)
     name = tokens[0]
-    if name not in KNOWN_PARAMS:
-        raise Refused(f"Unknown parameter {name!r}. Known: {', '.join(KNOWN_PARAMS)}.")
+    if name not in PARAMETERS:
+        raise Refused(f"Unknown parameter {name!r}. Known: {', '.join(PARAMETERS)}.")
     value_raw = " ".join(tokens[1:])
     if not value_raw:
         # Asking is not setting: the bare name shows where it stands.
@@ -163,27 +205,38 @@ def set_parameter_value(session: Session, name: str, value_raw: str) -> str:
     this; a typed line splits its own line first."""
     if session._client() is None:
         raise Refused(NO_MODEL_HINT)
-    if name not in KNOWN_PARAMS:
-        raise Refused(f"Unknown parameter {name!r}. Known: {', '.join(KNOWN_PARAMS)}.")
+    if name not in PARAMETERS:
+        raise Refused(f"Unknown parameter {name!r}. Known: {', '.join(PARAMETERS)}.")
     if value_raw.strip().lower() == "reset":
         if name not in session.params:
             return f"Parameter {name} is already at its default."
         session._params.pop(name)
-        return f"Parameter {name} reset to default{_save_params(session)}"
-    coerce = KNOWN_PARAMS[name]
+        return f"Parameter {name} reset to default{_save_model_settings(session)}"
+    parameter = PARAMETERS[name]
     try:
-        value = coerce(value_raw)
+        value = parameter.kind(value_raw)
     except ValueError:
-        raise Refused(f"Could not parse {value_raw!r} as {coerce.__name__}.") from None
+        raise Refused(f"Could not parse {value_raw!r} as {parameter.kind.__name__}.") from None
+    low, high = parameter.low, parameter.high
+    if isinstance(value, int | float) and low is not None:
+        below, above = value < low, high is not None and value > high
+        if below or above:
+            bounds = f"at least {low}" if high is None else f"between {low} and {high}"
+            raise Refused(f"{name} must be {bounds}.")
     session._params[name] = value
-    return f"{name} = {value}{_save_params(session)}"
+    return f"{name} = {value}{_save_model_settings(session)}"
 
 
-def _save_params(session: Session) -> str:
-    """Persist the model's parameters; the sentence tail says when the
-    save did not land (the session still took the value)."""
+def _save_model_settings(session: Session) -> str:
+    """Persist the model's entry — its parameters, and its thinking
+    level when one is set (unset is the row's absence); the sentence
+    tail says when the save did not land (the session still took the
+    value)."""
+    entry: dict[str, object] = dict(session.params)
+    if session._think != THINK_UNSET:
+        entry[THINK_KEY] = session._think
     try:
-        models_file.save_parameters(session._paths.models_file, session.model, dict(session.params))
+        models_file.save(session._paths.models_file, session.model, entry)
     except (OSError, ValueError) as e:
         return f" (this session only — could not save: {e})."
     return "."

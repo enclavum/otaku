@@ -269,9 +269,6 @@ export async function openInfo() {
       if (name === "model" && !title) title = value;
       else if (name === "story") closing.push(element("span", "otk-docket__story", value));
       else if (name === "messages") closing.push(span("otk-index__sub", `${value} messages`));
-      // The endpoint belongs UNDER the backend it addresses, not beside
-      // it: it is long, and it is the same fact said more precisely.
-      else if (name === "url") facts.append(span("otk-leader__aside otk-leader__aside--tight", value));
       else facts.append(leader(name, value));
     }
   }

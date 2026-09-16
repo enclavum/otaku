@@ -16,7 +16,7 @@ from http.client import HTTPConnection
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from otaku.backend.session import KNOWN_PARAMS, THINK_MENU
+from otaku.backend.session import PARAMETERS, THINK_MENU
 from scenarios.support.harness import set_config
 from scenarios.support.server import ModelServer
 from scenarios.web.conftest import Page, serving
@@ -181,10 +181,34 @@ class TestReading:
         page.patch("/api/providers/generic", {"url": ""})
         assert tomllib.loads(providers.read_text())["generic"]["url"] == ""
 
+    def test_the_card_says_where_the_key_comes_from(self, page: Page, monkeypatch) -> None:
+        # The field's caption, never the value: the section's key while
+        # there is one, the shell's once it is cleared, and a section
+        # that does not exist yet is asked the same way.
+        monkeypatch.setenv("GENERIC_API_KEY", "from-env")
+        monkeypatch.setenv("NANOGPT_API_KEY", "from-env")
+        monkeypatch.delenv("LLAMACPP_API_KEY", raising=False)
+        card = lambda name: page.get(f"/api/providers/{name}")["providers"][0]  # noqa: E731
+        assert card("generic")["key_source"] == "config"
+        page.patch("/api/providers/generic", {"api_key": ""})
+        assert card("generic")["key_source"] == "env"
+        page.patch("/api/providers/generic", {"api_key": "k-test"})
+        assert card("generic")["key_source"] == "config"
+        assert card("nanogpt")["key_source"] == "env"  # no section yet
+        assert card("llamacpp")["key_source"] is None
+
     def test_the_settings_read_carries_the_shared_effort_ladder(self, page: Page) -> None:
         # The order is declared ONCE, below both frontends — the page
         # draws it, never re-sorts it.
         assert page.get("/api/settings")["think_levels"] == list(THINK_MENU)
+
+    def test_the_settings_read_carries_each_parameters_bounds(self, page: Page) -> None:
+        # The bounds the setter holds a value to ride each row, null
+        # where there is none, so the page can say them before a save.
+        rows = {row["name"]: row for row in page.get("/api/settings")["parameters"]}
+        assert (rows["temperature"]["min"], rows["temperature"]["max"]) == (0, 2)
+        assert (rows["top_k"]["min"], rows["top_k"]["max"]) == (0, None)
+        assert (rows["seed"]["min"], rows["seed"]["max"]) == (None, None)
 
     def test_the_search_matches_buried_content_and_the_row_s_face(self, page: Page) -> None:
         """One filter rule for both browsers: a story is found by the
@@ -248,7 +272,7 @@ class TestPlaying:
             time.sleep(0.5)  # the reply is in the wait for the first token
             raw.close()
             started = time.monotonic()
-            page.put("/api/settings/think", {"value": "default"})  # a write: the thread in turn
+            page.put("/api/settings/think", {"value": "unset"})  # a write: the thread in turn
             assert time.monotonic() - started < 1.5  # never the server's three seconds
             server.headers_delay = 0.0
 
@@ -588,19 +612,29 @@ class TestThePicker:
             "tokenizer": False,
             "prompt_cache": False,
             "model_management": False,
-            "supported_params": list(KNOWN_PARAMS),
+            "supported_params": list(PARAMETERS),
         }
         assert mine["models"][0]["capabilities"] is None  # it says nothing of its models
+        assert mine["models"][0]["max_context_loaded"] == ""  # nothing loads on a generic url
         assert "can_manage" not in mine["models"][0]
         unanswered = next(p for p in panel["providers"] if p["id"] == "llamacpp")
         assert unanswered["capabilities"] is None
 
     def test_the_panel_says_where_each_provider_runs(self, page: Page) -> None:
         # The vocabulary the page's captions and the demo's fake read:
-        # the generic provider first and unable to say, a provider on this
-        # machine, a catalog over the wire.
+        # the generic provider unable to say, a provider on this machine,
+        # a catalog over the wire — in the panel's order, the engines on
+        # this machine first, the generic provider between them and the
+        # catalogs.
         panel = page.get("/api/providers")
-        assert panel["providers"][0]["id"] == "generic"
+        assert [p["id"] for p in panel["providers"]][:6] == [
+            "llamacpp",
+            "koboldcpp",
+            "ollama",
+            "omlx",
+            "lmstudio",
+            "generic",
+        ]
         by_name = {p["id"]: p["locality"] for p in panel["providers"]}
         assert by_name["generic"] == "unknown"
         assert by_name["llamacpp"] == "local"
@@ -609,8 +643,9 @@ class TestThePicker:
     def test_the_two_phases_carry_the_panel_order(self, page: Page) -> None:
         # The page asks in two phases and merges by each card's `order`:
         # the generic provider answers in the second phase and belongs
-        # first, a hand-written section last. Sorting both answers by it
-        # restores the unscoped panel exactly.
+        # between the engines and the catalogs, a hand-written section
+        # last. Sorting both answers by it restores the unscoped panel
+        # exactly.
         whole = [p["id"] for p in page.get("/api/providers")["providers"]]
         local = page.get("/api/providers?scope=local")["providers"]
         cloud = page.get("/api/providers?scope=cloud")["providers"]
@@ -618,7 +653,8 @@ class TestThePicker:
         assert all(p["id"] not in {"generic", "openrouter"} for p in local)
         merged = sorted(local + cloud, key=lambda p: (p["order"], p["id"]))
         assert [p["id"] for p in merged] == whole
-        assert merged[0]["id"] == "generic" and merged[0]["order"] == 0
+        assert merged[0]["id"] == "llamacpp" and merged[0]["order"] == 0
+        assert next(p for p in merged if p["id"] == "generic")["order"] == 5
 
 
 class TestOpenToTheNetwork:

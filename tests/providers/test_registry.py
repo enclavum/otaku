@@ -3,7 +3,7 @@ the section's name, and the names no engine serves set aside."""
 
 import pytest
 
-from otaku.providers import ALL_CLIENTS, ProviderConfig, Registry
+from otaku.providers import ALL_CLIENTS, ProviderConfig, Registry, autoconfigure
 from otaku.providers.clients.generic import GenericClient
 from otaku.providers.clients.ollama import OllamaClient
 
@@ -15,18 +15,41 @@ MINE = ProviderConfig(name="mine", url="http://localhost:9/v1")
 class TestTheRoster:
     def test_the_eight_engines_in_the_panels_order(self) -> None:
         assert list(ALL_CLIENTS) == [
-            "generic",
             "llamacpp",
             "koboldcpp",
             "ollama",
             "omlx",
             "lmstudio",
+            "generic",
             "openrouter",
             "nanogpt",
         ]
 
     def test_every_client_answers_to_its_own_id(self) -> None:
         assert all(cls.id == name for name, cls in ALL_CLIENTS.items())
+
+
+class TestAutoconfigure:
+    LOCAL = ("llamacpp", "koboldcpp", "ollama", "omlx", "lmstudio")
+
+    def test_the_local_engines_always_and_a_catalog_by_its_variable_alone(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for cls in ALL_CLIENTS.values():
+            if cls.env_key:
+                monkeypatch.delenv(cls.env_key, raising=False)
+        assert list(autoconfigure()) == list(self.LOCAL)
+        monkeypatch.setenv("OPENROUTER_API_KEY", "from-env")
+        founded = autoconfigure()
+        assert list(founded) == [*self.LOCAL, "openrouter"]  # the panel's order
+        # the fixed endpoint, and no key: the variable is never written
+        assert founded["openrouter"].url.startswith("https://openrouter.ai/")
+        assert founded["openrouter"].api_key == ""
+        # a local engine's variable changes nothing: its section is always there;
+        # the generic provider is never founded, key or no key
+        monkeypatch.setenv("OLLAMA_API_KEY", "from-env")
+        monkeypatch.setenv("GENERIC_API_KEY", "from-env")
+        assert list(autoconfigure()) == [*self.LOCAL, "openrouter"]
 
 
 class TestSections:

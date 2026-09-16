@@ -188,11 +188,20 @@ function modelRow(entry, current) {
   const lamp = span("otk-row__lamp", "");
   const managed = entry.provider.capabilities?.model_management;
   if (managed && entry.model.loaded) lamp.append(span("otk-dot otk-dot--sm", ""));
+  // The chosen model wears its tag right after its name, where the eye
+  // reads the name, not out past the figures.
+  const title = span("otk-row__title", entry.model.name);
+  if (`${entry.provider.id}/${entry.model.name}` === current) title.append(" ", span("otk-tag", "chosen"));
   const button = row(
     lamp,
-    span("otk-row__title", entry.model.name),
+    title,
     span("otk-row__num otk-row__num--size", entry.model.size),
-    span("otk-row__num otk-row__num--count", entry.model.max_context_catalogue),
+    // what a request would get: the running instance's size while one
+    // runs, the model's own otherwise
+    span(
+      "otk-row__num otk-row__num--count",
+      entry.model.max_context_loaded || entry.model.max_context_catalogue,
+    ),
   );
   button.classList.add("otk-row--indent", "otk-row--mono");
   /* Bold is loaded, dim is not, and only where loading is a thing that
@@ -200,7 +209,6 @@ function modelRow(entry, current) {
      say something true of nothing. */
   button.classList.toggle("is-loaded", managed && entry.model.loaded);
   button.classList.toggle("is-dim", managed && !entry.model.loaded);
-  if (`${entry.provider.id}/${entry.model.name}` === current) button.append(span("otk-tag", "chosen"));
   return button;
 }
 
@@ -213,6 +221,10 @@ function modelDetail(pane, entry, current, { use, setLoaded }) {
   const facts = element("div", "otk-detail__section");
   if (entry.model.size) facts.append(fact("size", entry.model.size));
   if (entry.model.max_context_catalogue) facts.append(fact("max context", entry.model.max_context_catalogue));
+  // the running instance's size, where it is known and is not the model's
+  // own — the info report's rule (`backend.api.reports`)
+  const loaded = entry.model.max_context_loaded;
+  if (loaded && loaded !== entry.model.max_context_catalogue) facts.append(fact("served max context", loaded));
   facts.append(fact("provider", entry.provider.label));
 
   // Pinned under the pane: the row above is a name of any length, and
@@ -389,7 +401,8 @@ const _beat = (ms) => new Promise((wake) => setTimeout(wake, ms));
 
 function keyField(state, provider) {
   /* One shape whether a key is set or not: a password field, empty for a
-     provider with no key and masked for one that has it. Entering clears
+     provider with no key, masked for one that has it in its section, and
+     captioned for one the shell carries. Entering clears
      the stand-in so a new key can be typed; leaving without typing one
      puts it back, the key still being there. Delete or Backspace on the
      bare field marks the key to be FORGOTTEN: the field stays bare with
@@ -398,7 +411,15 @@ function keyField(state, provider) {
   const input = element("input", "otk-field otk-field--mono");
   input.type = "password";
   input.dataset.provider = "api_key";
-  if (provider.has_key) {
+  if (provider.key_source === "env") {
+    /* A key the shell carries: nothing here to mask or forget, so the
+       field stays bare and says where the key is until one is typed
+       over it — the terminal's caption for the same fact
+       (`terminal.screens.models`). */
+    input.dataset.rest = "(from environment)";
+    keepKey(input);
+  }
+  if (provider.key_source === "config") {
     const mask = () => {
       input.value = _MASK;
       input.dataset.mask = "yes";
@@ -438,7 +459,7 @@ function forgetKey(input) {
 
 function keepKey(input) {
   delete input.dataset.forget;
-  input.placeholder = "";
+  input.placeholder = input.dataset.rest ?? "";
 }
 
 /** What a field would write, or null for nothing: a url that differs

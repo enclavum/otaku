@@ -1180,6 +1180,34 @@ class TestKeys:
         finally:
             app.close()
 
+    def test_the_panel_says_where_the_key_comes_from(
+        self, server: ModelServer, tmp_path, monkeypatch
+    ) -> None:
+        # What the field captions, the value never shown: the variable's
+        # until a key is typed, the section's while one is, the
+        # variable's again once it is cleared. A provider not configured
+        # yet is asked off its default section, so a variable shows
+        # before a section exists.
+        from otaku.backend.api import providers as api_providers
+        from scenarios.support.harness import launch, set_config_provider
+
+        monkeypatch.setenv("OPENROUTER_API_KEY", "from-env")
+        monkeypatch.setenv("NANOGPT_API_KEY", "from-env")
+        monkeypatch.delenv("LLAMACPP_API_KEY", raising=False)
+        set_config_provider(tmp_path / "state", server, name="openrouter", api_key="")
+        app = launch(tmp_path / "state", server, spec="openrouter/test-model")
+        try:
+            source = lambda name: api_providers.key_source(app.session, name)  # noqa: E731
+            assert source("openrouter") is KeySource.ENV
+            api_providers.save_field(app.session, "openrouter", "api_key", "typed")
+            assert source("openrouter") is KeySource.CONFIG
+            api_providers.clear_field(app.session, "openrouter", "api_key")
+            assert source("openrouter") is KeySource.ENV
+            assert source("nanogpt") is KeySource.ENV  # no section yet
+            assert source("llamacpp") is None
+        finally:
+            app.close()
+
 
 class TestProbe:
     def test_a_provider_that_answers(self, server: ModelServer, monkeypatch) -> None:

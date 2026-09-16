@@ -22,10 +22,9 @@ from otaku.backend.session import NO_MODEL_HINT, Refused, Session
 from otaku.encryption import AskSecret, Cipher, EncryptionError, SealedError
 from otaku.formatting import pretty_path
 from otaku.logging import ErrorLog, RequestLog, SystemLog
-from otaku.providers import ProviderConfig, Registry
-from otaku.providers import autoconfigure_local as autoconfigure_providers
+from otaku.providers import ProviderConfig, Registry, autoconfigure
+from otaku.settings import Secrets, migrations, write_atomic
 from otaku.settings import config as config_file
-from otaku.settings import migrations, write_atomic
 from otaku.settings import prompts as prompts_file
 from otaku.settings import providers as providers_file
 from otaku.settings import state as state_file
@@ -177,19 +176,15 @@ def _load_config(paths: Paths) -> tuple[Config, dict[str, ProviderConfig], list[
     if not paths.config_file.exists():
         write_atomic(paths.config_file, Config().to_toml())
         if not paths.providers_file.exists():
-            write_atomic(paths.providers_file, providers_file.render(autoconfigure_providers()))
+            write_atomic(paths.providers_file, providers_file.render(autoconfigure()))
         notices.append(f"Created {pretty_path(paths.config_file)}")
-    migrations.migrate(
-        config_path=paths.config_file,
-        providers_path=paths.providers_file,
-        prompts_path=paths.prompts_file,
-        backups_dir=paths.config_backups_dir,
-        provider_defaults=autoconfigure_providers(),
+    secrets = Secrets(
         seal=_sealer(paths),
         is_sealed=encryption.is_sealed,
         hash=passwords.hash,
         is_hashed=passwords.is_hashed,
     )
+    migrations.migrate(paths.settings_files, secrets, autoconfigure())
     config = config_file.load(paths.config_file)
     if config.web_password and not passwords.is_hashed(config.web_password):
         # The migration left it plain — the file could not be written, or

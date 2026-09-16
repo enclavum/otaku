@@ -16,6 +16,7 @@ from otaku.encryption import SealedError, seal
 from otaku.formatting import toml_key, toml_scalar
 from otaku.providers import (
     ALL_CLIENTS,
+    KeySource,
     Locality,
     ModelState,
     OpenAIClient,
@@ -40,7 +41,7 @@ def switch_model(session: Session, provider: str, model: str) -> str:
     if f"{provider}/{model}" == session.full_model_name:
         raise Refused(f"Already using {session.full_model_name}.")
     session._update_state(model=f"{provider}/{model}")
-    session._reload_params()
+    session._reload_model_settings()
     return f"Switched to {session.full_model_name}."
 
 
@@ -124,6 +125,16 @@ def section(session: Session, provider: str) -> ProviderConfig:
     if provider not in ALL_CLIENTS:
         raise Refused(f"No supported provider is named {provider}.")
     return ALL_CLIENTS[provider].autoconfigure()
+
+
+def key_source(session: Session, provider: str) -> KeySource | None:
+    """Where the key the panel's field stands for comes from — the
+    section's, the engine's environment variable, or none — so a field
+    can say which without showing the value. Read off the section a
+    save or a clear just moved, so the caption follows at once. Raises
+    Refused as `section` does."""
+    config = section(session, provider)
+    return ALL_CLIENTS[provider].key_source(config)
 
 
 def save_field(session: Session, provider: str, attr: ProviderField, value: str) -> str:

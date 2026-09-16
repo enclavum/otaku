@@ -44,7 +44,7 @@ class WebSettings:
     and reaching it from another machine is a decision to make on
     purpose — the one decision that makes the other two worth taking."""
 
-    host: str = "127.0.0.1"
+    host: str = "localhost"
     port: int = 9600
     https: bool = False
     # The hash of `[web] password` that `backend.passwords` made, never
@@ -74,7 +74,7 @@ class Config:
     dialogue_color: str = "auto"
     dialogue_bold: bool = False
     # [web]
-    web_host: str = "127.0.0.1"
+    web_host: str = "localhost"
     web_port: int = 9600
     web_https: bool = False
     web_password: str = ""
@@ -111,8 +111,8 @@ class Config:
             row(f"dialogue_bold = {toml_scalar(self.dialogue_bold)}", "also bold the spoken lines"),
             "",
             "[web]",
-            row(f"host = {toml_scalar(self.web_host)}", "where `otaku web` listens"),
-            row(f"port = {self.web_port}", "…and on which port"),
+            row(f"host = {toml_scalar(self.web_host)}", '"localhost": reachable from this machine only; "0.0.0.0": from the whole network — set https and a password first'),
+            row(f"port = {self.web_port}", "the port `otaku web` listens on"),
             row(f"https = {toml_scalar(self.web_https)}", "RECOMMENDED to turn on when the host is not local; the certificate lives in cert/: drop in your own, or one is generated"),
             row(f"password = {toml_scalar(self.web_password)}", "RECOMMENDED to set when the host is not local; typed in plain text, it is replaced by its hash at the next launch"),
             "",
@@ -207,7 +207,7 @@ def load(path: Path) -> Config:
             notification_sound=str(settings.get("notification_sound", "default")),
             dialogue_color=str(terminal.get("dialogue_color", "auto")),
             dialogue_bold=bool(terminal.get("dialogue_bold", False)),
-            web_host=str(web.get("host", "127.0.0.1")),
+            web_host=str(web.get("host", "localhost")),
             # Clamped to the range a socket accepts, 0 excluded: a port
             # of 0 asks the OS to pick one, and `otaku web` says where
             # the page is BEFORE it binds — an address nobody can be

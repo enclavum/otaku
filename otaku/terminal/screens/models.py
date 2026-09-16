@@ -69,7 +69,7 @@ from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.dimension import D
 from prompt_toolkit.styles import Style
 
-from otaku.backend import Locality, ModelState, ProviderInfo, meminfo
+from otaku.backend import KeySource, Locality, ModelState, ProviderInfo, meminfo
 from otaku.backend.api import providers as api_providers
 from otaku.backend.api.providers import ProviderField, SupportedProvider
 from otaku.backend.session import Refused, Session
@@ -130,6 +130,10 @@ def pick(session: Session, initial_spec: str | None = None) -> str | None:
 
 _FIELD_LABELS = {"url": "URL:", "api_key": "API key:"}
 _ATTRS: tuple[ProviderField, ...] = ("url", "api_key")  # the panel's rows per provider, in order
+# How the api key field reads: its value is never displayed, only where
+# it comes from. The page captions the same fact
+# (`web/static/js/models.js keyField`).
+_KEY_CAPTIONS = {KeySource.CONFIG: "(set)", KeySource.ENV: "(from environment)", None: ""}
 
 # A model row's shape: a 4-column prefix ("  > "), the model name, then
 # two right-aligned columns held at a FIXED width — the widest label
@@ -191,6 +195,7 @@ class ModelEntry:
     can_manage: bool = True  # False → served statically
     size_bytes: int | None = None  # None when the provider doesn't expose it
     max_context_catalogue: int | None = None  # the model's own maximum, when its provider states it
+    max_context_loaded: int | None = None  # what the running instance serves, while one runs
     # A row with no disk to weigh — a catalog's, or the generic
     # provider's: normal weight, no size.
     cloud: bool = False
@@ -349,7 +354,9 @@ class ModelPicker(ListScreen):
         labels = [truncate(e.model, self._name_width()) for e in rows]
         # A catalog row has no size at all — not even the unknown dash.
         sizes = ["" if e.cloud else format_size(e.size_bytes) for e in rows]
-        contexts = [format_context(e.max_context_catalogue) for e in rows]
+        # The context column says what a request would get: the running
+        # instance's size while one runs, the model's own otherwise.
+        contexts = [format_context(e.max_context_loaded or e.max_context_catalogue) for e in rows]
         width = self._row_width()
 
         out: StyleAndTextTuples = []
@@ -440,7 +447,8 @@ class ModelPicker(ListScreen):
 
     def _providers_text(self) -> StyleAndTextTuples:
         """The provider panel: per provider a caption, a blank, the URL
-        field, the API key field (its value never displayed), a blank."""
+        field, the API key field (its value never displayed, only where
+        it comes from), a blank."""
         out: StyleAndTextTuples = []
         for provider in self.providers:
             config = api_providers.section(self.session, provider.id)
@@ -457,7 +465,8 @@ class ModelPicker(ListScreen):
             out.append(("", "\n"))
             out.append(("class:preview.body", "\n"))
             out.extend(self._field_line(provider.id, "url", config.url))
-            out.extend(self._field_line(provider.id, "api_key", "(set)" if config.api_key else ""))
+            source = api_providers.key_source(self.session, provider.id)
+            out.extend(self._field_line(provider.id, "api_key", _KEY_CAPTIONS[source]))
             out.append(("class:preview.body", "\n"))
         return out
 
@@ -821,6 +830,7 @@ class ModelPicker(ListScreen):
                     can_manage=row.capabilities.model_management,
                     size_bytes=model.size,
                     max_context_catalogue=model.max_context_catalogue,
+                    max_context_loaded=model.max_context_loaded,
                     cloud=row.locality is not Locality.LOCAL,
                 )
                 for row in fetched

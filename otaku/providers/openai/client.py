@@ -18,7 +18,7 @@ from typing import ClassVar
 
 from otaku.formatting import Money
 from otaku.providers.http import ASK_TIMEOUT, ErrorSink, Http
-from otaku.providers.openai.auth import OpenAIAuth
+from otaku.providers.openai.auth import KeySource, OpenAIAuth
 from otaku.providers.openai.completion import OpenAICompletion, RequestSink
 from otaku.providers.openai.models import OpenAIModels
 from otaku.settings.providers import ProviderConfig
@@ -102,6 +102,14 @@ class OpenAIClient:
         the local engines. No key: the environment variable's is read
         at request time, never written into a section."""
         return ProviderConfig(name=cls.id, url="")
+
+    @classmethod
+    def key_source(cls, config: ProviderConfig) -> KeySource | None:
+        """Where the key `config` would be asked with comes from — its
+        section's, the engine's environment variable, or none — saved or
+        not, and no client built: what a panel captions the field with,
+        the value never shown."""
+        return cls.auth_class(config, cls.env_key).key_source
 
     def balance(self, timeout: float = ASK_TIMEOUT) -> Money | None:
         """The account balance as the provider reports it — None where

@@ -304,12 +304,34 @@ export function browser(popup, options) {
 
     `save` is handed the new text and returns the backend's ANSWER: one
     marked `refused` keeps the field open with the words still in it. */
-export function editable(className, { text, save: write, readonly = false, line = false }) {
+export function editable(
+  className,
+  { text, save: write, readonly = false, line = false, mask = null },
+) {
   const field = element("textarea", `${className} otk-editable`.trim());
   field.value = text ?? "";
   field.readOnly = readonly;
   if (readonly) return field;
   field.spellcheck = false;
+  if (mask) {
+    /* What the field accepts, as a pattern the WHOLE value must match: a
+       keystroke or a paste that would leave it not matching is dropped
+       before it lands, so a seed never holds a point and a temperature
+       never a word. Deleting always lands — it only ever shortens. */
+    let accepted = field.value;
+    field.addEventListener("beforeinput", (event) => {
+      if (event.inputType.startsWith("delete") || event.inputType.startsWith("history")) return;
+      const data = event.data ?? event.dataTransfer?.getData("text") ?? "";
+      const next =
+        field.value.slice(0, field.selectionStart) + data + field.value.slice(field.selectionEnd);
+      if (!mask.test(next)) event.preventDefault();
+    });
+    // The browser paths `beforeinput` cannot see (autofill, drag) settle here.
+    field.addEventListener("input", () => {
+      if (mask.test(field.value)) accepted = field.value;
+      else field.value = accepted;
+    });
+  }
 
   field._restore = () => {
     field.value = text ?? "";

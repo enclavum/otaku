@@ -20,18 +20,20 @@ const MODEL_CAPABILITIES = {
   structured_output: true,
 };
 const MODELS = [
-  { name: "demo-model", loaded: true, size: "4.7 GB", max_context_catalogue: "32K", capabilities: { ...MODEL_CAPABILITIES } },
-  { name: "demo-model-mini", loaded: false, size: "1.9 GB", max_context_catalogue: "8K", capabilities: { ...MODEL_CAPABILITIES } },
+  { name: "demo-model", loaded: true, size: "4.7 GB", max_context_catalogue: "32K", max_context_loaded: "", capabilities: { ...MODEL_CAPABILITIES } },
+  { name: "demo-model-mini", loaded: false, size: "1.9 GB", max_context_catalogue: "8K", max_context_loaded: "", capabilities: { ...MODEL_CAPABILITIES } },
 ];
 // What the demo's provider can do: it manages models, counts nothing
-// exactly, marks no cache, and reads every parameter the product knows.
+// exactly, marks no cache, and reads the protocol's own parameters and
+// no sampler beyond them — the fixtures are captured over a scripted
+// Ollama, whose wire reads exactly those, and the settings fixture lists
+// the same seven.
 const CAPABILITIES = {
   tokenizer: false,
   prompt_cache: false,
   model_management: true,
   supported_params: [
-    "temperature", "top_p", "top_k", "min_p", "max_tokens",
-    "presence_penalty", "frequency_penalty", "repetition_penalty", "seed", "stop",
+    "temperature", "top_p", "max_tokens", "presence_penalty", "frequency_penalty", "seed", "stop",
   ],
 };
 // The window the fixtures' context previews were captured under
@@ -196,7 +198,7 @@ function allProviders() {
         locality: "unknown", // the product cannot say where such a section runs
         connected: true,
         url: "in this browser tab",
-        has_key: false,
+        key_source: null,
         capabilities: { ...CAPABILITIES, supported_params: [...CAPABILITIES.supported_params] },
         models: MODELS.map((m) => ({ ...m, capabilities: { ...m.capabilities } })),
       },
@@ -216,7 +218,7 @@ function allProviders() {
         locality,
         connected: false,
         url,
-        has_key: false,
+        key_source: null,
         capabilities: null, // a provider that did not answer states nothing
         models: [],
       })),
@@ -366,16 +368,16 @@ export function info(version) {
       { rows: [["State dir", "(this browser tab — nothing leaves it)"]], note: "" },
       {
         rows: [
-          ["Model", `${PROVIDER}/${state.model}`],
           ["Backend", "demo (a model that lives in the page)"],
+          ["Model", state.model],
+          // The model's own size; the product adds a "Served max context"
+          // row only where the loaded instance's differs, and here it never does.
           ["Max context", modelRow().max_context_catalogue],
           // The product's capability rows, as the page's own model
-          // honestly answers them: it takes no images, no effort reaches
-          // it, and it completes no raw text.
-          ["Vision", "no"],
-          ["Reasoning efforts", "none"],
-          ["Text completion", "no"],
-          ["Thinking", "default"],
+          // honestly answers them: no effort reaches it, and it takes no
+          // images and completes no raw text.
+          ["Reasoning efforts", "not supported"],
+          ["Capabilities", "none"],
         ],
         note: "",
       },
@@ -589,6 +591,19 @@ export function setKnob(name, value) {
   return setter(raw);
 }
 
+// The product's bounds (`backend.session.PARAMETERS`): [low, high],
+// high null for no ceiling; a name absent takes any value of its type.
+const _RANGES = {
+  temperature: [0, 2],
+  top_p: [0, 1],
+  top_k: [0, null],
+  min_p: [0, 1],
+  max_tokens: [1, null],
+  presence_penalty: [-2, 2],
+  frequency_penalty: [-2, 2],
+  repetition_penalty: [0, 2],
+};
+
 export function setParameter(name, value) {
   // One per-model parameter; "reset" puts it back to the model's own
   // default, which is what a DELETE on it means.
@@ -604,6 +619,14 @@ export function setParameter(name, value) {
     return refuse(`Could not parse '${text}' as float.`);
   }
   if (row.type === "int" && !/^-?\d+$/.test(text)) return refuse(`Could not parse '${text}' as int.`);
+  const range = _RANGES[name];
+  if (range) {
+    const [low, high] = range;
+    const number = Number(text);
+    if (number < low || (high !== null && number > high)) {
+      return refuse(`${name} must be ${high === null ? `at least ${low}` : `between ${low} and ${high}`}.`);
+    }
+  }
   row.value = text;
   return say(`${name} = ${text}.`);
 }
@@ -611,14 +634,13 @@ export function setParameter(name, value) {
 const _KNOBS = {
   think: (raw) => {
     const s = state.settings;
-    const aliases = { on: "medium", off: "none" };
-    const value = aliases[raw.trim().toLowerCase()] || raw.trim().toLowerCase();
-    if (value === "default") {
-      s.think = "default";
-      return say("Think: default (nothing sent — the model decides).");
+    const value = raw.trim().toLowerCase();
+    if (value === "unset") {
+      s.think = "unset";
+      return say("Think: unset.");
     }
     if (!s.think_levels.includes(value)) {
-      return refuse("Usage: /set think on|off|none|low|medium|high|max|default");
+      return refuse(`Usage: /set think ${s.think_levels.join("|")}`);
     }
     s.think = value;
     return say(`Think: ${value}.`);

@@ -42,7 +42,7 @@ from otaku.providers.registry import (
     ProbeStatus,
     ProviderInfo,
     Registry,
-    autoconfigure_local,
+    autoconfigure,
     probe,
 )
 from otaku.settings.providers import ProviderConfig
@@ -76,7 +76,7 @@ __all__ = [
     "UnauthorizedError",
     "UnreachableError",
     "WireMessage",
-    "autoconfigure_local",
+    "autoconfigure",
     "probe",
     "reasoning",
 ]

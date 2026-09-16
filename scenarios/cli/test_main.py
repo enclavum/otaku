@@ -16,7 +16,7 @@ from otaku.terminal.tty import PROMPT_CONTINUATION
 from scenarios.support import server as scripted
 from scenarios.support.harness import SPEC, run_otaku, set_config, set_config_provider
 from scenarios.support.server import ModelServer
-from scenarios.support.terminal import CTRL_R, ENTER, ESC, TAB, Terminal
+from scenarios.support.terminal import CTRL_D, CTRL_R, ENTER, ESC, TAB, Terminal
 
 pytestmark = pytest.mark.cli
 
@@ -89,6 +89,46 @@ class TestChat:
         # story itself is the proof, resumed mid-scene.
         terminal.expect("You're late, mapmaker.")
         terminal.expect("Sample stories were imported")
+        assert terminal.quit() == 0
+
+
+class TestWeb:
+    def test_ctrl_r_serves_again_and_ctrl_d_stops(
+        self, server: ModelServer, tmp_path: Path
+    ) -> None:
+        """`otaku web` answers the keys at the terminal it runs in: Ctrl+R
+        stops and comes back on fresh sources — a new process, the
+        address said again — and Ctrl+D stops for good, as Ctrl+C does."""
+        state = tmp_path / "state"
+        set_config_provider(state, server)
+        terminal = Terminal(str(state), args=("web", "--port", str(_free_port())))
+        terminal.expect("web ui is available on", timeout=20.0)
+        terminal.send(CTRL_R, 1.0)
+        terminal.expect("Restarting")
+        _expect_count(terminal, "web ui is available on", 2, timeout=20.0)
+        terminal.send(CTRL_D, 1.0)
+        terminal.expect("Shutting down")
+        assert terminal.wait() == 0
+
+    def test_from_the_chat_ctrl_d_ends_the_serving_and_the_prompt_returns(
+        self, server: ModelServer, tmp_path: Path
+    ) -> None:
+        """`/web` hands the session to a browser and stands until the
+        reader stops it; Ctrl+D does what Ctrl+C does there, and the
+        chat carries on below. Ctrl+R is not a key here: the process is
+        the chat's."""
+        terminal = launch_remembered(
+            server, tmp_path / "state", env={"OTAKU_WEB_PORT": str(_free_port())}
+        )
+        play(terminal, "I enter the hall.", "stirred")
+        terminal.send("/web")
+        terminal.send(ENTER, 1.0)
+        terminal.expect("web ui is available on")
+        terminal.send(CTRL_R, 1.0)  # not a key here: the serving goes on
+        terminal.send(CTRL_D, 1.0)
+        terminal.expect("Shutting down")
+        assert "Restarting" not in terminal.transcript
+        play(terminal, "I look around.", "stirred")
         assert terminal.quit() == 0
 
 
@@ -229,6 +269,24 @@ class TestBlocks:
         assert terminal.quit() == 0
 
 
+def _free_port() -> int:
+    """A port nothing is listening on, asked of the OS and let go."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
+
+
+def _expect_count(terminal: Terminal, marker: str, count: int, *, timeout: float) -> None:
+    """Wait until `marker` has shown `count` times — `expect` cannot tell
+    a second showing from the first still on screen."""
+    import time
+
+    deadline = time.time() + timeout
+    while terminal.transcript.count(marker) < count and time.time() < deadline:
+        terminal.settle(0.5)
+    assert terminal.transcript.count(marker) >= count, terminal.transcript[-2000:]
+
+
 def _listening(port: int) -> bool:
     with socket.socket() as probe:
         probe.settimeout(0.2)
@@ -241,12 +299,15 @@ def remember(root: Path) -> None:
     state_mod.save(Paths.resolve(root).state_file, state_mod.State(model=SPEC))
 
 
-def launch_remembered(server: ModelServer, root: Path) -> Terminal:
+def launch_remembered(
+    server: ModelServer, root: Path, *, env: dict[str, str] | None = None
+) -> Terminal:
     """A terminal already in the REPL: the scripted provider configured,
-    the model remembered, the picker skipped."""
+    the model remembered, the picker skipped. `env` rides into the
+    process, for a story that needs a variable set."""
     set_config_provider(root, server)
     remember(root)
-    terminal = Terminal(str(root))
+    terminal = Terminal(str(root), env=env)
     terminal.expect("otaku")  # the banner — we are in the REPL
     return terminal
 

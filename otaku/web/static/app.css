@@ -309,6 +309,7 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 /* the value sizes to its own text, so an empty one would be a field nobody
    can see: it keeps a floor */
 .otk-leader .otk-editable { min-width: 9ch; text-align: right; }
+.otk-editable.is-out { color: var(--otk-danger); }   /* a value outside its bounds, while typed */
 /* An empty field stands at its default, and a default is an absent value —
    said in words, in the face `.otk-absent` says every other one in. */
 .otk-leader .otk-editable::placeholder { font-family: var(--otk-font-prose); font-style: italic; color: var(--otk-faint); opacity: 1; }
@@ -437,7 +438,7 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 
 .otk-tag {
   flex: none;
-  font-family: var(--otk-font-mono); font-size: var(--otk-size-tag);
+  font-family: var(--otk-font-mono); font-size: var(--otk-size-tag); font-weight: 400;
   letter-spacing: var(--otk-track-foot); text-transform: uppercase;
   color: var(--otk-faint); border: var(--otk-hair) solid var(--otk-line-soft);
   padding: 1px 5px;
@@ -719,6 +720,12 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
 /* the FIRST button takes the auto margin and the rest sit beside it, so a
    header's controls read as one group at the right */
 .otk-panel__head .otk-btn:first-of-type { margin-left: auto; }
+/* A head whose verbs sit at the line's centre: three columns, the eyebrow
+   left, the verbs in the middle, the close at the right. */
+.otk-panel__head--centered { display: grid; grid-template-columns: 1fr auto 1fr; }
+.otk-panel__head--centered .otk-close { justify-self: end; }
+.otk-panel__middle { display: flex; gap: 14px; }
+.otk-panel__middle .otk-btn { margin-left: 0; }
 .otk-panel__head > .otk-push ~ .otk-btn { margin-left: 0; }
 .otk-panel__head .otk-eyebrow { min-width: 0; overflow: hidden; white-space: nowrap; }
 /* on a narrow screen the title gives way, never a button's words */
@@ -971,6 +978,9 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
 /* a typed key, and a row of them against its meaning */
 .otk-key { font-family: var(--otk-font-mono); font-size: var(--otk-size-mono-sm); color: var(--otk-ink); border: var(--otk-hair) solid var(--otk-line); padding: 3px 9px; }
 .otk-keys { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+/* The think ladder: the keys' row, allowed to wrap onto more when the
+   leader is too narrow for every level — flush right, where the value is. */
+.otk-ladder { display: inline-flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 5px; min-width: 0; }
 /* left only: it stands off the key box it follows, and stays with the key
    or the argument shape it introduces */
 .otk-keys__plus { padding-left: 6px; font-family: var(--otk-font-mono); font-size: var(--otk-size-label); color: var(--otk-faint); }
@@ -982,11 +992,9 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
 
 /* inside a docket */
 .otk-leader__aside { align-self: flex-end; font-family: var(--otk-font-mono); font-size: var(--otk-size-small); color: var(--otk-faint); }
-.otk-leader__aside--tight { margin-top: -3px; font-size: var(--otk-size-mono-sm); }
 /* one step of a ladder written into an aside — the value it would set */
-.otk-step { font-family: var(--otk-font-mono); font-size: var(--otk-size-small); color: var(--otk-faint); }
-.otk-step:hover, .otk-toggle:hover { color: var(--otk-accent-ink); }
-.otk-step[aria-checked="true"], .otk-toggle[aria-checked="true"] { color: var(--otk-ink); font-weight: 500; }
+.otk-toggle:hover { color: var(--otk-accent-ink); }
+.otk-toggle[aria-checked="true"] { color: var(--otk-ink); font-weight: 500; }
 .otk-toggle { font-family: var(--otk-font-mono); font-size: var(--otk-size-mono); color: var(--otk-faint); }
 
 /* prose variants */

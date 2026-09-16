@@ -111,7 +111,7 @@ COMMANDS: tuple[CommandSpec, ...] = (
     # The mid-stream take is the terminal's POSIX-only watcher — the
     # Windows consoles have no termios, so there the row must not say more.
     CommandSpec("/regen", "", "Re-run the last prompt" + ("" if sys.platform == "win32" else " (mid-stream: cancel + regen)"), "playing", CommandKind.INTERACTIVE),
-    CommandSpec("/last", "[N]", "Show the last N turns (default 5) — a clean view after undos, regens, etc.", "playing", CommandKind.INTERACTIVE),
+    CommandSpec("/last", "[N]", "Show the last N turns (default 5)", "playing", CommandKind.INTERACTIVE),
     CommandSpec("/clear", "", "Clear the screen", "playing", CommandKind.INTERACTIVE),
     # Inside a prompt
     _inliner("/ooc", "An aside out of character"),
@@ -133,13 +133,13 @@ COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("/usage", "[all]", "Tokens spent on this story (or everything)", "inspect", CommandKind.OPERATION),
     CommandSpec("/info", "", "Show details about the current model + session", "inspect", CommandKind.OPERATION),
     # Import/export
-    CommandSpec("/card", "FILE [NAME]", "Import a character card (PNG or JSON) into this story — NAME renames them", "transfer", CommandKind.INTERACTIVE),
+    CommandSpec("/card", "FILE [NAME]", "Import a character card (PNG or JSON) into this story", "transfer", CommandKind.INTERACTIVE),
     CommandSpec("/import", "FILE", "Import a story: an otaku export, SillyTavern chat (.jsonl), or plain text", "transfer", CommandKind.INTERACTIVE),
     CommandSpec("/export", "[FILE]", "Export the whole story to Markdown (memory + messages)", "transfer", CommandKind.INTERACTIVE),
     # Models and settings
     CommandSpec("/model", "[PROVIDER/MODEL]", "Switch model", "settings", CommandKind.INTERACTIVE),
-    CommandSpec("/set think", "<level>", "Thinking effort for the model: on|off|none|low|medium|high|xhigh|max|default", "settings", CommandKind.OPERATION),
-    CommandSpec("/set parameter", "<name> <val>", "Set an inference parameter for the model; no <val> shows it, <val> = reset returns the default", "settings", CommandKind.OPERATION),
+    CommandSpec("/set think", "<level>", "Set thinking effort for the model", "settings", CommandKind.OPERATION),
+    CommandSpec("/set parameter", "<name> <val>", "Set an inference parameter for the model", "settings", CommandKind.OPERATION),
     CommandSpec("/set verbose", "on|off", "Show the stats line after each reply", "settings", CommandKind.OPERATION),
     CommandSpec("/set autocorrect", "on|off", "Settle a character name you type in /you and /me commands to the cast's own spelling", "settings", CommandKind.OPERATION),
     CommandSpec("/set notification", "on|off", "Play a sound when a reply lands (the sound is configs/config.toml's notification_sound)", "settings", CommandKind.OPERATION),

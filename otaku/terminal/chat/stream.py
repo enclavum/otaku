@@ -138,10 +138,16 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                 close()
 
     if interrupted:
+        # The cut line is ended — the prose or the thinking stopped
+        # mid-line. A wait cut before anything showed has no line to end:
+        # the echo's blank stands as the gap, and a newline here would be
+        # a second blank, with the loop's gap making a third.
+        cut_midline = streamed or in_thinking
         if in_thinking:
             out.write(RESET)
             in_thinking = False
-        out.write("\n")
+        if cut_midline:
+            out.write("\n")
         if session.verbose:
             elapsed = time.monotonic() - start
             rate = chars / elapsed if elapsed > 0 else 0.0

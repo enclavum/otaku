@@ -36,11 +36,16 @@ Backend:
 
 - The providers layer is rewritten from scratch. Models report which reasoning efforts reach them
   and what else they can do (vision, audio, etc.).
-- Three more sampling parameters: `top_k`, `min_p` and `repetition_penalty`.
-- Provider API keys can come from environment variables.
+- Three more sampling parameters: `top_k`, `min_p` and `repetition_penalty`. Since supported
+  parameters vary per provider, the UI shows and lets you edit supported parameters only.
+- The thinking level is set at the model level now, not globally as before. The UI shows and lets
+  you choose the current model's supported levels only.
+- Provider API keys can be set in environment variables (e.g., `OPENROUTER_API_KEY`).
 - llama.cpp's router mode: its models listed, loaded and unloaded from the picker.
 
 Full list of changes: [CHANGELOG.md](https://github.com/enclavum/otaku/blob/main/CHANGELOG.md)
+
+Tentative roadmap: [ROADMAP.md](https://github.com/enclavum/otaku/blob/main/ROADMAP.md)
 
 ### Added
 
@@ -49,7 +54,8 @@ Full list of changes: [CHANGELOG.md](https://github.com/enclavum/otaku/blob/main
   `OMLX_API_KEY`, Ollama `OLLAMA_API_KEY`, llama.cpp `LLAMACPP_API_KEY`, KoboldCpp
   `KOBOLDCPP_API_KEY`, and the Generic OpenAI provider `GENERIC_API_KEY`. A key typed into the
   provider panel wins over the variable, and clearing it there uncovers the variable again; the
-  variable is never written to the file. `/info` and `/balance` count a key from either source.
+  variable is never written to the file. `/info` and `/balance` count a key from either source,
+  and a catalog whose variable is set is in the picker from the first launch that finds it.
 - When the llama.cpp or KoboldCpp section is first written, it takes the port the server was
   actually launched with, read off the running process, rather than the engine's default — a
   release build's name (`koboldcpp-mac-arm64`), a `python koboldcpp.py` launch, a path with
@@ -83,6 +89,9 @@ Full list of changes: [CHANGELOG.md](https://github.com/enclavum/otaku/blob/main
   A password typed into `config.toml` is replaced by an scrypt hash at the next launch.
 - The address `otaku web` prints says when a password is set, and on an address other than this
   machine's, what it is missing — TLS, a password — whichever banner size is on.
+- `otaku web` answers Ctrl+D as it answers Ctrl+C, and Ctrl+R stops it and serves again on
+  fresh sources — a restart in place, the page reconnecting on its own. `/web` in the chat
+  takes Ctrl+D too.
 
 ### Changed
 
@@ -113,6 +122,16 @@ Full list of changes: [CHANGELOG.md](https://github.com/enclavum/otaku/blob/main
   `thinking`, and a failed answer's status carries the provider's sentence rather than the
   exception's name; lines written before still read.
 - The web API's status endpoint is `/api/status`; it was `/api/alive`.
+- A new config.toml spells `[web] host` as `localhost`, and the key's comment says what the
+  alternative, `0.0.0.0`, opens; a file holding `127.0.0.1` binds the same.
+- The thinking level is the model's, not the session's: `/set think` sets it for the model
+  in use, it follows the model as the parameters do, and it lives in `models.toml` beside
+  them. The level `state.toml` held moves to the remembered model on the first launch.
+  `/set think` offers and takes only the levels the model's engine says reach it. A model
+  with no level set sends nothing, where every model sent `none` before; `/set think unset`
+  forgets the level, which is what `/set think default` was.
+- `/set parameter`'s menu and the settings page list only the parameters the provider's wire
+  reads; any known parameter can still be set, and the wire sends the ones it reads.
 
 ### Fixed
 

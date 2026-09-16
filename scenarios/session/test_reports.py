@@ -4,6 +4,7 @@ counts the tokens spent, /info dumps what otaku knows."""
 import re
 
 from otaku.backend.api import reports
+from otaku.formatting import format_context
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch, set_config, set_config_provider
 
@@ -162,14 +163,29 @@ class TestInfo:
             app = launch(tmp_path / "state", server, spec="llamacpp/test-model")
             try:
                 rows = _rows(reports.info(app.session))
-                assert rows["Vision"] == "yes"
-                assert rows["Text completion"] == "yes"
+                assert rows["Capabilities"] == "vision, text completion, json output"
                 # Which efforts its template grades, the server cannot say.
                 assert rows["Reasoning efforts"] == "unknown"
             finally:
                 app.close()
         finally:
             server.close()
+
+    def test_the_context_rows_are_the_models_own_then_the_loaded_size_where_it_differs(
+        self, tmp_path
+    ) -> None:
+        # llama.cpp's listing carries both figures: the trained length
+        # and the slot's window. The window is a row only when it is not
+        # the trained length, and comes after it.
+        rows = _llamacpp_rows(tmp_path / "half", trained=8192, window=4096)
+        labels = list(rows)
+        assert labels.index("Max context") < labels.index("Served max context")
+        assert labels.index("Served max context") + 1 == labels.index("Reasoning efforts")
+        assert rows["Max context"] == format_context(8192)
+        assert rows["Served max context"] == format_context(4096)
+        rows = _llamacpp_rows(tmp_path / "whole", trained=8192, window=8192)
+        assert rows["Max context"] == format_context(8192)
+        assert "Served max context" not in rows
 
     def test_an_engine_that_names_no_efforts_says_so(self, tmp_path) -> None:
         # omlx's status states the thinking toggle; a template without
@@ -182,7 +198,26 @@ class TestInfo:
             app = launch(tmp_path / "state", server, spec="omlx/test-model")
             try:
                 row = _rows(reports.info(app.session))["Reasoning efforts"]
-                assert row == "no efforts supported"
+                assert row == "not supported"
+            finally:
+                app.close()
+        finally:
+            server.close()
+
+    def test_the_capabilities_row_spells_the_card_in_the_dataclasss_order(self, tmp_path) -> None:
+        # Ollama's card names thinking and vision; the row lists what the
+        # model has in the dataclass's order — reasoning left to its own
+        # row — with constrained decoding, which every Ollama model has,
+        # last.
+        server = scripted.ModelServer(managed=True)
+        server.capabilities["test-model"] = ["completion", "thinking", "vision"]
+        try:
+            set_config_provider(tmp_path / "state", server, name="ollama")
+            app = launch(tmp_path / "state", server, spec="ollama/test-model")
+            try:
+                rows = _rows(reports.info(app.session))
+                assert rows["Capabilities"] == "vision, json output"
+                assert rows["Reasoning efforts"] not in ("unknown", "not supported")
             finally:
                 app.close()
         finally:
@@ -204,13 +239,9 @@ class TestInfo:
 
     def test_what_the_engine_cannot_say_is_unknown(self, app: App) -> None:
         # The generic provider reads nothing: every capability is
-        # unknown, which the app offers nothing on, and the setting is
-        # reported regardless.
+        # unknown, which the app offers nothing on.
         rows = _rows(reports.info(app.session))
-        assert (rows["Vision"], rows["Reasoning efforts"], rows["Text completion"]) == (
-            "unknown",
-        ) * 3
-        assert "Thinking" in rows
+        assert (rows["Reasoning efforts"], rows["Capabilities"]) == ("unknown", "unknown")
 
     def test_without_a_model_the_session_half_still_reports(self, server, tmp_path, capsys) -> None:
         # A model is one of the things /info reports, not its
@@ -239,3 +270,21 @@ def numbers(text: str) -> list[int]:
 def _rows(report: reports.InfoReport) -> dict[str, str]:
     """Every labelled fact of the report, whichever block it is in."""
     return {label: value for section in report.sections for label, value in section.rows}
+
+
+def _llamacpp_rows(root, *, trained: int, window: int) -> dict[str, str]:
+    """`/info`'s rows on a llama.cpp whose model was trained to `trained`
+    tokens and loaded with a slot of `window` — one server and one
+    state dir each, since a client keeps the window it first read."""
+    server = scripted.ModelServer()
+    server.contexts["test-model"] = trained
+    server.window = window
+    try:
+        set_config_provider(root, server, name="llamacpp")
+        app = launch(root, server, spec="llamacpp/test-model")
+        try:
+            return _rows(reports.info(app.session))
+        finally:
+            app.close()
+    finally:
+        server.close()

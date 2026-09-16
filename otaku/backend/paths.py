@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Self
 
+from otaku.settings import SettingsFiles
+
 DEFAULT_ROOT = "~/.otaku"
 
 
@@ -128,3 +130,15 @@ class Paths:
         """The OS-keychain service label, named per state dir so parallel
         setups never share a key."""
         return f"otaku:{self.root}"
+
+    @property
+    def settings_files(self) -> SettingsFiles:
+        """The settings files as the migrations take them, in one value."""
+        return SettingsFiles(
+            config=self.config_file,
+            providers=self.providers_file,
+            prompts=self.prompts_file,
+            state=self.state_file,
+            models=self.models_file,
+            backups_dir=self.config_backups_dir,
+        )

@@ -42,6 +42,7 @@ from prompt_toolkit.lexers import Lexer
 from prompt_toolkit.styles import Style
 
 from otaku.backend.api import lore
+from otaku.backend.api import settings as api_settings
 from otaku.backend.session import Session
 from otaku.formatting import flatten, truncate
 from otaku.terminal.prompt.completion import SlashCompleter
@@ -198,6 +199,8 @@ def build_prompt(
         lambda: assembler.prefix,
         cast=lambda: _cast(session),
         shortcuts={token: caption for token, (_key, caption) in shortcuts.items()},
+        levels=lambda: api_settings.think_levels(session),
+        parameters=lambda: api_settings.parameter_names(session),
     )
     menu_line = Condition(
         lambda: completer.partial(get_app().current_buffer.document.text_before_cursor) is not None

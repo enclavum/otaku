@@ -295,7 +295,6 @@ class TestRejected:
         scenes = (scene(100, "sum one", history="Arc through one."),)
         with pytest.raises(ContextOverflowError) as caught:
             assemble("", rows, 3024, scenes=scenes, head_messages=5, min_tail_messages=150)
-        assert "max_context" in str(caught.value)
         assert "/extract" in str(caught.value)
 
     def test_a_story_without_scenes_over_the_limit_refuses_too(self) -> None:

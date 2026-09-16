@@ -20,7 +20,7 @@ touch only the run's own event. Frontends inherit this rule from here.
 
 import contextlib
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Self
 
@@ -34,36 +34,50 @@ from otaku.settings import models as models_file
 from otaku.settings import state as state_file
 from otaku.settings.config import Config, TerminalSettings, WebSettings
 from otaku.settings.prompts import Prompts
-from otaku.settings.state import THINK_DEFAULT, State
+from otaku.settings.state import State
 from otaku.store import Store
 from otaku.store.schema import Message
 from otaku.worker import Worker
 
-# The /set think ladder as every menu offers it: default first (the way
-# out), then the levels by effort. A frontend-shared ORDER, so it lives
-# here with the rest of the /set vocabulary — the file's own vocabulary
-# is `settings.state.THINK_LEVELS` (a set), and a unit test pins the
-# two consistent. The typed sugar (`on`/`off`) is the command surface's
-# and stays out of a menu of VALUES.
-THINK_MENU: tuple[str, ...] = (THINK_DEFAULT, "none", "low", "medium", "high", "xhigh", "max")
+# The /set think ladder as every menu offers it: unset first (the way
+# out: no level, nothing sent), then the wire's own ladder of efforts
+# in its order — what a model reports is a subset of it, and that
+# subset is what a menu offers (`api.settings.think_levels`). Bound
+# here so a frontend reads the whole /set vocabulary off one module.
+THINK_UNSET: str = models_file.THINK_UNSET
+THINK_MENU: tuple[str, ...] = (THINK_UNSET, *reasoning.EFFORTS)
 
 # The reasoning efforts in the wire's order, weakest to strongest, for
 # a frontend listing the ones a model honours.
 EFFORTS: tuple[str, ...] = reasoning.EFFORTS
 
-# The inference parameters otaku understands, and how each is read from
-# the saved file or a `/set parameter` argument.
-KNOWN_PARAMS: dict[str, type] = {
-    "temperature": float,
-    "top_p": float,
-    "top_k": int,
-    "min_p": float,
-    "max_tokens": int,
-    "presence_penalty": float,
-    "frequency_penalty": float,
-    "repetition_penalty": float,
-    "seed": int,
-    "stop": str,
+
+@dataclass(frozen=True)
+class Parameter:
+    """One inference parameter as /set takes it: how a typed word or a
+    saved value is read, and the range the engines agree on — the
+    protocol's own bounds for what it defines, the samplers' natural
+    ones. `low` None takes any value of the kind (a seed, a stop
+    string); `high` None is no ceiling. Checked once, in the setter,
+    for both frontends."""
+
+    kind: type
+    low: float | None = None
+    high: float | None = None
+
+
+# The inference parameters otaku understands.
+PARAMETERS: dict[str, Parameter] = {
+    "temperature": Parameter(float, 0, 2),
+    "top_p": Parameter(float, 0, 1),
+    "top_k": Parameter(int, 0),
+    "min_p": Parameter(float, 0, 1),
+    "max_tokens": Parameter(int, 1),
+    "presence_penalty": Parameter(float, -2, 2),
+    "frequency_penalty": Parameter(float, -2, 2),
+    "repetition_penalty": Parameter(float, 0, 2),
+    "seed": Parameter(int),
+    "stop": Parameter(str),
 }
 
 # What every model-facing door says while no model is selected, and
@@ -109,6 +123,7 @@ class Session:
     _system: str
     _messages: list[Message]
     _params: dict[str, object]
+    _think: str  # the model's level — one of `reasoning.EFFORTS`, or THINK_UNSET
     # The stories content index behind `api.stories.search` — built on
     # the first search, invalidated by the write primitives below.
     _search_index: dict[int, str] | None
@@ -154,16 +169,17 @@ class Session:
         session._system = ""
         session._messages = []
         session._params = {}
+        session._think = models_file.THINK_UNSET
         session._search_index = None
         session._config = config
         session._prompts = prompts
-        session._state = state.settled()
+        session._state = state
         session._paths = paths
         session._store = store
         session._providers_registry = registry
         session._worker = worker
         session._closed = False
-        session._reload_params()
+        session._reload_model_settings()
         # Reattach the story the previous session was on, so bare `otaku`
         # reopens it mid-scene; one deleted since simply starts fresh.
         if state.story and store.stories.exists(state.story):
@@ -221,8 +237,9 @@ class Session:
 
     @property
     def think(self) -> str | None:
-        """A `state.THINK_LEVELS` value; None = defer to the model."""
-        return None if self._state.think == THINK_DEFAULT else self._state.think
+        """The model's thinking level — one of `reasoning.EFFORTS`; None
+        = defer to the model. Saved per model, beside its parameters."""
+        return None if self._think == THINK_UNSET else self._think
 
     @property
     def verbose(self) -> bool:
@@ -508,20 +525,29 @@ class Session:
         if self._story_id is not None:
             self._store.stories.set_system(self._story_id, text)
 
-    def _reload_params(self) -> None:
-        """Replace the live parameters with the current model's saved
-        ones — parameters follow the model, at startup and on a switch.
-        A saved value the vocabulary no longer makes sense of lands in
-        `notices` and is skipped."""
+    def _reload_model_settings(self) -> None:
+        """Replace the live parameters and thinking level with the
+        current model's saved ones — they follow the model, at startup
+        and on a switch. A saved value the vocabulary no longer makes
+        sense of lands in `notices` and is skipped."""
         self._params = {}
+        self._think = models_file.THINK_UNSET
         saved = models_file.load(self._paths.models_file).get(self.model, {})
         for name, value in saved.items():
-            coerce = KNOWN_PARAMS.get(name)
-            if coerce is None:
+            if name == models_file.THINK_KEY:
+                # The wire's own word, or the way out — anything else is a
+                # hand edit the engine would refuse.
+                if value == models_file.THINK_UNSET or value in reasoning.ALL_EFFORTS:
+                    self._think = str(value)
+                else:
+                    self._note(f"Ignoring invalid think value {value!r} saved for {self.model}.")
+                continue
+            known = PARAMETERS.get(name)
+            if known is None:
                 self._note(f"Ignoring unknown parameter {name!r} saved for {self.model}.")
                 continue
             try:
-                self._params[name] = coerce(value)
+                self._params[name] = known.kind(value)
             except (TypeError, ValueError):
                 self._note(f"Ignoring invalid {name} value {value!r} saved for {self.model}.")
 

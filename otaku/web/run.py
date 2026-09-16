@@ -32,7 +32,7 @@ from typing import Any
 
 from otaku.backend import WebSettings
 from otaku.backend.session import Session
-from otaku.console import banner, sound, ticker
+from otaku.console import banner, keys, sound, ticker
 from otaku.web import api
 from otaku.web.cert import CertError, get_context
 from otaku.web.server import LOOPBACK, Hooks, bind
@@ -55,14 +55,17 @@ class ServeError(Exception):
 
 def run(
     session: Session, *, full: bool = True, host: str | None = None, port: int | None = None
-) -> None:
+) -> bool:
     """This frontend's whole life over an open session, as `chat.run` is
     the terminal's: what the launch has to say, where the page is, and
     the tail of requests until the reader stops it. Everything printed
     by `otaku web` is printed here — into the terminal it was launched
     from, which is the only part of that terminal this frontend has.
     Closing the session stays the caller's, as it is for the other
-    frontend.
+    frontend. Returns whether the reader asked to be served again on
+    fresh sources (Ctrl+R) — which is the caller's to do, over a
+    session it has closed, and asked only where the process is the
+    caller's to replace: `otaku web`, never `/web`.
 
     FULL is a terminal this frontend opens: `otaku web`, with the launch
     to report and a mark to draw. Without it the session came from
@@ -104,26 +107,28 @@ def run(
     # echo `^C` into the middle of the answer.
     with ticker.Ticker() as tail:
 
-        def stopping() -> None:
-            """The first Ctrl+C, in words — the last line of the log,
-            said in the log's own voice because that is what the reader
-            is already reading. Shown BEFORE the tail stops, which is the
-            only order that works: a stopped tail draws nothing, and a
-            line drawn as a row is one a later redraw keeps rather than
-            takes back. Then the tail stops, and with it the terminal
-            gets its own behaviour back — the NEXT press is the fatal one
-            and would otherwise leave it without. The sentence is the
-            truth: a reply already in flight is finished, not cut."""
-            tail.show("Shutting down…")
+        def stopping(sentence: str) -> None:
+            """The first Ctrl+C (or Ctrl+D, or Ctrl+R), in words — the
+            last line of the log, said in the log's own voice because
+            that is what the reader is already reading. Shown BEFORE the
+            tail stops, which is the only order that works: a stopped
+            tail draws nothing, and a line drawn as a row is one a later
+            redraw keeps rather than takes back. Then the tail stops, and
+            with it the terminal gets its own behaviour back — the NEXT
+            press is the fatal one and would otherwise leave it without.
+            The sentence is the truth: a reply already in flight is
+            finished, not cut."""
+            tail.show(sentence)
             tail.stop()
 
-        serve(
+        restart = serve(
             session,
             config,
             session.custom_web_dir,
             session.cert_dir,
             show=tail.show,
             stopping=stopping,
+            restartable=full,
         )
     if full:
         # The shell prompt starts against a blank rather than against the
@@ -131,6 +136,7 @@ def run(
         # here: the blank before its next prompt is its ledger's, and one
         # printed here as well would be two.
         print()
+    return restart
 
 
 def settings(
@@ -193,9 +199,10 @@ def serve(
     cert_dir: Path,
     *,
     show: Callable[[str], None] | None = None,
-    stopping: Callable[[], None] | None = None,
+    stopping: Callable[[str], None] | None = None,
     stop: threading.Event | None = None,
-) -> None:
+    restartable: bool = False,
+) -> bool:
     """Serve one open session until interrupted — the composition root
     under `run`, the background worker started here for the same reason
     `chat.run` starts it. `config` is the configured address (`settings`
@@ -206,14 +213,17 @@ def serve(
     frontend's.
 
     Nothing here is printed. `show` is handed one line per request worth
-    showing and `stopping` the moment the reader asks for the door —
-    where either APPEARS is the caller's, because this package draws
-    nothing in a terminal.
+    showing and `stopping` the sentence for the moment the reader asks
+    for the door — where either APPEARS is the caller's, because this
+    package draws nothing in a terminal.
 
     `stop` is how a caller that is not a terminal ends the serving: set
     it and this returns, the same way Ctrl+C does. Ctrl+C itself is only
     wired when this runs on the main thread, because that is the only
-    thread a signal handler can be installed from."""
+    thread a signal handler can be installed from — and the keys at the
+    terminal (Ctrl+D as Ctrl+C; with `restartable`, Ctrl+R as a stop
+    that asks to be served again) are watched only there too. Returns
+    whether Ctrl+R asked."""
     session.start_worker()
     runner = SessionRunner(session)
     # What the background worker says while nobody asked it anything —
@@ -279,11 +289,32 @@ def serve(
     # (`_Server.stopping`), the way out of a wedged engine.
     on_main = threading.current_thread() is threading.main_thread()
     was = (
-        signal.signal(signal.SIGINT, _interrupting(server.stopping, stopping)) if on_main else None
+        signal.signal(signal.SIGINT, _interrupting(server.stopping, stopping, "Shutting down…"))
+        if on_main
+        else None
     )
+    # The keys the terminal answers while it serves: Ctrl+D is Ctrl+C,
+    # and — for `otaku web`, whose process is its own to replace —
+    # Ctrl+R is a stop that asks to be served again on fresh sources.
+    # Watched where the signal is wired, and off a pipe not at all. A
+    # key stops without handing the signal back: that is the handler's
+    # own move, and only the main thread may make it.
+    asked = threading.Event()
+    table: dict[bytes, Callable[[], None]] = {}
+    if on_main:
+        table[keys.CTRL_D] = _stopping(server.stopping, stopping, "Shutting down…")
+    restart = _stopping(server.stopping, stopping, "Restarting…")
+
+    def restarting() -> None:
+        asked.set()
+        restart()
+
+    if restartable and on_main:
+        table[keys.CTRL_R] = restarting
     try:
         threading.Thread(target=server.serve_forever, daemon=True).start()
-        runner.loop(server.stopping)
+        with keys.watching(table):
+            runner.loop(server.stopping)
     finally:
         if was is not None:
             signal.signal(signal.SIGINT, was)
@@ -295,6 +326,7 @@ def serve(
         # The borrowed hooks go back to whoever held them before.
         session.set_on_idle(was_idle)
         session.set_on_notice(was_notice)
+    return asked.is_set()
 
 
 def _is_loopback(host: str) -> bool:
@@ -361,18 +393,33 @@ class _Sayings:
         return said
 
 
-def _interrupting(stop: threading.Event, said: Callable[[], None] | None) -> Callable[..., None]:
+def _interrupting(
+    stop: threading.Event, said: Callable[[str], None] | None, sentence: str
+) -> Callable[..., None]:
     """The first Ctrl+C, and what it says. The handler gives the signal
     back to Python before setting the flag, so a reader who presses it
     again is answered at once rather than waiting on a stream that may
-    not yield for minutes. `said` is the caller's — this package has no
-    terminal — and a hook may not be what stops a shutdown."""
+    not yield for minutes."""
+    halt = _stopping(stop, said, sentence)
 
     def interrupt(*_: Any) -> None:
         signal.signal(signal.SIGINT, signal.SIG_DFL)
+        halt()
+
+    return interrupt
+
+
+def _stopping(
+    stop: threading.Event, said: Callable[[str], None] | None, sentence: str
+) -> Callable[[], None]:
+    """A stop asked for, and what it says: the flag set, then `sentence`
+    said through `said` — the caller's, this package having no terminal
+    — and a hook may not be what stops a shutdown."""
+
+    def halt() -> None:
         stop.set()
         if said is not None:
             with contextlib.suppress(Exception):
-                said()
+                said(sentence)
 
-    return interrupt
+    return halt

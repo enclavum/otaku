@@ -1,13 +1,7 @@
 {
- "think": "none",
+ "think": "unset",
  "think_levels": [
-  "default",
-  "none",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-  "max"
+  "unset"
  ],
  "verbose": false,
  "autocorrect": true,
@@ -18,52 +12,51 @@
   {
    "name": "temperature",
    "value": "",
-   "type": "float"
+   "type": "float",
+   "min": 0,
+   "max": 2
   },
   {
    "name": "top_p",
    "value": "",
-   "type": "float"
-  },
-  {
-   "name": "top_k",
-   "value": "",
-   "type": "int"
-  },
-  {
-   "name": "min_p",
-   "value": "",
-   "type": "float"
+   "type": "float",
+   "min": 0,
+   "max": 1
   },
   {
    "name": "max_tokens",
    "value": "",
-   "type": "int"
+   "type": "int",
+   "min": 1,
+   "max": null
   },
   {
    "name": "presence_penalty",
    "value": "",
-   "type": "float"
+   "type": "float",
+   "min": -2,
+   "max": 2
   },
   {
    "name": "frequency_penalty",
    "value": "",
-   "type": "float"
-  },
-  {
-   "name": "repetition_penalty",
-   "value": "",
-   "type": "float"
+   "type": "float",
+   "min": -2,
+   "max": 2
   },
   {
    "name": "seed",
    "value": "",
-   "type": "int"
+   "type": "int",
+   "min": null,
+   "max": null
   },
   {
    "name": "stop",
    "value": "",
-   "type": "str"
+   "type": "str",
+   "min": null,
+   "max": null
   }
  ]
 }
