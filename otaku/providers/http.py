@@ -375,7 +375,7 @@ def _raise_for_status(response: httpx.Response, name: str) -> None:
     with contextlib.suppress(httpx.StreamError):
         # A body that could not be read (the connection dropped mid-body)
         # is no explanation, and no reason to leave the error family.
-        detail = _excerpt(response.text, _DETAIL_WIDTH)
+        detail = response.text
         # The message of the `{"error": …}` object every server in this
         # family answers with, out of its envelope — and away from the
         # account id some carry beside it.
@@ -384,9 +384,13 @@ def _raise_for_status(response: httpx.Response, name: str) -> None:
             failure = data.get("error") if isinstance(data, dict) else None
             message = failure.get("message") if isinstance(failure, dict) else failure
             if isinstance(message, str) and message:
-                detail = _excerpt(message, _DETAIL_WIDTH)
+                detail = message
+    detail_excerpt = _excerpt(detail, _DETAIL_WIDTH)
     raise StatusError(
-        f"Refused by {name} with HTTP {status}" + (f": {detail}" if detail else "."), status
+        f"Refused by {name} with HTTP {status}"
+        + (f": {detail_excerpt}" if detail_excerpt else "."),
+        status,
+        detail=detail,
     )
 
 

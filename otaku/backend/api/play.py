@@ -219,7 +219,7 @@ def _reply_events(
         session.model,
         wire,
         dict(session.params),
-        effort=session.think,
+        level=session.think,
         purpose="chat",
         # The thread this runs on belongs to the frontend between
         # tokens, if the frontend said what to do with it.

@@ -34,6 +34,10 @@ from otaku.settings.providers import ProviderConfig
 # The listing's names that are no model, as the server spells them —
 # never behind its "koboldcpp/" prefix, which only a model gets: its
 # word for nothing loaded, and router mode's two orders.
+# The rungs its budget tells apart — none 0, minimal a tenth, low a
+# quarter, medium half of the context; high is unlimited, and xhigh and
+# max would be high again.
+_GRADED_EFFORTS: frozenset[str] = frozenset({"none", "minimal", "low", "medium", "high"})
 _NOT_A_MODEL = frozenset({"inactive", "initial_model", "unload_model"})
 # What the model endpoint answers, behind `--password`, a key it does
 # not accept.
@@ -76,10 +80,11 @@ class KoboldCppModels(OpenAIModels):
             active = "" if named == "inactive" else named.removeprefix("koboldcpp/")
         max_context_loaded = self._loaded_size(http)
         # The server's feature flags: vision means a projector was loaded
-        # beside the model, audio that it hears. Every effort reaches the
-        # model as a budget; the raw wire is there; decoding is
-        # constrained server-side. A probe that did not answer states
-        # nothing, and the cache keeps what an earlier one read.
+        # beside the model, audio that it hears. A rung reaches the model
+        # as a share of the context spent on thinking, a budget as
+        # itself; the raw wire is there; decoding is constrained
+        # server-side. A probe that did not answer states nothing, and
+        # the cache keeps what an earlier one read.
         version = http.get(
             f"{self._config.base_url}/api/extra/version", timeout=PROBE_TIMEOUT, quiet=True
         )
@@ -87,7 +92,9 @@ class KoboldCppModels(OpenAIModels):
             ModelCapabilities(
                 vision=bool(version["vision"]) if "vision" in version else None,
                 audio=bool(version["audio"]) if "audio" in version else None,
-                reasoning=reasoning.ALL_EFFORTS,
+                reasoning_efforts=_GRADED_EFFORTS,
+                reasoning_switch=False,
+                reasoning_budget=True,
                 text_completion=True,
                 structured_output=True,
             )
@@ -148,10 +155,12 @@ class KoboldCppCompletion(OpenAICompletion):
     # one is not sent: read, as one sampler.
     supported_params = PROTOCOL_PARAMS | SAMPLER_PARAMS
     chat_reasoning_knobs: ClassVar[frozenset[str]] = frozenset(
-        {reasoning.EFFORT_KNOB, reasoning.FLAG_KNOB}
+        {reasoning.EFFORT_KNOB, reasoning.SWITCH_TEMPLATE_KNOB, reasoning.BUDGET_TOKENS_KNOB}
     )
     # The budget is applied on every path, the raw one included.
-    text_reasoning_knobs: ClassVar[frozenset[str]] = frozenset({reasoning.EFFORT_KNOB})
+    text_reasoning_knobs: ClassVar[frozenset[str]] = frozenset(
+        {reasoning.EFFORT_KNOB, reasoning.BUDGET_TOKENS_KNOB}
+    )
     can_count_tokens = True
 
     def count_chat_tokens(
@@ -159,7 +168,7 @@ class KoboldCppCompletion(OpenAICompletion):
         model: str,
         messages: Sequence[WireMessage],
         *,
-        effort: str | None = None,
+        level: str | None = None,
         images: Sequence[Image] = (),
         timeout: float = ASK_TIMEOUT,
     ) -> int | None:
@@ -167,7 +176,7 @@ class KoboldCppCompletion(OpenAICompletion):
         # transform a chat turn gets, jinja template included — the
         # template's default, though: the endpoint reads no template
         # kwargs, and it renders an image as a placeholder line.
-        body, _ = self._chat_request(model, messages, {}, effort=effort, images=images)
+        body, _ = self._chat_request(model, messages, {}, level=level, images=images)
         return self._count({"messages": body["messages"]}, timeout)
 
     def count_text_tokens(

@@ -615,6 +615,10 @@ class TestThePicker:
             "supported_params": list(PARAMETERS),
         }
         assert mine["models"][0]["capabilities"] is None  # it says nothing of its models
+        # The info report's two rows ride the model, in the report's words
+        # (`backend.api.reports`): a provider that says nothing reads unknown.
+        assert mine["models"][0]["reasoning_words"] == "unknown"
+        assert mine["models"][0]["capability_words"] == "unknown"
         assert mine["models"][0]["max_context_loaded"] == ""  # nothing loads on a generic url
         assert "can_manage" not in mine["models"][0]
         unanswered = next(p for p in panel["providers"] if p["id"] == "llamacpp")

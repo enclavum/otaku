@@ -468,18 +468,12 @@ def _model_info(session: Session) -> tuple[tuple[str, str], ...]:
     loaded = format_context(row.max_context if row else None)
     if loaded and loaded != catalogue:
         out.append(("Served max context", loaded))
-    # What the model can do, as the provider says it: the efforts that
-    # reach it, in the wire's order, then the capabilities it has, in
-    # the dataclass's — "unknown" where the provider could not say (and
-    # the app offers nothing on it).
+    # What the model can do, as the provider says it: how its thinking
+    # is set, then the capabilities it has, in the dataclass's order —
+    # "unknown" where the provider could not say.
     caps = row.capabilities if row is not None else None
-    efforts = caps.reasoning if caps else None
-    if efforts is None:
-        out.append(("Reasoning efforts", "unknown"))
-    else:
-        named = ", ".join(effort for effort in reasoning.EFFORTS if effort in efforts)
-        out.append(("Reasoning efforts", named or "not supported"))
-    out.append(("Capabilities", _capability_words(caps)))
+    out.append(("Reasoning", reasoning_words(caps)))
+    out.append(("Capabilities", capability_words(caps)))
     if config.keep_alive:
         out.append(("Keep-alive", str(config.keep_alive)))
     if client.capabilities.prompt_cache:
@@ -495,17 +489,37 @@ def _model_info(session: Session) -> tuple[tuple[str, str], ...]:
 _CAPABILITY_REWORDING = {"structured_output": "json output"}
 
 
-def _capability_words(caps: ModelCapabilities | None) -> str:
+def reasoning_words(caps: ModelCapabilities | None) -> str:
+    """How the model's thinking is set, as the provider says it: the
+    rungs it grades in the wire's order, or "on / off" for a switch,
+    and "token budget" where one holds beside; "not supported" where
+    nothing reaches it, "unknown" where the provider could not say.
+    The info report's row, and the picker's, on both frontends."""
+    if caps is None or (caps.reasoning_efforts is None and caps.reasoning_switch is None):
+        return "unknown"
+    ways = []
+    if caps.reasoning_efforts:
+        ways.append(
+            ", ".join(rung for rung in reasoning.EFFORT_LEVELS if rung in caps.reasoning_efforts)
+        )
+    elif caps.reasoning_switch:
+        ways.append("on / off")
+    if caps.reasoning_budget:
+        ways.append("token budget")
+    return " / ".join(ways) if ways else "not supported"
+
+
+def capability_words(caps: ModelCapabilities | None) -> str:
     """The capabilities the model has, in the dataclass's order and the
-    reader's words — reasoning left out, the efforts having a row of
-    their own; "none" when the provider knows of none, "unknown" when
-    it could not say."""
+    reader's words — the thinking left out, having a row of its own;
+    "none" when the provider knows of none, "unknown" when it could not
+    say. The info report's row, and the picker's, on both frontends."""
     if caps is None:
         return "unknown"
     facts = [
         (field.name, getattr(caps, field.name))
         for field in fields(caps)
-        if field.name != "reasoning"
+        if not field.name.startswith("reasoning")
     ]
     named = ", ".join(
         _CAPABILITY_REWORDING.get(name, name.replace("_", " ")) for name, fact in facts if fact

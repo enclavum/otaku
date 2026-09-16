@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from otaku.backend.api import settings as api_settings
 from otaku.providers.clients.omlx import OmlxClient
 from otaku.settings.providers import ProviderConfig
 from scenarios.support.live import case_key, case_model
@@ -29,16 +30,22 @@ BOTH = frozenset({"reasoning_effort", "enable_thinking"})
 EFFORT = frozenset({"reasoning_effort"})
 FLAG = frozenset({"enable_thinking"})
 TEMPLATE = frozenset({"enable_thinking", "template_reasoning_effort"})
-ALL = BOTH | TEMPLATE  # the generic provider: permissive, every knob
+# The engines that enforce a thinking budget of their own, each in its
+# spelling: the flag and the word for the template, the budget for the
+# sampler; KoboldCpp takes llama.cpp's budget as an alias.
+LLAMACPP = TEMPLATE | {"thinking_budget_tokens"}
+OMLX = TEMPLATE | {"thinking_budget"}
+KOBOLDCPP = BOTH | {"thinking_budget_tokens"}
+ALL = BOTH | LLAMACPP | OMLX  # the generic provider: permissive, every knob
 # (provider, url, the env var of its key or "", the model named or "",
 # the knobs the provider is promised — the completion half's
 # `chat_reasoning_knobs`). The generic case is a llama-server reached
 # through the protocol alone: the setup the "think none does nothing"
 # report came from.
 CASES = [
-    ("llamacpp", "http://127.0.0.1:8080/v1", "", "", TEMPLATE),
+    ("llamacpp", "http://127.0.0.1:8080/v1", "", "", LLAMACPP),
     ("generic", "http://127.0.0.1:8080/v1", "", "", ALL),
-    ("koboldcpp", "http://127.0.0.1:5001/v1", "", "", BOTH),
+    ("koboldcpp", "http://127.0.0.1:5001/v1", "", "", KOBOLDCPP),
     (
         "ollama",
         "http://127.0.0.1:11434/v1",
@@ -51,7 +58,7 @@ CASES = [
         os.environ.get("OTAKU_LIVE_OMLX_URL", OmlxClient.autoconfigure().url),
         "",
         os.environ.get("OTAKU_LIVE_OMLX_MODEL", ""),
-        TEMPLATE,
+        OMLX,
     ),
     (
         "lmstudio",
@@ -83,18 +90,20 @@ _IDS = [c[0] for c in CASES]
 
 class TestThink:
     @pytest.mark.parametrize(("provider", "url", "key_var", "model"), _PARAMS, ids=_IDS)
-    def test_none_plays_without_a_thinking_echo_and_says_so_on_the_wire(
+    def test_off_plays_without_a_thinking_echo_and_says_so_on_the_wire(
         self, tmp_path: Path, server, capsys, provider: str, url: str, key_var: str, model: str
     ) -> None:  # type: ignore[no-untyped-def]
         app = _open(tmp_path, server, provider, url, key_var, model)
         try:
-            app.play("/set think none")
+            off, _ = _levels(app)
+            app.play(f"/set think {off}")
+            assert app.session.think == off
             capsys.readouterr()
             app.play("Reply with one word: ready?")
             out = capsys.readouterr().out
             assert _replied(app)
             assert "(thinking)" not in out
-            assert _carried(app, provider) == _expected(_KNOBS[provider], "none")
+            assert _carried(app, provider) == _expected(_KNOBS[provider], off)
         finally:
             app.close()
 
@@ -104,13 +113,14 @@ class TestThink:
     ) -> None:  # type: ignore[no-untyped-def]
         app = _open(tmp_path, server, provider, url, key_var, model)
         try:
-            app.play("/set think high")
+            _, on = _levels(app)
+            app.play(f"/set think {on}")
             # Never refused for the provider's sake: a provider with no knob
             # takes the level too, and its request carries nothing.
-            assert app.session.think == "high"
+            assert app.session.think == on
             app.play("Reply with one word: ready?")
             assert _replied(app)
-            assert _carried(app, provider) == _expected(_KNOBS[provider], "high")
+            assert _carried(app, provider) == _expected(_KNOBS[provider], on)
         finally:
             app.close()
 
@@ -126,18 +136,37 @@ def _replied(app) -> bool:  # type: ignore[no-untyped-def]
     return len(chain) >= 2 and chain[-1].role == "assistant" and bool(chain[-1].body.strip())
 
 
-def _expected(knobs: frozenset[str], think: str) -> dict[str, object]:
-    """What the promised knobs spell for `think` on the wire."""
+def _levels(app) -> tuple[str, str]:  # type: ignore[no-untyped-def]
+    """(the off, the on) the model in use takes: the switch's two words
+    where the provider says it switches, else the ladder's none and
+    high — every rung where the provider cannot say. A model that takes
+    no level (Ollama's Gemma 3, whose card names no thinking) has
+    nothing to smoke: the case skips, and names a model that does."""
+    words = api_settings.think_choices(app.session).levels
+    if words == ("unset",):
+        pytest.skip(f"{app.session.model} takes no thinking level (OTAKU_LIVE_<PROVIDER>_MODEL)")
+    return ("off", "on") if "off" in words else ("none", "high")
+
+
+def _expected(knobs: frozenset[str], level: str) -> dict[str, object]:
+    """What the promised knobs spell for `level` on the wire: off as
+    none on every knob, on as the flag alone, a rung by name."""
+    off = level in ("none", "off")
+    word = "none" if off else None if level == "on" else level
     out: dict[str, object] = {}
-    if "reasoning_effort" in knobs:
-        out["reasoning_effort"] = think
+    if "reasoning_effort" in knobs and word:
+        out["reasoning_effort"] = word
     template: dict[str, object] = {}
     if "enable_thinking" in knobs:
-        template["enable_thinking"] = think != "none"
-    if "template_reasoning_effort" in knobs and think != "none":
-        template["reasoning_effort"] = think
+        template["enable_thinking"] = not off
+    if "template_reasoning_effort" in knobs and word:
+        template["reasoning_effort"] = word
     if template:
         out["chat_template_kwargs"] = template
+    # A budget knob carries 0 for off and nothing for a rung or on.
+    for budget in ("thinking_budget_tokens", "thinking_budget"):
+        if budget in knobs and off:
+            out[budget] = 0
     return out
 
 
@@ -158,4 +187,10 @@ def _carried(app, provider: str) -> dict[str, object]:  # type: ignore[no-untype
     assert bodies, "no turn request was logged"
     turn = bodies[-1]["messages"][-1]["content"]
     first = next(b for b in bodies if b["messages"][-1]["content"] == turn)
-    return {k: first[k] for k in ("reasoning_effort", "chat_template_kwargs") if k in first}
+    knobs = (
+        "reasoning_effort",
+        "chat_template_kwargs",
+        "thinking_budget_tokens",
+        "thinking_budget",
+    )
+    return {k: first[k] for k in knobs if k in first}

@@ -151,8 +151,13 @@ function buildModels(state, notice) {
 
   if (!offered.length) $("[data-actions]", pane).replaceChildren();
   /* Read BEFORE the browser paints: its first paint moves the cursor to
-     row 0 and `onMove` would overwrite what the reader was on. */
+     row 0 and `onMove` would overwrite what the reader was on. And only
+     the reader's own moves are remembered: the kit reports that first
+     paint and the select below as moves too, and a model that arrives
+     with the cloud phase must still be found by that rebuild — not the
+     row the paint happened to land on. */
   const wanted = state.picked ?? panel.current;
+  let settled = false;
   const view = browser(popup, {
     root: pane,
     rows: offered,
@@ -165,7 +170,9 @@ function buildModels(state, notice) {
     drawRow: (entry) => modelRow(entry, panel.current),
     drawPreview: (entry) => modelDetail(pane, entry, panel.current, { use, setLoaded }),
     onOpen: use,
-    onMove: (entry) => (state.picked = `${entry.provider.id}/${entry.model.name}`),
+    onMove: (entry) => {
+      if (settled) state.picked = `${entry.provider.id}/${entry.model.name}`;
+    },
     onKey: (event, entry) => {
       if (event.key !== "l" && event.key !== "u") return false;
       guard(setLoaded)(entry, event.key === "l");
@@ -181,7 +188,7 @@ function buildModels(state, notice) {
   // Open where the reader was — or on the model the session is playing,
   // the way back to it.
   view.select((entry) => `${entry.provider.id}/${entry.model.name}` === wanted);
-
+  settled = true;
 }
 
 function modelRow(entry, current) {
@@ -225,6 +232,10 @@ function modelDetail(pane, entry, current, { use, setLoaded }) {
   // own — the info report's rule (`backend.api.reports`)
   const loaded = entry.model.max_context_loaded;
   if (loaded && loaded !== entry.model.max_context_catalogue) facts.append(fact("served max context", loaded));
+  // how its thinking is set, and what else it can do: the info report's
+  // two rows, in the report's own words (`backend.api.reports`)
+  facts.append(fact("reasoning", entry.model.reasoning_words));
+  facts.append(fact("capabilities", entry.model.capability_words));
   facts.append(fact("provider", entry.provider.label));
 
   // Pinned under the pane: the row above is a name of any length, and
@@ -587,7 +598,9 @@ function patch(state, provider, found) {
 }
 
 function fact(key, value) {
-  const line = element("p", "otk-fact");
+  // Clipped, never wrapped: the pane keeps its width, and a value too
+  // long for it — a ladder of levels — shows as far as it fits.
+  const line = element("p", "otk-fact otk-fact--clip");
   line.append(span("", key), span("", value));
   return line;
 }

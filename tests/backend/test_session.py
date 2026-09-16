@@ -2,7 +2,7 @@
 `backend.session` — pinned to the file vocabulary they order, because
 the two live in different layers and only this keeps them one thing."""
 
-from otaku.backend.session import EFFORTS, PARAMETERS, THINK_MENU
+from otaku.backend.session import EFFORT_LEVELS, PARAMETERS, THINK_MENU
 from otaku.providers.openai.completion import PROTOCOL_PARAMS
 from otaku.providers.registry import ALL_CLIENTS
 from otaku.settings.models import THINK_UNSET
@@ -12,8 +12,8 @@ class TestThinkVocabulary:
     def test_the_menu_is_the_wires_ladder_behind_the_way_out(self) -> None:
         # A level the wire honours that the menu lacked could be reported
         # by /info and never set; there is one ladder, the wire's.
-        assert (THINK_UNSET, *EFFORTS) == THINK_MENU
-        assert THINK_UNSET not in EFFORTS
+        assert (THINK_UNSET, *EFFORT_LEVELS) == THINK_MENU
+        assert THINK_UNSET not in EFFORT_LEVELS
 
     def test_default_leads_the_menu(self) -> None:
         # The way out comes first, as the docstring promises.

@@ -95,11 +95,23 @@ export async function openSettings(answered = "") {
   const perModel = element("div", "otk-v otk-v--md");
   perModel.append(section(knobs.model || "no model", "this model"));
   const params = element("div", "otk-v otk-v--sm");
-  // The thinking level first: every level the model takes on one line,
-  // the one it stands at marked, the rest a click away.
-  params.append(
-    leader("think", ladder(knobs.think_levels, knobs.think, (level) => setKnob("think", level))),
-  );
+  // The thinking level first: every word the model takes on one line,
+  // the one it stands at marked, the rest a click away — and, where the
+  // model takes a budget, a field for the number of tokens beside them.
+  const think = ladder(knobs.think_levels, knobs.think, (level) => setKnob("think", level));
+  if (knobs.think_budget) {
+    const budget = editable("", {
+      text: stands.think_budget(knobs),
+      // Nothing typed is no budget, which is the way out.
+      save: (typed, field) =>
+        typedKnob(field, () => api.setSetting("think", typed.trim() || "unset"), stands.think_budget),
+      line: true,
+      mask: _COUNT,
+    });
+    budget.placeholder = "tokens";
+    think.append(span("otk-faint", "·"), budget);
+  }
+  params.append(leader("think", think));
   for (const parameter of knobs.parameters) {
     // A parameter nobody has set stands at the model's own value. That is
     // an absence, so it is the field's PLACEHOLDER and not its text — and
@@ -144,6 +156,8 @@ export async function openSettings(answered = "") {
    parameter its value or nothing. */
 const stands = {
   max_context: (knobs) => (knobs.max_context ? String(knobs.max_context) : ""),
+  // The level as a budget: the digits, or nothing where it is a word.
+  think_budget: (knobs) => (_COUNT.test(knobs.think) && knobs.think ? knobs.think : ""),
   parameter: (knobs, name) => knobs.parameters.find((p) => p.name === name)?.value ?? "",
 };
 

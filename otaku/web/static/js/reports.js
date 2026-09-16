@@ -259,7 +259,8 @@ export async function openInfo() {
      know stays a leader, so a renamed row degrades to a line. */
   const blocks = [];
   const closing = [];
-  const facts = element("div", "otk-v otk-v--sm");
+  // The one block the slip is torn to the width of (`.otk-docket--fit`).
+  const facts = element("div", "otk-v otk-v--sm otk-docket__facts");
   let title = null;
   for (const section of report.sections) {
     if (section.note) blocks.push(element("p", "otk-note", section.note));
@@ -284,21 +285,12 @@ export async function openInfo() {
   showDocket("info", "Info", blocks, "", title);
 }
 
-/* A value long enough to wrap is not a figure and cannot ride a leader:
-   the dots would run into a paragraph. Past this many characters the row
-   stacks instead — the name above, the value under it. */
-const _FIGURE = 42;
-
+/* A value rides its leader whatever its length: the slip grows to the
+   widest one rather than wrapping it or setting it in another face. */
 function leader(label, value, kind = "") {
-  const text = String(value);
-  if (text.length <= _FIGURE) {
-    const line = element("div", "otk-leader");
-    line.append(span("", label), span(kind, text));
-    return line;
-  }
-  const block = element("div", "otk-v otk-v--xs");
-  block.append(span("otk-margin__key", label), element("p", `otk-derived ${kind}`.trim(), text));
-  return block;
+  const line = element("div", "otk-leader");
+  line.append(span("", label), span(kind, String(value)));
+  return line;
 }
 
 /** The slip up before its data — a click must answer NOW, and the modal
@@ -310,14 +302,16 @@ function openSlip(kind, title) {
 }
 
 /* The BOX each report gets, decided by kind and not by what arrived:
-   balance is a column of figures on a narrow slip, usage and info take
-   the default width. Every slip is torn to what it says — the balance
-   included, whose whole shape stands from the roster with only the
-   figures to land, so nothing about its height ever changes. */
+   balance is a column of figures on a narrow slip, usage takes the
+   default width, and info is torn to its widest leader — a backend's
+   url, a ladder of levels — never wrapping one. Every slip is torn to
+   what it says — the balance included, whose whole shape stands from
+   the roster with only the figures to land, so nothing about its
+   height ever changes. */
 const _SIZE = {
   balance: ["otk-docket--narrow"],
   usage: [],
-  info: [],
+  info: ["otk-docket--fit"],
 };
 // A slip that cannot change size may open before it has anything to say.
 const _settles = (kind) => (_SIZE[kind] ?? []).includes("otk-docket--fixed");

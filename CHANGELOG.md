@@ -34,12 +34,14 @@ Mobile:
 
 Backend:
 
-- The providers layer is rewritten from scratch. Models report which reasoning efforts reach them
-  and what else they can do (vision, audio, etc.).
+- The providers layer is rewritten from scratch. Models report how their thinking is set — a
+  ladder of efforts, an on/off switch, or a budget in tokens — and what else they can do (vision,
+  audio, etc.).
 - Three more sampling parameters: `top_k`, `min_p` and `repetition_penalty`. Since supported
   parameters vary per provider, the UI shows and lets you edit supported parameters only.
 - The thinking level is set at the model level now, not globally as before. The UI shows and lets
-  you choose the current model's supported levels only.
+  you choose only what the current model takes: its levels, `off`/`on` where it only switches, and
+  a number of tokens where the engine holds a thinking budget (0 = off).
 - Provider API keys can be set in environment variables (e.g., `OPENROUTER_API_KEY`).
 - llama.cpp's router mode: its models listed, loaded and unloaded from the picker.
 
@@ -65,10 +67,11 @@ Tentative roadmap: [ROADMAP.md](https://github.com/enclavum/otaku/blob/main/ROAD
 - llama.cpp in router mode (`llama-server --models-dir`) lists the directory's models in the
   picker and loads and unloads them there, the way Ollama and omlx do. A model the router put to
   sleep counts as loaded, and a load that failed says so with the exit code.
-- `/info` reports what the model can do as its engine says it: whether it takes images, which
-  reasoning efforts reach it, and whether it completes raw text — `yes`, `no`, the efforts, or
-  `unknown` where the engine cannot say, which is the Generic OpenAI provider's every row and
-  llama.cpp's and omlx's efforts. Unknown is never taken for allowed. Text completion is `no` on
+- `/info` reports what the model can do as its engine says it: whether it takes images, how its
+  thinking is set, and whether it completes raw text — `yes`, `no`, the levels, `on / off`, `token
+  budget`, or `unknown` where the engine cannot say, which is the Generic OpenAI provider's
+  every row. llama.cpp is asked through its template (`/apply-template`): what changes the prompt
+  is what the template reads. Unknown is never taken for allowed. Text completion is `no` on
   Ollama: its `/v1/completions` wraps the prompt as a chat turn and thinks unseen, so no raw
   continuation exists there.
 - `/set` accepts three more sampling parameters: `top_k`, `min_p` and `repetition_penalty`. omlx
@@ -116,8 +119,8 @@ Tentative roadmap: [ROADMAP.md](https://github.com/enclavum/otaku/blob/main/ROAD
   `max_context` and its `engine` is `provider`, and the play event `thinking` is `reasoning`.
   A provider card carries a `capabilities` object — whether it manages models, counts tokens
   exactly, honours prompt-cache marks, and which `/set` parameters its wire reads — and each of
-  its models carries its own: vision, audio, the reasoning efforts, text completion, structured
-  output. The page's `.otk-thinking` class, which a `custom.css` may target, is `.otk-reasoning`.
+  its models carries its own: vision, audio, the reasoning efforts, switch and budget, text
+  completion, structured output. The page's `.otk-thinking` class, which a `custom.css` may target, is `.otk-reasoning`.
 - Request-log lines file an answer's `status` and `reasoning` where they filed `outcome` and
   `thinking`, and a failed answer's status carries the provider's sentence rather than the
   exception's name; lines written before still read.

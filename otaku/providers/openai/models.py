@@ -37,13 +37,19 @@ from otaku.settings.providers import ProviderConfig
 @dataclass(frozen=True)
 class ModelCapabilities:
     """What a model can do, as its engine reports it. None: the engine
-    cannot say, which a reader treats as no. `reasoning` is the set of
-    efforts honoured, "none" among them when reasoning can be switched
-    off; empty means no effort reaches the model."""
+    cannot say, which a reader treats as no. Thinking is three facts,
+    of which a model takes one shape of word (`reasoning`'s vocabulary):
+    `reasoning_efforts` are the ladder's rungs it grades, "none" among
+    them where that rung switches it off — empty, no rung reaches it;
+    `reasoning_switch` is whether it is on or off and nothing between;
+    `reasoning_budget` whether a budget in tokens holds, beside
+    either."""
 
     vision: bool | None = None  # takes images on a message
     audio: bool | None = None  # takes audio on a message
-    reasoning: frozenset[str] | None = None
+    reasoning_efforts: frozenset[str] | None = None
+    reasoning_switch: bool | None = None
+    reasoning_budget: bool | None = None
     text_completion: bool | None = None  # the raw text wire exists for it
     structured_output: bool | None = None  # can be held to a JSON schema, or json mode
 

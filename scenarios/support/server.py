@@ -63,11 +63,16 @@ class ModelServer:
         self.extras: dict[str, dict[str, Any]] = {}
         # llama.cpp's /props beyond the window (modalities, chat_template_caps).
         self.props: dict[str, Any] = {}
+        # llama.cpp's /apply-template: the chat_template_kwargs the
+        # template renders into the prompt; None → 404, a build without it.
+        self.template_reads: set[str] | None = None
         self.version: dict[str, Any] | None = None  # KoboldCpp's /api/extra/version; None → 404
         # KoboldCpp's /api/v1/model `result` — "koboldcpp/<name>", "inactive",
         # or the mask a wrong key gets; None → 404
         self.kobold_model: str | None = None
         self.capabilities: dict[str, list[str]] = {}  # ollama's /api/show capabilities per model
+        # LM Studio's registry: `reasoning.allowed_options` per model
+        self.reasoning_options: dict[str, list[str]] = {}
         self.remote: set[str] = set()  # ollama tags: the names served by ollama.com
         self.unload_status: int | None = None  # set → LM Studio's /unload answers this status
         self.ps_status: int | None = None  # set → /api/ps answers this status instead
@@ -179,7 +184,22 @@ class ModelServer:
                                     "size_bytes": outer.sizes.get(name, 1_048_576),
                                     "max_context_length": outer.contexts.get(name, 8192),
                                     **(
-                                        {"capabilities": {"vision": "vision" in caps}}
+                                        {
+                                            "capabilities": {
+                                                "vision": "vision" in caps,
+                                                **(
+                                                    {
+                                                        "reasoning": {
+                                                            "allowed_options": (
+                                                                outer.reasoning_options[name]
+                                                            )
+                                                        }
+                                                    }
+                                                    if name in outer.reasoning_options
+                                                    else {}
+                                                ),
+                                            }
+                                        }
                                         if (caps := outer.capabilities.get(name)) is not None
                                         else {}
                                     ),
@@ -350,6 +370,15 @@ class ModelServer:
                     self._json(outer.balances)
                     return
                 posted = self.path.split("?", 1)[0].rstrip("/")
+                if outer.template_reads is not None and posted.endswith("/apply-template"):
+                    # The prompt one turn renders to, the kwargs the
+                    # template reads written into it.
+                    kwargs = body.get("chat_template_kwargs") or {}
+                    read = "".join(
+                        f" {k}={kwargs[k]}" for k in sorted(outer.template_reads) if k in kwargs
+                    )
+                    self._json({"prompt": f"<user>{body['messages'][-1]['content']}</user>{read}"})
+                    return
                 if outer.managed and posted.endswith("/api/show"):
                     # Ollama's card: the capabilities of one model, and its
                     # trained context length where a test set one.

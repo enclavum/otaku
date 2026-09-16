@@ -149,7 +149,7 @@ class OpenAICompletion:
         messages: Sequence[WireMessage],
         params: dict[str, object],
         *,
-        effort: str | None = None,
+        level: str | None = None,
         images: Sequence[Image] = (),
         timeout: float = REPLY_TIMEOUT,
         purpose: str = "chat",
@@ -157,15 +157,16 @@ class OpenAICompletion:
         on_idle: Callable[[], bool | None] | None = None,
     ) -> Iterator[Chunk]:
         """Stream one chat completion: Reasoning and Text deltas, then a
-        final Stats. `effort` is a `reasoning.EFFORTS` word, sent on
-        every knob the engine reads; `images` ride on the last
+        final Stats. `level` is a thinking level in `reasoning`'s
+        vocabulary — a rung, off or on, a budget — sent on every knob
+        the engine reads; `images` ride on the last
         message; `watched=False` skips the pacing for a call nobody
         watches, so its cancel is not delayed. With the pacing on, the
         wait is spent ticking `on_idle`, which may answer False to say
         nobody reads any more — the stream ends as cancelled then, its
         request cut; without it, the caller's own thread is in the read
         and nothing ticks."""
-        body, knobs = self._chat_request(model, messages, params, effort=effort, images=images)
+        body, knobs = self._chat_request(model, messages, params, level=level, images=images)
         url = f"{self._config.url}/chat/completions"
         cut = Cut() if watched and self._smooth else None
         stream = self._stream(url, body, knobs, purpose, timeout, frames.chat_delta, cut)
@@ -178,19 +179,19 @@ class OpenAICompletion:
         prompt: str,
         params: dict[str, object],
         *,
-        effort: str | None = None,
+        level: str | None = None,
         timeout: float = REPLY_TIMEOUT,
         purpose: str = "chat",
         watched: bool = True,
         on_idle: Callable[[], bool | None] | None = None,
     ) -> Iterator[Chunk]:
         """Stream one text completion: the prompt continued where it
-        ends, Text deltas then a final Stats. `effort` goes out on the
+        ends, Text deltas then a final Stats. `level` goes out on the
         engine's text knobs. Whatever the model reasons arrives
         inline, in the text — nothing stands between the prompt and
         the model to tell a thought from the rest."""
         body = requests.text_completion_body(model, prompt, self._wire_params(params))
-        knobs = reasoning.fields(effort, self.text_reasoning_knobs)
+        knobs = reasoning.fields(level, self.text_reasoning_knobs)
         url = f"{self._config.url}/completions"
         cut = Cut() if watched and self._smooth else None
         stream = self._stream(url, body, knobs, purpose, timeout, frames.completion_delta, cut)
@@ -201,15 +202,15 @@ class OpenAICompletion:
         model: str,
         messages: Sequence[WireMessage],
         *,
-        effort: str | None = None,
+        level: str | None = None,
         images: Sequence[Image] = (),
         timeout: float = ASK_TIMEOUT,
     ) -> int | None:
         """How many tokens the chat wire would spend on `messages`, as
         the engine itself counts them, of the request a turn would send:
-        `effort` on the knobs and `images` on the last message, where
+        `level` on the knobs and `images` on the last message, where
         the engine's count renders them. None where it cannot say, which
-        the base cannot. Best effort: a caller keeps its estimate for
+        the base cannot. Best level: a caller keeps its estimate for
         None."""
         return None
 
@@ -233,7 +234,7 @@ class OpenAICompletion:
         messages: Sequence[WireMessage],
         params: dict[str, object],
         *,
-        effort: str | None,
+        level: str | None,
         images: Sequence[Image],
     ) -> tuple[dict[str, object], dict[str, object]]:
         """The chat request as the wire gets it: the body, and the
@@ -247,7 +248,7 @@ class OpenAICompletion:
             images=images,
             cache_ttl=self._cache_ttl(),
         )
-        return body, reasoning.fields(effort, self.chat_reasoning_knobs)
+        return body, reasoning.fields(level, self.chat_reasoning_knobs)
 
     def _cache_ttl(self) -> str | None:
         """The prompt-cache TTL to mark with, or None: the engine must
@@ -271,12 +272,16 @@ class OpenAICompletion:
         """The request with its reasoning `knobs`, and — should a 400
         refuse it before anything streamed, naming a knob — once more
         without them: "none" cannot be sent to a model whose reasoning
-        is mandatory, and some engines reject the field outright. A 400
-        that names no knob (a context overflow) is the answer, sent
-        once; a take that yielded is never retried, since its words are
-        on someone's screen. No knobs, one take. A failure is filed as
-        it escapes — past the retry, so a 400 that was sent again
-        without the knobs was no failure."""
+        is mandatory, and some engines reject the field outright. The
+        second take is filed as such, with the refusal's words: sent
+        bare, the engine keeps its default, which for a model that
+        insists on reasoning is reasoning — visible on screen as the
+        thought it streams, and in the log as this note. A 400 that
+        names no knob (a context overflow) is the answer, sent once; a
+        take that yielded is never retried, since its words are on
+        someone's screen. No knobs, one take. A failure is filed as it
+        escapes — past the retry, so a 400 that was sent again without
+        the knobs was no failure."""
         try:
             if not knobs:
                 yield from self._generate(url, body, purpose, timeout, read_delta, cut)
@@ -291,14 +296,19 @@ class OpenAICompletion:
                         yielded = True
                         yield chunk
             except StatusError as e:
-                # Less the model's own name: an id may spell "thinking"
-                # (NanoGPT's `:thinking` models) and a 400 that echoes it
-                # — a context overflow — names no knob.
-                sentence = str(e).lower().replace(str(body.get("model", "")).lower(), "")
+                # The server's whole sentence, not the cut a reader is
+                # shown: the word can sit past the cut. Less the model's
+                # own name: an id may spell "thinking" (NanoGPT's
+                # `:thinking` models) and a 400 that echoes it — a context
+                # overflow — names no knob.
+                sentence = (e.detail or str(e)).lower()
+                sentence = sentence.replace(str(body.get("model", "")).lower(), "")
                 knob_refused = any(word in sentence for word in self._refusal_words(knobs))
                 if yielded or e.status != 400 or not knob_refused:
                     raise
-                yield from self._generate(url, body, purpose, timeout, read_delta, cut)
+                yield from self._generate(
+                    url, body, purpose, timeout, read_delta, cut, retried=str(e)
+                )
         except ProviderError as e:
             self._http.record(e, purpose)
             raise
@@ -311,12 +321,15 @@ class OpenAICompletion:
         timeout: float,
         read_delta: _DeltaReader,
         cut: Cut | None = None,
+        retried: str = "",
     ) -> Generator[Chunk, None, None]:
         """One take: the request recorded, the wire read, and the answer
         filed under the request's id — once, however it ends: the clean
         end, the consumer closing it (the cancel-and-keep door), a cut
         it asked for from another thread, or a failure. What had
-        arrived rides along either way."""
+        arrived rides along either way. `retried` is the refusal a
+        second take answers, filed with it so the log says the knobs
+        were dropped and why."""
         name = self._config.name
         request_id = ""
         if self._request_sink is not None:
@@ -365,7 +378,9 @@ class OpenAICompletion:
                     raise
             if trouble:
                 raise DeclinedError(" ".join(trouble))
-            status = "ok"
+            status = (
+                "ok" if not retried else f"ok, sent again without the reasoning knobs: {retried}"
+            )
         except StreamCut:
             return  # the consumer cut the read: cancelled, as the word stands
         except Exception as e:

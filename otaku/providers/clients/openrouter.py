@@ -4,15 +4,16 @@ each model's max context and the one its top provider serves it
 with, its input modalities, and — in its `reasoning` object — the
 efforts it takes and whether reasoning is mandatory; the key's own
 endpoint answers a bad key with 401, which is how a key is checked,
-the catalog itself being public. An effort goes out as
-`reasoning_effort`. On Anthropic's models OpenRouter spends it as a
-share of `max_tokens`, and a share under Anthropic's floor of 1024
-thinking tokens is dropped: a small `max_tokens` turns the level off
-there, not the level.
+the catalog itself being public. A rung goes out as
+`reasoning_effort`, a budget as `reasoning.max_tokens`, and OpenRouter
+spends either as the model takes it (`_thinking_of`). On Anthropic's
+models a rung is a share of `max_tokens`, and a share under
+Anthropic's floor of 1024 thinking tokens is dropped: a small
+`max_tokens` turns the level off there, not the level.
 """
 
 from dataclasses import replace
-from typing import Any
+from typing import Any, ClassVar
 
 from otaku.formatting import Money
 from otaku.providers.http import ASK_TIMEOUT, Http, positive_int
@@ -59,6 +60,7 @@ class OpenRouterModels(OpenAIModels):
         )
         parameters = listed.get("supported_parameters")
         top = listed.get("top_provider")
+        levels, switch, budget = self._thinking_of(listed)
         return replace(
             model,
             max_context_loaded=self._top_provider_int(top, "context_length"),
@@ -66,7 +68,9 @@ class OpenRouterModels(OpenAIModels):
             capabilities=ModelCapabilities(
                 vision="image" in modalities if isinstance(modalities, list) else None,
                 audio="audio" in modalities if isinstance(modalities, list) else None,
-                reasoning=self._reasoning_of(listed),
+                reasoning_efforts=levels,
+                reasoning_switch=switch,
+                reasoning_budget=budget,
                 # The completions endpoint is per model and the catalog
                 # does not say which take it.
                 text_completion=None,
@@ -78,27 +82,37 @@ class OpenRouterModels(OpenAIModels):
             ),
         )
 
-    def _reasoning_of(self, listed: dict[str, Any]) -> frozenset[str] | None:
-        """The efforts a catalog model honours, as its `reasoning` object
-        states them. `supported_efforts` names them; null, or omitted,
-        means no selection among them — every effort reaches, as on:
-        Gemma 4, whose object names none, spent reasoning tokens at high
-        and none at none — and "none" reaches unless reasoning is
-        mandatory. A model whose parameters do not take `reasoning` cannot
-        reason, object or not; one that says neither cannot be read."""
+    def _thinking_of(
+        self, listed: dict[str, Any]
+    ) -> tuple[frozenset[str] | None, bool | None, bool | None]:
+        """(the rungs, whether it switches, whether a budget holds), as
+        the entry's `reasoning` object states them and OpenRouter's wire
+        completes them. Every model that reasons takes every rung and a
+        budget there, because OpenRouter converts between the two: a
+        rung is native to OpenAI's and Grok's models and a share of
+        `max_tokens` on the rest (max and xhigh 95%, high 80%, medium
+        50%, low 20%, minimal 10%), a budget is native to Anthropic's,
+        Gemini's and Qwen's and a rung on the rest, and a budget under
+        Anthropic's floor is raised to it. So `supported_efforts` names
+        the rungs a model grades natively, kept as named where it does —
+        OpenAI refuses a word off its list — and every rung otherwise.
+        "none" is off, and among them, unless reasoning is mandatory.
+        Never a switch: the ladder has the off. A model whose parameters
+        do not take `reasoning` cannot reason, object or not; one that
+        takes it without an object reasons in a way the catalog does not
+        say; one that says neither cannot be read."""
         parameters = listed.get("supported_parameters")
-        can_reason = isinstance(parameters, list) and "reasoning" in parameters
+        if not isinstance(parameters, list):
+            return None, None, None
+        if "reasoning" not in parameters:
+            return frozenset(), False, False
         spec = listed.get("reasoning")
         if not isinstance(spec, dict):
-            if not isinstance(parameters, list):
-                return None
-            return reasoning.ALL_EFFORTS if can_reason else frozenset()
-        if not can_reason:
-            return frozenset()
+            return None, None, None
         named = spec.get("supported_efforts")
-        efforts = reasoning.from_wire(named) if isinstance(named, list) else frozenset()
-        efforts = efforts or reasoning.ALL_EFFORTS
-        return efforts - {"none"} if spec.get("mandatory") else efforts | {"none"}
+        rungs = reasoning.from_wire(named) if isinstance(named, list) else frozenset()
+        rungs = rungs or reasoning.ALL_EFFORT_LEVELS
+        return (rungs - {"none"} if spec.get("mandatory") else rungs | {"none"}), False, True
 
     def _top_provider_int(self, top: object, key: str) -> int | None:
         """A figure off the entry's `top_provider` object, the provider a
@@ -114,8 +128,12 @@ class OpenRouterCompletion(OpenAICompletion):
     # that honour them (Anthropic above all) and drops them elsewhere —
     # marking is safe across the whole catalog.
     can_mark_cache = True
-    # No text knob: on the raw wire an effort derails the model (Gemma 4
+    # The rung by name, and the budget in the reasoning object. No text
+    # knob: on the raw wire an effort derails the model (Gemma 4
     # answered a puzzle with a page of "Good,") and no reasoning comes.
+    chat_reasoning_knobs: ClassVar[frozenset[str]] = frozenset(
+        {reasoning.EFFORT_KNOB, reasoning.BUDGET_MAX_TOKENS_KNOB}
+    )
 
 
 class OpenRouterClient(OpenAIClient):

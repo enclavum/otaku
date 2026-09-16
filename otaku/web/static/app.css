@@ -837,6 +837,7 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
 .otk-fact:last-child { border-bottom: 0; }
 .otk-fact > :first-child { color: var(--otk-muted); }
 .otk-fact > :last-child { color: var(--otk-body); overflow-wrap: anywhere; text-align: right; }
+.otk-fact--clip > :last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
 /* pinned to the foot of its pane: a taller or shorter body above never moves
    the buttons */
 .otk-actions { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: auto; padding-top: 14px; border-top: var(--otk-hair) solid var(--otk-line-soft); }
@@ -888,6 +889,13 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
 /* …except balance, whose figures arrive one per provider after the slip is
    open: a slip that grows under the pointer has moved what was clicked */
 .otk-docket--fixed  { height: min(var(--otk-docket-h), calc(100dvh - 80px)); }
+/* A slip torn to its widest leader: a value never wraps and never
+   changes face for its length — the slip grows to it, up to the
+   viewport. What may wrap (the subject, a note, the story's title) is
+   held out of the measure, so a paragraph cannot stretch the slip. */
+.otk-docket--fit    { width: fit-content; min-width: var(--otk-docket-w); }
+.otk-docket--fit .otk-leader > * { white-space: nowrap; }
+.otk-docket--fit .otk-slot > :not(.otk-docket__facts) { contain: inline-size; }
 /* between the click and the figures: the scrim answers, and the slip arrives
    whole rather than opening small and growing */
 .otk-docket.is-waiting { visibility: hidden; }

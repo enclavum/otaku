@@ -10,7 +10,7 @@ from otaku.formatting import toml_key, toml_scalar
 from otaku.settings import read_settings, write_atomic
 
 # The thinking level is the engine's own word for an effort, and which
-# words exist is the provider layer's (`providers.reasoning.EFFORTS`),
+# words exist is the provider layer's (`providers.reasoning.EFFORT_LEVELS`),
 # read back against it by the session: this file only holds one. "unset"
 # is not a level: no level is saved, nothing is sent, and the engine
 # decides — what a model with no think row runs at, so an entry carries

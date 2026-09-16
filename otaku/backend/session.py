@@ -39,17 +39,19 @@ from otaku.store import Store
 from otaku.store.schema import Message
 from otaku.worker import Worker
 
-# The /set think ladder as every menu offers it: unset first (the way
-# out: no level, nothing sent), then the wire's own ladder of efforts
-# in its order — what a model reports is a subset of it, and that
-# subset is what a menu offers (`api.settings.think_levels`). Bound
-# here so a frontend reads the whole /set vocabulary off one module.
+# The /set think menu for a model nobody has described: unset first
+# (the way out: no level, nothing sent), then the wire's own ladder of
+# efforts in its order. What a model takes is a subset of it, or the
+# switch's two words instead, or a budget besides — and that is what a
+# menu offers (`api.settings.think_choices`). Bound here so a frontend
+# reads the whole /set vocabulary off one module.
 THINK_UNSET: str = models_file.THINK_UNSET
-THINK_MENU: tuple[str, ...] = (THINK_UNSET, *reasoning.EFFORTS)
+THINK_MENU: tuple[str, ...] = (THINK_UNSET, *reasoning.EFFORT_LEVELS)
 
-# The reasoning efforts in the wire's order, weakest to strongest, for
-# a frontend listing the ones a model honours.
-EFFORTS: tuple[str, ...] = reasoning.EFFORTS
+# The ladder's rungs in the wire's order, weakest to strongest, and the
+# switch's two words, for a frontend listing what a model takes.
+EFFORT_LEVELS: tuple[str, ...] = reasoning.EFFORT_LEVELS
+SWITCH_LEVELS: tuple[str, ...] = reasoning.SWITCH_LEVELS
 
 
 @dataclass(frozen=True)
@@ -123,7 +125,7 @@ class Session:
     _system: str
     _messages: list[Message]
     _params: dict[str, object]
-    _think: str  # the model's level — one of `reasoning.EFFORTS`, or THINK_UNSET
+    _think: str  # the model's thinking level (`reasoning.is_level`), or THINK_UNSET
     # The stories content index behind `api.stories.search` — built on
     # the first search, invalidated by the write primitives below.
     _search_index: dict[int, str] | None
@@ -180,6 +182,7 @@ class Session:
         session._worker = worker
         session._closed = False
         session._reload_model_settings()
+        session._read_model()
         # Reattach the story the previous session was on, so bare `otaku`
         # reopens it mid-scene; one deleted since simply starts fresh.
         if state.story and store.stories.exists(state.story):
@@ -237,8 +240,9 @@ class Session:
 
     @property
     def think(self) -> str | None:
-        """The model's thinking level — one of `reasoning.EFFORTS`; None
-        = defer to the model. Saved per model, beside its parameters."""
+        """The model's thinking level — a rung of `reasoning.EFFORT_LEVELS`,
+        off or on, or a budget in tokens as digits; None = defer to the
+        model. Saved per model, beside its parameters."""
         return None if self._think == THINK_UNSET else self._think
 
     @property
@@ -525,6 +529,22 @@ class Session:
         if self._story_id is not None:
             self._store.stories.set_system(self._story_id, text)
 
+    def _read_model(self) -> None:
+        """Ask a LOCAL engine for the model's row once the model is
+        current — at launch and on a switch — so what the menus read off
+        the cache, how the model's thinking is set above all, is there
+        before the first turn's ask would fill it in: a /set think menu
+        must not change under the reader between the first keystroke
+        and the first reply. Over the engine's own socket, never the
+        internet (`max_context`'s rule); a server that does not answer
+        leaves the row unknown, and the menus offer every rung until
+        something does."""
+        client = self._client()
+        if client is None or client.locality is not Locality.LOCAL:
+            return
+        with contextlib.suppress(Exception):
+            client.models.get(self.model)
+
     def _reload_model_settings(self) -> None:
         """Replace the live parameters and thinking level with the
         current model's saved ones — they follow the model, at startup
@@ -535,9 +555,12 @@ class Session:
         saved = models_file.load(self._paths.models_file).get(self.model, {})
         for name, value in saved.items():
             if name == models_file.THINK_KEY:
-                # The wire's own word, or the way out — anything else is a
-                # hand edit the engine would refuse.
-                if value == models_file.THINK_UNSET or value in reasoning.ALL_EFFORTS:
+                # A level the wire spells, or the way out — anything else
+                # is a hand edit the engine would refuse. A budget is
+                # digits, quoted or not.
+                if isinstance(value, str | int) and (
+                    value == models_file.THINK_UNSET or reasoning.is_level(str(value))
+                ):
                     self._think = str(value)
                 else:
                     self._note(f"Ignoring invalid think value {value!r} saved for {self.model}.")

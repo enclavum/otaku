@@ -53,7 +53,7 @@ from otaku.backend.api.lore import FieldKind, WorkerRun
 from otaku.backend.api.play import Declined, Done, Failed, PlayEvent, Reasoning, Recorded, Text
 from otaku.backend.api.providers import SupportedProvider
 from otaku.backend.commands import COMMANDS, PROSE_DESCRIPTION
-from otaku.backend.session import EFFORTS, PARAMETERS, THINK_UNSET, Refused, Session
+from otaku.backend.session import EFFORT_LEVELS, PARAMETERS, THINK_UNSET, Refused, Session
 from otaku.formatting import Money, format_context, format_size
 
 __all__ = [
@@ -383,6 +383,10 @@ def _providers(session: Session, scope: str = "") -> dict[str, Any]:
                 if model.max_context_loaded
                 else "",
                 "capabilities": _model_capabilities(model),
+                # The info report's two rows on the model, in its words:
+                # the page draws them under the picker as it draws /info.
+                "reasoning_words": reports.reasoning_words(model.capabilities),
+                "capability_words": reports.capability_words(model.capabilities),
             }
             for model in row.models
         )
@@ -398,7 +402,8 @@ def _providers(session: Session, scope: str = "") -> dict[str, Any]:
     named = [p.id for p in providers if p.id in asked]
     named += sorted(name for name in models if name not in known)
     return {
-        "current": session.full_model_name,
+        # Under its listed name, which is how the page finds its row.
+        "current": api_providers.listed_spec(session),
         # The one machine fact a picker needs: loading a model is what
         # fills a machine up. Said below both frontends, so the terminal's
         # gauge and the page's are one sentence (`backend.meminfo`).
@@ -420,7 +425,7 @@ def _providers(session: Session, scope: str = "") -> dict[str, Any]:
 
 def _model_capabilities(model: ModelInfo) -> dict[str, Any] | None:
     """What the model can do, as the page reads it: each flag as the
-    provider states it, null where it cannot say; the efforts in the
+    provider states it, null where it cannot say; the rungs in the
     wire's order, weakest to strongest; null altogether where the
     provider says nothing of the model."""
     caps = model.capabilities
@@ -429,9 +434,11 @@ def _model_capabilities(model: ModelInfo) -> dict[str, Any] | None:
     return {
         "vision": caps.vision,
         "audio": caps.audio,
-        "reasoning": [e for e in EFFORTS if e in caps.reasoning]
-        if caps.reasoning is not None
+        "reasoning_efforts": [e for e in EFFORT_LEVELS if e in caps.reasoning_efforts]
+        if caps.reasoning_efforts is not None
         else None,
+        "reasoning_switch": caps.reasoning_switch,
+        "reasoning_budget": caps.reasoning_budget,
         "text_completion": caps.text_completion,
         "structured_output": caps.structured_output,
     }
@@ -469,12 +476,15 @@ def settings(session: Session) -> dict[str, Any]:
     """The /set family as values — what each knob stands at, and where
     it persists, which is a real distinction: the toggles are
     session-wide, the parameters per model."""
+    choices = api_settings.think_choices(session)
     return {
         "think": session.think or THINK_UNSET,
-        # What the model takes, in the ladder's one shared order
-        # (`api.settings.think_levels`) — the segmented control draws it,
-        # never re-sorts it.
-        "think_levels": api_settings.think_levels(session),
+        # What the model takes, in the one shared order
+        # (`api.settings.think_choices`) — the segmented control draws
+        # the levels, never re-sorts them, and a field takes the budget
+        # where one is.
+        "think_levels": choices.levels,
+        "think_budget": choices.budget,
         "verbose": session.verbose,
         "autocorrect": session.autocorrect,
         "notification": session.notification,
@@ -543,7 +553,7 @@ def _usage(session: Session, raw: str = "") -> dict[str, Any]:
         "cached_tokens": report.cached_tokens,
         "total_tokens": report.total_tokens,
         # The figures said in a sentence, and how much of the spend
-        # nobody asked for — the report's own words, not the page's.
+        # nobody asked for — the report's own levels, not the page's.
         "note": report.note,
     }
 
@@ -778,7 +788,7 @@ def _save_provider(session: Session, ask: Ask) -> str:
 
 def _set_knob(session: Session, ask: Ask) -> str:
     """One session-wide knob. The value crosses as given — JSON's one
-    boolean spelling translated back into the command words — and each
+    boolean spelling translated back into the command levels — and each
     setter parses its own: the shapes are the backend's, so the page
     never learns what `think` accepts."""
     setter = _KNOBS.get(ask.params["setting"])

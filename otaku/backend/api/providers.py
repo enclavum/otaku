@@ -42,6 +42,7 @@ def switch_model(session: Session, provider: str, model: str) -> str:
         raise Refused(f"Already using {session.full_model_name}.")
     session._update_state(model=f"{provider}/{model}")
     session._reload_model_settings()
+    session._read_model()
     return f"Switched to {session.full_model_name}."
 
 
@@ -57,6 +58,20 @@ def switch_spec(session: Session, raw: str) -> str:
         names = ", ".join(known)
         raise Refused(f"Use PROVIDER/MODEL (providers: {names}), or /model with no args to pick.")
     return switch_model(session, head, rest)
+
+
+def listed_spec(session: Session) -> str:
+    """The session's model as its provider lists it — "provider/name",
+    the spec a picker rows it under, which is where a picker's cursor
+    lands on the model in use. Ollama lists a bare name under its
+    ":latest" tag, and a spec typed without the tag must still be
+    found. The remembered spelling where the provider has not listed
+    the model, and "" without one."""
+    client = session._client()
+    found = client.models.cached(session.model) if client is not None else None
+    if found is None:
+        return session.full_model_name
+    return f"{session.provider}/{found.name}"
 
 
 def get_providers(

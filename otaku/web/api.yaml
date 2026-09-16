@@ -1159,10 +1159,11 @@ paths:
       tags: [Settings]
       summary: Set one session-wide knob
       description: |
-        The value's type is the knob's: a word for `think` (one of the
-        ladder in `Settings.think_levels`), a boolean for the three
-        toggles, an integer for `max_context` where 0 means the model's
-        own max context. Per-model inference parameters are not here — they
+        The value's type is the knob's: for `think` one of the words in
+        `Settings.think_levels`, or a number of tokens (0 = off) where
+        `Settings.think_budget` says one is taken; a boolean for the
+        three toggles; an integer for `max_context` where 0 means the
+        model's own max context. Per-model inference parameters are not here — they
         belong to a model, and live under the session's model.
       requestBody:
         content:
@@ -1548,7 +1549,7 @@ components:
         The gauge is not here: it moves on its own clock, so it is
         /api/machine and nothing carries a second copy.
       properties:
-        current: { type: string, description: '"provider/model"; "" without a model.' }
+        current: { type: string, description: '"provider/model" as the provider lists the model (Ollama tags a bare name ":latest"), which is how the page finds its row; "" without a model.' }
         providers:
           type: array
           items:
@@ -1620,13 +1621,17 @@ components:
                       properties:
                         vision: { type: boolean, nullable: true }
                         audio: { type: boolean, nullable: true }
-                        reasoning:
+                        reasoning_efforts:
                           type: array
                           nullable: true
                           items: { type: string }
-                          description: "The efforts honoured, weakest to strongest, \"none\" among them where reasoning switches off; empty where none reaches; null where unknown."
+                          description: "The ladder's rungs the model grades, weakest to strongest, \"none\" among them where that rung switches it off; empty where no rung reaches; null where unknown."
+                        reasoning_switch: { type: boolean, nullable: true, description: "Whether its thinking is on or off and nothing between (then `reasoning_efforts` is empty)." }
+                        reasoning_budget: { type: boolean, nullable: true, description: "Whether a budget in tokens holds, beside either." }
                         text_completion: { type: boolean, nullable: true }
                         structured_output: { type: boolean, nullable: true }
+                    reasoning_words: { type: string, description: "The info report's Reasoning row for the model, verbatim (backend.api.reports.reasoning_words): the rungs, \"on / off\", \"token budget\", \"not supported\" or \"unknown\"." }
+                    capability_words: { type: string, description: "The info report's Capabilities row for the model, verbatim (backend.api.reports.capability_words): what it has in the dataclass's order, \"none\" or \"unknown\"." }
 
     Scene:
       type: object
@@ -1677,10 +1682,11 @@ components:
           type: array
           items: { type: string }
           description: >
-            The levels /set think takes on the session's model, in the ladder's
-            one shared order (backend.api.settings.think_levels): unset always,
-            then those the provider says reach the model — every level where it
-            cannot say.
+            The words /set think takes on the session's model, in the one
+            shared order (backend.api.settings.think_choices): unset always,
+            then the ladder's rungs the provider says the model grades, or off
+            and on where it switches — every rung where it cannot say.
+        think_budget: { type: boolean, description: "Whether /set think takes a number of tokens as well, 0 = off." }
         verbose: { type: boolean }
         autocorrect: { type: boolean }
         notification: { type: boolean }

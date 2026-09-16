@@ -7,11 +7,13 @@ in `meta`, and in router mode the modalities of every entry — so
 `/props` is read once per listing: the modalities in single mode, and
 the key check in both, `/v1/models` being exempt from the server's key
 check where `/props` is not, so a wrong key, or none where one is
-demanded, shows at the listing rather than at the first turn. Nothing
-is read for a single server's state, which never changes. A router's
-entries carry a `status`, which is how the mode is told: `can_manage`
-is settled by the first listing and false until then. In router mode
-any request for an unloaded model loads it, so the counts ask not to.
+demanded, shows at the listing rather than at the first turn. How a
+model's thinking is set, the server states nowhere: its template is
+asked, through `/apply-template`, once per model. Nothing is read for
+a single server's state, which never changes. A router's entries carry
+a `status`, which is how the mode is told: `can_manage` is settled by
+the first listing and false until then. In router mode any request for
+an unloaded model loads it, so the counts and the probe ask not to.
 """
 
 import re
@@ -23,6 +25,7 @@ from otaku.providers.clients import launched_port
 from otaku.providers.errors import ProviderError, StatusError, UnreachableError
 from otaku.providers.http import ASK_TIMEOUT, PROBE_TIMEOUT, Http, positive_int
 from otaku.providers.openai import reasoning
+from otaku.providers.openai.auth import OpenAIAuth
 from otaku.providers.openai.client import Locality, OpenAIClient
 from otaku.providers.openai.completion import PROTOCOL_PARAMS, SAMPLER_PARAMS, OpenAICompletion
 from otaku.providers.openai.models import (
@@ -34,6 +37,14 @@ from otaku.providers.openai.models import (
 )
 from otaku.providers.openai.requests import Image, WireMessage
 from otaku.settings.providers import ProviderConfig
+
+# How a model's thinking is set, as its template told it: (the rungs
+# graded, whether it switches, whether a budget holds) — all None while
+# the template has not been asked, or answered nothing.
+_Thinking = tuple[frozenset[str] | None, bool | None, bool | None]
+_UNKNOWN_THINKING: _Thinking = (None, None, None)
+# The one turn the template is rendered over, three ways.
+_PROBE_MESSAGES = [{"role": "user", "content": "Hello"}]
 
 _LOAD_POLL_SECONDS = 0.5  # how often a router is asked whether an order is done
 _SILENCE_BUDGET = 10.0  # how long a router may leave polls unanswered before the order is lost
@@ -52,6 +63,10 @@ class LlamaCppModels(OpenAIModels):
     restarted the other way is followed; the cache and the lock stay.
     A fresh client is a single server until a listing says otherwise."""
 
+    def __init__(self, config: ProviderConfig, auth: OpenAIAuth, http: Http) -> None:
+        super().__init__(config, auth, http)
+        self._templates: dict[str, _Thinking] = {}  # what each model's template told, by name
+
     def _list(self, http: Http) -> Listing:
         data = http.get(f"{self._config.url}/models")
         # Loud: a 401 is the key's verdict, wrong or missing. A 404 alone
@@ -68,9 +83,9 @@ class LlamaCppModels(OpenAIModels):
         # nothing but a projector is still a router.
         is_router = any("status" in entry for entry in entries)
         self.__class__ = LlamaCppRouterModels if is_router else LlamaCppSingleModels
-        return self._listing([e for e in entries if not self._is_projector(e)], props)
+        return self._listing([e for e in entries if not self._is_projector(e)], props, http)
 
-    def _listing(self, entries: list[dict[str, Any]], props: Any) -> Listing:
+    def _listing(self, entries: list[dict[str, Any]], props: Any, http: Http) -> Listing:
         """The entries as the mode reads them — each mode's own."""
         raise NotImplementedError
 
@@ -101,12 +116,12 @@ class LlamaCppModels(OpenAIModels):
             positive_int(meta.get("size")),
         )
 
-    def _capabilities_of(self, modalities: object) -> ModelCapabilities:
+    def _capabilities_of(self, modalities: object, thinking: _Thinking) -> ModelCapabilities:
         """What the modalities say — a router entry's `input_modalities`
         list, or a props object's `modalities` flags; neither leaves
-        vision and audio unknown. The raw wire is always there and
-        decoding is constrained server-side; which efforts the template
-        grades, the server cannot say."""
+        vision and audio unknown — and what the template told
+        (`_thinking_of`). The raw wire is always there and decoding is
+        constrained server-side."""
         vision: bool | None
         audio: bool | None
         if isinstance(modalities, list):
@@ -116,9 +131,59 @@ class LlamaCppModels(OpenAIModels):
             audio = bool(modalities.get("audio")) if "audio" in modalities else None
         else:
             vision = audio = None
+        levels, switch, budget = thinking
         return ModelCapabilities(
-            vision=vision, audio=audio, text_completion=True, structured_output=True
+            vision=vision,
+            audio=audio,
+            reasoning_efforts=levels,
+            reasoning_switch=switch,
+            reasoning_budget=budget,
+            text_completion=True,
+            structured_output=True,
         )
+
+    def _thinking_of(self, model: str, http: Http) -> _Thinking:
+        """How `model`'s thinking is set, as its template tells it,
+        asked once: the prompt rendered by `/apply-template` with the
+        flag on and off, and with two efforts — what changes the prompt
+        is what the template reads. An effort it reads grades the
+        thinking: every rung, "none" being the budget's off. A flag
+        alone switches it. The budget holds on either: the server's own
+        sampler. A template that reads neither leaves all three
+        unknown — the server cannot say a model does not think, and a
+        thinking one the budget still stops — as does a render that
+        did not come: an old build without the endpoint, a router whose
+        model is not running (the render needs it loaded, and a probe
+        must not load it)."""
+        known = self._templates.get(model)
+        if known is not None:
+            return known
+        on_low = self._render(model, {"enable_thinking": True, "reasoning_effort": "low"}, http)
+        off_low = self._render(model, {"enable_thinking": False, "reasoning_effort": "low"}, http)
+        on_high = self._render(model, {"enable_thinking": True, "reasoning_effort": "high"}, http)
+        if on_low is None or off_low is None or on_high is None:
+            return _UNKNOWN_THINKING
+        thinking: _Thinking
+        if on_low != on_high:
+            thinking = (reasoning.ALL_EFFORT_LEVELS, False, True)
+        elif on_low != off_low:
+            thinking = (frozenset(), True, True)
+        else:
+            thinking = _UNKNOWN_THINKING
+        self._templates[model] = thinking
+        return thinking
+
+    def _render(self, model: str, kwargs: dict[str, object], http: Http) -> str | None:
+        """The prompt the template renders for one turn under `kwargs`;
+        None where the server did not answer."""
+        data = http.post(
+            f"{self._config.base_url}/apply-template?autoload=false",
+            {"model": model, "messages": _PROBE_MESSAGES, "chat_template_kwargs": kwargs},
+            timeout=PROBE_TIMEOUT,
+            quiet=True,
+        )
+        prompt = data.get("prompt") if isinstance(data, dict) else None
+        return prompt if isinstance(prompt, str) else None
 
 
 class LlamaCppSingleModels(LlamaCppModels):
@@ -132,29 +197,30 @@ class LlamaCppSingleModels(LlamaCppModels):
     request names, so the file name every build agrees on is what a
     section remembers. Nothing is asked live, nothing is managed."""
 
-    def _listing(self, entries: list[dict[str, Any]], props: Any) -> Listing:
+    def _listing(self, entries: list[dict[str, Any]], props: Any, http: Http) -> Listing:
         if not entries:
             return []
         max_context_loaded, max_context_catalogue, size = self._meta_of(entries[0])
         # Props without `modalities` are a build older than mid-2025:
         # still llama.cpp, vision and audio unknown. No props, nothing
-        # is known.
+        # is known of the modalities; the template is asked all the same.
         answered = isinstance(props, dict)
         modalities = props.get("modalities") if answered else None
+        # The file name, however the build lists it: the name alone
+        # (b9290) or the whole path (past it), either separator.
+        names = [re.split(r"[\\/]", str(entry["id"]))[-1] for entry in entries]
+        thinking = self._thinking_of(names[0], http)
         return sorted(
             (
                 ModelInfo(
-                    # The file name, however the build lists it: the name
-                    # alone (b9290) or the whole path (past it), either
-                    # separator.
-                    name=re.split(r"[\\/]", str(entry["id"]))[-1],
+                    name=name,
                     size=size,
                     max_context_catalogue=max_context_catalogue,
                     max_context_loaded=max_context_loaded,
-                    capabilities=self._capabilities_of(modalities) if answered else None,
+                    capabilities=self._capabilities_of(modalities, thinking),
                     state=ModelState.LOADED,
                 )
-                for entry in entries
+                for name in names
             ),
             key=lambda model: model.name,
         )
@@ -217,24 +283,28 @@ class LlamaCppRouterModels(LlamaCppModels):
 
     # ---------- the hooks ----------
 
-    def _listing(self, entries: list[dict[str, Any]], props: Any) -> Listing:
+    def _listing(self, entries: list[dict[str, Any]], props: Any, http: Http) -> Listing:
         # Every entry states its modalities; the loaded context size, the
-        # model's own max context and size are merged in for a running one.
+        # model's own max context and size are merged in for a running
+        # one, and its template is asked.
         models = []
         for entry in entries:
             max_context_loaded, max_context_catalogue, size = self._meta_of(entry)
-            architecture = entry.get("architecture")
-            modalities = (
-                architecture.get("input_modalities") if isinstance(architecture, dict) else None
-            )
+            state = self._state_of(entry)
+            name = str(entry["id"])
             models.append(
                 ModelInfo(
-                    name=str(entry["id"]),
+                    name=name,
                     size=size,
                     max_context_catalogue=max_context_catalogue,
                     max_context_loaded=max_context_loaded,
-                    capabilities=self._capabilities_of(modalities),
-                    state=self._state_of(entry),
+                    capabilities=self._capabilities_of(
+                        self._modalities_of(entry),
+                        self._thinking_of(name, http)
+                        if state is ModelState.LOADED
+                        else _UNKNOWN_THINKING,
+                    ),
+                    state=state,
                 )
             )
         return sorted(models, key=lambda model: model.name)
@@ -243,15 +313,22 @@ class LlamaCppRouterModels(LlamaCppModels):
         entry = self._entry(name, http)
         if entry is None:
             return None
-        # The meta rides only while the model runs: the first read after
-        # a load is where its own size and max context become known.
+        # The meta rides only while the model runs, and the template can
+        # only be asked then: the first read after a load is where its
+        # own size, max context and thinking become known.
         max_context_loaded, max_context_catalogue, size = self._meta_of(entry)
+        state = self._state_of(entry)
         return ModelInfo(
             name=name,
             size=size,
             max_context_catalogue=max_context_catalogue,
             max_context_loaded=max_context_loaded,
-            state=self._state_of(entry),
+            capabilities=self._capabilities_of(
+                self._modalities_of(entry), self._thinking_of(name, http)
+            )
+            if state is ModelState.LOADED
+            else None,
+            state=state,
         )
 
     # ---------- the router's own ----------
@@ -291,6 +368,11 @@ class LlamaCppRouterModels(LlamaCppModels):
                 quiet_since = None
             time.sleep(_LOAD_POLL_SECONDS)
 
+    def _modalities_of(self, entry: dict[str, Any]) -> object:
+        """An entry's `architecture.input_modalities`, as listed."""
+        architecture = entry.get("architecture")
+        return architecture.get("input_modalities") if isinstance(architecture, dict) else None
+
     def _status_of(self, entry: dict[str, Any]) -> str | None:
         """An entry's status word, `status.value`; None for a model the
         router does not list."""
@@ -313,10 +395,18 @@ class LlamaCppCompletion(OpenAICompletion):
     supported_params = PROTOCOL_PARAMS | SAMPLER_PARAMS
     # The template's flag is what stops Gemma 4 and its kind; the effort
     # rides beside it as a template variable, for the templates that
-    # read one. A request-level reasoning_effort is not read.
+    # read one; and the budget is the server's own sampler, which stops
+    # a template that reads neither (gpt-oss's, Kimi's). A request-level
+    # reasoning_effort is not read. The budget is a sampling parameter,
+    # so it holds on the raw wire too, where no template stands.
     chat_reasoning_knobs: ClassVar[frozenset[str]] = frozenset(
-        {reasoning.FLAG_KNOB, reasoning.TEMPLATE_EFFORT_KNOB}
+        {
+            reasoning.SWITCH_TEMPLATE_KNOB,
+            reasoning.EFFORT_TEMPLATE_KNOB,
+            reasoning.BUDGET_TOKENS_KNOB,
+        }
     )
+    text_reasoning_knobs: ClassVar[frozenset[str]] = frozenset({reasoning.BUDGET_TOKENS_KNOB})
     # The chat count needs a build past b9290 (June 2026); an older one
     # answers None and the caller keeps its estimate.
     can_count_tokens = True
@@ -326,14 +416,14 @@ class LlamaCppCompletion(OpenAICompletion):
         model: str,
         messages: Sequence[WireMessage],
         *,
-        effort: str | None = None,
+        level: str | None = None,
         images: Sequence[Image] = (),
         timeout: float = ASK_TIMEOUT,
     ) -> int | None:
         # The same body a turn would send, knobs included and streaming
         # fields aside, so the count is of what the template renders for
         # it. A router must not load the model for a count.
-        body, knobs = self._chat_request(model, messages, {}, effort=effort, images=images)
+        body, knobs = self._chat_request(model, messages, {}, level=level, images=images)
         request = {
             k: v for k, v in {**body, **knobs}.items() if k not in ("stream", "stream_options")
         }

@@ -3,6 +3,7 @@
  "think_levels": [
   "unset"
  ],
+ "think_budget": false,
  "verbose": false,
  "autocorrect": true,
  "notification": false,

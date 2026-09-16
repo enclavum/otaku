@@ -347,7 +347,7 @@ class Extractor:
                 self._progress(f"extraction failed ({e}) — {kept}the tail stays open")
                 return PassResult.FAILED
             except (ValueError, json.JSONDecodeError) as e:
-                # Best-effort: the unclosed tail stays unextracted, retried
+                # Best-level: the unclosed tail stays unextracted, retried
                 # on the next idle. Say why — a model that never returns
                 # a usable reply would otherwise build no memory at all,
                 # silently forever.
@@ -543,7 +543,7 @@ class Extractor:
                 ).strip()
             except ProviderError as e:
                 # A decline is skipped like a transport failure: the row
-                # stays NULL and the next pass tries again — best-effort,
+                # stays NULL and the next pass tries again — best-level,
                 # never the whole pass.
                 self._log(
                     f"story-so-far rollup failed (story {self._story_id}, scene {no}): "
@@ -637,7 +637,7 @@ class Extractor:
             self._model,
             messages,
             params,
-            effort="none",
+            level="none",
             purpose=purpose,
             timeout=timeout,
             watched=False,  # accumulated into a string; nobody watches it

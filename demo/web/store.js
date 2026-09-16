@@ -11,17 +11,22 @@
 // What the fake provider claims to be. One provider with two models, so
 // the picker's switch, load and unload have something real to do.
 export const PROVIDER = "demo";
-// What a local engine states of its models, in the product's shape.
+// What a local engine states of its models, in the product's shape —
+// the page's own model thinks nothing, takes no images and completes
+// no raw text — and the info report's two rows on it, in its words.
 const MODEL_CAPABILITIES = {
   vision: false,
   audio: false,
-  reasoning: [],
-  text_completion: true,
-  structured_output: true,
+  reasoning_efforts: [],
+  reasoning_switch: false,
+  reasoning_budget: false,
+  text_completion: false,
+  structured_output: false,
 };
+const MODEL_WORDS = { reasoning_words: "not supported", capability_words: "none" };
 const MODELS = [
-  { name: "demo-model", loaded: true, size: "4.7 GB", max_context_catalogue: "32K", max_context_loaded: "", capabilities: { ...MODEL_CAPABILITIES } },
-  { name: "demo-model-mini", loaded: false, size: "1.9 GB", max_context_catalogue: "8K", max_context_loaded: "", capabilities: { ...MODEL_CAPABILITIES } },
+  { name: "demo-model", loaded: true, size: "4.7 GB", max_context_catalogue: "32K", max_context_loaded: "", capabilities: { ...MODEL_CAPABILITIES }, ...MODEL_WORDS },
+  { name: "demo-model-mini", loaded: false, size: "1.9 GB", max_context_catalogue: "8K", max_context_loaded: "", capabilities: { ...MODEL_CAPABILITIES }, ...MODEL_WORDS },
 ];
 // What the demo's provider can do: it manages models, counts nothing
 // exactly, marks no cache, and reads the protocol's own parameters and
@@ -231,6 +236,7 @@ export function settings() {
   return {
     think: s.think,
     think_levels: s.think_levels,
+    think_budget: s.think_budget,
     verbose: s.verbose,
     autocorrect: s.autocorrect,
     notification: s.notification,
@@ -376,7 +382,7 @@ export function info(version) {
           // The product's capability rows, as the page's own model
           // honestly answers them: no effort reaches it, and it takes no
           // images and completes no raw text.
-          ["Reasoning efforts", "not supported"],
+          ["Reasoning", "not supported"],
           ["Capabilities", "none"],
         ],
         note: "",
@@ -638,6 +644,12 @@ const _KNOBS = {
     if (value === "unset") {
       s.think = "unset";
       return say("Think: unset.");
+    }
+    if (/^\d+$/.test(value)) {
+      // The demo's model takes no budget, as the product says of one.
+      return refuse(
+        `${state.model} does not take a thinking budget. Levels for this model: ${s.think_levels.join(", ")}.`,
+      );
     }
     if (!s.think_levels.includes(value)) {
       return refuse(`Usage: /set think ${s.think_levels.join("|")}`);

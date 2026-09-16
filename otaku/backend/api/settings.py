@@ -12,16 +12,18 @@ it itself; every one returns the confirmation to show and raises
 Refused for what it declines.
 """
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from otaku.backend.session import (
-    EFFORTS,
+    EFFORT_LEVELS,
     NO_MODEL_HINT,
     PARAMETERS,
+    SWITCH_LEVELS,
     THINK_MENU,
     Refused,
     Session,
 )
+from otaku.providers import reasoning
 from otaku.settings import models as models_file
 from otaku.settings import row
 from otaku.settings.migrations import surgery
@@ -31,18 +33,43 @@ _ON = ("on", "true", "yes")
 _OFF = ("off", "false", "no")
 
 
-def think_levels(session: Session) -> tuple[str, ...]:
-    """What /set think takes on the model in use, in the menu's order:
-    "unset" always (no level: nothing sent), then the levels the provider says
-    reach the model — every level where it cannot say, or has not
-    listed the model yet, so an engine that reports nothing loses
-    nothing. Both frontends' menus read this."""
+@dataclass(frozen=True)
+class ThinkChoices:
+    """What /set think takes on the model in use: the `levels`, "unset"
+    always first (no level: nothing sent), then the ladder's rungs the
+    model grades, or off and on where it switches; and whether a
+    `budget` — a number of tokens, 0 = off — is taken beside them."""
+
+    levels: tuple[str, ...]
+    budget: bool
+
+    @property
+    def listed(self) -> str:
+        """The choices as one sentence's list."""
+        tail = ", or a number of tokens" if self.budget else ""
+        return ", ".join(self.levels) + tail
+
+    @property
+    def usage(self) -> str:
+        return "Usage: /set think " + "|".join(self.levels) + ("|<tokens>" if self.budget else "")
+
+
+def think_choices(session: Session) -> ThinkChoices:
+    """The choices for the model in use, as the provider describes it
+    (`ModelCapabilities`): every rung, and no budget, where it cannot
+    say or has not listed the model yet — an engine that reports
+    nothing loses nothing. Both frontends' menus read this."""
     client = session._client()
     found = client.models.cached(session.model) if client is not None else None
-    efforts = found.capabilities.reasoning if found and found.capabilities else None
-    if efforts is None:
-        return THINK_MENU
-    return (THINK_UNSET, *(level for level in THINK_MENU if level in efforts))
+    caps = found.capabilities if found is not None else None
+    if caps is None or (caps.reasoning_efforts is None and caps.reasoning_switch is None):
+        return ThinkChoices(THINK_MENU, False)
+    levels = [THINK_UNSET]
+    if caps.reasoning_efforts:
+        levels += [rung for rung in EFFORT_LEVELS if rung in caps.reasoning_efforts]
+    elif caps.reasoning_switch:
+        levels += SWITCH_LEVELS
+    return ThinkChoices(tuple(levels), bool(caps.reasoning_budget))
 
 
 def parameter_names(session: Session) -> tuple[str, ...]:
@@ -61,28 +88,35 @@ def parameter_names(session: Session) -> tuple[str, ...]:
 
 
 def set_think(session: Session, raw: str) -> str:
-    """One of the wire's efforts, saved for the model in use, or "unset",
-    which forgets it — the level follows the model, as its parameters do;
-    "" reports where it stands and what the model
-    takes (`think_levels`). Raises Refused for an unknown word, a level
-    the model does not take, or no model — never for the provider: a
-    level goes out on whatever knobs the provider reads, and on none
-    where it reads none."""
-    levels = think_levels(session)
-    listed = ", ".join(levels)
+    """A thinking level — a rung, off or on, or a budget in tokens —
+    saved for the model in use, or "unset", which forgets it: the level
+    follows the model, as its parameters do. "" reports where it stands
+    and what the model takes (`think_choices`). Raises Refused for a
+    word outside the vocabulary, a level the model does not take, or no
+    model — never for the provider: a level goes out on whatever knobs
+    the provider reads, and on none where it reads none."""
+    choices = think_choices(session)
     if not raw.strip():
         current = session.think if session.think else THINK_UNSET
-        return f"Think: {current}. Levels for this model: {listed}."
+        return f"Think: {current}. Levels for this model: {choices.listed}."
     value = raw.strip().lower()
-    if value != THINK_UNSET and value not in EFFORTS:
-        raise Refused(f"Usage: /set think {'|'.join(levels)}")
+    if value != THINK_UNSET and not reasoning.is_level(value):
+        raise Refused(choices.usage)
     if session._client() is None:
         raise Refused(NO_MODEL_HINT)
-    if value not in levels:
-        raise Refused(f"{session.model} does not take {value}. Levels for this model: {listed}.")
+    budget = reasoning.budget_of(value)
+    if budget is not None:
+        if not choices.budget:
+            raise Refused(
+                f"{session.model} does not take a thinking budget. "
+                f"Levels for this model: {choices.listed}."
+            )
+        value = str(budget)  # as a number reads: no leading zeros
+    elif value not in choices.levels:
+        raise Refused(
+            f"{session.model} does not take {value}. Levels for this model: {choices.listed}."
+        )
     session._think = value
-    if value == THINK_UNSET:
-        return f"Think: unset{_save_model_settings(session)}"
     return f"Think: {value}{_save_model_settings(session)}"
 
 

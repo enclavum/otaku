@@ -32,9 +32,14 @@ class UnauthorizedError(ProviderError):
 
 
 class StatusError(ProviderError):
-    def __init__(self, message: str, status: int) -> None:
+    """A status the server refused with. The message is the sentence a
+    reader is shown, cut to fit; `detail` is the server's whole
+    explanation, for a decision that must not miss a word the cut took."""
+
+    def __init__(self, message: str, status: int, detail: str = "") -> None:
         super().__init__(message)
         self.status = status
+        self.detail = detail
 
 
 class DeclinedError(ProviderError):

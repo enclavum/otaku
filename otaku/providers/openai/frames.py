@@ -12,12 +12,18 @@ Usage = tuple[int | None, int | None, int | None]  # prompt, completion and cach
 
 def chat_delta(event: dict[str, Any]) -> tuple[str, str]:
     """A chat frame's (reasoning, text) deltas, "" where absent. It
-    arrives as `reasoning_content` (llama.cpp, omlx, KoboldCpp) or
-    `reasoning` (Ollama, OpenRouter, LM Studio)."""
+    arrives as `reasoning_content` (llama.cpp, omlx, KoboldCpp),
+    `reasoning` (Ollama, LM Studio), or OpenRouter's `reasoning_details`
+    — typed parts, of which the text and a summary are readable and an
+    encrypted one is not."""
     delta = _choice(event).get("delta")
     if not isinstance(delta, dict):
         return "", ""
-    reasoning = delta.get("reasoning_content") or delta.get("reasoning") or ""
+    reasoning = (
+        delta.get("reasoning_content")
+        or delta.get("reasoning")
+        or _details(delta.get("reasoning_details"))
+    )
     content = delta.get("content") or ""
     if isinstance(content, list):
         # Content parts on the way back: the text of each.
@@ -75,6 +81,18 @@ def read_usage(event: dict[str, Any]) -> Usage | None:
         cached if isinstance(cached, int) else None,
     )
     return report if any(count is not None for count in report) else None
+
+
+def _details(parts: object) -> str:
+    """OpenRouter's reasoning parts as one text: each part's `text` or
+    `summary`, in order; an encrypted part has neither and adds nothing."""
+    if not isinstance(parts, list):
+        return ""
+    return "".join(
+        str(part.get("text") or part.get("summary") or "")
+        for part in parts
+        if isinstance(part, dict)
+    )
 
 
 def _choice(event: dict[str, Any]) -> dict[str, Any]:

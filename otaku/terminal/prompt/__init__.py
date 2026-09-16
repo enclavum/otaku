@@ -199,7 +199,7 @@ def build_prompt(
         lambda: assembler.prefix,
         cast=lambda: _cast(session),
         shortcuts={token: caption for token, (_key, caption) in shortcuts.items()},
-        levels=lambda: api_settings.think_levels(session),
+        levels=lambda: api_settings.think_choices(session).levels,
         parameters=lambda: api_settings.parameter_names(session),
     )
     menu_line = Condition(

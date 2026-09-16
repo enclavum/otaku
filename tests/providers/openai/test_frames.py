@@ -20,6 +20,15 @@ class TestChatDelta:
     def test_a_null_content_is_empty_not_the_word_none(self) -> None:
         assert chat_delta({"choices": [{"delta": {"content": None}}]}) == ("", "")
 
+    def test_reads_openrouters_typed_parts_text_and_summary_not_the_encrypted(self) -> None:
+        parts = [
+            {"type": "reasoning.text", "text": "hm "},
+            {"type": "reasoning.encrypted", "data": "xxxx"},
+            {"type": "reasoning.summary", "summary": "so"},
+        ]
+        event = {"choices": [{"delta": {"content": "hi", "reasoning_details": parts}}]}
+        assert chat_delta(event) == ("hm so", "hi")
+
 
 class TestCompletionDelta:
     def test_reads_the_continuation_as_text(self) -> None:

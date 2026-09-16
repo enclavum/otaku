@@ -41,22 +41,27 @@ class NanoGptModels(OpenAIModels):
         caps = listed.get("capabilities")
         if not isinstance(caps, dict):
             return model
-        honoured: frozenset[str] | None
-        if self._flag(caps, "reasoning") is None:
-            honoured = None
-        elif not caps["reasoning"]:
-            honoured = frozenset()
+        # The rungs it lists, as listed: "none" is among them only where
+        # the model takes it. A model that reasons and names no rung is
+        # on or off. The catalog has no budget.
+        reasons = self._flag(caps, "reasoning")
+        levels: frozenset[str] | None
+        switch: bool | None
+        if reasons is None:
+            levels = switch = None
+        elif not reasons:
+            levels, switch = frozenset(), False
         else:
-            # The efforts it lists, as listed: "none" is among them only
-            # where the model takes it. A model that reasons but names
-            # no efforts leaves the question open.
-            honoured = reasoning.from_wire(listed.get("reasoning_efforts") or []) or None
+            levels = reasoning.from_wire(listed.get("reasoning_efforts") or [])
+            switch = not levels
         return replace(
             model,
             capabilities=ModelCapabilities(
                 vision=self._flag(caps, "vision"),
                 audio=self._flag(caps, "audio_input"),
-                reasoning=honoured,
+                reasoning_efforts=levels,
+                reasoning_switch=switch,
+                reasoning_budget=None if reasons is None else False,
                 # The completions endpoint is best-effort and per model,
                 # and the catalog does not say which take it.
                 text_completion=None,

@@ -164,8 +164,9 @@ class TestInfo:
             try:
                 rows = _rows(reports.info(app.session))
                 assert rows["Capabilities"] == "vision, text completion, json output"
-                # Which efforts its template grades, the server cannot say.
-                assert rows["Reasoning efforts"] == "unknown"
+                # How its template sets the thinking, a build without
+                # /apply-template cannot tell.
+                assert rows["Reasoning"] == "unknown"
             finally:
                 app.close()
         finally:
@@ -180,7 +181,7 @@ class TestInfo:
         rows = _llamacpp_rows(tmp_path / "half", trained=8192, window=4096)
         labels = list(rows)
         assert labels.index("Max context") < labels.index("Served max context")
-        assert labels.index("Served max context") + 1 == labels.index("Reasoning efforts")
+        assert labels.index("Served max context") + 1 == labels.index("Reasoning")
         assert rows["Max context"] == format_context(8192)
         assert rows["Served max context"] == format_context(4096)
         rows = _llamacpp_rows(tmp_path / "whole", trained=8192, window=8192)
@@ -189,7 +190,7 @@ class TestInfo:
 
     def test_an_engine_that_names_no_efforts_says_so(self, tmp_path) -> None:
         # omlx's status states the thinking toggle; a template without
-        # one takes no effort at all, which is a known nothing, not an
+        # one takes no level at all, which is a known nothing, not an
         # unknown.
         server = scripted.ModelServer()
         server.status = True
@@ -197,7 +198,7 @@ class TestInfo:
             set_config_provider(tmp_path / "state", server, name="omlx")
             app = launch(tmp_path / "state", server, spec="omlx/test-model")
             try:
-                row = _rows(reports.info(app.session))["Reasoning efforts"]
+                row = _rows(reports.info(app.session))["Reasoning"]
                 assert row == "not supported"
             finally:
                 app.close()
@@ -217,21 +218,23 @@ class TestInfo:
             try:
                 rows = _rows(reports.info(app.session))
                 assert rows["Capabilities"] == "vision, json output"
-                assert rows["Reasoning efforts"] not in ("unknown", "not supported")
+                assert rows["Reasoning"] not in ("unknown", "not supported")
             finally:
                 app.close()
         finally:
             server.close()
 
-    def test_an_engine_that_cannot_say_which_efforts_reach_reads_unknown(self, tmp_path) -> None:
-        # LM Studio takes the effort word but its registry does not say
-        # which models honour it.
+    def test_an_engine_that_cannot_say_how_the_thinking_is_set_reads_unknown(
+        self, tmp_path
+    ) -> None:
+        # LM Studio takes the effort word, but a registry row without
+        # the reasoning object does not say what the model takes.
         server = scripted.ModelServer(managed=True)
         try:
             set_config_provider(tmp_path / "state", server, name="lmstudio")
             app = launch(tmp_path / "state", server, spec="lmstudio/test-model")
             try:
-                assert _rows(reports.info(app.session))["Reasoning efforts"] == "unknown"
+                assert _rows(reports.info(app.session))["Reasoning"] == "unknown"
             finally:
                 app.close()
         finally:
@@ -241,7 +244,7 @@ class TestInfo:
         # The generic provider reads nothing: every capability is
         # unknown, which the app offers nothing on.
         rows = _rows(reports.info(app.session))
-        assert (rows["Reasoning efforts"], rows["Capabilities"]) == ("unknown", "unknown")
+        assert (rows["Reasoning"], rows["Capabilities"]) == ("unknown", "unknown")
 
     def test_without_a_model_the_session_half_still_reports(self, server, tmp_path, capsys) -> None:
         # A model is one of the things /info reports, not its

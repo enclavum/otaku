@@ -29,6 +29,7 @@ from otaku.providers import (
     ProviderConfig,
     Reasoning,
     Text,
+    reasoning,
 )
 from otaku.providers.clients.omlx import OmlxClient
 from scenarios.support.live import case_key, case_model
@@ -113,11 +114,46 @@ class TestMatrix:
         row = client.models.get(model)
         reasoning, text = _turn(client, model, PUZZLE, "none")
         assert text.strip()
-        honoured = row.capabilities.reasoning if row and row.capabilities else None
-        if honoured and "none" in honoured:
+        caps = row.capabilities if row else None
+        stops = caps is not None and bool(
+            (caps.reasoning_efforts and "none" in caps.reasoning_efforts) or caps.reasoning_switch
+        )
+        if stops:
             assert reasoning == "", "the model reasoned although none was sent"
         _, text = _turn(client, model, PUZZLE, "high")
         assert text.strip()
+
+    def test_what_the_model_takes_changes_its_reasoning(self, case) -> None:  # type: ignore[no-untyped-def]
+        # The shape the provider states is what the wire does: a
+        # switch's off stops the reasoning, and its on brings it where
+        # the model's default does; a ladder's top rung reasons at least
+        # as long as its bottom one; a budget bounds it, a small one
+        # shorter than a large one. Where the provider says nothing,
+        # nothing is promised — and a model that does not reason by
+        # default proves nothing but its off.
+        client, model = case
+        row = client.models.get(model)
+        caps = row.capabilities if row else None
+        if caps is None or (caps.reasoning_efforts is None and caps.reasoning_switch is None):
+            pytest.skip("the provider does not say how the thinking is set")
+        by_default, _ = _turn(client, model, PUZZLE, None)
+        if caps.reasoning_switch:
+            assert _turn(client, model, PUZZLE, "off")[0] == ""
+            if by_default:
+                assert _turn(client, model, PUZZLE, "on")[0]
+        rungs = [
+            r
+            for r in reasoning.EFFORT_LEVELS
+            if r in (caps.reasoning_efforts or ()) and r != "none"
+        ]
+        if len(rungs) > 1 and by_default:
+            bottom, _ = _turn(client, model, PUZZLE, rungs[0])
+            top, _ = _turn(client, model, PUZZLE, rungs[-1])
+            assert len(top) >= len(bottom)
+        if caps.reasoning_budget and by_default:
+            short, _ = _turn(client, model, PUZZLE, "40")
+            long, _ = _turn(client, model, PUZZLE, "400")
+            assert len(short) <= len(long)
 
     def test_a_text_completion_answers_as_text(self, case) -> None:  # type: ignore[no-untyped-def]
         client, model = case
@@ -145,7 +181,7 @@ class TestMatrix:
             model,
             messages,
             {"max_tokens": 200, "temperature": 0},
-            effort="none",
+            level="none",
             images=[Image(CAT.read_bytes(), "image/jpeg")],
             watched=False,
         )
@@ -181,12 +217,13 @@ class TestMatrix:
             assert money is None
 
 
-def _turn(client: OpenAIClient, model: str, prompt: str, effort: str) -> tuple[str, str]:
-    """One turn at `effort`: (reasoning, text) as they streamed."""
+def _turn(client: OpenAIClient, model: str, prompt: str, level: str | None) -> tuple[str, str]:
+    """One turn at `level` (None: the model's default): (reasoning,
+    text) as they streamed."""
     messages = [Turn("system", "You are a careful assistant."), Turn("user", prompt)]
     reasoning, text = [], []
     for chunk in client.completion.chat(
-        model, messages, {"max_tokens": 800, "temperature": 0}, effort=effort, watched=False
+        model, messages, {"max_tokens": 800, "temperature": 0}, level=level, watched=False
     ):
         if isinstance(chunk, Reasoning):
             reasoning.append(chunk.text)

@@ -151,13 +151,26 @@ class LmStudioModels(OpenAIModels):
         return [i for i in listed if isinstance(i, dict)] if isinstance(listed, list) else []
 
     def _capabilities_of(self, entry: dict[str, Any]) -> ModelCapabilities:
-        """What a registry entry says: vision from its capabilities;
-        whether an effort is honoured it does not say (see the module);
-        the raw wire is there; decoding is constrained server-side
-        (`response_format`)."""
+        """What a registry entry says: vision from its capabilities, and
+        the rungs its `reasoning.allowed_options` names — a registry
+        that names none for a model, or has no reasoning object, says
+        nothing of it; the raw wire is there; decoding is constrained
+        server-side (`response_format`)."""
         caps = entry.get("capabilities")
-        vision = bool(caps["vision"]) if isinstance(caps, dict) and "vision" in caps else None
-        return ModelCapabilities(vision=vision, text_completion=True, structured_output=True)
+        if not isinstance(caps, dict):
+            return ModelCapabilities(text_completion=True, structured_output=True)
+        vision = bool(caps["vision"]) if "vision" in caps else None
+        spec = caps.get("reasoning")
+        options = spec.get("allowed_options") if isinstance(spec, dict) else None
+        levels = reasoning.from_wire(options) if isinstance(options, list) else None
+        return ModelCapabilities(
+            vision=vision,
+            reasoning_efforts=levels,
+            reasoning_switch=None if levels is None else False,
+            reasoning_budget=None if levels is None else False,
+            text_completion=True,
+            structured_output=True,
+        )
 
 
 class LmStudioCompletion(OpenAICompletion):

@@ -4,10 +4,11 @@ max context from its card at /api/show — the registry row states the
 max context too, on a model a recent Ollama pulled; chat rides the
 OpenAI protocol at /v1, which reads the protocol's parameters and nothing beyond
 them — `top_k`, `min_p` and `repetition_penalty` are not sent, as the
-base's `supported_params` says. A reasoning effort
-goes out as `reasoning_effort` alone, the one knob the server reads;
-it takes none, low, medium, high and max, and answers 400 to any
-other word, which the take then sends again without the knob. A model
+base's `supported_params` says. A thinking level goes out as
+`reasoning_effort` alone, the one knob the server reads — the card's
+"thinking" is a switch, off as none, on as nothing sent; it takes
+none, low, medium, high and max, and answers 400 to any other word,
+which the take then sends again without the knob. A model
 served by ollama.com (`remote_host` on its entry) is listed as the
 registry describes it, its state unknown and nothing to load: every
 request for it is proxied.
@@ -33,8 +34,6 @@ from otaku.providers.openai.models import (
 )
 from otaku.settings.providers import ProviderConfig
 
-# The words the server accepts; any other is a 400.
-_EFFORTS: frozenset[str] = frozenset({"none", "low", "medium", "high", "max"})
 _UNLOAD_WAIT_SECONDS = 5.0  # an unload is answered before it is done
 _UNLOAD_POLL_SECONDS = 0.25
 
@@ -216,11 +215,14 @@ class OllamaModels(OpenAIModels):
         /v1/completions wraps the prompt as one chat turn and thinks
         unseen. Decoding is constrained server-side (`format`) for every
         model."""
-        reasoning = _EFFORTS if "thinking" in caps else frozenset[str]()
+        # "thinking" is on or off — the card grades nothing, and the
+        # /v1 wire spends a rung as the switch — and no budget exists.
         return ModelCapabilities(
             vision="vision" in caps,
             audio="audio" in caps,
-            reasoning=reasoning,
+            reasoning_efforts=frozenset(),
+            reasoning_switch="thinking" in caps,
+            reasoning_budget=False,
             text_completion=False,
             structured_output=True,
         )

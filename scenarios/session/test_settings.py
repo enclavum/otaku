@@ -79,6 +79,25 @@ class TestModel:
         app.play("/model")
         assert app.session.model == "test-model"
 
+    def test_the_model_in_use_is_named_as_its_provider_lists_it(self, tmp_path) -> None:
+        # Both pickers land their cursor on the model in use by the spec
+        # its provider rows it under: Ollama lists a bare name under its
+        # ":latest" tag, so a model set without the tag is still found.
+        # The remembered spelling stands where nothing lists the model.
+        server = scripted.ModelServer(models=("test-model:latest",), managed=True)
+        try:
+            set_config_provider(tmp_path / "state", server, name="ollama")
+            app = launch(tmp_path / "state", server, spec="ollama/test-model")
+            try:
+                assert app.session.full_model_name == "ollama/test-model"
+                assert api_providers.listed_spec(app.session) == "ollama/test-model:latest"
+                app.play("/model ollama/absent")
+                assert api_providers.listed_spec(app.session) == "ollama/absent"
+            finally:
+                app.close()
+        finally:
+            server.close()
+
 
 class TestThink:
     def test_a_level_is_set_and_remembered(self, app: App, capsys) -> None:
@@ -89,10 +108,12 @@ class TestThink:
         assert relaunched.session.think == "high"
         relaunched.close()
 
-    def test_on_and_off_are_not_levels(self, app: App) -> None:
+    def test_the_switch_words_are_refused_on_a_graded_model(self, app: App) -> None:
+        # The levels exist, and a model with rungs — or one nobody has
+        # described, which is offered every rung — takes neither.
         app.play("/set think high")
         for word in ("on", "off"):
-            with pytest.raises(Refused, match="Usage"):
+            with pytest.raises(Refused, match=f"does not take {word}"):
                 api_settings.set_think(app.session, word)
         assert app.session.think == "high"
 
@@ -184,11 +205,13 @@ class TestThink:
             app.close()
 
     def test_only_the_levels_the_model_takes_are_offered(self, tmp_path) -> None:
-        # Ollama's card says which models think: a thinking one takes the
-        # levels its engine grades, a plain one takes only default. The
-        # bare report lists them, a level the model does not take is
-        # refused by name, and an engine that has not listed the model
-        # yet loses nothing.
+        # Ollama's card says which models think: a thinking one is on or
+        # off, its engine grading nothing, a plain one takes only unset.
+        # The card is read as the model becomes current — at launch, on
+        # a switch — so the menu is right from the first keystroke; an
+        # engine that did not answer loses nothing until it does. The
+        # bare report lists the levels, and one the model does not take
+        # is refused by name.
         server = scripted.ModelServer(models=("test-model", "plain-model"), managed=True)
         server.capabilities = {
             "test-model": ["completion", "thinking"],
@@ -196,19 +219,23 @@ class TestThink:
         }
         try:
             set_config_provider(tmp_path / "state", server, name="ollama")
+            server.ps_status = 500  # the engine does not answer at launch
             app = launch(tmp_path / "state", server, spec="ollama/test-model")
             try:
-                assert api_settings.think_levels(app.session) == THINK_MENU
-                app.session.max_context()  # the header's ask lists the model
-                levels = ("unset", "none", "low", "medium", "high", "max")
-                assert api_settings.think_levels(app.session) == levels
+                assert api_settings.think_choices(app.session).levels == THINK_MENU
+                server.ps_status = None
+                app.session.max_context()  # the header's ask reads the card
+                levels = ("unset", "off", "on")
+                assert api_settings.think_choices(app.session).levels == levels
+                assert not api_settings.think_choices(app.session).budget
                 assert api_settings.set_think(app.session, "").endswith(", ".join(levels) + ".")
-                with pytest.raises(Refused, match="does not take xhigh"):
-                    api_settings.set_think(app.session, "xhigh")
+                with pytest.raises(Refused, match="does not take high"):
+                    api_settings.set_think(app.session, "high")
+                with pytest.raises(Refused, match="does not take a thinking budget"):
+                    api_settings.set_think(app.session, "2000")
                 assert app.session.think is None  # still unset
-                app.play("/model ollama/plain-model")
-                app.session.max_context()
-                assert api_settings.think_levels(app.session) == ("unset",)
+                app.play("/model ollama/plain-model")  # the switch reads the card
+                assert api_settings.think_choices(app.session).levels == ("unset",)
                 with pytest.raises(Refused, match="does not take none"):
                     api_settings.set_think(app.session, "none")
                 with pytest.raises(Refused, match=r"Usage: /set think unset$"):
@@ -220,6 +247,60 @@ class TestThink:
         finally:
             server.close()
 
+    def test_a_switch_takes_off_and_on_and_a_budget_takes_a_number(self, tmp_path) -> None:
+        # omlx's status says the template has the toggle: on or off, no
+        # rung, under a budget its own sampler holds — so a number of
+        # tokens is taken too, 0 = off, saved as the level is, and each
+        # is spelled on the wire: off as none, on as the flag alone, a
+        # budget as the number with the flag on.
+        server = scripted.ModelServer(models=("test-model",))
+        server.status = True
+        server.loaded = {"test-model"}
+        server.thinking = {"test-model": True}
+        try:
+            set_config_provider(tmp_path / "state", server, name="omlx")
+            app = launch(tmp_path / "state", server, spec="omlx/test-model")
+            try:
+                app.session.max_context()
+                choices = api_settings.think_choices(app.session)
+                assert (choices.levels, choices.budget) == (("unset", "off", "on"), True)
+                with pytest.raises(Refused, match="does not take low"):
+                    api_settings.set_think(app.session, "low")
+                with pytest.raises(Refused, match=r"Usage: /set think unset\|off\|on\|<tokens>$"):
+                    api_settings.set_think(app.session, "1.5")
+                app.play("/set think 2000")
+                assert app.session.think == "2000"
+                app.play("I enter the hall.")
+                body = app.server.requests[-1]
+                assert body["chat_template_kwargs"] == {"enable_thinking": True}
+                assert body["thinking_budget"] == 2000
+                app.play("/set think off")
+                app.play("I listen.")
+                body = app.server.requests[-1]
+                assert body["chat_template_kwargs"] == {
+                    "enable_thinking": False,
+                    "reasoning_effort": "none",
+                }
+                assert body["thinking_budget"] == 0
+                app.play("/set think on")
+                app.play("I look around.")
+                body = app.server.requests[-1]
+                assert body["chat_template_kwargs"] == {"enable_thinking": True}
+                assert "thinking_budget" not in body
+                app.play("/set think 0")
+                assert app.session.think == "0"
+                saved = tomllib.loads(app.paths.models_file.read_text())
+                assert saved["test-model"]["think"] == "0"
+            finally:
+                app.close()
+            relaunched = launch(tmp_path / "state", server)
+            try:
+                assert relaunched.session.think == "0"
+            finally:
+                relaunched.close()
+        finally:
+            server.close()
+
     def test_the_level_rides_the_wire_and_default_sends_nothing(self, app: App) -> None:
         # The scripted server is a generic provider, whose url could name
         # a local engine as well as a catalog: every knob goes out.
@@ -228,15 +309,21 @@ class TestThink:
         body = app.server.requests[-1]
         assert body["reasoning_effort"] == "low"
         assert body["chat_template_kwargs"] == {"enable_thinking": True, "reasoning_effort": "low"}
+        assert "thinking_budget_tokens" not in body and "thinking_budget" not in body
         app.play("/set think none")
         app.play("I listen.")
         body = app.server.requests[-1]
         assert body["reasoning_effort"] == "none"
-        assert body["chat_template_kwargs"] == {"enable_thinking": False}
+        assert body["chat_template_kwargs"] == {
+            "enable_thinking": False,
+            "reasoning_effort": "none",
+        }
+        assert (body["thinking_budget_tokens"], body["thinking_budget"]) == (0, 0)
         app.play("/set think unset")
         app.play("I look around.")
-        assert "reasoning_effort" not in app.server.requests[-1]
-        assert "chat_template_kwargs" not in app.server.requests[-1]
+        body = app.server.requests[-1]
+        assert "reasoning_effort" not in body and "chat_template_kwargs" not in body
+        assert "thinking_budget_tokens" not in body and "thinking_budget" not in body
 
     def test_a_400_to_the_knob_retries_once_without_it(self, app: App) -> None:
         # Providers differ on the knob: a reasoning-mandatory model refuses
@@ -279,7 +366,14 @@ class TestThink:
             app.play("I enter the hall.")
             body = app.server.requests[-1]
             assert "reasoning_effort" not in body
-            assert body["chat_template_kwargs"] == {"enable_thinking": False}
+            # The flag, the word for a template that switches off on it,
+            # and the budget the server's own sampler enforces on any
+            # template — the one off switch that holds everywhere.
+            assert body["chat_template_kwargs"] == {
+                "enable_thinking": False,
+                "reasoning_effort": "none",
+            }
+            assert body["thinking_budget_tokens"] == 0
             app.play("/set think high")
             app.play("I look around.")
             body = app.server.requests[-1]
@@ -288,6 +382,7 @@ class TestThink:
                 "enable_thinking": True,
                 "reasoning_effort": "high",
             }
+            assert "thinking_budget_tokens" not in body  # a level leaves the budget the engine's
         finally:
             app.close()
 
@@ -305,12 +400,19 @@ class TestThink:
             template = {"enable_thinking": True, "reasoning_effort": "high"}
             assert body["chat_template_kwargs"] == template
             assert "reasoning_effort" not in body
+            assert "thinking_budget" not in body
             app.play("/set think none")
             app.play("I look around.")
-            assert app.server.requests[-1]["chat_template_kwargs"] == {"enable_thinking": False}
+            body = app.server.requests[-1]
+            assert body["chat_template_kwargs"] == {
+                "enable_thinking": False,
+                "reasoning_effort": "none",
+            }
+            assert body["thinking_budget"] == 0  # omlx's own sampler, whatever the template reads
             app.play("/set think unset")
             app.play("We walk on.")
             assert "chat_template_kwargs" not in app.server.requests[-1]
+            assert "thinking_budget" not in app.server.requests[-1]
         finally:
             app.close()
 
@@ -329,13 +431,15 @@ class TestThink:
             app.close()
 
     def test_ollama_gets_the_effort_alone(self, server, tmp_path) -> None:
-        # Ollama reads reasoning_effort and nothing of the template.
+        # Ollama reads reasoning_effort and nothing of the template: its
+        # card's "thinking" is a switch, and off goes out as none.
         managed = ModelServer(managed=True)
+        managed.capabilities = {"test-model": ["completion", "thinking"]}
         try:
             set_config_provider(tmp_path / "state", managed, name="ollama")
             app = launch(tmp_path / "state", managed, spec="ollama/test-model")
             try:
-                app.play("/set think none")
+                app.play("/set think off")
                 app.play("I enter the hall.")
                 body = managed.requests[-1]
                 assert body["reasoning_effort"] == "none"
@@ -594,7 +698,10 @@ class TestManagedPicker:
         app, server = self.launch_managed(tmp_path)
         server.loaded = {"alpha"}
         server.contexts["alpha"] = 32768
+        # The launch read the model in use once (its card among the
+        # reads); the inventory is what is counted here.
         server.gets.clear()
+        server.requests.clear()
         try:
             rows, _ = api_providers.get_providers(app.session)
             ollama = next(r for r in rows if r.id == "ollama")

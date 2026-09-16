@@ -117,16 +117,19 @@ class OmlxModels(OpenAIModels):
     def _capabilities_of(self, entry: dict[str, Any]) -> ModelCapabilities:
         """Only a VLM takes images, and a type the status does not state
         leaves the question open. `thinking_default` is whether the
-        template has the thinking toggle at all: None, and no effort
-        reaches the model; a bool, and every effort does, as on or off.
-        Decoding is held to a schema server-side (a grammar compiled
+        template has the thinking toggle at all: a bool, and the model
+        is switched on or off — no rung, the server grades nothing —
+        under a budget its own sampler holds; None, and nothing reaches
+        it. Decoding is held to a schema server-side (a grammar compiled
         for `response_format`) for every model."""
         kind = entry.get("model_type")
         vision = kind == "vlm" if isinstance(kind, str) and kind else None
-        toggle = entry.get("thinking_default")
+        thinks = isinstance(entry.get("thinking_default"), bool)
         return ModelCapabilities(
             vision=vision,
-            reasoning=reasoning.ALL_EFFORTS if isinstance(toggle, bool) else frozenset(),
+            reasoning_efforts=frozenset(),
+            reasoning_switch=thinks,
+            reasoning_budget=thinks,
             text_completion=True,
             structured_output=True,
         )
@@ -134,9 +137,13 @@ class OmlxModels(OpenAIModels):
 
 class OmlxCompletion(OpenAICompletion):
     supported_params = PROTOCOL_PARAMS | SAMPLER_PARAMS
+    # The template's two variables, forwarded verbatim, and the budget
+    # omlx enforces itself with a logits processor — on the raw wire
+    # too, where it is the one knob there is.
     chat_reasoning_knobs: ClassVar[frozenset[str]] = frozenset(
-        {reasoning.FLAG_KNOB, reasoning.TEMPLATE_EFFORT_KNOB}
+        {reasoning.SWITCH_TEMPLATE_KNOB, reasoning.EFFORT_TEMPLATE_KNOB, reasoning.BUDGET_KNOB}
     )
+    text_reasoning_knobs: ClassVar[frozenset[str]] = frozenset({reasoning.BUDGET_KNOB})
     can_count_tokens = True
 
     def count_chat_tokens(
@@ -144,13 +151,13 @@ class OmlxCompletion(OpenAICompletion):
         model: str,
         messages: Sequence[WireMessage],
         *,
-        effort: str | None = None,
+        level: str | None = None,
         images: Sequence[Image] = (),
         timeout: float = ASK_TIMEOUT,
     ) -> int | None:
         # The count resolves the engine, which loads the model; a count
         # is never worth a load. Anthropic's shape takes neither the
-        # template kwargs nor an image, so `effort` and `images` do not
+        # template kwargs nor an image, so `level` and `images` do not
         # reach it: the count is of the template's default rendering.
         entry = _status_entry(self._http, self._config.base_url, model)
         if entry is None or not entry.get("loaded"):

@@ -48,7 +48,9 @@ class TestDefaults:
 
     def test_capabilities_are_unknown_until_stated(self) -> None:
         caps = ModelCapabilities()
-        assert (caps.vision, caps.audio, caps.reasoning) == (None, None, None)
+        assert (caps.vision, caps.audio) == (None, None)
+        thinking = (caps.reasoning_efforts, caps.reasoning_switch, caps.reasoning_budget)
+        assert thinking == (None, None, None)
         assert (caps.text_completion, caps.structured_output) == (None, None)
 
     def test_rows_and_capabilities_are_values(self) -> None:

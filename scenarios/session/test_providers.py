@@ -16,7 +16,7 @@ probe, the balance, and the error family, each with its sentence.
 import base64
 import time
 from collections.abc import Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import pytest
@@ -49,12 +49,14 @@ from otaku.providers.clients.nanogpt import NanoGptClient
 from otaku.providers.clients.ollama import OllamaClient
 from otaku.providers.clients.omlx import OmlxClient
 from otaku.providers.clients.openrouter import OpenRouterClient
-from otaku.providers.openai.reasoning import ALL_EFFORTS
+from otaku.providers.openai.reasoning import ALL_EFFORT_LEVELS
 from scenarios.support import server as scripted
 from scenarios.support.server import ModelServer
 
 EFFORT_NONE = {"reasoning_effort": "none"}
 FLAG_OFF = {"chat_template_kwargs": {"enable_thinking": False}}
+TEMPLATE_OFF = {"chat_template_kwargs": {"enable_thinking": False, "reasoning_effort": "none"}}
+BUDGETS_OFF = {"thinking_budget_tokens": 0, "thinking_budget": 0}
 DEAD = "http://127.0.0.1:9/v1"
 
 
@@ -127,10 +129,10 @@ class TestChatCompletion:
     @pytest.mark.parametrize(
         ("kind", "expected"),
         [
-            ("generic", {**EFFORT_NONE, **FLAG_OFF}),
-            ("llamacpp", FLAG_OFF),
-            ("koboldcpp", {**EFFORT_NONE, **FLAG_OFF}),
-            ("omlx", FLAG_OFF),
+            ("generic", {**EFFORT_NONE, **TEMPLATE_OFF, **BUDGETS_OFF}),
+            ("llamacpp", {**TEMPLATE_OFF, "thinking_budget_tokens": 0}),
+            ("koboldcpp", {**EFFORT_NONE, **FLAG_OFF, "thinking_budget_tokens": 0}),
+            ("omlx", {**TEMPLATE_OFF, "thinking_budget": 0}),
             ("ollama", EFFORT_NONE),
             ("openrouter", EFFORT_NONE),
             ("nanogpt", EFFORT_NONE),
@@ -140,12 +142,12 @@ class TestChatCompletion:
     def test_an_effort_goes_out_on_the_knobs_the_provider_reads(
         self, server: ModelServer, kind: str, expected: dict[str, object]
     ) -> None:
-        # The table every provider is promised by: both knobs where a
-        # local engine reads the template's flag, the effort alone on the
-        # catalogs, Ollama and LM Studio — and the turn plays in every
-        # case.
+        # The table every provider is promised by: the template's flag
+        # and word where a local engine forwards them, its own budget
+        # where it holds one, the effort alone on the catalogs, Ollama
+        # and LM Studio — and the turn plays in every case.
         client = ALL_CLIENTS[kind](_config(server, kind, api_key="k"))
-        _, text, _ = _drain(client.completion.chat("m", [Turn("user", "u")], {}, effort="none"))
+        _, text, _ = _drain(client.completion.chat("m", [Turn("user", "u")], {}, level="none"))
         assert _knobs(_sent(server, "messages")) == expected
         assert text == scripted.CHAT_REPLY
 
@@ -158,22 +160,27 @@ class TestChatCompletion:
         # rides there, beside the flag, for the templates that grade
         # their reasoning.
         client = ALL_CLIENTS[kind](_config(server, kind))
-        _drain(client.completion.chat("m", [Turn("user", "u")], {}, effort="high"))
+        _drain(client.completion.chat("m", [Turn("user", "u")], {}, level="high"))
         body = _sent(server, "messages")
         assert body["chat_template_kwargs"] == {"enable_thinking": True, "reasoning_effort": "high"}
         assert "reasoning_effort" not in body
 
-    def test_the_generic_provider_sends_the_effort_on_every_chat_knob(
-        self, server: ModelServer
-    ) -> None:
-        # Permissive: the url could name any engine, so the effort goes
-        # out by name, as the template's flag and as its variable, and
-        # the server drops what it does not read.
+    def test_the_generic_provider_sends_the_level_on_every_knob(self, server: ModelServer) -> None:
+        # Permissive: the url could name any engine, so a rung goes out
+        # by name, as the template's flag and as its variable, and none
+        # as both budgets too — the off that holds on a template that
+        # reads neither — and the server drops what it does not read.
         client = GenericClient(_config(server, "generic"))
-        _drain(client.completion.chat("m", [Turn("user", "u")], {}, effort="high"))
+        _drain(client.completion.chat("m", [Turn("user", "u")], {}, level="high"))
         assert _knobs(_sent(server, "messages")) == {
             "reasoning_effort": "high",
             "chat_template_kwargs": {"enable_thinking": True, "reasoning_effort": "high"},
+        }
+        _drain(client.completion.chat("m", [Turn("user", "u")], {}, level="none"))
+        assert _knobs(_sent(server, "messages")) == {
+            **EFFORT_NONE,
+            **TEMPLATE_OFF,
+            **BUDGETS_OFF,
         }
 
     def test_the_generic_provider_spells_the_penalty_both_ways(self, server: ModelServer) -> None:
@@ -198,7 +205,7 @@ class TestChatCompletion:
         server.refusal = "Your prompt to x:thinking exceeds the model's context length"
         client = GenericClient(_config(server, "generic"))
         with pytest.raises(StatusError):
-            _drain(client.completion.chat("x:thinking", [Turn("user", "u")], {}, effort="none"))
+            _drain(client.completion.chat("x:thinking", [Turn("user", "u")], {}, level="none"))
         assert len(server.requests) == 1
 
     def test_a_400_naming_the_knob_retries_once_without_it(self, server: ModelServer) -> None:
@@ -207,20 +214,20 @@ class TestChatCompletion:
         server.refuse = lambda body: 400 if "reasoning_effort" in body else None
         server.refusal = "unknown field: reasoning_effort"
         client = GenericClient(_config(server, "generic"))
-        _, text, _ = _drain(client.completion.chat("m", [Turn("user", "u")], {}, effort="high"))
+        _, text, _ = _drain(client.completion.chat("m", [Turn("user", "u")], {}, level="high"))
         assert text == scripted.CHAT_REPLY
         knobbed, plain = server.requests[-2:]
         assert knobbed["reasoning_effort"] == "high" and "reasoning_effort" not in plain
         server.refusal = "bad request"
         with pytest.raises(StatusError):
-            _drain(client.completion.chat("m", [Turn("user", "u")], {}, effort="high"))
+            _drain(client.completion.chat("m", [Turn("user", "u")], {}, level="high"))
         assert len(server.requests) == 3
 
     def test_a_400_after_words_arrived_is_a_failure_not_a_retry(self, server: ModelServer) -> None:
         # A second take would repeat what is already on someone's screen.
         server.fail_after = 1
         stream = GenericClient(_config(server, "generic")).completion.chat(
-            "m", [Turn("user", "u")], {}, effort="high"
+            "m", [Turn("user", "u")], {}, level="high"
         )
         with pytest.raises(UnreachableError):
             list(stream)
@@ -333,12 +340,12 @@ class TestTextCompletion:
     @pytest.mark.parametrize(
         ("kind", "expected"),
         [
-            ("generic", EFFORT_NONE),
-            ("koboldcpp", EFFORT_NONE),
+            ("generic", {**EFFORT_NONE, **BUDGETS_OFF}),
+            ("koboldcpp", {**EFFORT_NONE, "thinking_budget_tokens": 0}),
             ("nanogpt", EFFORT_NONE),
-            ("llamacpp", {}),
+            ("llamacpp", {"thinking_budget_tokens": 0}),
             ("ollama", {}),
-            ("omlx", {}),
+            ("omlx", {"thinking_budget": 0}),
             ("lmstudio", {}),
             ("openrouter", {}),
         ],
@@ -347,7 +354,7 @@ class TestTextCompletion:
         self, server: ModelServer, kind: str, expected: dict[str, object]
     ) -> None:
         client = ALL_CLIENTS[kind](_config(server, kind, api_key="k"))
-        _drain(client.completion.text("m", "p", {}, effort="none"))
+        _drain(client.completion.text("m", "p", {}, level="none"))
         assert _knobs(_sent(server, "prompt")) == expected
 
 
@@ -447,39 +454,98 @@ class TestListing:
 
 
 class TestCapabilities:
-    def test_llamacpp_reads_the_modalities_and_cannot_say_which_efforts_reach(
-        self, server: ModelServer
-    ) -> None:
-        # The effort is a template variable only some templates read;
-        # the server has no word on which, so the efforts are unknown.
+    def test_llamacpp_reads_the_modalities_off_props(self, server: ModelServer) -> None:
+        # A build without /apply-template says nothing of the thinking.
         server.window = 4096
         server.props = {"modalities": {"vision": False}}
         row = LlamaCppClient(_config(server, "llamacpp")).models.list()[0]
         assert row.capabilities == ModelCapabilities(
-            vision=False, reasoning=None, text_completion=True, structured_output=True
+            vision=False, text_completion=True, structured_output=True
         )
         server.props = {"modalities": {"vision": True}}
         row = LlamaCppClient(_config(server, "llamacpp")).models.list()[0]
         assert row.capabilities == ModelCapabilities(
-            vision=True, reasoning=None, text_completion=True, structured_output=True
+            vision=True, text_completion=True, structured_output=True
         )
         # Props without modalities, an older build: still the raw wire
         # and constrained decoding, the rest unknown.
         server.props = {}
         row = LlamaCppClient(_config(server, "llamacpp")).models.list()[0]
         assert row.capabilities == ModelCapabilities(
-            vision=None, reasoning=None, text_completion=True, structured_output=True
+            vision=None, text_completion=True, structured_output=True
         )
 
-    def test_koboldcpp_reads_vision_off_its_version_and_knows_its_budget_efforts(
+    def test_llamacpp_asks_the_template_how_the_thinking_is_set(self, server: ModelServer) -> None:
+        # The server states nowhere what its template reads, so the
+        # template is asked: rendered with the flag on and off and with
+        # two efforts, what changes the prompt is what it reads. A flag
+        # switches; an effort grades — every rung, none being the
+        # budget's off; the server's own budget holds on either. Neither
+        # read, the server cannot say — a thinking template it does not
+        # switch or grade is still stopped by the budget. Asked once per
+        # model, not per listing.
+        server.window = 4096
+        server.template_reads = {"enable_thinking"}
+        client = LlamaCppClient(_config(server, "llamacpp"))
+        row = client.models.list()[0]
+        assert row.capabilities == ModelCapabilities(
+            reasoning_efforts=frozenset(),
+            reasoning_switch=True,
+            reasoning_budget=True,
+            text_completion=True,
+            structured_output=True,
+        )
+        renders = server.posts.count("/apply-template")
+        assert renders == 3
+        client.models.list()
+        assert server.posts.count("/apply-template") == renders
+        server.template_reads = {"enable_thinking", "reasoning_effort"}
+        row = LlamaCppClient(_config(server, "llamacpp")).models.list()[0]
+        assert row.capabilities == ModelCapabilities(
+            reasoning_efforts=ALL_EFFORT_LEVELS,
+            reasoning_switch=False,
+            reasoning_budget=True,
+            text_completion=True,
+            structured_output=True,
+        )
+        server.template_reads = set()
+        row = LlamaCppClient(_config(server, "llamacpp")).models.list()[0]
+        assert row.capabilities == ModelCapabilities(text_completion=True, structured_output=True)
+
+    def test_llamacpp_router_asks_the_template_of_a_running_model_only(self) -> None:
+        # A render needs the model loaded, and a probe must not load it:
+        # a listing asks for the running models, and a model read after
+        # its load is asked then.
+        server = ModelServer(models=("a", "b"))
+        server.router = True
+        server.loaded = {"a"}
+        server.template_reads = {"enable_thinking"}
+        try:
+            client = LlamaCppClient(_config(server, "llamacpp"))
+            rows = {r.name: r for r in client.models.list()}
+            assert rows["a"].capabilities is not None
+            assert rows["a"].capabilities.reasoning_switch is True
+            assert rows["b"].capabilities is not None
+            assert rows["b"].capabilities.reasoning_switch is None
+            server.loaded.add("b")
+            fresh = client.models.get("b")
+            assert fresh is not None and fresh.capabilities is not None
+            assert fresh.capabilities.reasoning_switch is True
+        finally:
+            server.close()
+
+    def test_koboldcpp_reads_vision_off_its_version_and_knows_its_graded_budget(
         self, server: ModelServer
     ) -> None:
+        # Five rungs its budget tells apart, and the budget itself.
         server.version = {"version": "1.120", "vision": False, "audio": True}
         row = KoboldCppClient(_config(server, "koboldcpp")).models.list()[0]
         assert row.capabilities == ModelCapabilities(
             vision=False,
             audio=True,
-            reasoning=ALL_EFFORTS,
+            reasoning_efforts=frozenset({"none", "minimal", "low", "medium", "high"}),
+            reasoning_switch=False,
+            reasoning_budget=True,
             text_completion=True,
             structured_output=True,
         )
@@ -526,17 +592,22 @@ class TestCapabilities:
             assert not any(b.get("model") for b in server.requests)
             alpha, beta = client.models.get("alpha"), client.models.get("beta")
             assert alpha is not None and beta is not None
+            # The card's "thinking" is a switch: no rung, no budget.
             assert alpha.capabilities == ModelCapabilities(
                 vision=True,
                 audio=False,
-                reasoning=frozenset({"none", "low", "medium", "high", "max"}),
+                reasoning_efforts=frozenset(),
+                reasoning_switch=True,
+                reasoning_budget=False,
                 text_completion=False,
                 structured_output=True,
             )
             assert beta.capabilities == ModelCapabilities(
                 vision=False,
                 audio=False,
-                reasoning=frozenset(),
+                reasoning_efforts=frozenset(),
+                reasoning_switch=False,
+                reasoning_budget=False,
                 text_completion=False,
                 structured_output=True,
             )
@@ -602,7 +673,7 @@ class TestCapabilities:
 
     def test_omlx_reads_the_type_and_the_toggle_and_lists_only_language_models(self) -> None:
         # `thinking_default`, a bool, is the template's thinking toggle:
-        # every effort reaches; absent, none does.
+        # on or off, under the server's budget; absent, nothing reaches.
         server = ModelServer(models=("vl", "lm", "unsaid", "emb", "rerank"))
         server.status = True
         server.types = {"vl": "vlm", "lm": "llm", "emb": "embedding", "rerank": "reranker"}
@@ -611,15 +682,23 @@ class TestCapabilities:
             rows = {r.name: r for r in OmlxClient(_config(server, "omlx")).models.list()}
             assert set(rows) == {"vl", "lm", "unsaid"}  # an embedder plays no story
             assert rows["vl"].capabilities == ModelCapabilities(
-                vision=True, reasoning=ALL_EFFORTS, text_completion=True, structured_output=True
+                vision=True,
+                reasoning_efforts=frozenset(),
+                reasoning_switch=True,
+                reasoning_budget=True,
+                text_completion=True,
+                structured_output=True,
             )
-            assert rows["lm"].capabilities == ModelCapabilities(
-                vision=False, reasoning=frozenset(), text_completion=True, structured_output=True
+            silent = ModelCapabilities(
+                reasoning_efforts=frozenset(),
+                reasoning_switch=False,
+                reasoning_budget=False,
+                text_completion=True,
+                structured_output=True,
             )
+            assert rows["lm"].capabilities == replace(silent, vision=False)
             # No type on the row: whether it sees is unknown, not assumed.
-            assert rows["unsaid"].capabilities == ModelCapabilities(
-                vision=None, reasoning=frozenset(), text_completion=True, structured_output=True
-            )
+            assert rows["unsaid"].capabilities == silent
         finally:
             server.close()
 
@@ -682,40 +761,54 @@ class TestCapabilities:
             }
             # The text wire is per model and the catalog does not say
             # which take it: unknown on every row.
+            # The rungs as named, "none" among them unless reasoning is
+            # mandatory, and a budget on every model that reasons —
+            # OpenRouter spends either as the model takes it.
             assert rows["free"].capabilities == ModelCapabilities(
                 vision=True,
                 audio=False,
-                reasoning=frozenset({"none", "minimal", "low", "high"}),
+                reasoning_efforts=frozenset({"none", "minimal", "low", "high"}),
+                reasoning_switch=False,
+                reasoning_budget=True,
                 text_completion=None,
                 structured_output=True,
             )
             assert rows["fixed"].capabilities == ModelCapabilities(
                 vision=False,
                 audio=False,
-                reasoning=frozenset({"low", "medium", "high"}),
+                reasoning_efforts=frozenset({"low", "medium", "high"}),
+                reasoning_switch=False,
+                reasoning_budget=True,
                 text_completion=None,
                 structured_output=False,
             )
-            # No modalities named, no reasoning object: what a row does
-            # not say is unknown, not allowed.
+            # No modalities named, no reasoning among the parameters:
+            # nothing reaches; what a row does not say is unknown.
             assert rows["mute"].capabilities == ModelCapabilities(
-                vision=None, reasoning=frozenset(), text_completion=None, structured_output=False
+                reasoning_efforts=frozenset(),
+                reasoning_switch=False,
+                reasoning_budget=False,
+                text_completion=None,
+                structured_output=False,
             )
-            # A reasoning object naming no efforts: no selection among
-            # them, so every effort reaches as on — and none as off, unless
-            # reasoning is mandatory.
+            # A reasoning object naming no rungs: every rung reaches, as
+            # a share of the budget — and not "none" where reasoning is
+            # mandatory.
             assert rows["plain"].capabilities == ModelCapabilities(
-                vision=None, reasoning=ALL_EFFORTS, text_completion=None, structured_output=False
+                reasoning_efforts=ALL_EFFORT_LEVELS,
+                reasoning_switch=False,
+                reasoning_budget=True,
+                text_completion=None,
+                structured_output=False,
             )
             assert rows["forced"].capabilities == ModelCapabilities(
-                vision=None,
-                reasoning=ALL_EFFORTS - {"none"},
+                reasoning_efforts=ALL_EFFORT_LEVELS - {"none"},
+                reasoning_switch=False,
+                reasoning_budget=True,
                 text_completion=None,
                 structured_output=False,
             )
-            assert rows["bare"].capabilities == ModelCapabilities(
-                vision=None, reasoning=None, text_completion=None, structured_output=None
-            )
+            assert rows["bare"].capabilities == ModelCapabilities()
         finally:
             server.close()
 
@@ -744,21 +837,32 @@ class TestCapabilities:
                 r.name: r
                 for r in NanoGptClient(_config(server, "nanogpt", api_key="k")).models.list()
             }
-            # The efforts as listed, "none" among them only where the
-            # model takes it; the text wire is per model, unsaid.
+            # The rungs as listed, "none" among them only where the
+            # model takes it; no budget on the catalog; the text wire is
+            # per model, unsaid.
             assert rows["seeing"].capabilities == ModelCapabilities(
                 vision=True,
                 audio=False,
-                reasoning=frozenset({"low", "high"}),
+                reasoning_efforts=frozenset({"low", "high"}),
+                reasoning_switch=False,
+                reasoning_budget=False,
                 text_completion=None,
                 structured_output=True,
             )
-            # Reasons, but names no efforts: which efforts reach is unknown.
+            # Reasons, but names no rung: on or off.
             assert rows["fixed"].capabilities == ModelCapabilities(
-                vision=False, reasoning=None, text_completion=None
+                vision=False,
+                reasoning_efforts=frozenset(),
+                reasoning_switch=True,
+                reasoning_budget=False,
+                text_completion=None,
             )
             assert rows["mute"].capabilities == ModelCapabilities(
-                vision=False, reasoning=frozenset(), text_completion=None
+                vision=False,
+                reasoning_efforts=frozenset(),
+                reasoning_switch=False,
+                reasoning_budget=False,
+                text_completion=None,
             )
             # A null flag is the catalog's "unknown", not a no; the output
             # limit is read whether or not the flags are there.
@@ -769,16 +873,22 @@ class TestCapabilities:
         finally:
             server.close()
 
-    def test_lmstudio_reads_vision_off_its_registry_and_cannot_say_of_reasoning(self) -> None:
+    def test_lmstudio_reads_vision_and_the_reasoning_options_off_its_registry(self) -> None:
         # Vision is the registry's word, and a registry that says nothing
-        # of it leaves it unknown. Whether the effort it takes reaches a
-        # given model it never says: unknown on every row.
+        # of it leaves it unknown; the rungs are its `allowed_options`,
+        # and a row without the reasoning object says nothing of them.
         server = ModelServer(models=("seeing", "blind", "unsaid"), managed=True)
         server.capabilities = {"seeing": ["vision"], "blind": []}
+        server.reasoning_options = {"seeing": ["low", "medium", "high", "unheard-of"]}
         try:
             rows = {r.name: r for r in LmStudioClient(_config(server, "lmstudio")).models.list()}
             assert rows["seeing"].capabilities == ModelCapabilities(
-                vision=True, text_completion=True, structured_output=True
+                vision=True,
+                reasoning_efforts=frozenset({"low", "medium", "high"}),
+                reasoning_switch=False,
+                reasoning_budget=False,
+                text_completion=True,
+                structured_output=True,
             )
             assert rows["blind"].capabilities == ModelCapabilities(
                 vision=False, text_completion=True, structured_output=True
@@ -826,10 +936,14 @@ class TestTokenCounts:
         # Counted as the turn would send it: the knobs beside the body,
         # the images on the last message — what the template renders.
         client.completion.count_chat_tokens(
-            "m", [Turn("user", "u")], effort="none", images=[Image(b"x", "image/png")]
+            "m", [Turn("user", "u")], level="none", images=[Image(b"x", "image/png")]
         )
         counted = server.requests[-1]
-        assert counted["chat_template_kwargs"] == {"enable_thinking": False}
+        assert counted["chat_template_kwargs"] == {
+            "enable_thinking": False,
+            "reasoning_effort": "none",
+        }
+        assert counted["thinking_budget_tokens"] == 0
         assert counted["messages"][-1]["content"] == [
             {"type": "text", "text": "u"},
             {"type": "image_url", "image_url": {"url": "data:image/png;base64,eA=="}},
@@ -1389,7 +1503,7 @@ class TestFailures:
         client = GenericClient(_config(server, "generic"), error_sink=errors)
         server.refuse = lambda body: 400 if "reasoning_effort" in body else None
         server.refusal = "unknown field: reasoning_effort"
-        _drain(client.completion.chat("m", [Turn("user", "u")], {}, effort="low"))
+        _drain(client.completion.chat("m", [Turn("user", "u")], {}, level="low"))
         counting = LlamaCppClient(ProviderConfig(name="llamacpp", url=DEAD), error_sink=errors)
         assert counting.completion.count_text_tokens("m", "p") is None
         assert errors.filed == []
@@ -1428,7 +1542,13 @@ def _sent(server: ModelServer, shape: str) -> dict[str, object]:
 
 
 def _knobs(body: dict[str, object]) -> dict[str, object]:
-    return {k: body[k] for k in ("reasoning_effort", "chat_template_kwargs") if k in body}
+    knobs = (
+        "reasoning_effort",
+        "chat_template_kwargs",
+        "thinking_budget_tokens",
+        "thinking_budget",
+    )
+    return {k: body[k] for k in knobs if k in body}
 
 
 def _drain(stream: Iterator[Chunk]) -> tuple[str, str, Stats]:
