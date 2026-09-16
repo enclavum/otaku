@@ -2,6 +2,8 @@
 goes through, the purpose rule, and how a failure is filed."""
 
 import contextlib
+import datetime
+import email.utils
 import socket
 import threading
 import time
@@ -10,7 +12,15 @@ from pathlib import Path
 import pytest
 
 from otaku.providers import UnreachableError
-from otaku.providers.http import Cut, Http, _Cutting, positive_int
+from otaku.providers.http import (
+    Cut,
+    Http,
+    _Cutting,
+    explanation,
+    positive_int,
+    retry_after,
+    ticking,
+)
 
 
 class TestPositiveInt:
@@ -125,3 +135,108 @@ class TestCut:
             assert time.monotonic() - started < 1.0
         finally:
             listener.close()
+
+
+class TestTicking:
+    def test_the_answer_comes_back_and_the_hook_ticks_meanwhile(self) -> None:
+        ticks = 0
+
+        def idle() -> None:
+            nonlocal ticks
+            ticks += 1
+
+        def call() -> int:
+            time.sleep(0.15)
+            return 7
+
+        assert ticking(call, idle, Cut()) == 7
+        assert ticks > 0
+
+    def test_what_the_call_raises_is_raised(self) -> None:
+        def call() -> None:
+            raise ValueError("no")
+
+        with pytest.raises(ValueError):
+            ticking(call, lambda: None, Cut())
+
+    def test_a_hook_saying_nobody_waits_asks_the_cut(self) -> None:
+        cut = Cut()
+
+        def call() -> str:
+            time.sleep(0.2)
+            return "done"
+
+        assert ticking(call, lambda: False, cut) == "done"
+        assert cut.asked
+
+
+class TestExplanation:
+    def test_the_error_objects_message_out_of_its_envelope(self) -> None:
+        assert explanation({"error": {"message": "no such model", "code": 404}}) == "no such model"
+        assert explanation({"error": "plain words"}) == "plain words"
+
+    def test_openrouters_metadata_rides_along(self) -> None:
+        # The upstream's own words and which provider they came from:
+        # the half a reader can act on.
+        body = {
+            "error": {
+                "code": 429,
+                "message": "Provider returned error",
+                "metadata": {
+                    "raw": "temporarily rate-limited upstream",
+                    "provider_name": "DeepInfra",
+                },
+            }
+        }
+        assert (
+            explanation(body)
+            == "Provider returned error: temporarily rate-limited upstream (DeepInfra)"
+        )
+
+    def test_a_moderations_reasons_and_passage_ride_along(self) -> None:
+        body = {
+            "error": {
+                "code": 403,
+                "message": "Input flagged",
+                "metadata": {
+                    "reasons": ["violence"],
+                    "flagged_input": "the knife",
+                    "provider_name": "OpenAI",
+                },
+            }
+        }
+        assert explanation(body) == "Input flagged (OpenAI) — violence: 'the knife'"
+
+    def test_koboldcpps_detail_is_unwrapped(self) -> None:
+        busy = {
+            "detail": {
+                "msg": "Server is busy; please try again later.",
+                "type": "service_unavailable",
+            }
+        }
+        assert explanation(busy) == "Server is busy; please try again later."
+        assert explanation({"detail": "no such thing"}) == "no such thing"
+
+    def test_no_envelope_is_the_text_as_it_came(self) -> None:
+        assert explanation(None, "<html>gateway</html>") == "<html>gateway</html>"
+        assert explanation({"unrelated": 1}, "text") == "text"
+        assert explanation({"error": {}}, "") == ""
+
+
+class TestRetryAfter:
+    def test_a_count_of_seconds(self) -> None:
+        assert retry_after("20") == 20.0
+        assert retry_after(" 1.5 ") == 1.5
+        assert retry_after("-3") == 0.0
+
+    def test_an_http_date_is_the_seconds_until_it(self) -> None:
+        soon = datetime.datetime.now(datetime.UTC) + datetime.timedelta(seconds=90)
+        wait = retry_after(email.utils.format_datetime(soon, usegmt=True))
+        assert wait is not None and 85 <= wait <= 90
+        passed = datetime.datetime.now(datetime.UTC) - datetime.timedelta(seconds=90)
+        assert retry_after(email.utils.format_datetime(passed, usegmt=True)) == 0.0
+
+    def test_nothing_or_nonsense_is_none(self) -> None:
+        assert retry_after(None) is None
+        assert retry_after("") is None
+        assert retry_after("soon") is None

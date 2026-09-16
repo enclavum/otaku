@@ -12,12 +12,18 @@ from urllib.parse import quote
 
 from otaku.providers.clients import read_home_json
 from otaku.providers.errors import StatusError
-from otaku.providers.http import ASK_TIMEOUT, PROBE_TIMEOUT, Http, positive_int
+from otaku.providers.http import ASK_TIMEOUT, PROBE_TIMEOUT, Cut, Http, positive_int
 from otaku.providers.openai import reasoning
-from otaku.providers.openai.client import Locality, OpenAIClient
-from otaku.providers.openai.completion import PROTOCOL_PARAMS, SAMPLER_PARAMS, OpenAICompletion
+from otaku.providers.openai.client import OpenAIClient
+from otaku.providers.openai.completion import (
+    PROTOCOL_PARAMS,
+    SAMPLER_PARAMS,
+    Bounds,
+    OpenAICompletion,
+)
 from otaku.providers.openai.models import (
     Listing,
+    Locality,
     ModelCapabilities,
     ModelInfo,
     ModelState,
@@ -30,6 +36,11 @@ from otaku.settings.providers import ProviderConfig
 # kinds answer a chat with a 400, and the markitdown pseudo-model with a
 # document conversion.
 _LANGUAGE_MODELS = frozenset({"llm", "vlm"})
+# Config types omlx serves through mlx-vlm and types "vlm" without any
+# vision: two native text families, and two of Gemma 4's it serves that
+# way whether or not the checkpoint keeps its vision weights.
+_VLM_TEXT_TYPES = frozenset({"cohere2_moe", "minimax_m3"})
+_VLM_UNTOLD_TYPES = frozenset({"gemma4_unified", "diffusion_gemma"})
 
 
 class OmlxModels(OpenAIModels):
@@ -37,11 +48,11 @@ class OmlxModels(OpenAIModels):
     def can_manage(self) -> bool:
         return True
 
-    def load(self, model: str) -> None:
-        self._model_action("load", model)
+    def _load(self, model: str, http: Http, cut: Cut) -> None:
+        self._model_action("load", model, http, cut)
 
-    def unload(self, model: str) -> None:
-        self._model_action("unload", model)
+    def _unload(self, model: str, http: Http, cut: Cut) -> None:
+        self._model_action("unload", model, http, cut)
 
     # ---------- the hooks ----------
 
@@ -87,17 +98,16 @@ class OmlxModels(OpenAIModels):
 
     # ---------- the native surface ----------
 
-    def _model_action(self, action: str, model: str) -> None:
+    def _model_action(self, action: str, model: str, http: Http, cut: Cut) -> None:
         # omlx evicts on its own (idle, LRU, memory pressure); an unload
         # of what is not loaded is a 400, a load of what is a no-op: ask
-        # first, order only what is not so.
-        entry = _status_entry(self._http, self._config.base_url, model)
+        # first, order only what is not so. Through the order's view,
+        # under its budget and its cut.
+        entry = _status_entry(http, self._config.base_url, model)
         if entry is not None and bool(entry.get("loaded")) == (action == "load"):
             return
-        self._http.post(
-            f"{self._config.base_url}/v1/models/{quote(model, safe='')}/{action}",
-            {},
-            purpose=action,
+        http.post(
+            f"{self._config.base_url}/v1/models/{quote(model, safe='')}/{action}", {}, cut=cut
         )
 
     def _state_of(self, entry: dict[str, Any]) -> tuple[ModelState, int | None]:
@@ -105,26 +115,49 @@ class OmlxModels(OpenAIModels):
         context size a request gets — `max_context_window`, the serving
         cap, never the model's own length. The cap is config, stated in
         every state, and omlx loads on demand under it: an unloaded
-        model's budget is the cap, not a default."""
+        model's budget is the cap, not a default. Stated with no
+        `model_context_length` beside it, the cap is the server's
+        global default standing in for a length it could not discover
+        — a guess, above the real window as often as not — and is not
+        taken."""
         if entry.get("loaded"):
             state = ModelState.LOADED
         elif entry.get("is_loading"):
             state = ModelState.LOADING
         else:
             state = ModelState.UNLOADED
+        if not positive_int(entry.get("model_context_length")):
+            return state, None
         return state, positive_int(entry.get("max_context_window"))
 
     def _capabilities_of(self, entry: dict[str, Any]) -> ModelCapabilities:
-        """Only a VLM takes images, and a type the status does not state
-        leaves the question open. `thinking_default` is whether the
+        """Only a VLM takes images — a "vlm" that is a text model served
+        by mlx-vlm aside — and a type the status does not state leaves
+        the question open. `thinking_default` is whether the
         template has the thinking toggle at all: a bool, and the model
         is switched on or off — no rung, the server grades nothing —
         under a budget its own sampler holds; None, and nothing reaches
         it. Decoding is held to a schema server-side (a grammar compiled
         for `response_format`) for every model."""
         kind = entry.get("model_type")
-        vision = kind == "vlm" if isinstance(kind, str) and kind else None
         thinks = isinstance(entry.get("thinking_default"), bool)
+        vision: bool | None
+        if not isinstance(kind, str) or not kind:
+            vision = None
+        elif kind != "vlm":
+            vision = False
+        else:
+            # Typed "vlm" is served by mlx-vlm, which also serves two
+            # text-only families, and Gemma 4's unified and diffusion
+            # models whether or not they see: the config's own type
+            # tells them apart, where the status states it.
+            config_type = entry.get("config_model_type")
+            if config_type in _VLM_TEXT_TYPES:
+                vision = False
+            elif config_type in _VLM_UNTOLD_TYPES:
+                vision = None
+            else:
+                vision = True
         return ModelCapabilities(
             vision=vision,
             reasoning_efforts=frozenset(),
@@ -137,6 +170,14 @@ class OmlxModels(OpenAIModels):
 
 class OmlxCompletion(OpenAICompletion):
     supported_params = PROTOCOL_PARAMS | SAMPLER_PARAMS
+    # A local engine bounds nothing the catalogs bound: any temperature,
+    # any penalty.
+    bounds: ClassVar[dict[str, Bounds]] = {
+        "temperature": (0, None),
+        "presence_penalty": (None, None),
+        "frequency_penalty": (None, None),
+        "repetition_penalty": (0, None),
+    }
     # The template's two variables, forwarded verbatim, and the budget
     # omlx enforces itself with a logits processor — on the raw wire
     # too, where it is the one knob there is.

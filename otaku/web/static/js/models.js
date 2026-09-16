@@ -110,7 +110,7 @@ function buildModels(state, notice) {
   const offered = panel.providers.flatMap((provider) =>
     provider.models.map((model) => ({ provider, model, haystack: model.name.toLowerCase() })),
   );
-  const local = offered.filter((entry) => entry.provider.locality === "local").length;
+  const local = offered.filter((entry) => entry.model.locality === "local").length;
   const remote = offered.length - local;
   $("[data-tabs-aside]", popup).textContent =
     `${offered.length} ${offered.length === 1 ? "model" : "models"}`;
@@ -221,7 +221,8 @@ function modelRow(entry, current) {
 
 function modelDetail(pane, entry, current, { use, setLoaded }) {
   const managed = entry.provider.capabilities?.model_management;
-  const where = whereItRuns(entry.provider);
+  // the model's own: an Ollama model served by ollama.com is over the wire
+  const where = whereItRuns(entry.model);
   const state = !managed ? "" : entry.model.loaded ? " · loaded" : " · not loaded";
   const chosen = `${entry.provider.id}/${entry.model.name}` === current;
 
@@ -326,6 +327,8 @@ function providerDetail(state, pane, provider) {
     "otk-label",
     provider.connected ? `answering · ${models} ${models === 1 ? "model" : "models"}` : "not answering",
   );
+  // Why not, in the backend's own sentence, under the verdict.
+  const reason = provider.reason ? element("p", "otk-note", provider.reason) : null;
 
   const fields = element("div", "otk-detail__section");
   const url = urlField(state, provider);
@@ -393,9 +396,10 @@ function urlField(state, provider) {
    the generic provider is a url and cannot say, so its caption says
    neither. The footnote's count above puts the unknowns with the
    remote ones — the side that may cost money. */
-function whereItRuns(provider) {
-  if (provider.locality === "local") return "on this machine";
-  if (provider.locality === "remote") return "over the wire";
+function whereItRuns(served) {
+  /* A provider's or a model's — either says where it runs. */
+  if (served.locality === "local") return "on this machine";
+  if (served.locality === "remote") return "over the wire";
   return "wherever the url points";
 }
 
@@ -565,7 +569,7 @@ function testProvider(state, provider) {
       $("[data-title]", dialog).textContent = found?.connected ? "Connected" : "No answer";
       $(".otk-dialog__body", dialog).textContent = found?.connected
         ? `${provider.label} answered with ${models} ${models === 1 ? "model" : "models"}.`
-        : `${provider.label} did not answer at ${provider.url}.`;
+        : found?.reason || `${provider.label} did not answer at ${provider.url}.`;
     }),
     guard(() => {
       // The question itself could not be asked — the dialog still

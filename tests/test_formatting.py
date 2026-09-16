@@ -196,6 +196,11 @@ class TestTomlScalar:
         assert toml_scalar(True) == "true"
         assert toml_scalar(False) == "false"
 
+    def test_an_array_roundtrips_its_items(self) -> None:
+        # The stop strings: several, with a newline among them.
+        assert roundtrip(["\nUser:", "END", 'say "no"']) == ["\nUser:", "END", 'say "no"']
+        assert roundtrip([]) == []
+
     def test_numbers_roundtrip(self) -> None:
         assert roundtrip(42) == 42
         assert roundtrip(1.5) == 1.5

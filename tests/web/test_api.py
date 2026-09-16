@@ -24,7 +24,7 @@ class TestEvent:
         assert api.event(Text("word"))["type"] == "text"
         assert api.event(Declined("no model"))["type"] == "declined"
         assert api.event(Failed("the provider hung up"))["type"] == "failed"
-        assert api.event(Done(reply="done", stats="7 tok/s"))["type"] == "done"
+        assert api.event(Done(reply="done", report=None, stats="7 tok/s"))["type"] == "done"
 
     def test_the_union_is_covered(self) -> None:
         # The match is exhaustive by construction; this is what makes

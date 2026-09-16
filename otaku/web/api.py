@@ -354,7 +354,8 @@ def _providers(session: Session, scope: str = "") -> dict[str, Any]:
             raise NotFound(f"no provider {scope!r}")
     else:
         asked = everyone
-    rows, reachable = api_providers.get_providers(session, skip=everyone - asked)
+    panel = api_providers.get_providers(session, skip=everyone - asked)
+    rows, reachable = panel.rows, panel.reachable
     # Seeded from what is ASKED, not from what answered: a provider
     # whose server is down is exactly the one a reader opens the picker
     # to fix, and `get_providers` returns only the reachable.
@@ -383,6 +384,10 @@ def _providers(session: Session, scope: str = "") -> dict[str, Any]:
                 if model.max_context_loaded
                 else "",
                 "capabilities": _model_capabilities(model),
+                # Where the model is served: its own where it differs from
+                # its provider's (Ollama's ollama.com rows), the provider's
+                # otherwise — what a caption on the model reads.
+                "locality": (model.locality or row.locality).value,
                 # The info report's two rows on the model, in its words:
                 # the page draws them under the picker as it draws /info.
                 "reasoning_words": reports.reasoning_words(model.capabilities),
@@ -417,6 +422,7 @@ def _providers(session: Session, scope: str = "") -> dict[str, Any]:
                 abilities,
                 models,
                 reachable,
+                panel.failures,
             )
             for name in named
         ],
@@ -434,6 +440,9 @@ def _model_capabilities(model: ModelInfo) -> dict[str, Any] | None:
     return {
         "vision": caps.vision,
         "audio": caps.audio,
+        "supported_params": [p for p in PARAMETERS if p in caps.supported_params]
+        if caps.supported_params is not None
+        else None,
         "reasoning_efforts": [e for e in EFFORT_LEVELS if e in caps.reasoning_efforts]
         if caps.reasoning_efforts is not None
         else None,
@@ -452,6 +461,7 @@ def _card(
     abilities: dict[str, dict[str, Any] | None],
     models: dict[str, list[dict[str, Any]]],
     reachable: set[str] | frozenset[str],
+    failures: dict[str, str],
 ) -> dict[str, Any]:
     """One provider as the picker draws it. A configured section that is
     not one of the supported providers has no roster entry to describe
@@ -465,6 +475,9 @@ def _card(
         "order": order,
         "locality": (provider.locality if provider is not None else Locality.UNKNOWN).value,
         "connected": name in reachable,
+        # Why not, in the package's sentence — a dead server, a rejected
+        # key, an error status; "" when connected or never asked.
+        "reason": failures.get(name, ""),
         "url": section.url,
         "key_source": source.value if source is not None else None,
         "capabilities": abilities.get(name),
@@ -496,12 +509,15 @@ def settings(session: Session) -> dict[str, Any]:
         "parameters": [
             {
                 "name": name,
-                "value": str(session.params.get(name, "")),
+                "value": api_settings.parameter_text(session.params[name])
+                if name in session.params
+                else "",
                 "type": PARAMETERS[name].kind.__name__,
-                # The bounds the setter holds a value to, null where none:
-                # the page's placeholder, its sign rule and its mark.
-                "min": PARAMETERS[name].low,
-                "max": PARAMETERS[name].high,
+                # The bounds the setter holds a value to — the provider's
+                # own where it states them — null where none: the page's
+                # placeholder, its sign rule and its mark.
+                "min": api_settings.parameter_bounds(session, name)[0],
+                "max": api_settings.parameter_bounds(session, name)[1],
             }
             for name in api_settings.parameter_names(session)
         ],
@@ -521,6 +537,8 @@ def context(session: Session) -> dict[str, Any]:
         "shape": asdict(shape)
         | {"kept": shape.kept, "total_tokens": shape.total_tokens, "used": shape.used},
         "lede": report.summary,
+        # What the preview could not know, in the report's words; "".
+        "note": report.note,
         "parts": [asdict(part) for part in report.parts],
     }
 
@@ -1012,7 +1030,23 @@ def event(happened: PlayEvent) -> dict[str, Any]:
         case Failed():
             return {"type": "failed", "reason": happened.reason}
         case Done():
-            return {"type": "done", "stats": happened.stats}
+            report = happened.report
+            return {
+                "type": "done",
+                "stats": happened.stats,
+                # The reply's report as facts, the derived ones included,
+                # and its notice — a reply cut short says so.
+                "report": asdict(report.stats)
+                | {
+                    "max_context": report.max_context,
+                    "truncated": report.truncated,
+                    "rate": report.rate,
+                    "context_used": report.context_used,
+                }
+                if report is not None
+                else None,
+                "notice": report.notice if report is not None else "",
+            }
 
 
 # ---------- shared shapes ----------

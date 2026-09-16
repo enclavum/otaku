@@ -79,7 +79,9 @@ PARAMETERS: dict[str, Parameter] = {
     "frequency_penalty": Parameter(float, -2, 2),
     "repetition_penalty": Parameter(float, 0, 2),
     "seed": Parameter(int),
-    "stop": Parameter(str),
+    # Stop strings, several: every engine takes a list, and a stop may
+    # hold a newline or a space (`api.settings.parse_stops` reads them).
+    "stop": Parameter(list),
 }
 
 # What every model-facing door says while no model is selected, and
@@ -212,7 +214,7 @@ class Session:
         is not one: its url could name a catalog, but the marker says
         what is known, not what might be."""
         client = self._client()
-        return client is not None and client.locality is Locality.REMOTE
+        return client is not None and client.locality_of(self.model) is Locality.REMOTE
 
     @property
     def model(self) -> str:
@@ -311,7 +313,7 @@ class Session:
         alone, nothing over the wire — None until a listing warmed it.
         Not a property: a local engine is asked over its own socket."""
         client = self._client()
-        if client is None or client.locality is Locality.REMOTE:
+        if client is None or client.locality_of(self.model) is Locality.REMOTE:
             return None
         try:
             if client.locality is Locality.UNKNOWN:
@@ -544,6 +546,9 @@ class Session:
             return
         with contextlib.suppress(Exception):
             client.models.get(self.model)
+        # Listed, the model may turn out served elsewhere (Ollama's
+        # ollama.com rows): asked once more is asked of the internet, so
+        # nothing more is read of one.
 
     def _reload_model_settings(self) -> None:
         """Replace the live parameters and thinking level with the
@@ -570,9 +575,22 @@ class Session:
                 self._note(f"Ignoring unknown parameter {name!r} saved for {self.model}.")
                 continue
             try:
-                self._params[name] = known.kind(value)
+                self._params[name] = self._saved_parameter(known, value)
             except (TypeError, ValueError):
                 self._note(f"Ignoring invalid {name} value {value!r} saved for {self.model}.")
+
+    @staticmethod
+    def _saved_parameter(parameter: Parameter, value: object) -> object:
+        """A saved value as the live one: the kind's own, and for a list —
+        the stop strings — the array as saved, or one string from a file
+        written when stop held one. Raises ValueError for anything else."""
+        if parameter.kind is not list:
+            return parameter.kind(value)
+        if isinstance(value, str):
+            return [value]
+        if isinstance(value, list) and all(isinstance(item, str) for item in value):
+            return list(value)
+        raise ValueError(value)
 
     def _update_state(self, **fields: Any) -> None:
         """Change what state.toml remembers — `fields` are `State`'s own —

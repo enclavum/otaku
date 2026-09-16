@@ -127,6 +127,7 @@ class Entry:
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     cached_tokens: int | None = None
+    finish_reason: str | None = None  # answers: why the model stopped, in the wire's word
 
 
 class RequestLog(DailyLog):
@@ -177,6 +178,8 @@ class RequestLog(DailyLog):
         }
         if stats.first_token_seconds is not None:
             envelope["first_token_seconds"] = round(stats.first_token_seconds, 2)
+        if stats.finish_reason:
+            envelope["finish_reason"] = stats.finish_reason
         for name, tokens in (
             ("prompt_tokens", stats.prompt_tokens),
             ("completion_tokens", stats.completion_tokens),
@@ -226,6 +229,9 @@ class RequestLog(DailyLog):
                 prompt_tokens=_count(raw.get("prompt_tokens")),
                 completion_tokens=_count(raw.get("completion_tokens")),
                 cached_tokens=_count(raw.get("cached_tokens")),
+                finish_reason=(
+                    str(raw["finish_reason"]) if isinstance(raw.get("finish_reason"), str) else None
+                ),
             )
 
     def _get_body(self, raw: dict[str, object]) -> dict[str, object] | None:

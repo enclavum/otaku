@@ -19,9 +19,9 @@ from otaku.formatting import Money
 from otaku.providers.http import ASK_TIMEOUT, Http, positive_int
 from otaku.providers.openai import reasoning
 from otaku.providers.openai.auth import OpenAIAuth
-from otaku.providers.openai.client import Locality, OpenAIClient
+from otaku.providers.openai.client import OpenAIClient
 from otaku.providers.openai.completion import PROTOCOL_PARAMS, SAMPLER_PARAMS, OpenAICompletion
-from otaku.providers.openai.models import ModelCapabilities, ModelInfo, OpenAIModels
+from otaku.providers.openai.models import Locality, ModelCapabilities, ModelInfo, OpenAIModels
 from otaku.settings.providers import ProviderConfig
 
 # OpenRouter attributes a request to the app that sent it, by three
@@ -61,6 +61,19 @@ class OpenRouterModels(OpenAIModels):
         parameters = listed.get("supported_parameters")
         top = listed.get("top_provider")
         levels, switch, budget = self._thinking_of(listed)
+        # The route's own parameters, in the app's names: a catalog
+        # spelling the app does not have is not one of the app's, and
+        # `max_completion_tokens` is the reply cap under its newer name.
+        honoured = (
+            frozenset(
+                "max_tokens" if p == "max_completion_tokens" else p
+                for p in parameters
+                if isinstance(p, str)
+            )
+            & (PROTOCOL_PARAMS | SAMPLER_PARAMS)
+            if isinstance(parameters, list)
+            else None
+        )
         return replace(
             model,
             max_context_loaded=self._top_provider_int(top, "context_length"),
@@ -68,6 +81,7 @@ class OpenRouterModels(OpenAIModels):
             capabilities=ModelCapabilities(
                 vision="image" in modalities if isinstance(modalities, list) else None,
                 audio="audio" in modalities if isinstance(modalities, list) else None,
+                supported_params=honoured,
                 reasoning_efforts=levels,
                 reasoning_switch=switch,
                 reasoning_budget=budget,
@@ -131,9 +145,16 @@ class OpenRouterCompletion(OpenAICompletion):
     # The rung by name, and the budget in the reasoning object. No text
     # knob: on the raw wire an effort derails the model (Gemma 4
     # answered a puzzle with a page of "Good,") and no reasoning comes.
+    # The reply cap goes out under both its names: the catalog marks
+    # `max_tokens` deprecated, and a few routes take only the newer.
     chat_reasoning_knobs: ClassVar[frozenset[str]] = frozenset(
         {reasoning.EFFORT_KNOB, reasoning.BUDGET_MAX_TOKENS_KNOB}
     )
+
+    def _convert_params(self, params: dict[str, object]) -> dict[str, object]:
+        if "max_tokens" not in params:
+            return params
+        return {**params, "max_completion_tokens": params["max_tokens"]}
 
 
 class OpenRouterClient(OpenAIClient):

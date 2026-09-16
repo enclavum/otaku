@@ -19,14 +19,16 @@ import ipaddress
 import os
 import time
 from dataclasses import replace
-from typing import Any
+from typing import Any, ClassVar
 
 from otaku.providers.errors import ProviderError
-from otaku.providers.http import PROBE_TIMEOUT, Http, positive_int
+from otaku.providers.http import PROBE_TIMEOUT, Cut, Http, positive_int
 from otaku.providers.openai.auth import OpenAIAuth
-from otaku.providers.openai.client import Locality, OpenAIClient
+from otaku.providers.openai.client import OpenAIClient
+from otaku.providers.openai.completion import Bounds, OpenAICompletion
 from otaku.providers.openai.models import (
     Listing,
+    Locality,
     ModelCapabilities,
     ModelInfo,
     ModelState,
@@ -42,25 +44,30 @@ class OllamaModels(OpenAIModels):
     def __init__(self, config: ProviderConfig, auth: OpenAIAuth, http: Http) -> None:
         super().__init__(config, auth, http)
         self._remote: set[str] = set()  # served by ollama.com, as of the last listing
-        self._carded: set[str] = set()  # whose card has answered, this session
+        # Whose card has answered, for the weights the listing last saw:
+        # a re-pull replaces a tag's content in place, and the entry's
+        # digest changes with it, so the card is asked again then.
+        self._carded: set[str] = set()
+        self._digests: dict[str, str] = {}
 
     @property
     def can_manage(self) -> bool:
         return True
 
-    def load(self, model: str) -> None:
+    def _load(self, model: str, http: Http, cut: Cut) -> None:
         self._refuse_remote(model)
-        self._generate_nothing(model, keep_alive=self._config.keep_alive or "24h", purpose="load")
+        self._generate_nothing(model, http, cut, keep_alive=self._config.keep_alive or "24h")
 
-    def unload(self, model: str) -> None:
+    def _unload(self, model: str, http: Http, cut: Cut) -> None:
         # Answered as soon as the runner is told to expire; the scheduler
         # unloads after, so the picker's read-back is waited for.
         self._refuse_remote(model)
-        self._generate_nothing(model, keep_alive=0, purpose="unload")
+        self._generate_nothing(model, http, cut, keep_alive=0)
         deadline = time.monotonic() + _UNLOAD_WAIT_SECONDS
         names = {model, self._canonical(model)}  # the door takes either spelling
-        while time.monotonic() < deadline:
-            running = self._running(self._http)
+        while time.monotonic() < deadline and not cut.asked:
+            http.check_budget()
+            running = self._running(http)
             if running is not None and names.isdisjoint(running):
                 return
             time.sleep(_UNLOAD_POLL_SECONDS)
@@ -94,6 +101,10 @@ class OllamaModels(OpenAIModels):
             if not isinstance(name, str):
                 continue
             seen.add(name)
+            digest = entry.get("digest")
+            if isinstance(digest, str) and self._digests.get(name) != digest:
+                self._carded.discard(name)
+                self._digests[name] = digest
             caps = entry.get("capabilities")
             if isinstance(caps, list) and "completion" not in caps:
                 continue
@@ -106,6 +117,7 @@ class OllamaModels(OpenAIModels):
                     name=name,
                     max_context_catalogue=context,
                     capabilities=self._capabilities_of(caps) if isinstance(caps, list) else None,
+                    locality=Locality.REMOTE,
                 )
                 continue
             sizes[name] = positive_int(entry.get("size"))
@@ -179,13 +191,14 @@ class OllamaModels(OpenAIModels):
         if model in self._remote or self._canonical(model) in self._remote:
             raise ProviderError(f"{model} is served by ollama.com; there is nothing to load.")
 
-    def _generate_nothing(self, model: str, *, keep_alive: str | int, purpose: str) -> None:
+    def _generate_nothing(self, model: str, http: Http, cut: Cut, *, keep_alive: str | int) -> None:
         """An empty generation is how the registry is told to load a
-        model, and for how long to keep it — zero unloads it."""
-        self._http.post(
+        model, and for how long to keep it — zero unloads it. Through
+        the order's view, under its budget and its cut."""
+        http.post(
             f"{self._config.base_url}/api/generate",
             {"model": model, "prompt": "", "stream": False, "keep_alive": keep_alive},
-            purpose=purpose,
+            cut=cut,
         )
 
     def _running(self, http: Http) -> dict[str, int | None] | None:
@@ -205,10 +218,15 @@ class OllamaModels(OpenAIModels):
         return running
 
     def _state_of(self, running: dict[str, int | None] | None, name: str) -> ModelState:
-        """Loaded or not by the ps listing; unknown when ps did not answer."""
+        """By the ps listing: unknown when ps did not answer; loading
+        while the runner is listed without its context length — ps
+        lists a runner from the moment its load starts and states the
+        length only once it serves; loaded then."""
         if running is None:
             return ModelState.UNKNOWN
-        return ModelState.LOADED if name in running else ModelState.UNLOADED
+        if name not in running:
+            return ModelState.UNLOADED
+        return ModelState.LOADED if running[name] else ModelState.LOADING
 
     def _capabilities_of(self, caps: list[Any]) -> ModelCapabilities:
         """A card's capability words as ours. No raw text wire: Ollama's
@@ -228,12 +246,22 @@ class OllamaModels(OpenAIModels):
         )
 
 
+class OllamaCompletion(OpenAICompletion):
+    # Any temperature and any penalty: forwarded to the runner's floats.
+    bounds: ClassVar[dict[str, Bounds]] = {
+        "temperature": (0, None),
+        "presence_penalty": (None, None),
+        "frequency_penalty": (None, None),
+    }
+
+
 class OllamaClient(OpenAIClient):
     id = "ollama"
     label = "Ollama"
     locality = Locality.LOCAL
     env_key = "OLLAMA_API_KEY"
     models_class = OllamaModels
+    completion_class = OllamaCompletion
 
     @classmethod
     def autoconfigure(cls) -> ProviderConfig:

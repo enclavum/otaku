@@ -46,6 +46,43 @@ class TestSmoothen:
         list(smoothen(slow(), idle))
         assert ticks > 0
 
+    def test_unpaced_the_text_arrives_as_it_comes_and_the_hook_still_ticks(self) -> None:
+        # The relay without the jitter buffer: the pump and the tick, for
+        # a caller that needs to be ticked and not paced.
+        ticks = 0
+
+        def idle() -> None:
+            nonlocal ticks
+            ticks += 1
+
+        chunks = list(smoothen(_bursty(), idle, paced=False))
+        text = "".join(c.text for c in chunks if isinstance(c, Text))
+        assert text == "The light went out, and something stirred."
+        assert isinstance(chunks[0], Reasoning) and isinstance(chunks[-1], Stats)
+        assert ticks > 0
+
+    def test_unpaced_a_hook_saying_nobody_reads_cuts_the_source(self) -> None:
+        # The cut is asked the moment the hook says so — long before the
+        # source would have answered; the close then waits for the pump
+        # to file its answer, which this fake cut cannot hurry.
+        cut_at: list[float] = []
+
+        def slow() -> Iterator[Chunk]:
+            time.sleep(0.5)
+            yield Text("late")
+            yield Stats()
+
+        started = time.monotonic()
+        assert (
+            list(
+                smoothen(
+                    slow(), lambda: False, lambda: cut_at.append(time.monotonic()), paced=False
+                )
+            )
+            == []
+        )
+        assert len(cut_at) == 1 and cut_at[0] - started < 0.4
+
     def test_a_closed_consumer_stops_the_source(self) -> None:
         closed = False
 

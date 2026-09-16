@@ -51,6 +51,8 @@ export async function openContext() {
 
   const head = element("div", "otk-v otk-v--lg");
   head.append(summary, stages(shape));
+  // What the preview could not know, in the report's own words.
+  if (preview.note) head.append(element("p", "otk-note", preview.note));
 
   const wire = element("div", "otk-context__wire");
   for (const part of preview.parts) {

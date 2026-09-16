@@ -10,6 +10,7 @@ drift because the text is rendered from the facts beside it.
 
 from dataclasses import dataclass, fields
 
+from otaku.backend.api import settings as api_settings
 from otaku.backend.api import stories
 from otaku.backend.session import NO_MODEL_HINT, Refused, Session
 from otaku.context.assembler import AssembledPrompt, ContextOverflowError
@@ -81,11 +82,15 @@ class ContextReport:
     shape: AssembledShape
     summary: str
     parts: tuple[ContextPart, ...]
+    # What the preview could not know: "" when it knew everything, else
+    # the sentence — the model is not loaded, so the window it was cut
+    # to is the assembler's substitute until the turn loads it.
+    note: str = ""
 
     def text(self, *, dim: str = "", reset: str = "") -> str:
         """The whole preview as a terminal pages it. `dim`/`reset`
         bracket the role markers, so a terminal can fade them."""
-        out = [self.summary]
+        out = [self.summary] + ([self.note] if self.note else [])
         for part in self.parts:
             out.extend(["", f"{dim}[{part.role}]{reset}", part.body])
         return "\n".join(out)
@@ -95,7 +100,9 @@ def context(session: Session) -> ContextReport:
     """Preview the next request: what it is made of, said in words, and
     one part per message it will carry. No model: the preview still
     stands, over the assembler's default window — what WOULD be sent is
-    a question that needs no server."""
+    a question that needs no server. A model not loaded is not loaded
+    for a preview, so its window is the substitute too, and the report
+    says so."""
     client = session._client()
     found = client.models.get(session.model) if client is not None else None
     max_context = found.max_context if found else None
@@ -105,12 +112,23 @@ def context(session: Session) -> ContextReport:
         # The preview of a request that would not be sent is its refusal.
         raise Refused(str(e)) from e
     shape = _shape(prompt)
+    cold = (
+        found is not None
+        and max_context is None
+        and found.state in (ModelState.UNLOADED, ModelState.LOADING)
+    )
     return ContextReport(
         shape=shape,
         summary=_summary(shape),
         parts=tuple(
             ContextPart(turn.role, "\n".join(_preview_body(printable(turn.body), prompt.recap)))
             for turn in prompt.messages
+        ),
+        note=(
+            f"The model is not loaded: the window is {format_context(shape.limit)} of the "
+            "assembler's own until the next turn loads it."
+            if cold
+            else ""
         ),
     )
 
@@ -414,7 +432,7 @@ def balances(session: Session, *, probe: bool = True) -> BalanceReport:
     playing, client = session.provider, session._client()
     if client is None or not playing:
         spending = "Paid providers are charged only when you play on one."
-    elif client.locality is Locality.REMOTE:
+    elif client.locality_of(session.model) is Locality.REMOTE:
         spending = f"This story runs on {playing}, and every reply is billed to that account."
     else:
         spending = (
@@ -454,7 +472,7 @@ def _model_info(session: Session) -> tuple[tuple[str, str], ...]:
     # pay it. The generic provider reports none of these, wherever its
     # url points, so it is not asked.
     row = client.models.get(session.model) if client.locality is not Locality.UNKNOWN else None
-    if row is not None and client.locality is Locality.LOCAL:
+    if row is not None and client.locality_of(session.model) is Locality.LOCAL:
         out.append(("Loaded", _STATE_WORDS[row.state]))
         if row.size:
             out.append(("Size", format_size(row.size)))
@@ -519,7 +537,7 @@ def capability_words(caps: ModelCapabilities | None) -> str:
     facts = [
         (field.name, getattr(caps, field.name))
         for field in fields(caps)
-        if not field.name.startswith("reasoning")
+        if not field.name.startswith(("reasoning", "supported"))
     ]
     named = ", ".join(
         _CAPABILITY_REWORDING.get(name, name.replace("_", " ")) for name, fact in facts if fact
@@ -540,7 +558,22 @@ def _session_rows(session: Session) -> tuple[tuple[str, str], ...]:
     # it on its own, at whatever length that is. A report of one-line
     # facts is the wrong place to print an imported lorebook.
     if session.params:
-        out.append(("Parameters", ", ".join(f"{k} = {v}" for k, v in session.params.items())))
+        # Each as a reader types it, and marked where the provider in
+        # use does not read it — kept for the model, sent elsewhere.
+        out.append(
+            (
+                "Parameters",
+                ", ".join(
+                    f"{k} = {api_settings.parameter_text(v)}"
+                    + (
+                        ""
+                        if api_settings.parameter_read(session, k)
+                        else f" (not read by {session.provider})"
+                    )
+                    for k, v in session.params.items()
+                ),
+            )
+        )
     return tuple(out)
 
 

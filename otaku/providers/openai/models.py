@@ -25,11 +25,20 @@ from __future__ import annotations
 
 import enum
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Any, ClassVar, final
 
 from otaku.providers.errors import ProviderError, UnauthorizedError
-from otaku.providers.http import ASK_TIMEOUT, Http, positive_int
+from otaku.providers.http import (
+    ASK_TIMEOUT,
+    LOAD_TIMEOUT,
+    Cut,
+    Http,
+    StreamCut,
+    positive_int,
+    ticking,
+)
 from otaku.providers.openai.auth import OpenAIAuth
 from otaku.settings.providers import ProviderConfig
 
@@ -47,11 +56,31 @@ class ModelCapabilities:
 
     vision: bool | None = None  # takes images on a message
     audio: bool | None = None  # takes audio on a message
+    # The app's parameters this model honours, where a catalog states
+    # them per route (OpenRouter); None where the provider's set is the
+    # only word. Read through `OpenAIClient.supported_params_of`.
+    supported_params: frozenset[str] | None = None
     reasoning_efforts: frozenset[str] | None = None
     reasoning_switch: bool | None = None
     reasoning_budget: bool | None = None
     text_completion: bool | None = None  # the raw text wire exists for it
     structured_output: bool | None = None  # can be held to a JSON schema, or json mode
+
+
+class Locality(enum.Enum):
+    """Where a server runs, as far as a client can tell: an engine
+    knows, the generic provider is a url and cannot. A provider's, on
+    its client; a model's own where a listing says it differs from its
+    provider's (`ModelInfo.locality`) — Ollama serves a model marked
+    `remote_host` from ollama.com through the local client — read for
+    the model in use through `OpenAIClient.locality_of`. Every reader
+    picks its safe side for UNKNOWN — what costs money or waits on the
+    internet treats it as REMOTE, what edits the url treats it as
+    LOCAL, and a caption says neither."""
+
+    LOCAL = "local"
+    REMOTE = "remote"
+    UNKNOWN = "unknown"
 
 
 class ModelState(enum.Enum):
@@ -82,6 +111,9 @@ class ModelInfo:
     max_output_tokens: int | None = None
     capabilities: ModelCapabilities | None = None
     state: ModelState = ModelState.UNKNOWN
+    # Where the model is served, when that is not where its provider's
+    # server runs: None, and it is the provider's.
+    locality: Locality | None = None
 
     @property
     def max_context(self) -> int | None:
@@ -160,6 +192,29 @@ class OpenAIModels:
         return model
 
     @final
+    def ready(
+        self,
+        name: str,
+        timeout: float = ASK_TIMEOUT,
+        on_idle: Callable[[], bool | None] | None = None,
+    ) -> ModelInfo | None:
+        """`get`, the model loaded first where the engine manages loads
+        and is not running it: a request would load it anyway, and the
+        instance's facts — above all the window a prompt must fit — are
+        known only once it runs. What a turn and the warm-up read, so
+        neither budgets a cold model blind: Ollama sizes a runner as it
+        loads and drops a prompt's head to fit it without a word. Waits
+        as `load` waits, ticking `on_idle` meanwhile, and raises the
+        error family as it does; None as `get` answers None."""
+        found = self.get(name, timeout)
+        if found is None or not self.can_manage:
+            return found
+        if found.state not in (ModelState.UNLOADED, ModelState.LOADING):
+            return found
+        self.load(found.name, on_idle=on_idle)
+        return self.get(found.name, timeout) or found
+
+    @final
     def cached(self, name: str) -> ModelInfo | None:
         """The model as last listed or read, nothing asked of the engine —
         for a reader that must not wait on the wire, the launch's banner
@@ -170,13 +225,57 @@ class OpenAIModels:
             found = self._cached_models.get(name)
             return found if found is not None else self._cached_models.get(self._canonical(name))
 
-    def load(self, model: str) -> None:
-        """Blocks until the engine answers. Raises the error family; the
-        base refuses, for an engine that does not manage models."""
-        raise ProviderError(f"Models cannot be loaded or unloaded on {self._config.name}.")
+    @final
+    def load(
+        self,
+        model: str,
+        *,
+        timeout: float = LOAD_TIMEOUT,
+        on_idle: Callable[[], bool | None] | None = None,
+    ) -> None:
+        """Load `model` and wait until the engine says it runs, under
+        `timeout` for the whole sequence — weights read from disk, or
+        fetched on demand — spent as unreachable. `on_idle`, given, is
+        ticked on the caller's thread while the wait lasts, and may
+        answer False to say nobody waits any more: the sequence is cut
+        then, and raises as cut short. Raises the error family; refuses
+        on an engine that does not manage models."""
+        self._order("load", model, timeout, on_idle, self._load)
 
-    def unload(self, model: str) -> None:
-        raise ProviderError(f"Models cannot be loaded or unloaded on {self._config.name}.")
+    @final
+    def unload(
+        self,
+        model: str,
+        *,
+        timeout: float = LOAD_TIMEOUT,
+        on_idle: Callable[[], bool | None] | None = None,
+    ) -> None:
+        """Unload `model` and wait until the engine says it is gone; as
+        `load` in every other respect."""
+        self._order("unload", model, timeout, on_idle, self._unload)
+
+    def _order(
+        self,
+        purpose: str,
+        model: str,
+        timeout: float,
+        on_idle: Callable[[], bool | None] | None,
+        hook: Callable[[str, Http, Cut], None],
+    ) -> None:
+        """One order to the engine, `hook`, under one budget and one cut:
+        run on the caller's thread, or on one of its own while the
+        caller ticks `on_idle`."""
+        if not self.can_manage:
+            raise ProviderError(f"Models cannot be loaded or unloaded on {self._config.name}.")
+        http = self._http.within(timeout, purpose)
+        cut = Cut()
+        try:
+            if on_idle is None:
+                hook(model, http, cut)
+            else:
+                ticking(lambda: hook(model, http, cut), on_idle, cut)
+        except StreamCut:
+            raise ProviderError(f"The {purpose} of {model} was cut short.") from None
 
     @property
     def can_manage(self) -> bool:
@@ -198,14 +297,19 @@ class OpenAIModels:
             max_context_catalogue=fresh.max_context_catalogue or cached.max_context_catalogue,
             max_output_tokens=fresh.max_output_tokens or cached.max_output_tokens,
             capabilities=fresh.capabilities or cached.capabilities,
+            locality=fresh.locality or cached.locality,
         )
 
     # ---------- the hooks: each reads the engine and nothing else ----------
 
     def _list(self, http: Http) -> Listing:
         """The engine's listing, asked through the listing's view. The
-        base reads the OpenAI /models: `context_length` as the catalogue
-        size, `_decode` for what else an entry carries."""
+        base reads the OpenAI /models: the model's own size as a
+        catalog's `context_length` or llama.cpp's trained length in
+        `meta`, the served window as the vLLM extension `max_model_len`
+        (omlx and SGLang emit it too) or llama.cpp's slot in `meta` —
+        what a request gets, from a server the generic provider cannot
+        otherwise ask; `_decode` for what else an entry carries."""
         config = self._config
         if self.listing_keyed:
             if not self._auth.api_key:
@@ -217,12 +321,28 @@ class OpenAIModels:
         for listed in raw if isinstance(raw, list) else []:
             if not isinstance(listed, dict) or not isinstance(listed.get("id"), str):
                 continue
+            meta = listed.get("meta")
+            meta = meta if isinstance(meta, dict) else {}
             model = ModelInfo(
                 str(listed["id"]),
-                max_context_catalogue=positive_int(listed.get("context_length")),
+                max_context_catalogue=positive_int(listed.get("context_length"))
+                or positive_int(meta.get("n_ctx_train")),
+                max_context_loaded=positive_int(listed.get("max_model_len"))
+                or positive_int(meta.get("n_ctx")),
             )
             models.append(self._decode(listed, model))
         return sorted(models, key=lambda model: model.name)
+
+    def _load(self, model: str, http: Http, cut: Cut) -> None:
+        """The engine's load order and the wait for it, through the
+        view `http` — one budget for the sequence — every request of
+        it handed `cut`, and every poll of it ending when the cut is
+        asked. An engine that manages models overrides; the base has
+        nothing to order."""
+        raise ProviderError(f"Models cannot be loaded or unloaded on {self._config.name}.")
+
+    def _unload(self, model: str, http: Http, cut: Cut) -> None:
+        raise ProviderError(f"Models cannot be loaded or unloaded on {self._config.name}.")
 
     def _get(self, name: str, http: Http) -> ModelInfo | None:
         """What the engine says of `name` now, asked through the model's

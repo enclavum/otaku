@@ -40,9 +40,9 @@ from otaku.providers.clients.openrouter import OpenRouterClient
 from otaku.providers.errors import ProviderError, UnauthorizedError, UnreachableError
 from otaku.providers.http import LISTING_TIMEOUT, ErrorSink
 from otaku.providers.openai.auth import KeySource
-from otaku.providers.openai.client import Locality, OpenAIClient, ProviderCapabilities
+from otaku.providers.openai.client import OpenAIClient, ProviderCapabilities
 from otaku.providers.openai.completion import RequestSink
-from otaku.providers.openai.models import ModelInfo
+from otaku.providers.openai.models import Locality, ModelInfo
 from otaku.settings.providers import ProviderConfig
 
 _T = TypeVar("_T")  # Registry.map's result type
@@ -82,6 +82,18 @@ class ProbeStatus(enum.Enum):
     UNREACHABLE = "unreachable"
     UNAUTHORIZED = "unauthorized"
     ERROR = "error"  # the server answered with an error status
+
+
+@dataclass(frozen=True)
+class ProviderFailure:
+    """Why a configured provider is not listed — what `Registry.info`
+    answers in place of a `ProviderInfo`: the probe's verdict and the
+    package's sentence for it, a dead server, a rejected key, an error
+    status, so a picker can say more than "not connected"."""
+
+    id: str
+    status: ProbeStatus
+    message: str
 
 
 @dataclass(frozen=True)
@@ -148,17 +160,22 @@ class Registry:
             self.configs[config.name] = config
             self._build(config)
 
-    def info(self, provider: str) -> ProviderInfo | None:
-        """One provider's identity and models, listed now — None when it
-        is not configured or cannot answer: a dead server, a rejected
-        key. The pickers fan it out with `map`."""
+    def info(self, provider: str) -> ProviderInfo | ProviderFailure | None:
+        """One provider's identity and models, listed now — or why not:
+        a `ProviderFailure` for one that cannot answer, a dead server, a
+        rejected key, an error status, with the sentence that says so;
+        None for one not configured. The pickers fan it out with `map`."""
         client = self.get(provider)
         if client is None:
             return None
         try:
             models = client.models.list(timeout=LISTING_TIMEOUT)
-        except ProviderError:
-            return None
+        except UnreachableError as e:
+            return ProviderFailure(client.id, ProbeStatus.UNREACHABLE, str(e))
+        except UnauthorizedError as e:
+            return ProviderFailure(client.id, ProbeStatus.UNAUTHORIZED, str(e))
+        except ProviderError as e:
+            return ProviderFailure(client.id, ProbeStatus.ERROR, str(e))
         return ProviderInfo(
             client.id,
             client.label,

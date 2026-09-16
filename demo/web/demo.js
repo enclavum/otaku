@@ -517,7 +517,22 @@ function play(body, regenerate, signal) {
             ? `[ total ${seconds.toFixed(1)}s, prompt ${promptTokens} tok, eval ${tokens} tok @ ${rate} tok/s ]`
             : "";
           land();
-          frame(controller, { type: "done", stats });
+          // The product's shape: the report's facts beside the line, and
+          // a notice the page's own model never has — it finishes what
+          // it starts.
+          const report = {
+            total_seconds: seconds,
+            first_token_seconds: Math.min(0.2, seconds),
+            prompt_tokens: promptTokens,
+            cached_tokens: null,
+            completion_tokens: tokens,
+            max_context: null,
+            finish_reason: "stop",
+            truncated: false,
+            rate: Number(rate),
+            context_used: null,
+          };
+          frame(controller, { type: "done", stats, report, notice: "" });
           over = true;
           controller.close();
           return;

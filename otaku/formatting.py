@@ -252,12 +252,15 @@ def toml_key(name: str) -> str:
 
 
 def toml_scalar(value: object) -> str:
-    """One TOML value (str, int, float, bool), control characters escaped
-    so no value can render a file that fails to parse back."""
+    """One TOML value (str, int, float, bool, or an array of them),
+    control characters escaped so no value can render a file that fails
+    to parse back."""
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, int | float):
         return repr(value)
+    if isinstance(value, list | tuple):
+        return "[" + ", ".join(toml_scalar(item) for item in value) + "]"
     return '"' + _escaped(str(value)) + '"'
 
 

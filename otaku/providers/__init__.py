@@ -25,21 +25,30 @@ from otaku.providers.errors import (
 )
 from otaku.providers.openai import reasoning
 from otaku.providers.openai.auth import KeySource, OpenAIAuth
-from otaku.providers.openai.client import Locality, OpenAIClient, ProviderCapabilities
+from otaku.providers.openai.client import OpenAIClient, ProviderCapabilities
 from otaku.providers.openai.completion import (
+    Bounds,
     Chunk,
     OpenAICompletion,
     Reasoning,
+    Reply,
     RequestSink,
     Stats,
     Text,
 )
-from otaku.providers.openai.models import ModelCapabilities, ModelInfo, ModelState, OpenAIModels
+from otaku.providers.openai.models import (
+    Locality,
+    ModelCapabilities,
+    ModelInfo,
+    ModelState,
+    OpenAIModels,
+)
 from otaku.providers.openai.requests import Image, WireMessage
 from otaku.providers.registry import (
     ALL_CLIENTS,
     Probe,
     ProbeStatus,
+    ProviderFailure,
     ProviderInfo,
     Registry,
     autoconfigure,
@@ -49,6 +58,7 @@ from otaku.settings.providers import ProviderConfig
 
 __all__ = [
     "ALL_CLIENTS",
+    "Bounds",
     "Chunk",
     "DeclinedError",
     "Image",
@@ -66,9 +76,11 @@ __all__ = [
     "ProviderCapabilities",
     "ProviderConfig",
     "ProviderError",
+    "ProviderFailure",
     "ProviderInfo",
     "Reasoning",
     "Registry",
+    "Reply",
     "RequestSink",
     "Stats",
     "StatusError",

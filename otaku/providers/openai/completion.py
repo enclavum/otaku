@@ -25,6 +25,7 @@ from otaku.providers import smoothing
 from otaku.providers.errors import DeclinedError, ProviderError, StatusError, UnreachableError
 from otaku.providers.http import ASK_TIMEOUT, REPLY_TIMEOUT, Cut, Http, StreamCut
 from otaku.providers.openai import frames, reasoning, requests
+from otaku.providers.openai.models import OpenAIModels
 from otaku.providers.openai.requests import Image, WireMessage
 from otaku.settings.providers import ProviderConfig
 
@@ -58,9 +59,36 @@ class Stats:
     cached_tokens: int | None = None
     first_token_seconds: float | None = None  # request sent → first token; None when none came
     total_seconds: float = 0.0  # request sent → stream ended
+    # Why the model stopped, in the wire's word: "stop" for its own end
+    # or a stop word, "length" for the reply limit — a reply cut short,
+    # mid-sentence, that every engine reports the same way; None where
+    # the stream ended without a word (cut, failed, or never said).
+    finish_reason: str | None = None
 
 
 Chunk = Text | Reasoning | Stats
+
+
+class Reply(Iterator[Chunk]):
+    """A reply as it streams: the chunks, and `stats`, filled as they
+    come, for what the stream came to so far — a reader that stops
+    reading (a cancel) still holds the wait it spent and any count the
+    wire stated by then, to file. Closing it closes the stream."""
+
+    def __init__(self, chunks: Iterator[Chunk], stats: Stats) -> None:
+        self._chunks = chunks
+        self.stats = stats
+
+    def __iter__(self) -> Iterator[Chunk]:
+        return self
+
+    def __next__(self) -> Chunk:
+        return next(self._chunks)
+
+    def close(self) -> None:
+        closer = getattr(self._chunks, "close", None)
+        if closer is not None:
+            closer()
 
 
 class RequestSink(Protocol):
@@ -92,14 +120,29 @@ class RequestSink(Protocol):
 PROTOCOL_PARAMS: frozenset[str] = frozenset(
     {"temperature", "top_p", "max_tokens", "presence_penalty", "frequency_penalty", "seed", "stop"}
 )
-# The three beyond the protocol, llama.cpp's samplers by name; an engine
-# declares the ones its endpoint reads.
+# The three beyond the protocol; an engine declares the ones its
+# endpoint reads. `top_k` and `min_p` are llama.cpp's names;
+# `repetition_penalty` is omlx's and the catalogs' — llama.cpp and LM
+# Studio read it as `repeat_penalty`, which their `_convert_params`
+# respell.
 SAMPLER_PARAMS: frozenset[str] = frozenset({"top_k", "min_p", "repetition_penalty"})
+# The spellings a refusal of a sampler would name.
+_SAMPLER_WORDS: frozenset[str] = SAMPLER_PARAMS | {"repeat_penalty"}
+
+# A parameter's bounds as an engine holds them: (low, high), None for
+# no bound on that side. The app's own table (`backend.session.PARAMETERS`)
+# is the catalogs' — the protocol's 0 to 2 on temperature and the
+# penalties; an engine that takes more, or less, says so here.
+Bounds = tuple[float | None, float | None]
 
 
 class OpenAICompletion:
     # ---------- class knowledge: what is true of the engine's wire ----------
 
+    # The parameter bounds the engine holds where they differ from the
+    # app's table: the local engines take any temperature and penalty,
+    # NanoGPT no top_k below 1, KoboldCpp no repetition penalty below 1.
+    bounds: ClassVar[dict[str, Bounds]] = {}
     # The parameters the wire reads, out of the app's — and the only
     # ones that go out (`_wire_params`): one outside the set is left
     # behind, since the engine would keep its default either way and a
@@ -134,11 +177,16 @@ class OpenAICompletion:
         *,
         request_sink: RequestSink | None,
         smooth: bool,
+        models: OpenAIModels | None = None,
     ) -> None:
         self._config = config
         self._http = http
         self._request_sink = request_sink
         self._smooth = smooth
+        # The model half, for what a model honours of the parameters:
+        # a catalog states it per route, and the wire sends only that.
+        # Without one — a half on its own — the wire's set is the word.
+        self._models = models
 
     # ---------- the protocol ----------
 
@@ -155,22 +203,24 @@ class OpenAICompletion:
         purpose: str = "chat",
         watched: bool = True,
         on_idle: Callable[[], bool | None] | None = None,
-    ) -> Iterator[Chunk]:
+    ) -> Reply:
         """Stream one chat completion: Reasoning and Text deltas, then a
         final Stats. `level` is a thinking level in `reasoning`'s
         vocabulary — a rung, off or on, a budget — sent on every knob
         the engine reads; `images` ride on the last
         message; `watched=False` skips the pacing for a call nobody
-        watches, so its cancel is not delayed. With the pacing on, the
-        wait is spent ticking `on_idle`, which may answer False to say
-        nobody reads any more — the stream ends as cancelled then, its
-        request cut; without it, the caller's own thread is in the read
-        and nothing ticks."""
+        watches, so its cancel is not delayed. `on_idle` is ticked
+        while the reply is waited on — before the first token above all
+        — and may answer False to say nobody reads any more: the stream
+        ends as cancelled then, its request cut. Given, it is ticked
+        whether the reply is paced or not; without it, and without the
+        pacing, the caller's own thread is in the read and nothing
+        ticks."""
         body, knobs = self._chat_request(model, messages, params, level=level, images=images)
         url = f"{self._config.url}/chat/completions"
-        cut = Cut() if watched and self._smooth else None
-        stream = self._stream(url, body, knobs, purpose, timeout, frames.chat_delta, cut)
-        return stream if cut is None else smoothing.smoothen(stream, on_idle, cut.cut)
+        return self._relayed(
+            url, body, knobs, purpose, timeout, frames.chat_delta, watched, on_idle
+        )
 
     @final
     def text(
@@ -184,18 +234,43 @@ class OpenAICompletion:
         purpose: str = "chat",
         watched: bool = True,
         on_idle: Callable[[], bool | None] | None = None,
-    ) -> Iterator[Chunk]:
+    ) -> Reply:
         """Stream one text completion: the prompt continued where it
         ends, Text deltas then a final Stats. `level` goes out on the
         engine's text knobs. Whatever the model reasons arrives
         inline, in the text — nothing stands between the prompt and
         the model to tell a thought from the rest."""
-        body = requests.text_completion_body(model, prompt, self._wire_params(params))
+        body = requests.text_completion_body(model, prompt, self._wire_params(params, model))
         knobs = reasoning.fields(level, self.text_reasoning_knobs)
         url = f"{self._config.url}/completions"
-        cut = Cut() if watched and self._smooth else None
-        stream = self._stream(url, body, knobs, purpose, timeout, frames.completion_delta, cut)
-        return stream if cut is None else smoothing.smoothen(stream, on_idle, cut.cut)
+        return self._relayed(
+            url, body, knobs, purpose, timeout, frames.completion_delta, watched, on_idle
+        )
+
+    def _relayed(
+        self,
+        url: str,
+        body: dict[str, object],
+        knobs: dict[str, object],
+        purpose: str,
+        timeout: float,
+        read_delta: _DeltaReader,
+        watched: bool,
+        on_idle: Callable[[], bool | None] | None,
+    ) -> Reply:
+        """The reply, read under a cut whenever a thread other than the
+        reader's will hold the stream — the pacing's pump for a watched
+        reply, the tick's for a caller with `on_idle` — and through the
+        relay then: a pump thread reading, the caller's emitting and
+        ticking `on_idle`, paced only for a reader watching. Without
+        either, the caller's own thread reads and nobody could cut it."""
+        stats = Stats()
+        cut = Cut() if on_idle is not None or (watched and self._smooth) else None
+        stream = self._stream(url, body, knobs, purpose, timeout, read_delta, stats, cut)
+        if cut is None:
+            return Reply(stream, stats)
+        paced = watched and self._smooth
+        return Reply(smoothing.smoothen(stream, on_idle, cut.cut, paced=paced), stats)
 
     def count_chat_tokens(
         self,
@@ -223,10 +298,21 @@ class OpenAICompletion:
 
     # ---------- streaming ----------
 
-    def _wire_params(self, params: dict[str, object]) -> dict[str, object]:
-        """The params as they go out: the ones this engine reads
-        (`supported_params`), spelled its way (`_convert_params`)."""
-        return self._convert_params({k: v for k, v in params.items() if k in self.supported_params})
+    def honoured(self, model: str) -> frozenset[str]:
+        """The app's parameters that reach `model`: the ones this wire
+        reads (`supported_params`), and among those, where a catalog
+        states the model's own (`ModelCapabilities.supported_params`),
+        the ones it honours — the rest it would drop, silently. Off the
+        cache, as listed; the wire's whole set for a model not listed."""
+        found = self._models.cached(model) if self._models is not None else None
+        stated = found.capabilities.supported_params if found and found.capabilities else None
+        return self.supported_params if stated is None else self.supported_params & stated
+
+    def _wire_params(self, params: dict[str, object], model: str) -> dict[str, object]:
+        """The params as they go out: the ones that reach `model`
+        (`honoured`), spelled the engine's way (`_convert_params`)."""
+        reaching = self.honoured(model)
+        return self._convert_params({k: v for k, v in params.items() if k in reaching})
 
     def _chat_request(
         self,
@@ -244,7 +330,7 @@ class OpenAICompletion:
         body = requests.chat_completion_body(
             model,
             messages,
-            self._wire_params(params),
+            self._wire_params(params, model),
             images=images,
             cache_ttl=self._cache_ttl(),
         )
@@ -267,6 +353,7 @@ class OpenAICompletion:
         purpose: str,
         timeout: float,
         read_delta: _DeltaReader,
+        stats: Stats,
         cut: Cut | None = None,
     ) -> Iterator[Chunk]:
         """The request with its reasoning `knobs`, and — should a 400
@@ -279,20 +366,20 @@ class OpenAICompletion:
         thought it streams, and in the log as this note. A 400 that
         names no knob (a context overflow) is the answer, sent once; a
         take that yielded is never retried, since its words are on
-        someone's screen. No knobs, one take. A failure is filed as it
-        escapes — past the retry, so a 400 that was sent again without
-        the knobs was no failure."""
+        someone's screen. The same once more for a sampler: a strict
+        server (OpenAI's own, behind the generic provider) refuses a
+        field it does not know by name, and the take goes out again
+        without the samplers. Nothing named, one take. A failure is
+        filed as it escapes — past the retry, so a 400 that was sent
+        again was no failure."""
         try:
-            if not knobs:
-                yield from self._generate(url, body, purpose, timeout, read_delta, cut)
-                return
-            knobbed = self._generate(url, {**body, **knobs}, purpose, timeout, read_delta, cut)
+            first = self._generate(url, {**body, **knobs}, purpose, timeout, read_delta, stats, cut)
             yielded = False
             try:
                 # Closed the moment the consumer lets go, not at collection:
                 # cancel-and-keep records the partial right then.
-                with contextlib.closing(knobbed):
-                    for chunk in knobbed:
+                with contextlib.closing(first):
+                    for chunk in first:
                         yielded = True
                         yield chunk
             except StatusError as e:
@@ -303,11 +390,39 @@ class OpenAICompletion:
                 # overflow — names no knob.
                 sentence = (e.detail or str(e)).lower()
                 sentence = sentence.replace(str(body.get("model", "")).lower(), "")
-                knob_refused = any(word in sentence for word in self._refusal_words(knobs))
-                if yielded or e.status != 400 or not knob_refused:
+                knob_refused = bool(knobs) and any(
+                    word in sentence for word in self._refusal_words(knobs)
+                )
+                # A strict server (OpenAI's own, behind the generic
+                # provider) refuses a sampler it does not know by name:
+                # sent again without the samplers, the knobs kept.
+                samplers = {k for k in body if k in _SAMPLER_WORDS}
+                sampler_refused = bool(samplers) and any(word in sentence for word in samplers)
+                if yielded or e.status != 400 or not (knob_refused or sampler_refused):
                     raise
+                again = (
+                    {k: v for k, v in body.items() if k not in samplers}
+                    if sampler_refused
+                    else body
+                )
+                again_knobs = {} if knob_refused else knobs
+                dropped = " and ".join(
+                    what
+                    for what, went in (
+                        ("the reasoning knobs", knob_refused),
+                        ("the samplers", sampler_refused),
+                    )
+                    if went
+                )
                 yield from self._generate(
-                    url, body, purpose, timeout, read_delta, cut, retried=str(e)
+                    url,
+                    {**again, **again_knobs},
+                    purpose,
+                    timeout,
+                    read_delta,
+                    stats,
+                    cut,
+                    retried=f"sent again without {dropped}: {e}",
                 )
         except ProviderError as e:
             self._http.record(e, purpose)
@@ -320,6 +435,7 @@ class OpenAICompletion:
         purpose: str,
         timeout: float,
         read_delta: _DeltaReader,
+        stats: Stats,
         cut: Cut | None = None,
         retried: str = "",
     ) -> Generator[Chunk, None, None]:
@@ -327,15 +443,16 @@ class OpenAICompletion:
         filed under the request's id — once, however it ends: the clean
         end, the consumer closing it (the cancel-and-keep door), a cut
         it asked for from another thread, or a failure. What had
-        arrived rides along either way. `retried` is the refusal a
-        second take answers, filed with it so the log says the knobs
-        were dropped and why."""
+        arrived rides along either way, in `stats` — the caller's, filled
+        as the stream goes and yielded whole at a clean end, so a caller
+        that stopped reading still holds what came. `retried` is the
+        note a second take is filed with — what was dropped, and the
+        refusal that made it — so the log says why."""
         name = self._config.name
         request_id = ""
         if self._request_sink is not None:
             request_id = self._request_sink.record_request(name, purpose, body)
         start = time.monotonic()
-        stats = Stats()
         text: list[str] = []
         thoughts: list[str] = []
         trouble: list[str] = []
@@ -361,6 +478,9 @@ class OpenAICompletion:
                     sentence = frames.trouble(event)
                     if sentence and sentence not in trouble:
                         trouble.append(sentence)
+                    reason = frames.finish(event)
+                    if reason:
+                        stats.finish_reason = reason
                     thought, content = read_delta(event)
                     if (thought or content) and stats.first_token_seconds is None:
                         stats.first_token_seconds = time.monotonic() - start
@@ -378,9 +498,7 @@ class OpenAICompletion:
                     raise
             if trouble:
                 raise DeclinedError(" ".join(trouble))
-            status = (
-                "ok" if not retried else f"ok, sent again without the reasoning knobs: {retried}"
-            )
+            status = "ok" if not retried else f"ok, {retried}"
         except StreamCut:
             return  # the consumer cut the read: cancelled, as the word stands
         except Exception as e:

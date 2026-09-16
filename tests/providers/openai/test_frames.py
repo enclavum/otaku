@@ -1,7 +1,7 @@
 """How a frame is read: the deltas of each wire, the usage report, and a
 frame that is trouble instead of content."""
 
-from otaku.providers.openai.frames import chat_delta, completion_delta, read_usage, trouble
+from otaku.providers.openai.frames import chat_delta, completion_delta, finish, read_usage, trouble
 
 
 class TestChatDelta:
@@ -42,10 +42,34 @@ class TestCompletionDelta:
         assert completion_delta({}) == ("", "")
 
 
+class TestFinish:
+    def test_the_choices_finish_reason_as_the_wire_spells_it(self) -> None:
+        assert finish({"choices": [{"delta": {}, "finish_reason": "length"}]}) == "length"
+        assert finish({"choices": [{"text": "", "finish_reason": "stop"}]}) == "stop"
+
+    def test_a_frame_without_one_says_nothing(self) -> None:
+        assert finish({"choices": [{"delta": {"content": "hi"}, "finish_reason": None}]}) is None
+        assert finish({"choices": [{"delta": {"content": "hi"}}]}) is None
+        assert finish({}) is None
+
+
 class TestTrouble:
     def test_a_servers_error_object_breaks_the_reply_off_in_its_words(self) -> None:
         event = {"error": {"message": "server overloaded", "type": "server_error"}}
         assert trouble(event) == "The reply broke off: server overloaded"
+
+    def test_a_mid_stream_errors_metadata_rides_along(self) -> None:
+        # OpenRouter's mid-stream error carries the same object as its
+        # refusals: the upstream's words reach the reader.
+        event = {
+            "error": {
+                "message": "Provider returned error",
+                "metadata": {"raw": "context length exceeded", "provider_name": "Groq"},
+            }
+        }
+        assert trouble(event) == (
+            "The reply broke off: Provider returned error: context length exceeded (Groq)"
+        )
 
     def test_a_servers_error_string_too(self) -> None:
         assert trouble({"error": "boom"}) == "The reply broke off: boom"

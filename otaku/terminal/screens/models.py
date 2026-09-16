@@ -220,8 +220,10 @@ class ModelPicker(ListScreen):
         self._order = {provider.id: i for i, provider in enumerate(providers)}
         self._captions = {provider.id: provider.label for provider in providers}
         # Names whose last listing succeeded — the panel's tick: the
-        # provider answered, and with the right key where one is needed.
+        # provider answered, and with the right key where one is needed
+        # — and, for the others, why not, in the package's sentence.
         self.connected: set[str] = set(connected or ())
+        self.failures: dict[str, str] = {}
         self.all: list[ModelEntry] = list(entries)
         self.filtered: list[ModelEntry] = list(entries)
         self._initial_spec = initial_spec
@@ -460,8 +462,12 @@ class ModelPicker(ListScreen):
                 out.append(("class:preview.title", provider.label))
                 out.append(("class:tick", " ✓"))
             else:
-                # Not connected: the name alone reads disabled.
+                # Not connected: the name alone reads disabled, and the
+                # reason — the backend's sentence — under it.
                 out.append(("class:preview.muted", provider.label))
+                if reason := self.failures.get(provider.id):
+                    out.append(("", "\n"))
+                    out.append(("class:preview.muted", f"  {reason}"))
             out.append(("", "\n"))
             out.append(("class:preview.body", "\n"))
             out.extend(self._field_line(provider.id, "url", config.url))
@@ -776,12 +782,15 @@ class ModelPicker(ListScreen):
         every OTHER configured provider skipped, so a catalog refresh
         never costs a sweep of dead providers."""
         skip = api_providers.configured(self.session) - {name}
-        rows, reachable = api_providers.get_providers(self.session, skip=skip)
-        if name in reachable:
+        panel = api_providers.get_providers(self.session, skip=skip)
+        if name in panel.reachable:
             self.connected.add(name)
+            self.failures.pop(name, None)
         else:
             self.connected.discard(name)
-        return rows
+            if name in panel.failures:
+                self.failures[name] = panel.failures[name]
+        return panel.rows
 
     def _refresh_provider(self, name: str, *, settled: bool = False) -> None:
         """Re-list one provider — at the open, and again whenever its
@@ -831,7 +840,7 @@ class ModelPicker(ListScreen):
                     size_bytes=model.size,
                     max_context_catalogue=model.max_context_catalogue,
                     max_context_loaded=model.max_context_loaded,
-                    cloud=row.locality is not Locality.LOCAL,
+                    cloud=(model.locality or row.locality) is not Locality.LOCAL,
                 )
                 for row in fetched
                 for model in row.models

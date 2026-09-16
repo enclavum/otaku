@@ -1405,6 +1405,7 @@ components:
             total_tokens: { type: integer, description: "Derived: system + transcript." }
             used: { type: integer, description: "Derived: percent of the limit." }
         lede: { type: string, description: "The summary said in words." }
+        note: { type: string, description: "What the preview could not know, as a sentence — the model is not loaded, so the window is the assembler's substitute until a turn loads it; \"\" when it knew everything." }
         parts:
           type: array
           description: One part per message, exactly as the wire will carry it.
@@ -1525,7 +1526,25 @@ components:
             type: { const: done }
             stats:
               type: string
-              description: 'The verbose stats line the terminal prints after a reply; "" unless /set verbose.'
+              description: 'The verbose stats line the terminal prints after a reply — the report''s text(); "" unless /set verbose.'
+            notice:
+              type: string
+              description: 'What the reader is told of the reply beyond its text: it was cut short at the max_tokens limit; "" otherwise.'
+            report:
+              type: object
+              nullable: true
+              description: What the reply came to (backend.api.play.ReplyReport); null when the stream said nothing of itself.
+              properties:
+                total_seconds: { type: number, description: "Request sent → stream ended." }
+                first_token_seconds: { type: number, nullable: true, description: "The prefill wait; null when no token came." }
+                prompt_tokens: { type: integer, nullable: true }
+                cached_tokens: { type: integer, nullable: true }
+                completion_tokens: { type: integer, nullable: true }
+                max_context: { type: integer, nullable: true, description: "The context the prompt was measured against." }
+                finish_reason: { type: string, nullable: true, description: 'Why the model stopped, in the wire''s word: "stop", "length", …; null where it said none.' }
+                truncated: { type: boolean, description: "Derived: the reply was cut at the reply limit." }
+                rate: { type: number, nullable: true, description: "Derived: tokens per second over the generation alone." }
+                context_used: { type: integer, nullable: true, description: "Derived: percent of the context the prompt took." }
 
     PreparedCard:
       type: object
@@ -1573,6 +1592,7 @@ components:
                   The url is editable unless remote; sizes and load state
                   exist only when local.
               connected: { type: boolean }
+              reason: { type: string, description: 'Why the provider is not connected, in the package''s own sentence — a dead server, a rejected key, an error status; "" when connected or never asked.' }
               url: { type: string }
               key_source:
                 type: string
@@ -1609,6 +1629,10 @@ components:
                         loading is not loaded. Always true where the provider
                         does not manage models.
                     size: { type: string }
+                    locality:
+                      type: string
+                      enum: [local, remote, unknown]
+                      description: "Where the model is served: its own where it differs from its provider's (Ollama's ollama.com models are remote), the provider's otherwise. What a caption on the model reads."
                     max_context_catalogue: { type: string, description: "The model's own maximum context, formatted; \"\" when the provider states none." }
                     max_context_loaded: { type: string, description: "What the running instance serves, formatted; \"\" while none runs or the engine does not say." }
                     capabilities:
@@ -1621,6 +1645,11 @@ components:
                       properties:
                         vision: { type: boolean, nullable: true }
                         audio: { type: boolean, nullable: true }
+                        supported_params:
+                          type: array
+                          nullable: true
+                          items: { type: string }
+                          description: "The /set parameters this route honours, in the vocabulary's order, where a catalog states them per model (OpenRouter); null where the provider's set is the only word."
                         reasoning_efforts:
                           type: array
                           nullable: true
@@ -1702,9 +1731,9 @@ components:
             type: object
             properties:
               name: { type: string }
-              value: { type: string, description: '"" when at the model''s own default.' }
-              type: { type: string, description: "float / int / str — how a typed value parses." }
-              min: { type: number, nullable: true, description: "The least the setter takes; null for no floor." }
+              value: { type: string, description: '"" when not set (the engine''s own default applies); the stop strings as JSON strings separated by spaces, as the setter reads them back (backend.api.settings.parse_stops).' }
+              type: { type: string, description: "float / int / str / list — how a typed value parses." }
+              min: { type: number, nullable: true, description: "The least the setter takes — the provider's own bound where it states one (backend.api.settings.parameter_bounds); null for no floor." }
               max: { type: number, nullable: true, description: "The most the setter takes; null for no ceiling." }
 
     Story:

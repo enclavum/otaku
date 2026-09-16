@@ -438,9 +438,9 @@ def _pace(seconds: float) -> None:
 def _build_demo_client():
     import demo_script
 
-    from otaku.providers.openai.client import Locality, OpenAIClient
+    from otaku.providers.openai.client import OpenAIClient
     from otaku.providers.openai.completion import OpenAICompletion, Reasoning, Stats, Text
-    from otaku.providers.openai.models import ModelInfo, ModelState, OpenAIModels
+    from otaku.providers.openai.models import Locality, ModelInfo, ModelState, OpenAIModels
 
     class DemoModels(OpenAIModels):
         def _list(self, http):

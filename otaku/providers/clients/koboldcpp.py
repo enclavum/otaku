@@ -19,10 +19,16 @@ from otaku.providers.clients import launched_port
 from otaku.providers.errors import UnauthorizedError
 from otaku.providers.http import ASK_TIMEOUT, PROBE_TIMEOUT, Http, positive_int
 from otaku.providers.openai import reasoning
-from otaku.providers.openai.client import Locality, OpenAIClient
-from otaku.providers.openai.completion import PROTOCOL_PARAMS, SAMPLER_PARAMS, OpenAICompletion
+from otaku.providers.openai.client import OpenAIClient
+from otaku.providers.openai.completion import (
+    PROTOCOL_PARAMS,
+    SAMPLER_PARAMS,
+    Bounds,
+    OpenAICompletion,
+)
 from otaku.providers.openai.models import (
     Listing,
+    Locality,
     ModelCapabilities,
     ModelInfo,
     ModelState,
@@ -151,9 +157,16 @@ class KoboldCppModels(OpenAIModels):
 
 
 class KoboldCppCompletion(OpenAICompletion):
-    # `frequency_penalty` stands in for `presence_penalty` where that
-    # one is not sent: read, as one sampler.
-    supported_params = PROTOCOL_PARAMS | SAMPLER_PARAMS
+    # One penalty sampler, presence: `frequency_penalty` is read only in
+    # its place, as a presence term, so it is not advertised. The
+    # repetition penalty is floored at 1 — below it, the server sends
+    # its own 1.0 — and the rest is unbounded, as on every local engine.
+    supported_params = (PROTOCOL_PARAMS | SAMPLER_PARAMS) - {"frequency_penalty"}
+    bounds: ClassVar[dict[str, Bounds]] = {
+        "temperature": (0, None),
+        "presence_penalty": (None, None),
+        "repetition_penalty": (1, None),
+    }
     chat_reasoning_knobs: ClassVar[frozenset[str]] = frozenset(
         {reasoning.EFFORT_KNOB, reasoning.SWITCH_TEMPLATE_KNOB, reasoning.BUDGET_TOKENS_KNOB}
     )

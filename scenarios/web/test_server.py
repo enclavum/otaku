@@ -209,6 +209,7 @@ class TestReading:
         assert (rows["temperature"]["min"], rows["temperature"]["max"]) == (0, 2)
         assert (rows["top_k"]["min"], rows["top_k"]["max"]) == (0, None)
         assert (rows["seed"]["min"], rows["seed"]["max"]) == (None, None)
+        assert rows["stop"]["type"] == "list"  # several strings, typed as JSON strings
 
     def test_the_search_matches_buried_content_and_the_row_s_face(self, page: Page) -> None:
         """One filter rule for both browsers: a story is found by the
@@ -276,12 +277,47 @@ class TestPlaying:
             assert time.monotonic() - started < 1.5  # never the server's three seconds
             server.headers_delay = 0.0
 
+    def test_a_page_that_hangs_up_in_the_wait_frees_the_session_with_the_pacing_off(
+        self, server: ModelServer, tmp_path: Path
+    ) -> None:
+        # Before the first token nothing is written to the page, so its
+        # leaving could only be seen at the first frame. The wait asks
+        # every tick instead: the reply ends the moment the page is gone,
+        # its request cut, and the session's thread is free for the next
+        # write instead of queued behind a prefill nobody wants.
+        # The same, with smoothing off (the harness's default): the tick
+        # is the session's contract, not the pacing's — a setting a reader
+        # takes for cosmetic must not decide what the server can answer.
+        with serving(server, tmp_path) as page:
+            server.headers_delay = 3.0
+            parts = urlsplit(page.url)
+            assert parts.hostname and parts.port
+            raw = socket.create_connection((parts.hostname, parts.port), timeout=5)
+            body = json.dumps({"line": "I enter the hall."}).encode()
+            raw.sendall(
+                f"POST /api/play HTTP/1.1\r\nHost: {parts.netloc}\r\n"
+                f"Content-Type: application/json\r\nContent-Length: {len(body)}\r\n"
+                "Connection: close\r\n\r\n".encode()
+                + body
+            )
+            time.sleep(0.5)  # the reply is in the wait for the first token
+            raw.close()
+            started = time.monotonic()
+            page.put("/api/settings/think", {"value": "unset"})  # a write: the thread in turn
+            assert time.monotonic() - started < 1.5  # never the server's three seconds
+            server.headers_delay = 0.0
+
     def test_a_line_plays_and_lands_in_the_store(self, page: Page) -> None:
         events = page.play("I unroll the county survey.")
         kinds = [event["type"] for event in events]
         assert kinds[0] == "recorded"
         assert "text" in kinds
         assert kinds[-1] == "done"
+        # The turn's end carries the reply's report as facts and its
+        # notice — nothing to say of a reply the model finished.
+        assert events[-1]["notice"] == ""
+        assert events[-1]["report"]["finish_reason"] == "stop"
+        assert events[-1]["report"]["truncated"] is False
         story = page.get("/api/session")["story_id"]
         stored = page.store.stories.get_messages(story)
         assert stored[-2].body == "I unroll the county survey."
@@ -619,10 +655,13 @@ class TestThePicker:
         # (`backend.api.reports`): a provider that says nothing reads unknown.
         assert mine["models"][0]["reasoning_words"] == "unknown"
         assert mine["models"][0]["capability_words"] == "unknown"
+        assert mine["models"][0]["locality"] == "unknown"  # the model's is its provider's
         assert mine["models"][0]["max_context_loaded"] == ""  # nothing loads on a generic url
         assert "can_manage" not in mine["models"][0]
         unanswered = next(p for p in panel["providers"] if p["id"] == "llamacpp")
         assert unanswered["capabilities"] is None
+        assert unanswered["connected"] is False and unanswered["reason"]  # the page is told why
+        assert mine["reason"] == ""
 
     def test_the_panel_says_where_each_provider_runs(self, page: Page) -> None:
         # The vocabulary the page's captions and the demo's fake read:

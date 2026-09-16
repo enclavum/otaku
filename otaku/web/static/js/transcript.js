@@ -447,15 +447,14 @@ const DRAW = {
   },
   done(turn, happened) {
     /* The stats line the terminal prints after a reply, verbatim — off
-       unless the reader asked for it (`/set verbose`). It goes BEFORE
-       the status row, which stays and keeps its height once a reply
-       lands: appended after it, the line would sit against the row
+       unless the reader asked for it (`/set verbose`) — and the reply's
+       notice, the backend's sentence for a reply cut short. Both go
+       BEFORE the status row, which stays and keeps its height once a
+       reply lands: appended after it, a line would sit against the row
        rather than against the answer it reports on. */
-    if (!happened.stats) return;
-    turn.article.insertBefore(
-      element("p", "otk-verbose", happened.stats),
-      $(".otk-generating__status", turn.article),
-    );
+    const status = $(".otk-generating__status", turn.article);
+    if (happened.stats) turn.article.insertBefore(element("p", "otk-verbose", happened.stats), status);
+    if (happened.notice) turn.article.insertBefore(element("p", "otk-note", happened.notice), status);
   },
 };
 

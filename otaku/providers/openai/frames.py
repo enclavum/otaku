@@ -5,7 +5,7 @@ here touches the network or knows an engine.
 
 from typing import Any
 
-from otaku.providers.http import positive_int
+from otaku.providers.http import explanation, positive_int
 
 Usage = tuple[int | None, int | None, int | None]  # prompt, completion and cached tokens
 
@@ -40,6 +40,14 @@ def completion_delta(event: dict[str, Any]) -> tuple[str, str]:
     return str(reasoning), str(choice.get("text") or "")
 
 
+def finish(event: dict[str, Any]) -> str | None:
+    """Why the model stopped, where a frame says: the choice's
+    `finish_reason` as the wire spells it ("stop", "length",
+    "content_filter", "error"); None on a frame that carries none."""
+    reason = _choice(event).get("finish_reason")
+    return reason if isinstance(reason, str) and reason else None
+
+
 def trouble(event: dict[str, Any]) -> str:
     """The sentence a frame is trouble by, "" otherwise. The model's own
     refusal — a `refusal` delta, or a stop by `content_filter` — is
@@ -48,11 +56,12 @@ def trouble(event: dict[str, Any]) -> str:
     "error" (KoboldCpp's failed generation, which then ends cleanly) —
     is "The reply broke off: …", in the server's words where it gave
     any. Swallowed, such a frame would end the stream as an "ok" reply."""
+    # The frame's error object, explained whole (`http.explanation`):
+    # OpenRouter's mid-stream errors carry the same metadata as its
+    # refusals.
     failure = event.get("error")
-    if isinstance(failure, dict) and failure.get("message"):
-        return f"The reply broke off: {failure['message']}"
-    if isinstance(failure, str) and failure:
-        return f"The reply broke off: {failure}"
+    if isinstance(failure, dict | str) and (said := explanation(event)):
+        return f"The reply broke off: {said}"
     choice = _choice(event)
     delta = choice.get("delta")
     if isinstance(delta, dict) and delta.get("refusal"):

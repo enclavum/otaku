@@ -10,7 +10,9 @@ Four kinds, by where the failure came from:
   wrong (401; a 403 is the request refused, not the key), or a
   catalog that needs a key was asked without one.
 - `StatusError` — the server answered with any other error status;
-  `status` says which, the sentence carries its explanation.
+  `status` says which, the sentence carries its explanation, and
+  `retry_after` says when the server would take the request again,
+  where it said (a rate limit, an engine busy with one request).
 - `DeclinedError` — the model itself answered with a refusal or an
   in-stream error frame instead of content.
 
@@ -34,12 +36,17 @@ class UnauthorizedError(ProviderError):
 class StatusError(ProviderError):
     """A status the server refused with. The message is the sentence a
     reader is shown, cut to fit; `detail` is the server's whole
-    explanation, for a decision that must not miss a word the cut took."""
+    explanation, for a decision that must not miss a word the cut took;
+    `retry_after` the seconds the server asked for before the request
+    is sent again, None where it named none."""
 
-    def __init__(self, message: str, status: int, detail: str = "") -> None:
+    def __init__(
+        self, message: str, status: int, detail: str = "", retry_after: float | None = None
+    ) -> None:
         super().__init__(message)
         self.status = status
         self.detail = detail
+        self.retry_after = retry_after
 
 
 class DeclinedError(ProviderError):

@@ -23,13 +23,19 @@ from typing import Any, ClassVar
 
 from otaku.providers.clients import launched_port
 from otaku.providers.errors import ProviderError, StatusError, UnreachableError
-from otaku.providers.http import ASK_TIMEOUT, PROBE_TIMEOUT, Http, positive_int
+from otaku.providers.http import ASK_TIMEOUT, PROBE_TIMEOUT, Cut, Http, StreamCut, positive_int
 from otaku.providers.openai import reasoning
 from otaku.providers.openai.auth import OpenAIAuth
-from otaku.providers.openai.client import Locality, OpenAIClient
-from otaku.providers.openai.completion import PROTOCOL_PARAMS, SAMPLER_PARAMS, OpenAICompletion
+from otaku.providers.openai.client import OpenAIClient
+from otaku.providers.openai.completion import (
+    PROTOCOL_PARAMS,
+    SAMPLER_PARAMS,
+    Bounds,
+    OpenAICompletion,
+)
 from otaku.providers.openai.models import (
     Listing,
+    Locality,
     ModelCapabilities,
     ModelInfo,
     ModelState,
@@ -117,15 +123,20 @@ class LlamaCppModels(OpenAIModels):
         )
 
     def _capabilities_of(self, modalities: object, thinking: _Thinking) -> ModelCapabilities:
-        """What the modalities say — a router entry's `input_modalities`
-        list, or a props object's `modalities` flags; neither leaves
-        vision and audio unknown — and what the template told
+        """What the modalities say — a props object's `modalities` flags,
+        which a running server states for sure, or a router entry's
+        `input_modalities` list, which the router resolves from the
+        preset offline and leaves at text alone both for a text model
+        and for one it could not resolve (no projector configured, a
+        download still to come): a modality it lists is there, one it
+        does not is unknown — and what the template told
         (`_thinking_of`). The raw wire is always there and decoding is
         constrained server-side."""
         vision: bool | None
         audio: bool | None
         if isinstance(modalities, list):
-            vision, audio = "image" in modalities, "audio" in modalities
+            vision = True if "image" in modalities else None
+            audio = True if "audio" in modalities else None
         elif isinstance(modalities, dict):
             vision = bool(modalities.get("vision")) if "vision" in modalities else None
             audio = bool(modalities.get("audio")) if "audio" in modalities else None
@@ -187,15 +198,17 @@ class LlamaCppModels(OpenAIModels):
 
 
 class LlamaCppSingleModels(LlamaCppModels):
-    """One model, loaded at launch, its state never changing: the
-    listing's one entry carries its loaded context size, its own max
-    context and size, `/props` its modalities, and every listed name
-    is that model's — a listing that came back long, a catalog's url
-    pasted into the section, still costs the one probe, stamped on
-    every row. The name is the model file's: a build past b9290 lists
-    the whole path, and the server serves its one model whatever a
-    request names, so the file name every build agrees on is what a
-    section remembers. Nothing is asked live, nothing is managed."""
+    """One model, loaded at launch, its state never changing while the
+    process lives: the listing's one entry carries its loaded context
+    size, its own max context and size, `/props` its modalities, and
+    every listed name is that model's — a listing that came back long,
+    a catalog's url pasted into the section, still costs the one
+    probe, stamped on every row. The name is the model file's: a build
+    past b9290 lists the whole path, and the server serves its one
+    model whatever a request names, so the file name every build
+    agrees on is what a section remembers. The entry is read again on
+    a one-model ask, since the process may have been restarted with
+    another window, or another model. Nothing is managed."""
 
     def _listing(self, entries: list[dict[str, Any]], props: Any, http: Http) -> Listing:
         if not entries:
@@ -225,6 +238,25 @@ class LlamaCppSingleModels(LlamaCppModels):
             key=lambda model: model.name,
         )
 
+    def _get(self, name: str, http: Http) -> ModelInfo | None:
+        """The one entry as the server lists it now: its meta is this
+        instance's, whatever the listing read before a restart. A
+        server that no longer serves `name` is not answered for — the
+        cached word stands until a listing drops it — and one that did
+        not answer states nothing."""
+        data = http.get(f"{self._config.url}/models", timeout=PROBE_TIMEOUT, quiet=True)
+        entries = [e for e in self._entries_of(data) if not self._is_projector(e)]
+        if not entries or re.split(r"[\\/]", str(entries[0]["id"]))[-1] != name:
+            return None
+        max_context_loaded, max_context_catalogue, size = self._meta_of(entries[0])
+        return ModelInfo(
+            name=name,
+            size=size,
+            max_context_catalogue=max_context_catalogue,
+            max_context_loaded=max_context_loaded,
+            state=ModelState.LOADED,
+        )
+
 
 class LlamaCppRouterModels(LlamaCppModels):
     """A folder of models, each with a server of its own that the router
@@ -237,14 +269,14 @@ class LlamaCppRouterModels(LlamaCppModels):
     def can_manage(self) -> bool:
         return True
 
-    def load(self, model: str) -> None:
-        entry = self._entry(model, self._http)
+    def _load(self, model: str, http: Http, cut: Cut) -> None:
+        entry = self._entry(model, http)
         if entry == {}:
             # The router lists every model it fronts. A name it does not
             # — a top-level projector's, a typo — would spawn a child
             # doomed to die, or draw a 404 spelled "File Not Found".
             unknown = ProviderError(f"{model} is not offered by {self._config.name}.")
-            self._http.record(unknown, "load")
+            http.record(unknown, "load")
             raise unknown
         status = self._status_of(entry or {})
         if status in _RUNNING:
@@ -254,18 +286,18 @@ class LlamaCppRouterModels(LlamaCppModels):
         # out quietly: the router's own word for one the probe missed is
         # a 400, no failure, and the poll judges what became of it.
         if status not in _PENDING:
-            self._http.post(f"{self._config.base_url}/models/load", {"model": model}, quiet=True)
-        entry = self._wait(model, lambda status: status in _PENDING, "load")
+            http.post(f"{self._config.base_url}/models/load", {"model": model}, quiet=True, cut=cut)
+        entry = self._wait(model, lambda status: status in _PENDING, http, cut)
         if self._status_of(entry) not in _RUNNING:
             status_object = entry.get("status")
             code = status_object.get("exit_code") if isinstance(status_object, dict) else None
             suffix = f" (exit code {code})" if isinstance(code, int) else ""
             failed = ProviderError(f"{model} did not load on {self._config.name}{suffix}.")
-            self._http.record(failed, "load")
+            http.record(failed, "load")
             raise failed
 
-    def unload(self, model: str) -> None:
-        status = self._status_of(self._entry(model, self._http) or {})
+    def _unload(self, model: str, http: Http, cut: Cut) -> None:
+        status = self._status_of(self._entry(model, http) or {})
         if status not in _RUNNING and status not in _PENDING:
             return  # nothing running, or on its way, to stop
         # A 400 is the router saying the model stopped between the probe
@@ -273,13 +305,11 @@ class LlamaCppRouterModels(LlamaCppModels):
         # asked for. Loud otherwise: an order that failed would leave the
         # poll waiting on a model that never stops.
         try:
-            self._http.post(
-                f"{self._config.base_url}/models/unload", {"model": model}, purpose="unload"
-            )
+            http.post(f"{self._config.base_url}/models/unload", {"model": model}, cut=cut)
         except StatusError as e:
             if e.status != 400:
                 raise
-        self._wait(model, lambda status: status in _RUNNING or status in _PENDING, "unload")
+        self._wait(model, lambda status: status in _RUNNING or status in _PENDING, http, cut)
 
     # ---------- the hooks ----------
 
@@ -335,9 +365,10 @@ class LlamaCppRouterModels(LlamaCppModels):
 
     def _entry(self, model: str, http: Http) -> dict[str, Any] | None:
         """The model's entry in the listing now, as a probe through
-        `http` — the model's view, or the transport itself while a load
-        polls: {} when the router lists no such model, None when it did
-        not answer — which the polling tells apart."""
+        `http` — the model's view, or an order's while a load polls: {}
+        when the router lists no such model, None when it did not
+        answer — which the polling tells apart — and a view whose
+        budget is spent raises as unreachable."""
         data = http.get(f"{self._config.url}/models", timeout=PROBE_TIMEOUT, quiet=True)
         if not isinstance(data, dict):
             return None
@@ -345,22 +376,27 @@ class LlamaCppRouterModels(LlamaCppModels):
         return next((e for e in entries if e.get("id") == model), {})
 
     def _wait(
-        self, model: str, pending: Callable[[str | None], bool], purpose: str
+        self, model: str, pending: Callable[[str | None], bool], http: Http, cut: Cut
     ) -> dict[str, Any]:
-        """The model's entry once its status is no longer `pending`. A
+        """The model's entry once its status is no longer `pending`,
+        polled through the order's view: its budget bounds the whole
+        wait — a download on demand included — and the cut ends it. A
         poll the router does not answer — it holds its lock while a
         child spawns — is waited out, up to a budget of silence, then
-        filed under `purpose`."""
+        filed under the order."""
         quiet_since: float | None = None  # when the router's silence began
         while True:
-            entry = self._entry(model, self._http)
+            if cut.asked:
+                raise StreamCut
+            http.check_budget()
+            entry = self._entry(model, http)
             if entry is None:
                 now = time.monotonic()
                 if quiet_since is None:
                     quiet_since = now
                 elif now - quiet_since > _SILENCE_BUDGET:
                     lost = UnreachableError(f"{self._config.name} stopped answering.")
-                    self._http.record(lost, purpose)
+                    http.record(lost)
                     raise lost
             elif not pending(self._status_of(entry)):
                 return entry
@@ -393,6 +429,14 @@ class LlamaCppRouterModels(LlamaCppModels):
 
 class LlamaCppCompletion(OpenAICompletion):
     supported_params = PROTOCOL_PARAMS | SAMPLER_PARAMS
+    # A local engine bounds nothing the catalogs bound: any temperature,
+    # any penalty.
+    bounds: ClassVar[dict[str, Bounds]] = {
+        "temperature": (0, None),
+        "presence_penalty": (None, None),
+        "frequency_penalty": (None, None),
+        "repetition_penalty": (0, None),
+    }
     # The template's flag is what stops Gemma 4 and its kind; the effort
     # rides beside it as a template variable, for the templates that
     # read one; and the budget is the server's own sampler, which stops

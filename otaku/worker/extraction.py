@@ -51,7 +51,15 @@ from typing import Self
 from otaku.context.assembler import WireTurn
 from otaku.context.syntax import OOC_FRAME, to_wire
 from otaku.formatting import format_duration, render
-from otaku.providers import OpenAIClient, ProviderError, Stats, Text, UnreachableError, WireMessage
+from otaku.providers import (
+    OpenAIClient,
+    ProviderError,
+    Stats,
+    StatusError,
+    Text,
+    UnreachableError,
+    WireMessage,
+)
 from otaku.store import Store
 from otaku.store.ops.lore import CharacterMemory
 from otaku.store.schema import Message
@@ -63,12 +71,19 @@ _TIMEOUT = 600.0
 # loses the whole scene's extraction.
 _MAX_TOKENS = 8_192
 # A background completion is idempotent and unwatched, so a transient
-# transport failure (the server dropping the stream mid-body, a lost
-# socket, a read timeout) is retried before giving up — the usual cause is
-# a passing collision for the one model, gone by the time the backoff
-# elapses. A bad HTTP status is not transient and is never retried.
+# failure is retried before giving up: a transport failure (the server
+# dropping the stream mid-body, a lost socket, a read timeout) — the
+# usual cause is a passing collision for the one model, gone by the time
+# the backoff elapses — and the two statuses that say "not now": a rate
+# limit (429) and an engine busy with one request (503; KoboldCpp serves
+# one at a time, and a user's turn collides with the pass routinely).
+# The wait is the server's own where it named one (`Retry-After`),
+# capped, else the backoff. Any other status is not transient and is
+# never retried.
 _ATTEMPTS = 3
 _BACKOFF_SECONDS = 1.0
+_TRANSIENT_STATUSES = frozenset({429, 503})
+_RETRY_AFTER_CAP = 60.0  # the longest a pass waits on the server's word
 
 # Null-object cancel: callers pass a real Event or nothing; normalizing to
 # a never-set Event deletes the `is not None` guard at every check site.
@@ -259,26 +274,36 @@ class Extractor:
         the story under `purpose`. A str prompt wraps into a WireTurn —
         never a stored Message: only wire types travel here, so the
         warm-up's assembled turns arrive as they are. Cancelled
-        mid-stream → "" and nothing recorded; transient transport
-        failures retry with a cancel-aware backoff; a bad HTTP status
-        propagates on the first try."""
+        mid-stream → "" and nothing recorded; a transient failure — a
+        transport failure, a rate limit, a busy engine — retries with a
+        cancel-aware wait, the server's own where it named one; any
+        other status propagates on the first try."""
         messages = [WireTurn(role="user", body=prompt)] if isinstance(prompt, str) else prompt
-        last_exc: UnreachableError | None = None
+        last_exc: ProviderError | None = None
         for attempt in range(_ATTEMPTS):
             if self._cancel.is_set():
                 return ""
             try:
                 return self._stream_once(messages, purpose, params, timeout)
-            except UnreachableError as e:
+            except (UnreachableError, StatusError) as e:
+                if isinstance(e, StatusError) and e.status not in _TRANSIENT_STATUSES:
+                    raise
                 last_exc = e
                 more = attempt + 1 < _ATTEMPTS
+                wait = _BACKOFF_SECONDS * (attempt + 1)
+                if isinstance(e, StatusError):
+                    what = f"refused ({e.status})"
+                    if e.retry_after is not None:
+                        wait = min(e.retry_after, _RETRY_AFTER_CAP)
+                else:
+                    what = f"dropped ({type(e).__name__})"
                 if more:
                     self._log(
-                        f"{purpose} request dropped ({type(e).__name__}); "
-                        f"retrying ({attempt + 2}/{_ATTEMPTS})"
+                        f"{purpose} request {what}; retrying ({attempt + 2}/{_ATTEMPTS}) "
+                        f"in {wait:.0f}s"
                     )
                 # A set event ends the backoff early — same as a cancel.
-                if more and self._cancel.wait(_BACKOFF_SECONDS * (attempt + 1)):
+                if more and self._cancel.wait(wait):
                     return ""
         assert last_exc is not None  # the loop reaches here only via except
         self._log(f"{purpose} request failed after {_ATTEMPTS} attempts: {type(last_exc).__name__}")
@@ -641,6 +666,10 @@ class Extractor:
             purpose=purpose,
             timeout=timeout,
             watched=False,  # accumulated into a string; nobody watches it
+            # Ticked while the reply is waited on, so a cancel — the
+            # user typing, the shutdown — cuts a prefill in flight rather
+            # than waiting out the engine's next word.
+            on_idle=lambda: not self._cancel.is_set(),
         )
         try:
             for chunk in stream:
@@ -654,6 +683,8 @@ class Extractor:
             close = getattr(stream, "close", None)
             if callable(close):
                 close()
+        if self._cancel.is_set():
+            return ""  # cut in the wait: what came is no answer
         if final is not None:
             self._store.usage.record(
                 self._client.config.name,

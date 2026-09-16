@@ -32,23 +32,28 @@ if TYPE_CHECKING:
 _LAG = 0.25  # target display lag; flush gaps up to ~2x this are absorbed fully
 _RATE_WINDOW = 3.0  # sliding window (seconds) for the arrival-rate estimate
 _TICK = 0.02  # emit cadence
+_CUT_WAIT = 1.0  # how long a consumer's close waits for the pump it cut to file the answer
 
 
 def smoothen(
     chunks: Iterator[Chunk],
     on_idle: Callable[[], bool | None] | None = None,
     cut: Callable[[], None] | None = None,
+    *,
+    paced: bool = True,
 ) -> Iterator[Chunk]:
-    """`chunks` re-timed into an even flow. `on_idle` is called on every
-    tick the wrapper spends waiting — before the first token and in every
-    gap after it — which is the one moment a caller's own thread is
-    demonstrably free while a reply is in flight; it may answer False to
-    say nobody reads any more (a closed tab), and the stream ends there,
-    the source cut. `cut` is called from the consumer's thread the moment
-    it lets go while the pump still reads: it must wake the pump's read
-    wherever it is blocked, or the source stays open until the engine's
-    next word — a whole prefill, spent for nobody, with the next turn
-    queued behind it."""
+    """`chunks` re-timed into an even flow — or, `paced=False`, relayed
+    as they arrive: the pump and the tick without the jitter buffer,
+    for a caller that needs the tick and not the pacing. `on_idle` is
+    called on every tick the wrapper spends waiting — before the first
+    token and in every gap after it — which is the one moment a
+    caller's own thread is demonstrably free while a reply is in
+    flight; it may answer False to say nobody reads any more (a closed
+    tab), and the stream ends there, the source cut. `cut` is called
+    from the consumer's thread the moment it lets go while the pump
+    still reads: it must wake the pump's read wherever it is blocked,
+    or the source stays open until the engine's next word — a whole
+    prefill, spent for nobody, with the next turn queued behind it."""
     from otaku.providers.openai.completion import Reasoning, Stats, Text
 
     buffer: list[str] = []
@@ -94,6 +99,11 @@ def smoothen(
             with lock:
                 if reasoning:
                     out_reasoning = reasoning.popleft()
+                elif buffer and not paced:
+                    n = len(buffer)
+                    out_text = "".join(buffer)
+                    buffer.clear()
+                    emitted += n
                 elif buffer:
                     arrived = emitted + len(buffer)
                     if not samples:
@@ -136,6 +146,10 @@ def smoothen(
         done.set()  # stop the pump if the consumer aborted mid-stream
         if cut is not None and worker.is_alive():
             cut()
+            # The pump files the answer as it ends: waited for, briefly,
+            # so a consumer that let go holds whole stats the moment
+            # close() returns — the wait it spent, what the wire stated.
+            worker.join(_CUT_WAIT)
 
 
 def _pace(backlog: int, rate: float) -> float:

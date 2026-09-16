@@ -13,12 +13,13 @@ from typing import Any, ClassVar
 
 from otaku.providers.clients import read_home_json
 from otaku.providers.errors import StatusError
-from otaku.providers.http import ASK_TIMEOUT, PROBE_TIMEOUT, Http, positive_int
+from otaku.providers.http import PROBE_TIMEOUT, Cut, Http, positive_int
 from otaku.providers.openai import reasoning
-from otaku.providers.openai.client import Locality, OpenAIClient
-from otaku.providers.openai.completion import PROTOCOL_PARAMS, OpenAICompletion
+from otaku.providers.openai.client import OpenAIClient
+from otaku.providers.openai.completion import PROTOCOL_PARAMS, Bounds, OpenAICompletion
 from otaku.providers.openai.models import (
     Listing,
+    Locality,
     ModelCapabilities,
     ModelInfo,
     ModelState,
@@ -32,30 +33,29 @@ class LmStudioModels(OpenAIModels):
     def can_manage(self) -> bool:
         return True
 
-    def load(self, model: str) -> None:
+    def _load(self, model: str, http: Http, cut: Cut) -> None:
         # Idempotent on purpose: LM Studio's /load is not — repeated
-        # calls stack 'model:2', ':3', … instances.
-        entry = self._entry_of(model, self._http.within(ASK_TIMEOUT, "load"), quiet=False)
+        # calls stack 'model:2', ':3', … instances. Through the order's
+        # view, under its budget and its cut.
+        entry = self._entry_of(model, http, quiet=False)
         if entry is not None and entry.get("loaded_instances"):
             return
-        self._http.post(
-            f"{self._config.base_url}/api/v1/models/load", {"model": model}, purpose="load"
-        )
+        http.post(f"{self._config.base_url}/api/v1/models/load", {"model": model}, cut=cut)
 
-    def unload(self, model: str) -> None:
+    def _unload(self, model: str, http: Http, cut: Cut) -> None:
         # /unload takes an instance id: every loaded instance of the
         # model is unloaded in turn. The registry is read with its
         # errors on: a door that cannot read must say so, not do nothing.
-        entry = self._entry_of(model, self._http.within(ASK_TIMEOUT, "unload"), quiet=False)
+        entry = self._entry_of(model, http, quiet=False)
         for instance in self._instances(entry) if entry is not None else []:
             instance_id = instance.get("id")
             if not isinstance(instance_id, str):
                 continue
             try:
-                self._http.post(
+                http.post(
                     f"{self._config.base_url}/api/v1/models/unload",
                     {"instance_id": instance_id},
-                    purpose="unload",
+                    cut=cut,
                 )
             except StatusError as e:
                 # Gone between the read and the order — LM Studio's own
@@ -177,6 +177,14 @@ class LmStudioCompletion(OpenAICompletion):
     # Its endpoint documents `top_k` and `repeat_penalty` beyond the
     # protocol, and no `min_p`.
     supported_params = PROTOCOL_PARAMS | {"top_k", "repetition_penalty"}
+    # A local engine bounds nothing the catalogs bound: any temperature,
+    # any penalty.
+    bounds: ClassVar[dict[str, Bounds]] = {
+        "temperature": (0, None),
+        "presence_penalty": (None, None),
+        "frequency_penalty": (None, None),
+        "repetition_penalty": (0, None),
+    }
     chat_reasoning_knobs: ClassVar[frozenset[str]] = frozenset({reasoning.EFFORT_KNOB})
 
     def _convert_params(self, params: dict[str, object]) -> dict[str, object]:

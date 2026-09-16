@@ -12,28 +12,15 @@ OpenAI one at /v1 — whatever was typed. The account's balance, which
 only a catalog has, is the client's own.
 """
 
-import enum
 from dataclasses import dataclass, replace
 from typing import ClassVar
 
 from otaku.formatting import Money
 from otaku.providers.http import ASK_TIMEOUT, ErrorSink, Http
 from otaku.providers.openai.auth import KeySource, OpenAIAuth
-from otaku.providers.openai.completion import OpenAICompletion, RequestSink
-from otaku.providers.openai.models import OpenAIModels
+from otaku.providers.openai.completion import Bounds, OpenAICompletion, RequestSink
+from otaku.providers.openai.models import Locality, OpenAIModels
 from otaku.settings.providers import ProviderConfig
-
-
-class Locality(enum.Enum):
-    """Where a provider's server runs, as far as its client can tell:
-    an engine knows, the generic provider is a url and cannot. Every
-    reader picks its safe side for UNKNOWN — what costs money or waits
-    on the internet treats it as REMOTE, what edits the url treats it
-    as LOCAL, and a caption says neither."""
-
-    LOCAL = "local"
-    REMOTE = "remote"
-    UNKNOWN = "unknown"
 
 
 @dataclass(frozen=True)
@@ -47,6 +34,7 @@ class ProviderCapabilities:
     prompt_cache: bool  # breakpoints are honoured
     model_management: bool  # `load` and `unload` work
     supported_params: frozenset[str]  # the app's parameters the wire reads
+    bounds: dict[str, Bounds]  # the engine's own bounds, where they differ from the app's table
 
 
 class OpenAIClient:
@@ -80,8 +68,25 @@ class OpenAIClient:
         self._http = Http(config.name, self.auth.headers, error_sink)
         self.models = self.models_class(config, self.auth, self._http)
         self.completion = self.completion_class(
-            config, self._http, request_sink=request_sink, smooth=smooth
+            config, self._http, request_sink=request_sink, smooth=smooth, models=self.models
         )
+
+    def supported_params_of(self, model: str) -> frozenset[str]:
+        """The app's parameters that reach `model`: the wire's set, and
+        within it the route's own where a catalog states one — what a
+        menu offers for the model in use, and what the wire sends."""
+        return self.completion.honoured(model)
+
+    def locality_of(self, model: str) -> Locality:
+        """Where `model` is served, as far as the client can tell: the
+        row's own where a listing stated one — Ollama's rows served by
+        ollama.com — and the client's otherwise. Off the cache, never
+        over the wire: a reader asking where a request would go must
+        not send one to find out."""
+        found = self.models.cached(model)
+        if found is not None and found.locality is not None:
+            return found.locality
+        return self.locality
 
     @property
     def capabilities(self) -> ProviderCapabilities:
@@ -93,6 +98,7 @@ class OpenAIClient:
             prompt_cache=self.completion.can_mark_cache,
             model_management=self.models.can_manage,
             supported_params=self.completion.supported_params,
+            bounds=self.completion.bounds,
         )
 
     @classmethod

@@ -15,7 +15,7 @@
    "value": "",
    "type": "float",
    "min": 0,
-   "max": 2
+   "max": null
   },
   {
    "name": "top_p",
@@ -35,15 +35,15 @@
    "name": "presence_penalty",
    "value": "",
    "type": "float",
-   "min": -2,
-   "max": 2
+   "min": null,
+   "max": null
   },
   {
    "name": "frequency_penalty",
    "value": "",
    "type": "float",
-   "min": -2,
-   "max": 2
+   "min": null,
+   "max": null
   },
   {
    "name": "seed",
@@ -55,7 +55,7 @@
   {
    "name": "stop",
    "value": "",
-   "type": "str",
+   "type": "list",
    "min": null,
    "max": null
   }

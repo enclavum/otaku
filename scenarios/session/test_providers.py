@@ -27,11 +27,13 @@ from otaku.providers import (
     DeclinedError,
     Image,
     KeySource,
+    Locality,
     ModelCapabilities,
     ModelState,
     ProbeStatus,
     ProviderConfig,
     ProviderError,
+    ProviderFailure,
     Reasoning,
     Registry,
     Stats,
@@ -49,7 +51,9 @@ from otaku.providers.clients.nanogpt import NanoGptClient
 from otaku.providers.clients.ollama import OllamaClient
 from otaku.providers.clients.omlx import OmlxClient
 from otaku.providers.clients.openrouter import OpenRouterClient
+from otaku.providers.openai.completion import PROTOCOL_PARAMS, SAMPLER_PARAMS
 from otaku.providers.openai.reasoning import ALL_EFFORT_LEVELS
+from otaku.web import cert
 from scenarios.support import server as scripted
 from scenarios.support.server import ModelServer
 
@@ -275,6 +279,161 @@ class TestChatCompletion:
                 next(stream)
             assert _filed(sink, "cancelled", within=1.0)
             assert time.monotonic() - started < 2.0  # never the server's three seconds
+        finally:
+            server.headers_delay = 0.0
+
+    def test_a_route_gets_only_the_parameters_it_honours(self) -> None:
+        # OpenRouter states per route; the wire sends the route's own,
+        # the client answers the same set for the menus, and a model
+        # not listed gets the wire's whole set.
+        server = ModelServer(models=("narrow", "wide"))
+        server.extras = {
+            "narrow": {"supported_parameters": ["temperature", "max_completion_tokens"]},
+            "wide": {},
+        }
+        try:
+            client = OpenRouterClient(_config(server, "openrouter", api_key="k"))
+            client.models.list()
+            assert client.supported_params_of("narrow") == frozenset({"temperature", "max_tokens"})
+            assert client.supported_params_of("wide") == PROTOCOL_PARAMS | SAMPLER_PARAMS
+            assert client.supported_params_of("unlisted") == PROTOCOL_PARAMS | SAMPLER_PARAMS
+            params = {"temperature": 0.5, "top_k": 4, "max_tokens": 50}
+            _drain(client.completion.chat("narrow", [Turn("user", "u")], params))
+            body = _sent(server, "messages")
+            assert body["temperature"] == 0.5 and "top_k" not in body
+            # The reply cap under both its names: a few routes take only the newer.
+            assert (body["max_tokens"], body["max_completion_tokens"]) == (50, 50)
+            _drain(client.completion.chat("wide", [Turn("user", "u")], params))
+            assert _sent(server, "messages")["top_k"] == 4
+        finally:
+            server.close()
+
+    def test_a_strict_server_refusing_a_sampler_gets_the_take_again_without_them(
+        self, server: ModelServer
+    ) -> None:
+        # OpenAI's own endpoint, behind the generic provider, refuses a
+        # field it does not know by name: sent again without the samplers,
+        # the protocol's own kept, and the take filed as sent again.
+        sink = Sink()
+        server.refuse = lambda body: 400 if "top_k" in body else None
+        server.refusal = "Unrecognized request argument supplied: top_k"
+        client = GenericClient(_config(server, "generic"), request_sink=sink)
+        _, text, _ = _drain(
+            client.completion.chat(
+                "m", [Turn("user", "u")], {"temperature": 0.5, "top_k": 4, "min_p": 0.1}
+            )
+        )
+        assert text == scripted.CHAT_REPLY
+        first, second = [r for r in server.requests if "messages" in r][-2:]
+        assert first["top_k"] == 4 and "top_k" not in second and "min_p" not in second
+        assert second["temperature"] == 0.5
+        assert _filed(sink, "ok, sent again without the samplers", within=1.0)
+
+    def test_koboldcpp_sends_one_penalty(self, server: ModelServer) -> None:
+        # It has one penalty sampler, presence; frequency is read only
+        # in its place, so it is neither advertised nor sent.
+        client = KoboldCppClient(_config(server, "koboldcpp"))
+        assert "frequency_penalty" not in client.capabilities.supported_params
+        params = {"presence_penalty": 0.5, "frequency_penalty": 0.3}
+        _drain(client.completion.chat("m", [Turn("user", "u")], params))
+        body = _sent(server, "messages")
+        assert body["presence_penalty"] == 0.5 and "frequency_penalty" not in body
+
+    def test_the_stats_say_why_the_model_stopped(self, server: ModelServer) -> None:
+        # The wire's own word on its last frame: "stop" for the model's
+        # end, "length" for a reply cut at the limit — the fact a reader
+        # is told of, and the request log files.
+        client = GenericClient(_config(server, "generic"))
+        _, _, stats = _drain(client.completion.chat("m", [Turn("user", "u")], {}))
+        assert stats.finish_reason == "stop"
+        server.finish = "length"
+        _, _, stats = _drain(client.completion.chat("m", [Turn("user", "u")], {}))
+        assert stats.finish_reason == "length"
+        _, _, stats = _drain(client.completion.text("m", "p", {}))
+        assert stats.finish_reason == "length"
+
+    def test_a_closed_reply_keeps_what_its_stats_came_to(self, server: ModelServer) -> None:
+        # A reader that lets go mid-reply still holds the stream's stats
+        # so far — the wait it spent — whole the moment close() returns,
+        # and the stream ended without a word on why.
+        server.chunk_delay = 0.3
+        client = GenericClient(_config(server, "generic"), smooth=True)
+        try:
+            reply = client.completion.chat("m", [Turn("user", "u")], {}, on_idle=lambda: None)
+            next(c for c in reply if isinstance(c, Text))
+            reply.close()
+            assert reply.stats.first_token_seconds is not None
+            assert reply.stats.total_seconds >= reply.stats.first_token_seconds
+            assert reply.stats.finish_reason is None
+        finally:
+            server.chunk_delay = 0.0
+
+    def test_a_rate_limit_says_who_and_when(self, server: ModelServer) -> None:
+        # OpenRouter's 429: the upstream's own words and its name out of
+        # the metadata, and the header's wait on the error and in the
+        # sentence.
+        server.refuse = lambda body: 429
+        server.refusal_body = {
+            "error": {
+                "code": 429,
+                "message": "Provider returned error",
+                "metadata": {
+                    "raw": "temporarily rate-limited upstream",
+                    "provider_name": "DeepInfra",
+                },
+            }
+        }
+        server.retry_after = "2"
+        client = OpenRouterClient(_config(server, "openrouter", api_key="k"))
+        with pytest.raises(StatusError) as caught:
+            _drain(client.completion.chat("m", [Turn("user", "u")], {}))
+        assert caught.value.status == 429 and caught.value.retry_after == 2.0
+        assert "temporarily rate-limited upstream (DeepInfra)" in caught.value.detail
+        assert "Try again in" in str(caught.value)
+
+    def test_a_server_behind_its_own_certificate_is_named_as_such(self, tmp_path) -> None:
+        # KoboldCpp's --ssl, a fronted omlx: a certificate the client
+        # does not trust is refused as TLS, not as a dead port.
+        secured = ModelServer(tls=cert.get_context(tmp_path))
+        try:
+            client = GenericClient(_config(secured, "generic"))
+            with pytest.raises(UnreachableError, match="TLS certificate"):
+                client.models.list()
+        finally:
+            secured.close()
+
+    def test_a_cancel_cuts_an_unwatched_wait_for_the_first_token(self, server: ModelServer) -> None:
+        # The background pass's path: unwatched, unpaced, and told. The
+        # hook it hands over is ticked while the wait lasts, and a cancel
+        # cuts the prefill rather than waiting out the engine's next word.
+        sink = Sink()
+        client = GenericClient(_config(server, "generic"), request_sink=sink, smooth=False)
+        server.headers_delay = 3.0
+        try:
+            started = time.monotonic()
+            stream = client.completion.chat(
+                "m", [Turn("user", "u")], {}, watched=False, on_idle=lambda: False
+            )
+            assert list(stream) == []
+            assert _filed(sink, "cancelled", within=1.0)
+            assert time.monotonic() - started < 2.0  # never the server's three seconds
+        finally:
+            server.headers_delay = 0.0
+
+    def test_with_the_pacing_off_a_watched_reply_is_still_ticked(self, server: ModelServer) -> None:
+        # The web with smoothing off: the tick is the caller's contract,
+        # not the pacing's — a reader that left is still noticed in the
+        # wait for the first token.
+        sink = Sink()
+        client = GenericClient(_config(server, "generic"), request_sink=sink, smooth=False)
+        server.headers_delay = 3.0
+        try:
+            started = time.monotonic()
+            stream = client.completion.chat("m", [Turn("user", "u")], {}, on_idle=_interrupt)
+            with pytest.raises(_Interrupted):
+                next(stream)
+            assert _filed(sink, "cancelled", within=1.0)
+            assert time.monotonic() - started < 2.0
         finally:
             server.headers_delay = 0.0
 
@@ -665,6 +824,15 @@ class TestCapabilities:
             assert set(rows) == {"alpha", "cloud"}
             assert rows["cloud"].state is ModelState.UNKNOWN
             assert rows["cloud"].capabilities is not None and rows["cloud"].capabilities.vision
+            # Served by ollama.com: the row says so, the client answers it
+            # for the model, and a one-model read keeps it.
+            assert (rows["cloud"].locality, rows["alpha"].locality) == (Locality.REMOTE, None)
+            assert client.locality_of("cloud") is Locality.REMOTE
+            assert client.locality_of("alpha") is Locality.LOCAL
+            assert client.locality_of("unlisted") is Locality.LOCAL
+            cloud = client.models.get("cloud")
+            assert cloud is not None and cloud.locality is Locality.REMOTE
+            assert client.locality_of("cloud") is Locality.REMOTE
             alpha = client.models.get("alpha")
             assert alpha is not None and alpha.capabilities is not None
             assert (alpha.capabilities.audio, alpha.capabilities.vision) == (True, False)
@@ -689,6 +857,19 @@ class TestCapabilities:
                 text_completion=True,
                 structured_output=True,
             )
+            # "vlm" is what mlx-vlm serves, which includes two text
+            # families and Gemma 4's unified models, seeing or not: the
+            # config's own type tells a text model (no) from an untold
+            # one (unknown).
+            server.config_types = {"vl": "cohere2_moe"}
+            rows = {r.name: r for r in OmlxClient(_config(server, "omlx")).models.list()}
+            assert rows["vl"].capabilities is not None and rows["vl"].capabilities.vision is False
+            server.config_types = {"vl": "gemma4_unified"}
+            rows = {r.name: r for r in OmlxClient(_config(server, "omlx")).models.list()}
+            assert rows["vl"].capabilities is not None and rows["vl"].capabilities.vision is None
+            server.config_types = {"vl": "gemma3"}
+            rows = {r.name: r for r in OmlxClient(_config(server, "omlx")).models.list()}
+            assert rows["vl"].capabilities is not None and rows["vl"].capabilities.vision is True
             silent = ModelCapabilities(
                 reasoning_efforts=frozenset(),
                 reasoning_switch=False,
@@ -764,9 +945,12 @@ class TestCapabilities:
             # The rungs as named, "none" among them unless reasoning is
             # mandatory, and a budget on every model that reasons —
             # OpenRouter spends either as the model takes it.
+            # The route's own parameters, in the app's names: what the
+            # wire sends for this model, and what a menu offers.
             assert rows["free"].capabilities == ModelCapabilities(
                 vision=True,
                 audio=False,
+                supported_params=frozenset({"temperature"}),
                 reasoning_efforts=frozenset({"none", "minimal", "low", "high"}),
                 reasoning_switch=False,
                 reasoning_budget=True,
@@ -776,6 +960,7 @@ class TestCapabilities:
             assert rows["fixed"].capabilities == ModelCapabilities(
                 vision=False,
                 audio=False,
+                supported_params=frozenset({"temperature"}),
                 reasoning_efforts=frozenset({"low", "medium", "high"}),
                 reasoning_switch=False,
                 reasoning_budget=True,
@@ -785,6 +970,7 @@ class TestCapabilities:
             # No modalities named, no reasoning among the parameters:
             # nothing reaches; what a row does not say is unknown.
             assert rows["mute"].capabilities == ModelCapabilities(
+                supported_params=frozenset({"temperature"}),
                 reasoning_efforts=frozenset(),
                 reasoning_switch=False,
                 reasoning_budget=False,
@@ -795,6 +981,7 @@ class TestCapabilities:
             # a share of the budget — and not "none" where reasoning is
             # mandatory.
             assert rows["plain"].capabilities == ModelCapabilities(
+                supported_params=frozenset(),
                 reasoning_efforts=ALL_EFFORT_LEVELS,
                 reasoning_switch=False,
                 reasoning_budget=True,
@@ -802,6 +989,7 @@ class TestCapabilities:
                 structured_output=False,
             )
             assert rows["forced"].capabilities == ModelCapabilities(
+                supported_params=frozenset(),
                 reasoning_efforts=ALL_EFFORT_LEVELS - {"none"},
                 reasoning_switch=False,
                 reasoning_budget=True,
@@ -1149,6 +1337,37 @@ class TestLoadUnload:
             assert client.models.can_manage is True
         finally:
             alone.close()
+
+    def test_a_load_ends_when_its_budget_is_spent(self) -> None:
+        # A router whose load never ends — a download on demand that
+        # stalls — is polled under the order's budget, never forever.
+        server = ModelServer(models=("m",))
+        server.router = True
+        server.router_stuck = {"m"}
+        try:
+            client = LlamaCppClient(_config(server, "llamacpp"))
+            client.models.list()
+            started = time.monotonic()
+            with pytest.raises(UnreachableError):
+                client.models.load("m", timeout=0.6)
+            assert time.monotonic() - started < 2.0
+        finally:
+            server.close()
+
+    def test_a_load_nobody_waits_for_is_cut(self) -> None:
+        # The hook says nobody waits any more — a page that left: the
+        # order's request is cut where it blocks, and the load raises as
+        # cut short rather than holding the caller for the engine's time.
+        server = ModelServer(models=("alpha",), managed=True)
+        server.load_delay = 3.0
+        try:
+            client = OllamaClient(_config(server, "ollama"))
+            started = time.monotonic()
+            with pytest.raises(ProviderError, match="cut short"):
+                client.models.load("alpha", on_idle=lambda: False)
+            assert time.monotonic() - started < 2.0
+        finally:
+            server.close()
 
     def test_a_llamacpp_router_get_learns_the_models_own_facts_after_a_load(self) -> None:
         # The router states a model's size and max context only while it
@@ -1509,6 +1728,162 @@ class TestFailures:
         assert errors.filed == []
 
 
+class TestPanel:
+    def test_the_registry_says_why_a_provider_is_not_listed(self, server: ModelServer) -> None:
+        # The pickers get the package's sentence, not a bare None: a
+        # dead server, a rejected key, an error status — each its own
+        # verdict; one not configured is None still.
+        registry = Registry(
+            {
+                "generic": ProviderConfig(name="generic", url=DEAD),
+                "openrouter": ProviderConfig(name="openrouter", url=server.url, api_key="wrong"),
+            }
+        )
+        dead = registry.info("generic")
+        assert isinstance(dead, ProviderFailure)
+        assert dead.status is ProbeStatus.UNREACHABLE and "generic" in dead.message
+        server.api_key = "right"  # the catalog demands one, and this is not it
+        try:
+            rejected = registry.info("openrouter")
+        finally:
+            server.api_key = None
+        assert isinstance(rejected, ProviderFailure)
+        assert rejected.status is ProbeStatus.UNAUTHORIZED and rejected.message
+        assert registry.info("ollama") is None
+        server.list_status = 500
+        try:
+            failed = Registry({"generic": ProviderConfig(name="generic", url=server.url)}).info(
+                "generic"
+            )
+            assert isinstance(failed, ProviderFailure) and failed.status is ProbeStatus.ERROR
+        finally:
+            server.list_status = None
+
+
+class TestWindowsAndState:
+    def test_a_cold_model_is_loaded_before_its_row_is_read(self) -> None:
+        # `ready` is what a turn reads: an engine that manages loads and
+        # does not run the model loads it first, so the window a prompt
+        # is cut to is the runner's — Ollama sizes one as it loads. A
+        # model already running costs no load; a provider that manages
+        # nothing answers as `get` does.
+        server = ModelServer(models=("alpha",), managed=True)
+        server.contexts["alpha"] = 32768
+        try:
+            client = OllamaClient(_config(server, "ollama"))
+            cold = client.models.get("alpha")
+            assert cold is not None and cold.state is ModelState.UNLOADED
+            assert cold.max_context is None
+            row = client.models.ready("alpha")
+            assert row is not None and row.state is ModelState.LOADED
+            assert row.max_context == 32768
+            assert server.posts.count("/api/generate") == 1
+            client.models.ready("alpha")
+            assert server.posts.count("/api/generate") == 1
+            plain = GenericClient(_config(server, "generic")).models.ready("alpha")
+            assert plain is not None and plain.state is ModelState.UNKNOWN
+            assert server.posts.count("/api/generate") == 1
+        finally:
+            server.close()
+
+    def test_ollama_lists_a_runner_without_a_window_as_loading(self) -> None:
+        # ps lists a runner from the moment its load starts and states
+        # its context length only once it serves; a turn on one waits
+        # for it as on a cold model.
+        server = ModelServer(models=("alpha", "beta"), managed=True)
+        server.loaded = {"alpha"}
+        server.loading = {"beta"}
+        server.contexts["beta"] = 16384
+        try:
+            client = OllamaClient(_config(server, "ollama"))
+            rows = {r.name: r for r in client.models.list()}
+            assert rows["alpha"].state is ModelState.LOADED
+            assert (rows["beta"].state, rows["beta"].max_context) == (ModelState.LOADING, None)
+            row = client.models.ready("beta")
+            assert row is not None and (row.state, row.max_context) == (ModelState.LOADED, 16384)
+        finally:
+            server.close()
+
+    def test_ollama_reads_the_card_again_when_the_digest_changes(self) -> None:
+        # A re-pull replaces a tag's content in place; the listing's
+        # digest says so, and the next read asks the card again.
+        server = ModelServer(models=("alpha",), managed=True)
+        server.capabilities["alpha"] = ["completion"]
+        try:
+            client = OllamaClient(_config(server, "ollama"))
+            client.models.get("alpha")
+            client.models.get("alpha")
+            assert server.posts.count("/api/show") == 1
+            server.capabilities["alpha"] = ["completion", "vision"]
+            client.models.list()
+            row = client.models.get("alpha")
+            assert server.posts.count("/api/show") == 1  # the same weights: the card stands
+            assert row is not None and row.capabilities is not None
+            assert row.capabilities.vision is False
+            server.digests["alpha"] = "sha256:other"
+            client.models.list()
+            row = client.models.get("alpha")
+            assert server.posts.count("/api/show") == 2
+            assert row is not None and row.capabilities is not None
+            assert row.capabilities.vision is True
+        finally:
+            server.close()
+
+    def test_llamacpp_single_mode_reads_its_entry_again(self) -> None:
+        # A one-model read re-reads the one entry: a server restarted
+        # with another window is noticed; one serving another model is
+        # not answered for, and the cached word stands until a listing
+        # drops it.
+        server = ModelServer(models=("model.gguf",))
+        server.window = 4096
+        try:
+            client = LlamaCppClient(_config(server, "llamacpp"))
+            assert client.models.list()[0].max_context == 4096
+            server.window = 2048
+            row = client.models.get("model.gguf")
+            assert row is not None and row.max_context == 2048
+            server.models = ["other.gguf"]
+            row = client.models.get("model.gguf")
+            assert row is not None and row.max_context == 2048
+            assert [r.name for r in client.models.list()] == ["other.gguf"]
+            assert client.models.get("model.gguf") is None
+        finally:
+            server.close()
+
+    def test_the_generic_provider_reads_a_served_window_where_one_is_listed(self) -> None:
+        # The vLLM extension, and llama.cpp's meta: a window from a
+        # server the generic provider cannot otherwise ask.
+        server = ModelServer(models=("vllm", "llama", "plain"))
+        server.extras = {
+            "vllm": {"max_model_len": 4096},
+            "llama": {"meta": {"n_ctx": 2048, "n_ctx_train": 8192}},
+        }
+        try:
+            rows = {r.name: r for r in GenericClient(_config(server, "generic")).models.list()}
+            assert (rows["vllm"].max_context_loaded, rows["vllm"].max_context) == (4096, 4096)
+            assert (rows["llama"].max_context_catalogue, rows["llama"].max_context) == (8192, 2048)
+            assert rows["plain"].max_context is None
+        finally:
+            server.close()
+
+    def test_omlx_takes_a_cap_stated_alone_as_a_guess(self) -> None:
+        # The serving cap is the window only beside the model's own
+        # length; alone it is the server's default for a length it could
+        # not discover, and the budget stays unknown.
+        server = ModelServer(models=("known", "guessed"))
+        server.status = True
+        server.unstated = {"guessed"}
+        try:
+            rows = {r.name: r for r in OmlxClient(_config(server, "omlx")).models.list()}
+            assert rows["known"].max_context == 8192
+            assert (rows["guessed"].max_context, rows["guessed"].max_context_catalogue) == (
+                None,
+                None,
+            )
+        finally:
+            server.close()
+
+
 def _config(server: ModelServer, kind: str, **fields: str) -> ProviderConfig:
     return ProviderConfig(name=kind, url=server.url, **fields)  # type: ignore[arg-type]
 
@@ -1524,11 +1899,12 @@ def _interrupt() -> None:
 
 
 def _filed(sink: Sink, status: str, *, within: float) -> bool:
-    """Whether the take filed `status` within `within` seconds: the
-    filing happens in the pump's thread, after the cut wakes it."""
+    """Whether the take filed a status opening with `status` within
+    `within` seconds: the filing happens in the pump's thread, after
+    the cut wakes it."""
     deadline = time.monotonic() + within
     while time.monotonic() < deadline:
-        if sink.statuses and sink.statuses[-1] == status:
+        if sink.statuses and sink.statuses[-1].startswith(status):
             return True
         time.sleep(0.01)
     return False

@@ -51,129 +51,61 @@ Tentative roadmap: [ROADMAP.md](https://github.com/enclavum/otaku/blob/main/ROAD
 
 ### Added
 
-- A cloud key can live in the shell instead of `providers.toml`: OpenRouter reads
-  `OPENROUTER_API_KEY`, NanoGPT `NANOGPT_API_KEY`, LM Studio `LMSTUDIO_API_KEY`, omlx
-  `OMLX_API_KEY`, Ollama `OLLAMA_API_KEY`, llama.cpp `LLAMACPP_API_KEY`, KoboldCpp
-  `KOBOLDCPP_API_KEY`, and the Generic OpenAI provider `GENERIC_API_KEY`. A key typed into the
-  provider panel wins over the variable, and clearing it there uncovers the variable again; the
-  variable is never written to the file. `/info` and `/balance` count a key from either source,
-  and a catalog whose variable is set is in the picker from the first launch that finds it.
-- When the llama.cpp or KoboldCpp section is first written, it takes the port the server was
-  actually launched with, read off the running process, rather than the engine's default — a
-  release build's name (`koboldcpp-mac-arm64`), a `python koboldcpp.py` launch, a path with
-  spaces in it and KoboldCpp's port written positionally, as its own docs spell it, included;
-  where several servers of the name run, the lowest port, since a llama.cpp router's children
-  sit on ephemeral ones.
-- llama.cpp in router mode (`llama-server --models-dir`) lists the directory's models in the
-  picker and loads and unloads them there, the way Ollama and omlx do. A model the router put to
-  sleep counts as loaded, and a load that failed says so with the exit code.
-- `/info` reports what the model can do as its engine says it: whether it takes images, how its
-  thinking is set, and whether it completes raw text — `yes`, `no`, the levels, `on / off`, `token
-  budget`, or `unknown` where the engine cannot say, which is the Generic OpenAI provider's
-  every row. llama.cpp is asked through its template (`/apply-template`): what changes the prompt
-  is what the template reads. Unknown is never taken for allowed. Text completion is `no` on
-  Ollama: its `/v1/completions` wraps the prompt as a chat turn and thinks unseen, so no raw
-  continuation exists there.
-- `/set` accepts three more sampling parameters: `top_k`, `min_p` and `repetition_penalty`. omlx
-  and KoboldCpp take them as sent; llama.cpp and LM Studio spell the penalty `repeat_penalty`, and
-  the provider sends it so; Ollama's OpenAI-compatible endpoint ignores all three (set those in a
-  Modelfile instead).
-- A provider failure is filed in the error log with its traceback — a server that could not be
-  reached or refused a request, a rejected key, a model that would not load, a reply that broke
-  off — under the provider's name and what the request was for, so the reason behind a dash in
-  the picker or a failed turn can be read after the fact.
-- `otaku web` serves over HTTPS with `https = true` in `[web]`. A self-signed certificate is
-  generated into the state dir's `cert/` the first time it is needed and kept from then on; a
-  certificate of your own — mkcert, `tailscale cert` — replaces the two files there. A folder
-  holding only one of them, or a pair that will not load, stops the launch with a sentence rather
-  than being written over.
-- `password` in `[web]` makes the page ask for it before it shows anything. A sign-in lasts 4
-  hours, or 30 days with "stay signed in" ticked, and Sign out sits at the foot of the contents.
-  A password typed into `config.toml` is replaced by an scrypt hash at the next launch.
-- The address `otaku web` prints says when a password is set, and on an address other than this
-  machine's, what it is missing — TLS, a password — whichever banner size is on.
-- `otaku web` answers Ctrl+D as it answers Ctrl+C, and Ctrl+R stops it and serves again on
-  fresh sources — a restart in place, the page reconnecting on its own. `/web` in the chat
-  takes Ctrl+D too.
+- Provider API keys can come from the environment: `OPENROUTER_API_KEY`, `NANOGPT_API_KEY`,
+  `LMSTUDIO_API_KEY`, `OMLX_API_KEY`, `OLLAMA_API_KEY`, `LLAMACPP_API_KEY`, `KOBOLDCPP_API_KEY`,
+  `GENERIC_API_KEY`. A key typed into the panel wins; the variable is never written to the file.
+- The llama.cpp and KoboldCpp sections are first written with the port the running server was
+  launched with.
+- llama.cpp in router mode (`llama-server --models-dir`): its models are listed, loaded and
+  unloaded from the picker.
+- `/info` reports what the model can do: vision, text completion, and how its thinking is set —
+  the levels, `on / off`, `token budget` — or `unknown` where the engine cannot say.
+- Three more sampling parameters: `top_k`, `min_p` and `repetition_penalty`.
+- `stop` takes several strings, typed as JSON strings: `/set parameter stop "\nUser:" "END"`.
+- A provider failure is filed in the error log with its traceback.
+- `otaku web` serves over HTTPS with `https = true` in `[web]`: a self-signed certificate is
+  generated into the state dir's `cert/`, or your own pair goes there.
+- `password` in `[web]` protects the page. A sign-in lasts 4 hours, or 30 days with "stay signed
+  in".
+- `otaku web` quits on Ctrl+D as on Ctrl+C, and restarts on fresh sources on Ctrl+R.
 
 ### Changed
 
-- A model's context size is two figures, not one: the model's own maximum, as its catalog or
-  card states it, and the context size the loaded instance serves, which is what a request gets
-  and what the context budget reads, under the `max_context` setting as before. The picker's
-  column shows the model's own — KoboldCpp states none, and Ollama's arrives from the card once
-  `/info` has asked for it — and `/info` shows both when known.
-- A request refused with a 400 goes out again without the reasoning knobs only when the server's
-  message names them — a model whose reasoning is mandatory refusing `none`, an engine that
-  rejects the field. A context overflow fails at once instead of going out twice.
-- `/set think` is no longer refused on KoboldCpp or LM Studio. A level goes out on whatever
-  knobs the engine reads: KoboldCpp takes `reasoning_effort` and the template's flag, and its
-  newer builds spend it as a thinking budget; LM Studio takes `reasoning_effort` since its 0.4.8
-  and hands it to the models that expose reasoning, ignoring it on the others.
-- A failed turn, a refused load and a provider panel that cannot save now say one sentence in
-  the provider's own words: which provider could not be reached, which HTTP status it refused
-  with and what the server said, whose key was rejected, or that the model declined and why.
-- The web API spells its provider and model fields the way the backend does: the panel's
-  `engines` array is `providers` and a card's `name` is `id`, a model's `can_load_unload` is
-  `can_manage` and its `context` is `max_context_catalogue`, the session's `context` is
-  `max_context` and its `engine` is `provider`, and the play event `thinking` is `reasoning`.
-  A provider card carries a `capabilities` object — whether it manages models, counts tokens
-  exactly, honours prompt-cache marks, and which `/set` parameters its wire reads — and each of
-  its models carries its own: vision, audio, the reasoning efforts, switch and budget, text
-  completion, structured output. The page's `.otk-thinking` class, which a `custom.css` may target, is `.otk-reasoning`.
-- Request-log lines file an answer's `status` and `reasoning` where they filed `outcome` and
-  `thinking`, and a failed answer's status carries the provider's sentence rather than the
-  exception's name; lines written before still read.
-- The web API's status endpoint is `/api/status`; it was `/api/alive`.
-- A new config.toml spells `[web] host` as `localhost`, and the key's comment says what the
-  alternative, `0.0.0.0`, opens; a file holding `127.0.0.1` binds the same.
-- The thinking level is the model's, not the session's: `/set think` sets it for the model
-  in use, it follows the model as the parameters do, and it lives in `models.toml` beside
-  them. The level `state.toml` held moves to the remembered model on the first launch.
-  `/set think` offers and takes only the levels the model's engine says reach it. A model
-  with no level set sends nothing, where every model sent `none` before; `/set think unset`
-  forgets the level, which is what `/set think default` was.
-- `/set parameter`'s menu and the settings page list only the parameters the provider's wire
-  reads; any known parameter can still be set, and the wire sends the ones it reads.
+- The thinking level is the model's, kept in `models.toml`; the level `state.toml` held moves to
+  the remembered model at the first launch. `/set think` offers only what the model takes: its
+  levels, `off`/`on` where it only switches, a number of tokens where the engine holds a budget
+  (0 = off). `unset` replaces `default` and sends nothing.
+- `/set parameter` offers only what reaches the model in use; any known parameter can still be
+  set, and one the provider does not read is kept for the model and said so. The bounds are the
+  engine's own: a local engine takes any temperature.
+- A model's context is two figures: its own maximum and what the loaded instance serves. A turn
+  on a model that is not loaded loads it first, so the prompt is cut to the real window.
+- A reply cut at `max_tokens` is said so under it. A cancelled reply counts in `/usage`.
+- An error names the provider and carries the server's whole explanation, and says when to try
+  again where the server said; the lore pass waits out a rate limit and a busy engine.
+- The web page stays live while a model loads, and with stream smoothing off. Loading a model
+  can be cut short; typing cuts the lore pass and the warm-up at once.
+- A provider that does not answer says why in both pickers. A model Ollama serves from ollama.com
+  counts as remote.
+- The web API renames its fields after the backend: `engines` is `providers`, a card's `name` is
+  `id`, `can_load_unload` is `can_manage`, `context` is `max_context_catalogue` on a model and
+  `max_context` on the session, `engine` is `provider`, the play event `thinking` is `reasoning`,
+  `/api/alive` is `/api/status`, and the page's `.otk-thinking` class is `.otk-reasoning`.
+- A new config.toml spells `[web] host` as `localhost`.
 
 ### Fixed
 
-- The thinking level never reached llama.cpp or omlx as an effort: both forward
-  `chat_template_kwargs` into the chat template and read no `reasoning_effort` of their own, so
-  only the on/off flag ever arrived, and 0.4.3's "llama.cpp takes the levels" was wrong. The
-  effort now rides into the template as a variable, beside the flag, for the templates that
-  grade their thinking (gpt-oss's); a template that reads none still gets on and off.
-- A reply cut short by the engine mid-stream — Ollama's runner failing, say — was filed as a
-  complete answer. A stream that ends without the protocol's `[DONE]` is now a lost connection.
-- With smoothing on, cancelling a reply while the model was still reading the prompt did not
-  reach the engine: the connection stayed open until the first token came, the engine finished
-  the prefill for nobody, and the next turn queued behind it. The cancel now cuts the connection
-  at once, before the first byte included; the page's Stop reaches it during that wait too, where
-  it used to be noticed only at the first token.
-- A Ctrl+C mid-reply with smoothing on kept the words on screen but not in the story: the
-  interrupt landed inside the wait, past the point that records a cut-off reply. It is recorded
-  now, as a closed stream's partial is.
-- `OLLAMA_HOST` is read the way Ollama reads it: an `http://` or `https://` scheme is kept and
-  supplies the port when none is written, a path is kept, a bare IPv6 address is bracketed, and
-  a bare number is a host, as it is to Ollama.
-- The picker offered models no story can be played on: Ollama's embedding models, and omlx's
-  embedding, reranker and audio models, each answering the first turn with a 400. They are no
-  longer listed. KoboldCpp with nothing loaded listed a model named `inactive`; it lists none.
-- A KoboldCpp generation that failed on the server ended as a complete reply: it stops with
-  `finish_reason: error` and no error text, which now ends the turn as a reply that broke off.
-- A local engine's url typed without `/v1` listed its models — Ollama's and LM Studio's native
-  surfaces answer at the root — and then failed every turn with a 404. The OpenAI surface of
-  llama.cpp, KoboldCpp, Ollama, omlx and LM Studio is now taken at `/v1` under whatever url the
-  section names; `/info` shows the url in use.
-- A provider url that cannot be spelled (a letter in the port) was a traceback; it is the
-  provider's could-not-reach sentence.
-- A section url a proxy redirects — `http` to `https`, a trailing slash — was taken as the
-  answer and failed as not JSON. Redirects are followed.
-- A key with a character a header cannot carry, a pasted non-breaking space say, was a
-  traceback. It is a sentence naming the position.
-- A launch that sealed an API key typed into `providers.toml` left the plain key behind in the
-  dated backup it wrote to `configs/backups/`. A secret an edit replaces is now redacted in that
-  backup, and one it leaves alone is kept.
+- `/set think` had no effect on llama.cpp and omlx beyond on and off, and `none` did not switch
+  thinking off on every model.
+- A reply the engine cut short mid-stream was filed as complete.
+- With smoothing on, a cancel during the prefill did not reach the engine, and a Ctrl+C mid-reply
+  was not recorded.
+- `OLLAMA_HOST` is read the way Ollama reads it: scheme, port, path, a bare IPv6 address.
+- The picker offered embedding, reranker and audio models, and KoboldCpp's `inactive`.
+- A local engine's url typed without `/v1` failed every turn.
+- A url with a letter in its port, a url a proxy redirects, and a key with a character a header
+  cannot carry each ended in a traceback or a wrong failure.
+- A launch that sealed an API key left the plain key in the dated backup it wrote.
 
 ## [0.4.3] - 2026-09-08
 

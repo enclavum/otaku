@@ -39,7 +39,9 @@ class TestParamsVocabulary:
     def test_every_provider_declares_what_it_reads_in_the_set_vocabulary(self) -> None:
         # A declaration outside the vocabulary names a parameter nobody
         # can set; one short of the protocol's own denies what every
-        # OpenAI endpoint reads.
+        # OpenAI endpoint reads — but for the penalties, of which an
+        # engine may have one sampler (KoboldCpp's presence term).
         for kind, client_class in ALL_CLIENTS.items():
             declared = client_class.completion_class.supported_params
-            assert PROTOCOL_PARAMS <= declared <= set(PARAMETERS), kind
+            assert declared <= set(PARAMETERS), kind
+            assert PROTOCOL_PARAMS - {"presence_penalty", "frequency_penalty"} <= declared, kind

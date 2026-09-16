@@ -7,7 +7,6 @@ call, so an edit is live at once; a write that could not land is SAID,
 not swallowed.
 """
 
-from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Literal
 
@@ -22,6 +21,7 @@ from otaku.providers import (
     OpenAIClient,
     ProviderConfig,
     ProviderError,
+    ProviderFailure,
     ProviderInfo,
 )
 from otaku.settings.migrations import PROMPT_CACHE_ROW, surgery
@@ -74,16 +74,31 @@ def listed_spec(session: Session) -> str:
     return f"{session.provider}/{found.name}"
 
 
-def get_providers(
-    session: Session, skip: set[str] | None = None
-) -> tuple[list[ProviderInfo], set[str]]:
-    """Every reachable provider with its models, plus the reachable set —
-    the picker's one query; `skip` lets it fetch cloud catalogs after
-    its screen is up."""
+@dataclass(frozen=True)
+class Panel:
+    """The picker's one query answered: every reachable provider with
+    its models, the reachable set, and for each provider asked that
+    could not answer, the package's sentence for why — a dead server, a
+    rejected key, an error status — so a picker says more than "not
+    connected"."""
+
+    rows: list[ProviderInfo]
+    reachable: set[str]
+    failures: dict[str, str]
+
+
+def get_providers(session: Session, skip: set[str] | None = None) -> Panel:
+    """Every reachable provider with its models, and why the others are
+    not — the picker's one query; `skip` lets it fetch cloud catalogs
+    after its screen is up."""
     registry = session._providers_registry
     asked = [name for name in registry.list() if name not in (skip or ())]
-    rows = [row for row in registry.map(registry.info, asked) if row is not None]
-    return rows, {row.id for row in rows}
+    answers = registry.map(registry.info, asked)
+    rows = [answer for answer in answers if isinstance(answer, ProviderInfo)]
+    failures = {
+        answer.id: answer.message for answer in answers if isinstance(answer, ProviderFailure)
+    }
+    return Panel(rows, {row.id for row in rows}, failures)
 
 
 @dataclass(frozen=True)
@@ -230,11 +245,23 @@ def load(session: Session, provider: str, model: str) -> None:
     sentence (not managed, the provider unreachable, the server's own
     error text) — no transport
     exception type ever crosses the boundary."""
-    _perform(_managed(session, provider).models.load, model, provider)
+    models = _managed(session, provider).models
+    # The session's idle hook is ticked while the engine works: the
+    # web's one thread answers its reads meanwhile, and a page that left
+    # cuts the wait. A failure is the provider package's own sentence,
+    # which names the provider.
+    try:
+        models.load(model, on_idle=session._on_idle)
+    except ProviderError as e:
+        raise Refused(str(e)) from e
 
 
 def unload(session: Session, provider: str, model: str) -> None:
-    _perform(_managed(session, provider).models.unload, model, provider)
+    models = _managed(session, provider).models
+    try:
+        models.unload(model, on_idle=session._on_idle)
+    except ProviderError as e:
+        raise Refused(str(e)) from e
 
 
 def _managed(session: Session, provider: str) -> OpenAIClient:
@@ -244,13 +271,3 @@ def _managed(session: Session, provider: str) -> OpenAIClient:
     if not client.capabilities.model_management:
         raise Refused(f"{provider} cannot load or unload models.")
     return client
-
-
-def _perform(action: Callable[[str], None], model: str, provider: str) -> None:
-    """One load/unload call, its failures curated into Refused — shared
-    by both doors, so the wording cannot fork. The sentence is the
-    provider package's own, which names the provider."""
-    try:
-        action(model)
-    except ProviderError as e:
-        raise Refused(str(e)) from e

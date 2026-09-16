@@ -291,7 +291,7 @@ class Worker:
         a full context window BILLED for one token, so it is never
         sent; nor to the generic provider, whose url could name one."""
         assert self._deferred is not None
-        if client.locality is not Locality.LOCAL:
+        if client.locality_of(job.model) is not Locality.LOCAL:
             return
         if not job.messages or self._deferred.is_set():
             return
@@ -299,7 +299,11 @@ class Worker:
         self._log.record(f"warm-up started (story {job.story_id})")
         self._set_status("warming the prompt cache")
         try:
-            found = client.models.get(job.model)
+            # Loaded first where cold, as the turn loads it: what is
+            # warmed must be the prefix the turn sends, cut to the same
+            # window (`OpenAIModels.ready`).
+            deferred = self._deferred
+            found = client.models.ready(job.model, on_idle=lambda: not deferred.is_set())
             max_context = found.max_context if found else None
         except Exception:
             max_context = None

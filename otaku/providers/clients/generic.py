@@ -1,8 +1,10 @@
 """The generic provider: any server behind the OpenAI protocol, by url
 and key, over the protocol alone. The base listing reads /models, with
-the model's own max context where an entry carries `context_length`, and
-nothing an engine's API would add — no state, no sizes, every
-capability unknown, which a reader treats as no. Permissive, never
+the model's own max context where an entry carries `context_length` or
+llama.cpp's `meta`, and the served window where it carries the vLLM
+extension `max_model_len` or that `meta` — and nothing an engine's API
+would add: no state, no sizes, every capability unknown, which a reader
+treats as no. Permissive, never
 restrictive: what the server reads cannot be known, so everything the
 app can send goes out — every parameter, the penalty under both its
 spellings, a thinking level on every knob an engine could read — in

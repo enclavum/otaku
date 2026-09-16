@@ -17,9 +17,14 @@ from otaku.formatting import Money
 from otaku.providers.http import ASK_TIMEOUT, Http, positive_int
 from otaku.providers.openai import frames, reasoning
 from otaku.providers.openai.auth import OpenAIAuth
-from otaku.providers.openai.client import Locality, OpenAIClient
-from otaku.providers.openai.completion import PROTOCOL_PARAMS, SAMPLER_PARAMS, OpenAICompletion
-from otaku.providers.openai.models import ModelCapabilities, ModelInfo, OpenAIModels
+from otaku.providers.openai.client import OpenAIClient
+from otaku.providers.openai.completion import (
+    PROTOCOL_PARAMS,
+    SAMPLER_PARAMS,
+    Bounds,
+    OpenAICompletion,
+)
+from otaku.providers.openai.models import Locality, ModelCapabilities, ModelInfo, OpenAIModels
 from otaku.settings.providers import ProviderConfig
 
 
@@ -78,6 +83,9 @@ class NanoGptModels(OpenAIModels):
 
 class NanoGptCompletion(OpenAICompletion):
     supported_params = PROTOCOL_PARAMS | SAMPLER_PARAMS
+    # The catalog refuses a top_k under 1 with a 400 before the
+    # provider sees it, and documents the repetition penalty as -2 to 2.
+    bounds: ClassVar[dict[str, Bounds]] = {"top_k": (1, None), "repetition_penalty": (-2, 2)}
     # Inline `cache_control` reaches the models that honour it and is
     # dropped elsewhere: marking is safe across the catalog.
     can_mark_cache = True

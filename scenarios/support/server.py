@@ -16,6 +16,7 @@ wire promise is checked against it — and its headers in
 
 import contextlib
 import json
+import ssl
 import threading
 import time
 from collections.abc import Callable
@@ -42,7 +43,13 @@ class ModelServer:
     way the real engine mutates it. `chunk_delay` slows the stream down
     for stories that act mid-stream."""
 
-    def __init__(self, models: tuple[str, ...] = ("test-model",), *, managed: bool = False) -> None:
+    def __init__(
+        self,
+        models: tuple[str, ...] = ("test-model",),
+        *,
+        managed: bool = False,
+        tls: ssl.SSLContext | None = None,
+    ) -> None:
         self.models = list(models)
         self.managed = managed
         self.loaded: set[str] = set()
@@ -57,6 +64,7 @@ class ModelServer:
         self.status = False  # True → serve omlx's rich /v1/models/status
         self.status_code: int | None = None  # set → /models/status answers this status instead
         self.types: dict[str, str] = {}  # omlx status: model_type per model ("vlm", "llm")
+        self.config_types: dict[str, str] = {}  # omlx status: the config's own model_type
         self.thinking: dict[str, bool] = {}  # omlx status: thinking_default per model
         # What a listing entry carries beyond its id and context — the
         # catalogs' capability fields, merged into the entry as sent.
@@ -71,6 +79,9 @@ class ModelServer:
         # or the mask a wrong key gets; None → 404
         self.kobold_model: str | None = None
         self.capabilities: dict[str, list[str]] = {}  # ollama's /api/show capabilities per model
+        self.loading: set[str] = set()  # ollama: runners listed by /api/ps with no window yet
+        self.digests: dict[str, str] = {}  # ollama: a tag's digest; absent → one made of its name
+        self.unstated: set[str] = set()  # omlx: models whose own length the status leaves null
         # LM Studio's registry: `reasoning.allowed_options` per model
         self.reasoning_options: dict[str, list[str]] = {}
         self.remote: set[str] = set()  # ollama tags: the names served by ollama.com
@@ -82,7 +93,12 @@ class ModelServer:
         self.router_sleeping: set[str] = set()  # loaded names the router put to sleep
         self.router_loading: set[str] = set()  # names loading by themselves: loaded once listed
         self.router_downloading: set[str] = set()  # names fetched first: loading once listed
+        self.router_stuck: set[str] = set()  # names whose load never ends: loading on every listing
+        # seconds a load or unload door waits before answering — the
+        # engine at work, on every engine that has such a door
+        self.load_delay = 0.0
         self.no_done = False  # True → the stream ends cleanly without [DONE]
+        self.finish = "stop"  # the finish reason the last frame carries; "length" for a cut reply
         self.decline: str | None = None  # set → the stream is one error frame, no content
         # set → a chat POST is answered 200 with this bare `{"error": …}`
         # object and no stream: LM Studio's answer to a wrong path
@@ -108,6 +124,11 @@ class ModelServer:
         # request and serve its bare retry.
         self.refuse: Callable[[dict[str, Any]], int | None] = lambda body: None
         self.refusal = REFUSAL  # the message a refusal carries; a test makes it an engine's
+        # A refusal's whole body, in place of the `error.message` envelope
+        # — OpenRouter's metadata, KoboldCpp's `detail`; and its
+        # Retry-After header, as the server would spell it.
+        self.refusal_body: dict[str, Any] | None = None
+        self.retry_after: str | None = None
         self.requests: list[dict[str, Any]] = []
         self.request_headers: list[dict[str, str]] = []  # one row per POST, same order
         self.posts: list[str] = []  # every POST path, same order
@@ -150,11 +171,20 @@ class ModelServer:
                                     "estimated_size": outer.sizes.get(name, 1_048_576),
                                     "loaded": name in outer.loaded,
                                     "is_loading": False,
-                                    "model_context_length": outer.contexts.get(name, 8192),
+                                    "model_context_length": (
+                                        None
+                                        if name in outer.unstated
+                                        else outer.contexts.get(name, 8192)
+                                    ),
                                     "max_context_window": outer.contexts.get(name, 8192),
                                     **(
                                         {"model_type": outer.types[name]}
                                         if name in outer.types
+                                        else {}
+                                    ),
+                                    **(
+                                        {"config_model_type": outer.config_types[name]}
+                                        if name in outer.config_types
                                         else {}
                                     ),
                                     **(
@@ -253,6 +283,8 @@ class ModelServer:
                                 state = "loading"
                                 outer.router_loading.discard(name)
                                 outer.loaded.add(name)
+                            if name in outer.router_stuck:
+                                state = "loading"
                             entry["status"] = {"value": state}
                             if name in outer.router_failed:
                                 entry["status"]["failed"] = True
@@ -293,15 +325,21 @@ class ModelServer:
                         self.send_response(outer.ps_status)
                         self.end_headers()
                         return
+                    # A runner is listed from the moment its load starts,
+                    # its window stated only once it serves.
                     self._json(
                         {
                             "models": [
                                 {
                                     "name": name,
                                     "size": outer.sizes.get(name, 1_000_000),
-                                    "context_length": outer.contexts.get(name, 8192),
+                                    **(
+                                        {"context_length": outer.contexts.get(name, 8192)}
+                                        if name not in outer.loading
+                                        else {}
+                                    ),
                                 }
-                                for name in sorted(outer.loaded)
+                                for name in sorted(outer.loaded | outer.loading)
                             ]
                         }
                     )
@@ -315,6 +353,7 @@ class ModelServer:
                                 {
                                     "name": name,
                                     "size": outer.sizes.get(name, 1_000_000),
+                                    "digest": outer.digests.get(name, f"sha256:{name}"),
                                     **(
                                         {"capabilities": outer.capabilities[name]}
                                         if name in outer.capabilities
@@ -397,6 +436,8 @@ class ModelServer:
                     and "/v1/models/" in posted
                 ):
                     # omlx's doors: the model is in the path, the state flips.
+                    if outer.load_delay:
+                        time.sleep(outer.load_delay)
                     name = posted.split("/v1/models/", 1)[1].rsplit("/", 1)[0]
                     (outer.loaded.add if posted.endswith("/load") else outer.loaded.discard)(name)
                     self._json({"status": "ok"})
@@ -405,6 +446,8 @@ class ModelServer:
                     ("/api/v1/models/load", "/api/v1/models/unload")
                 ):
                     # LM Studio's doors: a model to load, an instance to unload.
+                    if outer.load_delay:
+                        time.sleep(outer.load_delay)
                     if outer.unload_status is not None and posted.endswith("/unload"):
                         self.send_response(outer.unload_status)
                         self.end_headers()
@@ -440,18 +483,24 @@ class ModelServer:
                 if outer.managed and self.path.rstrip("/").endswith("/api/generate"):
                     # Ollama's load door: an empty prompt with a keep_alive
                     # loads the model; keep_alive 0 unloads it.
+                    if outer.load_delay:
+                        time.sleep(outer.load_delay)
                     if body.get("keep_alive") == 0:
                         outer.loaded.discard(str(body.get("model")))
                     else:
                         outer.loaded.add(str(body.get("model")))
+                        outer.loading.discard(str(body.get("model")))
                     self._json({})
                     return
                 status = outer.refuse(body)
                 if status is not None:
                     self.send_response(status)
                     self.send_header("Content-Type", "application/json")
+                    if outer.retry_after is not None:
+                        self.send_header("Retry-After", outer.retry_after)
                     self.end_headers()
-                    self.wfile.write(json.dumps({"error": {"message": outer.refusal}}).encode())
+                    refusal = outer.refusal_body or {"error": {"message": outer.refusal}}
+                    self.wfile.write(json.dumps(refusal).encode())
                     return
                 result = outer.script(body)
                 thinking, text = result if isinstance(result, tuple) else ("", result)
@@ -498,6 +547,10 @@ class ModelServer:
                         piece = text[i : i + third]
                         choice = {"text": piece} if as_text else {"delta": {"content": piece}}
                         self._event({"choices": [choice]})
+                    # Why the model stopped, on a frame of its own as the
+                    # engines send it.
+                    ended = {"text": ""} if as_text else {"delta": {}}
+                    self._event({"choices": [{**ended, "finish_reason": outer.finish}]})
                     if as_text and outer.pricing is not None:
                         prompt_count, completion_count = outer.pricing
                         pricing = {"inputTokens": prompt_count, "outputTokens": completion_count}
@@ -514,7 +567,13 @@ class ModelServer:
                 self.wfile.write(b"data: " + json.dumps(payload).encode() + b"\n\n")
 
         self._httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        self.url = f"http://127.0.0.1:{self._httpd.server_address[1]}/v1"
+        scheme = "http"
+        if tls is not None:
+            # A server behind its own certificate — KoboldCpp's --ssl, a
+            # fronted omlx — which a client trusts or names its refusal of.
+            self._httpd.socket = tls.wrap_socket(self._httpd.socket, server_side=True)
+            scheme = "https"
+        self.url = f"{scheme}://127.0.0.1:{self._httpd.server_address[1]}/v1"
         # The poll interval is `shutdown`'s latency: the loop only notices
         # the request between selects, and the server is torn down once
         # per test. The stdlib default of half a second would cost the
@@ -526,6 +585,9 @@ class ModelServer:
         self.script = default_script
         self.refuse = lambda body: None
         self.refusal = REFUSAL
+        self.refusal_body = None
+        self.retry_after = None
+        self.finish = "stop"
         self.requests.clear()
         self.request_headers.clear()
         self.posts.clear()

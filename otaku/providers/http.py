@@ -35,12 +35,15 @@ all completes it in milliseconds.
 from __future__ import annotations
 
 import contextlib
+import datetime
+import email.utils
 import socket
+import ssl
 import threading
 import time
-from collections.abc import Generator, Iterable
+from collections.abc import Callable, Generator, Iterable
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, TypeVar
 
 import httpcore
 import httpx
@@ -52,6 +55,10 @@ ASK_TIMEOUT = 10.0  # one question, one answer: a listing, a count, a balance
 PROBE_TIMEOUT = 1.5  # a best-effort native read, never worth a turn's wait
 LISTING_TIMEOUT = 5.0  # the picker's fan-out: one dead provider costs at most this
 REPLY_TIMEOUT = 600.0  # a reply, read chunk by chunk for as long as a model takes
+LOAD_TIMEOUT = 600.0  # a load or unload, start to finish: weights read from disk, or fetched
+# How often a thread waiting on another's call asks its caller whether
+# anybody still waits (`ticking`).
+_IDLE_TICK = 0.05
 
 # The handshake's own cap, see the module docstring.
 _CONNECT_TIMEOUT = 2.0  # a request that has to get through
@@ -63,6 +70,8 @@ _DETAIL_WIDTH = 300  # how much of a server's explanation a sentence carries
 # The sentences for what never reached the server, or never came back.
 _UNSENDABLE = "A request to {name} could not be encoded: {detail}"
 _SILENT = "{name} took the request but did not answer within {seconds}."
+_T = TypeVar("_T")
+
 _STALLED = "{name} went quiet mid-reply: nothing for {seconds}."
 _SPENT = "{name} did not answer in time."
 
@@ -129,13 +138,14 @@ class Http:
         url: str,
         body: dict[str, Any],
         *,
+        cut: Cut | None = None,
         purpose: str = "",
         timeout: float | None = None,
         quiet: bool = False,
     ) -> Any:
         """POST `body`, parsed, as `get`. With no cap and no budget it
         waits as long as a model load takes."""
-        return self._request("POST", url, body, purpose, timeout, quiet)
+        return self._request("POST", url, body, purpose, timeout, quiet, cut)
 
     def stream(
         self, url: str, body: dict[str, Any], *, timeout: float, cut: Cut | None = None
@@ -203,7 +213,7 @@ class Http:
                 raise StreamCut from e
             if started:
                 raise UnreachableError(f"Lost the connection to {name}.") from e
-            raise UnreachableError(f"Could not reach {name}.") from e
+            raise UnreachableError(_unreached(name, e)) from e
         except UnicodeEncodeError as e:
             raise ProviderError(_UNSENDABLE.format(name=name, detail=e)) from e
 
@@ -224,26 +234,33 @@ class Http:
         purpose: str,
         timeout: float | None,
         quiet: bool,
+        cut: Cut | None = None,
     ) -> Any:
         """One request, parsed, its failure filed under `purpose` — the
         call's own, else the view's. `quiet` answers None to any failure
         instead, with the handshake capped at a second: a best-effort
         probe must not wait on a dead host — and files nothing, so it
-        needs no purpose."""
+        needs no purpose. `cut`, when given, is armed with the
+        connection as a stream's is: cut from another thread, the
+        request ends as `StreamCut`, the caller's own doing — a load
+        nobody waits for any more, above all."""
         if not (purpose or self._purpose) and not quiet:
             raise ValueError("a request needs a purpose")  # nothing to file a failure under
         name = self._name
         try:
             try:
                 capped = self._cap(timeout)
-                response = httpx.request(
-                    method,
-                    url,
-                    json=body,
-                    headers=self._headers,
-                    timeout=_timeout(capped, _QUIET_CONNECT_TIMEOUT if quiet else _CONNECT_TIMEOUT),
-                    follow_redirects=True,
-                )
+                with self._client(cut) as client:
+                    response = client.request(
+                        method,
+                        url,
+                        json=body,
+                        headers=self._headers,
+                        timeout=_timeout(
+                            capped, _QUIET_CONNECT_TIMEOUT if quiet else _CONNECT_TIMEOUT
+                        ),
+                        follow_redirects=True,
+                    )
                 _raise_for_status(response, name)
                 return response.json()
             except httpx.ReadTimeout as e:
@@ -252,10 +269,12 @@ class Http:
                     _SILENT.format(name=name, seconds=format_seconds(capped))
                 ) from e
             except (httpx.HTTPError, httpx.InvalidURL) as e:
+                if cut is not None and cut.asked:
+                    raise StreamCut from e
                 # InvalidURL is httpx's own for a url that cannot be spelled
                 # (a port with a letter in it) — a section's mistake, and a
                 # sentence, never a traceback.
-                raise UnreachableError(f"Could not reach {name}.") from e
+                raise UnreachableError(_unreached(name, e)) from e
             except UnicodeEncodeError as e:
                 # Raised before anything is sent: a header carries ASCII only.
                 raise ProviderError(_UNSENDABLE.format(name=name, detail=e)) from e
@@ -282,6 +301,12 @@ class Http:
             ssl_context=httpx.create_ssl_context(), network_backend=_Cutting(cut)
         )
         return httpx.Client(transport=transport)
+
+    def check_budget(self) -> None:
+        """Raises as unreachable once the view's budget is spent — for a
+        sequence that waits between requests (a poll), whose quiet
+        probes would swallow the spent budget as any other miss."""
+        self._cap(None)
 
     def _cap(self, timeout: float | None) -> float | None:
         """`timeout` under the budget: the shorter of the two, or the one
@@ -327,8 +352,40 @@ class Cut:
 
 
 class StreamCut(Exception):  # noqa: N818 — the reader's own doing, not an error
-    """What `stream` raises in place of the transport's failure when the
-    cut it was handed had been asked for."""
+    """What `stream` (and a request handed a cut) raises in place of the
+    transport's failure when the cut it was handed had been asked for."""
+
+
+def ticking(call: Callable[[], _T], on_idle: Callable[[], bool | None], cut: Cut) -> _T:
+    """`call()`, run on a thread of its own while this one ticks
+    `on_idle` — the one moment a caller's thread is demonstrably free
+    while a sequence it waits on is in flight (a load, above all). The
+    hook may answer False to say nobody waits any more: the sequence
+    is cut then, through `cut`, and ends as the call's cut ends it. A
+    hook must never be the thing that breaks the sequence, so what it
+    raises stops with it. The call's answer, or what it raised."""
+    answer: list[_T] = []
+    trouble: list[BaseException] = []
+
+    def run() -> None:
+        try:
+            answer.append(call())
+        except BaseException as e:  # relayed to the caller, whatever it is
+            trouble.append(e)
+
+    worker = threading.Thread(target=run, name="otaku-ticking", daemon=True)
+    worker.start()
+    while worker.is_alive():
+        worker.join(_IDLE_TICK)
+        if not worker.is_alive():
+            break
+        with contextlib.suppress(Exception):
+            if on_idle() is False:
+                cut.cut()
+                worker.join()
+    if trouble:
+        raise trouble[0]
+    return answer[0]
 
 
 class _Cutting(httpcore.SyncBackend):
@@ -375,23 +432,114 @@ def _raise_for_status(response: httpx.Response, name: str) -> None:
     with contextlib.suppress(httpx.StreamError):
         # A body that could not be read (the connection dropped mid-body)
         # is no explanation, and no reason to leave the error family.
-        detail = response.text
-        # The message of the `{"error": …}` object every server in this
-        # family answers with, out of its envelope — and away from the
-        # account id some carry beside it.
+        data: object = None
         with contextlib.suppress(ValueError):
             data = response.json()
-            failure = data.get("error") if isinstance(data, dict) else None
-            message = failure.get("message") if isinstance(failure, dict) else failure
-            if isinstance(message, str) and message:
-                detail = message
+        detail = explanation(data, response.text)
+    wait = retry_after(response.headers.get("Retry-After"))
     detail_excerpt = _excerpt(detail, _DETAIL_WIDTH)
     raise StatusError(
         f"Refused by {name} with HTTP {status}"
-        + (f": {detail_excerpt}" if detail_excerpt else "."),
+        + (f": {detail_excerpt}" if detail_excerpt else ".")
+        + (f" Try again in {format_seconds(wait)}." if wait else ""),
         status,
         detail=detail,
+        retry_after=wait,
     )
+
+
+def explanation(data: object, text: str = "") -> str:
+    """A server's explanation of a refusal, whole and out of its
+    envelope: the `error` object's message with what OpenRouter files
+    under its `metadata` — the upstream's own words (`raw`) and which
+    provider they came from, a moderation's reasons and the passage it
+    flagged — or the string it answers in place of one; KoboldCpp's
+    `detail`, an object with a `msg` or a string. `text` as it came
+    where no envelope is recognised; "" where there is nothing."""
+    if not isinstance(data, dict):
+        return text
+    failure = data.get("error")
+    if isinstance(failure, str) and failure:
+        return failure
+    if isinstance(failure, dict):
+        said = _said(failure.get("message"))
+        meta = failure.get("metadata")
+        if isinstance(meta, dict):
+            raw = _said(meta.get("raw"))
+            if raw and raw not in said:
+                said = f"{said}: {raw}" if said else raw
+            provider = _said(meta.get("provider_name"))
+            if provider and provider not in said:
+                said = f"{said} ({provider})" if said else provider
+            reasons = meta.get("reasons")
+            named = (
+                ", ".join(r for r in reasons if isinstance(r, str))
+                if isinstance(reasons, list)
+                else ""
+            )
+            if named:
+                said = f"{said} — {named}" if said else named
+            flagged = _said(meta.get("flagged_input"))
+            if flagged:
+                said = f"{said}: {flagged!r}" if said else repr(flagged)
+        if said:
+            return said
+    detail = data.get("detail")
+    if isinstance(detail, dict):
+        msg = _said(detail.get("msg"))
+        if msg:
+            return msg
+    if isinstance(detail, str) and detail:
+        return detail
+    return text
+
+
+def _said(value: object) -> str:
+    """A field's words: a non-empty string, else nothing."""
+    return value if isinstance(value, str) else ""
+
+
+def retry_after(header: str | None) -> float | None:
+    """The seconds a `Retry-After` header asks for: a count, or an HTTP
+    date read as the seconds until it (0 for one that passed); None
+    for no header, or one that says neither."""
+    if not header:
+        return None
+    text = header.strip()
+    try:
+        return max(0.0, float(text))
+    except ValueError:
+        pass
+    try:
+        when = email.utils.parsedate_to_datetime(text)
+    except (TypeError, ValueError, IndexError):
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=datetime.UTC)
+    return max(0.0, (when - datetime.datetime.now(datetime.UTC)).total_seconds())
+
+
+def _tls_reason(exc: BaseException) -> str:
+    """Why TLS failed, where a transport failure is one — the certificate
+    was not accepted, the versions did not meet — as the ssl module
+    names it in the cause chain; "" where TLS was not the failure."""
+    seen: BaseException | None = exc
+    while seen is not None:
+        if isinstance(seen, ssl.SSLError):
+            return str(getattr(seen, "reason", "") or seen)
+        seen = seen.__cause__ or seen.__context__
+    return ""
+
+
+def _unreached(name: str, exc: BaseException) -> str:
+    """The sentence for a server that could not be reached — and why,
+    where the why is TLS: a certificate of the server's own (KoboldCpp's
+    `--ssl`, a fronted omlx) is refused by default, and "could not
+    reach" would send a reader to check the port."""
+    reason = _tls_reason(exc)
+    if reason:
+        return f"Could not reach {name}: its TLS certificate was not accepted ({reason})."
+    return f"Could not reach {name}."
 
 
 def _excerpt(text: str, width: int) -> str:

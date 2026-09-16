@@ -4,6 +4,8 @@ line."""
 
 from pathlib import Path
 
+from otaku.backend.api import play as api_play
+from otaku.backend.api.play import Done
 from otaku.backend.formats import EXPORT_MARKER
 from otaku.backend.paths import Paths
 from scenarios.support import server as scripted
@@ -109,6 +111,27 @@ class TestTurns:
         assert app.session.messages[-1].body == "The hall glows."
 
 
+class TestReplyReport:
+    def test_a_reply_cut_at_the_limit_is_said_so(self, app: App) -> None:
+        # The wire's "length" is a reply the model did not finish: the
+        # turn's end carries the fact and the sentence for it, and the
+        # reply is recorded as it came.
+        app.server.finish = "length"
+        events = list(api_play.submit(app.session, "I enter the hall."))
+        done = events[-1]
+        assert isinstance(done, Done)
+        assert done.report is not None and done.report.stats.finish_reason == "length"
+        assert done.report.truncated and done.report.notice
+        assert done.reply is not None and done.reply.body
+
+    def test_a_finished_reply_has_nothing_to_notice(self, app: App) -> None:
+        events = list(api_play.submit(app.session, "I enter the hall."))
+        done = events[-1]
+        assert isinstance(done, Done)
+        assert done.report is not None and not done.report.truncated
+        assert done.report.notice == "" and done.stats == ""  # verbose is off
+
+
 class TestProviderFailures:
     """What the reader is told when a turn cannot be played: the
     provider package's own sentence, which names the provider and
@@ -120,6 +143,14 @@ class TestProviderFailures:
         out = capsys.readouterr().out
         assert "[ error: Refused by generic with HTTP 503: " in out
         assert "refused by the script" in out
+
+    def test_a_rate_limited_turn_says_when_to_try_again(self, app: App, capsys) -> None:
+        app.server.refuse = lambda body: 429
+        app.server.retry_after = "30"
+        app.play("I enter the hall.")
+        out = capsys.readouterr().out
+        assert "[ error: Refused by generic with HTTP 429: " in out
+        assert "Try again in 30 seconds." in out
 
     def test_a_declining_model_says_so_in_its_words(self, app: App, capsys) -> None:
         app.server.decline = "content filtered"
@@ -506,6 +537,12 @@ class TestCancelAndKeep:
             reply = app.store.stories.get_messages(app.session.story_id)[-1]
             assert reply.role == "assistant"
             assert 0 < len(reply.body) < len(server.script({}))
+            # The prefill was spent: the request is in /usage, with the
+            # time it took and whatever the wire had stated by then.
+            chat = next(
+                t for t in app.store.usage.get_totals(app.session.story_id) if t.purpose == "chat"
+            )
+            assert chat.requests == 1 and chat.seconds > 0
         finally:
             app.close()
 

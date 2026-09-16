@@ -17,13 +17,14 @@ export const PROVIDER = "demo";
 const MODEL_CAPABILITIES = {
   vision: false,
   audio: false,
+  supported_params: null,
   reasoning_efforts: [],
   reasoning_switch: false,
   reasoning_budget: false,
   text_completion: false,
   structured_output: false,
 };
-const MODEL_WORDS = { reasoning_words: "not supported", capability_words: "none" };
+const MODEL_WORDS = { locality: "local", reasoning_words: "not supported", capability_words: "none" };
 const MODELS = [
   { name: "demo-model", loaded: true, size: "4.7 GB", max_context_catalogue: "32K", max_context_loaded: "", capabilities: { ...MODEL_CAPABILITIES }, ...MODEL_WORDS },
   { name: "demo-model-mini", loaded: false, size: "1.9 GB", max_context_catalogue: "8K", max_context_loaded: "", capabilities: { ...MODEL_CAPABILITIES }, ...MODEL_WORDS },
@@ -202,6 +203,7 @@ function allProviders() {
         order: 8, // a hand-written section sorts after the eight supported providers, as in the product
         locality: "unknown", // the product cannot say where such a section runs
         connected: true,
+        reason: "",
         url: "in this browser tab",
         key_source: null,
         capabilities: { ...CAPABILITIES, supported_params: [...CAPABILITIES.supported_params] },
@@ -222,6 +224,9 @@ function allProviders() {
         order,
         locality,
         connected: false,
+        // The product's sentence for a server nobody reached, as the
+        // demo's page reaches none: everything lives in the tab.
+        reason: `Could not reach ${id}.`,
         url,
         key_source: null,
         capabilities: null, // a provider that did not answer states nothing
@@ -281,6 +286,7 @@ export function context() {
       used,
     },
     lede,
+    note: "",
     parts: [
       ...(system ? [{ role: "system", body: system }] : []),
       ...bodies.map((t) => ({ role: t.role, body: t.body })),

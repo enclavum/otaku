@@ -77,6 +77,7 @@ class TestCapabilities:
             prompt_cache=False,
             model_management=False,
             supported_params=PROTOCOL_PARAMS,
+            bounds={},
         )
 
     def test_the_object_is_a_value_composed_on_each_read(self) -> None:

@@ -25,11 +25,11 @@ const _COUNT = /^\d*$/;
    states for the value and the floor it holds it to
    (`Settings.parameters[]`): an integer is digits, a float digits with
    one point, a minus only where the floor lets a value go below zero, a
-   stop string anything. A pattern the whole value must match while it is
+   stop string or list anything. A pattern the whole value must match while it is
    typed, so the in-between states ("-", "0.") pass; the magnitude is the
    backend's to refuse, and `outOfRange` marks it meanwhile. */
 function mask(parameter) {
-  if (parameter.type === "str") return null;
+  if (parameter.type === "str" || parameter.type === "list") return null;
   const sign = parameter.min === null || parameter.min < 0 ? "-?" : "";
   return new RegExp(parameter.type === "int" ? `^${sign}\\d*$` : `^${sign}\\d*\\.?\\d*$`);
 }

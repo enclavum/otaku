@@ -12,6 +12,7 @@ it itself; every one returns the confirmation to show and raises
 Refused for what it declines.
 """
 
+import json
 from dataclasses import dataclass, replace
 
 from otaku.backend.session import (
@@ -73,18 +74,74 @@ def think_choices(session: Session) -> ThinkChoices:
 
 
 def parameter_names(session: Session) -> tuple[str, ...]:
-    """The /set parameters the provider in use reads, in PARAMETERS's
-    order (`ProviderCapabilities.supported_params`) — every one while
+    """The /set parameters that reach the model in use, in PARAMETERS's
+    order (`OpenAIClient.supported_params_of`: the wire's set, and the
+    route's own within it where a catalog states one) — every one while
     no model is selected, so a menu with nobody to ask still names
     them. Both frontends' menus read this. A list, never a gate: any
     known parameter may be set — one model is served by more than one
     provider, and they read different sets — and the wire sends the
-    ones this provider reads."""
+    ones that reach."""
     client = session._client()
     if client is None:
         return tuple(PARAMETERS)
-    supported = client.capabilities.supported_params
-    return tuple(name for name in PARAMETERS if name in supported)
+    reaching = client.supported_params_of(session.model)
+    return tuple(name for name in PARAMETERS if name in reaching)
+
+
+def parameter_read(session: Session, name: str) -> bool:
+    """Whether `name` reaches the model in use — the same answer the
+    menu reads (`parameter_names`); True with nobody to ask."""
+    client = session._client()
+    return client is None or name in client.supported_params_of(session.model)
+
+
+def parameter_bounds(session: Session, name: str) -> tuple[float | None, float | None]:
+    """(low, high) the setter holds `name` to: the app's table
+    (`PARAMETERS`, the catalogs' bounds), or the bounds the provider in
+    use states for itself (`ProviderCapabilities.bounds` — a local
+    engine takes any temperature). None on a side is no bound there.
+    The page publishes these, so its mark and the refusal agree."""
+    client = session._client()
+    if client is not None and name in client.capabilities.bounds:
+        return client.capabilities.bounds[name]
+    parameter = PARAMETERS[name]
+    return parameter.low, parameter.high
+
+
+def parameter_text(value: object) -> str:
+    """A parameter's value as a reader sees and types it: a number as
+    it is, the stop strings as `parse_stops` reads them back — each a
+    JSON string, so a newline shows as \\n — one bare where it holds
+    no quote or space."""
+    if isinstance(value, list):
+        return " ".join(json.dumps(stop, ensure_ascii=False) for stop in value)
+    return str(value)
+
+
+def parse_stops(raw: str) -> list[str]:
+    """Stop strings as typed: JSON strings separated by spaces —
+    `"\\nUser:" "END"` — so a stop may hold a newline or a space; a
+    text that does not open with a quote is one stop, as it is. Raises
+    ValueError for a quote left open, or an empty stop."""
+    text = raw.strip()
+    if not text.startswith('"'):
+        stops = [text] if text else []
+    else:
+        decoder = json.JSONDecoder()
+        stops = []
+        at = 0
+        while at < len(text):
+            if text[at].isspace():
+                at += 1
+                continue
+            if text[at] != '"':
+                raise ValueError(f"a stop string needs quotes at {text[at:]!r}")
+            stop, at = decoder.raw_decode(text, at)
+            stops.append(stop)
+    if not stops or any(not stop for stop in stops):
+        raise ValueError("an empty stop")
+    return stops
 
 
 def set_think(session: Session, raw: str) -> str:
@@ -212,53 +269,71 @@ def set_parameter(session: Session, raw: str) -> str:
     what is set), auto-saved per model. Raises Refused for an unknown
     name, an unparsable value, or one outside the parameter's bounds
     (`Parameter`)."""
-    tokens = raw.split()
-    if not tokens:
+    # The name, then the value as typed — whole, since a stop string
+    # may hold spaces.
+    name, _, value_raw = raw.strip().partition(" ")
+    if not name:
         if not session.params:
             return "No parameters set."
-        rows = "\n".join(f"  {name} = {value}." for name, value in session.params.items())
+        rows = "\n".join(
+            f"  {name} = {parameter_text(value)}." for name, value in session.params.items()
+        )
         return f"Parameters:\n{rows}"
     if session._client() is None:
         raise Refused(NO_MODEL_HINT)
-    name = tokens[0]
     if name not in PARAMETERS:
         raise Refused(f"Unknown parameter {name!r}. Known: {', '.join(PARAMETERS)}.")
-    value_raw = " ".join(tokens[1:])
-    if not value_raw:
+    if not value_raw.strip():
         # Asking is not setting: the bare name shows where it stands.
         if name in session.params:
-            return f"{name} = {session.params[name]}"
-        return f"Parameter {name} is at the model's own default."
+            return f"{name} = {parameter_text(session.params[name])}"
+        return f"Parameter {name} is not set: the engine's own default applies."
     return set_parameter_value(session, name, value_raw)
 
 
 def set_parameter_value(session: Session, name: str, value_raw: str) -> str:
     """One known parameter set to one value, auto-saved per model. The
-    literal `reset` returns it to the model's own default, here and in
-    the saved file. A surface with two fields (a name and a value) calls
-    this; a typed line splits its own line first."""
+    literal `reset` unsets it, here and in the saved file, and the
+    engine's own default applies again. A surface with two fields (a
+    name and a value) calls this; a typed line splits its own line
+    first. The value is held to `parameter_bounds`. A parameter the
+    provider in use does not read is set all the same — one model is
+    served by more than one provider — and the answer says so."""
     if session._client() is None:
         raise Refused(NO_MODEL_HINT)
     if name not in PARAMETERS:
         raise Refused(f"Unknown parameter {name!r}. Known: {', '.join(PARAMETERS)}.")
     if value_raw.strip().lower() == "reset":
         if name not in session.params:
-            return f"Parameter {name} is already at its default."
+            return f"Parameter {name} is not set."
         session._params.pop(name)
-        return f"Parameter {name} reset to default{_save_model_settings(session)}"
+        saved = _save_model_settings(session)
+        return f"Parameter {name} unset: the engine's own default applies{saved}"
     parameter = PARAMETERS[name]
+    value: object
     try:
-        value = parameter.kind(value_raw)
+        value = parse_stops(value_raw) if parameter.kind is list else parameter.kind(value_raw)
     except ValueError:
         raise Refused(f"Could not parse {value_raw!r} as {parameter.kind.__name__}.") from None
-    low, high = parameter.low, parameter.high
-    if isinstance(value, int | float) and low is not None:
-        below, above = value < low, high is not None and value > high
+    low, high = parameter_bounds(session, name)
+    if isinstance(value, int | float) and (low is not None or high is not None):
+        below = low is not None and value < low
+        above = high is not None and value > high
         if below or above:
-            bounds = f"at least {low}" if high is None else f"between {low} and {high}"
+            if high is None:
+                bounds = f"at least {low}"
+            elif low is None:
+                bounds = f"at most {high}"
+            else:
+                bounds = f"between {low} and {high}"
             raise Refused(f"{name} must be {bounds}.")
     session._params[name] = value
-    return f"{name} = {value}{_save_model_settings(session)}"
+    said = f"{name} = {parameter_text(value)}{_save_model_settings(session)}"
+    if not parameter_read(session, name):
+        said += (
+            f" Not read by {session.provider}: kept for the model, sent where a provider reads it."
+        )
+    return said
 
 
 def _save_model_settings(session: Session) -> str:

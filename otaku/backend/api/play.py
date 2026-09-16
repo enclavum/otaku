@@ -20,8 +20,8 @@ from otaku.backend.session import NO_MODEL_HINT, Refused, Session
 from otaku.context import syntax
 from otaku.context.assembler import ContextOverflowError
 from otaku.formatting import format_context
+from otaku.providers import ProviderError, Stats
 from otaku.providers import Reasoning as Reasoning
-from otaku.providers import Stats
 from otaku.providers import Text as Text
 from otaku.store.schema import Character, Message
 
@@ -56,11 +56,80 @@ class Failed:
 
 
 @dataclass(frozen=True)
+class ReplyReport:
+    """What the reply came to: the stream's own account (`stats` — the
+    spans, the counts, why the model stopped) beside what the stream
+    cannot know, the context the prompt was measured against; and what
+    follows from both. A frontend draws its stats line from these;
+    `text()` is the line the terminal prints. `truncated` is a reply
+    the model did not finish — cut at the reply limit, mid-sentence —
+    and `notice` the sentence that says so, "" otherwise."""
+
+    stats: Stats
+    max_context: int | None
+
+    @property
+    def truncated(self) -> bool:
+        return self.stats.finish_reason == "length"
+
+    @property
+    def notice(self) -> str:
+        return "The reply was cut short at the max_tokens limit." if self.truncated else ""
+
+    @property
+    def rate(self) -> float | None:
+        """Tokens per second over the generation alone — the span after
+        the first token; None without a count or a span."""
+        stats = self.stats
+        if stats.completion_tokens is None or stats.first_token_seconds is None:
+            return None
+        span = stats.total_seconds - stats.first_token_seconds
+        return stats.completion_tokens / span if span > 0 else None
+
+    @property
+    def context_used(self) -> int | None:
+        """Percent of the context the prompt took; None where either
+        figure is unknown."""
+        if self.stats.prompt_tokens is None or not self.max_context:
+            return None
+        return round(100 * self.stats.prompt_tokens / self.max_context)
+
+    def text(self) -> str:
+        """The verbose stats line:
+
+            [ total 1.3s, prompt 40 tok, eval 37 tok @ 35.2 tok/s, ctx 12% / 32K ]
+
+        `total` is wall-clock for the whole request; the rate is over
+        the decode-only span, so it reflects generation speed. Fields
+        with no underlying value are skipped."""
+        stats = self.stats
+        parts: list[str] = [f"total {stats.total_seconds:.1f}s"]
+        if stats.prompt_tokens is not None:
+            parts.append(f"prompt {stats.prompt_tokens} tok")
+        if stats.cached_tokens is not None:
+            # Zero included: "cached 0 tok" is how a reader discovers their
+            # pacing outlives the cache TTL (see providers.toml prompt_cache).
+            parts.append(f"cached {stats.cached_tokens} tok")
+        if stats.completion_tokens is not None:
+            rate = self.rate
+            parts.append(
+                f"eval {stats.completion_tokens} tok"
+                + (f" @ {rate:.1f} tok/s" if rate is not None else "")
+            )
+        if self.context_used is not None:
+            parts.append(f"ctx {self.context_used}% / {format_context(self.max_context)}")
+        return f"[ {', '.join(parts)} ]"
+
+
+@dataclass(frozen=True)
 class Done:
-    """The turn's end: the recorded reply (None when nothing arrived) and
-    the verbose stats line ("" when off or unknowable)."""
+    """The turn's end: the recorded reply (None when nothing arrived),
+    what it came to (None when the stream said nothing of itself), and
+    the verbose stats line — the report's `text()`, "" unless /set
+    verbose, so a frontend prints it as it is."""
 
     reply: Message | None
+    report: ReplyReport | None
     stats: str
 
 
@@ -203,9 +272,16 @@ def _reply_events(
         yield Declined(NO_MODEL_HINT)
         return
     try:
-        found = client.models.get(session.model)
+        # A cold model is loaded first, so the window the prompt is cut
+        # to is the runner's and not a substitute (`OpenAIModels.ready`).
+        found = client.models.ready(session.model, on_idle=session._on_idle)
         max_context = found.max_context if found else None
         wire = session.assemble(max_context).messages
+    except ProviderError as e:
+        # The load the turn needed did not happen: the turn is recorded
+        # and plays once the engine can, on a regenerate.
+        yield Declined(str(e))
+        return
     except ContextOverflowError as e:
         # The turn is recorded — it is story — and plays once the limit
         # is raised or more scenes close. The sentence is the assembler's.
@@ -256,8 +332,9 @@ def _reply_events(
         # The frontend closed the stream mid-way, or the terminal's
         # Ctrl+C landed in the wait itself, inside this frame — the same
         # cancel-and-keep. No more yields are possible: record and
-        # re-raise.
-        _land_reply(session, content, final, reply_kind, reply_speaker)
+        # re-raise. What the stream came to so far is filed too — the
+        # prefill was spent and billed, whatever the reader saw.
+        _land_reply(session, content, stream.stats, reply_kind, reply_speaker)
         raise
     except Exception as e:  # the stream failed; what streamed is kept
         # The provider package's own sentence: it names the provider and
@@ -267,8 +344,9 @@ def _reply_events(
     if error is not None:
         yield Failed(error)
         return
-    stats = _format_stats(final, max_context) if session.verbose and final is not None else ""
-    yield Done(reply=reply, stats=stats)
+    report = ReplyReport(final, max_context) if final is not None else None
+    stats = report.text() if session.verbose and report is not None else ""
+    yield Done(reply=reply, report=report, stats=stats)
 
 
 def _land_reply(
@@ -312,36 +390,3 @@ def _land_reply(
     if reply is not None and session._config.lore_enabled and session.story_id is not None:
         session._worker.schedule(build_job(session))
     return reply
-
-
-def _format_stats(stats: Stats, max_context: int | None) -> str:
-    """The verbose stats line:
-
-        [ total 1.3s, prompt 40 tok, eval 37 tok @ 35.2 tok/s, ctx 12% / 32K ]
-
-    `total` is wall-clock for the whole request; the rate is computed over
-    the decode-only span (excluding prefill and time-to-first-token) so it
-    reflects generation speed; `max_context` is the context the prompt
-    is measured against. Fields with no underlying value are skipped."""
-    parts: list[str] = [f"total {stats.total_seconds:.1f}s"]
-    if stats.prompt_tokens is not None:
-        parts.append(f"prompt {stats.prompt_tokens} tok")
-    if stats.cached_tokens is not None:
-        # Zero included: "cached 0 tok" is how a reader discovers their
-        # pacing outlives the cache TTL (see providers.toml prompt_cache).
-        parts.append(f"cached {stats.cached_tokens} tok")
-    if stats.completion_tokens is not None:
-        generation = stats.total_seconds - (stats.first_token_seconds or 0.0)
-        if generation > 0:
-            rate = stats.completion_tokens / generation
-            parts.append(f"eval {stats.completion_tokens} tok @ {rate:.1f} tok/s")
-        else:
-            parts.append(f"eval {stats.completion_tokens} tok")
-    if max_context:
-        cap = format_context(max_context)
-        if stats.prompt_tokens is not None:
-            pct = stats.prompt_tokens / max_context * 100
-            parts.append(f"ctx {pct:.0f}% / {cap}")
-        else:
-            parts.append(f"ctx {cap}")
-    return "[ " + ", ".join(parts) + " ]"
