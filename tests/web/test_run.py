@@ -7,7 +7,7 @@ configured with — so the cases that matter are the ones nobody runs.
 """
 
 from otaku.backend import WebSettings
-from otaku.web.run import _is_loopback, address
+from otaku.web.run import _is_loopback, address, address_notes
 
 
 class TestAddress:
@@ -26,19 +26,37 @@ class TestAddress:
         assert address(WebSettings(port=443)) == "http://localhost:443"
         assert address(WebSettings(port=80, https=True)) == "https://localhost:80"
 
-    def test_every_spelling_that_arrives_here_reads_as_localhost(self) -> None:
-        # What a person reads and a browser bar shows back, for every
-        # address this server answers to — the wildcards included, whose
-        # own spelling is no use to anybody typing it.
-        for host in ("127.0.0.1", "::1", "localhost", "0.0.0.0", "::", ""):
-            assert address(WebSettings(host=host)) == "http://localhost:9600", host
+    def test_the_loopback_address_reads_as_localhost(self) -> None:
+        assert address(WebSettings(host="127.0.0.1")) == "http://localhost:9600"
+        assert address(WebSettings(host="localhost")) == "http://localhost:9600"
 
-    def test_an_interface_of_its_own_stays_as_configured(self) -> None:
-        # That one was a decision, and the reader is the one who made it.
-        assert address(WebSettings(host="192.168.1.5")) == "http://192.168.1.5:9600"
+    def test_every_other_host_stays_as_configured(self) -> None:
+        # A wildcard above all: it is public, and must not read as the
+        # one address that is not.
+        for host in ("0.0.0.0", "::", "::1", "192.168.1.5"):
+            assert address(WebSettings(host=host)) == f"http://{host}:9600", host
 
     def test_there_is_no_trailing_slash(self) -> None:
         assert not address(WebSettings()).endswith("/")
+
+
+class TestAddressNotes:
+    """`web.run.address_notes` — whether the banner says the address is
+    public: on every host but localhost and 127.0.0.1, whatever else is
+    set."""
+
+    def test_a_loopback_host_gets_no_note(self) -> None:
+        for host in ("localhost", "127.0.0.1"):
+            assert address_notes(WebSettings(host=host)) == "", host
+
+    def test_any_other_host_is_said_to_be_public(self) -> None:
+        for host in ("0.0.0.0", "::", "::1", "192.168.1.5"):
+            assert "public" in address_notes(WebSettings(host=host)), host
+
+    def test_a_public_host_is_still_said_so_with_tls_and_a_password(self) -> None:
+        # Secured is not the same as private.
+        notes = address_notes(WebSettings(host="0.0.0.0", https=True, password="hash"))
+        assert "public" in notes and "no " not in notes
 
 
 class TestLoopback:

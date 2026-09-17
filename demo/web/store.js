@@ -620,7 +620,10 @@ export function setParameter(name, value) {
   // One per-model parameter; "reset" puts it back to the model's own
   // default, which is what a DELETE on it means.
   const row = state.settings.parameters.find((p) => p.name === name);
-  if (!row) return refuse(`Unknown parameter '${name}'.`);
+  if (!row) {
+    const known = state.settings.parameters.filter((p) => p.supported).map((p) => p.name).join(", ");
+    return refuse(`Unsupported parameter '${name}'. Supported: ${known}.`);
+  }
   const text = String(value).trim();
   if (text.toLowerCase() === "reset") {
     if (!row.value) return say(`Parameter ${name} is already at its default.`);

@@ -35,7 +35,7 @@ from otaku.backend.session import Session
 from otaku.console import banner, keys, sound, ticker
 from otaku.web import api
 from otaku.web.cert import CertError, get_context
-from otaku.web.server import LOOPBACK, Hooks, bind
+from otaku.web.server import Hooks, bind
 from otaku.web.thread import SessionRunner
 
 __all__ = ["ServeError", "address", "run", "serve", "settings"]
@@ -168,28 +168,31 @@ def settings(
 
 
 def address(config: WebSettings) -> str:
-    """The URL that address READS as — what the terminal prints and a
-    reader pastes."""
+    """The URL the banner prints: the host as configured, `127.0.0.1`
+    read as `localhost`."""
     scheme = "https" if config.https else "http"
-    reachable = "localhost" if config.host in LOOPBACK else config.host
+    reachable = "localhost" if config.host == "127.0.0.1" else config.host
     if config.port == (443 if config.https else 80):
         return f"{scheme}://{reachable}"
     return f"{scheme}://{reachable}:{config.port}"
 
 
 def address_notes(config: WebSettings) -> str:
-    """What the banner says after the address: that a password is set, and
-    — off loopback — what the address is missing. `<b>…</b>` marks what
-    is bold; how bold looks is the banner's (`banner.render_web`)."""
+    """What the banner says after the address: that a password is set,
+    and — on any host but `localhost` or `127.0.0.1` — that the address
+    is public, with what it is missing. `<b>…</b>` marks what is bold;
+    how bold looks is the banner's (`banner.render_web`)."""
     notes = ""
     if config.password:
         notes = " (password set)"
+    if config.host in ("localhost", "127.0.0.1"):
+        return notes
     missing = [
         name for name, on in (("no TLS", config.https), ("no password", config.password)) if not on
     ]
-    if missing and not _is_loopback(config.host):
-        notes += f"<b> - public, yet with {' and '.join(missing)}</b> - set in config.toml"
-    return notes
+    if missing:
+        return notes + f"<b> - public, yet with {' and '.join(missing)}</b> - set in config.toml"
+    return notes + "<b> - public</b>"
 
 
 def serve(

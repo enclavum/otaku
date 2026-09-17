@@ -5,7 +5,7 @@ All notable changes to otaku are documented in this file. The format is based on
 [Semantic Versioning](https://semver.org/) — while pre-1.0, minor releases may include breaking
 changes.
 
-## [0.5.0] - [Planned]
+## [0.5.0] - 2026-09-17
 
 **TL;DR**
 
@@ -75,9 +75,10 @@ Tentative roadmap: [ROADMAP.md](https://github.com/enclavum/otaku/blob/main/ROAD
   the remembered model at the first launch. `/set think` offers only what the model takes: its
   levels, `off`/`on` where it only switches, a number of tokens where the engine holds a budget
   (0 = off). `unset` replaces `default` and sends nothing.
-- `/set parameter` offers only what reaches the model in use; any known parameter can still be
-  set, and one the provider does not read is kept for the model and said so. The bounds are the
-  engine's own: a local engine takes any temperature.
+- `/set parameter` offers only what reaches the model in use, and the web's settings list every
+  parameter with the unsupported ones closed; any known parameter can still be set, and one the
+  provider does not read is kept for the model and said so. The bounds are the engine's own: a
+  local engine takes any temperature.
 - A model's context is two figures: its own maximum and what the loaded instance serves. A turn
   on a model that is not loaded loads it first, so the prompt is cut to the real window.
 - A reply cut at `max_tokens` is said so under it. A cancelled reply counts in `/usage`.
@@ -85,8 +86,8 @@ Tentative roadmap: [ROADMAP.md](https://github.com/enclavum/otaku/blob/main/ROAD
   again where the server said; the lore pass waits out a rate limit and a busy engine.
 - The web page stays live while a model loads, and with stream smoothing off. Loading a model
   can be cut short; typing cuts the lore pass and the warm-up at once.
-- A provider that does not answer says why in both pickers. A model Ollama serves from ollama.com
-  counts as remote.
+- The web's provider card says why a provider does not answer. A model Ollama serves from
+  ollama.com counts as remote.
 - The web API renames its fields after the backend: `engines` is `providers`, a card's `name` is
   `id`, `can_load_unload` is `can_manage`, `context` is `max_context_catalogue` on a model and
   `max_context` on the session, `engine` is `provider`, the play event `thinking` is `reasoning`,

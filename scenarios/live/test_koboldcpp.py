@@ -25,7 +25,7 @@ class TestKoboldCpp:
         assert chain[1].body.strip()
 
     def test_the_context_window_reads_from_the_extra_api(self, live_app) -> None:  # type: ignore[no-untyped-def]
-        rows, _ = api_providers.get_providers(live_app.session)
+        rows = api_providers.get_providers(live_app.session).rows
         provider = next(r for r in rows if r.id == "koboldcpp")
         row = next(m for m in provider.models if m.name == live_app.session.model)
         assert row.max_context_loaded  # the /api/extra window rode the listing

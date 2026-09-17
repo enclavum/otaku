@@ -54,7 +54,7 @@ onmessage = async (event) => {
     post("status", { text: "waking the snake…" });
     const py = await loadPyodide({ indexURL: "./pyodide/" });
     post("status", { text: "loading the packages…" });
-    await py.loadPackage(["sqlite3", "cryptography", "click", "httpx"], {
+    await py.loadPackage(["sqlite3", "ssl", "cryptography", "click", "httpx", "httpcore", "idna"], {
       messageCallback: () => {},
     });
     post("status", { text: "installing otaku…" });

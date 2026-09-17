@@ -504,22 +504,27 @@ def settings(session: Session) -> dict[str, Any]:
         # Tokens the prompt may use at most; 0 = the model's own max context.
         "max_context": session.max_context_setting,
         "model": session.model,
-        # The parameters the provider in use reads
-        # (`api.settings.parameter_names`), never one its wire would drop.
+        # Every parameter /set knows, in its order, each saying whether
+        # it reaches the model in use (`api.settings.parameter_read`):
+        # the page draws the unsupported ones closed, never silently
+        # dropped from the slip.
         "parameters": [
             {
                 "name": name,
+                "supported": api_settings.parameter_read(session, name),
                 "value": api_settings.parameter_text(session.params[name])
                 if name in session.params
                 else "",
-                "type": PARAMETERS[name].kind.__name__,
+                # The page's three kinds: the stop list is a text field
+                # there, and the setter reads the text.
+                "type": "str" if PARAMETERS[name].kind is list else PARAMETERS[name].kind.__name__,
                 # The bounds the setter holds a value to — the provider's
                 # own where it states them — null where none: the page's
                 # placeholder, its sign rule and its mark.
                 "min": api_settings.parameter_bounds(session, name)[0],
                 "max": api_settings.parameter_bounds(session, name)[1],
             }
-            for name in api_settings.parameter_names(session)
+            for name in PARAMETERS
         ],
     }
 

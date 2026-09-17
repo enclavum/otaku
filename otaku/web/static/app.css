@@ -313,6 +313,10 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 /* An empty field stands at its default, and a default is an absent value —
    said in words, in the face `.otk-absent` says every other one in. */
 .otk-leader .otk-editable::placeholder { font-family: var(--otk-font-prose); font-style: italic; color: var(--otk-faint); opacity: 1; }
+/* a parameter the provider in use does not read: in its place, closed — the
+   label struck, the field shut */
+.otk-leader--closed > span:first-child { text-decoration: line-through; color: var(--otk-faint); }
+.otk-leader .otk-editable:disabled { color: var(--otk-faint); cursor: default; }
 
 /* The label line under an editable value: one row at a fixed height in every
    state, so opening a field moves nothing above or below it. */
@@ -837,6 +841,7 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
 .otk-fact:last-child { border-bottom: 0; }
 .otk-fact > :first-child { color: var(--otk-muted); }
 .otk-fact > :last-child { color: var(--otk-body); overflow-wrap: anywhere; text-align: right; }
+.otk-fact--clip { gap: 36px; }   /* a clipped value stands clear of its key */
 .otk-fact--clip > :last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
 /* pinned to the foot of its pane: a taller or shorter body above never moves
    the buttons */
@@ -889,13 +894,12 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
 /* …except balance, whose figures arrive one per provider after the slip is
    open: a slip that grows under the pointer has moved what was clicked */
 .otk-docket--fixed  { height: min(var(--otk-docket-h), calc(100dvh - 80px)); }
-/* A slip torn to its widest leader: a value never wraps and never
-   changes face for its length — the slip grows to it, up to the
-   viewport. What may wrap (the subject, a note, the story's title) is
-   held out of the measure, so a paragraph cannot stretch the slip. */
-.otk-docket--fit    { width: fit-content; min-width: var(--otk-docket-w); }
-.otk-docket--fit .otk-leader > * { white-space: nowrap; }
-.otk-docket--fit .otk-slot > :not(.otk-docket__facts) { contain: inline-size; }
+/* A slip whose leaders clip: the label keeps its width, the value never
+   wraps and is cut with an ellipsis where the slip is too narrow for it
+   — as the picker's detail clips its facts. */
+.otk-docket--clip .otk-leader > :first-child { flex: none; }
+.otk-docket--clip .otk-leader::after { min-width: 36px; }   /* a run of dots always stands between key and value */
+.otk-docket--clip .otk-leader > :last-child { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* between the click and the figures: the scrim answers, and the slip arrives
    whole rather than opening small and growing */
 .otk-docket.is-waiting { visibility: hidden; }

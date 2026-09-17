@@ -154,7 +154,7 @@ def set_think(session: Session, raw: str) -> str:
     the provider reads, and on none where it reads none."""
     choices = think_choices(session)
     if not raw.strip():
-        current = session.think if session.think else THINK_UNSET
+        current = _think_word(session.think if session.think else THINK_UNSET)
         return f"Think: {current}. Levels for this model: {choices.listed}."
     value = raw.strip().lower()
     if value != THINK_UNSET and not reasoning.is_level(value):
@@ -174,7 +174,13 @@ def set_think(session: Session, raw: str) -> str:
             f"{session.model} does not take {value}. Levels for this model: {choices.listed}."
         )
     session._think = value
-    return f"Think: {value}{_save_model_settings(session)}"
+    return f"Think: {_think_word(value)}{_save_model_settings(session)}"
+
+
+def _think_word(level: str) -> str:
+    """A level as the answer says it: a budget as "20 token budget", a
+    word as itself."""
+    return f"{level} token budget" if reasoning.budget_of(level) is not None else level
 
 
 def set_verbose(session: Session, raw: str) -> str:
@@ -282,7 +288,7 @@ def set_parameter(session: Session, raw: str) -> str:
     if session._client() is None:
         raise Refused(NO_MODEL_HINT)
     if name not in PARAMETERS:
-        raise Refused(f"Unknown parameter {name!r}. Known: {', '.join(PARAMETERS)}.")
+        raise _unsupported(session, name)
     if not value_raw.strip():
         # Asking is not setting: the bare name shows where it stands.
         if name in session.params:
@@ -302,7 +308,7 @@ def set_parameter_value(session: Session, name: str, value_raw: str) -> str:
     if session._client() is None:
         raise Refused(NO_MODEL_HINT)
     if name not in PARAMETERS:
-        raise Refused(f"Unknown parameter {name!r}. Known: {', '.join(PARAMETERS)}.")
+        raise _unsupported(session, name)
     if value_raw.strip().lower() == "reset":
         if name not in session.params:
             return f"Parameter {name} is not set."
@@ -334,6 +340,14 @@ def set_parameter_value(session: Session, name: str, value_raw: str) -> str:
             f" Not read by {session.provider}: kept for the model, sent where a provider reads it."
         )
     return said
+
+
+def _unsupported(session: Session, name: str) -> Refused:
+    """The refusal for a name outside PARAMETERS, naming what reaches the
+    model in use — the same list the completion menu shows."""
+    return Refused(
+        f"Unsupported parameter {name!r}. Supported: {', '.join(parameter_names(session))}."
+    )
 
 
 def _save_model_settings(session: Session) -> str:

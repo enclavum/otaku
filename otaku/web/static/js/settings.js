@@ -25,11 +25,11 @@ const _COUNT = /^\d*$/;
    states for the value and the floor it holds it to
    (`Settings.parameters[]`): an integer is digits, a float digits with
    one point, a minus only where the floor lets a value go below zero, a
-   stop string or list anything. A pattern the whole value must match while it is
+   stop string anything. A pattern the whole value must match while it is
    typed, so the in-between states ("-", "0.") pass; the magnitude is the
    backend's to refuse, and `outOfRange` marks it meanwhile. */
 function mask(parameter) {
-  if (parameter.type === "str" || parameter.type === "list") return null;
+  if (parameter.type === "str") return null;
   const sign = parameter.min === null || parameter.min < 0 ? "-?" : "";
   return new RegExp(parameter.type === "int" ? `^${sign}\\d*$` : `^${sign}\\d*\\.?\\d*$`);
 }
@@ -45,17 +45,6 @@ function outOfRange(parameter, text) {
     (parameter.min !== null && number < parameter.min) ||
     (parameter.max !== null && number > parameter.max)
   );
-}
-
-/* An unset parameter's placeholder: the model's own value, and the
-   bounds a typed one is held to, where there are any. */
-function placeholder(parameter) {
-  if (parameter.min === null) return DEFAULT_VALUE;
-  const bounds =
-    parameter.max === null
-      ? `at least ${parameter.min}`
-      : `${parameter.min} to ${parameter.max}`;
-  return `${DEFAULT_VALUE} · ${bounds}`;
 }
 
 export async function openSettings(answered = "") {
@@ -98,20 +87,32 @@ export async function openSettings(answered = "") {
   // The thinking level first: every word the model takes on one line,
   // the one it stands at marked, the rest a click away — and, where the
   // model takes a budget, a field for the number of tokens beside them.
-  const think = ladder(knobs.think_levels, knobs.think, (level) => setKnob("think", level));
+  // A model that takes no level at all (unset alone, no budget) keeps
+  // the row, closed, the way an unsupported parameter does.
+  const takesNone = knobs.think_levels.length <= 1 && !knobs.think_budget;
+  const think = takesNone
+    ? editable("", { text: "", readonly: true, line: true })
+    : ladder(knobs.think_levels, knobs.think, (level) => setKnob("think", level));
+  if (takesNone) {
+    think.disabled = true;
+    think.placeholder = "unsupported";
+  }
+  const thinkRow = leader("think", think);
+  if (takesNone) thinkRow.classList.add("otk-leader--closed");
   if (knobs.think_budget) {
     const budget = editable("", {
       text: stands.think_budget(knobs),
-      // Nothing typed is no budget, which is the way out.
-      save: (typed, field) =>
-        typedKnob(field, () => api.setSetting("think", typed.trim() || "unset"), stands.think_budget),
+      // A write like the ladder's: the slip is rebuilt from the answer,
+      // so the ladder's mark follows the budget. Nothing typed is no
+      // budget, which is the way out.
+      save: (typed) => setKnob("think", typed.trim() || "unset"),
       line: true,
       mask: _COUNT,
     });
-    budget.placeholder = "tokens";
+    budget.placeholder = "max tokens";
     think.append(span("otk-faint", "·"), budget);
   }
-  params.append(leader("think", think));
+  params.append(thinkRow);
   for (const parameter of knobs.parameters) {
     // A parameter nobody has set stands at the model's own value. That is
     // an absence, so it is the field's PLACEHOLDER and not its text — and
@@ -133,7 +134,16 @@ export async function openSettings(answered = "") {
       mask(parameter),
     );
     const field = line.lastElementChild;
-    field.placeholder = placeholder(parameter);
+    if (!parameter.supported) {
+      // One the provider in use does not read: in its place, closed —
+      // the label struck, the field shut.
+      line.classList.add("otk-leader--closed");
+      field.disabled = true;
+      field.placeholder = "unsupported";
+      params.append(line);
+      continue;
+    }
+    field.placeholder = DEFAULT_VALUE;
     field.addEventListener("input", () => {
       field.classList.toggle("is-out", outOfRange(parameter, field.value));
     });

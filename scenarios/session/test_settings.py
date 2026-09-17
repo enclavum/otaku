@@ -270,6 +270,49 @@ class TestThink:
         finally:
             server.close()
 
+    def test_a_hosted_catalog_is_read_behind_the_launch(self, tmp_path) -> None:
+        # A catalog's row lives across the internet, so neither the
+        # launch nor a switch waits for it: it is read on a thread of
+        # its own, and the menus — the rungs, the parameters that reach
+        # — follow it moments later. Nothing is played or billed for it.
+        server = scripted.ModelServer(models=("graded", "plain"))
+        server.extras = {
+            "graded": {
+                "supported_parameters": ["temperature", "max_completion_tokens", "reasoning"],
+                "reasoning": {"supported_efforts": ["low", "high"]},
+            },
+            "plain": {"supported_parameters": ["temperature", "top_p"]},
+        }
+        root = tmp_path / "state"
+        try:
+            set_config_provider(root, server, name="openrouter")
+            app = launch(root, server, spec=None)
+            try:
+                app.play("/model openrouter/graded")  # typed: nothing listed first
+                names = lambda: api_settings.parameter_names(app.session)  # noqa: E731
+                _settled(lambda: names() == ("temperature", "max_tokens"))
+                assert names() == ("temperature", "max_tokens")
+                choices = api_settings.think_choices(app.session)
+                assert set(choices.levels) == {"unset", "none", "low", "high"}
+                assert choices.budget
+                assert app.server.requests == []  # a read, never a turn
+            finally:
+                app.close()
+            # Remembered, the model is read the same way as the session opens.
+            app = launch(root, server, spec=None)
+            try:
+                names = lambda: api_settings.parameter_names(app.session)  # noqa: E731
+                _settled(lambda: names() == ("temperature", "max_tokens"))
+                assert names() == ("temperature", "max_tokens")
+                app.play("/model openrouter/plain")
+                _settled(lambda: names() == ("temperature", "top_p"))
+                assert names() == ("temperature", "top_p")
+                assert api_settings.think_choices(app.session).levels == ("unset",)
+            finally:
+                app.close()
+        finally:
+            server.close()
+
     def test_a_switch_takes_off_and_on_and_a_budget_takes_a_number(self, tmp_path) -> None:
         # omlx's status says the template has the toggle: on or off, no
         # rung, under a budget its own sampler holds — so a number of

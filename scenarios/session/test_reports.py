@@ -172,7 +172,7 @@ class TestInfo:
         finally:
             server.close()
 
-    def test_the_context_rows_are_the_models_own_then_the_loaded_size_where_it_differs(
+    def test_the_context_row_says_the_served_size_of_the_models_own_where_they_differ(
         self, tmp_path
     ) -> None:
         # llama.cpp's listing carries both figures: the trained length
@@ -180,13 +180,11 @@ class TestInfo:
         # the trained length, and comes after it.
         rows = _llamacpp_rows(tmp_path / "half", trained=8192, window=4096)
         labels = list(rows)
-        assert labels.index("Max context") < labels.index("Served max context")
-        assert labels.index("Served max context") + 1 == labels.index("Reasoning")
-        assert rows["Max context"] == format_context(8192)
-        assert rows["Served max context"] == format_context(4096)
+        assert labels.index("Max context") + 1 == labels.index("Reasoning")
+        served, own = format_context(4096), format_context(8192)
+        assert rows["Max context"] == f"{served} (of {own} native)"
         rows = _llamacpp_rows(tmp_path / "whole", trained=8192, window=8192)
         assert rows["Max context"] == format_context(8192)
-        assert "Served max context" not in rows
 
     def test_an_engine_that_names_no_efforts_says_so(self, tmp_path) -> None:
         # omlx's status states the thinking toggle; a template without

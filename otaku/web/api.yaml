@@ -1724,15 +1724,17 @@ components:
         parameters:
           type: array
           description: >
-            The parameters the session's provider reads (its card's
-            `supported_params`), in the vocabulary's order — never one its
-            wire would drop.
+            Every parameter /set knows, in the vocabulary's order, each
+            saying whether the session's provider reads it for the model in
+            use (backend.api.settings.parameter_read): the page draws an
+            unsupported one closed.
           items:
             type: object
             properties:
               name: { type: string }
+              supported: { type: boolean, description: "Whether the provider in use reads this parameter for the model — the same answer the menus give; false draws the field closed." }
               value: { type: string, description: '"" when not set (the engine''s own default applies); the stop strings as JSON strings separated by spaces, as the setter reads them back (backend.api.settings.parse_stops).' }
-              type: { type: string, description: "float / int / str / list — how a typed value parses." }
+              type: { type: string, description: "float / int / str — how a typed value parses; the stop list is a str field, read by the setter." }
               min: { type: number, nullable: true, description: "The least the setter takes — the provider's own bound where it states one (backend.api.settings.parameter_bounds); null for no floor." }
               max: { type: number, nullable: true, description: "The most the setter takes; null for no ceiling." }
 

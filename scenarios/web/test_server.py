@@ -17,7 +17,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from otaku.backend.session import PARAMETERS, THINK_MENU
-from scenarios.support.harness import set_config
+from scenarios.support.harness import set_config, set_config_provider
 from scenarios.support.server import ModelServer
 from scenarios.web.conftest import Page, serving
 
@@ -202,6 +202,23 @@ class TestReading:
         # draws it, never re-sorts it.
         assert page.get("/api/settings")["think_levels"] == list(THINK_MENU)
 
+    def test_the_settings_read_lists_every_parameter_and_says_which_reach(
+        self, server: ModelServer, tmp_path: Path
+    ) -> None:
+        # Every parameter rides the read, in /set's order, each saying
+        # whether the provider in use reads it for the model — the page
+        # draws an unsupported one closed rather than dropping it. LM
+        # Studio's wire reads top_k and not min_p.
+        def studio(root: Path) -> None:
+            set_config_provider(root, server, name="lmstudio")
+
+        with serving(server, tmp_path, prepare=studio) as page:
+            page.put("/api/session/model", {"provider": "lmstudio", "model": "test-model"})
+            rows = page.get("/api/settings")["parameters"]
+            assert [row["name"] for row in rows] == list(PARAMETERS)
+            supported = {row["name"]: row["supported"] for row in rows}
+            assert supported["top_k"] and not supported["min_p"]
+
     def test_the_settings_read_carries_each_parameters_bounds(self, page: Page) -> None:
         # The bounds the setter holds a value to ride each row, null
         # where there is none, so the page can say them before a save.
@@ -209,7 +226,7 @@ class TestReading:
         assert (rows["temperature"]["min"], rows["temperature"]["max"]) == (0, 2)
         assert (rows["top_k"]["min"], rows["top_k"]["max"]) == (0, None)
         assert (rows["seed"]["min"], rows["seed"]["max"]) == (None, None)
-        assert rows["stop"]["type"] == "list"  # several strings, typed as JSON strings
+        assert rows["stop"]["type"] == "str"  # a text field: the setter reads the JSON strings
 
     def test_the_search_matches_buried_content_and_the_row_s_face(self, page: Page) -> None:
         """One filter rule for both browsers: a story is found by the

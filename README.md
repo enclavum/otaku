@@ -47,6 +47,8 @@ Import your content:
 - **lorebooks or world info** have no equivalent in otaku, but they can be imported from a file
   into the system message (the `/system` command).
 
+Tentative roadmap: [ROADMAP.md](https://github.com/enclavum/otaku/blob/main/ROADMAP.md)
+
 ## Requirements
 
 - Platform: macOS / Linux / Windows.
@@ -111,8 +113,9 @@ otaku web      # for web interface; default URL is http://localhost:9600
 
 On first start, you choose a provider and a model: otaku automatically detects local LLM
 backends and lets you pick from their models. Cloud providers (OpenRouter, NanoGPT) are also in
-the picker — enter an API key and their catalogs appear — and the Generic OpenAI provider, first
-in the picker's panel, takes any other OpenAI-compatible server's URL and key. After you've
+the picker — enter an API key and their catalogs appear — and the Generic OpenAI provider,
+between the local backends and the cloud providers in the picker's panel, takes any other
+OpenAI-compatible server's URL and key. After you've
 chosen (or cancelled with Esc), you land at the prompt. The model picker is available later with
 the `/model` (Ctrl+O) command.
 

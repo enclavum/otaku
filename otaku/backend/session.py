@@ -19,6 +19,7 @@ touch only the run's own event. Frontends inherit this rule from here.
 """
 
 import contextlib
+import threading
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -532,23 +533,35 @@ class Session:
             self._store.stories.set_system(self._story_id, text)
 
     def _read_model(self) -> None:
-        """Ask a LOCAL engine for the model's row once the model is
-        current — at launch and on a switch — so what the menus read off
-        the cache, how the model's thinking is set above all, is there
-        before the first turn's ask would fill it in: a /set think menu
-        must not change under the reader between the first keystroke
-        and the first reply. Over the engine's own socket, never the
-        internet (`max_context`'s rule); a server that does not answer
-        leaves the row unknown, and the menus offer every rung until
-        something does."""
+        """Read the model's row once the model is current — at launch and
+        on a switch — so what the menus read off the cache, how the
+        model's thinking is set above all, is there before the first
+        turn's ask would fill it in. A LOCAL engine is asked at once,
+        over its own socket: a /set think menu must not change under
+        the reader between the first keystroke and the first reply. A
+        REMOTE catalog's row lives across the internet and a launch does
+        not wait for that (`max_context`'s rule), so it is asked on a
+        thread of its own and lands moments later — until then the
+        menus offer everything, as they do for an engine that does not
+        answer. The generic provider is not asked, as the header does
+        not ask it: its cache fills on the first listing."""
         client = self._client()
-        if client is None or client.locality is not Locality.LOCAL:
+        if client is None or client.locality is Locality.UNKNOWN:
             return
-        with contextlib.suppress(Exception):
-            client.models.get(self.model)
-        # Listed, the model may turn out served elsewhere (Ollama's
-        # ollama.com rows): asked once more is asked of the internet, so
-        # nothing more is read of one.
+        if client.locality is Locality.LOCAL:
+            with contextlib.suppress(Exception):
+                client.models.get(self.model)
+            # Listed, the model may turn out served elsewhere (Ollama's
+            # ollama.com rows): asked once more is asked of the internet,
+            # so nothing more is read of one.
+            return
+        model = self.model
+
+        def read() -> None:
+            with contextlib.suppress(Exception):
+                client.models.get(model)
+
+        threading.Thread(target=read, name="otaku-model-read", daemon=True).start()
 
     def _reload_model_settings(self) -> None:
         """Replace the live parameters and thinking level with the

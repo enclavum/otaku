@@ -12,6 +12,7 @@
  "parameters": [
   {
    "name": "temperature",
+   "supported": true,
    "value": "",
    "type": "float",
    "min": 0,
@@ -19,6 +20,23 @@
   },
   {
    "name": "top_p",
+   "supported": true,
+   "value": "",
+   "type": "float",
+   "min": 0,
+   "max": 1
+  },
+  {
+   "name": "top_k",
+   "supported": false,
+   "value": "",
+   "type": "int",
+   "min": 0,
+   "max": null
+  },
+  {
+   "name": "min_p",
+   "supported": false,
    "value": "",
    "type": "float",
    "min": 0,
@@ -26,6 +44,7 @@
   },
   {
    "name": "max_tokens",
+   "supported": true,
    "value": "",
    "type": "int",
    "min": 1,
@@ -33,6 +52,7 @@
   },
   {
    "name": "presence_penalty",
+   "supported": true,
    "value": "",
    "type": "float",
    "min": null,
@@ -40,13 +60,23 @@
   },
   {
    "name": "frequency_penalty",
+   "supported": true,
    "value": "",
    "type": "float",
    "min": null,
    "max": null
   },
   {
+   "name": "repetition_penalty",
+   "supported": false,
+   "value": "",
+   "type": "float",
+   "min": 0,
+   "max": 2
+  },
+  {
    "name": "seed",
+   "supported": true,
    "value": "",
    "type": "int",
    "min": null,
@@ -54,8 +84,9 @@
   },
   {
    "name": "stop",
+   "supported": true,
    "value": "",
-   "type": "list",
+   "type": "str",
    "min": null,
    "max": null
   }

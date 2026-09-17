@@ -162,9 +162,12 @@ Every reader picks its safe side for `UNKNOWN`: what costs money or
 waits on the internet (the worker's warm-up, the info report's listing,
 the page's second listing phase) treats it as remote; what edits (the
 url field) treats it as local; what STATES a fact (the cloud prompt
-marker, a caption) says only what is known. A new reader of the flag
-decides the same way, in both frontends, and the enum has no boolean
-shortcut on purpose.
+marker, a caption) says only what is known; the read of the model's
+row as it becomes current (`Session._read_model`) asks a local engine
+at once, a hosted catalog on a thread of its own so no launch waits on
+the internet, and the generic provider not at all, as the context
+header does not. A new reader of the flag decides the same way, in
+both frontends, and the enum has no boolean shortcut on purpose.
 
 ### Names
 

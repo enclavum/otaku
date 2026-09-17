@@ -126,10 +126,6 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                         out.write("\n")
                     if event.stats:
                         out.write(DIM + event.stats + RESET + "\n")
-                    # A reply the model did not finish: the backend's
-                    # sentence, in the stats line's family.
-                    if event.report is not None and event.report.notice:
-                        out.write(DIM + f"[ {event.report.notice} ]" + RESET + "\n")
         except KeyboardInterrupt:
             interrupted = True
         finally:

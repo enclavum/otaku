@@ -476,16 +476,15 @@ def _model_info(session: Session) -> tuple[tuple[str, str], ...]:
         out.append(("Loaded", _STATE_WORDS[row.state]))
         if row.size:
             out.append(("Size", format_size(row.size)))
-    # The model's own context size where known, and — only when the
-    # loaded instance was given a different one — what a request
-    # actually gets: the loaded size, or the model's own where nothing
-    # loads.
+    # One row for the context: the model's own size where known, and —
+    # only when the loaded instance was given a different one — what a
+    # request actually gets, said first: "64K (of 128K native)".
     catalogue = format_context(row.max_context_catalogue if row else None)
-    if catalogue:
-        out.append(("Max context", catalogue))
     loaded = format_context(row.max_context if row else None)
-    if loaded and loaded != catalogue:
-        out.append(("Served max context", loaded))
+    if catalogue and loaded and loaded != catalogue:
+        out.append(("Max context", f"{loaded} (of {catalogue} native)"))
+    elif catalogue or loaded:
+        out.append(("Max context", catalogue or loaded))
     # What the model can do, as the provider says it: how its thinking
     # is set, then the capabilities it has, in the dataclass's order —
     # "unknown" where the provider could not say.
