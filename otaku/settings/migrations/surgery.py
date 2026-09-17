@@ -25,6 +25,11 @@ from pathlib import Path
 from otaku.formatting import decode_text
 from otaku.settings import write_atomic
 
+# The keys whose values are secrets wherever they appear — a provider's
+# api key, the web password — and so never kept in a backup once an
+# edit has replaced them (`redacted`).
+_SECRETS = ("api_key", "password")
+
 # One shape change: config text in, config text out (unchanged when the
 # change does not apply).
 Migration = Callable[[str], str]
@@ -256,21 +261,65 @@ def backup_path(backups_dir: Path, stem: str) -> Path:
 
 def commit(file: Path, backup: Path, text: str, migrated: str) -> bool:
     """The write behind every config edit: the pre-edit text kept under
-    its own dated backup name — born 0600 in a 0700 backups dir, since a
-    pre-seal state may hold a plain api key — then the atomic replace.
-    OSError is swallowed — an edit is never worth a crash — and False
-    reports it."""
+    its own dated backup name — born 0600 in a 0700 backups dir — then
+    the atomic replace. OSError is swallowed — an edit is never worth a
+    crash — and False reports it.
+
+    What is kept is `redacted`: a secret this edit replaced is redacted in
+    the backup, so sealing a key or hashing a password does not leave the
+    plain value behind in a file nobody deletes."""
     try:
         backup.parent.mkdir(parents=True, exist_ok=True)
         os.chmod(backup.parent, 0o700)
         # Born 0600: never a moment (or a crash residue) at umask perms.
         fd = os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
-            f.write(text)
+            f.write(redacted(text, migrated))
         write_atomic(file, migrated)
     except OSError:
         return False
     return True
+
+
+def redacted(text: str, migrated: str) -> str:
+    """`text` as a backup may keep it: every secret — an `api_key`, a
+    `password` — whose value the edit to `migrated` CHANGED, set to
+    "[REDACTED]".
+
+    Changed is the whole test, and it is enough. A secret is only ever
+    rewritten because it was sealed, hashed, replaced or moved away, and
+    what replaced it is in the live file; one the edit left alone is
+    kept as it was, so restoring the backup still restores it. What a
+    restore of a redacted one costs is typing it again.
+
+    The redacted line loses its trailing comment, as any `set_key` line
+    does. A text that does not parse is kept as it is — nothing in it
+    can be found to redact."""
+    before, after = parse(text), parse(migrated)
+    if before is None or after is None:
+        return text
+    for section, table in _tables(before):
+        now = _table(after, section)
+        for key in _SECRETS:
+            was = table.get(key)
+            if not isinstance(was, str) or not was:
+                continue
+            if not isinstance(now, dict) or now.get(key) != was:
+                text = set_key(section, key, f'{key} = "[REDACTED]"')(text)
+    return text
+
+
+def _tables(parsed: dict[str, object], prefix: str = "") -> list[tuple[str, dict[str, object]]]:
+    """Every table in a parsed file under its dotted name, nested ones
+    included — an old config's `[providers.name]` sections are tables
+    inside a table, and their keys are secrets all the same."""
+    found: list[tuple[str, dict[str, object]]] = []
+    for name, value in parsed.items():
+        if isinstance(value, dict):
+            dotted = f"{prefix}{name}"
+            found.append((dotted, value))
+            found.extend(_tables(value, f"{dotted}."))
+    return found
 
 
 # ---------- the textual scan ----------

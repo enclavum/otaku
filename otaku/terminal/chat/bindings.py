@@ -450,7 +450,7 @@ def _model(chat: Chat, raw: str) -> None:
     if raw.strip():
         chat.say(_bold_switch(api_providers.switch_spec(chat.session, raw)))
         return
-    notice = screen_models.pick(chat.session, initial_spec=chat.session.full_model_name)
+    notice = screen_models.pick(chat.session, initial_spec=api_providers.listed_spec(chat.session))
     if notice:
         chat.say(_bold_switch(notice))
 

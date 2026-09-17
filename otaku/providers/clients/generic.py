@@ -1,24 +1,59 @@
 """The generic provider: any server behind the OpenAI protocol, by url
-and key, over the protocol alone. Models come from /models — a window
-read when the listing carries `context_length`, the extension the
-catalogs share — and turns stream from /chat/completions. Nothing an
-engine's own API would add: no load state, no sizes, no warm-up (the url
-may name a hosted catalog, where a warm-up bills a window for one
-token), and the window otherwise unknown. The one provider a reader
-configures entirely by hand, so it has no first-run section."""
+and key, over the protocol alone. The base listing reads /models, with
+the model's own max context where an entry carries `context_length` or
+llama.cpp's `meta`, and the served window where it carries the vLLM
+extension `max_model_len` or that `meta` — and nothing an engine's API
+would add: no state, no sizes, every capability unknown, which a reader
+treats as no. Permissive, never
+restrictive: what the server reads cannot be known, so everything the
+app can send goes out — every parameter, the penalty under both its
+spellings, a thinking level on every knob an engine could read — in
+the hope it is taken, and the server drops what it does not read; one
+that refuses an unknown field names it, and the take goes out again
+without the knobs. The url may name a local engine as well as a
+catalog, so `locality` stays UNKNOWN. Configured entirely by hand, so
+no first-run section.
+"""
 
 from typing import ClassVar
 
-from otaku.providers.base import ModelInfo, OpenAIClient
+from otaku.providers.openai import reasoning
+from otaku.providers.openai.client import OpenAIClient
+from otaku.providers.openai.completion import PROTOCOL_PARAMS, SAMPLER_PARAMS, OpenAICompletion
+
+
+class GenericCompletion(OpenAICompletion):
+    supported_params = PROTOCOL_PARAMS | SAMPLER_PARAMS  # permissive: see the module
+    # The rung by name and as the template's variable, the template's
+    # flag, and both budgets — the one off that holds on a template that
+    # reads neither, behind llama.cpp's or omlx's url. Not OpenRouter's
+    # object: it carries only on and a number, and a model the provider
+    # cannot describe is offered neither.
+    chat_reasoning_knobs: ClassVar[frozenset[str]] = frozenset(
+        {
+            reasoning.BUDGET_KNOB,
+            reasoning.BUDGET_TOKENS_KNOB,
+            reasoning.EFFORT_KNOB,
+            reasoning.EFFORT_TEMPLATE_KNOB,
+            reasoning.SWITCH_TEMPLATE_KNOB,
+        }
+    )
+    # On the text wire no template stands: the protocol's own field,
+    # which KoboldCpp reads there, and the budgets, which are sampling.
+    text_reasoning_knobs: ClassVar[frozenset[str]] = frozenset(
+        {reasoning.BUDGET_KNOB, reasoning.BUDGET_TOKENS_KNOB, reasoning.EFFORT_KNOB}
+    )
+
+    def _convert_params(self, params: dict[str, object]) -> dict[str, object]:
+        # `repeat_penalty` beside `repetition_penalty`: llama.cpp and LM
+        # Studio behind this url read only the former.
+        if "repetition_penalty" not in params:
+            return params
+        return {**params, "repeat_penalty": params["repetition_penalty"]}
 
 
 class GenericClient(OpenAIClient):
-    kind = "generic"
+    id = "generic"
     label = "Generic OpenAI provider"
-    # `locality` stays UNKNOWN: a url says nothing about where it runs.
-    # The url may name a local engine as well as a catalog, so the think
-    # setting goes out on both knobs (`base.thinking_knobs`).
-    thinking_knobs: ClassVar[tuple[str, ...]] = ("reasoning_effort", "enable_thinking")
-
-    def _list(self, timeout: float) -> list[ModelInfo]:
-        return self._catalog(timeout)
+    env_key = "GENERIC_API_KEY"
+    completion_class = GenericCompletion

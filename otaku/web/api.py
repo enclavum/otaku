@@ -31,7 +31,15 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from otaku import __version__
-from otaku.backend import Journal, Locality, Message, commands, meminfo
+from otaku.backend import (
+    Journal,
+    Locality,
+    Message,
+    ModelInfo,
+    ModelState,
+    commands,
+    meminfo,
+)
 from otaku.backend.api import cards as api_cards
 from otaku.backend.api import lore as api_lore
 from otaku.backend.api import play as api_play
@@ -42,10 +50,10 @@ from otaku.backend.api import stories as api_stories
 from otaku.backend.api import transfer as api_transfer
 from otaku.backend.api.cards import PreparedCard
 from otaku.backend.api.lore import FieldKind, WorkerRun
-from otaku.backend.api.play import Declined, Done, Failed, PlayEvent, Recorded, Text, Thinking
-from otaku.backend.api.providers import Engine
+from otaku.backend.api.play import Declined, Done, Failed, PlayEvent, Reasoning, Recorded, Text
+from otaku.backend.api.providers import SupportedProvider
 from otaku.backend.commands import COMMANDS, PROSE_DESCRIPTION
-from otaku.backend.session import KNOWN_PARAMS, THINK_MENU, Refused, Session
+from otaku.backend.session import EFFORT_LEVELS, PARAMETERS, THINK_UNSET, Refused, Session
 from otaku.formatting import Money, format_context, format_size
 
 __all__ = [
@@ -126,18 +134,18 @@ class NotFound(Exception):  # noqa: N818 — a 404 is an expected answer, not an
 
 def facts(session: Session) -> dict[str, Any]:
     """What the rail and the runhead draw, without reading a story or
-    probing an engine. Best-effort like the terminal's own opening: a
+    probing a provider. Best-effort like the terminal's own opening: a
     cloud catalog is never asked for its context window here.
 
     The knobs are NOT here — they are `settings`, and a figure with two
     homes has two truths — and neither is the premise, which belongs to
     the story that is sent with it."""
-    window = session.context_size()
+    max_context = session.max_context()
     return {
         "version": __version__,
         "model": session.model or "(no model)",
-        "engine": session.engine,
-        "context": format_context(window) if window else "",
+        "provider": session.provider,
+        "max_context": format_context(max_context) if max_context else "",
         "story": api_stories.headline(session),
         "story_id": session.story_id,
         # How many, so the runhead needs no chain.
@@ -310,30 +318,30 @@ def _memory(session: Session) -> dict[str, Any]:
     """The machine's memory alone — the same gauge the picker opens with
     (`backend.meminfo`), on its own so the page can watch it fill while a
     model loads. Reading it costs one syscall; asking `providers` for it
-    would re-probe every engine a second."""
+    would re-probe every provider a second."""
     return {"memory": meminfo.gauge()}
 
 
 def _providers(session: Session, scope: str = "") -> dict[str, Any]:
     """The model picker: every reachable provider's models under their
-    engine captions, and the panel's field rows. An api key's VALUE is
-    never sent — only whether one is set.
+    provider captions, and the panel's field rows. An api key's VALUE is
+    never sent — only where it comes from.
 
-    Every CONFIGURED provider, not only the engines otaku ships a client
+    Every CONFIGURED provider, not only the ones otaku ships a client
     for: a section somebody added by hand is a provider they play on,
-    and the terminal lists those after the engines, by name. A picker
+    and the terminal lists those after the supported ones, by name. A picker
     that hides the model the session is using is a picker with no way
     back to it.
 
     `scope` is which slice to ask — the terminal's own two-phase rule
-    (its picker opens on the engines on this machine and lets the rest
+    (its picker opens on the providers on this machine and lets the rest
     answer after): "local" probes and lists everything but the catalogs,
     "cloud" only those — the hosted ones and the generic provider,
     whose url could point anywhere — a provider's name only it (the
     one-provider refresh a Test connection is), "" the whole set."""
-    engines = api_providers.engines(session)
-    catalogs = {engine.name for engine in engines if engine.locality is not Locality.LOCAL}
-    everyone = {engine.name for engine in engines} | api_providers.configured(session)
+    providers = api_providers.supported(session)
+    catalogs = {p.id for p in providers if p.locality is not Locality.LOCAL}
+    everyone = {p.id for p in providers} | api_providers.configured(session)
     if scope == "local":
         asked = everyone - catalogs
     elif scope == "cloud":
@@ -346,67 +354,133 @@ def _providers(session: Session, scope: str = "") -> dict[str, Any]:
             raise NotFound(f"no provider {scope!r}")
     else:
         asked = everyone
-    rows, reachable = api_providers.get_providers(session, skip=everyone - asked)
+    panel = api_providers.get_providers(session, skip=everyone - asked)
+    rows, reachable = panel.rows, panel.reachable
     # Seeded from what is ASKED, not from what answered: a provider
     # whose server is down is exactly the one a reader opens the picker
     # to fix, and `get_providers` returns only the reachable.
     models: dict[str, list[dict[str, Any]]] = {name: [] for name in asked}
+    # What each provider can do, for the cards that answered; a card
+    # whose provider did not carries null.
+    abilities: dict[str, dict[str, Any] | None] = dict.fromkeys(asked)
     for row in rows:
-        models.setdefault(row.config.name, []).extend(
+        abilities[row.id] = {
+            "tokenizer": row.capabilities.tokenizer,
+            "prompt_cache": row.capabilities.prompt_cache,
+            "model_management": row.capabilities.model_management,
+            "supported_params": [p for p in PARAMETERS if p in row.capabilities.supported_params],
+        }
+        models.setdefault(row.id, []).extend(
             {
                 "name": model.name,
-                "loaded": model.loaded if row.can_load_unload else True,
-                "can_load_unload": row.can_load_unload,
+                "loaded": model.state is ModelState.LOADED
+                if row.capabilities.model_management
+                else True,
                 "size": format_size(model.size) if model.size else "",
-                "context": format_context(model.context) if model.context else "",
+                "max_context_catalogue": format_context(model.max_context_catalogue)
+                if model.max_context_catalogue
+                else "",
+                "max_context_loaded": format_context(model.max_context_loaded)
+                if model.max_context_loaded
+                else "",
+                "capabilities": _model_capabilities(model),
+                # Where the model is served: its own where it differs from
+                # its provider's (Ollama's ollama.com rows), the provider's
+                # otherwise — what a caption on the model reads.
+                "locality": (model.locality or row.locality).value,
+                # The info report's two rows on the model, in its words:
+                # the page draws them under the picker as it draws /info.
+                "reasoning_words": reports.reasoning_words(model.capabilities),
+                "capability_words": reports.capability_words(model.capabilities),
             }
             for model in row.models
         )
-    known = {engine.name: engine for engine in engines}
-    # The engines in their own order, then whatever else is configured,
+    known = {p.id: p for p in providers}
+    # The supported providers in their own order, then whatever else is configured,
     # by name — the terminal's `order.get(name, len(order))` — and only
     # the slice that was asked: a scoped answer carries no card it did
     # not probe, so the page never draws a lamp nobody checked. Each card
     # SAYS its position too, because the page asks in two phases and the
-    # order runs across both: the generic provider is first in the
-    # panel and last to answer.
-    rank = {engine.name: i for i, engine in enumerate(engines)}
-    named = [engine.name for engine in engines if engine.name in asked]
+    # order runs across both: the generic provider, asked in the second
+    # phase, sits between the engines on this machine and the catalogs.
+    rank = {p.id: i for i, p in enumerate(providers)}
+    named = [p.id for p in providers if p.id in asked]
     named += sorted(name for name in models if name not in known)
     return {
-        "current": session.full_model_name,
+        # Under its listed name, which is how the page finds its row.
+        "current": api_providers.listed_spec(session),
         # The one machine fact a picker needs: loading a model is what
         # fills a machine up. Said below both frontends, so the terminal's
         # gauge and the page's are one sentence (`backend.meminfo`).
         "memory": meminfo.gauge(),
-        "engines": [
-            _engine(session, name, known.get(name), rank.get(name, len(rank)), models, reachable)
+        "providers": [
+            _card(
+                session,
+                name,
+                known.get(name),
+                rank.get(name, len(rank)),
+                abilities,
+                models,
+                reachable,
+                panel.failures,
+            )
             for name in named
         ],
     }
 
 
-def _engine(
+def _model_capabilities(model: ModelInfo) -> dict[str, Any] | None:
+    """What the model can do, as the page reads it: each flag as the
+    provider states it, null where it cannot say; the rungs in the
+    wire's order, weakest to strongest; null altogether where the
+    provider says nothing of the model."""
+    caps = model.capabilities
+    if caps is None:
+        return None
+    return {
+        "vision": caps.vision,
+        "audio": caps.audio,
+        "supported_params": [p for p in PARAMETERS if p in caps.supported_params]
+        if caps.supported_params is not None
+        else None,
+        "reasoning_efforts": [e for e in EFFORT_LEVELS if e in caps.reasoning_efforts]
+        if caps.reasoning_efforts is not None
+        else None,
+        "reasoning_switch": caps.reasoning_switch,
+        "reasoning_budget": caps.reasoning_budget,
+        "text_completion": caps.text_completion,
+        "structured_output": caps.structured_output,
+    }
+
+
+def _card(
     session: Session,
     name: str,
-    engine: Engine | None,
+    provider: SupportedProvider | None,
     order: int,
+    abilities: dict[str, dict[str, Any] | None],
     models: dict[str, list[dict[str, Any]]],
     reachable: set[str] | frozenset[str],
+    failures: dict[str, str],
 ) -> dict[str, Any]:
     """One provider as the picker draws it. A configured section that is
-    not one of the engines has no catalog entry to describe it, so it
-    speaks for itself: its own name, what its config says, and no idea
-    where it runs."""
+    not one of the supported providers has no roster entry to describe
+    it, so it speaks for itself: its own name, what its config says, and
+    no idea where it runs."""
     section = api_providers.section(session, name)
+    source = api_providers.key_source(session, name)
     return {
-        "name": name,
-        "label": engine.label if engine is not None else name,
+        "id": name,
+        "label": provider.label if provider is not None else name,
         "order": order,
-        "locality": (engine.locality if engine is not None else Locality.UNKNOWN).value,
+        "locality": (provider.locality if provider is not None else Locality.UNKNOWN).value,
         "connected": name in reachable,
+        # Why not, in the package's sentence — a dead server, a rejected
+        # key, an error status; "" when connected or never asked.
+        "reason": failures.get(name, ""),
         "url": section.url,
-        "has_key": bool(section.api_key),
+        "key_source": source.value if source is not None else None,
+        "capabilities": abilities.get(name),
         "models": models.get(name, []),
     }
 
@@ -415,20 +489,42 @@ def settings(session: Session) -> dict[str, Any]:
     """The /set family as values — what each knob stands at, and where
     it persists, which is a real distinction: the toggles are
     session-wide, the parameters per model."""
+    choices = api_settings.think_choices(session)
     return {
-        "think": session.think or "default",
-        # The ladder in its one shared order (`backend.session`) — the
-        # segmented control draws it, never re-sorts it.
-        "think_levels": THINK_MENU,
+        "think": session.think or THINK_UNSET,
+        # What the model takes, in the one shared order
+        # (`api.settings.think_choices`) — the segmented control draws
+        # the levels, never re-sorts them, and a field takes the budget
+        # where one is.
+        "think_levels": choices.levels,
+        "think_budget": choices.budget,
         "verbose": session.verbose,
         "autocorrect": session.autocorrect,
         "notification": session.notification,
-        # Tokens the prompt may use at most; 0 = the model's whole window.
-        "max_context": session.max_context,
+        # Tokens the prompt may use at most; 0 = the model's own max context.
+        "max_context": session.max_context_setting,
         "model": session.model,
+        # Every parameter /set knows, in its order, each saying whether
+        # it reaches the model in use (`api.settings.parameter_read`):
+        # the page draws the unsupported ones closed, never silently
+        # dropped from the slip.
         "parameters": [
-            {"name": name, "value": str(session.params.get(name, "")), "type": kind.__name__}
-            for name, kind in KNOWN_PARAMS.items()
+            {
+                "name": name,
+                "supported": api_settings.parameter_read(session, name),
+                "value": api_settings.parameter_text(session.params[name])
+                if name in session.params
+                else "",
+                # The page's three kinds: the stop list is a text field
+                # there, and the setter reads the text.
+                "type": "str" if PARAMETERS[name].kind is list else PARAMETERS[name].kind.__name__,
+                # The bounds the setter holds a value to — the provider's
+                # own where it states them — null where none: the page's
+                # placeholder, its sign rule and its mark.
+                "min": api_settings.parameter_bounds(session, name)[0],
+                "max": api_settings.parameter_bounds(session, name)[1],
+            }
+            for name in PARAMETERS
         ],
     }
 
@@ -446,6 +542,8 @@ def context(session: Session) -> dict[str, Any]:
         "shape": asdict(shape)
         | {"kept": shape.kept, "total_tokens": shape.total_tokens, "used": shape.used},
         "lede": report.summary,
+        # What the preview could not know, in the report's words; "".
+        "note": report.note,
         "parts": [asdict(part) for part in report.parts],
     }
 
@@ -478,7 +576,7 @@ def _usage(session: Session, raw: str = "") -> dict[str, Any]:
         "cached_tokens": report.cached_tokens,
         "total_tokens": report.total_tokens,
         # The figures said in a sentence, and how much of the spend
-        # nobody asked for — the report's own words, not the page's.
+        # nobody asked for — the report's own levels, not the page's.
         "note": report.note,
     }
 
@@ -713,7 +811,7 @@ def _save_provider(session: Session, ask: Ask) -> str:
 
 def _set_knob(session: Session, ask: Ask) -> str:
     """One session-wide knob. The value crosses as given — JSON's one
-    boolean spelling translated back into the command words — and each
+    boolean spelling translated back into the command levels — and each
     setter parses its own: the shapes are the backend's, so the page
     never learns what `think` accepts."""
     setter = _KNOBS.get(ask.params["setting"])
@@ -928,8 +1026,8 @@ def event(happened: PlayEvent) -> dict[str, Any]:
             # `note` is the record's own dim line (a /roll's dice); ""
             # rides along so the shape never depends on the turn.
             return {"type": "recorded", "turn": _turn(happened.message), "note": happened.note}
-        case Thinking():
-            return {"type": "thinking", "text": happened.text}
+        case Reasoning():
+            return {"type": "reasoning", "text": happened.text}
         case Text():
             return {"type": "text", "text": happened.text}
         case Declined():
@@ -937,7 +1035,23 @@ def event(happened: PlayEvent) -> dict[str, Any]:
         case Failed():
             return {"type": "failed", "reason": happened.reason}
         case Done():
-            return {"type": "done", "stats": happened.stats}
+            report = happened.report
+            return {
+                "type": "done",
+                "stats": happened.stats,
+                # The reply's report as facts, the derived ones included,
+                # and its notice — a reply cut short says so.
+                "report": asdict(report.stats)
+                | {
+                    "max_context": report.max_context,
+                    "truncated": report.truncated,
+                    "rate": report.rate,
+                    "context_used": report.context_used,
+                }
+                if report is not None
+                else None,
+                "notice": report.notice if report is not None else "",
+            }
 
 
 # ---------- shared shapes ----------
@@ -998,7 +1112,7 @@ _Flow = Callable[[Session, Ask, Pending], Any]
 # `ask.params[name]`. The paths that span two requests are `FLOWS`, below.
 #
 # Four paths are NOT here, because none of them touch the session's
-# thread: `/api/alive` and `/api/watch` never do, `GET .../extraction`
+# thread: `/api/status` and `/api/watch` never do, `GET .../extraction`
 # reads a run's own channel-safe poll, and the two that PLAY answer with
 # a stream rather than a payload. The server holds those itself.
 ROUTES: dict[tuple[str, str], _Route] = {

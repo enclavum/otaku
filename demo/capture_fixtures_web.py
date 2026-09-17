@@ -10,7 +10,7 @@ real context window (32K — the demo's own model claims the same in
 `demo/web/store.js`), and the context previews are the real assembler's
 work over both samples: the river verbatim, the tour as the
 head-recap-tail ladder. The captured payloads are exactly what
-`otaku/web/api.py` serves; the harness engine's name and the throwaway
+`otaku/web/api.py` serves; the harness provider's name and the throwaway
 path are scrubbed before writing.
 
 Run from the repo root:  conda run -n otaku python demo/capture_fixtures_web.py
@@ -87,9 +87,9 @@ def main() -> None:
                 api_stories.land(session, river_id, river_messages[-1].id, "resume")
 
                 facts = web_api.facts(session)
-                # The harness engine is scaffolding, not content; the
+                # The harness provider is scaffolding, not content; the
                 # demo names its own model (`demo/web/store.js`).
-                facts.update(model="", engine="", context="")
+                facts.update(model="", provider="", max_context="")
                 settings = web_api.settings(session)
                 settings["model"] = ""
                 rows = web_api.stories(session)  # after both landings: river open

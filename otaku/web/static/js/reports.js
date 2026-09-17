@@ -10,7 +10,7 @@
 
 import * as api from "./api.js";
 import { footnote, guard, popups } from "./browser.js";
-import { $, element, span } from "./dom.js";
+import { $, $$, element, span } from "./dom.js";
 import { count } from "./format.js";
 
 // ---------- context: the request as a document ----------
@@ -269,9 +269,6 @@ export async function openInfo() {
       if (name === "model" && !title) title = value;
       else if (name === "story") closing.push(element("span", "otk-docket__story", value));
       else if (name === "messages") closing.push(span("otk-index__sub", `${value} messages`));
-      // The endpoint belongs UNDER the backend it addresses, not beside
-      // it: it is long, and it is the same fact said more precisely.
-      else if (name === "url") facts.append(span("otk-leader__aside otk-leader__aside--tight", value));
       else facts.append(leader(name, value));
     }
   }
@@ -285,23 +282,20 @@ export async function openInfo() {
     blocks.push(block);
   }
   showDocket("info", "Info", blocks, "", title);
+  // A value the slip clips is whole in its hover hint; one that fits
+  // needs none. Measured once the slip is laid out.
+  for (const value of $$(".otk-docket--clip .otk-leader > :last-child", popups.get("/report"))) {
+    if (value.scrollWidth > value.clientWidth) value.title = value.textContent;
+  }
 }
 
-/* A value long enough to wrap is not a figure and cannot ride a leader:
-   the dots would run into a paragraph. Past this many characters the row
-   stacks instead — the name above, the value under it. */
-const _FIGURE = 42;
-
+/* A value rides its leader whatever its length — clipped where it does
+   not fit, as the picker's detail clips, never wrapped or set in another
+   face. */
 function leader(label, value, kind = "") {
-  const text = String(value);
-  if (text.length <= _FIGURE) {
-    const line = element("div", "otk-leader");
-    line.append(span("", label), span(kind, text));
-    return line;
-  }
-  const block = element("div", "otk-v otk-v--xs");
-  block.append(span("otk-margin__key", label), element("p", `otk-derived ${kind}`.trim(), text));
-  return block;
+  const line = element("div", "otk-leader");
+  line.append(span("", label), span(kind, String(value)));
+  return line;
 }
 
 /** The slip up before its data — a click must answer NOW, and the modal
@@ -314,13 +308,15 @@ function openSlip(kind, title) {
 
 /* The BOX each report gets, decided by kind and not by what arrived:
    balance is a column of figures on a narrow slip, usage and info take
-   the default width. Every slip is torn to what it says — the balance
-   included, whose whole shape stands from the roster with only the
-   figures to land, so nothing about its height ever changes. */
+   the default width — info clipping a value too long for it, a
+   backend's url, a ladder of levels, rather than wrapping it. Every
+   slip is torn to what it says — the balance included, whose whole
+   shape stands from the roster with only the figures to land, so
+   nothing about its height ever changes. */
 const _SIZE = {
   balance: ["otk-docket--narrow"],
   usage: [],
-  info: [],
+  info: ["otk-docket--clip"],
 };
 // A slip that cannot change size may open before it has anything to say.
 const _settles = (kind) => (_SIZE[kind] ?? []).includes("otk-docket--fixed");

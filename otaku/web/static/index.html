@@ -1,11 +1,20 @@
 <!doctype html>
-<html lang="en">
+<!-- `data-booting` until the page knows whether a password is asked for:
+     the shell stays unseen, so a sign-in does not open over a page that
+     has already flashed up behind it (`app.boot` takes it off). -->
+<html lang="en" data-booting>
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- `interactive-widget`: an on-screen keyboard shrinks the page, top bar
+     kept, rather than sliding it up — where a browser honours it (Android
+     now; Safari has it in WebKit but not yet shipped) -->
+<meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
 <title>otaku</title>
 <!-- The tab's mark: the accent square, and the greyed copy
      `shell.disconnected` swaps in when otaku stops. -->
+<!-- Added to a home screen, the page opens as an app of its own, without the
+     browser's bars. -->
+<link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2016%2016'%3E%3Crect%20x='3'%20y='3'%20width='10'%20height='10'%20fill='%23b06636'/%3E%3C/svg%3E" data-offline="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2016%2016'%3E%3Crect%20x='3'%20y='3'%20width='10'%20height='10'%20fill='%23a0a0a0'/%3E%3C/svg%3E">
 <!-- The reader's theme pin, "dark" or "light", applied before the first
      paint so a pinned page never flashes the other way: the switch in the
@@ -38,6 +47,9 @@
       <button type="button" class="otk-switch" data-theme-switch role="switch" aria-checked="false" aria-label="Dark theme"><span class="otk-switch__knob"></span></button>
       <span class="otk-theme__word" aria-hidden="true"><svg viewBox="0 0 16 16" width="16" height="16"><path d="M13.6 10.4A6.4 6.4 0 0 1 5.6 2.4 6.4 6.4 0 1 0 13.6 10.4Z" fill="currentColor"></path></svg></span>
     </div>
+    <!-- full screen, for a touch screen's few lines more: shown only where
+         the browser can do it (`shell.wireFullscreen`) -->
+    <button type="button" class="otk-fullscreen" data-fullscreen aria-pressed="false" aria-label="Full screen" hidden><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M1.5 5.5v-4h4M10.5 1.5h4v4M14.5 10.5v4h-4M5.5 14.5h-4v-4" fill="none" stroke="currentColor" stroke-width="1.45"></path></svg></button>
     <div class="otk-spine__dots" aria-hidden="true">
       <span class="otk-spine__dot" aria-current="true"></span>
       <span class="otk-spine__dot"></span>
@@ -66,6 +78,10 @@
       <span class="otk-toc__gap"></span>
       <button type="button" class="otk-toc__row" data-command="/set"><span>Settings</span></button>
       <button type="button" class="otk-toc__row" data-command="/help"><span>Help</span></button>
+      <!-- Only ever drawn when a password is set and the reader is through
+           it. Not a command: the terminal has no session to leave. -->
+      <span class="otk-toc__gap" data-signed-in hidden></span>
+      <button type="button" class="otk-toc__row" data-sign-out hidden><span>Sign out</span></button>
     </div>
 
     <!-- STATUS. One reserved line: it holds its height when empty, so nothing
@@ -81,7 +97,7 @@
          reaches to change it: the foot IS the picker's button. -->
     <button type="button" class="otk-rail__foot" data-command="/model">
       <span class="otk-rail__model" data-fact="model"></span>
-      <span data-fact="engine"></span>
+      <span data-fact="provider"></span>
     </button>
   </nav>
 
@@ -141,11 +157,12 @@
 
 <!-- level 1: every story -->
 <dialog class="otk-panel" data-popup="/stories" aria-label="Stories">
-  <header class="otk-panel__head">
+  <header class="otk-panel__head otk-panel__head--centered">
     <span class="otk-eyebrow">Stories</span>
-    <span class="otk-push"></span>
-    <button type="button" class="otk-btn" data-command="/new">New story</button>
-    <button type="button" class="otk-btn" data-command="/import">Import story</button>
+    <span class="otk-panel__middle">
+      <button type="button" class="otk-btn" data-command="/new">New</button>
+      <button type="button" class="otk-btn" data-command="/import">Import</button>
+    </span>
     <button type="button" class="otk-btn otk-close">Close <span class="otk-btn__key">esc</span></button>
   </header>
 
@@ -424,6 +441,38 @@
 <!-- the drop-zone dialog: a card in, with the name it speaks to on its face
      — the one question a card import asks, answered where the card is
      chosen -->
+<!-- The one dialog with no way out: there is nothing behind it to go
+     back to, so it carries no Cancel and its backdrop hides the page
+     rather than dimming it. -->
+<dialog class="otk-dialog otk-dialog--bare" data-dialog="login" data-fixed aria-labelledby="otk-login-title">
+  <span class="otk-eyebrow">otaku</span>
+  <span class="otk-dialog__name" id="otk-login-title">Sign in</span>
+
+  <div class="otk-field-stack">
+    <label class="otk-label" for="otk-login-password">password</label>
+    <input class="otk-field" id="otk-login-password" type="password"
+           autocomplete="current-password" required autofocus
+           aria-describedby="otk-login-refused">
+    <!-- Shown only after a refusal, under the field it is about — and here
+         at all rather than in the status line, which is behind this. -->
+    <p class="otk-meta otk-field-error" id="otk-login-refused" data-error hidden></p>
+  </div>
+
+  <label class="otk-check-row">
+    <input class="otk-check" type="checkbox" data-remember checked>
+    <!-- The two lifetimes are the server's (`web.auth`); the label says
+         whichever the box stands for. -->
+    <span class="otk-meta" data-remember-label
+          data-on="stay signed in for 30 days" data-off="stay signed in for 4 hours">stay signed in for 30 days</span>
+  </label>
+
+  <p class="otk-note">You can change the password in config.toml.</p>
+
+  <div class="otk-dialog__foot">
+    <button type="button" class="otk-btn otk-btn--primary" data-choice="sign-in">Continue</button>
+  </div>
+</dialog>
+
 <dialog class="otk-dialog" data-dialog="card" aria-labelledby="otk-card-title">
   <span class="otk-eyebrow" data-title id="otk-card-title">Import a character card</span>
 

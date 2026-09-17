@@ -4,6 +4,7 @@ counts the tokens spent, /info dumps what otaku knows."""
 import re
 
 from otaku.backend.api import reports
+from otaku.formatting import format_context
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch, set_config, set_config_provider
 
@@ -147,6 +148,102 @@ class TestBalance:
 
 
 class TestInfo:
+    def test_the_models_capabilities_are_rows_where_the_engine_can_say(self, tmp_path) -> None:
+        # llama.cpp says what it loaded in /props: a projector means
+        # images, a template that reads reasoning_effort means every
+        # level; raw completion is its wire's own.
+        server = scripted.ModelServer()
+        server.window = 8192
+        server.props = {
+            "modalities": {"vision": True, "audio": False},
+            "chat_template_caps": {"supports_reasoning_effort": True},
+        }
+        try:
+            set_config_provider(tmp_path / "state", server, name="llamacpp")
+            app = launch(tmp_path / "state", server, spec="llamacpp/test-model")
+            try:
+                rows = _rows(reports.info(app.session))
+                assert rows["Capabilities"] == "vision, text completion, json output"
+                # How its template sets the thinking, a build without
+                # /apply-template cannot tell.
+                assert rows["Reasoning"] == "unknown"
+            finally:
+                app.close()
+        finally:
+            server.close()
+
+    def test_the_context_row_says_the_served_size_of_the_models_own_where_they_differ(
+        self, tmp_path
+    ) -> None:
+        # llama.cpp's listing carries both figures: the trained length
+        # and the slot's window. The window is a row only when it is not
+        # the trained length, and comes after it.
+        rows = _llamacpp_rows(tmp_path / "half", trained=8192, window=4096)
+        labels = list(rows)
+        assert labels.index("Max context") + 1 == labels.index("Reasoning")
+        served, own = format_context(4096), format_context(8192)
+        assert rows["Max context"] == f"{served} (of {own} native)"
+        rows = _llamacpp_rows(tmp_path / "whole", trained=8192, window=8192)
+        assert rows["Max context"] == format_context(8192)
+
+    def test_an_engine_that_names_no_efforts_says_so(self, tmp_path) -> None:
+        # omlx's status states the thinking toggle; a template without
+        # one takes no level at all, which is a known nothing, not an
+        # unknown.
+        server = scripted.ModelServer()
+        server.status = True
+        try:
+            set_config_provider(tmp_path / "state", server, name="omlx")
+            app = launch(tmp_path / "state", server, spec="omlx/test-model")
+            try:
+                row = _rows(reports.info(app.session))["Reasoning"]
+                assert row == "not supported"
+            finally:
+                app.close()
+        finally:
+            server.close()
+
+    def test_the_capabilities_row_spells_the_card_in_the_dataclasss_order(self, tmp_path) -> None:
+        # Ollama's card names thinking and vision; the row lists what the
+        # model has in the dataclass's order — reasoning left to its own
+        # row — with constrained decoding, which every Ollama model has,
+        # last.
+        server = scripted.ModelServer(managed=True)
+        server.capabilities["test-model"] = ["completion", "thinking", "vision"]
+        try:
+            set_config_provider(tmp_path / "state", server, name="ollama")
+            app = launch(tmp_path / "state", server, spec="ollama/test-model")
+            try:
+                rows = _rows(reports.info(app.session))
+                assert rows["Capabilities"] == "vision, json output"
+                assert rows["Reasoning"] not in ("unknown", "not supported")
+            finally:
+                app.close()
+        finally:
+            server.close()
+
+    def test_an_engine_that_cannot_say_how_the_thinking_is_set_reads_unknown(
+        self, tmp_path
+    ) -> None:
+        # LM Studio takes the effort word, but a registry row without
+        # the reasoning object does not say what the model takes.
+        server = scripted.ModelServer(managed=True)
+        try:
+            set_config_provider(tmp_path / "state", server, name="lmstudio")
+            app = launch(tmp_path / "state", server, spec="lmstudio/test-model")
+            try:
+                assert _rows(reports.info(app.session))["Reasoning"] == "unknown"
+            finally:
+                app.close()
+        finally:
+            server.close()
+
+    def test_what_the_engine_cannot_say_is_unknown(self, app: App) -> None:
+        # The generic provider reads nothing: every capability is
+        # unknown, which the app offers nothing on.
+        rows = _rows(reports.info(app.session))
+        assert (rows["Reasoning"], rows["Capabilities"]) == ("unknown", "unknown")
+
     def test_without_a_model_the_session_half_still_reports(self, server, tmp_path, capsys) -> None:
         # A model is one of the things /info reports, not its
         # precondition: the story and the parameters are the session's
@@ -169,3 +266,26 @@ class TestInfo:
 
 def numbers(text: str) -> list[int]:
     return [int(n) for n in re.findall(r"\d+", text)]
+
+
+def _rows(report: reports.InfoReport) -> dict[str, str]:
+    """Every labelled fact of the report, whichever block it is in."""
+    return {label: value for section in report.sections for label, value in section.rows}
+
+
+def _llamacpp_rows(root, *, trained: int, window: int) -> dict[str, str]:
+    """`/info`'s rows on a llama.cpp whose model was trained to `trained`
+    tokens and loaded with a slot of `window` — one server and one
+    state dir each, since a client keeps the window it first read."""
+    server = scripted.ModelServer()
+    server.contexts["test-model"] = trained
+    server.window = window
+    try:
+        set_config_provider(root, server, name="llamacpp")
+        app = launch(root, server, spec="llamacpp/test-model")
+        try:
+            return _rows(reports.info(app.session))
+        finally:
+            app.close()
+    finally:
+        server.close()

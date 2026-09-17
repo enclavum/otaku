@@ -11,7 +11,7 @@ import { guard } from "./browser.js";
 import { $, $$ } from "./dom.js";
 import { label } from "./format.js";
 import { offline, reached, tell, told, working } from "./status.js";
-import { isPlaying, showTurns } from "./transcript.js";
+import { isPlaying, showCorrected, showTurns } from "./transcript.js";
 
 const app = $(".otk-app");
 const icon = $('link[rel="icon"]');
@@ -28,13 +28,13 @@ let drawn = null;
 const GONE = "otaku is down";
 
 export function showFacts(facts) {
-  const engine = [facts.engine, facts.context && `${facts.context} context`]
+  const provider = [facts.provider, facts.max_context && `${facts.max_context} context`]
     .filter(Boolean)
     .join(" · ");
   const fields = {
     version: `v${facts.version}`,
     model: facts.model,
-    engine: engine,
+    provider: provider,
     story: label(facts.story) || "No story yet",
     turns: facts.turns ? `${facts.turns} messages` : "",
   };
@@ -57,15 +57,16 @@ export async function refresh() {
 /** What a write answered with, shown where it belongs. The facts are
     always asked again; the transcript is redrawn only when the story it
     draws is no longer the one that is open, because a redraw costs the
-    reader their place. */
-export async function landed(notice, { redraw = "if-moved", keepPlace = false } = {}) {
+    reader their place. `corrected` — `[position, text]` — is one turn
+    corrected elsewhere, shown where the transcript draws it instead. */
+export async function landed(notice, { redraw = "if-moved", corrected = null } = {}) {
   const facts = await api.facts();
   const moved = facts.story_id !== drawn;
   showFacts(facts);
   if (redraw === "always" || (redraw === "if-moved" && moved)) {
-    // `keepPlace` is for a write that TAKES something away: what is
-    // above it must not move, and the space it emptied stays open.
-    showTurns(await api.turns(), { keepPlace });
+    showTurns(await api.turns());
+  } else if (corrected) {
+    showCorrected(...corrected);
   }
   tell(notice);
 }
@@ -102,7 +103,7 @@ export function watchServer(boot) {
   let beating = ""; // the worker's line, while the page is showing it
   setInterval(async () => {
     try {
-      const beat = await api.alive();
+      const beat = await api.status();
       /* Every sentence of the beat, not the last: the beat DRAINS the
          worker's mailbox, so one shown is the rest lost forever. One
          line holds them ellipsised, and hovering reads them whole
@@ -214,6 +215,26 @@ export function wireTheme() {
       /* private mode or storage refused: the choice holds for this page */
     }
     show();
+  });
+}
+
+/** Full screen, for a phone's few lines more. Offered only on a touch
+    screen whose browser can do it for a page — which no browser on an
+    iPhone can; there, adding the page to the home screen is the way. */
+export function wireFullscreen() {
+  const control = $("[data-fullscreen]");
+  if (!control) return;
+  control.hidden = !(document.fullscreenEnabled && window.matchMedia("(pointer: coarse)").matches);
+  // left by the phone's own back gesture too, so the state is read back
+  document.addEventListener("fullscreenchange", () => {
+    control.setAttribute("aria-pressed", String(Boolean(document.fullscreenElement)));
+  });
+  control.addEventListener("click", () => {
+    // a browser that declines says nothing worth a sentence: the button stays
+    const asked = document.fullscreenElement
+      ? document.exitFullscreen()
+      : document.documentElement.requestFullscreen();
+    asked.catch(() => {});
   });
 }
 

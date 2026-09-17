@@ -2,8 +2,9 @@
 
 This module holds the shape-change tables themselves and `migrate`, the
 whole launch step; `surgery` is the toolkit every edit is built from,
-`providers_file` the moves over providers.toml, and `prompt_texts` the
-refreshed templates for prompts.toml. Everything here is idempotent and
+`providers_file` the moves over providers.toml, `prompt_texts` the
+refreshed templates for prompts.toml, and `state_file` the thinking
+level's move out of state.toml. Everything here is idempotent and
 convergent: it all simply reruns at every launch — no version stamp to
 trust, no one-shot step whose half-state could stick — so a crash
 between writes, a hand edit, or a launch that could not finish heals on
@@ -12,9 +13,9 @@ the next one. A file is written only when something actually changed.
 
 import contextlib
 from collections.abc import Callable
-from pathlib import Path
 
-from otaku.settings import row, write_atomic
+from otaku.settings import Secrets, SettingsFiles, row, write_atomic
+from otaku.settings.migrations.config_file import hash_plain_password
 from otaku.settings.migrations.prompt_texts import (
     EXTRACT_0_2_2,
     EXTRACT_0_3_0,
@@ -29,6 +30,7 @@ from otaku.settings.migrations.providers_file import (
     move_providers,
     seal_api_keys,
 )
+from otaku.settings.migrations.state_file import move_think
 from otaku.settings.migrations.surgery import (
     Migration,
     apply_migrations,
@@ -88,11 +90,12 @@ _CONFIG_MIGRATIONS: list[Migration] = [
         "web",
         "[web]\n"
         + row(
-            'host = "127.0.0.1"',
-            "where `otaku web` listens; anything but 127.0.0.1 opens it to the network",
+            'host = "localhost"',
+            '"localhost": reachable from this machine only; "0.0.0.0": from the whole '
+            "network — set https and a password first",
         )
         + "\n"
-        + row("port = 9600", "…and on which port"),
+        + row("port = 9600", "the port `otaku web` listens on"),
         after="terminal",
     ),
     # 0.4.0 — the background stops being guessed in silence. The ask
@@ -126,7 +129,7 @@ _CONFIG_MIGRATIONS: list[Migration] = [
         "max_context",
         row(
             "max_context = 0",
-            "the prompt may use at most this many tokens; 0 = the model's whole window",
+            "the prompt may use at most this many tokens; 0 = the model's own max context",
         ),
         after="min_tail_messages",
     ),
@@ -139,6 +142,30 @@ _CONFIG_MIGRATIONS: list[Migration] = [
         lambda value: row(
             f"min_tail_messages = {value}", "at least this many recent messages kept verbatim"
         ),
+    ),
+    # 0.5.0 — the web frontend learns TLS and a password, both off. A
+    # config written before them was written for a loopback server,
+    # where neither buys anything; the keys land so an upgrader SEES
+    # that the choice exists once their host stops being loopback.
+    ensure_key(
+        "web",
+        "https",
+        row(
+            "https = false",
+            "RECOMMENDED to turn on when the host is not local; the certificate lives in "
+            "cert/: drop in your own, or one is generated",
+        ),
+        after="port",
+    ),
+    ensure_key(
+        "web",
+        "password",
+        row(
+            'password = ""',
+            "RECOMMENDED to set when the host is not local; typed in plain text, it is "
+            "replaced by its hash at the next launch",
+        ),
+        after="https",
     ),
 ]
 
@@ -189,12 +216,12 @@ def _provider_migrations(
     of them — and runs after the move from an old config, so it cleans a
     section the same way wherever the section came from."""
     return [
-        # 0.2.2 — thinking support became class knowledge of the engine.
+        # 0.2.2 — thinking support became class knowledge of the provider.
         drop_key_everywhere("supports_thinking"),
         # 0.2.2 — api keys live sealed; a plain one (hand-typed, or left
         # by a launch that could not seal) is sealed as soon as possible.
         seal_api_keys(seal, is_sealed),
-        # 0.4.0 — prompt caching arrives, on where the engine honours
+        # 0.4.0 — prompt caching arrives, on where the provider honours
         # cache breakpoints: the key lands in the file so an upgrader
         # SEES the setting exists; what a user already set stays. Named
         # sections only — the section's name is what picks the marking
@@ -207,30 +234,36 @@ def _provider_migrations(
 
 
 def migrate(
-    *,
-    config_path: Path,
-    providers_path: Path,
-    prompts_path: Path,
-    backups_dir: Path,
-    provider_defaults: dict[str, ProviderConfig],
-    seal: Callable[[str], str],
-    is_sealed: Callable[[str], bool],
+    files: SettingsFiles, secrets: Secrets, provider_defaults: dict[str, ProviderConfig]
 ) -> None:
     """The whole launch step over the settings files, in order: the
-    config table, the provider move, the providers table (plain api
-    keys sealed — `is_sealed` rides with `seal` so the migration skips
-    sealed keys itself; an unsealable line stays for the next launch),
-    the given engines' sections ensured, the
-    prompt-template refreshes. providers.toml itself converges too:
-    missing beside an existing config — a crash between the first-run
-    writes, a hand deletion — it is founded empty here, for the ensured
-    sections to fill. A missing config is bootstrap's business, and
-    failures are swallowed — a migration is never worth a launch."""
-    update_config(config_path, backups_dir, _CONFIG_MIGRATIONS)
-    move_providers(config_path, providers_path, backups_dir)
-    if config_path.exists() and not providers_path.exists():
+    config table (a typed web password replaced by its hash last), the
+    provider move, the given providers' sections ensured, the providers
+    table (plain api keys sealed; an unsealable line stays for the next
+    launch — and a section founded just above gaining what the table
+    adds, in the same launch), the prompt-template refreshes, and the
+    thinking level an older state.toml still holds moved to its model.
+    providers.toml itself converges too: missing beside an existing
+    config — a crash between the first-run writes, a hand deletion — it
+    is founded empty here, for the ensured sections to fill. A missing
+    config is bootstrap's business, and failures are swallowed — a
+    migration is never worth a launch."""
+    # The password is hashed after the shape moves, so a config that is
+    # still gaining its [web] rows has them before this looks for one.
+    update_config(
+        files.config,
+        files.backups_dir,
+        [*_CONFIG_MIGRATIONS, hash_plain_password(secrets.hash, secrets.is_hashed)],
+    )
+    move_providers(files.config, files.providers, files.backups_dir)
+    if files.config.exists() and not files.providers.exists():
         with contextlib.suppress(OSError):
-            write_atomic(providers_path, "")
-    update_providers(providers_path, backups_dir, _provider_migrations(seal, is_sealed))
-    ensure_providers(providers_path, backups_dir, provider_defaults)
-    update_prompts(prompts_path, backups_dir, _PROMPT_MIGRATIONS)
+            write_atomic(files.providers, "")
+    ensure_providers(files.providers, files.backups_dir, provider_defaults)
+    update_providers(
+        files.providers,
+        files.backups_dir,
+        _provider_migrations(secrets.seal, secrets.is_sealed),
+    )
+    update_prompts(files.prompts, files.backups_dir, _PROMPT_MIGRATIONS)
+    move_think(files.state, files.models)

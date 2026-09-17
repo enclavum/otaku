@@ -517,7 +517,22 @@ function play(body, regenerate, signal) {
             ? `[ total ${seconds.toFixed(1)}s, prompt ${promptTokens} tok, eval ${tokens} tok @ ${rate} tok/s ]`
             : "";
           land();
-          frame(controller, { type: "done", stats });
+          // The product's shape: the report's facts beside the line, and
+          // a notice the page's own model never has — it finishes what
+          // it starts.
+          const report = {
+            total_seconds: seconds,
+            first_token_seconds: Math.min(0.2, seconds),
+            prompt_tokens: promptTokens,
+            cached_tokens: null,
+            completion_tokens: tokens,
+            max_context: null,
+            finish_reason: "stop",
+            truncated: false,
+            rate: Number(rate),
+            context_used: null,
+          };
+          frame(controller, { type: "done", stats, report, notice: "" });
           over = true;
           controller.close();
           return;
@@ -550,7 +565,15 @@ window.fetch = async (input, init) => {
   if (!path.startsWith("/api/")) return realFetch(input, init);
   await ready;
   const query = new URLSearchParams(url.split("?")[1] ?? "");
-  if (path === "/api/alive") return json({ status: store.status(), notices: [] });
+  if (path === "/api/status") return json({ status: store.status(), notices: [] });
+  // The demo asks for no password, so this is the product's answer for an
+  // otaku with none set: nothing to sign in to, and every attempt refused.
+  if (path === "/api/login") {
+    const method = (init && init.method) || "GET";
+    if (method === "GET") return json({ required: false, signed_in: false });
+    if (method === "POST") return json({ notice: "This otaku asks for no password.", refused: true });
+    return json({});
+  }
   const method = (init && init.method) || "GET";
   const body = init && init.body ? JSON.parse(init.body) : {};
   // The two that answer with a STREAM rather than a payload.

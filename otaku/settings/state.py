@@ -1,22 +1,15 @@
 """What the app remembers between sessions: state.toml — rewritten
-wholesale on every change; there are no user edits to preserve. What a
-hand-edited or older file may hold is settled onto the vocabulary as it
-is read (`State.settled`), so nothing downstream has to distrust it."""
+wholesale on every change; there are no user edits to preserve. A key
+an older file still carries and this one no longer does (the thinking
+level, the model's own since 0.5.0 — `migrations.state_file` moves it)
+is read past."""
 
 import tomllib
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 from otaku.formatting import toml_scalar
 from otaku.settings import read_settings, row, write_atomic
-
-# Thinking effort as this file spells it. "default" is not a level: it
-# means send nothing and let the model decide. This is the FILE's
-# vocabulary — the order a menu offers it in is a frontend-shared
-# decision and lives with the rest of the /set vocabulary
-# (`backend.session.THINK_MENU`).
-THINK_LEVELS = {"none", "low", "medium", "high", "xhigh", "max"}
-THINK_DEFAULT = "default"
 
 
 @dataclass(frozen=True)
@@ -26,7 +19,6 @@ class State:
     verbose: bool = False
     autocorrect: bool = True
     notification: bool = False
-    think: str = "none"
 
     @property
     def provider(self) -> str:
@@ -39,14 +31,6 @@ class State:
         """The model half, as a server expects it; "" when nothing is
         remembered, and "" for a half-written spec ("ollama/")."""
         return self.model.partition("/")[2]
-
-    def settled(self) -> "State":
-        """This state on the vocabulary the app understands: a `think`
-        it does not recognize falls to "none" — never a failed launch,
-        and the next write heals the file."""
-        if self.think == THINK_DEFAULT or self.think in THINK_LEVELS:
-            return self
-        return replace(self, think="none")
 
 
 def load(path: Path) -> tuple[State, list[str]]:
@@ -66,8 +50,7 @@ def load(path: Path) -> tuple[State, list[str]]:
         verbose=bool(raw.get("verbose", False)),
         autocorrect=bool(raw.get("autocorrect", True)),
         notification=bool(raw.get("notification", False)),
-        think=str(raw.get("think", "none")),
-    ).settled(), []
+    ), []
 
 
 def save(path: Path, state: State) -> None:
@@ -79,7 +62,6 @@ def save(path: Path, state: State) -> None:
             row(f"verbose = {str(state.verbose).lower()}", "/set verbose"),
             row(f"autocorrect = {str(state.autocorrect).lower()}", "/set autocorrect"),
             row(f"notification = {str(state.notification).lower()}", "/set notification"),
-            row(f"think = {toml_scalar(state.think)}", "/set think"),
         ]
     )
     write_atomic(path, body + "\n")

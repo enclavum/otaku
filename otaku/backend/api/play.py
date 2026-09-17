@@ -2,7 +2,7 @@
 the takes over it (regenerate, undo).
 
 The stream is the frontend's to drive: iterate to render, close to
-cancel. The event vocabulary lives here, `Text` and `Thinking` included
+cancel. The event vocabulary lives here, `Text` and `Reasoning` included
 (re-exported from providers — members of this module's union). Closing
 mid-stream keeps and records what arrived — Ctrl+C and Ctrl+R are the
 frontend closing the generator; a Ctrl+R then simply calls `regenerate`
@@ -11,21 +11,18 @@ stream. A new reply arms the worker's idle-debounced extraction pass;
 every submission (submit, regenerate, undo) defers pending work first.
 """
 
-import contextlib
 from collections.abc import Iterator
 from dataclasses import dataclass
-
-import httpx
 
 from otaku.backend.api.cards import drop_unplayed_card
 from otaku.backend.api.lore import build_job
 from otaku.backend.session import NO_MODEL_HINT, Refused, Session
 from otaku.context import syntax
 from otaku.context.assembler import ContextOverflowError
-from otaku.formatting import format_context, printable
-from otaku.providers import ProviderConfig, Stats
+from otaku.formatting import format_context
+from otaku.providers import ProviderError, Stats
+from otaku.providers import Reasoning as Reasoning
 from otaku.providers import Text as Text
-from otaku.providers import Thinking as Thinking
 from otaku.store.schema import Character, Message
 
 
@@ -59,15 +56,84 @@ class Failed:
 
 
 @dataclass(frozen=True)
+class ReplyReport:
+    """What the reply came to: the stream's own account (`stats` — the
+    spans, the counts, why the model stopped) beside what the stream
+    cannot know, the context the prompt was measured against; and what
+    follows from both. A frontend draws its stats line from these;
+    `text()` is the line the terminal prints. `truncated` is a reply
+    the model did not finish — cut at the reply limit, mid-sentence —
+    and `notice` the sentence that says so, "" otherwise."""
+
+    stats: Stats
+    max_context: int | None
+
+    @property
+    def truncated(self) -> bool:
+        return self.stats.finish_reason == "length"
+
+    @property
+    def notice(self) -> str:
+        return "The reply was cut short at the max_tokens limit." if self.truncated else ""
+
+    @property
+    def rate(self) -> float | None:
+        """Tokens per second over the generation alone — the span after
+        the first token; None without a count or a span."""
+        stats = self.stats
+        if stats.completion_tokens is None or stats.first_token_seconds is None:
+            return None
+        span = stats.total_seconds - stats.first_token_seconds
+        return stats.completion_tokens / span if span > 0 else None
+
+    @property
+    def context_used(self) -> int | None:
+        """Percent of the context the prompt took; None where either
+        figure is unknown."""
+        if self.stats.prompt_tokens is None or not self.max_context:
+            return None
+        return round(100 * self.stats.prompt_tokens / self.max_context)
+
+    def text(self) -> str:
+        """The verbose stats line:
+
+            [ total 1.3s, prompt 40 tok, eval 37 tok @ 35.2 tok/s, ctx 12% / 32K ]
+
+        `total` is wall-clock for the whole request; the rate is over
+        the decode-only span, so it reflects generation speed. Fields
+        with no underlying value are skipped."""
+        stats = self.stats
+        parts: list[str] = [f"total {stats.total_seconds:.1f}s"]
+        if stats.prompt_tokens is not None:
+            parts.append(f"prompt {stats.prompt_tokens} tok")
+        if stats.cached_tokens is not None:
+            # Zero included: "cached 0 tok" is how a reader discovers their
+            # pacing outlives the cache TTL (see providers.toml prompt_cache).
+            parts.append(f"cached {stats.cached_tokens} tok")
+        if stats.completion_tokens is not None:
+            rate = self.rate
+            parts.append(
+                f"eval {stats.completion_tokens} tok"
+                + (f" @ {rate:.1f} tok/s" if rate is not None else "")
+            )
+        if self.context_used is not None:
+            parts.append(f"ctx {self.context_used}% / {format_context(self.max_context)}")
+        return f"[ {', '.join(parts)} ]"
+
+
+@dataclass(frozen=True)
 class Done:
-    """The turn's end: the recorded reply (None when nothing arrived) and
-    the verbose stats line ("" when off or unknowable)."""
+    """The turn's end: the recorded reply (None when nothing arrived),
+    what it came to (None when the stream said nothing of itself), and
+    the verbose stats line — the report's `text()`, "" unless /set
+    verbose, so a frontend prints it as it is."""
 
     reply: Message | None
+    report: ReplyReport | None
     stats: str
 
 
-PlayEvent = Recorded | Text | Thinking | Declined | Failed | Done
+PlayEvent = Recorded | Text | Reasoning | Declined | Failed | Done
 
 
 def submit(session: Session, line: str) -> Iterator[PlayEvent]:
@@ -78,7 +144,7 @@ def submit(session: Session, line: str) -> Iterator[PlayEvent]:
     function that validates and returns the inner generator, never a
     generator itself. Then: the typed name settles to the cast's
     spelling, the turn records, Recorded is yielded, and the reply
-    streams as Thinking/Text deltas, Failed on a stream error, Done at
+    streams as Reasoning/Text deltas, Failed on a stream error, Done at
     the end. With no model selected the turn is still recorded — it is
     story — and Declined(NO_MODEL_HINT) ends the stream after Recorded.
     Closing the generator mid-stream records the partial reply and its
@@ -94,7 +160,7 @@ def submit(session: Session, line: str) -> Iterator[PlayEvent]:
 
 def regenerate(session: Session) -> Iterator[PlayEvent]:
     """Re-run the last prompt: the standing reply becomes a sibling and
-    the fresh take streams (Text/Thinking/Failed/Done — no Recorded; the
+    the fresh take streams (Text/Reasoning/Failed/Done — no Recorded; the
     prompt is already on screen or in `session.messages`). The dropped
     reply's kind and speaker are re-derived from the prompt, exactly as
     when it first played. Raises Refused when there is no model or
@@ -206,7 +272,16 @@ def _reply_events(
         yield Declined(NO_MODEL_HINT)
         return
     try:
-        wire = session.assemble(client.get_context_size(session.model)).messages
+        # A cold model is loaded first, so the window the prompt is cut
+        # to is the runner's and not a substitute (`OpenAIModels.ready`).
+        found = client.models.ready(session.model, on_idle=session._on_idle)
+        max_context = found.max_context if found else None
+        wire = session.assemble(max_context).messages
+    except ProviderError as e:
+        # The load the turn needed did not happen: the turn is recorded
+        # and plays once the engine can, on a regenerate.
+        yield Declined(str(e))
+        return
     except ContextOverflowError as e:
         # The turn is recorded — it is story — and plays once the limit
         # is raised or more scenes close. The sentence is the assembler's.
@@ -216,11 +291,11 @@ def _reply_events(
     held = ""  # a whitespace run the stream has not yet earned sending
     final: Stats | None = None
     error: str | None = None
-    stream = client.chat_stream(
+    stream = client.completion.chat(
         session.model,
         wire,
         dict(session.params),
-        think=session.think,
+        level=session.think,
         purpose="chat",
         # The thread this runs on belongs to the frontend between
         # tokens, if the frontend said what to do with it.
@@ -229,7 +304,7 @@ def _reply_events(
     try:
         try:
             for chunk in stream:
-                if isinstance(chunk, Thinking):
+                if isinstance(chunk, Reasoning):
                     yield chunk
                 elif isinstance(chunk, Text):
                     # Some models pad the reply with blank lines. The text
@@ -253,19 +328,25 @@ def _reply_events(
             close = getattr(stream, "close", None)
             if callable(close):
                 close()
-    except GeneratorExit:
-        # The frontend closed the stream mid-way: cancel-and-keep. No
-        # more yields are possible — record and re-raise.
-        _land_reply(session, content, final, reply_kind, reply_speaker)
+    except (GeneratorExit, KeyboardInterrupt):
+        # The frontend closed the stream mid-way, or the terminal's
+        # Ctrl+C landed in the wait itself, inside this frame — the same
+        # cancel-and-keep. No more yields are possible: record and
+        # re-raise. What the stream came to so far is filed too — the
+        # prefill was spent and billed, whatever the reader saw.
+        _land_reply(session, content, stream.stats, reply_kind, reply_speaker)
         raise
     except Exception as e:  # the stream failed; what streamed is kept
-        error = _error_message(e, client.config)
+        # The provider package's own sentence: it names the provider and
+        # carries the server's explanation where there was one.
+        error = str(e)
     reply = _land_reply(session, content, final, reply_kind, reply_speaker)
     if error is not None:
         yield Failed(error)
         return
-    stats = _format_stats(final) if session.verbose and final is not None else ""
-    yield Done(reply=reply, stats=stats)
+    report = ReplyReport(final, max_context) if final is not None else None
+    stats = report.text() if session.verbose and report is not None else ""
+    yield Done(reply=reply, report=report, stats=stats)
 
 
 def _land_reply(
@@ -304,56 +385,8 @@ def _land_reply(
             prompt_tokens=final.prompt_tokens,
             completion_tokens=final.completion_tokens,
             cached_tokens=final.cached_tokens,
-            duration_seconds=final.duration_seconds,
+            duration_seconds=final.total_seconds,
         )
     if reply is not None and session._config.lore_enabled and session.story_id is not None:
         session._worker.schedule(build_job(session))
     return reply
-
-
-def _format_stats(stats: Stats) -> str:
-    """The verbose stats line:
-
-        [ total 1.3s, prompt 40 tok, eval 37 tok @ 35.2 tok/s, ctx 12% / 32K ]
-
-    `total` is wall-clock for the whole request; the rate is computed over
-    the decode-only span (excluding prefill and time-to-first-token) so it
-    reflects generation speed. Fields with no underlying value are skipped."""
-    parts: list[str] = [f"total {stats.duration_seconds:.1f}s"]
-    if stats.prompt_tokens is not None:
-        parts.append(f"prompt {stats.prompt_tokens} tok")
-    if stats.cached_tokens is not None:
-        # Zero included: "cached 0 tok" is how a reader discovers their
-        # pacing outlives the cache TTL (see providers.toml prompt_cache).
-        parts.append(f"cached {stats.cached_tokens} tok")
-    if stats.completion_tokens is not None:
-        generation = stats.generation_seconds or stats.duration_seconds
-        if generation > 0:
-            rate = stats.completion_tokens / generation
-            parts.append(f"eval {stats.completion_tokens} tok @ {rate:.1f} tok/s")
-        else:
-            parts.append(f"eval {stats.completion_tokens} tok")
-    if stats.context_max:
-        cap = format_context(stats.context_max)
-        if stats.prompt_tokens is not None and stats.context_max > 0:
-            pct = stats.prompt_tokens / stats.context_max * 100
-            parts.append(f"ctx {pct:.0f}% / {cap}")
-        else:
-            parts.append(f"ctx {cap}")
-    return "[ " + ", ".join(parts) + " ]"
-
-
-def _error_message(e: Exception, config: ProviderConfig) -> str:
-    """One formatter for every stream failure. A 4xx/5xx carries the
-    server's explanatory body — a bare '400 Bad Request' hides the actual
-    reason (usually context overflow)."""
-    if isinstance(e, httpx.HTTPStatusError):
-        body = ""
-        with contextlib.suppress(Exception):
-            e.response.read()  # a streamed response may not be read yet
-            body = printable(" ".join(e.response.text.split()))
-        detail = f": {body[:300]}" if body else ""
-        return f"HTTP {e.response.status_code} from {e.request.url.host}{detail}"
-    if isinstance(e, httpx.RequestError):
-        return f"could not reach {config.name} at {config.url}"
-    return str(e)

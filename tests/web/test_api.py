@@ -10,7 +10,7 @@ says which lane a row takes, because the METHOD is the lane.
 
 from typing import get_args
 
-from otaku.backend.api.play import Declined, Done, Failed, PlayEvent, Recorded, Text, Thinking
+from otaku.backend.api.play import Declined, Done, Failed, PlayEvent, Reasoning, Recorded, Text
 from otaku.store.schema import Message
 from otaku.web import api
 
@@ -20,18 +20,18 @@ class TestEvent:
 
     def test_every_kind_has_a_name_on_the_wire(self) -> None:
         assert api.event(Recorded(Message(role="user", body="hi")))["type"] == "recorded"
-        assert api.event(Thinking("hm"))["type"] == "thinking"
+        assert api.event(Reasoning("hm"))["type"] == "reasoning"
         assert api.event(Text("word"))["type"] == "text"
         assert api.event(Declined("no model"))["type"] == "declined"
         assert api.event(Failed("the provider hung up"))["type"] == "failed"
-        assert api.event(Done(reply="done", stats="7 tok/s"))["type"] == "done"
+        assert api.event(Done(reply="done", report=None, stats="7 tok/s"))["type"] == "done"
 
     def test_the_union_is_covered(self) -> None:
         # The match is exhaustive by construction; this is what makes
         # ADDING a kind fail here instead of shipping as a silence.
         assert {kind.__name__ for kind in get_args(PlayEvent)} == {
             "Recorded",
-            "Thinking",
+            "Reasoning",
             "Text",
             "Declined",
             "Failed",

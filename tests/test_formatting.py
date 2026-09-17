@@ -7,6 +7,7 @@ from otaku.formatting import (
     decode_text,
     flatten,
     format_context,
+    format_seconds,
     format_size,
     pretty_path,
     printable,
@@ -112,6 +113,22 @@ class TestFormatSize:
         assert format_size(0) == "—"
 
 
+class TestFormatSeconds:
+    def test_whole_seconds_from_ten_up(self) -> None:
+        assert format_seconds(30) == "30 seconds"
+        assert format_seconds(10.4) == "10 seconds"
+
+    def test_tenths_below_ten(self) -> None:
+        assert format_seconds(0.5) == "0.5 seconds"
+        assert format_seconds(2.5) == "2.5 seconds"
+
+    def test_a_round_figure_drops_its_tenth(self) -> None:
+        assert format_seconds(5.0) == "5 seconds"
+
+    def test_one_second_is_singular(self) -> None:
+        assert format_seconds(1.0) == "1 second"
+
+
 class TestFormatContext:
     def test_a_round_decimal_size_keeps_the_label_it_is_sold_under(self) -> None:
         # 128,000 divides by 1024 too — the decimal reading has to win, or
@@ -178,6 +195,11 @@ class TestTomlScalar:
     def test_booleans(self) -> None:
         assert toml_scalar(True) == "true"
         assert toml_scalar(False) == "false"
+
+    def test_an_array_roundtrips_its_items(self) -> None:
+        # The stop strings: several, with a newline among them.
+        assert roundtrip(["\nUser:", "END", 'say "no"']) == ["\nUser:", "END", 'say "no"']
+        assert roundtrip([]) == []
 
     def test_numbers_roundtrip(self) -> None:
         assert roundtrip(42) == 42

@@ -7,15 +7,45 @@
    disagree.
 
    Two blocks, because where a value persists is a real distinction: the
-   session's own toggles, and the parameters kept per model. */
+   app's own settings, and what is kept per model — the thinking level
+   and the parameters. */
 
 import * as api from "./api.js";
 import { editable, footnote, guard, popups, wiring } from "./browser.js";
 import { $, $$, element, span } from "./dom.js";
 
-// What a knob nobody has set reads as — the model's own value, or its
-// whole window. Either is an absence, and is drawn like one.
+// What a knob nobody has set reads as — the model's own value, or the
+// model's own max context. Either is an absence, and is drawn like one.
 const DEFAULT_VALUE = "default";
+
+// The context limit's field accepts a count: digits alone.
+const _COUNT = /^\d*$/;
+
+/* What a parameter's field accepts while typed, from the type the backend
+   states for the value and the floor it holds it to
+   (`Settings.parameters[]`): an integer is digits, a float digits with
+   one point, a minus only where the floor lets a value go below zero, a
+   stop string anything. A pattern the whole value must match while it is
+   typed, so the in-between states ("-", "0.") pass; the magnitude is the
+   backend's to refuse, and `outOfRange` marks it meanwhile. */
+function mask(parameter) {
+  if (parameter.type === "str") return null;
+  const sign = parameter.min === null || parameter.min < 0 ? "-?" : "";
+  return new RegExp(parameter.type === "int" ? `^${sign}\\d*$` : `^${sign}\\d*\\.?\\d*$`);
+}
+
+/* Whether a typed value has left the parameter's bounds — marked while
+   typing, refused by the backend on save. Nothing typed, or no number
+   yet, is not out of range. */
+function outOfRange(parameter, text) {
+  if (parameter.min === null && parameter.max === null) return false;
+  const number = Number(text);
+  if (!text.trim() || Number.isNaN(number)) return false;
+  return (
+    (parameter.min !== null && number < parameter.min) ||
+    (parameter.max !== null && number > parameter.max)
+  );
+}
 
 export async function openSettings(answered = "") {
   // Read before the docket shows: it takes its height from the slip, so
@@ -26,16 +56,7 @@ export async function openSettings(answered = "") {
   const popup = popups.get("/set");
 
   const global = element("div", "otk-v otk-v--md");
-  global.append(section("Global", "every story"));
-
-  // The effort ladder: the value it stands at, and every step it could
-  // take written under it in the table's own order.
-  global.append(
-    knob(
-      leader("think", knobs.think),
-      ladder(knobs.think_levels, knobs.think, (level) => setKnob("think", level)),
-    ),
-  );
+  global.append(section("Global", "app settings"));
 
   for (const name of ["verbose", "autocorrect", "notification"]) {
     global.append(
@@ -50,8 +71,12 @@ export async function openSettings(answered = "") {
      window, which the backend spells 0 — an absence, so the field is
      EMPTY and says `default` the way an unset parameter does. Clearing
      it sets it: 0 goes out, and the same absence comes back. */
-  const limit = editableLeader("max_context", stands.max_context(knobs), (value, field) =>
-    typedKnob(field, () => api.setSetting("max_context", value.trim() || "0"), stands.max_context),
+  const limit = editableLeader(
+    "max_context",
+    stands.max_context(knobs),
+    (value, field) =>
+      typedKnob(field, () => api.setSetting("max_context", value.trim() || "0"), stands.max_context),
+    _COUNT,
   );
   limit.lastElementChild.placeholder = DEFAULT_VALUE;
   global.append(knob(limit, element("p", "otk-note", about("max_context"))));
@@ -59,23 +84,69 @@ export async function openSettings(answered = "") {
   const perModel = element("div", "otk-v otk-v--md");
   perModel.append(section(knobs.model || "no model", "this model"));
   const params = element("div", "otk-v otk-v--sm");
+  // The thinking level first: every word the model takes on one line,
+  // the one it stands at marked, the rest a click away — and, where the
+  // model takes a budget, a field for the number of tokens beside them.
+  // A model that takes no level at all (unset alone, no budget) keeps
+  // the row, closed, the way an unsupported parameter does.
+  const takesNone = knobs.think_levels.length <= 1 && !knobs.think_budget;
+  const think = takesNone
+    ? editable("", { text: "", readonly: true, line: true })
+    : ladder(knobs.think_levels, knobs.think, (level) => setKnob("think", level));
+  if (takesNone) {
+    think.disabled = true;
+    think.placeholder = "unsupported";
+  }
+  const thinkRow = leader("think", think);
+  if (takesNone) thinkRow.classList.add("otk-leader--closed");
+  if (knobs.think_budget) {
+    const budget = editable("", {
+      text: stands.think_budget(knobs),
+      // A write like the ladder's: the slip is rebuilt from the answer,
+      // so the ladder's mark follows the budget. Nothing typed is no
+      // budget, which is the way out.
+      save: (typed) => setKnob("think", typed.trim() || "unset"),
+      line: true,
+      mask: _COUNT,
+    });
+    budget.placeholder = "max tokens";
+    think.append(span("otk-faint", "·"), budget);
+  }
+  params.append(thinkRow);
   for (const parameter of knobs.parameters) {
     // A parameter nobody has set stands at the model's own value. That is
     // an absence, so it is the field's PLACEHOLDER and not its text — and
     // it reads the same whether it was never set or was just cleared.
-    const line = editableLeader(parameter.name, parameter.value, (value, field) =>
-      typedKnob(
-        field,
-        // An emptied field is the model's own default, which is an
-        // absence and has its own door.
-        () =>
-          value.trim()
-            ? api.setParameter(parameter.name, value.trim())
-            : api.resetParameter(parameter.name),
-        (fresh) => stands.parameter(fresh, parameter.name),
-      ),
+    const line = editableLeader(
+      parameter.name,
+      parameter.value,
+      (value, field) =>
+        typedKnob(
+          field,
+          // An emptied field is the model's own default, which is an
+          // absence and has its own door.
+          () =>
+            value.trim()
+              ? api.setParameter(parameter.name, value.trim())
+              : api.resetParameter(parameter.name),
+          (fresh) => stands.parameter(fresh, parameter.name),
+        ),
+      mask(parameter),
     );
-    line.lastElementChild.placeholder = DEFAULT_VALUE;
+    const field = line.lastElementChild;
+    if (!parameter.supported) {
+      // One the provider in use does not read: in its place, closed —
+      // the label struck, the field shut.
+      line.classList.add("otk-leader--closed");
+      field.disabled = true;
+      field.placeholder = "unsupported";
+      params.append(line);
+      continue;
+    }
+    field.placeholder = DEFAULT_VALUE;
+    field.addEventListener("input", () => {
+      field.classList.toggle("is-out", outOfRange(parameter, field.value));
+    });
     params.append(line);
   }
   perModel.append(params);
@@ -90,11 +161,13 @@ export async function openSettings(answered = "") {
 }
 
 /* What a typed knob's field shows, read off the settings: the limit is
-   a figure or nothing (0 is the model's whole window — an absence, so the
+   a figure or nothing (0 is the model's own max context — an absence, so the
    field is EMPTY and says `default` the way an unset parameter does), a
    parameter its value or nothing. */
 const stands = {
   max_context: (knobs) => (knobs.max_context ? String(knobs.max_context) : ""),
+  // The level as a budget: the digits, or nothing where it is a word.
+  think_budget: (knobs) => (_COUNT.test(knobs.think) && knobs.think ? knobs.think : ""),
   parameter: (knobs, name) => knobs.parameters.find((p) => p.name === name)?.value ?? "",
 };
 
@@ -117,19 +190,21 @@ function leader(label, value, kind = "") {
 }
 
 function ladder(levels, current, set) {
-  /* Every step the knob can take, in the shared table's own order — the
-     one it stands at marked, the rest a click away. */
-  const aside = element("span", "otk-leader__aside");
+  /* Every level the model takes, in the shared ladder's order — the one
+     it stands at marked, the rest a click away: the value is a word, and
+     the word is the control, as on a toggle. Wraps where the row is too
+     narrow for all of them. */
+  const box = element("span", "otk-ladder");
   levels.forEach((level, i) => {
-    if (i) aside.append(" · ");
-    const step = element("button", "otk-step", level);
+    if (i) box.append(span("otk-faint", "·"));
+    const step = element("button", "otk-toggle", level);
     step.type = "button";
     step.setAttribute("aria-checked", String(level === current));
     step.setAttribute("role", "radio");
     step.onclick = guard(() => set(level));
-    aside.append(step);
+    box.append(step);
   });
-  return aside;
+  return box;
 }
 
 function toggle(on, set) {
@@ -150,14 +225,20 @@ function toggle(on, set) {
   return box;
 }
 
-function editableLeader(label, value, save) {
+function editableLeader(label, value, save, mask = null) {
   /* A value edited where it is READ: the figure IS the field. A knob is
      one line long, so Enter finishes it, and so does leaving it; Esc
      puts it back — none written down, a slip having no room to explain
      its own keys. `save` is handed the words and the field, so the
-     write can settle the field afterwards. */
+     write can settle the field afterwards; `mask` is what the field
+     accepts while typed (`_MASKS`). */
   const row = element("div", "otk-leader");
-  const field = editable("", { text: value, save: (typed) => save(typed, field), line: true });
+  const field = editable("", {
+    text: value,
+    save: (typed) => save(typed, field),
+    line: true,
+    mask,
+  });
   row.append(span("", label), field);
   return row;
 }
@@ -228,12 +309,19 @@ async function typedKnob(field, write, stands) {
      field for the next one, and a rebuild would take that one from
      under them. This field alone is then settled to what the store
      holds, read back rather than trusted: a number is normalised on
-     the way in ("32,000" lands as 32000, "0.70" as 0.7), and the field
-     must show what the file holds. A refusal is the field's own to
-     report (`browser.editable` reads the flag) and changes nothing. */
+     the way in ("0.70" lands as 0.7), and the field must show what the
+     file holds. A refusal — a value that does not parse, or one outside
+     the parameter's range — is the field's own to report
+     (`browser.editable` reads the flag) and changes nothing: the field
+     goes back to what the store holds. */
   const answer = await write();
-  if (answer.refused) return answer;
+  if (answer.refused) {
+    field._restore();
+    field.dispatchEvent(new Event("input")); // the mark follows the value
+    return answer;
+  }
   footnote(popups.get("/set"), answer.notice);
   field._settle(stands(await api.settings()));
+  field.dispatchEvent(new Event("input"));
   return answer;
 }

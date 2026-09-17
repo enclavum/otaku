@@ -7395,6 +7395,7 @@
    "used": 84
   },
   "lede": "Context preview — the exact request to be sent. Context summary:\n\n  ~27,259 tokens · 84% of the 32,299 limit\n  system 194 · transcript 27,065\n  20 head + 54 tail verbatim, plus 244 middle inserted in between as 13 scene summaries\n  the tail aims at 50 messages instead of the configured 150, so the context fits the limit",
+  "note": "",
   "parts": [
    {
     "role": "system",

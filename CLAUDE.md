@@ -55,7 +55,7 @@ review:
     providers  → settings (its ProviderConfig and sections live there), formatting
     store      → encryption
     settings   → formatting
-    logging    → encryption, formatting
+    logging    → providers (the request log's Stats), encryption, formatting
     encryption → formatting
     update     → (nothing)
     formatting → (nothing)
@@ -146,29 +146,50 @@ recency, "extracted 4m ago") is allowed.
 
 ### Providers
 
+A provider section's name IS its engine: `[generic]`, `[llamacpp]`,
+`[koboldcpp]`, `[ollama]`, `[omlx]`, `[lmstudio]`, `[openrouter]`,
+`[nanogpt]` — `providers.registry.ALL_CLIENTS`. A section under any other
+name is not served; the registry lists it in `ignored` and the launch
+says so. One section per engine (a second server of one kind is a
+feature not built).
+
 A client declares where its server runs as `providers.Locality`:
 `LOCAL` (the engines on this machine), `REMOTE` (the hosted catalogs)
 or `UNKNOWN` — the generic provider (`clients/generic.py`, the
-`[generic]` section, first in the panel) is a url and cannot say, and
-neither can a hand-written section, which the same client serves.
+`[generic]` section, between the local engines and the catalogs in the
+panel) is a url and cannot say.
 Every reader picks its safe side for `UNKNOWN`: what costs money or
 waits on the internet (the worker's warm-up, the info report's listing,
 the page's second listing phase) treats it as remote; what edits (the
 url field) treats it as local; what STATES a fact (the cloud prompt
-marker, a caption) says only what is known. A new reader of the flag
-decides the same way, in both frontends, and the enum has no boolean
-shortcut on purpose.
+marker, a caption) says only what is known; the read of the model's
+row as it becomes current (`Session._read_model`) asks a local engine
+at once, a hosted catalog on a thread of its own so no launch waits on
+the internet, and the generic provider not at all, as the context
+header does not. A new reader of the flag decides the same way, in
+both frontends, and the enum has no boolean shortcut on purpose.
 
 ### Names
 
 A protected name (`_leading_underscore`) marks what is not part of a
 module's surface. Two named extensions: SUBCLASS HOOKS declared by a
-base class (`_fetch_context_size`, the `ListScreen` `_on_*` contract) —
+base class (`providers.openai.models.OpenAIModels._get`, the `ListScreen`
+`_on_*` contract) —
 "for subclasses, not callers", every hook declared on the base so the
 extension surface is visible in one place — and BACKEND-PACKAGE-PRIVATE
 names on `Session` (`session._store`, `_record_turn`): the backend's own
 modules are the implementation and may use them; frontends never do
 (test-enforced: no `session._` outside `otaku/backend`).
+
+A BOOLEAN property is never named by a noun or a verb. One that says
+whether the object IS something is `is_…` (`_is_router`); one that
+says whether it CAN do something is `can_…` (`can_manage`,
+`can_count_tokens`, `can_mark_cache`); an adjective or a participle
+stands on its own (`checked`, `fresh`, `quiet`). So
+`manages_models` and `counts_tokens` are not booleans' names. The one
+exception is a CAPABILITY (`ModelCapabilities.vision`, `text_completion`): those
+are the trade's own words, spelled as every engine spells them.
+Applied in `otaku/providers` so far; a new boolean anywhere follows it.
 
 ### Inside the terminal
 
@@ -219,7 +240,9 @@ applicability on the parsed file (no version stamp), and heals any
 half-state — a crash between writes, a hand edit, a seal that could not
 happen — on the next run; nothing is ever one-shot. Every edit keeps the pre-edit file as
 `configs/backups/{config,providers}-YYYYMMDD.toml`, `-N` appended when
-the day already has one. Every setting changed from inside the app
+the day already has one, with every secret the edit replaced (an
+`api_key`, a `password`) replaced with `"[REDACTED]"` in the copy
+(`surgery.redacted`). Every setting changed from inside the app
 persists elsewhere and is rewritten wholesale: `configs/state.toml` for
 session-wide values (the resumed model and story, `/set` toggles) and
 `configs/models.toml` for per-model overrides.
@@ -230,6 +253,10 @@ anything in it wins) and `fonts/` (typefaces of their own, asked for
 under `/web-fonts/`). The custom properties the stylesheet writes
 against are a public contract — `docs/web_tokens.md`, where a rename is
 a breaking change.
+
+`cert/` holds the TLS pair the web frontend serves under (`web.cert`):
+the app writes it only into an empty directory, and a pair already there
+is served as it is.
 
 ## Migrations
 
@@ -342,7 +369,8 @@ The package is one secret per module — `run` (the frontend's life; the
 ONLY module that prints, into the terminal it was launched from),
 `server` (HTTP alone), `api` (what the page may ask: `ROUTES` and
 `FLOWS`, keyed by method and path template; cross-request state in
-`Pending`), `thread` (the one that owns the session; see Architecture).
+`Pending`), `thread` (the one that owns the session; see Architecture),
+`cert` (the TLS pair it serves under), `auth` (the sign-in token).
 The rules that span them are below, held by `scenarios/web`; the
 mechanics live in the module docstrings:
 
@@ -351,19 +379,22 @@ mechanics live in the module docstrings:
   versioned fonts are the one immutable exception. `/api/watch`
   finishes the rule rather than a dev mode: the page reloads itself when
   a file it is made of changes.
-- **Two guards in front of every request**, both reading the bind: the
-  `Host` must name this machine (else 421), and a WRITE must prove it
-  came from otaku's own page (else 403). Which headers count, and why a
-  request carrying neither is left to the bind, are in
-  `_from_this_machine` and `_from_our_page` — a change to either is a
-  change to what a LAN can do to this server.
+- **Three guards in front of every request**: the `Host` must name this
+  machine (else 421), a WRITE must prove it came from otaku's own page
+  (else 403), and where `[web] password` is set the request must carry
+  a good credential (else 401). Which headers count, and why a request
+  carrying neither of the first two is left to the bind, are in
+  `_from_this_machine` and `_from_our_page`; what is answered without a
+  credential is `server._OPEN` — a change to any of them is a change to
+  what a LAN can do to this server.
 - **The METHOD is the lane** (why: Architecture — inside the web): a GET
   only reads and is answered in the gaps of a streaming reply; every
   other method moves the story and takes the one thread in turn. A read
   filed as a POST would queue behind a reply and leave every screen dead
-  while the model talks. `/api/alive` and `/api/watch` are in neither
+  while the model talks. `/api/status` and `/api/watch` are in neither
   lane, never touch the session, and are the only unasked-for requests —
-  both quiet in the terminal.
+  both quiet in the terminal. `/api/login` is in neither lane either:
+  checking a password is slow on purpose.
 - **A route that spans two requests is a `FLOW`**, not a `ROUTE`: it
   takes `Pending` as a third argument, which is the whole difference
   and the only place the two kinds differ once matched. Five of them —
@@ -385,7 +416,8 @@ mechanics live in the module docstrings:
   `refused` flag is what tells a fault from an answer.
 - **A refusal is an answer**: `Refused` comes back 200 as
   `{"notice": …, "refused": true}` — the page shows the sentence and
-  reads only the flag, never the wording.
+  reads only the flag, never the wording. A wrong sign-in password is
+  not a `Refused` but an authentication failure: 401, with the same body.
 - **Where it listens** is the `[web]` slice of config.toml, arriving as
   `session.web` the way the terminal's looks arrive as `session.terminal` —
   this package imports no settings of its own. `web.settings` is what
@@ -400,6 +432,11 @@ mechanics live in the module docstrings:
   kept, the flag's is refused by the argument parser before anything
   runs — because the address is PRINTED before the bind, and an
   ephemeral port could not be named.
+- **Signing in**: a frontend never sees a password — the launch replaces
+  `[web] password` with its hash (`backend.passwords`) and hands on only
+  that. The page never holds a credential either: the token lives in an
+  `HttpOnly` cookie, and a 401 reaches the page only through
+  `api.whenUnauthorized`, its one sign-in path.
 - **`web/custom.css`** in the state dir is the reader's own, loaded
   last so anything in it wins; never written by the app, served empty
   when absent. Its custom properties are a public contract
@@ -418,7 +455,7 @@ mechanics live in the module docstrings:
   and the name must be one of its entries.
 - **`otaku/web/api.yaml`** is the HTTP surface as OpenAPI, maintained
   by hand as a reference: one path per row of `ROUTES` and `FLOWS`,
-  plus the five the server holds itself, payload schemas included. It
+  plus the six the server holds itself, payload schemas included. It
   ships in the wheel. The CODE is the authority — a change to the
   surface updates the spec in the same commit, and
   `tests/test_architecture.py` holds the spec against the tables, path
@@ -447,7 +484,7 @@ mechanics live in the module docstrings:
 
   `demo/terminal/` is the demo's sibling for the OTHER frontend: the
   REAL terminal frontend on Pyodide in a Web Worker, xterm.js as the
-  screen, with the provider faked at `providers.registry.CLIENTS`
+  screen, with the provider faked at `providers.registry.ALL_CLIENTS`
   (`demo/terminal/boot.py` says how, seam by seam). The demos have ONE
   procedure, and it lives in the site repo: otaku.sh's `demos/build.sh
   <otaku checkout>` regenerates the fixtures, runs this repo's

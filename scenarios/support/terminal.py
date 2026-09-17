@@ -48,10 +48,12 @@ class Terminal:
         self,
         state_dir: str,
         *,
+        args: tuple[str, ...] = (),
         env: dict[str, str] | None = None,
         rows: int = 24,
         cols: int = 80,
     ) -> None:
+        """`args` is the command line after `otaku` — none for the chat."""
         self._master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
         run_env = (
@@ -66,7 +68,7 @@ class Terminal:
             | (env or {})
         )
         self._proc = subprocess.Popen(
-            [sys.executable, "-c", "from otaku.cli import main; main()"],
+            [sys.executable, "-c", "from otaku.cli import main; main()", *args],
             stdin=slave,
             stdout=slave,
             stderr=slave,

@@ -10,6 +10,7 @@ entry-point business) and passed down as a plain path.
 
 import getpass
 import os
+import sys
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import TypeVar
@@ -93,8 +94,9 @@ def web(host: str | None, port: int | None) -> None:
     except (EncryptionError, DatabaseError) as e:
         click.echo(str(e), err=True)
         ctx.exit(1)
+    restart = False
     try:
-        web_frontend.run(session, host=host, port=port)
+        restart = web_frontend.run(session, host=host, port=port)
     except web_frontend.ServeError as e:
         # An address that cannot be listened on: another otaku already
         # has it, the host does not name this machine, the port is the
@@ -106,6 +108,12 @@ def web(host: str | None, port: int | None) -> None:
         ctx.exit(1)
     finally:
         session.close()
+    if restart:
+        # Ctrl+R: served again on fresh sources. The process is REPLACED
+        # rather than a child spawned — the PID, the terminal and the
+        # shell's job stay — over the same command line, and the session
+        # closed above leaves the database clean for the next.
+        os.execv(sys.executable, [sys.executable, "-m", "otaku", *sys.argv[1:]])
 
 
 def _crashed(root: Path | None, e: Exception) -> None:

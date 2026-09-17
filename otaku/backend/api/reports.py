@@ -8,8 +8,9 @@ Neither invents a fact, neither rewords a sentence, and the two cannot
 drift because the text is rendered from the facts beside it.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 
+from otaku.backend.api import settings as api_settings
 from otaku.backend.api import stories
 from otaku.backend.session import NO_MODEL_HINT, Refused, Session
 from otaku.context.assembler import AssembledPrompt, ContextOverflowError
@@ -21,7 +22,7 @@ from otaku.formatting import (
     printable,
     truncate_label,
 )
-from otaku.providers import CLIENTS, CloudClient, Locality, ProviderConfig
+from otaku.providers import ALL_CLIENTS, Locality, ModelCapabilities, ModelState, reasoning
 
 
 @dataclass(frozen=True)
@@ -81,11 +82,15 @@ class ContextReport:
     shape: AssembledShape
     summary: str
     parts: tuple[ContextPart, ...]
+    # What the preview could not know: "" when it knew everything, else
+    # the sentence — the model is not loaded, so the window it was cut
+    # to is the assembler's substitute until the turn loads it.
+    note: str = ""
 
     def text(self, *, dim: str = "", reset: str = "") -> str:
         """The whole preview as a terminal pages it. `dim`/`reset`
         bracket the role markers, so a terminal can fade them."""
-        out = [self.summary]
+        out = [self.summary] + ([self.note] if self.note else [])
         for part in self.parts:
             out.extend(["", f"{dim}[{part.role}]{reset}", part.body])
         return "\n".join(out)
@@ -95,21 +100,35 @@ def context(session: Session) -> ContextReport:
     """Preview the next request: what it is made of, said in words, and
     one part per message it will carry. No model: the preview still
     stands, over the assembler's default window — what WOULD be sent is
-    a question that needs no server."""
+    a question that needs no server. A model not loaded is not loaded
+    for a preview, so its window is the substitute too, and the report
+    says so."""
     client = session._client()
-    window = client.get_context_size(session.model) if client is not None else None
+    found = client.models.get(session.model) if client is not None else None
+    max_context = found.max_context if found else None
     try:
-        prompt = session.assemble(window)
+        prompt = session.assemble(max_context)
     except ContextOverflowError as e:
         # The preview of a request that would not be sent is its refusal.
         raise Refused(str(e)) from e
     shape = _shape(prompt)
+    cold = (
+        found is not None
+        and max_context is None
+        and found.state in (ModelState.UNLOADED, ModelState.LOADING)
+    )
     return ContextReport(
         shape=shape,
         summary=_summary(shape),
         parts=tuple(
             ContextPart(turn.role, "\n".join(_preview_body(printable(turn.body), prompt.recap)))
             for turn in prompt.messages
+        ),
+        note=(
+            f"The model is not loaded: the window is {format_context(shape.limit)} of the "
+            "assembler's own until the next turn loads it."
+            if cold
+            else ""
         ),
     )
 
@@ -303,14 +322,14 @@ def info(session: Session) -> InfoReport:
     if session._client() is None:
         model = InfoSection(note=NO_MODEL_HINT)
     else:
-        model = InfoSection(rows=_model_rows(session))
+        model = InfoSection(rows=_model_info(session))
     return InfoReport((state, model, InfoSection(rows=_session_rows(session))))
 
 
 @dataclass(frozen=True)
 class Balance:
     provider: str  # the configured section's name
-    label: str  # what to CALL it: the engine's own caption
+    label: str  # what to CALL it: the provider's own caption
     money: Money | None  # None when the account would not say
     note: str = ""  # why there is no figure \u2014 never empty when money is None
 
@@ -361,7 +380,8 @@ def balances(session: Session, *, probe: bool = True) -> BalanceReport:
     keeps its row with a dash, because a report of only what answered
     cannot be told apart from one that found nothing — and the row with
     the dash is usually the one the reader came to look at. The cloud
-    catalogs are asked concurrently; a local engine has no account.
+    catalogs are asked concurrently; a provider on this machine has
+    no account.
 
     `probe=False` asks no network at all and returns the ROSTER — each
     keyed row with no figure and an EMPTY note, meaning "not asked yet"
@@ -369,23 +389,22 @@ def balances(session: Session, *, probe: bool = True) -> BalanceReport:
     it and fills the figures from one probed report. The terminal asks
     plainly and gets everything in one wait."""
     registry = session._providers_registry
-    configured = {config.name for config in registry.configured()}
+    configured = set(registry.list())
 
-    def account(provider: str, config: ProviderConfig) -> Balance | None:
-        client = registry.get_client(provider)
-        if not isinstance(client, CloudClient):
-            return None  # a local engine has no account to ask
-        # What to CALL it: the engine's own caption — "OpenRouter", not
+    def account(provider: str) -> Balance | None:
+        client = registry.get(provider)
+        if client is None or client.locality is not Locality.REMOTE:
+            return None  # a provider on this machine has no account to ask
+        # What to CALL it: the provider's own caption — "OpenRouter", not
         # "openrouter". A section somebody named themselves keeps THEIR
-        # name, with the engine in brackets: two sections of one kind
+        # name, with the provider in brackets: two sections of one kind
         # are two accounts, and a report of balances that cannot tell
         # them apart is a report of one number twice.
-        kind, label = type(client).kind, type(client).label
-        named = label if provider == kind else f"{provider} ({label})"
+        named = client.label if provider == client.id else f"{provider} ({client.label})"
         # An account nobody has a key for was never asked: that is a
         # different fact from an account that would not answer, and the
         # reader can act on one of them.
-        if not config.api_key:
+        if client.auth.key_source is None:
             return Balance(provider, named, None, NO_KEY)
         if not probe:
             return Balance(provider, named, None, "")
@@ -396,13 +415,13 @@ def balances(session: Session, *, probe: bool = True) -> BalanceReport:
         return Balance(provider, named, money, "" if money else NO_ANSWER)
 
     rows = [row for row in registry.map(account) if row]
-    # A cloud engine otaku ships a client for and nobody has configured
+    # A cloud provider otaku ships a client for and nobody has configured
     # is still an account a reader may be about to open: it belongs in
     # the list, with nothing in it.
     rows += [
-        Balance(kind, cls.label, None, NO_KEY)
-        for kind, cls in CLIENTS.items()
-        if issubclass(cls, CloudClient) and kind not in configured
+        Balance(id, cls.label, None, NO_KEY)
+        for id, cls in ALL_CLIENTS.items()
+        if cls.locality is Locality.REMOTE and id not in configured
     ]
     if not rows:
         raise Refused("No cloud providers.")
@@ -413,7 +432,7 @@ def balances(session: Session, *, probe: bool = True) -> BalanceReport:
     playing, client = session.provider, session._client()
     if client is None or not playing:
         spending = "Paid providers are charged only when you play on one."
-    elif isinstance(client, CloudClient):
+    elif client.locality_of(session.model) is Locality.REMOTE:
         spending = f"This story runs on {playing}, and every reply is billed to that account."
     else:
         spending = (
@@ -426,7 +445,16 @@ def balances(session: Session, *, probe: bool = True) -> BalanceReport:
 # ---------- report internals ----------
 
 
-def _model_rows(session: Session) -> tuple[tuple[str, str], ...]:
+# A model's load state as the Loaded row says it.
+_STATE_WORDS = {
+    ModelState.LOADED: "yes",
+    ModelState.UNLOADED: "no",
+    ModelState.LOADING: "loading",
+    ModelState.UNKNOWN: "unknown",
+}
+
+
+def _model_info(session: Session) -> tuple[tuple[str, str], ...]:
     """The active model's block of `info` — the caller checked a model
     is active."""
     client = session._client()
@@ -434,35 +462,88 @@ def _model_rows(session: Session) -> tuple[tuple[str, str], ...]:
     # The registry's copy, not a snapshot: a URL or key edited in the
     # picker panel shows here immediately.
     config = client.config
-    # Two facts, not one: a frontend that wants to set the URL under the
-    # backend's own line cannot split a parenthesis back apart.
-    out = [("Model", session.full_model_name), ("Backend", client.kind), ("URL", config.url)]
-    if config.api_key:
+    out = [("Backend", f"{client.id} ({config.url})"), ("Model", session.model)]
+    if client.auth.key_source is not None:
         out.append(("Auth", "api_key configured"))
-    # The model's own row — load state only where loading is a real state
-    # (a plain endpoint or a cloud catalog serves everything statically).
-    # A cloud catalog has neither a load state nor a size to report, and
-    # asking costs a full catalog fetch: skip what would print nothing.
-    # The generic provider has neither either, wherever its url points.
-    row = client.model(session.model) if client.locality is Locality.LOCAL else None
-    if row is not None:
-        out.append(("Loaded", "yes" if row.loaded else "no"))
-    if row is not None and row.size:
-        out.append(("Size", format_size(row.size)))
-    window = format_context(client.get_context_size(session.model))
-    if window:
-        out.append(("Context", window))
-    if client.supports_thinking:
-        out.append(("Thinking", session.think if session.think else "default"))
-    else:
-        out.append(("Thinking", "not supported"))
+    # The model's own row. Load state and size only where loading is a
+    # real state (a cloud catalog serves everything statically); the
+    # capabilities from any provider that reports them, a catalog included
+    # — that one costs a full catalog fetch, and /info is the place to
+    # pay it. The generic provider reports none of these, wherever its
+    # url points, so it is not asked.
+    row = client.models.get(session.model) if client.locality is not Locality.UNKNOWN else None
+    if row is not None and client.locality_of(session.model) is Locality.LOCAL:
+        out.append(("Loaded", _STATE_WORDS[row.state]))
+        if row.size:
+            out.append(("Size", format_size(row.size)))
+    # One row for the context: the model's own size where known, and —
+    # only when the loaded instance was given a different one — what a
+    # request actually gets, said first: "64K (of 128K native)".
+    catalogue = format_context(row.max_context_catalogue if row else None)
+    loaded = format_context(row.max_context if row else None)
+    if catalogue and loaded and loaded != catalogue:
+        out.append(("Max context", f"{loaded} (of {catalogue} native)"))
+    elif catalogue or loaded:
+        out.append(("Max context", catalogue or loaded))
+    # What the model can do, as the provider says it: how its thinking
+    # is set, then the capabilities it has, in the dataclass's order —
+    # "unknown" where the provider could not say.
+    caps = row.capabilities if row is not None else None
+    out.append(("Reasoning", reasoning_words(caps)))
+    out.append(("Capabilities", capability_words(caps)))
     if config.keep_alive:
         out.append(("Keep-alive", str(config.keep_alive)))
-    if client.cache_markers:
+    if client.capabilities.prompt_cache:
         # Displayed here, decided in providers.toml — the keep_alive
         # pattern: behaviour keys are read in /info, edited in the file.
         out.append(("Prompt cache", config.prompt_cache or "5m"))
     return tuple(out)
+
+
+# How the Capabilities row spells a field where the dataclass's own name
+# is not the reader's word; the rest read as their name with the
+# underscore dropped.
+_CAPABILITY_REWORDING = {"structured_output": "json output"}
+
+
+def reasoning_words(caps: ModelCapabilities | None) -> str:
+    """How the model's thinking is set, as the provider says it: the
+    rungs it grades in the wire's order, or "on / off" for a switch,
+    and "token budget" where one holds beside; "not supported" where
+    nothing reaches it, "unknown" where the provider could not say.
+    The info report's row, and the picker's, on both frontends."""
+    if caps is None or (caps.reasoning_efforts is None and caps.reasoning_switch is None):
+        return "unknown"
+    ways = []
+    if caps.reasoning_efforts:
+        ways.append(
+            ", ".join(rung for rung in reasoning.EFFORT_LEVELS if rung in caps.reasoning_efforts)
+        )
+    elif caps.reasoning_switch:
+        ways.append("on / off")
+    if caps.reasoning_budget:
+        ways.append("token budget")
+    return " / ".join(ways) if ways else "not supported"
+
+
+def capability_words(caps: ModelCapabilities | None) -> str:
+    """The capabilities the model has, in the dataclass's order and the
+    reader's words — the thinking left out, having a row of its own;
+    "none" when the provider knows of none, "unknown" when it could not
+    say. The info report's row, and the picker's, on both frontends."""
+    if caps is None:
+        return "unknown"
+    facts = [
+        (field.name, getattr(caps, field.name))
+        for field in fields(caps)
+        if not field.name.startswith(("reasoning", "supported"))
+    ]
+    named = ", ".join(
+        _CAPABILITY_REWORDING.get(name, name.replace("_", " ")) for name, fact in facts if fact
+    )
+    if named:
+        return named
+    return "none" if any(fact is not None for _, fact in facts) else "unknown"
 
 
 def _session_rows(session: Session) -> tuple[tuple[str, str], ...]:
@@ -476,7 +557,22 @@ def _session_rows(session: Session) -> tuple[tuple[str, str], ...]:
     # it on its own, at whatever length that is. A report of one-line
     # facts is the wrong place to print an imported lorebook.
     if session.params:
-        out.append(("Parameters", ", ".join(f"{k} = {v}" for k, v in session.params.items())))
+        # Each as a reader types it, and marked where the provider in
+        # use does not read it — kept for the model, sent elsewhere.
+        out.append(
+            (
+                "Parameters",
+                ", ".join(
+                    f"{k} = {api_settings.parameter_text(v)}"
+                    + (
+                        ""
+                        if api_settings.parameter_read(session, k)
+                        else f" (not read by {session.provider})"
+                    )
+                    for k, v in session.params.items()
+                ),
+            )
+        )
     return tuple(out)
 
 

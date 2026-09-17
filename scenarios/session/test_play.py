@@ -4,6 +4,8 @@ line."""
 
 from pathlib import Path
 
+from otaku.backend.api import play as api_play
+from otaku.backend.api.play import Done
 from otaku.backend.formats import EXPORT_MARKER
 from otaku.backend.paths import Paths
 from scenarios.support import server as scripted
@@ -107,6 +109,64 @@ class TestTurns:
         app.play("I enter the hall.")
         assert "\n\n\n" not in capsys.readouterr().out
         assert app.session.messages[-1].body == "The hall glows."
+
+
+class TestReplyReport:
+    def test_a_reply_cut_at_the_limit_is_said_so(self, app: App) -> None:
+        # The wire's "length" is a reply the model did not finish: the
+        # turn's end carries the fact and the sentence for it, and the
+        # reply is recorded as it came.
+        app.server.finish = "length"
+        events = list(api_play.submit(app.session, "I enter the hall."))
+        done = events[-1]
+        assert isinstance(done, Done)
+        assert done.report is not None and done.report.stats.finish_reason == "length"
+        assert done.report.truncated and done.report.notice
+        assert done.reply is not None and done.reply.body
+
+    def test_a_finished_reply_has_nothing_to_notice(self, app: App) -> None:
+        events = list(api_play.submit(app.session, "I enter the hall."))
+        done = events[-1]
+        assert isinstance(done, Done)
+        assert done.report is not None and not done.report.truncated
+        assert done.report.notice == "" and done.stats == ""  # verbose is off
+
+
+class TestProviderFailures:
+    """What the reader is told when a turn cannot be played: the
+    provider package's own sentence, which names the provider and
+    carries the server's explanation — never a transport type."""
+
+    def test_an_error_status_names_the_provider_and_the_status(self, app: App, capsys) -> None:
+        app.server.refuse = lambda body: 503
+        app.play("I enter the hall.")
+        out = capsys.readouterr().out
+        assert "[ error: Refused by generic with HTTP 503: " in out
+        assert "refused by the script" in out
+
+    def test_a_rate_limited_turn_says_when_to_try_again(self, app: App, capsys) -> None:
+        app.server.refuse = lambda body: 429
+        app.server.retry_after = "30"
+        app.play("I enter the hall.")
+        out = capsys.readouterr().out
+        assert "[ error: Refused by generic with HTTP 429: " in out
+        assert "Try again in 30 seconds." in out
+
+    def test_a_declining_model_says_so_in_its_words(self, app: App, capsys) -> None:
+        app.server.decline = "content filtered"
+        app.play("I enter the hall.")
+        assert "[ error: The reply broke off: content filtered ]" in capsys.readouterr().out
+
+    def test_a_dead_provider_cannot_be_reached(self, server, tmp_path, capsys) -> None:
+        dead = scripted.ModelServer()
+        dead.close()  # the port is known, and nothing answers on it
+        set_config_provider(tmp_path / "state", dead)
+        app = launch(tmp_path / "state", dead)
+        try:
+            app.play("I enter the hall.")
+            assert "[ error: Could not reach generic. ]" in capsys.readouterr().out
+        finally:
+            app.close()
 
 
 class TestAttribution:
@@ -408,7 +468,7 @@ class TestPromptCache:
     """The prompt-cache breakpoints a marked provider's requests carry:
     the system row and the final row as content parts with
     `cache_control`, the middle plain strings — and none of it where the
-    engine cannot honour markers or the section said off. The wire is
+    provider cannot honour markers or the section said off. The wire is
     the whole assertion."""
 
     def test_an_openrouter_request_carries_the_markers(self, server, tmp_path) -> None:
@@ -443,12 +503,48 @@ class TestPromptCache:
         finally:
             app.close()
 
-    def test_a_local_engine_sends_plain_strings(self, app: App) -> None:
+    def test_a_local_provider_sends_plain_strings(self, app: App) -> None:
         # The capability is class knowledge: no section key can make a
-        # local engine mark, and its wire stays exactly as it was.
+        # local provider mark, and its wire stays exactly as it was.
         app.play("I enter the hall.")
         sent = scripted.chat_request(app.server, "I enter the hall.")["messages"]
         assert all(isinstance(m["content"], str) for m in sent)
+
+
+class TestCancelAndKeep:
+    def test_a_ctrl_c_in_the_wait_keeps_the_partial_with_smoothing_on(
+        self, server, tmp_path
+    ) -> None:
+        # With smoothing on, the wait is the wrapper's own tick inside the
+        # play's frame, and that is where a Ctrl+C lands: what streamed
+        # must be recorded all the same, the way a closed stream's is.
+        server.script = lambda body: "The light went out, and something stirred in the dark. " * 8
+        server.chunk_size = 6
+        server.chunk_delay = 0.03
+        set_config(tmp_path / "state", smooth_streaming=True)
+        app = launch(tmp_path / "state", server)
+        try:
+            ticks = 0
+
+            def interrupt() -> None:
+                nonlocal ticks
+                ticks += 1
+                if ticks == 40:  # some 0.8 s into the reply: words have streamed
+                    raise KeyboardInterrupt
+
+            app.session.set_on_idle(interrupt)
+            app.play("I enter the hall.")
+            reply = app.store.stories.get_messages(app.session.story_id)[-1]
+            assert reply.role == "assistant"
+            assert 0 < len(reply.body) < len(server.script({}))
+            # The prefill was spent: the request is in /usage, with the
+            # time it took and whatever the wire had stated by then.
+            chat = next(
+                t for t in app.store.usage.get_totals(app.session.story_id) if t.purpose == "chat"
+            )
+            assert chat.requests == 1 and chat.seconds > 0
+        finally:
+            app.close()
 
 
 def _cloud(server: scripted.ModelServer, tmp_path: Path, *, prompt_cache: str = "") -> App:

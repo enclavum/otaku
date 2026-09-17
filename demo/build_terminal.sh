@@ -71,7 +71,7 @@ PACKAGE_FILES=$(python3 - "$CACHE/pyodide-lock.json" <<'EOF'
 import json, sys
 lock = json.load(open(sys.argv[1]))
 packages = lock["packages"]
-want, seen = ["sqlite3", "cryptography", "click", "httpx"], set()
+want, seen = ["sqlite3", "ssl", "cryptography", "click", "httpx", "httpcore", "idna"], set()
 while want:
     name = want.pop()
     key = name.lower().replace("-", "_")

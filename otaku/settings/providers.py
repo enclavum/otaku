@@ -19,8 +19,8 @@ class ProviderConfig:
     url: str
     api_key: str = ""
     keep_alive: str = ""  # how long an explicitly loaded model stays resident (ollama)
-    # Prompt-cache breakpoints, where the engine supports them ("" = the
-    # engine's default): "off" never marks, "5m"/"1h" mark with that TTL.
+    # Prompt-cache breakpoints, where the provider supports them ("" = the
+    # provider's default): "off" never marks, "5m"/"1h" mark with that TTL.
     prompt_cache: str = ""
 
     @property

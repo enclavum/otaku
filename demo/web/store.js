@@ -8,13 +8,40 @@
    so the demo answers exactly as the product would; anything the demo
    deliberately cannot do says so honestly and points at the install. */
 
-// What the fake engine claims to be. One provider with two models, so
+// What the fake provider claims to be. One provider with two models, so
 // the picker's switch, load and unload have something real to do.
 export const PROVIDER = "demo";
+// What a local engine states of its models, in the product's shape —
+// the page's own model thinks nothing, takes no images and completes
+// no raw text — and the info report's two rows on it, in its words.
+const MODEL_CAPABILITIES = {
+  vision: false,
+  audio: false,
+  supported_params: null,
+  reasoning_efforts: [],
+  reasoning_switch: false,
+  reasoning_budget: false,
+  text_completion: false,
+  structured_output: false,
+};
+const MODEL_WORDS = { locality: "local", reasoning_words: "not supported", capability_words: "none" };
 const MODELS = [
-  { name: "demo-model", loaded: true, can_load_unload: true, size: "4.7 GB", context: "32K" },
-  { name: "demo-model-mini", loaded: false, can_load_unload: true, size: "1.9 GB", context: "8K" },
+  { name: "demo-model", loaded: true, size: "4.7 GB", max_context_catalogue: "32K", max_context_loaded: "", capabilities: { ...MODEL_CAPABILITIES }, ...MODEL_WORDS },
+  { name: "demo-model-mini", loaded: false, size: "1.9 GB", max_context_catalogue: "8K", max_context_loaded: "", capabilities: { ...MODEL_CAPABILITIES }, ...MODEL_WORDS },
 ];
+// What the demo's provider can do: it manages models, counts nothing
+// exactly, marks no cache, and reads the protocol's own parameters and
+// no sampler beyond them — the fixtures are captured over a scripted
+// Ollama, whose wire reads exactly those, and the settings fixture lists
+// the same seven.
+const CAPABILITIES = {
+  tokenizer: false,
+  prompt_cache: false,
+  model_management: true,
+  supported_params: [
+    "temperature", "top_p", "max_tokens", "presence_penalty", "frequency_penalty", "seed", "stop",
+  ],
+};
 // The window the fixtures' context previews were captured under
 // (scripts/demo_fixtures.py) — the two must agree, or the demo's own
 // numbers argue with the captured ledes.
@@ -35,7 +62,7 @@ const state = {
   usage: [], // one row per completed reply: {story, prompt, completion, seconds}
   syntax: null, // the story's typed language, for the menu and the sheet
   contextFixtures: new Map(), // id → captured preview, served until that story moves
-  status: "", // what /api/alive reports the worker doing
+  status: "", // what /api/status reports the worker doing
 };
 
 export function seed(fixtures) {
@@ -70,8 +97,8 @@ export function facts(version) {
   return {
     version,
     model: state.model,
-    engine: "demo",
-    context: model ? model.context : "",
+    provider: "demo",
+    max_context: model ? model.max_context_catalogue : "",
     story: story ? label(story) : "",
     story_id: state.open,
     turns: story ? story.turns.length : 0,
@@ -149,18 +176,18 @@ export function memory() {
 }
 
 export function providers(scope = "") {
-  // The product answers in two phases — the local engines now, the
-  // cloud catalogs after. The demo has no cloud half, and says so with
-  // an empty second phase rather than doubled engines.
+  // The product answers in two phases — the providers on this machine
+  // now, the cloud catalogs after. The demo has no cloud half, and says
+  // so with an empty second phase rather than doubled providers.
   if (scope === "cloud") {
-    return { current: `${PROVIDER}/${state.model}`, memory: memory().memory, engines: [] };
+    return { current: `${PROVIDER}/${state.model}`, memory: memory().memory, providers: [] };
   }
   const all = allProviders();
   if (scope && scope !== "local") {
-    const named = all.engines.filter((engine) => engine.name === scope);
+    const named = all.providers.filter((provider) => provider.id === scope);
     // a name nothing is configured under answers 404, as the product does
     if (!named.length) return null;
-    return { ...all, engines: named };
+    return { ...all, providers: named };
   }
   return all;
 }
@@ -169,16 +196,18 @@ function allProviders() {
   return {
     current: `${PROVIDER}/${state.model}`,
     memory: memory().memory,
-    engines: [
+    providers: [
       {
-        name: PROVIDER,
+        id: PROVIDER,
         label: "Demo",
-        order: 8, // a hand-written section sorts after the eight engines, as in the product
+        order: 8, // a hand-written section sorts after the eight supported providers, as in the product
         locality: "unknown", // the product cannot say where such a section runs
         connected: true,
+        reason: "",
         url: "in this browser tab",
-        has_key: false,
-        models: MODELS.map((m) => ({ ...m })),
+        key_source: null,
+        capabilities: { ...CAPABILITIES, supported_params: [...CAPABILITIES.supported_params] },
+        models: MODELS.map((m) => ({ ...m, capabilities: { ...m.capabilities } })),
       },
       ...[
         ["generic", "Generic OpenAI provider", "", "unknown"],
@@ -189,14 +218,18 @@ function allProviders() {
         ["lmstudio", "LM Studio", "http://localhost:1234/v1", "local"],
         ["openrouter", "OpenRouter", "https://openrouter.ai/api/v1", "remote"],
         ["nanogpt", "NanoGPT", "https://nano-gpt.com/api/v1", "remote"],
-      ].map(([name, labelled, url, locality], order) => ({
-        name,
+      ].map(([id, labelled, url, locality], order) => ({
+        id,
         label: labelled,
         order,
         locality,
         connected: false,
+        // The product's sentence for a server nobody reached, as the
+        // demo's page reaches none: everything lives in the tab.
+        reason: `Could not reach ${id}.`,
         url,
-        has_key: false,
+        key_source: null,
+        capabilities: null, // a provider that did not answer states nothing
         models: [],
       })),
     ],
@@ -208,6 +241,7 @@ export function settings() {
   return {
     think: s.think,
     think_levels: s.think_levels,
+    think_budget: s.think_budget,
     verbose: s.verbose,
     autocorrect: s.autocorrect,
     notification: s.notification,
@@ -252,6 +286,7 @@ export function context() {
       used,
     },
     lede,
+    note: "",
     parts: [
       ...(system ? [{ role: "system", body: system }] : []),
       ...bodies.map((t) => ({ role: t.role, body: t.body })),
@@ -345,10 +380,16 @@ export function info(version) {
       { rows: [["State dir", "(this browser tab — nothing leaves it)"]], note: "" },
       {
         rows: [
-          ["Model", `${PROVIDER}/${state.model}`],
           ["Backend", "demo (a model that lives in the page)"],
-          ["Context", modelRow().context],
-          ["Thinking", "not supported"],
+          ["Model", state.model],
+          // The model's own size; the product adds a "Served max context"
+          // row only where the loaded instance's differs, and here it never does.
+          ["Max context", modelRow().max_context_catalogue],
+          // The product's capability rows, as the page's own model
+          // honestly answers them: no effort reaches it, and it takes no
+          // images and completes no raw text.
+          ["Reasoning", "not supported"],
+          ["Capabilities", "none"],
         ],
         note: "",
       },
@@ -503,7 +544,7 @@ export function switchModel(provider, model) {
 
 export function loadModel(model, wanted) {
   const row = MODELS.find((m) => m.name === model);
-  if (!row || !row.can_load_unload) return refuse(`${PROVIDER} cannot load or unload models.`);
+  if (!row || !CAPABILITIES.model_management) return refuse(`${PROVIDER} cannot load or unload models.`);
   row.loaded = wanted;
   return say(wanted ? `Loaded ${model}.` : `Unloaded ${model}.`);
 }
@@ -562,11 +603,27 @@ export function setKnob(name, value) {
   return setter(raw);
 }
 
+// The product's bounds (`backend.session.PARAMETERS`): [low, high],
+// high null for no ceiling; a name absent takes any value of its type.
+const _RANGES = {
+  temperature: [0, 2],
+  top_p: [0, 1],
+  top_k: [0, null],
+  min_p: [0, 1],
+  max_tokens: [1, null],
+  presence_penalty: [-2, 2],
+  frequency_penalty: [-2, 2],
+  repetition_penalty: [0, 2],
+};
+
 export function setParameter(name, value) {
   // One per-model parameter; "reset" puts it back to the model's own
   // default, which is what a DELETE on it means.
   const row = state.settings.parameters.find((p) => p.name === name);
-  if (!row) return refuse(`Unknown parameter '${name}'.`);
+  if (!row) {
+    const known = state.settings.parameters.filter((p) => p.supported).map((p) => p.name).join(", ");
+    return refuse(`Unsupported parameter '${name}'. Supported: ${known}.`);
+  }
   const text = String(value).trim();
   if (text.toLowerCase() === "reset") {
     if (!row.value) return say(`Parameter ${name} is already at its default.`);
@@ -577,6 +634,14 @@ export function setParameter(name, value) {
     return refuse(`Could not parse '${text}' as float.`);
   }
   if (row.type === "int" && !/^-?\d+$/.test(text)) return refuse(`Could not parse '${text}' as int.`);
+  const range = _RANGES[name];
+  if (range) {
+    const [low, high] = range;
+    const number = Number(text);
+    if (number < low || (high !== null && number > high)) {
+      return refuse(`${name} must be ${high === null ? `at least ${low}` : `between ${low} and ${high}`}.`);
+    }
+  }
   row.value = text;
   return say(`${name} = ${text}.`);
 }
@@ -584,14 +649,19 @@ export function setParameter(name, value) {
 const _KNOBS = {
   think: (raw) => {
     const s = state.settings;
-    const aliases = { on: "medium", off: "none" };
-    const value = aliases[raw.trim().toLowerCase()] || raw.trim().toLowerCase();
-    if (value === "default") {
-      s.think = "default";
-      return say("Think: default (nothing sent — the model decides).");
+    const value = raw.trim().toLowerCase();
+    if (value === "unset") {
+      s.think = "unset";
+      return say("Think: unset.");
+    }
+    if (/^\d+$/.test(value)) {
+      // The demo's model takes no budget, as the product says of one.
+      return refuse(
+        `${state.model} does not take a thinking budget. Levels for this model: ${s.think_levels.join(", ")}.`,
+      );
     }
     if (!s.think_levels.includes(value)) {
-      return refuse("Usage: /set think on|off|none|low|medium|high|max|default");
+      return refuse(`Usage: /set think ${s.think_levels.join("|")}`);
     }
     s.think = value;
     return say(`Think: ${value}.`);
@@ -603,7 +673,7 @@ const _KNOBS = {
     const value = raw.trim().toLowerCase();
     if (["off", "none", "0"].includes(value)) {
       state.settings.max_context = 0;
-      return say("Max context: the model's whole window.");
+      return say("Max context: 0 (the model's own max context).");
     }
     if (!/^\d+$/.test(value)) return refuse("Usage: /set max_context TOKENS|off");
     state.settings.max_context = Number.parseInt(value, 10);

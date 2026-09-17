@@ -15,15 +15,16 @@ from dataclasses import replace
 from pathlib import Path
 
 from otaku import encryption
+from otaku.backend import passwords
 from otaku.backend.api import transfer
 from otaku.backend.paths import Paths
 from otaku.backend.session import NO_MODEL_HINT, Refused, Session
 from otaku.encryption import AskSecret, Cipher, EncryptionError, SealedError
 from otaku.formatting import pretty_path
 from otaku.logging import ErrorLog, RequestLog, SystemLog
-from otaku.providers import ProviderConfig, Registry, autoconfigure_providers
+from otaku.providers import ProviderConfig, Registry, autoconfigure
+from otaku.settings import Secrets, migrations, write_atomic
 from otaku.settings import config as config_file
-from otaku.settings import migrations, write_atomic
 from otaku.settings import prompts as prompts_file
 from otaku.settings import providers as providers_file
 from otaku.settings import state as state_file
@@ -72,11 +73,19 @@ def open_session(root: str | Path | None = None, *, ask_secret: AskSecret | None
     # edited there is visible everywhere at once. The invariant: names
     # are the stable handle — a config may swap under a running pass,
     # which resolves its client by name.
+    errors = ErrorLog(paths.logs_dir)
     registry = Registry(
         providers,
-        request_log=RequestLog(paths.logs_dir, cipher),
+        request_sink=RequestLog(paths.logs_dir, cipher),
+        error_sink=errors,
         smooth=config.smooth_streaming,
     )
+    # A section named for no supported provider is not served, and the
+    # file is the user's: it stays, and the launch says it is passed over.
+    notices += [
+        f"Ignoring provider section [{name}]: no supported provider is named so."
+        for name in registry.ignored
+    ]
     # A remembered model whose provider is still configured resumes; a
     # stale one is reported and skipped — the session opens modelless
     # and every model-facing door says so until a pick.
@@ -108,7 +117,7 @@ def open_session(root: str | Path | None = None, *, ask_secret: AskSecret | None
         lambda: Store.open(paths.database_file, cipher, backups_dir=paths.backups_dir, keep=0),
         registry,
         system_log,
-        errors=ErrorLog(paths.logs_dir),
+        errors=errors,
         idle_seconds=config.idle_seconds,
     )
     try:
@@ -158,26 +167,31 @@ def _load_config(paths: Paths) -> tuple[Config, dict[str, ProviderConfig], list[
     conversion anywhere), and the notices to show: the files written at
     first run, migrated to the current shape always — first run
     included, so an autoconfigured plain api key (omlx's, say) is sealed
-    by the very launch that wrote it — and sealed api keys resolved for
-    the session (one that will not open is warned about and its provider
-    runs keyless). Raises ConfigError when a file does not parse."""
+    by the very launch that wrote it, and a typed web password replaced
+    by its hash — and sealed api keys resolved for the session (one
+    that will not open is warned about and its provider runs keyless).
+    Raises ConfigError when a file does not parse."""
     paths.ensure_tree()
     notices: list[str] = []
     if not paths.config_file.exists():
         write_atomic(paths.config_file, Config().to_toml())
         if not paths.providers_file.exists():
-            write_atomic(paths.providers_file, providers_file.render(autoconfigure_providers()))
+            write_atomic(paths.providers_file, providers_file.render(autoconfigure()))
         notices.append(f"Created {pretty_path(paths.config_file)}")
-    migrations.migrate(
-        config_path=paths.config_file,
-        providers_path=paths.providers_file,
-        prompts_path=paths.prompts_file,
-        backups_dir=paths.config_backups_dir,
-        provider_defaults=autoconfigure_providers(),
+    secrets = Secrets(
         seal=_sealer(paths),
         is_sealed=encryption.is_sealed,
+        hash=passwords.hash,
+        is_hashed=passwords.is_hashed,
     )
+    migrations.migrate(paths.settings_files, secrets, autoconfigure())
     config = config_file.load(paths.config_file)
+    if config.web_password and not passwords.is_hashed(config.web_password):
+        # The migration left it plain — the file could not be written, or
+        # the value is not a string: hashed in memory for this session, and
+        # in the file by the next launch that can. Nothing past this line
+        # sees it typed.
+        config = replace(config, web_password=passwords.hash(config.web_password))
     providers = providers_file.load(paths.providers_file)
     resolved, key_warnings = _resolve_api_keys(paths, providers)
     return config, resolved, notices + key_warnings

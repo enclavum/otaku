@@ -7,6 +7,8 @@ store, never on the screen.
 """
 
 import base64
+import json
+import socket
 import threading
 import time
 import tomllib
@@ -14,9 +16,10 @@ from http.client import HTTPConnection
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from otaku.backend.session import THINK_MENU
+from otaku.backend.session import PARAMETERS, THINK_MENU
+from scenarios.support.harness import set_config, set_config_provider
 from scenarios.support.server import ModelServer
-from scenarios.web.conftest import Page
+from scenarios.web.conftest import Page, serving
 
 SERAPHINA = Path(__file__).parent.parent / "fixtures" / "seraphina.png"
 
@@ -97,13 +100,13 @@ class TestServing:
 
 
 class TestTheHeartbeat:
-    """`/api/alive` is how a tab that is asking for nothing else learns
-    that otaku stopped — and what the background worker is doing while
-    nobody asked. It is in neither lane, and the difference shows
+    """`/api/status` is how a tab that is asking for nothing else learns
+    that otaku stopped — and what the backend is doing while nobody
+    asked. It is in neither lane, and the difference shows
     exactly when the session's thread is not free."""
 
     def test_it_answers_what_can_be_answered_off_the_session_s_thread(self, page: Page) -> None:
-        beat = page.get("/api/alive")
+        beat = page.get("/api/status")
         assert beat == {"status": "", "notices": []}
 
     def test_it_answers_while_a_reply_is_streaming(self, page: Page, server: ModelServer) -> None:
@@ -116,7 +119,7 @@ class TestTheHeartbeat:
         replying.start()
         try:
             time.sleep(0.5)
-            assert page.status("/api/alive") == 200
+            assert page.status("/api/status") == 200
             assert replying.is_alive(), "the reply was over — the story proves nothing"
         finally:
             replying.join(timeout=30)
@@ -128,7 +131,7 @@ class TestReading:
         # The bare model in the header, the provider beside it — the
         # banner's own split, which the page draws in two places.
         assert facts["model"] == "test-model"
-        assert facts["engine"]
+        assert facts["provider"]
 
     def test_the_turns_are_the_story_as_the_store_has_it(self, page: Page) -> None:
         page.play("I listen at the culvert mouth.")
@@ -175,13 +178,55 @@ class TestReading:
         answer = page.patch("/api/providers/openrouter", {"api_key": ""})
         assert not answer.get("refused")
         assert tomllib.loads(providers.read_text())["openrouter"]["api_key"] == ""
-        page.patch("/api/providers/test", {"url": ""})
-        assert tomllib.loads(providers.read_text())["test"]["url"] == ""
+        page.patch("/api/providers/generic", {"url": ""})
+        assert tomllib.loads(providers.read_text())["generic"]["url"] == ""
+
+    def test_the_card_says_where_the_key_comes_from(self, page: Page, monkeypatch) -> None:
+        # The field's caption, never the value: the section's key while
+        # there is one, the shell's once it is cleared, and a section
+        # that does not exist yet is asked the same way.
+        monkeypatch.setenv("GENERIC_API_KEY", "from-env")
+        monkeypatch.setenv("NANOGPT_API_KEY", "from-env")
+        monkeypatch.delenv("LLAMACPP_API_KEY", raising=False)
+        card = lambda name: page.get(f"/api/providers/{name}")["providers"][0]  # noqa: E731
+        assert card("generic")["key_source"] == "config"
+        page.patch("/api/providers/generic", {"api_key": ""})
+        assert card("generic")["key_source"] == "env"
+        page.patch("/api/providers/generic", {"api_key": "k-test"})
+        assert card("generic")["key_source"] == "config"
+        assert card("nanogpt")["key_source"] == "env"  # no section yet
+        assert card("llamacpp")["key_source"] is None
 
     def test_the_settings_read_carries_the_shared_effort_ladder(self, page: Page) -> None:
         # The order is declared ONCE, below both frontends — the page
         # draws it, never re-sorts it.
         assert page.get("/api/settings")["think_levels"] == list(THINK_MENU)
+
+    def test_the_settings_read_lists_every_parameter_and_says_which_reach(
+        self, server: ModelServer, tmp_path: Path
+    ) -> None:
+        # Every parameter rides the read, in /set's order, each saying
+        # whether the provider in use reads it for the model — the page
+        # draws an unsupported one closed rather than dropping it. LM
+        # Studio's wire reads top_k and not min_p.
+        def studio(root: Path) -> None:
+            set_config_provider(root, server, name="lmstudio")
+
+        with serving(server, tmp_path, prepare=studio) as page:
+            page.put("/api/session/model", {"provider": "lmstudio", "model": "test-model"})
+            rows = page.get("/api/settings")["parameters"]
+            assert [row["name"] for row in rows] == list(PARAMETERS)
+            supported = {row["name"]: row["supported"] for row in rows}
+            assert supported["top_k"] and not supported["min_p"]
+
+    def test_the_settings_read_carries_each_parameters_bounds(self, page: Page) -> None:
+        # The bounds the setter holds a value to ride each row, null
+        # where there is none, so the page can say them before a save.
+        rows = {row["name"]: row for row in page.get("/api/settings")["parameters"]}
+        assert (rows["temperature"]["min"], rows["temperature"]["max"]) == (0, 2)
+        assert (rows["top_k"]["min"], rows["top_k"]["max"]) == (0, None)
+        assert (rows["seed"]["min"], rows["seed"]["max"]) == (None, None)
+        assert rows["stop"]["type"] == "str"  # a text field: the setter reads the JSON strings
 
     def test_the_search_matches_buried_content_and_the_row_s_face(self, page: Page) -> None:
         """One filter rule for both browsers: a story is found by the
@@ -219,12 +264,77 @@ class TestReading:
 
 
 class TestPlaying:
+    def test_a_page_that_hangs_up_in_the_wait_frees_the_session_at_once(
+        self, server: ModelServer, tmp_path: Path
+    ) -> None:
+        # Before the first token nothing is written to the page, so its
+        # leaving could only be seen at the first frame. The wait asks
+        # every tick instead: the reply ends the moment the page is gone,
+        # its request cut, and the session's thread is free for the next
+        # write instead of queued behind a prefill nobody wants.
+        smoothed = serving(
+            server, tmp_path, prepare=lambda root: set_config(root, smooth_streaming=True)
+        )
+        with smoothed as page:
+            server.headers_delay = 3.0
+            parts = urlsplit(page.url)
+            assert parts.hostname and parts.port
+            raw = socket.create_connection((parts.hostname, parts.port), timeout=5)
+            body = json.dumps({"line": "I enter the hall."}).encode()
+            raw.sendall(
+                f"POST /api/play HTTP/1.1\r\nHost: {parts.netloc}\r\n"
+                f"Content-Type: application/json\r\nContent-Length: {len(body)}\r\n"
+                "Connection: close\r\n\r\n".encode()
+                + body
+            )
+            time.sleep(0.5)  # the reply is in the wait for the first token
+            raw.close()
+            started = time.monotonic()
+            page.put("/api/settings/think", {"value": "unset"})  # a write: the thread in turn
+            assert time.monotonic() - started < 1.5  # never the server's three seconds
+            server.headers_delay = 0.0
+
+    def test_a_page_that_hangs_up_in_the_wait_frees_the_session_with_the_pacing_off(
+        self, server: ModelServer, tmp_path: Path
+    ) -> None:
+        # Before the first token nothing is written to the page, so its
+        # leaving could only be seen at the first frame. The wait asks
+        # every tick instead: the reply ends the moment the page is gone,
+        # its request cut, and the session's thread is free for the next
+        # write instead of queued behind a prefill nobody wants.
+        # The same, with smoothing off (the harness's default): the tick
+        # is the session's contract, not the pacing's — a setting a reader
+        # takes for cosmetic must not decide what the server can answer.
+        with serving(server, tmp_path) as page:
+            server.headers_delay = 3.0
+            parts = urlsplit(page.url)
+            assert parts.hostname and parts.port
+            raw = socket.create_connection((parts.hostname, parts.port), timeout=5)
+            body = json.dumps({"line": "I enter the hall."}).encode()
+            raw.sendall(
+                f"POST /api/play HTTP/1.1\r\nHost: {parts.netloc}\r\n"
+                f"Content-Type: application/json\r\nContent-Length: {len(body)}\r\n"
+                "Connection: close\r\n\r\n".encode()
+                + body
+            )
+            time.sleep(0.5)  # the reply is in the wait for the first token
+            raw.close()
+            started = time.monotonic()
+            page.put("/api/settings/think", {"value": "unset"})  # a write: the thread in turn
+            assert time.monotonic() - started < 1.5  # never the server's three seconds
+            server.headers_delay = 0.0
+
     def test_a_line_plays_and_lands_in_the_store(self, page: Page) -> None:
         events = page.play("I unroll the county survey.")
         kinds = [event["type"] for event in events]
         assert kinds[0] == "recorded"
         assert "text" in kinds
         assert kinds[-1] == "done"
+        # The turn's end carries the reply's report as facts and its
+        # notice — nothing to say of a reply the model finished.
+        assert events[-1]["notice"] == ""
+        assert events[-1]["report"]["finish_reason"] == "stop"
+        assert events[-1]["report"]["truncated"] is False
         story = page.get("/api/session")["story_id"]
         stored = page.store.stories.get_messages(story)
         assert stored[-2].body == "I unroll the county survey."
@@ -305,9 +415,9 @@ class TestWrites:
         # `encodeURIComponent` — `llama3:8b` is the ordinary local model,
         # not the exotic one. Undecoded, the escape reaches the engine as
         # part of the name and nothing it asks for exists.
-        plain = page.get("/api/providers/test")
-        assert plain["engines"], "the fixture's provider should be there"
-        assert page.get("/api/providers/te%73t") == plain
+        plain = page.get("/api/providers/generic")
+        assert plain["providers"], "the fixture's provider should be there"
+        assert page.get("/api/providers/gener%69c") == plain
 
     def test_a_fault_answers_in_the_body_whatever_the_reason_says(self, page: Page) -> None:
         # The reason carries a story title, a character name, a
@@ -457,9 +567,10 @@ def _polled(page: Page, timeout: float = 30.0) -> str:
 
 
 class TestWhoIsAsking:
-    """The page has no login, and it does not need one — but a page on
-    another origin, in the same browser, must not be able to drive it.
-    A write can do its damage without ever reading the answer."""
+    """With no password set the page asks nobody who they are — but a
+    page on another origin, in the same browser, must still not be able
+    to drive it. A write can do its damage without ever reading the
+    answer; a read cannot, and is not asked."""
 
     def test_a_cross_site_write_is_refused(self, page: Page) -> None:
         # What an auto-submitting form on another site sends. It cannot
@@ -488,7 +599,7 @@ class TestWhoIsAsking:
                 "/api/providers/demo",
                 method="POST",
                 headers={"Origin": "http://evil.example"},
-                data=b'{"provider":"test","field":"url","value":"http://attacker.example/v1"}',
+                data=b'{"provider":"generic","field":"url","value":"http://attacker.example/v1"}',
             )
             == 403
         )
@@ -506,6 +617,15 @@ class TestWhoIsAsking:
             )
             == 200
         )
+
+    def test_following_a_link_from_another_site_opens_the_page(self, page: Page) -> None:
+        # A read moves nothing and its answer cannot be seen from the page
+        # that caused it, so it is not asked where it came from — or a
+        # reader could not open otaku from a link somewhere else.
+        navigated = {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate"}
+        assert page.status("/", headers=navigated) == 200
+        fetched = {"Sec-Fetch-Site": "cross-site", "Origin": "http://elsewhere.example"}
+        assert page.status("/api/session", headers=fetched) == 200
 
     def test_a_request_addressed_to_another_name_is_misdirected(self, page: Page) -> None:
         # DNS rebinding is the one attack a loopback bind does not stop:
@@ -529,23 +649,53 @@ class TestWhoIsAsking:
 class TestThePicker:
     def test_a_provider_configured_by_hand_is_in_the_picker(self, page: Page) -> None:
         # The scenario's own provider is a hand-written section named
-        # `test` — not one of the engines otaku ships a client for. The
+        # `test` — not one of the providers otaku ships a client for. The
         # session is PLAYING on it, so a picker without it is a picker
         # with no way back to the story's own model.
         panel = page.get("/api/providers")
-        mine = next(engine for engine in panel["engines"] if engine["name"] == "test")
+        mine = next(p for p in panel["providers"] if p["id"] == "generic")
         assert [model["name"] for model in mine["models"]] == ["test-model"]
-        assert panel["current"] == "test/test-model"
+        assert panel["current"] == "generic/test-model"
         assert mine["connected"] is True
         assert mine["locality"] == "unknown"  # a hand-written section: nobody can say
+        # What it can do rides the card, never a model: the generic
+        # provider manages nothing, counts nothing exactly, marks no
+        # cache, and sends every parameter the app knows, in /set's order.
+        assert mine["capabilities"] == {
+            "tokenizer": False,
+            "prompt_cache": False,
+            "model_management": False,
+            "supported_params": list(PARAMETERS),
+        }
+        assert mine["models"][0]["capabilities"] is None  # it says nothing of its models
+        # The info report's two rows ride the model, in the report's words
+        # (`backend.api.reports`): a provider that says nothing reads unknown.
+        assert mine["models"][0]["reasoning_words"] == "unknown"
+        assert mine["models"][0]["capability_words"] == "unknown"
+        assert mine["models"][0]["locality"] == "unknown"  # the model's is its provider's
+        assert mine["models"][0]["max_context_loaded"] == ""  # nothing loads on a generic url
+        assert "can_manage" not in mine["models"][0]
+        unanswered = next(p for p in panel["providers"] if p["id"] == "llamacpp")
+        assert unanswered["capabilities"] is None
+        assert unanswered["connected"] is False and unanswered["reason"]  # the page is told why
+        assert mine["reason"] == ""
 
-    def test_the_panel_says_where_each_engine_runs(self, page: Page) -> None:
+    def test_the_panel_says_where_each_provider_runs(self, page: Page) -> None:
         # The vocabulary the page's captions and the demo's fake read:
-        # the generic provider first and unable to say, an engine on this
-        # machine, a catalog over the wire.
+        # the generic provider unable to say, a provider on this machine,
+        # a catalog over the wire — in the panel's order, the engines on
+        # this machine first, the generic provider between them and the
+        # catalogs.
         panel = page.get("/api/providers")
-        assert panel["engines"][0]["name"] == "generic"
-        by_name = {engine["name"]: engine["locality"] for engine in panel["engines"]}
+        assert [p["id"] for p in panel["providers"]][:6] == [
+            "llamacpp",
+            "koboldcpp",
+            "ollama",
+            "omlx",
+            "lmstudio",
+            "generic",
+        ]
+        by_name = {p["id"]: p["locality"] for p in panel["providers"]}
         assert by_name["generic"] == "unknown"
         assert by_name["llamacpp"] == "local"
         assert by_name["openrouter"] == "remote"
@@ -553,17 +703,18 @@ class TestThePicker:
     def test_the_two_phases_carry_the_panel_order(self, page: Page) -> None:
         # The page asks in two phases and merges by each card's `order`:
         # the generic provider answers in the second phase and belongs
-        # first, a hand-written section last. Sorting both answers by it
-        # restores the unscoped panel exactly.
-        whole = [engine["name"] for engine in page.get("/api/providers")["engines"]]
-        local = page.get("/api/providers?scope=local")["engines"]
-        cloud = page.get("/api/providers?scope=cloud")["engines"]
-        assert {engine["name"] for engine in cloud} >= {"generic", "openrouter", "nanogpt"}
-        assert all(engine["name"] not in {"generic", "openrouter"} for engine in local)
-        merged = sorted(local + cloud, key=lambda engine: (engine["order"], engine["name"]))
-        assert [engine["name"] for engine in merged] == whole
-        assert merged[0]["name"] == "generic" and merged[0]["order"] == 0
-        assert merged[-1]["name"] == "test"  # the harness's own section, after every engine
+        # between the engines and the catalogs, a hand-written section
+        # last. Sorting both answers by it restores the unscoped panel
+        # exactly.
+        whole = [p["id"] for p in page.get("/api/providers")["providers"]]
+        local = page.get("/api/providers?scope=local")["providers"]
+        cloud = page.get("/api/providers?scope=cloud")["providers"]
+        assert {p["id"] for p in cloud} >= {"generic", "openrouter", "nanogpt"}
+        assert all(p["id"] not in {"generic", "openrouter"} for p in local)
+        merged = sorted(local + cloud, key=lambda p: (p["order"], p["id"]))
+        assert [p["id"] for p in merged] == whole
+        assert merged[0]["id"] == "llamacpp" and merged[0]["order"] == 0
+        assert next(p for p in merged if p["id"] == "generic")["order"] == 5
 
 
 class TestOpenToTheNetwork:
@@ -584,7 +735,7 @@ class TestOpenToTheNetwork:
                 "/api/providers/demo",
                 method="POST",
                 headers={"Host": "otaku.lan:9600", "Origin": "http://otaku.lan:8080"},
-                data=b'{"provider":"test","field":"url","value":"http://attacker.example/v1"}',
+                data=b'{"provider":"generic","field":"url","value":"http://attacker.example/v1"}',
             )
             == 403
         )

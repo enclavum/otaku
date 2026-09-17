@@ -25,7 +25,7 @@ from prompt_toolkit.completion import CompleteEvent, Completer, Completion
 from prompt_toolkit.document import Document
 
 from otaku.backend.commands import COMMANDS, CommandSpec
-from otaku.backend.session import KNOWN_PARAMS, THINK_MENU
+from otaku.backend.session import PARAMETERS, THINK_MENU
 from otaku.terminal.tty import latin_key
 
 # The story's characters for the menus: (name, one-line description).
@@ -41,6 +41,16 @@ PATH_LEAF = "<path>"
 # Names may contain spaces, so like a path the argument is read raw.
 NAME_LEAF = "<name>"
 
+# A leaf may be THINK_LEAF: "a thinking level goes here" — the completer
+# offers what the model in use takes, looked up live
+# (`api.settings.think_levels`), in the shared ladder's order.
+THINK_LEAF = "<level>"
+
+# And PARAMETER_LEAF: "a /set parameter goes here" — the ones the
+# provider in use reads, looked up live (`api.settings.parameter_names`),
+# each followed by its `reset`.
+PARAMETER_LEAF = "<parameter>"
+
 CompletionTree = dict[str, "CompletionTree | str | None"]
 
 # The terminal's completion SHAPES: which command's argument is a path,
@@ -48,10 +58,6 @@ CompletionTree = dict[str, "CompletionTree | str | None"]
 # here because they are completion affordances, not command semantics.
 _PATH_COMMANDS = {"/system", "/card", "/import", "/export"}
 _NAME_COMMANDS = {"/merge"}
-# What `/set think` completes to: the typed sugar first (this menu is
-# of what you may TYPE), then the shared ladder — one order for the
-# values everywhere a menu offers them (`backend.session.THINK_MENU`).
-_THINK_COMPLETIONS = ("on", "off", *THINK_MENU)
 
 
 class MenuRow(Completion):
@@ -88,11 +94,21 @@ class CommandCompleter(_Surface):
     WHEN that fires (behind an explicit `@`, immediately and while
     typing) and the raw-line slicing that lets spaces survive in paths."""
 
-    def __init__(self, tree: CompletionTree, cast: Callable[[], Cast] | None = None) -> None:
+    def __init__(
+        self,
+        tree: CompletionTree,
+        cast: Callable[[], Cast] | None = None,
+        levels: Callable[[], Sequence[str]] | None = None,
+        parameters: Callable[[], Sequence[str]] | None = None,
+    ) -> None:
         self.tree = tree
         # The story's cast, looked up live: (name, one-line description)
         # rows for the commands whose argument is a character.
         self.cast = cast or (lambda: ())
+        # What /set think and /set parameter take on the model in use,
+        # looked up live — the whole vocabulary with no session to ask.
+        self.levels = levels or (lambda: THINK_MENU)
+        self.parameters = parameters or (lambda: tuple(PARAMETERS))
         self.shortcuts: dict[str, str] = {}
 
     @staticmethod
@@ -125,7 +141,7 @@ class CommandCompleter(_Surface):
             token = match.group(0)
             if not isinstance(node, dict) or token not in node:
                 return
-            node = node[token]
+            node = self._expanded(node[token])
             if node in (PATH_LEAF, NAME_LEAF):
                 # The argument begins at the first non-space char after this
                 # token — sliced from the raw line, so spaces survive.
@@ -154,6 +170,16 @@ class CommandCompleter(_Surface):
 
         menu = {key: _describe((*path, key)) for key in node}
         yield from _rows(menu, self.partial(text), tuple(path), self.shortcuts)
+
+    def _expanded(self, node: Any) -> Any:
+        """A leaf that asks the session, expanded to the menu it stands
+        for the moment the walk steps onto it — so what follows (a
+        parameter's `reset`) is walked like any node."""
+        if node == THINK_LEAF:
+            return {level: None for level in self.levels()}
+        if node == PARAMETER_LEAF:
+            return {name: {"reset": None} for name in self.parameters()}
+        return node
 
 
 class InlinerCompleter(_Surface):
@@ -199,14 +225,18 @@ class SlashCompleter(Completer):
         prefix: Callable[[], str] = lambda: "",
         cast: Callable[[], Cast] | None = None,
         shortcuts: dict[str, str] | None = None,
+        levels: Callable[[], Sequence[str]] | None = None,
+        parameters: Callable[[], Sequence[str]] | None = None,
     ) -> Self:
         """A completer over the shared command table. `prefix` supplies an
         open block's collected text — the line being typed is read in the
         context of the message it belongs to, or every continuation line
         would look like the start of one. `cast` answers with the story's
-        characters, looked up live. `shortcuts` (token → caption, from
-        `chat.bindings.SHORTCUTS` as data) fills the menu's key column."""
-        command = CommandCompleter(_completion_tree(), cast)
+        characters, looked up live; `levels` and `parameters` with what
+        /set think and /set parameter take on the model in use, likewise.
+        `shortcuts` (token → caption, from `chat.bindings.SHORTCUTS` as
+        data) fills the menu's key column."""
+        command = CommandCompleter(_completion_tree(), cast, levels, parameters)
         command.shortcuts = shortcuts or {}
         return cls((command, InlinerCompleter(_inliner_menu())), prefix)
 
@@ -268,12 +298,12 @@ def _command_leaf(spec: CommandSpec) -> "CompletionTree | str | None":
     return None
 
 
-def _subcommand_leaf(name: str) -> "CompletionTree | None":
+def _subcommand_leaf(name: str) -> "CompletionTree | str | None":
     """The /set family's value menus."""
     if name == "think":
-        return {level: None for level in _THINK_COMPLETIONS}
+        return THINK_LEAF
     if name == "parameter":
-        return {p: {"reset": None} for p in KNOWN_PARAMS}
+        return PARAMETER_LEAF
     if name in ("verbose", "autocorrect", "notification"):
         return {"on": None, "off": None}
     return None

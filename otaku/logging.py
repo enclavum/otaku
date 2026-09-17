@@ -31,6 +31,7 @@ from typing import ClassVar
 
 from otaku.encryption import Cipher, PlainCipher
 from otaku.formatting import decode_text, printable
+from otaku.providers import Stats
 
 __all__ = ["DailyLog", "Entry", "ErrorLog", "RequestLog", "SystemLog"]
 
@@ -110,7 +111,7 @@ class SystemLog(DailyLog):
 class Entry:
     """One line of the request log, either kind: a request (`body` is
     the request as sent) or its answer (`body` holds `text`, and
-    `thinking` when the model reasoned; the numbers below are set). The
+    `reasoning` when the model reasoned; the numbers below are set). The
     two pair by `request_id` — an answer that never arrived is a stream
     that never finished, which is itself a fact worth reading."""
 
@@ -120,12 +121,13 @@ class Entry:
     body: dict[str, object] | None  # None when the body cannot be read back
     kind: str = "request"  # "request" | "answer" (absent in old lines = request)
     request_id: str = ""  # pairs an answer to its request; "" in old lines
-    outcome: str = ""  # answers: "ok", "cancelled", or "failed: <type>"
+    status: str = ""  # answers: "ok", "cancelled", or "failed: <the provider's sentence>"
     seconds: float | None = None  # answers: request start → stream end
     first_token_seconds: float | None = None  # answers: the prefill wait
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     cached_tokens: int | None = None
+    finish_reason: str | None = None  # answers: why the model stopped, in the wire's word
 
 
 class RequestLog(DailyLog):
@@ -156,16 +158,12 @@ class RequestLog(DailyLog):
         purpose: str,
         request_id: str,
         *,
-        outcome: str,
-        seconds: float,
-        first_token_seconds: float | None,
-        prompt_tokens: int | None,
-        completion_tokens: int | None,
-        cached_tokens: int | None,
+        status: str,
+        stats: Stats,
         text: str,
-        thinking: str = "",
+        reasoning: str = "",
     ) -> None:
-        """Append what a request's stream came to: the outcome, the
+        """Append what a request's stream came to: the status, the
         timings and token counts on the envelope, the answer's text (and
         reasoning, when the model sent any) sealed like a request body.
         Written however the stream ended — a cancelled or failed one
@@ -175,21 +173,23 @@ class RequestLog(DailyLog):
             "purpose": purpose,
             "kind": "answer",
             "request_id": request_id,
-            "outcome": outcome,
-            "seconds": round(seconds, 2),
+            "status": status,
+            "seconds": round(stats.total_seconds, 2),
         }
-        if first_token_seconds is not None:
-            envelope["first_token_seconds"] = round(first_token_seconds, 2)
+        if stats.first_token_seconds is not None:
+            envelope["first_token_seconds"] = round(stats.first_token_seconds, 2)
+        if stats.finish_reason:
+            envelope["finish_reason"] = stats.finish_reason
         for name, tokens in (
-            ("prompt_tokens", prompt_tokens),
-            ("completion_tokens", completion_tokens),
-            ("cached_tokens", cached_tokens),
+            ("prompt_tokens", stats.prompt_tokens),
+            ("completion_tokens", stats.completion_tokens),
+            ("cached_tokens", stats.cached_tokens),
         ):
             if tokens is not None:
                 envelope[name] = tokens
         body: dict[str, object] = {"text": text}
-        if thinking:
-            body["thinking"] = thinking
+        if reasoning:
+            body["reasoning"] = reasoning
         self._append_entry(envelope, body)
 
     def _append_entry(self, envelope: dict[str, object], body: dict[str, object]) -> None:
@@ -222,12 +222,16 @@ class RequestLog(DailyLog):
                 body=self._get_body(raw),
                 kind=str(raw.get("kind", "request")),
                 request_id=str(raw.get("request_id", "")),
-                outcome=str(raw.get("outcome", "")),
+                # Lines written before 0.5.0 say "outcome".
+                status=str(raw.get("status", raw.get("outcome", ""))),
                 seconds=_number(raw.get("seconds")),
                 first_token_seconds=_number(raw.get("first_token_seconds")),
                 prompt_tokens=_count(raw.get("prompt_tokens")),
                 completion_tokens=_count(raw.get("completion_tokens")),
                 cached_tokens=_count(raw.get("cached_tokens")),
+                finish_reason=(
+                    str(raw["finish_reason"]) if isinstance(raw.get("finish_reason"), str) else None
+                ),
             )
 
     def _get_body(self, raw: dict[str, object]) -> dict[str, object] | None:
@@ -269,7 +273,7 @@ def render_plain(log: DailyLog, stamp: str) -> str:
 def render_requests(log: RequestLog, stamp: str) -> Iterator[str]:
     """One day's request log as pager text: per request a header row,
     the non-message fields as one JSON row, then each message; per
-    answer, its outcome-and-timings row and the text that arrived. The
+    answer, its status-and-timings row and the text that arrived. The
     day closes with a per-purpose summary — counts, seconds and tokens
     summed off the answers' envelopes, which is the profile of where a
     day's model time went. Display goes through `formatting.printable`;
@@ -317,7 +321,7 @@ def render_requests(log: RequestLog, stamp: str) -> Iterator[str]:
 def _answer_lines(entry: Entry) -> Iterator[str]:
     """One answer as the pager shows it: what the stream came to on the
     header row, then the text (and reasoning) that arrived."""
-    account = [entry.outcome or "?"]
+    account = [entry.status or "?"]
     if entry.seconds is not None:
         account.append(f"total {entry.seconds:.1f}s")
     if entry.first_token_seconds is not None:
@@ -332,9 +336,10 @@ def _answer_lines(entry: Entry) -> Iterator[str]:
     if entry.body is None:
         yield "  <unreadable: wrong key or corrupted>\n\n"
         return
-    thinking = entry.body.get("thinking")
-    if thinking:
-        yield f"  [thinking] {printable(str(thinking))}\n"
+    # Lines written before 0.5.0 say "thinking".
+    reasoning = entry.body.get("reasoning", entry.body.get("thinking"))
+    if reasoning:
+        yield f"  [reasoning] {printable(str(reasoning))}\n"
     yield f"  [assistant] {printable(str(entry.body.get('text', '')))}\n"
     yield "\n"
 

@@ -5,7 +5,7 @@ smoke.mjs for its two implementations).
 
 The philosophy is demo.js's, one layer down: the web demo is the real
 page with `fetch` faked in the browser; this is the real TUI with the
-provider faked under `providers.registry.CLIENTS`. Everything between —
+provider faked under `providers.registry.ALL_CLIENTS`. Everything between —
 the chat loop, the ledger, the prompt, the store, the context assembler,
 extraction — is the product's own code, imported unmodified.
 
@@ -30,8 +30,10 @@ declares:
 - Threads: Pyodide cannot start any. The worker runs its forced passes
   inline (`/extract` and `/import` wait on them anyway), the spinner
   becomes one static frame, the model picker's fire-once threads run
-  synchronously, and the in-stream Ctrl+C/Ctrl+R watcher moves into the
-  fake client's pacing loop — where the bytes actually arrive.
+  synchronously, the completion's relay — a pump thread, for a cancel
+  that cuts a waiting request — passes the chunks straight through, and
+  the in-stream Ctrl+C/Ctrl+R watcher moves into the fake client's
+  pacing loop — where the bytes actually arrive.
 """
 
 import asyncio
@@ -438,67 +440,88 @@ def _pace(seconds: float) -> None:
 def _build_demo_client():
     import demo_script
 
-    from otaku.providers.base import OpenAIClient, Stats, Text, Thinking
+    from otaku.providers.openai.client import OpenAIClient
+    from otaku.providers.openai.completion import OpenAICompletion, Reasoning, Text
+    from otaku.providers.openai.models import Locality, ModelInfo, ModelState, OpenAIModels
 
-    class DemoClient(OpenAIClient):
-        """The scripted engine: the real `OpenAIClient` with the four
-        wire calls answered from `demo_script` instead of a socket. The
-        orchestration above `_stream` — request logging, the thinking
-        retry, cancel-and-keep on close — is the base class's own."""
-
-        kind = "demo"
-        label = "demo"
-        local = True
-
-        def _model_names(self, timeout):
-            return [MODEL]
-
-        def _list(self, timeout):
-            from otaku.providers.base import ModelInfo
-
+    class DemoModels(OpenAIModels):
+        def _list(self, http):
             # Loaded and sized like a serving engine, or /info and the
             # picker would show a model nobody started.
-            return [ModelInfo(name=MODEL, context=CONTEXT_SIZE, loaded=True)]
-
-        def _fetch_context_size(self, model):
-            return CONTEXT_SIZE
-
-        def _stream(self, model, body, timeout, purpose, request_id):
-            thinking, text = demo_script.reply(body, purpose)
-            if purpose != "chat":
-                # Background work (extraction, rollups, warm-ups) is
-                # nobody's screen: answer whole, at once.
-                yield Text(text=text)
-                yield Stats(
-                    prompt_tokens=_estimate(body),
-                    completion_tokens=max(1, len(text) // 4),
-                    duration_seconds=0.05,
-                    context_max=CONTEXT_SIZE,
-                    generation_seconds=0.04,
-                    cached_tokens=None,
+            return [
+                ModelInfo(
+                    name=MODEL,
+                    max_context_catalogue=CONTEXT_SIZE,
+                    max_context_loaded=CONTEXT_SIZE,
+                    state=ModelState.LOADED,
                 )
-                return
+            ]
+
+    class DemoCompletion(OpenAICompletion):
+        """The wire calls answered from `demo_script` instead of a
+        socket. The orchestration above `_generate` — the knob and
+        sampler retries, cancel-and-keep on close — is the base class's
+        own; this hook does what the base's does with the request log
+        and the caller's `Stats`: the request recorded, the stats filled
+        as the stream goes, the answer filed however it ends, the stats
+        yielded whole at a clean end."""
+
+        def _generate(self, url, body, purpose, timeout, read_delta, stats, cut=None, retried=""):
+            name = self._config.name
+            request_id = ""
+            if self._request_sink is not None:
+                request_id = self._request_sink.record_request(name, purpose, body)
+            reasoning, text = demo_script.reply(body, purpose)
             start = time.monotonic()
-            _pace(_FIRST_TOKEN_WAIT)
-            first = time.monotonic()
-            if thinking:
-                for chunk in _chunks(thinking):
-                    yield Thinking(text=chunk)
-                    _pace(_CHUNK_WAIT)
-            emitted = 0
-            for chunk in _chunks(text):
-                yield Text(text=chunk)
-                emitted += len(chunk)
-                _pace(_CHUNK_WAIT)
-            end = time.monotonic()
-            yield Stats(
-                prompt_tokens=_estimate(body),
-                completion_tokens=max(1, emitted // 4),
-                duration_seconds=end - start,
-                context_max=CONTEXT_SIZE,
-                generation_seconds=end - first,
-                cached_tokens=None,
-            )
+            stats.prompt_tokens = _estimate(body)
+            spoken: list[str] = []
+            thought: list[str] = []
+            status = "cancelled"  # a close before the end is a cancel, as on the wire
+            try:
+                if purpose != "chat":
+                    # Background work (extraction, rollups, warm-ups) is
+                    # nobody's screen: answer whole, at once.
+                    stats.first_token_seconds = 0.01
+                    spoken.append(text)
+                    yield Text(text=text)
+                else:
+                    _pace(_FIRST_TOKEN_WAIT)
+                    stats.first_token_seconds = time.monotonic() - start
+                    if reasoning:
+                        for chunk in _chunks(reasoning):
+                            thought.append(chunk)
+                            yield Reasoning(text=chunk)
+                            _pace(_CHUNK_WAIT)
+                    for chunk in _chunks(text):
+                        spoken.append(chunk)
+                        yield Text(text=chunk)
+                        _pace(_CHUNK_WAIT)
+                stats.completion_tokens = max(1, len("".join(spoken)) // 4)
+                stats.finish_reason = "stop"
+                status = "ok"
+            finally:
+                stats.total_seconds = time.monotonic() - start
+                if self._request_sink is not None and request_id:
+                    self._request_sink.record_answer(
+                        name,
+                        purpose,
+                        request_id,
+                        status=status,
+                        stats=stats,
+                        text="".join(spoken),
+                        reasoning="".join(thought),
+                    )
+            yield stats
+
+    class DemoClient(OpenAIClient):
+        """The scripted provider: the real client with its two halves
+        answering from the script."""
+
+        id = "demo"
+        label = "demo"
+        locality = Locality.LOCAL
+        models_class = DemoModels
+        completion_class = DemoCompletion
 
     def _estimate(body) -> int:
         total = 0
@@ -523,6 +546,7 @@ def _build_demo_client():
 def _patch_threads() -> None:
     import otaku.terminal.chat.stream as chat_stream
     import otaku.terminal.screens.models as screens_models
+    from otaku.providers import smoothing
     from otaku.providers.registry import Registry
     from otaku.worker import Worker
     from otaku.worker.extraction import Extractor, PassResult, Report
@@ -584,7 +608,7 @@ def _patch_threads() -> None:
         try:
             try:
                 store = self._store_factory()
-                client = self._providers.get_client(job.provider)
+                client = self._providers.get(job.provider)
                 extractor = Extractor(
                     store,
                     client,
@@ -613,10 +637,21 @@ def _patch_threads() -> None:
     Worker.start = demo_start
     Worker.schedule = demo_schedule
 
+    # The completion's relay pumps a stream on a thread of its own so a
+    # cancel can cut a request mid-wait (`providers.smoothing`); the
+    # forced pass asks for that relay. The demo has no thread and
+    # nothing to cut — its pacing is the script's own — so the chunks
+    # pass straight through, the tick and the cut left unused.
+    def demo_smoothen(chunks, on_idle=None, cut=None, *, paced=True):
+        yield from chunks
+
+    smoothing.smoothen = demo_smoothen
+
     # Provider fan-out without its pool: one scripted provider answers
     # instantly, so configuration order needs no overlap.
-    def demo_map(self, fn):
-        return [fn(name, config) for name, config in list(self._providers.items())]
+    def demo_map(self, fn, names=None):
+        asked = list(self.configs) if names is None else list(names)
+        return [fn(name, self.configs[name]) for name in asked]
 
     Registry.map = demo_map
 
@@ -705,8 +740,9 @@ def main() -> None:
     # No local engines to detect: first-run and the ensure-providers
     # migration would otherwise write sections probing this machine.
     backend_launch.autoconfigure_providers = lambda: {}
-    providers_registry.CLIENTS[PROVIDER] = _build_demo_client()
+    providers_registry.ALL_CLIENTS[PROVIDER] = _build_demo_client()
     _patch_threads()
+
     # Two doors a tab cannot honor: /web binds a socket, and /bye — with
     # Ctrl+D, the app's own shortcut submitting /bye on an empty line —
     # would end a session only a reload can restart. Both answer with

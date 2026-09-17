@@ -2,10 +2,10 @@
 and `/model`.
 
 A single full-screen Application, split 1:1. The left side lists every
-model from every reachable provider — grouped under engine captions in
-the panel's order (`api.providers.engines`, the one source of the
+model from every reachable provider — grouped under provider captions
+in the panel's order (`api.providers.supported`, the one source of the
 captions), bare model names, providers with no models absent —
-color-coded by load state. Only the local engines are waited for before
+color-coded by load state. Only the local providers are waited for before
 the screen opens; each cloud catalog's rows arrive when it answers, the
 panel naming what is still loading. The user can:
     - move the cursor (↑/↓/PgUp/PgDn/Home/End)
@@ -18,11 +18,11 @@ panel naming what is still loading. The user can:
     - press Esc to leave without picking.
 
 Loaded models render bold; not-loaded muted. The cursor restores to the
-last-used model on open. An engine without load/unload serves its models
+last-used model on open. A provider without load/unload serves its models
 statically: they all show as loaded, Enter picks them directly, and the
 l/u keys (and their help entries) disappear on such a row.
 
-The right side is the provider panel: each engine's caption with its
+The right side is the provider panel: each provider's caption with its
 `URL:` and `API key:` fields, the key's value never displayed, the
 cloud catalogs' url fixed (shown dimmed, never walkable). Tab switches
 sides; ↑/↓ walk the fields; Enter edits the highlighted one in place
@@ -69,9 +69,9 @@ from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.dimension import D
 from prompt_toolkit.styles import Style
 
-from otaku.backend import Locality, Provider, meminfo
+from otaku.backend import KeySource, Locality, ModelState, ProviderInfo, meminfo
 from otaku.backend.api import providers as api_providers
-from otaku.backend.api.providers import Engine, ProviderField
+from otaku.backend.api.providers import ProviderField, SupportedProvider
 from otaku.backend.session import Refused, Session
 from otaku.formatting import format_context, format_size, truncate
 from otaku.terminal.screens.base import ListScreen, base_style, bordered_box, text_line
@@ -105,7 +105,7 @@ def pick(session: Session, initial_spec: str | None = None) -> str | None:
     choosing — silently: at launch the session opens model-less and the
     first turn explains itself, from /model everything stays as it was.
     Opens even with nothing to list — the panel is the one door to
-    configuring an engine.
+    configuring a provider.
 
     NOTHING is waited for: the screen opens on an empty list and every
     configured provider answers into it, each saying "loading…" in the
@@ -117,13 +117,11 @@ def pick(session: Session, initial_spec: str | None = None) -> str | None:
     one that answered."""
     picker = ModelPicker(
         session,
-        api_providers.engines(session),
+        api_providers.supported(session),
         [],
         initial_spec=initial_spec,
-        # Every CONFIGURED provider, not every engine: one with no section
-        # has nothing to ask and would spend a thread learning it, while a
-        # section under a name of the reader's own is not an engine at all
-        # and still holds models.
+        # Every CONFIGURED provider, not every supported one: one with no
+        # section has nothing to ask and would spend a thread learning it.
         fetch=sorted(api_providers.configured(session)),
         connected=set(),
     )
@@ -131,7 +129,11 @@ def pick(session: Session, initial_spec: str | None = None) -> str | None:
 
 
 _FIELD_LABELS = {"url": "URL:", "api_key": "API key:"}
-_ATTRS: tuple[ProviderField, ...] = ("url", "api_key")  # the panel's rows per engine, in order
+_ATTRS: tuple[ProviderField, ...] = ("url", "api_key")  # the panel's rows per provider, in order
+# How the api key field reads: its value is never displayed, only where
+# it comes from. The page captions the same fact
+# (`web/static/js/models.js keyField`).
+_KEY_CAPTIONS = {KeySource.CONFIG: "(set)", KeySource.ENV: "(from environment)", None: ""}
 
 # A model row's shape: a 4-column prefix ("  > "), the model name, then
 # two right-aligned columns held at a FIXED width — the widest label
@@ -190,9 +192,10 @@ class ModelEntry:
     provider_name: str
     model: str
     loaded: bool
-    can_load_unload: bool = True  # False → served statically
+    can_manage: bool = True  # False → served statically
     size_bytes: int | None = None  # None when the provider doesn't expose it
-    context: int | None = None  # the model's context window, when reported
+    max_context_catalogue: int | None = None  # the model's own maximum, when its provider states it
+    max_context_loaded: int | None = None  # what the running instance serves, while one runs
     # A row with no disk to weigh — a catalog's, or the generic
     # provider's: normal weight, no size.
     cloud: bool = False
@@ -202,7 +205,7 @@ class ModelPicker(ListScreen):
     def __init__(
         self,
         session: Session,
-        engines: list[Engine],
+        providers: list[SupportedProvider],
         entries: list[ModelEntry],
         initial_spec: str | None = None,
         *,
@@ -213,9 +216,9 @@ class ModelPicker(ListScreen):
         self.session = session
         # The panel vocabulary — captions, order, and where each runs —
         # from the backend's one source.
-        self.engines = engines
-        self._order = {engine.name: i for i, engine in enumerate(engines)}
-        self._captions = {engine.name: engine.label for engine in engines}
+        self.providers = providers
+        self._order = {provider.id: i for i, provider in enumerate(providers)}
+        self._captions = {provider.id: provider.label for provider in providers}
         # Names whose last listing succeeded — the panel's tick: the
         # provider answered, and with the right key where one is needed.
         self.connected: set[str] = set(connected or ())
@@ -225,16 +228,16 @@ class ModelPicker(ListScreen):
         self._drawn_cursor_line = 0
 
         # The provider panel (the right side): the walkable field list —
-        # two rows per engine, except the cloud catalogs whose url is
+        # two rows per provider, except the cloud catalogs whose url is
         # fixed (their API key alone) — its own cursor (both sides stay
         # visible, so the base's one integer serves the models side and
         # the key handling swaps), the inline editor.
         self.side: str = "models"
         self.fields: list[tuple[str, ProviderField]] = [
-            (engine.name, attr)
-            for engine in engines
+            (provider.id, attr)
+            for provider in providers
             for attr in _ATTRS
-            if attr != "url" or engine.locality is not Locality.REMOTE
+            if attr != "url" or provider.locality is not Locality.REMOTE
         ]
         self.field_cursor: int = 0
         self.editing: bool = False
@@ -277,7 +280,7 @@ class ModelPicker(ListScreen):
 
     def run(self) -> str | None:
         # An empty screen still runs: the provider panel is the one door
-        # to configuring an engine, so a machine with nothing reachable
+        # to configuring a provider, so a machine with nothing reachable
         # must reach it — `pick` alone decides when opening is skipped.
         self.app.run()
         if self._picked is not None:
@@ -351,7 +354,9 @@ class ModelPicker(ListScreen):
         labels = [truncate(e.model, self._name_width()) for e in rows]
         # A catalog row has no size at all — not even the unknown dash.
         sizes = ["" if e.cloud else format_size(e.size_bytes) for e in rows]
-        contexts = [format_context(e.context) for e in rows]
+        # The context column says what a request would get: the running
+        # instance's size while one runs, the model's own otherwise.
+        contexts = [format_context(e.max_context_loaded or e.max_context_catalogue) for e in rows]
         width = self._row_width()
 
         out: StyleAndTextTuples = []
@@ -402,9 +407,9 @@ class ModelPicker(ListScreen):
             txt = " type to filter · ↑/↓ navigate · enter select · esc clear filter"
         else:
             segments = ["↑/↓ navigate", "/ filter"]
-            # Load/unload only appear when the SELECTED model's engine
+            # Load/unload only appear when the SELECTED model's provider
             # supports them.
-            if self.filtered and self.filtered[self.cursor].can_load_unload:
+            if self.filtered and self.filtered[self.cursor].can_manage:
                 segments += ["l load", "u unload"]
             segments += ["enter select", "tab providers", "esc quit"]
             txt = " " + " · ".join(segments)
@@ -441,25 +446,27 @@ class ModelPicker(ListScreen):
         ]
 
     def _providers_text(self) -> StyleAndTextTuples:
-        """The provider panel: per engine a caption, a blank, the URL
-        field, the API key field (its value never displayed), a blank."""
+        """The provider panel: per provider a caption, a blank, the URL
+        field, the API key field (its value never displayed, only where
+        it comes from), a blank."""
         out: StyleAndTextTuples = []
-        for engine in self.engines:
-            config = api_providers.section(self.session, engine.name)
-            if engine.name in self.pending:
+        for provider in self.providers:
+            config = api_providers.section(self.session, provider.id)
+            if provider.id in self.pending:
                 # Still being listed: the answer decides the other two, so
                 # say so here rather than let the name read as a verdict.
-                out.append(("class:preview.muted", engine.label + " - loading…"))
-            elif engine.name in self.connected:
-                out.append(("class:preview.title", engine.label))
+                out.append(("class:preview.muted", provider.label + " - loading…"))
+            elif provider.id in self.connected:
+                out.append(("class:preview.title", provider.label))
                 out.append(("class:tick", " ✓"))
             else:
                 # Not connected: the name alone reads disabled.
-                out.append(("class:preview.muted", engine.label))
+                out.append(("class:preview.muted", provider.label))
             out.append(("", "\n"))
             out.append(("class:preview.body", "\n"))
-            out.extend(self._field_line(engine.name, "url", config.url))
-            out.extend(self._field_line(engine.name, "api_key", "(set)" if config.api_key else ""))
+            out.extend(self._field_line(provider.id, "url", config.url))
+            source = api_providers.key_source(self.session, provider.id)
+            out.extend(self._field_line(provider.id, "api_key", _KEY_CAPTIONS[source]))
             out.append(("class:preview.body", "\n"))
         return out
 
@@ -628,7 +635,7 @@ class ModelPicker(ListScreen):
         if not self.filtered:
             return
         entry = self.filtered[self.cursor]
-        if entry.loaded or not entry.can_load_unload:
+        if entry.loaded or not entry.can_manage:
             # Loaded — or a statically served engine (llama.cpp, a
             # KoboldCpp between admin swaps): the engine serves what it
             # serves, so Enter just picks.
@@ -641,8 +648,8 @@ class ModelPicker(ListScreen):
         if self.in_filter or self.confirming_action or not self.filtered:
             return
         entry = self.filtered[self.cursor]
-        if not entry.can_load_unload or entry.loaded:
-            return  # can't load this engine, or already loaded — a no-op
+        if not entry.can_manage or entry.loaded:
+            return  # can't load on this provider, or already loaded — a no-op
         self.confirming_action = "load"
         self.confirming_entry = entry
 
@@ -650,8 +657,8 @@ class ModelPicker(ListScreen):
         if self.in_filter or self.confirming_action or not self.filtered:
             return
         entry = self.filtered[self.cursor]
-        if not entry.can_load_unload or not entry.loaded:
-            return  # can't unload this engine, or not loaded — a no-op
+        if not entry.can_manage or not entry.loaded:
+            return  # can't unload on this provider, or not loaded — a no-op
         self.confirming_action = "unload"
         self.confirming_entry = entry
 
@@ -764,17 +771,17 @@ class ModelPicker(ListScreen):
         # its rows, the listing having nowhere to go.
         self._refresh_provider(name, settled=True)
 
-    def _fetch_rows(self, name: str) -> list[Provider]:
+    def _fetch_rows(self, name: str) -> list[ProviderInfo]:
         """One provider's fresh listing, through the picker's one query —
         every OTHER configured provider skipped, so a catalog refresh
-        never costs a sweep of dead engines."""
+        never costs a sweep of dead providers."""
         skip = api_providers.configured(self.session) - {name}
-        rows, reachable = api_providers.get_providers(self.session, skip=skip)
-        if name in reachable:
+        panel = api_providers.get_providers(self.session, skip=skip)
+        if name in panel.reachable:
             self.connected.add(name)
         else:
             self.connected.discard(name)
-        return rows
+        return panel.rows
 
     def _refresh_provider(self, name: str, *, settled: bool = False) -> None:
         """Re-list one provider — at the open, and again whenever its
@@ -817,10 +824,13 @@ class ModelPicker(ListScreen):
                     full_spec=f"{name}/{model.name}",
                     provider_name=name,
                     model=model.name,
-                    loaded=model.loaded if row.can_load_unload else True,
-                    can_load_unload=row.can_load_unload,
+                    loaded=model.state is ModelState.LOADED
+                    if row.capabilities.model_management
+                    else True,
+                    can_manage=row.capabilities.model_management,
                     size_bytes=model.size,
-                    context=model.context,
+                    max_context_catalogue=model.max_context_catalogue,
+                    max_context_loaded=model.max_context_loaded,
                     cloud=row.locality is not Locality.LOCAL,
                 )
                 for row in fetched
@@ -1078,7 +1088,7 @@ class ModelPicker(ListScreen):
 
 
 def _ordered(entries: list[ModelEntry], order: dict[str, int]) -> list[ModelEntry]:
-    """Panel order: the engines as the provider panel lists them, any
+    """Panel order: the supported providers as the panel lists them, any
     other configured provider after, by name; models keep their client
     order within a provider."""
     return sorted(

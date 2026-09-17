@@ -19,7 +19,7 @@ import time
 from collections.abc import Iterator
 from typing import Any, Self
 
-from otaku.backend.api.play import Declined, Done, Failed, PlayEvent, Recorded, Text, Thinking
+from otaku.backend.api.play import Declined, Done, Failed, PlayEvent, Reasoning, Recorded, Text
 from otaku.console.sound import ring
 from otaku.formatting import printable
 from otaku.terminal.chat.chat import Chat
@@ -81,7 +81,7 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                     if event.note:
                         out.write(f"{DIM}[ {event.note} ]{RESET}\n\n")
                     spinner.start()
-                elif isinstance(event, Thinking):
+                elif isinstance(event, Reasoning):
                     if not in_thinking:
                         out.write(DIM + "(thinking) ")
                         in_thinking = True
@@ -138,10 +138,16 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                 close()
 
     if interrupted:
+        # The cut line is ended — the prose or the thinking stopped
+        # mid-line. A wait cut before anything showed has no line to end:
+        # the echo's blank stands as the gap, and a newline here would be
+        # a second blank, with the loop's gap making a third.
+        cut_midline = streamed or in_thinking
         if in_thinking:
             out.write(RESET)
             in_thinking = False
-        out.write("\n")
+        if cut_midline:
+            out.write("\n")
         if session.verbose:
             elapsed = time.monotonic() - start
             rate = chars / elapsed if elapsed > 0 else 0.0

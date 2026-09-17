@@ -12,7 +12,9 @@ import os
 import shutil
 import sys
 from dataclasses import dataclass
+from typing import Literal
 
+from otaku import __version__
 from otaku.console import BOLD, DEFAULT_BG, DIM, MARGIN, RESET
 from otaku.formatting import drawn_width, format_context
 
@@ -67,10 +69,9 @@ class SessionFacts:
     cuts nothing (a display width is the frontend's decision, made
     where the facts are read)."""
 
-    version: str
     model: str  # "(no model)" when none
-    engine: str  # the kind of server behind it; "" when none
-    context: int | None  # the loaded window, when a LOCAL engine answers
+    provider: str  # the provider serving it; "" when none
+    max_context: int | None  # the context the model gets, when a LOCAL provider answers
     story: str  # the story's name, cut by the caller; "" when it has none
 
 
@@ -101,16 +102,19 @@ _COLOUR = _Style(
 _PLAIN = _Style()
 
 
+# How much of the web banner a launch wants.
+WebBannerSize = Literal["full", "short", "line"]
+
+
 def render_terminal(facts: SessionFacts) -> str:
     """The banner a chat session opens with. Its three lines are what
     that session IS: the story being played, on what model, through what
-    engine."""
+    provider."""
     style = _style()
-    details = [f"{style.gray}{facts.engine}{style.reset}" if facts.engine else ""]
-    if facts.context:
-        details.append(f"{style.gray}{format_context(facts.context)} context{style.reset}")
+    details = [f"{style.gray}{facts.provider}{style.reset}" if facts.provider else ""]
+    if facts.max_context:
+        details.append(f"{style.gray}{format_context(facts.max_context)} context{style.reset}")
     return _render(
-        facts.version,
         [
             f"{style.gray}{facts.story}{style.reset}"
             if facts.story
@@ -121,40 +125,34 @@ def render_terminal(facts: SessionFacts) -> str:
     )
 
 
-def render_web(version: str, url: str, *, full: bool = True) -> str:
-    """What a served session opens with, in the two sizes a terminal
-    wants it. Its three lines are the one thing that terminal is for:
-    the address, how to open it, and how to stop serving. What the chat
-    banner says (model, story) is on the page itself, so it would only
-    be said twice.
-
-    FULL draws the mark above them — `otaku web`, opening a terminal
-    that has nothing else on it. Without it, the three lines alone under
-    a rule of their own width: `/web` prints into a chat already on
-    screen, where the mark was drawn when the session opened, and drawing
-    it again would say the session had started twice when it has only
-    changed medium. That rule is as wide as the longest line it closes
-    and no wider — it parts the serving from the story above it, and a
-    rule reaching past what it parts is underlining the screen — and the
-    block stands in the column the request tail below it uses, so the
-    address, the rule and the requests read as one thing."""
+def render_web(url: str, url_notes: str = "", *, size: WebBannerSize = "full") -> str:
+    """What a served session opens with: where the page is, how to open
+    it, how to stop serving. The model and the story are on the page
+    itself, so the chat banner's lines would only be said twice."""
     style = _style()
+    notes = url_notes.replace("<b>", style.bold).replace("</b>", style.reset)
+
+    if size == "line":
+        return f"web ui is available on: {url}{notes} (ctrl+c to stop)"
+
     # Most terminals want a modifier with the click, and which one is
     # the platform's business — ⌘ on a Mac, ctrl everywhere else.
     click = "⌘" if sys.platform == "darwin" else "ctrl"
     lines = [
-        f"{style.dim}web ui is available on:{style.reset} {style.accent}{url}{style.reset}",
+        f"{style.dim}web ui is available on:{style.reset} "
+        f"{style.accent}{style.bold}{url}{style.reset}{notes}",
         f"{style.dim}{click}-click to open / paste it in your browser{style.reset}",
         f"{style.dim}ctrl+c to stop{style.reset}",
     ]
-    if full:
-        return _render(version, lines)
+    if size == "full":
+        return _render(lines)
+
     width = max(drawn_width(line) for line in lines)
     rule = f"{style.rule}{'─' * width}{style.reset}"
     return "\n".join(f"{' ' * MARGIN}{line}" for line in [*lines, rule])
 
 
-def _render(version: str, lines: list[str]) -> str:
+def _render(lines: list[str]) -> str:
     """One banner: the mark, the two lines every banner opens with, a
     blank, and the three its caller filled in — closed by the rule that
     separates it from whatever is printed under it. A line past the
@@ -165,7 +163,7 @@ def _render(version: str, lines: list[str]) -> str:
     rows = _sprite_rows()
     beside = " " * len(_SPRITE[0])
     beginning = [
-        f"{style.accent}{style.bold}otaku{style.reset} {style.dim}v{version}{style.reset}",
+        f"{style.accent}{style.bold}otaku{style.reset} {style.dim}v{__version__}{style.reset}",
         f"{style.dim}a roleplay client{style.reset}",
         "",
     ]

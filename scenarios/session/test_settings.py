@@ -2,20 +2,27 @@
 /set parameter, /set notification, /set max_context — and what each
 remembers across a relaunch.
 
-The design: `/set think`, `/set verbose` and `/set notification` are
-session-wide and persist in the app's own state; `/set max_context`
-edits config.toml's [context] value surgically — its one home; `/set
-parameter` follows the MODEL it was set on; a model switch keeps the
-story context and is remembered as last used.
+The design: `/set think` and `/set parameter` follow the MODEL they
+were set on; `/set verbose` and `/set notification` are session-wide
+and persist in the app's own state; `/set max_context` edits
+config.toml's [context] value surgically — its one home; a model switch
+keeps the story context and is remembered as last used.
 """
 
 import contextlib
 import time
 import tomllib
 
+import pytest
+
+from otaku.backend import launch as backend_launch
 from otaku.backend.api import providers as api_providers
+from otaku.backend.api import reports
+from otaku.backend.api import settings as api_settings
+from otaku.backend.paths import Paths
+from otaku.backend.session import PARAMETERS, THINK_MENU, Refused
 from otaku.encryption import unseal
-from otaku.providers import Locality
+from otaku.providers import Locality, ModelState
 from otaku.terminal.chat import stream
 from otaku.terminal.screens import models as screen_models
 from otaku.terminal.tty import clipboard
@@ -35,7 +42,7 @@ _DEL = "\x1b[3~"
 class TestModel:
     def test_a_direct_switch_keeps_the_context_and_changes_the_wire(self, app: App, capsys) -> None:
         app.play("I enter the hall.")
-        app.play("/model test/other-model")
+        app.play("/model generic/other-model")
         app.play("I look around.")
         assert app.server.requests[-1]["model"] == "other-model"
         # The story context traveled with the switch.
@@ -45,13 +52,13 @@ class TestModel:
         ]
 
     def test_the_switch_is_remembered_as_last_used(self, app: App) -> None:
-        app.play("/model test/other-model")
+        app.play("/model generic/other-model")
         relaunched = launch(app.paths.root, app.server)
         assert relaunched.session.model == "other-model"
         relaunched.close()
 
     def test_a_model_name_with_a_quote_survives_the_state_file(self, app: App) -> None:
-        app.play('/model test/oddly"named')
+        app.play('/model generic/oddly"named')
         relaunched = launch(app.paths.root, app.server)
         assert relaunched.session.model == 'oddly"named'
         relaunched.close()
@@ -64,7 +71,7 @@ class TestModel:
         # happens, or the session drops a parameter in silence.
         app.paths.models_file.write_text("[other-model]\nbogus = 1\n")
         capsys.readouterr()
-        app.play("/model test/other-model")
+        app.play("/model generic/other-model")
         assert "bogus" in capsys.readouterr().out
         assert "bogus" not in app.session.params
 
@@ -72,6 +79,47 @@ class TestModel:
         monkeypatch.setattr(screen_models, "pick", lambda session, initial_spec=None: None)
         app.play("/model")
         assert app.session.model == "test-model"
+
+    def test_the_model_in_use_is_named_as_its_provider_lists_it(self, tmp_path) -> None:
+        # Both pickers land their cursor on the model in use by the spec
+        # its provider rows it under: Ollama lists a bare name under its
+        # ":latest" tag, so a model set without the tag is still found.
+        # The remembered spelling stands where nothing lists the model.
+        server = scripted.ModelServer(models=("test-model:latest",), managed=True)
+        try:
+            set_config_provider(tmp_path / "state", server, name="ollama")
+            app = launch(tmp_path / "state", server, spec="ollama/test-model")
+            try:
+                assert app.session.full_model_name == "ollama/test-model"
+                assert api_providers.listed_spec(app.session) == "ollama/test-model:latest"
+                app.play("/model ollama/absent")
+                assert api_providers.listed_spec(app.session) == "ollama/absent"
+            finally:
+                app.close()
+        finally:
+            server.close()
+
+    def test_a_model_ollama_serves_from_the_cloud_is_on_the_cloud(self, tmp_path) -> None:
+        # The session reads where the MODEL runs: the prompt's cloud
+        # marker says so, and the banner's context ask is not sent
+        # across the internet — while a model the same Ollama runs here
+        # stays local.
+        server = scripted.ModelServer(models=("local-model", "cloud"), managed=True)
+        server.remote = {"cloud"}
+        server.loaded = {"local-model"}
+        try:
+            set_config_provider(tmp_path / "state", server, name="ollama")
+            app = launch(tmp_path / "state", server, spec="ollama/cloud")
+            try:
+                assert app.session.on_cloud
+                assert app.session.max_context() is None
+                app.play("/model ollama/local-model")
+                assert not app.session.on_cloud
+                assert app.session.max_context() == 8192
+            finally:
+                app.close()
+        finally:
+            server.close()
 
 
 class TestThink:
@@ -83,44 +131,274 @@ class TestThink:
         assert relaunched.session.think == "high"
         relaunched.close()
 
-    def test_on_and_off_are_aliases(self, app: App) -> None:
-        app.play("/set think on")
-        assert app.session.think == "medium"
-        app.play("/set think off")
-        assert app.session.think == "none"
+    def test_the_switch_words_are_refused_on_a_graded_model(self, app: App) -> None:
+        # The levels exist, and a model with rungs — or one nobody has
+        # described, which is offered every rung — takes neither.
+        app.play("/set think high")
+        for word in ("on", "off"):
+            with pytest.raises(Refused, match=f"does not take {word}"):
+                api_settings.set_think(app.session, word)
+        assert app.session.think == "high"
 
     def test_default_means_the_model_decides(self, app: App) -> None:
-        app.play("/set think default")
+        app.play("/set think unset")
         assert app.session.think is None
         relaunched = launch(app.paths.root, app.server)
         assert relaunched.session.think is None
         relaunched.close()
 
+    def test_the_level_follows_the_model(self, app: App) -> None:
+        # Saved per model beside its parameters: a model with none saved
+        # runs unset, and unset is the row's absence — setting it forgets
+        # the row, where a level, "none" included, is written.
+        app.play("/set think high")
+        app.play("/model generic/other-model")
+        assert app.session.think is None
+        app.play("/set think unset")
+        app.play("/model generic/test-model")
+        assert app.session.think == "high"
+        saved = tomllib.loads(app.paths.models_file.read_text())
+        assert saved["test-model"]["think"] == "high"
+        assert "think" not in saved.get("other-model", {})
+        app.play("/set think none")
+        assert tomllib.loads(app.paths.models_file.read_text())["test-model"]["think"] == "none"
+
+    def test_the_level_an_older_state_held_moves_to_its_model(self, server, tmp_path) -> None:
+        # Before 0.5.0 the level was one for every model and lived in
+        # state.toml. The first launch moves it to the remembered model's
+        # entry verbatim — state.toml names "provider/model", models.toml
+        # the bare name; "none", what every untouched install held, moves
+        # like any other — and drops the key, so the next launch has
+        # nothing to move.
+        root = tmp_path / "state"
+        set_config_provider(root, server)
+        paths = Paths.resolve(root)
+        paths.state_file.write_text('model = "generic/test-model"\nstory = 0\nthink = "none"\n')
+        app = launch(root, server)
+        try:
+            assert app.session.think == "none"
+            saved = tomllib.loads(paths.models_file.read_text())
+            assert saved["test-model"]["think"] == "none"
+            assert "think" not in tomllib.loads(paths.state_file.read_text())
+        finally:
+            app.close()
+
+    def test_the_retired_spelling_of_unset_leaves_no_row(self, server, tmp_path) -> None:
+        # Releases before 0.5.0 wrote "default" for send-nothing; that is
+        # unset now, which is the absence of a row — so nothing is written
+        # and the key is simply dropped.
+        root = tmp_path / "state"
+        set_config_provider(root, server)
+        paths = Paths.resolve(root)
+        paths.state_file.write_text('model = "generic/test-model"\nthink = "default"\n')
+        app = launch(root, server)
+        try:
+            assert app.session.think is None
+            assert "think" not in tomllib.loads(paths.state_file.read_text())
+            saved = (
+                tomllib.loads(paths.models_file.read_text()) if paths.models_file.exists() else {}
+            )
+            assert "think" not in saved.get("test-model", {})
+        finally:
+            app.close()
+
+    def test_a_level_already_moved_stays_and_an_unremembered_one_has_no_home(
+        self, server, tmp_path
+    ) -> None:
+        # Convergence: a launch that wrote models.toml and could not
+        # rewrite state.toml is finished, not redone — the entry's level
+        # wins; and with no model remembered the level goes nowhere.
+        root = tmp_path / "state"
+        set_config_provider(root, server)
+        paths = Paths.resolve(root)
+        paths.models_file.write_text('[test-model]\nthink = "low"\n')
+        paths.state_file.write_text('model = "generic/test-model"\nthink = "high"\n')
+        app = launch(root, server)
+        try:
+            assert app.session.think == "low"
+            assert "think" not in tomllib.loads(paths.state_file.read_text())
+        finally:
+            app.close()
+        paths.state_file.write_text('model = ""\nthink = "high"\n')
+        app = launch(root, server)
+        try:
+            assert "think" not in tomllib.loads(paths.state_file.read_text())
+            assert tomllib.loads(paths.models_file.read_text()) == {"test-model": {"think": "low"}}
+        finally:
+            app.close()
+
+    def test_only_the_levels_the_model_takes_are_offered(self, tmp_path) -> None:
+        # Ollama's card says which models think: a thinking one is on or
+        # off, its engine grading nothing, a plain one takes only unset.
+        # The card is read as the model becomes current — at launch, on
+        # a switch — so the menu is right from the first keystroke; an
+        # engine that did not answer loses nothing until it does. The
+        # bare report lists the levels, and one the model does not take
+        # is refused by name.
+        server = scripted.ModelServer(models=("test-model", "plain-model"), managed=True)
+        server.capabilities = {
+            "test-model": ["completion", "thinking"],
+            "plain-model": ["completion"],
+        }
+        try:
+            set_config_provider(tmp_path / "state", server, name="ollama")
+            server.ps_status = 500  # the engine does not answer at launch
+            app = launch(tmp_path / "state", server, spec="ollama/test-model")
+            try:
+                assert api_settings.think_choices(app.session).levels == THINK_MENU
+                server.ps_status = None
+                app.session.max_context()  # the header's ask reads the card
+                levels = ("unset", "off", "on")
+                assert api_settings.think_choices(app.session).levels == levels
+                assert not api_settings.think_choices(app.session).budget
+                assert api_settings.set_think(app.session, "").endswith(", ".join(levels) + ".")
+                with pytest.raises(Refused, match="does not take high"):
+                    api_settings.set_think(app.session, "high")
+                with pytest.raises(Refused, match="does not take a thinking budget"):
+                    api_settings.set_think(app.session, "2000")
+                assert app.session.think is None  # still unset
+                app.play("/model ollama/plain-model")  # the switch reads the card
+                assert api_settings.think_choices(app.session).levels == ("unset",)
+                with pytest.raises(Refused, match="does not take none"):
+                    api_settings.set_think(app.session, "none")
+                with pytest.raises(Refused, match=r"Usage: /set think unset$"):
+                    api_settings.set_think(app.session, "loud")
+                api_settings.set_think(app.session, "unset")
+                assert app.session.think is None
+            finally:
+                app.close()
+        finally:
+            server.close()
+
+    def test_a_hosted_catalog_is_read_behind_the_launch(self, tmp_path) -> None:
+        # A catalog's row lives across the internet, so neither the
+        # launch nor a switch waits for it: it is read on a thread of
+        # its own, and the menus — the rungs, the parameters that reach
+        # — follow it moments later. Nothing is played or billed for it.
+        server = scripted.ModelServer(models=("graded", "plain"))
+        server.extras = {
+            "graded": {
+                "supported_parameters": ["temperature", "max_completion_tokens", "reasoning"],
+                "reasoning": {"supported_efforts": ["low", "high"]},
+            },
+            "plain": {"supported_parameters": ["temperature", "top_p"]},
+        }
+        root = tmp_path / "state"
+        try:
+            set_config_provider(root, server, name="openrouter")
+            app = launch(root, server, spec=None)
+            try:
+                app.play("/model openrouter/graded")  # typed: nothing listed first
+                names = lambda: api_settings.parameter_names(app.session)  # noqa: E731
+                _settled(lambda: names() == ("temperature", "max_tokens"))
+                assert names() == ("temperature", "max_tokens")
+                choices = api_settings.think_choices(app.session)
+                assert set(choices.levels) == {"unset", "none", "low", "high"}
+                assert choices.budget
+                assert app.server.requests == []  # a read, never a turn
+            finally:
+                app.close()
+            # Remembered, the model is read the same way as the session opens.
+            app = launch(root, server, spec=None)
+            try:
+                names = lambda: api_settings.parameter_names(app.session)  # noqa: E731
+                _settled(lambda: names() == ("temperature", "max_tokens"))
+                assert names() == ("temperature", "max_tokens")
+                app.play("/model openrouter/plain")
+                _settled(lambda: names() == ("temperature", "top_p"))
+                assert names() == ("temperature", "top_p")
+                assert api_settings.think_choices(app.session).levels == ("unset",)
+            finally:
+                app.close()
+        finally:
+            server.close()
+
+    def test_a_switch_takes_off_and_on_and_a_budget_takes_a_number(self, tmp_path) -> None:
+        # omlx's status says the template has the toggle: on or off, no
+        # rung, under a budget its own sampler holds — so a number of
+        # tokens is taken too, 0 = off, saved as the level is, and each
+        # is spelled on the wire: off as none, on as the flag alone, a
+        # budget as the number with the flag on.
+        server = scripted.ModelServer(models=("test-model",))
+        server.status = True
+        server.loaded = {"test-model"}
+        server.thinking = {"test-model": True}
+        try:
+            set_config_provider(tmp_path / "state", server, name="omlx")
+            app = launch(tmp_path / "state", server, spec="omlx/test-model")
+            try:
+                app.session.max_context()
+                choices = api_settings.think_choices(app.session)
+                assert (choices.levels, choices.budget) == (("unset", "off", "on"), True)
+                with pytest.raises(Refused, match="does not take low"):
+                    api_settings.set_think(app.session, "low")
+                with pytest.raises(Refused, match=r"Usage: /set think unset\|off\|on\|<tokens>$"):
+                    api_settings.set_think(app.session, "1.5")
+                app.play("/set think 2000")
+                assert app.session.think == "2000"
+                app.play("I enter the hall.")
+                body = app.server.requests[-1]
+                assert body["chat_template_kwargs"] == {"enable_thinking": True}
+                assert body["thinking_budget"] == 2000
+                app.play("/set think off")
+                app.play("I listen.")
+                body = app.server.requests[-1]
+                assert body["chat_template_kwargs"] == {
+                    "enable_thinking": False,
+                    "reasoning_effort": "none",
+                }
+                assert body["thinking_budget"] == 0
+                app.play("/set think on")
+                app.play("I look around.")
+                body = app.server.requests[-1]
+                assert body["chat_template_kwargs"] == {"enable_thinking": True}
+                assert "thinking_budget" not in body
+                app.play("/set think 0")
+                assert app.session.think == "0"
+                saved = tomllib.loads(app.paths.models_file.read_text())
+                assert saved["test-model"]["think"] == "0"
+            finally:
+                app.close()
+            relaunched = launch(tmp_path / "state", server)
+            try:
+                assert relaunched.session.think == "0"
+            finally:
+                relaunched.close()
+        finally:
+            server.close()
+
     def test_the_level_rides_the_wire_and_default_sends_nothing(self, app: App) -> None:
         # The scripted server is a generic provider, whose url could name
-        # a local engine as well as a catalog: both knobs go out.
+        # a local engine as well as a catalog: every knob goes out.
         app.play("/set think low")
         app.play("I enter the hall.")
         body = app.server.requests[-1]
         assert body["reasoning_effort"] == "low"
-        assert body["chat_template_kwargs"] == {"enable_thinking": True}
+        assert body["chat_template_kwargs"] == {"enable_thinking": True, "reasoning_effort": "low"}
+        assert "thinking_budget_tokens" not in body and "thinking_budget" not in body
         app.play("/set think none")
         app.play("I listen.")
         body = app.server.requests[-1]
         assert body["reasoning_effort"] == "none"
-        assert body["chat_template_kwargs"] == {"enable_thinking": False}
-        app.play("/set think default")
+        assert body["chat_template_kwargs"] == {
+            "enable_thinking": False,
+            "reasoning_effort": "none",
+        }
+        assert (body["thinking_budget_tokens"], body["thinking_budget"]) == (0, 0)
+        app.play("/set think unset")
         app.play("I look around.")
-        assert "reasoning_effort" not in app.server.requests[-1]
-        assert "chat_template_kwargs" not in app.server.requests[-1]
+        body = app.server.requests[-1]
+        assert "reasoning_effort" not in body and "chat_template_kwargs" not in body
+        assert "thinking_budget_tokens" not in body and "thinking_budget" not in body
 
     def test_a_400_to_the_knob_retries_once_without_it(self, app: App) -> None:
-        # Engines differ on the knob: a reasoning-mandatory model refuses
-        # "none", some engines reject the field outright — either way a
+        # Providers differ on the knob: a reasoning-mandatory model refuses
+        # "none", some providers reject the field outright — either way a
         # 400 before any content. The same request goes again with no
-        # thinking field, and the engine's own default answers.
+        # thinking field, and the provider's own default answers.
         app.play("/set think low")
         app.server.refuse = lambda body: 400 if "reasoning_effort" in body else None
+        app.server.refusal = "unknown field: reasoning_effort"
         app.play("I enter the hall.")
         assert app.session.messages[-1].role == "assistant"
         knobbed, knobless = app.server.requests[-2:]
@@ -142,55 +420,113 @@ class TestThink:
         assert "consider" not in str(app.server.requests[-1]["messages"])
 
     def test_llamacpp_gets_both_knobs_and_none_turns_the_flag_off(self, server, tmp_path) -> None:
-        # llama.cpp's server ignores reasoning_effort and reads the template
-        # flag alone; its template allows thinking by default, so with
-        # nothing sent the model thinks when it likes. The flag rides along.
+        # llama.cpp's server reads no reasoning_effort of its own and hands
+        # chat_template_kwargs to the template: the flag gates thinking,
+        # and a level rides beside it as the variable a template that
+        # grades its thinking reads. Its template allows thinking by
+        # default, so with nothing sent the model thinks when it likes.
         set_config_provider(tmp_path / "state", server, name="llamacpp")
         app = launch(tmp_path / "state", server, spec="llamacpp/test-model")
         try:
             app.play("/set think none")
             app.play("I enter the hall.")
             body = app.server.requests[-1]
-            assert body["reasoning_effort"] == "none"
-            assert body["chat_template_kwargs"] == {"enable_thinking": False}
+            assert "reasoning_effort" not in body
+            # The flag, the word for a template that switches off on it,
+            # and the budget the server's own sampler enforces on any
+            # template — the one off switch that holds everywhere.
+            assert body["chat_template_kwargs"] == {
+                "enable_thinking": False,
+                "reasoning_effort": "none",
+            }
+            assert body["thinking_budget_tokens"] == 0
             app.play("/set think high")
             app.play("I look around.")
             body = app.server.requests[-1]
-            assert body["reasoning_effort"] == "high"
-            assert body["chat_template_kwargs"] == {"enable_thinking": True}
+            assert "reasoning_effort" not in body
+            assert body["chat_template_kwargs"] == {
+                "enable_thinking": True,
+                "reasoning_effort": "high",
+            }
+            assert "thinking_budget_tokens" not in body  # a level leaves the budget the engine's
         finally:
             app.close()
 
-    def test_omlx_translates_the_level_to_its_template_flag(self, server, tmp_path) -> None:
-        # omlx ignores reasoning_effort; thinking is gated by the chat
-        # template's enable_thinking flag — a level enables, off disables,
-        # default sends nothing.
+    def test_omlx_gets_the_template_its_flag_and_its_effort(self, server, tmp_path) -> None:
+        # omlx forwards chat_template_kwargs into the template and drops
+        # a request-level reasoning_effort unread: the flag gates thinking
+        # — a level enables, off disables, default sends nothing — and the
+        # effort rides beside it for the templates that grade theirs.
         set_config_provider(tmp_path / "state", server, name="omlx")
         app = launch(tmp_path / "state", server, spec="omlx/test-model")
         try:
             app.play("/set think high")
             app.play("I enter the hall.")
             body = app.server.requests[-1]
-            assert body["chat_template_kwargs"] == {"enable_thinking": True}
+            template = {"enable_thinking": True, "reasoning_effort": "high"}
+            assert body["chat_template_kwargs"] == template
             assert "reasoning_effort" not in body
-            app.play("/set think off")
+            assert "thinking_budget" not in body
+            app.play("/set think none")
             app.play("I look around.")
-            assert app.server.requests[-1]["chat_template_kwargs"] == {"enable_thinking": False}
-            app.play("/set think default")
+            body = app.server.requests[-1]
+            assert body["chat_template_kwargs"] == {
+                "enable_thinking": False,
+                "reasoning_effort": "none",
+            }
+            assert body["thinking_budget"] == 0  # omlx's own sampler, whatever the template reads
+            app.play("/set think unset")
             app.play("We walk on.")
             assert "chat_template_kwargs" not in app.server.requests[-1]
+            assert "thinking_budget" not in app.server.requests[-1]
         finally:
             app.close()
 
-    def test_a_provider_without_thinking_refuses_the_knob(self, server, tmp_path, capsys) -> None:
-        # KoboldCpp has no request-level thinking knob — class knowledge,
-        # not configuration, so no config flag can turn it on.
+    def test_koboldcpp_gets_both_knobs(self, server, tmp_path) -> None:
+        # KoboldCpp reads the effort as a thinking budget on every launch
+        # and the template's flag under --jinja: both go out.
         set_config_provider(tmp_path / "state", server, name="koboldcpp")
-        plain = launch(tmp_path / "state", server, spec="koboldcpp/test-model")
+        app = launch(tmp_path / "state", server, spec="koboldcpp/test-model")
+        try:
+            app.play("/set think low")
+            app.play("I enter the hall.")
+            body = app.server.requests[-1]
+            assert body["reasoning_effort"] == "low"
+            assert body["chat_template_kwargs"] == {"enable_thinking": True}
+        finally:
+            app.close()
+
+    def test_ollama_gets_the_effort_alone(self, server, tmp_path) -> None:
+        # Ollama reads reasoning_effort and nothing of the template: its
+        # card's "thinking" is a switch, and off goes out as none.
+        managed = ModelServer(managed=True)
+        managed.capabilities = {"test-model": ["completion", "thinking"]}
+        try:
+            set_config_provider(tmp_path / "state", managed, name="ollama")
+            app = launch(tmp_path / "state", managed, spec="ollama/test-model")
+            try:
+                app.play("/set think off")
+                app.play("I enter the hall.")
+                body = managed.requests[-1]
+                assert body["reasoning_effort"] == "none"
+                assert "chat_template_kwargs" not in body
+            finally:
+                app.close()
+        finally:
+            managed.close()
+
+    def test_lmstudio_takes_the_level_and_sends_the_effort_alone(self, server, tmp_path) -> None:
+        # LM Studio reads `reasoning_effort` and no template knob: the
+        # level goes out by name and nothing else rides with it.
+        set_config_provider(tmp_path / "state", server, name="lmstudio")
+        plain = launch(tmp_path / "state", server, spec="lmstudio/test-model")
         try:
             plain.play("/set think high")
-            assert "cannot be set" in capsys.readouterr().out
-            assert plain.session.think != "high"
+            assert plain.session.think == "high"
+            plain.play("I enter the hall.")
+            body = plain.server.requests[-1]
+            assert body["reasoning_effort"] == "high"
+            assert "chat_template_kwargs" not in body
         finally:
             plain.close()
 
@@ -230,18 +566,133 @@ class TestParameters:
         # Set on one model, switch away: the other model plays with ITS
         # saved parameters, not the first one's.
         app.play("/set parameter temperature 0.7")
-        app.play("/model test/other-model")
+        app.play("/model generic/other-model")
         app.play("/set parameter top_p 0.5")
         app.play("I enter the hall.")
         body = app.server.requests[-1]
         assert body["top_p"] == 0.5
         assert "temperature" not in body
         # And switching back restores the first model's own parameters.
-        app.play("/model test/test-model")
+        app.play("/model generic/test-model")
         app.play("I look around.")
         body = app.server.requests[-1]
         assert body["temperature"] == 0.7
         assert "top_p" not in body
+
+    def test_only_the_parameters_the_provider_reads_are_offered(self, tmp_path) -> None:
+        # LM Studio's wire reads top_k and repetition_penalty beyond the
+        # protocol's, not min_p: the menu names what reaches the wire, in
+        # the vocabulary's order. A list, not a gate — one model is served
+        # by more than one provider — so min_p is still set and saved,
+        # and it is the wire that leaves it out.
+        server = scripted.ModelServer(managed=True)
+        try:
+            set_config_provider(tmp_path / "state", server, name="lmstudio")
+            app = launch(tmp_path / "state", server, spec="lmstudio/test-model")
+            try:
+                names = api_settings.parameter_names(app.session)
+                assert "top_k" in names and "min_p" not in names
+                assert list(names) == [n for n in PARAMETERS if n in names]
+                app.play("/set parameter top_k 40")
+                app.play("/set parameter min_p 0.1")
+                assert app.session.params["min_p"] == 0.1
+                app.play("I enter the hall.")
+                body = app.server.requests[-1]
+                assert body["top_k"] == 40 and "min_p" not in body
+            finally:
+                app.close()
+        finally:
+            server.close()
+
+    def test_a_value_outside_the_range_is_refused_and_the_bounds_stand(self, app: App) -> None:
+        # The engines' own bounds, checked once for both frontends: out
+        # of range is refused by name and nothing is saved; the bounds
+        # themselves are taken.
+        with pytest.raises(Refused, match="temperature must be between 0 and 2"):
+            api_settings.set_parameter(app.session, "temperature 3")
+        with pytest.raises(Refused, match="top_k must be at least 0"):
+            api_settings.set_parameter_value(app.session, "top_k", "-1")
+        assert "temperature" not in app.session.params and "top_k" not in app.session.params
+        api_settings.set_parameter(app.session, "temperature 2")
+        api_settings.set_parameter(app.session, "top_p 0")
+        api_settings.set_parameter(app.session, "seed -7")  # unbounded: any integer
+        assert (app.session.params["temperature"], app.session.params["top_p"]) == (2.0, 0.0)
+        assert app.session.params["seed"] == -7
+
+    def test_the_bounds_are_the_engines_own(self, tmp_path) -> None:
+        # A local engine takes any temperature; KoboldCpp floors the
+        # repetition penalty at 1; NanoGPT refuses a top_k under 1. The
+        # bounds the setter holds to are the ones the page publishes.
+        server = scripted.ModelServer()
+        try:
+            set_config_provider(tmp_path / "state", server, name="llamacpp")
+            local = launch(tmp_path / "state", server, spec="llamacpp/test-model")
+            try:
+                api_settings.set_parameter(local.session, "temperature 3.5")
+                api_settings.set_parameter(local.session, "presence_penalty -3")
+                assert local.session.params["temperature"] == 3.5
+                assert api_settings.parameter_bounds(local.session, "temperature") == (0, None)
+                assert api_settings.parameter_bounds(local.session, "top_p") == (0, 1)
+            finally:
+                local.close()
+            set_config_provider(tmp_path / "kobold", server, name="koboldcpp")
+            kobold = launch(tmp_path / "kobold", server, spec="koboldcpp/test-model")
+            try:
+                with pytest.raises(Refused, match="repetition_penalty must be at least 1"):
+                    api_settings.set_parameter(kobold.session, "repetition_penalty 0.9")
+            finally:
+                kobold.close()
+            set_config_provider(tmp_path / "nano", server, name="nanogpt", api_key="k")
+            nano = launch(tmp_path / "nano", server, spec="nanogpt/test-model")
+            try:
+                with pytest.raises(Refused, match="top_k must be at least 1"):
+                    api_settings.set_parameter(nano.session, "top_k 0")
+                with pytest.raises(Refused, match="temperature must be between 0 and 2"):
+                    api_settings.set_parameter(nano.session, "temperature 3")
+            finally:
+                nano.close()
+        finally:
+            server.close()
+
+    def test_stop_holds_several_strings_with_their_whitespace(self, app: App) -> None:
+        # Typed as JSON strings, so a stop may hold a newline or a space;
+        # kept as a list, saved as one, sent as one, read back on a
+        # relaunch — and a bare text is one stop as it is.
+        app.play('/set parameter stop "\\nUser:" "The End"')
+        assert app.session.params["stop"] == ["\nUser:", "The End"]
+        app.play("I enter the hall.")
+        assert app.server.requests[-1]["stop"] == ["\nUser:", "The End"]
+        saved = tomllib.loads(app.paths.models_file.read_text())
+        assert saved["test-model"]["stop"] == ["\nUser:", "The End"]
+        relaunched = launch(app.paths.root, app.server)
+        try:
+            assert relaunched.session.params["stop"] == ["\nUser:", "The End"]
+        finally:
+            relaunched.close()
+        app.play("/set parameter stop END")
+        assert app.session.params["stop"] == ["END"]
+        with pytest.raises(Refused, match="Could not parse"):
+            api_settings.set_parameter(app.session, 'stop "unclosed')
+
+    def test_a_parameter_the_provider_drops_is_kept_and_said_so(self, tmp_path) -> None:
+        # Ollama's /v1 reads no top_k: the value is set and saved for the
+        # model all the same — another provider may read it — and the
+        # setter and the report both say the provider in use does not.
+        server = scripted.ModelServer(managed=True)
+        try:
+            set_config_provider(tmp_path / "state", server, name="ollama")
+            app = launch(tmp_path / "state", server, spec="ollama/test-model")
+            try:
+                assert api_settings.parameter_read(app.session, "temperature")
+                assert not api_settings.parameter_read(app.session, "top_k")
+                api_settings.set_parameter(app.session, "top_k 40")
+                assert app.session.params["top_k"] == 40
+                app.play("I enter the hall.")
+                assert "top_k" not in app.server.requests[-1]
+            finally:
+                app.close()
+        finally:
+            server.close()
 
     def test_an_invalid_value_is_refused(self, app: App, capsys) -> None:
         app.play("/set parameter temperature warm")
@@ -308,10 +759,10 @@ class TestMaxContext:
         migrated = app.paths.config_file.read_text()
         assert "max_context = 32000" in migrated
         assert migrated.count("max_context") == 1  # edited in place, not appended
-        assert "0 = the model's whole window" in migrated  # the comment rides it
+        assert "0 = the model's own max context" in migrated  # the comment rides it
         assert any(app.paths.config_backups_dir.iterdir())  # the pre-edit file waits
         relaunched = launch(app.paths.root, app.server)
-        assert relaunched.session.max_context == 32000
+        assert relaunched.session.max_context_setting == 32000
         relaunched.close()
 
     def test_a_bare_set_reports_and_changes_nothing(self, app: App, capsys) -> None:
@@ -327,7 +778,7 @@ class TestMaxContext:
         # 0 is what a fresh config carries: the window a model advertises
         # is the one it can use, and a reader who wants the prompt kept
         # smaller than that says so.
-        assert app.session.max_context == 0
+        assert app.session.max_context_setting == 0
         assert "max_context = 0" in app.paths.config_file.read_text()
 
     def test_a_story_over_the_cap_declines_with_the_sentence(self, app: App, capsys) -> None:
@@ -358,14 +809,52 @@ class TestManagedPicker:
         empty list. Built HERE, inside the app session, because
         prompt_toolkit binds an Application's input when it is built; the
         queued keys wait in the pipe meanwhile."""
-        engines = api_providers.engines(app.session)
+        supported = api_providers.supported(app.session)
         picker = screen_models.ModelPicker(
-            app.session, engines, [], initial_spec="ollama/alpha", fetch=["ollama"]
+            app.session, supported, [], initial_spec="ollama/alpha", fetch=["ollama"]
         )
         deadline = time.monotonic() + 5
         while picker.pending and time.monotonic() < deadline:
             time.sleep(0.02)
         return picker.run()
+
+    def test_a_turn_on_a_cold_model_loads_it_first(self, tmp_path) -> None:
+        # The turn's request would load the model anyway; loading first
+        # means the prompt is cut to the runner's window, not the
+        # assembler's substitute — which the preview, that loads
+        # nothing, says it is until then.
+        app, server = self.launch_managed(tmp_path)
+        server.contexts["alpha"] = 32768
+        try:
+            assert app.session.max_context() is None
+            assert reports.context(app.session).note
+            app.play("I enter the hall.")
+            assert "/api/generate" in server.posts
+            assert server.posts.index("/api/generate") < server.posts.index("/v1/chat/completions")
+            assert app.session.max_context() == 32768
+            assert reports.context(app.session).note == ""
+        finally:
+            app.close()
+
+    def test_a_turns_load_ticks_the_idle_hook(self, tmp_path) -> None:
+        # The hook the session was handed — the web's one thread
+        # answering its reads — is ticked through a cold model's load,
+        # as through the reply after it.
+        app, server = self.launch_managed(tmp_path)
+        server.load_delay = 0.4
+        ticks = 0
+
+        def tick() -> None:
+            nonlocal ticks
+            ticks += 1
+
+        app.session.set_on_idle(tick)
+        try:
+            app.play("I enter the hall.")
+            assert "/api/generate" in server.posts
+            assert ticks > 0
+        finally:
+            app.close()
 
     def test_l_loads_the_model_after_a_confirm(self, tmp_path) -> None:
         app, server = self.launch_managed(tmp_path)
@@ -388,13 +877,16 @@ class TestManagedPicker:
         app, server = self.launch_managed(tmp_path)
         server.loaded = {"alpha"}
         server.contexts["alpha"] = 32768
+        # The launch read the model in use once (its card among the
+        # reads); the inventory is what is counted here.
         server.gets.clear()
+        server.requests.clear()
         try:
-            rows, _ = api_providers.get_providers(app.session)
-            ollama = next(r for r in rows if r.config.name == "ollama")
+            rows = api_providers.get_providers(app.session).rows
+            ollama = next(r for r in rows if r.id == "ollama")
             by_name = {m.name: m for m in ollama.models}
-            assert by_name["alpha"].context == 32768
-            assert by_name["beta"].context is None
+            assert by_name["alpha"].max_context_loaded == 32768
+            assert by_name["beta"].max_context_loaded is None
             assert by_name["alpha"].size == 1_000_000
             # One pass over each native endpoint, however long the list,
             # and no per-model card lookups (the harness's generic
@@ -406,18 +898,17 @@ class TestManagedPicker:
             server.close()
 
     def test_an_unloaded_models_window_is_unknown_until_it_loads(self, tmp_path) -> None:
-        # The budget asks the same question: unknown before the load, the
-        # live figure after — and only the live figure is kept, so the
-        # first ask never pins "unknown" on a model that loads a moment
-        # later.
+        # The budget asks the instance, live: unknown before the load,
+        # the served window after, unknown again once unloaded — nothing
+        # is pinned on a model that loads a moment later.
         app, server = self.launch_managed(tmp_path)
         try:
-            assert app.session.context_size() is None
+            assert app.session.max_context() is None
             server.loaded = {"alpha"}
             server.contexts["alpha"] = 4096
-            assert app.session.context_size() == 4096
+            assert app.session.max_context() == 4096
             server.loaded = set()
-            assert app.session.context_size() == 4096
+            assert app.session.max_context() is None
         finally:
             app.close()
             server.close()
@@ -436,29 +927,30 @@ class TestManagedPicker:
             server.close()
 
     def test_rows_landing_above_the_cursor_leave_it_on_the_model(self, tmp_path) -> None:
-        # Rows land in PROVIDER order, not arrival order: the generic
-        # provider is first in the panel and here the last to answer, so
-        # its rows land ABOVE the remembered model's — a model that is
-        # not its provider's first row would otherwise lose the cursor to
+        # Rows land in PROVIDER order, not arrival order: llama.cpp is
+        # before Ollama in the panel and here the last to answer, so its
+        # rows land ABOVE the remembered model's — a model that is not
+        # its provider's first row would otherwise lose the cursor to
         # whatever slid under it. The cursor follows the model.
         server = ModelServer(models=("alpha", "beta"), managed=True)
-        server.list_delay = 0.5  # /v1/models, the generic listing, answers after /api/tags
+        server.window = 4096  # llama.cpp's listing reads /props; served with a window
+        server.list_delay = 0.5  # /v1/models, llama.cpp's listing, answers after /api/tags
         root = tmp_path / "state"
         set_config_provider(root, server, name="ollama", keep_alive="24h")
-        set_config_provider(root, server, name="generic")
+        set_config_provider(root, server, name="llamacpp")
         app = launch(root, server, spec="ollama/beta")
 
         def settled() -> str | None:
-            engines = api_providers.engines(app.session)
+            supported = api_providers.supported(app.session)
             picker = screen_models.ModelPicker(
-                app.session, engines, [], initial_spec="ollama/beta", fetch=["ollama", "generic"]
+                app.session, supported, [], initial_spec="ollama/beta", fetch=["ollama", "llamacpp"]
             )
             deadline = time.monotonic() + 5
             while picker.pending and time.monotonic() < deadline:
                 time.sleep(0.02)
             assert [e.full_spec for e in picker.filtered] == [
-                "generic/alpha",
-                "generic/beta",
+                "llamacpp/alpha",
+                "llamacpp/beta",
                 "ollama/alpha",
                 "ollama/beta",
             ]
@@ -486,23 +978,24 @@ class TestManagedPicker:
 
 
 class TestProviderPanel:
-    """The picker's right side: the app's backends in a fixed order,
+    """The picker's right side: the app's backends in the panel's order,
     each with an editable URL and API key — Tab over, ↑/↓ between
-    fields, Enter to edit in place. Editing a backend that is not in
-    the config yet writes its section; the first field is the Generic
-    OpenAI provider's URL — a section nothing wrote yet, so every edit
-    here founds it."""
+    fields, Enter to edit in place. The cursor opens on the first field;
+    `_panel_walk` takes it to a provider's field wherever the panel puts
+    it. Editing a backend that is not in the config yet writes its
+    section."""
 
     def test_an_edited_url_lands_in_config_and_the_session(self, app: App) -> None:
-        # Tab to the panel; Enter edits the generic provider's URL
-        # (prefilled with the configured value, here none); Ctrl+U
-        # clears; the new url is typed; Enter saves.
-        keys = "\t" + ENTER + "\x15" + "http://localhost:7777/v1" + ENTER + ESC + ESC
+        # Walk to the generic provider's URL; Enter edits it (prefilled
+        # with the configured value); Ctrl+U clears; the new url is
+        # typed; Enter saves.
+        keys = _panel_walk(app, "generic", "url") + ENTER + "\x15" + "http://localhost:7777/v1"
+        keys += ENTER + ESC + ESC
         picked = run_screen(keys, lambda: screen_models.pick(app.session))
         assert picked is None
         raw = app.paths.providers_file.read_text()
         assert 'url = "http://localhost:7777/v1"' in raw
-        assert "[test]" in raw  # the other sections survived
+        assert "[ollama]" in raw  # the other sections survived
         assert api_providers.section(app.session, "generic").url == "http://localhost:7777/v1"
 
     def test_a_section_name_cannot_write_rows_of_its_own(self, app: App) -> None:
@@ -512,19 +1005,22 @@ class TestProviderPanel:
         configured provider's url at another host, which is where the
         next turn would send its api key."""
         hostile = 'pwn]\n[openrouter]\nurl = "http://attacker"\n[x'
-        api_providers.save_field(app.session, hostile, "url", "http://evil")
-        parsed = tomllib.loads(app.paths.providers_file.read_text())
-        # One section, named exactly what was asked for — and no second
-        # one conjured out of its name.
-        assert hostile in parsed
+        before = app.paths.providers_file.read_text()
+        # A section is its provider's name, so a name no supported provider answers to
+        # is refused before anything is written — nothing conjured out
+        # of its rows, and the file as it was.
+        with pytest.raises(Refused):
+            api_providers.save_field(app.session, hostile, "url", "http://evil")
+        assert app.paths.providers_file.read_text() == before
+        parsed = tomllib.loads(before)
         assert "openrouter" not in parsed
-        assert parsed["test"]["url"] == app.server.url
+        assert parsed["generic"]["url"] == app.server.url
 
     def test_ctrl_v_sets_a_key_in_one_press(self, app: App, monkeypatch) -> None:
         # An api key is pasted, never typed: Ctrl+V on the highlighted
         # field is the whole gesture — no Enter to open it, none to save.
         monkeypatch.setattr(clipboard, "paste", lambda: "sk-pasted")
-        keys = "\t" + _DOWN + CTRL_V + ESC + ESC
+        keys = _panel_walk(app, "generic", "api_key") + CTRL_V + ESC + ESC
         run_screen(keys, lambda: screen_models.pick(app.session))
         entry = tomllib.loads(app.paths.providers_file.read_text())["generic"]
         assert _unsealed(app, entry["api_key"]) == "sk-pasted"
@@ -533,7 +1029,7 @@ class TestProviderPanel:
         # On macOS the gesture is Cmd+V, which the terminal delivers as a
         # bracketed paste — the app never sees a control byte, so the key
         # binding alone would leave the field untouched.
-        keys = "\t" + _DOWN + pasted("sk-from-cmd-v") + ESC + ESC
+        keys = _panel_walk(app, "generic", "api_key") + pasted("sk-from-cmd-v") + ESC + ESC
         run_screen(keys, lambda: screen_models.pick(app.session))
         entry = tomllib.loads(app.paths.providers_file.read_text())["generic"]
         assert _unsealed(app, entry["api_key"]) == "sk-from-cmd-v"
@@ -541,49 +1037,55 @@ class TestProviderPanel:
     def test_a_paste_inside_the_editor_stays_an_ordinary_paste(self, app: App) -> None:
         # Open, the user is composing: the clipboard goes in at the cursor
         # and Enter is still what saves — only a CLOSED field is set.
-        keys = "\t" + _DOWN + ENTER + "head-" + pasted("tail") + ENTER + ESC + ESC
+        keys = _panel_walk(app, "generic", "api_key") + ENTER + "head-" + pasted("tail")
+        keys += ENTER + ESC + ESC
         run_screen(keys, lambda: screen_models.pick(app.session))
         entry = tomllib.loads(app.paths.providers_file.read_text())["generic"]
         assert _unsealed(app, entry["api_key"]) == "head-tail"
 
     def test_ctrl_v_sets_a_url_the_same_way(self, app: App, monkeypatch) -> None:
         monkeypatch.setattr(clipboard, "paste", lambda: "http://localhost:7777/v1")
-        run_screen("\t" + CTRL_V + ESC + ESC, lambda: screen_models.pick(app.session))
+        keys = _panel_walk(app, "generic", "url") + CTRL_V + ESC + ESC
+        run_screen(keys, lambda: screen_models.pick(app.session))
         assert 'url = "http://localhost:7777/v1"' in app.paths.providers_file.read_text()
         assert api_providers.section(app.session, "generic").url == "http://localhost:7777/v1"
 
     def test_a_saved_api_key_is_sealed_never_plain(self, app: App) -> None:
-        keys = "\t" + _DOWN + ENTER + "hunter-2" + ENTER + ESC + ESC
+        keys = _panel_walk(app, "generic", "api_key") + ENTER + "hunter-2" + ENTER + ESC + ESC
         run_screen(keys, lambda: screen_models.pick(app.session))
         raw = app.paths.providers_file.read_text()
         assert "hunter-2" not in raw  # never plain text in the config
         entry = tomllib.loads(raw)["generic"]
-        assert entry["url"] == ""  # the key edit founded the section and left the url alone
+        assert entry["url"] == app.server.url  # the key edit left the url alone
         assert entry["api_key"].startswith("sealed:")
         assert _unsealed(app, entry["api_key"]) == "hunter-2"
         # The running session got the plain key at once...
         assert api_providers.section(app.session, "generic").api_key == "hunter-2"
-        # ...and the next launch resolves it back from the sealed value.
-        relaunched = launch(app.paths.root, app.server)
+        # ...and the next launch resolves it back from the sealed value
+        # (the session opened as the launcher opens it: the harness's own
+        # launch would re-seed its section's key).
+        relaunched = backend_launch.open_session(app.paths.root)
         try:
-            assert api_providers.section(relaunched.session, "generic").api_key == "hunter-2"
+            assert api_providers.section(relaunched, "generic").api_key == "hunter-2"
         finally:
             relaunched.close()
 
     def test_delete_outside_the_editor_clears_the_url_too(self, app: App) -> None:
-        # Two rows down is llama.cpp's URL, which the harness pre-seeds:
-        # Delete forgets it in the file and the session both, and the
-        # engine, with nowhere to ask, is no longer connected.
-        keys = "\t" + _DOWN + _DOWN + _DEL + ESC + ESC
+        # llama.cpp's URL, which the harness pre-seeds: Delete forgets it
+        # in the file and the session both, and the provider, with
+        # nowhere to ask, is no longer connected.
+        keys = _panel_walk(app, "llamacpp", "url") + _DEL + ESC + ESC
         run_screen(keys, lambda: screen_models.pick(app.session))
         raw = app.paths.providers_file.read_text()
         assert tomllib.loads(raw)["llamacpp"]["url"] == ""
         assert api_providers.section(app.session, "llamacpp").url == ""
-        _, reachable = api_providers.get_providers(app.session)
-        assert "llamacpp" not in reachable
+        panel = api_providers.get_providers(app.session)
+        assert "llamacpp" not in panel.reachable
+        assert panel.failures["llamacpp"]  # and the picker is told why
 
     def test_delete_outside_the_editor_clears_a_saved_key(self, app: App) -> None:
-        keys = "\t" + _DOWN + ENTER + "hunter-2" + ENTER + _DEL + ESC + ESC
+        keys = _panel_walk(app, "generic", "api_key") + ENTER + "hunter-2" + ENTER + _DEL
+        keys += ESC + ESC
         run_screen(keys, lambda: screen_models.pick(app.session))
         raw = app.paths.providers_file.read_text()
         assert tomllib.loads(raw)["generic"]["api_key"] == ""
@@ -591,15 +1093,17 @@ class TestProviderPanel:
 
 
 class TestGenericProvider:
-    """The generic provider: the protocol alone, by url and key — first
-    in the panel, and unable to say where its server runs."""
+    """The generic provider: the protocol alone, by url and key —
+    between the engines on this machine and the catalogs in the panel,
+    and unable to say where its server runs."""
 
-    def test_it_is_first_in_the_panel_and_cannot_say_where_it_runs(self, app: App) -> None:
-        engines = api_providers.engines(app.session)
-        assert engines[0].name == "generic"
-        assert engines[0].locality is Locality.UNKNOWN
-        # The engines know: the ones on this machine, the catalogs.
-        by_name = {engine.name: engine.locality for engine in engines}
+    def test_it_sits_between_the_engines_and_the_catalogs_and_cannot_say(self, app: App) -> None:
+        supported = api_providers.supported(app.session)
+        ids = [p.id for p in supported]
+        assert ids.index("lmstudio") < ids.index("generic") < ids.index("openrouter")
+        assert supported[ids.index("generic")].locality is Locality.UNKNOWN
+        # The supported providers know: the ones on this machine, the catalogs.
+        by_name = {p.id: p.locality for p in supported}
         assert by_name["llamacpp"] is Locality.LOCAL
         assert by_name["openrouter"] is Locality.REMOTE
 
@@ -613,26 +1117,61 @@ class TestGenericProvider:
             set_config_provider(tmp_path / "state", server, name="generic")
             app = launch(tmp_path / "state", server, spec="generic/a")
             try:
-                rows, reachable = api_providers.get_providers(app.session)
+                panel = api_providers.get_providers(app.session)
+                rows, reachable = panel.rows, panel.reachable
                 assert "generic" in reachable
-                generic = next(r for r in rows if r.config.name == "generic")
-                assert [(m.name, m.context, m.loaded) for m in generic.models] == [
-                    ("a", 32_000, True),
-                    ("b", None, True),
+                generic = next(r for r in rows if r.id == "generic")
+                # A catalog row has no load state.
+                assert [(m.name, m.max_context_catalogue, m.state) for m in generic.models] == [
+                    ("a", 32_000, ModelState.UNKNOWN),
+                    ("b", None, ModelState.UNKNOWN),
                 ]
                 assert generic.locality is Locality.UNKNOWN
-                assert app.session.context_size() == 32_000
+                assert app.session.max_context() == 32_000
             finally:
                 app.close()
         finally:
             server.close()
 
-    def test_a_section_under_any_other_name_is_served_the_same_way(self, app: App) -> None:
-        # The harness's own provider is a hand-written section named
-        # "test": not an engine, so the generic client serves it.
-        rows, _ = api_providers.get_providers(app.session)
-        mine = next(r for r in rows if r.config.name == "test")
+    def test_the_generic_section_is_the_generic_engine(self, app: App) -> None:
+        # The harness's own provider is the [generic] section: a url and
+        # nothing more, which cannot say where it points.
+        rows = api_providers.get_providers(app.session).rows
+        mine = next(r for r in rows if r.id == "generic")
         assert mine.locality is Locality.UNKNOWN
+
+    def test_a_section_under_any_other_name_is_passed_over_and_said_so(
+        self, server, tmp_path
+    ) -> None:
+        # A section is its provider's name; one under any other name is
+        # not served — the file keeps it, the launch names it.
+        set_config_provider(tmp_path / "state", server, name="mybox")
+        app = launch(tmp_path / "state", server)
+        try:
+            assert "mybox" not in api_providers.configured(app.session)
+            assert any("[mybox]" in notice for notice in app.session.notices)
+            assert tomllib.loads(app.paths.providers_file.read_text())["mybox"]
+        finally:
+            app.close()
+
+    def test_the_launch_never_lists_the_generic_provider_for_its_window(self, tmp_path) -> None:
+        # Its url could name a catalog across the internet: the header's
+        # window comes from the cache alone, None before a listing warmed it.
+        server = ModelServer(models=("a",))
+        server.contexts["a"] = 32_000
+        try:
+            set_config_provider(tmp_path / "state", server, name="generic")
+            app = launch(tmp_path / "state", server, spec="generic/a")
+            try:
+                asked = len(server.gets)
+                assert app.session.max_context() is None
+                assert server.gets[asked:] == []
+                api_providers.get_providers(app.session)
+                assert app.session.max_context() == 32_000
+            finally:
+                app.close()
+        finally:
+            server.close()
 
 
 class TestLlamaCpp:
@@ -647,9 +1186,9 @@ class TestLlamaCpp:
             set_config_provider(tmp_path / "state", server, name="llamacpp")
             app = launch(tmp_path / "state", server, spec=None)
             try:
-                rows, _ = api_providers.get_providers(app.session)
-                llama = next(r for r in rows if r.config.name == "llamacpp")
-                assert [m.context for m in llama.models] == [4096, 4096, 4096]
+                rows = api_providers.get_providers(app.session).rows
+                llama = next(r for r in rows if r.id == "llamacpp")
+                assert [m.max_context_loaded for m in llama.models] == [4096, 4096, 4096]
                 assert sum(p.endswith("/props") for p in server.gets) == 1
             finally:
                 app.close()
@@ -659,7 +1198,7 @@ class TestLlamaCpp:
 
 class TestKoboldCpp:
     def test_the_window_is_asked_once_for_every_row(self, tmp_path) -> None:
-        # The same rule as llama.cpp's, held separately: this engine lists
+        # The same rule as llama.cpp's, held separately: this provider lists
         # its own way (the prefix, admin mode's active model).
         server = ModelServer(models=("koboldcpp/a", "koboldcpp/b", "koboldcpp/c"))
         server.window = 2048
@@ -667,9 +1206,9 @@ class TestKoboldCpp:
             set_config_provider(tmp_path / "state", server, name="koboldcpp")
             app = launch(tmp_path / "state", server, spec=None)
             try:
-                rows, _ = api_providers.get_providers(app.session)
-                kobold = next(r for r in rows if r.config.name == "koboldcpp")
-                assert [m.context for m in kobold.models] == [2048, 2048, 2048]
+                rows = api_providers.get_providers(app.session).rows
+                kobold = next(r for r in rows if r.id == "koboldcpp")
+                assert [m.max_context_loaded for m in kobold.models] == [2048, 2048, 2048]
                 assert sum(p.endswith("/true_max_context_length") for p in server.gets) == 1
             finally:
                 app.close()
@@ -682,8 +1221,8 @@ class TestKoboldCpp:
             set_config_provider(tmp_path / "state", server, name="koboldcpp")
             app = launch(tmp_path / "state", server, spec="koboldcpp/tiny")
             try:
-                rows, _ = api_providers.get_providers(app.session)
-                kobold = next(r for r in rows if r.config.name == "koboldcpp")
+                rows = api_providers.get_providers(app.session).rows
+                kobold = next(r for r in rows if r.id == "koboldcpp")
                 assert [m.name for m in kobold.models] == ["tiny"]
             finally:
                 app.close()
@@ -702,13 +1241,13 @@ class TestCloudProviders:
             set_config_provider(tmp_path / "state", server, name="openrouter")
             app = launch(tmp_path / "state", server, spec="openrouter/gpt-alpha")
             try:
-                rows, _ = api_providers.get_providers(app.session)
-                catalog = next(r for r in rows if r.config.name == "openrouter")
-                assert catalog.can_load_unload is False
+                rows = api_providers.get_providers(app.session).rows
+                catalog = next(r for r in rows if r.id == "openrouter")
+                assert catalog.capabilities.model_management is False
                 by_name = {m.name: m for m in catalog.models}
-                assert by_name["gpt-alpha"].context == 128_000
+                assert by_name["gpt-alpha"].max_context_catalogue == 128_000
                 assert by_name["gpt-alpha"].size is None
-                assert all(m.loaded for m in catalog.models)
+                assert all(m.state is ModelState.UNKNOWN for m in catalog.models)
                 # The listing seeded the context cache — a chat-time
                 # lookup answers without refetching the catalog.
                 fetches = len(app.server.requests)
@@ -729,7 +1268,7 @@ class TestCloudProviders:
         app = launch(tmp_path / "state", dead, spec=None)
         try:
             capsys.readouterr()
-            # The pick's pre-screen sweep waits out the dead engines'
+            # The pick's pre-screen sweep waits out the dead providers'
             # connect timeouts (up to ~5s on macOS, where a closed local
             # port hangs rather than refuses) BEFORE the screen opens —
             # the launch's own behavior; the patience covers it.
@@ -753,13 +1292,14 @@ class TestCloudProviders:
         app = launch(tmp_path / "state", server)
         try:
             # The blocking pass skips the catalogs entirely...
-            rows, reachable = api_providers.get_providers(app.session, skip={"openrouter"})
-            assert all(row.config.name != "openrouter" for row in rows)
+            panel = api_providers.get_providers(app.session, skip={"openrouter"})
+            rows, reachable = panel.rows, panel.reachable
+            assert all(row.id != "openrouter" for row in rows)
             assert "openrouter" not in reachable
             # ...and the picker fetches them after opening: the rows land
             # in the background and the pending mark drains.
-            engines = api_providers.engines(app.session)
-            picker = screen_models.ModelPicker(app.session, engines, [], fetch=["openrouter"])
+            supported = api_providers.supported(app.session)
+            picker = screen_models.ModelPicker(app.session, supported, [], fetch=["openrouter"])
             deadline = time.monotonic() + 5
             while picker.pending and time.monotonic() < deadline:
                 time.sleep(0.02)
@@ -775,9 +1315,9 @@ class TestCloudProviders:
             set_config_provider(tmp_path / "state", server, name="nanogpt")
             app = launch(tmp_path / "state", server, spec="nanogpt/gpt-alpha")
             try:
-                rows, _ = api_providers.get_providers(app.session)
-                nano = next(r for r in rows if r.config.name == "nanogpt")
-                assert [m.context for m in nano.models] == [64_000]
+                rows = api_providers.get_providers(app.session).rows
+                nano = next(r for r in rows if r.id == "nanogpt")
+                assert [m.max_context_catalogue for m in nano.models] == [64_000]
             finally:
                 app.close()
         finally:
@@ -789,6 +1329,20 @@ def _settled(done, deadline: float = 5.0) -> None:
     end = time.monotonic() + deadline
     while not done() and time.monotonic() < end:
         time.sleep(0.02)
+
+
+def _panel_walk(app: App, provider: str, attr: str) -> str:
+    """The keys that take the panel's cursor from its first field to
+    `provider`'s `attr`: Tab into the panel, then Down past every field
+    above — two per provider in the panel's order, the cloud catalogs'
+    fixed url excepted (`ModelPicker.fields`)."""
+    fields = [
+        (p.id, a)
+        for p in api_providers.supported(app.session)
+        for a in ("url", "api_key")
+        if a != "url" or p.locality is not Locality.REMOTE
+    ]
+    return "\t" + _DOWN * fields.index((provider, attr))
 
 
 def _unsealed(app: App, value: str) -> str:

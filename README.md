@@ -9,8 +9,8 @@
 
 Otaku is an LLM frontend for roleplay (similar to SillyTavern, Janitor AI, etc.).
 
-It's free, works on your machine, and lets you play either in a web UI or in the terminal. LLMs
-can be local (via llama.cpp, KoboldCpp, Ollama, and others) or accessed via an API service
+It's free, works on your machine, and lets you play either in a web interface or in the terminal.
+LLMs can be local (via llama.cpp, KoboldCpp, Ollama, and others) or accessed via an API service
 (OpenRouter, NanoGPT). Otaku needs no infrastructure — no Docker, no database server — installs
 in one command, and requires minimal configuration.
 
@@ -18,7 +18,7 @@ in one command, and requires minimal configuration.
 
 Demos are available on the [website](https://otaku.sh/):
 
-- Web UI demo: https://otaku.sh/demo-web/
+- Web demo: https://otaku.sh/demo-web/ (optimized for mobile too)
 - Terminal demo: https://otaku.sh/demo-terminal/
 
 Both demos include two sample stories and a scripted "model", so you can actually send prompts
@@ -46,6 +46,8 @@ Import your content:
   the `/import` command);
 - **lorebooks or world info** have no equivalent in otaku, but they can be imported from a file
   into the system message (the `/system` command).
+
+Tentative roadmap: [ROADMAP.md](https://github.com/enclavum/otaku/blob/main/ROADMAP.md)
 
 ## Requirements
 
@@ -95,10 +97,10 @@ upgrade.
 
 ## User guide
 
-Both the web UI and the terminal share the same functions; the difference is that in the
+Both the web interface and the terminal share the same functions; the difference is that in the
 terminal you execute them with slash commands (the reference is available with `/help`), while
-in the web UI the operations are available from the menu. In the description below, all commands
-are given as they are called from the terminal.
+in the web interface the operations are available from the menu. In the description below, all
+commands are given as they are called from the terminal.
 
 ### Launching
 
@@ -106,13 +108,14 @@ In the terminal, type one of the 2 commands:
 
 ```bash
 otaku          # for terminal
-otaku web      # for web UI; default URL is http://localhost:9600
+otaku web      # for web interface; default URL is http://localhost:9600
 ```
 
 On first start, you choose a provider and a model: otaku automatically detects local LLM
 backends and lets you pick from their models. Cloud providers (OpenRouter, NanoGPT) are also in
-the picker — enter an API key and their catalogs appear — and the Generic OpenAI provider, first
-in the picker's panel, takes any other OpenAI-compatible server's URL and key. After you've
+the picker — enter an API key and their catalogs appear — and the Generic OpenAI provider,
+between the local backends and the cloud providers in the picker's panel, takes any other
+OpenAI-compatible server's URL and key. After you've
 chosen (or cancelled with Esc), you land at the prompt. The model picker is available later with
 the `/model` (Ctrl+O) command.
 
@@ -196,13 +199,15 @@ The exact context composition, case by case, is described in
 [context_design.md](https://github.com/enclavum/otaku/blob/main/docs/context_design.md).
 You can use the `/context` command to see what exactly will be sent to the LLM.
 
-### Customizing the web UI
+### Customizing the web interface
 
-To restyle the web UI, create `~/.otaku/web/custom.css`; it overrides styles in the bundled
+To restyle the web interface, create `~/.otaku/web/custom.css`; it overrides styles in the bundled
 design. The custom properties it can set are listed in
 [docs/web_tokens.md](https://github.com/enclavum/otaku/blob/main/docs/web_tokens.md).
 
 ## Configuration and environments
+
+### Configuration files
 
 Everything lives in the state dir, `~/.otaku` by default:
 
@@ -213,7 +218,7 @@ Everything lives in the state dir, `~/.otaku` by default:
 - `configs/prompts.toml` — every template otaku ever sends, editable.
 - `configs/state.toml`, `configs/models.toml` — the app's own memory of your session and
   per-model settings.
-- `web/custom.css` and `web/fonts/` — web UI customization, if needed.
+- `web/custom.css` and `web/fonts/` — web interface customization, if needed.
 
 The config files are written on first run and after that edited only surgically — line by line,
 never rewritten as a whole: version migrations at launch and the picker's provider edits, each
@@ -223,6 +228,19 @@ touched.
 
 Set `OTAKU_CONFIG_DIR` to run a completely separate environment:
 `OTAKU_CONFIG_DIR=~/.otaku-alt otaku`.
+
+### Web interface
+
+By default, the web interface is available on the local machine only. You can set it to public by
+editing the `host` parameter in the `[web]` section of `~/.otaku/configs/config.toml`. If you do,
+you should also consider turning on the next two parameters, `https` and `password`, for privacy.
+
+The web interface can serve over HTTPS. Turn on `https` in the config file and otaku generates a
+self-signed certificate, which you can also replace with your own if you need to. Browsers will
+show warnings about an untrusted certificate. That is unavoidable with a self-signed certificate,
+but the encryption is real.
+
+The web interface can be password-protected — set the password in the same config file.
 
 ## Storage and privacy
 

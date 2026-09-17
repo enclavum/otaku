@@ -215,7 +215,7 @@ the platform's chrome.
 | `--otk-scrollbar-thumb` | the thumb — ink-family, so it reads as drawn |
 | `--otk-scrollbar-track` | the channel it runs in |
 
-`--otk-scrollbar-w` reaches only an engine that lacks `scrollbar-color`:
+`--otk-scrollbar-w` reaches only a browser that lacks `scrollbar-color`:
 the standard `scrollbar-width`/`scrollbar-color` pair is what every
 current browser is given, and `thin` is its own width. The two colour
 tokens reach both.

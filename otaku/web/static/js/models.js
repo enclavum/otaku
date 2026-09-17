@@ -2,7 +2,7 @@
    providers behind them on the other — two halves of one panel, because
    a model that is missing is fixed on the provider side.
 
-   It opens the way the terminal's picker does: on the local engines,
+   It opens the way the terminal's picker does: on the providers on this machine,
    NOW, with each cloud catalog's rows merged in behind the open panel
    when it answers. Testing a connection re-asks that same read for one
    provider — a provider that answers the catalog IS the test.
@@ -56,8 +56,8 @@ export async function openModels(answered = "", tab = "models") {
       if (!popup.open || epoch !== _opening) return;
       state.panel = {
         ...state.panel,
-        engines: [...state.panel.engines, ...cloud.engines].sort(
-          (a, b) => a.order - b.order || a.name.localeCompare(b.name),
+        providers: [...state.panel.providers, ...cloud.providers].sort(
+          (a, b) => a.order - b.order || a.id.localeCompare(b.id),
         ),
       };
       build(state.tab);
@@ -79,7 +79,7 @@ const _MEMORY_MS = 1000;
 let _gauge = 0;
 
 function watchMemory(popup) {
-  /* Its own read: the picker's inventory costs every engine a probe,
+  /* Its own read: the picker's inventory costs every provider a probe,
      this costs a syscall. One timer at a time, dying with the panel, so
      a closed picker asks nothing. */
   clearInterval(_gauge);
@@ -107,23 +107,23 @@ function watchMemory(popup) {
 function buildModels(state, notice) {
   const { popup, panel } = state;
   const pane = $('[data-pane="models"]', popup);
-  const offered = panel.engines.flatMap((engine) =>
-    engine.models.map((model) => ({ engine, model, haystack: model.name.toLowerCase() })),
+  const offered = panel.providers.flatMap((provider) =>
+    provider.models.map((model) => ({ provider, model, haystack: model.name.toLowerCase() })),
   );
-  const local = offered.filter((entry) => entry.engine.locality === "local").length;
+  const local = offered.filter((entry) => entry.provider.locality === "local").length;
   const remote = offered.length - local;
   $("[data-tabs-aside]", popup).textContent =
     `${offered.length} ${offered.length === 1 ? "model" : "models"}`;
   footnote(popup, notice || `${local} on this machine · ${remote} over the wire`);
 
   const use = async (entry) => {
-    const { notice: said } = await api.switchModel(entry.engine.name, entry.model.name);
+    const { notice: said } = await api.switchModel(entry.provider.id, entry.model.name);
     closeAll();
     await landed(said, { redraw: "always" });
   };
 
   const setLoaded = async (entry, wanted) => {
-    if (!entry?.model.can_load_unload) return;
+    if (!entry?.provider.capabilities?.model_management) return;
     /* Asked first, as the terminal's picker asks: a load takes the
        engine's memory and its time, and `u` sits one key beside `l`. */
     const verb = wanted ? "Load" : "Unload";
@@ -139,7 +139,7 @@ function buildModels(state, notice) {
       $('[data-choice="cancel"]', dialog).textContent = "Cancel";
     });
     if (choice !== "confirm") return;
-    const answer = await api.setLoaded(entry.engine.name, entry.model.name, wanted);
+    const answer = await api.setLoaded(entry.provider.id, entry.model.name, wanted);
     /* One flag on one model changed, so that is what changes here:
        asking the catalogs again costs every provider a round trip to
        redraw a lamp, and moves the list under the reader. Only when the
@@ -151,21 +151,28 @@ function buildModels(state, notice) {
 
   if (!offered.length) $("[data-actions]", pane).replaceChildren();
   /* Read BEFORE the browser paints: its first paint moves the cursor to
-     row 0 and `onMove` would overwrite what the reader was on. */
+     row 0 and `onMove` would overwrite what the reader was on. And only
+     the reader's own moves are remembered: the kit reports that first
+     paint and the select below as moves too, and a model that arrives
+     with the cloud phase must still be found by that rebuild — not the
+     row the paint happened to land on. */
   const wanted = state.picked ?? panel.current;
+  let settled = false;
   const view = browser(popup, {
     root: pane,
     rows: offered,
-    /* Engines in their own order, each under its caption, and only the
-       ones that ANSWERED — a provider with nothing to offer is dealt
-       with on the providers tab. An engine a filter emptied drops out
+    /* Providers in their own order, each under its caption, and only
+       the ones that ANSWERED — one with nothing to offer is dealt with
+       on the providers tab. A provider a filter emptied drops out
        rather than captioning an empty stretch. */
-    groupOf: (entry) => entry.engine,
-    drawGroup: engineHeading,
+    groupOf: (entry) => entry.provider,
+    drawGroup: providerHeading,
     drawRow: (entry) => modelRow(entry, panel.current),
     drawPreview: (entry) => modelDetail(pane, entry, panel.current, { use, setLoaded }),
     onOpen: use,
-    onMove: (entry) => (state.picked = `${entry.engine.name}/${entry.model.name}`),
+    onMove: (entry) => {
+      if (settled) state.picked = `${entry.provider.id}/${entry.model.name}`;
+    },
     onKey: (event, entry) => {
       if (event.key !== "l" && event.key !== "u") return false;
       guard(setLoaded)(entry, event.key === "l");
@@ -180,19 +187,28 @@ function buildModels(state, notice) {
   });
   // Open where the reader was — or on the model the session is playing,
   // the way back to it.
-  view.select((entry) => `${entry.engine.name}/${entry.model.name}` === wanted);
-
+  view.select((entry) => `${entry.provider.id}/${entry.model.name}` === wanted);
+  settled = true;
 }
 
 function modelRow(entry, current) {
   const lamp = span("otk-row__lamp", "");
-  const managed = entry.model.can_load_unload;
+  const managed = entry.provider.capabilities?.model_management;
   if (managed && entry.model.loaded) lamp.append(span("otk-dot otk-dot--sm", ""));
+  // The chosen model wears its tag right after its name, where the eye
+  // reads the name, not out past the figures.
+  const title = span("otk-row__title", entry.model.name);
+  if (`${entry.provider.id}/${entry.model.name}` === current) title.append(" ", span("otk-tag", "chosen"));
   const button = row(
     lamp,
-    span("otk-row__title", entry.model.name),
+    title,
     span("otk-row__num otk-row__num--size", entry.model.size),
-    span("otk-row__num otk-row__num--count", entry.model.context),
+    // what a request would get: the running instance's size while one
+    // runs, the model's own otherwise
+    span(
+      "otk-row__num otk-row__num--count",
+      entry.model.max_context_loaded || entry.model.max_context_catalogue,
+    ),
   );
   button.classList.add("otk-row--indent", "otk-row--mono");
   /* Bold is loaded, dim is not, and only where loading is a thing that
@@ -200,20 +216,27 @@ function modelRow(entry, current) {
      say something true of nothing. */
   button.classList.toggle("is-loaded", managed && entry.model.loaded);
   button.classList.toggle("is-dim", managed && !entry.model.loaded);
-  if (`${entry.engine.name}/${entry.model.name}` === current) button.append(span("otk-tag", "chosen"));
   return button;
 }
 
 function modelDetail(pane, entry, current, { use, setLoaded }) {
-  const managed = entry.model.can_load_unload;
-  const where = whereItRuns(entry.engine);
+  const managed = entry.provider.capabilities?.model_management;
+  const where = whereItRuns(entry.provider);
   const state = !managed ? "" : entry.model.loaded ? " · loaded" : " · not loaded";
-  const chosen = `${entry.engine.name}/${entry.model.name}` === current;
+  const chosen = `${entry.provider.id}/${entry.model.name}` === current;
 
   const facts = element("div", "otk-detail__section");
   if (entry.model.size) facts.append(fact("size", entry.model.size));
-  if (entry.model.context) facts.append(fact("context", entry.model.context));
-  facts.append(fact("provider", entry.engine.label));
+  if (entry.model.max_context_catalogue) facts.append(fact("max context", entry.model.max_context_catalogue));
+  // the running instance's size, where it is known and is not the model's
+  // own — the info report's rule (`backend.api.reports`)
+  const loaded = entry.model.max_context_loaded;
+  if (loaded && loaded !== entry.model.max_context_catalogue) facts.append(fact("served max context", loaded));
+  // how its thinking is set, and what else it can do: the info report's
+  // two rows, in the report's own words (`backend.api.reports`)
+  facts.append(fact("reasoning", entry.model.reasoning_words));
+  facts.append(fact("capabilities", entry.model.capability_words));
+  facts.append(fact("provider", entry.provider.label));
 
   // Pinned under the pane: the row above is a name of any length, and
   // the button must not move with it.
@@ -245,13 +268,13 @@ function modelDetail(pane, entry, current, { use, setLoaded }) {
   ].filter(Boolean);
 }
 
-function engineHeading(engine) {
-  /* A caption per engine: the lamp, its name, and what it holds. */
+function providerHeading(provider) {
+  /* A caption per provider: the lamp, its name, and what it holds. */
   const heading = element("h3", "otk-group");
   heading.append(
-    element("span", engine.connected ? "otk-dot" : "otk-dot otk-dot--off"),
-    span("otk-group__name", engine.label),
-    span("otk-group__count", `${engine.models.length} ${whereItRuns(engine)}`),
+    element("span", provider.connected ? "otk-dot" : "otk-dot otk-dot--off"),
+    span("otk-group__name", provider.label),
+    span("otk-group__count", `${provider.models.length} ${whereItRuns(provider)}`),
   );
   return [heading, element("div", "otk-rule")];
 }
@@ -261,15 +284,15 @@ function engineHeading(engine) {
 function buildProviders(state, notice) {
   const { popup, panel } = state;
   const pane = $('[data-pane="providers"]', popup);
-  const answering = panel.engines.filter((engine) => engine.connected);
+  const answering = panel.providers.filter((provider) => provider.connected);
   $("[data-tabs-aside]", popup).textContent =
-    `${answering.length} of ${panel.engines.length} answering`;
+    `${answering.length} of ${panel.providers.length} answering`;
   footnote(popup, notice || `${answering.length} ${answering.length === 1 ? "provider" : "providers"} answering`);
 
-  /* In the registry's order (`providers.registry.CLIENTS`), which is the
+  /* In the registry's order (`providers.registry.ALL_CLIENTS`), which is the
      terminal's picker's: a frontend that re-sorted them would invent an
      order the other does not have. */
-  const rows = panel.engines.map((engine) => ({ engine, haystack: engine.label.toLowerCase() }));
+  const rows = panel.providers.map((provider) => ({ provider, haystack: provider.label.toLowerCase() }));
   // Read before the paint, for the same reason the models tab does.
   const wanted = state.pickedProvider;
 
@@ -279,34 +302,34 @@ function buildProviders(state, notice) {
     drawRow: (entry) => {
       const stack = element("span", "otk-stack");
       stack.append(
-        span("otk-choice__name", entry.engine.label),
-        span("otk-index__sub", entry.engine.url),
+        span("otk-choice__name", entry.provider.label),
+        span("otk-index__sub", entry.provider.url),
       );
       return row(
-        element("span", entry.engine.connected ? "otk-dot" : "otk-dot otk-dot--off"),
+        element("span", entry.provider.connected ? "otk-dot" : "otk-dot otk-dot--off"),
         stack,
-        span("otk-row__num", entry.engine.connected ? "answering" : "not answering"),
+        span("otk-row__num", entry.provider.connected ? "answering" : "not answering"),
       );
     },
-    drawPreview: (entry) => providerDetail(state, pane, entry.engine),
+    drawPreview: (entry) => providerDetail(state, pane, entry.provider),
     onOpen: () => $("[data-detail] input", pane)?.focus(),
-    onMove: (entry) => (state.pickedProvider = entry.engine.name),
+    onMove: (entry) => (state.pickedProvider = entry.provider.id),
   });
   // A rebuild — a save's, a test's, a tab switched away and back —
   // stays on the provider it was about.
-  if (wanted) view.select((entry) => entry.engine.name === wanted);
+  if (wanted) view.select((entry) => entry.provider.id === wanted);
 }
 
-function providerDetail(state, pane, engine) {
-  const models = engine.models.length;
+function providerDetail(state, pane, provider) {
+  const models = provider.models.length;
   const head = span(
     "otk-label",
-    engine.connected ? `answering · ${models} ${models === 1 ? "model" : "models"}` : "not answering",
+    provider.connected ? `answering · ${models} ${models === 1 ? "model" : "models"}` : "not answering",
   );
 
   const fields = element("div", "otk-detail__section");
-  const url = urlField(state, engine);
-  const key = keyField(state, engine);
+  const url = urlField(state, provider);
+  const key = keyField(state, provider);
   fields.append(span("otk-margin__key", "url"), url);
   fields.append(span("otk-margin__key", "api key"), key);
   fields.append(
@@ -319,7 +342,7 @@ function providerDetail(state, pane, engine) {
 
   const save = actionButton("Save", {
     kind: "otk-btn--primary",
-    onclick: guard(() => saveProvider(state, engine)),
+    onclick: guard(() => saveProvider(state, provider)),
   });
   /* A test asks the CONFIGURED provider, and its answer redraws the
      panel: with changes pending it would test the old values and throw
@@ -337,12 +360,12 @@ function providerDetail(state, pane, engine) {
   const test = actionButton("Test connection", {
     onclick: guard(() => {
       if (test.getAttribute("aria-disabled") === "true") return undefined;
-      return testProvider(state, engine);
+      return testProvider(state, provider);
     }),
   });
   test.hidden = true;
   const settle = () => {
-    const pending = dirty(state.popup, engine);
+    const pending = dirty(state.popup, provider);
     save.setAttribute("aria-disabled", String(!pending));
     test.setAttribute("aria-disabled", String(pending));
   };
@@ -350,29 +373,29 @@ function providerDetail(state, pane, engine) {
   for (const input of [url, key]) input.addEventListener("input", settle);
   $("[data-actions]", pane).replaceChildren(save, test);
 
-  return [head, element("h3", "otk-detail__title", engine.label), fields];
+  return [head, element("h3", "otk-detail__title", provider.label), fields];
 }
 
-function urlField(state, engine) {
+function urlField(state, provider) {
   /* A local URL is editable — a port moves. A cloud URL is the
      provider's own and shown dim, because reading it is useful and
      changing it is not. */
   const input = element("input", "otk-field otk-field--mono");
   input.type = "url";
   input.dataset.provider = "url";
-  input.value = engine.url;
-  input.disabled = engine.locality === "remote";
-  if (!input.disabled) saveOnEnter(state, input, engine, "url");
+  input.value = provider.url;
+  input.disabled = provider.locality === "remote";
+  if (!input.disabled) saveOnEnter(state, input, provider, "url");
   return input;
 }
 
-/* Where an engine runs, as its client knows it (`backend.Locality`):
+/* Where a provider's server runs, as its client knows it (`backend.Locality`):
    the generic provider is a url and cannot say, so its caption says
    neither. The footnote's count above puts the unknowns with the
    remote ones — the side that may cost money. */
-function whereItRuns(engine) {
-  if (engine.locality === "local") return "on this machine";
-  if (engine.locality === "remote") return "over the wire";
+function whereItRuns(provider) {
+  if (provider.locality === "local") return "on this machine";
+  if (provider.locality === "remote") return "over the wire";
   return "wherever the url points";
 }
 
@@ -387,9 +410,10 @@ const _ASKING_MS = 1000;
 
 const _beat = (ms) => new Promise((wake) => setTimeout(wake, ms));
 
-function keyField(state, engine) {
+function keyField(state, provider) {
   /* One shape whether a key is set or not: a password field, empty for a
-     provider with no key and masked for one that has it. Entering clears
+     provider with no key, masked for one that has it in its section, and
+     captioned for one the shell carries. Entering clears
      the stand-in so a new key can be typed; leaving without typing one
      puts it back, the key still being there. Delete or Backspace on the
      bare field marks the key to be FORGOTTEN: the field stays bare with
@@ -398,7 +422,15 @@ function keyField(state, engine) {
   const input = element("input", "otk-field otk-field--mono");
   input.type = "password";
   input.dataset.provider = "api_key";
-  if (engine.has_key) {
+  if (provider.key_source === "env") {
+    /* A key the shell carries: nothing here to mask or forget, so the
+       field stays bare and says where the key is until one is typed
+       over it — the terminal's caption for the same fact
+       (`terminal.screens.models`). */
+    input.dataset.rest = "(from environment)";
+    keepKey(input);
+  }
+  if (provider.key_source === "config") {
     const mask = () => {
       input.value = _MASK;
       input.dataset.mask = "yes";
@@ -425,7 +457,7 @@ function keyField(state, engine) {
       if (input.value) keepKey(input);
     });
   }
-  saveOnEnter(state, input, engine, "api_key");
+  saveOnEnter(state, input, provider, "api_key");
   return input;
 }
 
@@ -438,23 +470,23 @@ function forgetKey(input) {
 
 function keepKey(input) {
   delete input.dataset.forget;
-  input.placeholder = "";
+  input.placeholder = input.dataset.rest ?? "";
 }
 
 /** What a field would write, or null for nothing: a url that differs
     from the configured one — emptied included, which clears it — a
     typed key, or "" for a key marked to be forgotten. */
-function pending(input, engine, attr) {
+function pending(input, provider, attr) {
   if (!input || input.disabled) return null;
   if (attr === "url") {
     const value = input.value.trim();
-    return value === engine.url ? null : value;
+    return value === provider.url ? null : value;
   }
   if (input.dataset.forget) return "";
   return input.value.trim() && !input.dataset.mask ? input.value : null;
 }
 
-function saveOnEnter(state, input, engine, attr) {
+function saveOnEnter(state, input, provider, attr) {
   /* Enter saves the field it is in, as Save saves both. A field left
      without saving is left alone: a half-typed URL must not become the
      configuration because the reader clicked elsewhere. */
@@ -467,7 +499,7 @@ function saveOnEnter(state, input, engine, attr) {
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
-        input.value = attr === "url" ? engine.url : "";
+        input.value = attr === "url" ? provider.url : "";
         if (attr === "api_key") keepKey(input);
         input.dispatchEvent(new Event("input"));
         $("[data-list]", input.closest("[data-pane]"))?.focus();
@@ -480,38 +512,38 @@ function saveOnEnter(state, input, engine, attr) {
          could-not-write warning for a value that needed no saving — or
          for a key nobody typed; "" for an emptied url or a forgotten
          key, which the route clears. */
-      const value = pending(input, engine, attr);
+      const value = pending(input, provider, attr);
       if (value === null) return;
-      const { notice } = await api.saveProviderField(engine.name, attr, value);
-      await refreshProvider(state, engine, notice);
+      const { notice } = await api.saveProviderField(provider.id, attr, value);
+      await refreshProvider(state, provider, notice);
     }),
   );
 }
 
-function dirty(popup, engine) {
+function dirty(popup, provider) {
   /* Whether a save would write anything (`pending`): a moved or emptied
      url, a typed key, a key marked to be forgotten. */
   const url = $('[data-detail] input[data-provider="url"]', popup);
   const key = $('[data-detail] input[data-provider="api_key"]', popup);
-  return pending(url, engine, "url") !== null || pending(key, engine, "api_key") !== null;
+  return pending(url, provider, "url") !== null || pending(key, provider, "api_key") !== null;
 }
 
-async function saveProvider(state, engine) {
+async function saveProvider(state, provider) {
   /* Both fields at once, skipping what did not change; an emptied one
      is cleared. Saving nothing is an answer too. */
   const url = $('[data-detail] input[data-provider="url"]', state.popup);
   const key = $('[data-detail] input[data-provider="api_key"]', state.popup);
   const notices = [];
   for (const [input, attr] of [[url, "url"], [key, "api_key"]]) {
-    const value = pending(input, engine, attr);
+    const value = pending(input, provider, attr);
     if (value === null) continue;
-    const { notice } = await api.saveProviderField(engine.name, attr, value);
+    const { notice } = await api.saveProviderField(provider.id, attr, value);
     notices.push(notice);
   }
-  await refreshProvider(state, engine, notices.join(" ") || "Nothing to save.");
+  await refreshProvider(state, provider, notices.join(" ") || "Nothing to save.");
 }
 
-function testProvider(state, engine) {
+function testProvider(state, provider) {
   /* The test IS the catalog read for this one provider — the same read
      the picker draws from, no new backend door. The dialog opens FIRST:
      a dead host answers by timing out, and the reader who pressed Test
@@ -519,27 +551,27 @@ function testProvider(state, engine) {
   const dialog = $('dialog[data-dialog="told"]');
   const answered = ask("told", () => {
     $("[data-title]", dialog).textContent = "Checking";
-    $(".otk-dialog__body", dialog).textContent = `Asking ${engine.label} at ${engine.url}…`;
+    $(".otk-dialog__body", dialog).textContent = `Asking ${provider.label} at ${provider.url}…`;
   });
   // A local engine answers in milliseconds, and a question asked and
   // answered inside one frame reads as nothing having happened.
-  const asking = Promise.all([api.provider(engine.name), _beat(_ASKING_MS)]).then(([fresh]) => fresh);
+  const asking = Promise.all([api.provider(provider.id), _beat(_ASKING_MS)]).then(([fresh]) => fresh);
   asking.then(
     guard((fresh) => {
-      const found = fresh.engines.find((entry) => entry.name === engine.name);
-      patch(state, engine, found);
+      const found = fresh.providers.find((entry) => entry.id === provider.id);
+      patch(state, provider, found);
       const models = found?.models.length ?? 0;
       // The dialog the reader is already looking at becomes the answer.
       $("[data-title]", dialog).textContent = found?.connected ? "Connected" : "No answer";
       $(".otk-dialog__body", dialog).textContent = found?.connected
-        ? `${engine.label} answered with ${models} ${models === 1 ? "model" : "models"}.`
-        : `${engine.label} did not answer at ${engine.url}.`;
+        ? `${provider.label} answered with ${models} ${models === 1 ? "model" : "models"}.`
+        : `${provider.label} did not answer at ${provider.url}.`;
     }),
     guard(() => {
       // The question itself could not be asked — the dialog still
       // becomes the answer, never a "Checking" frozen forever.
       $("[data-title]", dialog).textContent = "No answer";
-      $(".otk-dialog__body", dialog).textContent = `${engine.label} could not be asked — otaku did not answer.`;
+      $(".otk-dialog__body", dialog).textContent = `${provider.label} could not be asked — otaku did not answer.`;
     }),
   );
   // The list catches up once the reader is done with the answer: a
@@ -547,26 +579,34 @@ function testProvider(state, engine) {
   return answered.then(() => state.build("providers", ""));
 }
 
-async function refreshProvider(state, engine, notice) {
+async function refreshProvider(state, provider, notice) {
   /* One provider re-asked and patched into the panel, wherever it now
      stands — the terminal's own one-provider refresh, over the wire. */
-  const fresh = await api.provider(engine.name);
-  patch(state, engine, fresh.engines.find((entry) => entry.name === engine.name));
+  const fresh = await api.provider(provider.id);
+  patch(state, provider, fresh.providers.find((entry) => entry.id === provider.id));
   state.build("providers", notice);
 }
 
-function patch(state, engine, found) {
+function patch(state, provider, found) {
   /* One provider's row replaced in place — the rest of the panel is
      what it was, and the list keeps its order and its cursor. */
   if (!found) return;
   state.panel = {
     ...state.panel,
-    engines: state.panel.engines.map((entry) => (entry.name === engine.name ? found : entry)),
+    providers: state.panel.providers.map((entry) => (entry.id === provider.id ? found : entry)),
   };
 }
 
 function fact(key, value) {
-  const line = element("p", "otk-fact");
-  line.append(span("", key), span("", value));
+  // Clipped, never wrapped: the pane keeps its width, and a value too
+  // long for it — a ladder of levels — shows as far as it fits, whole
+  // in its hover hint. Measured once the pane holds it: the kit
+  // attaches the preview right after drawing it, before the microtask.
+  const line = element("p", "otk-fact otk-fact--clip");
+  const shown = span("", value);
+  line.append(span("", key), shown);
+  queueMicrotask(() => {
+    if (shown.isConnected && shown.scrollWidth > shown.clientWidth) shown.title = String(value);
+  });
   return line;
 }

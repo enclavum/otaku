@@ -12,6 +12,8 @@ here. Api-key sealing is NOT here: it is encryption's second plane
 key material.
 """
 
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from otaku.formatting import decode_text
@@ -19,6 +21,35 @@ from otaku.formatting import decode_text
 # Written config lines align their comments to one column, so the values
 # read as a column instead of a wall of prose.
 _COMMENT_COLUMN = 30
+
+
+@dataclass(frozen=True)
+class SettingsFiles:
+    """Where the files this package works on live — handed down by the
+    launch, since this package resolves no locations itself: the four
+    settings files, the per-model overrides, and the directory the
+    surgical edits keep their backups in."""
+
+    config: Path
+    providers: Path
+    prompts: Path
+    state: Path
+    models: Path
+    backups_dir: Path
+
+
+@dataclass(frozen=True)
+class Secrets:
+    """The encryption plane, injected by the launch: this package may
+    not reach it, and only the migrations use it. `seal` seals a plain
+    api key and `is_sealed` tells one already sealed, so the migration
+    skips those itself; `hash` and `is_hashed` the same for the web
+    password."""
+
+    seal: Callable[[str], str]
+    is_sealed: Callable[[str], bool]
+    hash: Callable[[str], str]
+    is_hashed: Callable[[str], bool]
 
 
 def row(setting: str, comment: str) -> str:

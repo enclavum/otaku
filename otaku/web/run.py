@@ -19,8 +19,10 @@ looks, off the session rather than out of the file.
 """
 
 import contextlib
+import ipaddress
 import os
 import signal
+import ssl
 import sys
 import threading
 from collections.abc import Callable
@@ -28,12 +30,12 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from otaku import __version__
 from otaku.backend import WebSettings
 from otaku.backend.session import Session
-from otaku.console import banner, sound, ticker
+from otaku.console import banner, keys, sound, ticker
 from otaku.web import api
-from otaku.web.server import LOOPBACK, Hooks, bind
+from otaku.web.cert import CertError, get_context
+from otaku.web.server import Hooks, bind
 from otaku.web.thread import SessionRunner
 
 __all__ = ["ServeError", "address", "run", "serve", "settings"]
@@ -53,14 +55,17 @@ class ServeError(Exception):
 
 def run(
     session: Session, *, full: bool = True, host: str | None = None, port: int | None = None
-) -> None:
+) -> bool:
     """This frontend's whole life over an open session, as `chat.run` is
     the terminal's: what the launch has to say, where the page is, and
     the tail of requests until the reader stops it. Everything printed
     by `otaku web` is printed here — into the terminal it was launched
     from, which is the only part of that terminal this frontend has.
     Closing the session stays the caller's, as it is for the other
-    frontend.
+    frontend. Returns whether the reader asked to be served again on
+    fresh sources (Ctrl+R) — which is the caller's to do, over a
+    session it has closed, and asked only where the process is the
+    caller's to replace: `otaku web`, never `/web`.
 
     FULL is a terminal this frontend opens: `otaku web`, with the launch
     to report and a mark to draw. Without it the session came from
@@ -83,12 +88,18 @@ def run(
     # configuration's and not the socket's answer: a reader can be
     # opening the page while the first request is still arriving. The
     # banner is the same mark a chat session opens with and answers to
-    # the same setting; without it, one line saying the same things.
-    url = address(config)
-    if session.terminal.show_banner:
-        print(banner.render_web(__version__, url, full=full))
-    else:
-        print(f"web ui is available on: {url}  (ctrl+c to stop)")
+    # the same setting, which decides its STYLE rather than whether the
+    # address is said at all.
+    size: banner.WebBannerSize = (
+        ("full" if session.terminal.show_banner else "line") if full else "short"
+    )
+    print(
+        banner.render_web(
+            address(config),
+            address_notes(config),
+            size=size,
+        )
+    )
     # The last few requests, kept under the address and rewritten in
     # place: proof that the browser is reaching this server, in a
     # terminal that stays the height it started at. It owns the terminal
@@ -96,25 +107,28 @@ def run(
     # echo `^C` into the middle of the answer.
     with ticker.Ticker() as tail:
 
-        def stopping() -> None:
-            """The first Ctrl+C, in words — the last line of the log,
-            said in the log's own voice because that is what the reader
-            is already reading. Shown BEFORE the tail stops, which is the
-            only order that works: a stopped tail draws nothing, and a
-            line drawn as a row is one a later redraw keeps rather than
-            takes back. Then the tail stops, and with it the terminal
-            gets its own behaviour back — the NEXT press is the fatal one
-            and would otherwise leave it without. The sentence is the
-            truth: a reply already in flight is finished, not cut."""
-            tail.show("Shutting down…")
+        def stopping(sentence: str) -> None:
+            """The first Ctrl+C (or Ctrl+D, or Ctrl+R), in words — the
+            last line of the log, said in the log's own voice because
+            that is what the reader is already reading. Shown BEFORE the
+            tail stops, which is the only order that works: a stopped
+            tail draws nothing, and a line drawn as a row is one a later
+            redraw keeps rather than takes back. Then the tail stops, and
+            with it the terminal gets its own behaviour back — the NEXT
+            press is the fatal one and would otherwise leave it without.
+            The sentence is the truth: a reply already in flight is
+            finished, not cut."""
+            tail.show(sentence)
             tail.stop()
 
-        serve(
+        restart = serve(
             session,
             config,
             session.custom_web_dir,
+            session.cert_dir,
             show=tail.show,
             stopping=stopping,
+            restartable=full,
         )
     if full:
         # The shell prompt starts against a blank rather than against the
@@ -122,6 +136,7 @@ def run(
         # here: the blank before its next prompt is its ledger's, and one
         # printed here as well would be two.
         print()
+    return restart
 
 
 def settings(
@@ -153,46 +168,65 @@ def settings(
 
 
 def address(config: WebSettings) -> str:
-    """The URL that address READS as — what the terminal prints and a
-    reader pastes.
+    """The URL the banner prints: the host as configured, `127.0.0.1`
+    read as `localhost`."""
+    scheme = "https" if config.https else "http"
+    reachable = "localhost" if config.host == "127.0.0.1" else config.host
+    if config.port == (443 if config.https else 80):
+        return f"{scheme}://{reachable}"
+    return f"{scheme}://{reachable}:{config.port}"
 
-    A NAME, not a number: every loopback spelling reaches this server,
-    and `localhost` is the one a person reads and a browser bar shows
-    back. An address that names a real interface stays as it was
-    configured; that one was a decision. Port 80 is what a bare `http://`
-    already means, so printing it is printing the default twice, and
-    there is no trailing slash: the root is where a bare host goes, and
-    a slash is one more character between a reader and a working
-    paste."""
-    reachable = "localhost" if config.host in LOOPBACK else config.host
-    return f"http://{reachable}" if config.port == 80 else f"http://{reachable}:{config.port}"
+
+def address_notes(config: WebSettings) -> str:
+    """What the banner says after the address: that a password is set,
+    and — on any host but `localhost` or `127.0.0.1` — that the address
+    is public, with what it is missing. `<b>…</b>` marks what is bold;
+    how bold looks is the banner's (`banner.render_web`)."""
+    notes = ""
+    if config.password:
+        notes = " (password set)"
+    if config.host in ("localhost", "127.0.0.1"):
+        return notes
+    missing = [
+        name for name, on in (("no TLS", config.https), ("no password", config.password)) if not on
+    ]
+    if missing:
+        return notes + f"<b> - public, yet with {' and '.join(missing)}</b> - set in config.toml"
+    return notes + "<b> - public</b>"
 
 
 def serve(
     session: Session,
     config: WebSettings,
     custom_web_dir: Path,
+    cert_dir: Path,
     *,
     show: Callable[[str], None] | None = None,
-    stopping: Callable[[], None] | None = None,
+    stopping: Callable[[str], None] | None = None,
     stop: threading.Event | None = None,
-) -> None:
+    restartable: bool = False,
+) -> bool:
     """Serve one open session until interrupted — the composition root
     under `run`, the background worker started here for the same reason
     `chat.run` starts it. `config` is the configured address (`settings`
     above); `custom_web_dir` is the state dir's own web directory, where
-    the reader's `custom.css` lives and nothing else is ever read from.
-    Closing the session stays the caller's, like every other frontend's.
+    the reader's `custom.css` lives and nothing else is ever read from;
+    `cert_dir` is where the TLS pair lives, read only when the address
+    says https. Closing the session stays the caller's, like every other
+    frontend's.
 
     Nothing here is printed. `show` is handed one line per request worth
-    showing and `stopping` the moment the reader asks for the door —
-    where either APPEARS is the caller's, because this package draws
-    nothing in a terminal.
+    showing and `stopping` the sentence for the moment the reader asks
+    for the door — where either APPEARS is the caller's, because this
+    package draws nothing in a terminal.
 
     `stop` is how a caller that is not a terminal ends the serving: set
     it and this returns, the same way Ctrl+C does. Ctrl+C itself is only
     wired when this runs on the main thread, because that is the only
-    thread a signal handler can be installed from."""
+    thread a signal handler can be installed from — and the keys at the
+    terminal (Ctrl+D as Ctrl+C; with `restartable`, Ctrl+R as a stop
+    that asks to be served again) are watched only there too. Returns
+    whether Ctrl+R asked."""
     session.start_worker()
     runner = SessionRunner(session)
     # What the background worker says while nobody asked it anything —
@@ -201,6 +235,7 @@ def serve(
     # until it asks, so the sentences wait in the mailbox and go out on
     # the heartbeat it is already making.
     sayings = _Sayings()
+    tls_context = _get_tls_context(config, cert_dir, session, show)
     try:
         server = bind(
             config,
@@ -224,6 +259,8 @@ def serve(
                 # sound machinery is the one the chat already rings.
                 ring=lambda: sound.ring(session.terminal.notification_sound),
             ),
+            tls_context,
+            config.password or None,
         )
     except OSError as e:
         # The address is configuration, and configuration that cannot be
@@ -255,11 +292,32 @@ def serve(
     # (`_Server.stopping`), the way out of a wedged engine.
     on_main = threading.current_thread() is threading.main_thread()
     was = (
-        signal.signal(signal.SIGINT, _interrupting(server.stopping, stopping)) if on_main else None
+        signal.signal(signal.SIGINT, _interrupting(server.stopping, stopping, "Shutting down…"))
+        if on_main
+        else None
     )
+    # The keys the terminal answers while it serves: Ctrl+D is Ctrl+C,
+    # and — for `otaku web`, whose process is its own to replace —
+    # Ctrl+R is a stop that asks to be served again on fresh sources.
+    # Watched where the signal is wired, and off a pipe not at all. A
+    # key stops without handing the signal back: that is the handler's
+    # own move, and only the main thread may make it.
+    asked = threading.Event()
+    table: dict[bytes, Callable[[], None]] = {}
+    if on_main:
+        table[keys.CTRL_D] = _stopping(server.stopping, stopping, "Shutting down…")
+    restart = _stopping(server.stopping, stopping, "Restarting…")
+
+    def restarting() -> None:
+        asked.set()
+        restart()
+
+    if restartable and on_main:
+        table[keys.CTRL_R] = restarting
     try:
         threading.Thread(target=server.serve_forever, daemon=True).start()
-        runner.loop(server.stopping)
+        with keys.watching(table):
+            runner.loop(server.stopping)
     finally:
         if was is not None:
             signal.signal(signal.SIGINT, was)
@@ -271,6 +329,51 @@ def serve(
         # The borrowed hooks go back to whoever held them before.
         session.set_on_idle(was_idle)
         session.set_on_notice(was_notice)
+    return asked.is_set()
+
+
+def _is_loopback(host: str) -> bool:
+    """Whether this address reaches THIS MACHINE ONLY.
+
+    Not `server.LOOPBACK`, which is the wider question that one asks —
+    every spelling that ARRIVES here, the wildcards among them, because
+    a wildcard bind does answer as localhost too. Here `0.0.0.0` is the
+    most exposed address there is, so it has to come out false, and a
+    set that contains it is the wrong set.
+
+    A name is never resolved: that is a DNS call at the launch, and the
+    only name worth the trouble is the one everybody means by it."""
+    name = host.strip("[]")
+    if name == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(name).is_loopback
+    except ValueError:
+        return False
+
+
+def _get_tls_context(
+    config: WebSettings,
+    cert_dir: Path,
+    session: Session,
+    show: Callable[[str], None] | None,
+) -> ssl.SSLContext | None:
+    """What every accepted connection is wrapped in, or None where the
+    address is a plain one. Asked for before the socket is, so a
+    configuration that cannot be served under never gets as far as
+    printing an address nobody can open.
+
+    A failure here is the reader's to act on and not a crash to dump:
+    the traceback goes to the error log the way every contained crash
+    does, and what comes back out is the sentence plus where to read the
+    rest."""
+    if not config.https:
+        return None
+    try:
+        return get_context(cert_dir, show)
+    except CertError as e:
+        where = session.record_crash("web certificate", e)
+        raise ServeError(f"{e}" + (f" (recorded in {where})" if where else "")) from e
 
 
 class _Sayings:
@@ -293,18 +396,33 @@ class _Sayings:
         return said
 
 
-def _interrupting(stop: threading.Event, said: Callable[[], None] | None) -> Callable[..., None]:
+def _interrupting(
+    stop: threading.Event, said: Callable[[str], None] | None, sentence: str
+) -> Callable[..., None]:
     """The first Ctrl+C, and what it says. The handler gives the signal
     back to Python before setting the flag, so a reader who presses it
     again is answered at once rather than waiting on a stream that may
-    not yield for minutes. `said` is the caller's — this package has no
-    terminal — and a hook may not be what stops a shutdown."""
+    not yield for minutes."""
+    halt = _stopping(stop, said, sentence)
 
     def interrupt(*_: Any) -> None:
         signal.signal(signal.SIGINT, signal.SIG_DFL)
+        halt()
+
+    return interrupt
+
+
+def _stopping(
+    stop: threading.Event, said: Callable[[str], None] | None, sentence: str
+) -> Callable[[], None]:
+    """A stop asked for, and what it says: the flag set, then `sentence`
+    said through `said` — the caller's, this package having no terminal
+    — and a hook may not be what stops a shutdown."""
+
+    def halt() -> None:
         stop.set()
         if said is not None:
             with contextlib.suppress(Exception):
-                said()
+                said(sentence)
 
-    return interrupt
+    return halt

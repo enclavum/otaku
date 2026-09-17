@@ -1,6 +1,6 @@
 """The provider moves over providers.toml: any provider section still in
 config.toml moved over, plain api keys sealed wherever they came from,
-and the known engines' sections ensured — each step convergent, run at
+and the local providers' sections ensured — each step convergent, run at
 every launch."""
 
 import re
@@ -136,10 +136,10 @@ def ensure_providers(
     providers_path: Path, backups_dir: Path, defaults: dict[str, ProviderConfig]
 ) -> None:
     """The launch step over providers.toml: every given backend keeps a
-    section — what first run writes, ensured thereafter, so an engine
+    section — what first run writes, ensured thereafter, so a provider
     the app learned after this install still shows up in the picker.
     Present sections are never touched; like every migration this
-    converges, so a deleted section returns — retire an engine by
+    converges, so a deleted section returns — retire a provider by
     leaving its section pointing nowhere instead."""
     changes = []
     for config in defaults.values():

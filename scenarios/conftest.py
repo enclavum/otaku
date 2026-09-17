@@ -5,8 +5,22 @@ from pathlib import Path
 
 import pytest
 
+from otaku.providers import ALL_CLIENTS
 from scenarios.support.harness import App, launch
 from scenarios.support.server import ModelServer
+
+
+@pytest.fixture(autouse=True)
+def _no_shell_keys(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The developer's own shell keys stay out of every offline scenario:
+    a catalog whose variable is set is founded at launch and would then
+    be listed over the real internet. The live smokes read them on
+    purpose, and a scenario that wants one sets it itself."""
+    if request.node.get_closest_marker("live"):
+        return
+    for cls in ALL_CLIENTS.values():
+        if cls.env_key:
+            monkeypatch.delenv(cls.env_key, raising=False)
 
 
 @pytest.fixture

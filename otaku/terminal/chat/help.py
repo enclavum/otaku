@@ -54,6 +54,12 @@ _MIN_DESCRIPTION = 26
 # Nor is it worth taking for a sliver: the split must save at least this
 # share of the height to be worth the wrapping it forces.
 _TWO_COLUMN_SAVING = 0.1
+# The group that opens the right column: the first about the app rather
+# than the story it is played in. A fixed seam, so a group is found where
+# it always is — and the two sides come out close at every width that
+# takes two columns, where a seam chased by height left Import/export
+# straddling the middle and the right column short.
+_RIGHT_COLUMN_OPENS = "transfer"
 
 # One block: its heading ("" for a group that names itself) and its rows,
 # each a (label, shortcut caption, description).
@@ -70,7 +76,7 @@ def text(shortcuts: Mapping[str, str], width: int | None = None) -> str:
     half = (columns - _GAP) // 2
     if half - _widths(blocks)[2] < _MIN_DESCRIPTION:
         return "\n".join(stacked)
-    second = _column_break(_render(blocks, half))
+    second = _right_column(blocks)
     left = _stacked(_render(blocks[:second], half))
     right = _stacked(_render(blocks[second:], half))
     beside = _beside(left, right)
@@ -147,27 +153,11 @@ def _stacked(rendered: list[list[str]]) -> list[str]:
     return lines
 
 
-def _column_break(rendered: list[list[str]]) -> int:
-    """The block the second column starts at: blocks fill the left column
-    until one takes it past half the page's height. That one is the last
-    the left column takes, and the next opens the right. A group is never
-    broken across the two, and the first block always stays left however
-    tall it is.
-
-    The straddling block goes LEFT, which leaves the left column the
-    fuller of the two rather than the emptier. A reader fills the left
-    before the right, so a right column that runs out early reads as a
-    column running out, where a left one doing the same reads as a
-    mistake. The break falls at a heading either way — a group is not
-    worth splitting to even two columns out."""
-    heights = [len(block) + 1 for block in rendered]
-    half = (sum(heights) + 1) // 2
-    taken = 0
-    for i, height in enumerate(heights):
-        if i and taken + height > half:
-            return i + 1
-        taken += height
-    return len(rendered)
+def _right_column(blocks: list[_Block]) -> int:
+    """The block the right column starts at: the seam's own heading, so
+    a group is never broken across the two."""
+    heading = f"{commands.GROUP_LABELS[_RIGHT_COLUMN_OPENS]}:"
+    return next(i for i, (head, _rows) in enumerate(blocks) if head == heading)
 
 
 def _beside(left: list[str], right: list[str]) -> str:

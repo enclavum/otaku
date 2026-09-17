@@ -8,7 +8,7 @@ One path into a pass, so a forced close can never race an automatic
 one. The worker is the system log's owner and only writer: everything a
 pass does lands there.
 
-After a scene closes, the warm-up — LOCAL engines only: the close
+After a scene closes, the warm-up — LOCAL providers only: the close
 rewrites the next request's shape, so the server's cached prefix is
 stale. The exact next request (rebuilt from the Job's snapshot) is sent
 with max_tokens=1 while the user still reads — skipped once they moved
@@ -27,7 +27,7 @@ from otaku.context import assembler
 from otaku.context.assembler import ContextShape
 from otaku.formatting import format_duration
 from otaku.logging import ErrorLog, SystemLog
-from otaku.providers import Locality, OpenAIClient, Registry
+from otaku.providers import Locality, OpenAIClient, ProviderError, Registry
 from otaku.store import Store
 from otaku.store.schema import Message
 from otaku.worker.extraction import ExtractionSettings, Extractor, PassResult, Report
@@ -210,7 +210,9 @@ class Worker:
                         self._set_status("")  # a new pass supersedes a held failure
                         if store is None:
                             store = self._store_factory()
-                        client = self._providers.get_client(job.provider)
+                        client = self._providers.get(job.provider)
+                        if client is None:
+                            raise ProviderError(f"Unknown provider {job.provider!r}.")
                         extractor = Extractor(
                             store,
                             client,
@@ -246,7 +248,7 @@ class Worker:
                         with contextlib.suppress(Exception):
                             job.on_done(result, report)
                     with contextlib.suppress(Exception):
-                        if result is PassResult.CLOSED and store is not None:
+                        if result is PassResult.CLOSED and store is not None and client is not None:
                             self._warm(store, client, job)
                 finally:
                     # Idle — unless the pass failed, in which case its
@@ -282,14 +284,14 @@ class Worker:
         because the prompt must match byte for byte; a warm-up of a
         slightly different prefix caches nothing useful.
 
-        LOCAL engines only: the warm-up exists for a local server's
+        LOCAL providers only: the warm-up exists for a local server's
         prefix cache, so the close's rewrite of the window costs no
         first-token wait. A hosted catalog keeps no per-session cache an
         OpenAI-compatible request could warm — the same request there is
         a full context window BILLED for one token, so it is never
         sent; nor to the generic provider, whose url could name one."""
         assert self._deferred is not None
-        if client.locality is not Locality.LOCAL:
+        if client.locality_of(job.model) is not Locality.LOCAL:
             return
         if not job.messages or self._deferred.is_set():
             return
@@ -297,9 +299,14 @@ class Worker:
         self._log.record(f"warm-up started (story {job.story_id})")
         self._set_status("warming the prompt cache")
         try:
-            context = client.get_context_size(job.model)
+            # Loaded first where cold, as the turn loads it: what is
+            # warmed must be the prefix the turn sends, cut to the same
+            # window (`OpenAIModels.ready`).
+            deferred = self._deferred
+            found = client.models.ready(job.model, on_idle=lambda: not deferred.is_set())
+            max_context = found.max_context if found else None
         except Exception:
-            context = None
+            max_context = None
         try:
             wire = assembler.assemble_story(
                 store,
@@ -307,7 +314,7 @@ class Worker:
                 system=job.system,
                 messages=job.messages,
                 shape=job.shape,
-                context_max=context,
+                max_context=max_context,
             ).messages
         except assembler.ContextOverflowError:
             # Nothing sendable to warm with — the next turn will say so.

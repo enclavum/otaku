@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Self
 
+from otaku.settings import SettingsFiles
+
 DEFAULT_ROOT = "~/.otaku"
 
 
@@ -93,6 +95,16 @@ class Paths:
         empty stylesheet."""
         return self.root / "web"
 
+    # cert/ — what `otaku web` serves under when https is on
+
+    @property
+    def cert_dir(self) -> Path:
+        """The TLS pair the web frontend serves under. Created on the
+        first launch that needs it rather than with the rest of the tree,
+        and never written over once it holds a pair — so a certificate
+        the reader drops in here is the one that is served."""
+        return self.root / "cert"
+
     # database/ — the story store
 
     @property
@@ -118,3 +130,15 @@ class Paths:
         """The OS-keychain service label, named per state dir so parallel
         setups never share a key."""
         return f"otaku:{self.root}"
+
+    @property
+    def settings_files(self) -> SettingsFiles:
+        """The settings files as the migrations take them, in one value."""
+        return SettingsFiles(
+            config=self.config_file,
+            providers=self.providers_file,
+            prompts=self.prompts_file,
+            state=self.state_file,
+            models=self.models_file,
+            backups_dir=self.config_backups_dir,
+        )

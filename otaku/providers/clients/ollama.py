@@ -1,132 +1,325 @@
-"""Ollama: the model registry, load/unload, sizes, and context windows via
-the native /api endpoints; chat rides the OpenAI protocol at /v1."""
+"""Ollama: the registry, load and unload, sizes and the loaded context sizes
+via the native /api endpoints, each model's capabilities and its own
+max context from its card at /api/show — the registry row states the
+max context too, on a model a recent Ollama pulled; chat rides the
+OpenAI protocol at /v1, which reads the protocol's parameters and nothing beyond
+them — `top_k`, `min_p` and `repetition_penalty` are not sent, as the
+base's `supported_params` says. A thinking level goes out as
+`reasoning_effort` alone, the one knob the server reads — the card's
+"thinking" is a switch, off as none, on as nothing sent; it takes
+none, low, medium, high and max, and answers 400 to any other word,
+which the take then sends again without the knob. A model
+served by ollama.com (`remote_host` on its entry) is listed as the
+registry describes it, its state unknown and nothing to load: every
+request for it is proxied.
+"""
 
+import contextlib
+import ipaddress
 import os
+import time
+from dataclasses import replace
+from typing import Any, ClassVar
 
-import httpx
-
-from otaku.providers.base import ManagedClient, ModelInfo
+from otaku.providers.errors import ProviderError
+from otaku.providers.http import PROBE_TIMEOUT, Cut, Http, positive_int
+from otaku.providers.openai.auth import OpenAIAuth
+from otaku.providers.openai.client import OpenAIClient
+from otaku.providers.openai.completion import Bounds, OpenAICompletion
+from otaku.providers.openai.models import (
+    Listing,
+    Locality,
+    ModelCapabilities,
+    ModelInfo,
+    ModelState,
+    OpenAIModels,
+)
 from otaku.settings.providers import ProviderConfig
 
+_UNLOAD_WAIT_SECONDS = 5.0  # an unload is answered before it is done
+_UNLOAD_POLL_SECONDS = 0.25
 
-class OllamaClient(ManagedClient):
-    kind = "ollama"
-    label = "Ollama"
 
-    @classmethod
-    def autoconfigure(cls) -> ProviderConfig:
-        """The first-run section, its host and port detected from
-        OLLAMA_HOST — a remote server stays remote."""
-        raw = os.environ.get("OLLAMA_HOST") or ""
-        host = _parse_host(raw) or "localhost"
-        port = _parse_port(raw) or 11434
-        url = f"http://{host}:{port}/v1"
-        return ProviderConfig(name=cls.kind, url=url, keep_alive="24h")
+class OllamaModels(OpenAIModels):
+    def __init__(self, config: ProviderConfig, auth: OpenAIAuth, http: Http) -> None:
+        super().__init__(config, auth, http)
+        self._remote: set[str] = set()  # served by ollama.com, as of the last listing
+        # Whose card has answered, for the weights the listing last saw:
+        # a re-pull replaces a tag's content in place, and the entry's
+        # digest changes with it, so the card is asked again then.
+        self._carded: set[str] = set()
+        self._digests: dict[str, str] = {}
 
-    def load_model(self, model: str) -> None:
-        body = {
-            "model": model,
-            "prompt": "",
-            "stream": False,
-            "keep_alive": self.config.keep_alive or "24h",
-        }
-        response = httpx.post(
-            f"{self.config.base_url}/api/generate",
-            json=body,
-            headers=self._headers,
-            timeout=None,
-        )
-        response.raise_for_status()
+    @property
+    def can_manage(self) -> bool:
+        return True
 
-    def unload_model(self, model: str) -> None:
-        body = {"model": model, "prompt": "", "stream": False, "keep_alive": 0}
-        response = httpx.post(
-            f"{self.config.base_url}/api/generate",
-            json=body,
-            headers=self._headers,
-            timeout=None,
-        )
-        response.raise_for_status()
+    def _load(self, model: str, http: Http, cut: Cut) -> None:
+        self._refuse_remote(model)
+        self._generate_nothing(model, http, cut, keep_alive=self._config.keep_alive or "24h")
 
-    def _list(self, timeout: float) -> list[ModelInfo]:
-        """One row per model: names and sizes from /api/tags, load state
-        and the live window from /api/ps — one call each, however long
-        the registry. An unloaded model carries NO window: Ollama sizes
-        one at load time, from a server-wide default (tiered by VRAM, or
-        OLLAMA_CONTEXT_LENGTH) clamped to the card's trained maximum, and
-        no endpoint says what that default is. The card's figure is a
-        ceiling, not the window — reported as one it budgeted stories
-        past what the model could hold. A loaded model missing from the
-        registry still belongs in the list."""
-        sizes: dict[str, int] = {}
-        data = self._get_json("/api/tags", timeout=timeout)
-        if data is None:
-            raise httpx.ConnectError(f"{self.config.name} is not answering /api/tags")
-        for entry in data.get("models") or [] if isinstance(data, dict) else []:
+    def _unload(self, model: str, http: Http, cut: Cut) -> None:
+        # Answered as soon as the runner is told to expire; the scheduler
+        # unloads after, so the picker's read-back is waited for.
+        self._refuse_remote(model)
+        self._generate_nothing(model, http, cut, keep_alive=0)
+        deadline = time.monotonic() + _UNLOAD_WAIT_SECONDS
+        names = {model, self._canonical(model)}  # the door takes either spelling
+        while time.monotonic() < deadline and not cut.asked:
+            http.check_budget()
+            running = self._running(http)
+            if running is not None and names.isdisjoint(running):
+                return
+            time.sleep(_UNLOAD_POLL_SECONDS)
+
+    # ---------- the hooks ----------
+
+    def _list(self, http: Http) -> Listing:
+        """Names, sizes and the model's own max context from /api/tags,
+        state and loaded context size from /api/ps, one call each
+        however long the registry. A tags entry names capabilities too,
+        but not the card's (a server here said of Gemma 4 "completion,
+        tools, thinking" where the card adds vision), so only what an
+        entry cannot get wrong is read off it: an embedding model has
+        no "completion" and plays no story, wherever it is served; and
+        `details.context_length` is the trained length, which a recent
+        pull records and an older one leaves for the card to say. A
+        model with a `remote_host` is ollama.com's: no runner ever lists
+        it, its card is an internet round-trip, so the entry's own word
+        is taken and its state stays unknown. A loaded model missing
+        from the registry still belongs in the list; a listed one that
+        plays no story does not come back through ps. A ps probe that
+        did not answer leaves every state unknown."""
+        data = http.get(f"{self._config.base_url}/api/tags")
+        seen: set[str] = set()
+        sizes: dict[str, int | None] = {}
+        contexts: dict[str, int | None] = {}
+        remote: dict[str, ModelInfo] = {}
+        entries = data.get("models") if isinstance(data, dict) else None
+        for entry in entries if isinstance(entries, list) else []:
             name = entry.get("name") or entry.get("model")
-            size = entry.get("size")
-            if isinstance(name, str):
-                sizes[name] = size if isinstance(size, int) and size > 0 else 0
-        running = self._running(timeout=1.5)
-        # The listing just paid for every live window — seed the cache,
-        # so the budget's ask for a loaded model never refetches it.
-        for name, window in running.items():
-            if window:
-                self._context_cache[name] = window
-        names = sorted(sizes) + sorted(set(running) - set(sizes))
-        return [
+            if not isinstance(name, str):
+                continue
+            seen.add(name)
+            digest = entry.get("digest")
+            if isinstance(digest, str) and self._digests.get(name) != digest:
+                self._carded.discard(name)
+                self._digests[name] = digest
+            caps = entry.get("capabilities")
+            if isinstance(caps, list) and "completion" not in caps:
+                continue
+            details = entry.get("details")
+            context = (
+                positive_int(details.get("context_length")) if isinstance(details, dict) else None
+            )
+            if entry.get("remote_host"):
+                remote[name] = ModelInfo(
+                    name=name,
+                    max_context_catalogue=context,
+                    capabilities=self._capabilities_of(caps) if isinstance(caps, list) else None,
+                    locality=Locality.REMOTE,
+                )
+                continue
+            sizes[name] = positive_int(entry.get("size"))
+            contexts[name] = context
+        self._remote = set(remote)
+        running = self._running(http)
+        names = sorted(sizes) + sorted(set(running or {}) - seen)
+        local = [
             ModelInfo(
                 name=name,
-                size=sizes.get(name) or None,
-                context=running.get(name) or None,
-                loaded=name in running,
+                size=sizes.get(name),
+                max_context_catalogue=contexts.get(name),
+                max_context_loaded=running.get(name) if running else None,
+                state=self._state_of(running, name),
             )
             for name in names
         ]
+        return local + [remote[name] for name in sorted(remote)]
 
-    def _running(self, timeout: float) -> dict[str, int]:
-        """The loaded models with their live windows, from /api/ps: name →
-        context_length, 0 where the server does not state one."""
-        running: dict[str, int] = {}
-        data = self._get_json("/api/ps", timeout=timeout)
+    def _get(self, name: str, http: Http) -> ModelInfo | None:
+        """/api/ps for the instance, and — once a session, the first time
+        it answers — the card: capabilities and the trained context
+        length, the model's own max context, never the loaded size,
+        which Ollama sets at load time from a server-wide default
+        clamped to it. The model's view carries the whole budget: a cold
+        card reads the model's header first. A model ollama.com serves
+        has neither: nothing runs here for it."""
+        if name in self._remote:
+            return ModelInfo(name=name, state=ModelState.UNKNOWN)
+        running = self._running(http)
+        if running is None:
+            return None
+        fresh = ModelInfo(
+            name=name, max_context_loaded=running.get(name), state=self._state_of(running, name)
+        )
+        if name in self._carded:
+            return fresh
+        data = http.post(f"{self._config.base_url}/api/show", {"model": name}, quiet=True)
         if not isinstance(data, dict):
-            return running
-        for entry in data.get("models") or []:
+            return fresh
+        caps = data.get("capabilities")
+        info = data.get("model_info")
+        # The trained length is under the architecture's own key
+        # ("gemma3.context_length") — or any key so named, when the
+        # architecture is not stated.
+        max_context_catalogue = None
+        if isinstance(info, dict):
+            arch = info.get("general.architecture")
+            keyed = info.get(f"{arch}.context_length") if isinstance(arch, str) else None
+            if keyed is None:
+                keyed = next((v for k, v in info.items() if k.endswith(".context_length")), None)
+            max_context_catalogue = positive_int(keyed)
+        self._carded.add(name)
+        return replace(
+            fresh,
+            capabilities=self._capabilities_of(caps)
+            if isinstance(caps, list)
+            else ModelCapabilities(),
+            max_context_catalogue=max_context_catalogue,
+        )
+
+    def _canonical(self, name: str) -> str:
+        # A name without a tag is its ":latest" one, as Ollama reads it;
+        # the tag follows the last slash, so a registry's port is none.
+        _, _, tail = name.rpartition("/")
+        return name if ":" in tail else f"{name}:latest"
+
+    # ---------- the native surface ----------
+
+    def _refuse_remote(self, model: str) -> None:
+        if model in self._remote or self._canonical(model) in self._remote:
+            raise ProviderError(f"{model} is served by ollama.com; there is nothing to load.")
+
+    def _generate_nothing(self, model: str, http: Http, cut: Cut, *, keep_alive: str | int) -> None:
+        """An empty generation is how the registry is told to load a
+        model, and for how long to keep it — zero unloads it. Through
+        the order's view, under its budget and its cut."""
+        http.post(
+            f"{self._config.base_url}/api/generate",
+            {"model": model, "prompt": "", "stream": False, "keep_alive": keep_alive},
+            cut=cut,
+        )
+
+    def _running(self, http: Http) -> dict[str, int | None] | None:
+        """The loaded models with their context sizes, from /api/ps: name →
+        context_length, None where the server states none. None
+        altogether when the server did not answer. `http` is the
+        view of the ask that is running, the listing's or the model's."""
+        data = http.get(f"{self._config.base_url}/api/ps", timeout=PROBE_TIMEOUT, quiet=True)
+        if not isinstance(data, dict):
+            return None
+        running: dict[str, int | None] = {}
+        entries = data.get("models")
+        for entry in entries if isinstance(entries, list) else []:
             name = entry.get("name") or entry.get("model")
-            if not name:
-                continue
-            window = entry.get("context_length")
-            running[str(name)] = window if isinstance(window, int) and window > 0 else 0
+            if isinstance(name, str):
+                running[name] = positive_int(entry.get("context_length"))
         return running
 
-    def _fetch_context_size(self, model: str) -> int | None:
-        # Only a loaded model has a window (see `_list`): unknown until
-        # then, and the base caches nothing for an unknown — so the first
-        # turn, the one whose request loads the model, budgets on the
-        # assembler's default, and the next ask reads the live figure.
-        return self._running(timeout=1.5).get(model) or None
+    def _state_of(self, running: dict[str, int | None] | None, name: str) -> ModelState:
+        """By the ps listing: unknown when ps did not answer; loading
+        while the runner is listed without its context length — ps
+        lists a runner from the moment its load starts and states the
+        length only once it serves; loaded then."""
+        if running is None:
+            return ModelState.UNKNOWN
+        if name not in running:
+            return ModelState.UNLOADED
+        return ModelState.LOADED if running[name] else ModelState.LOADING
+
+    def _capabilities_of(self, caps: list[Any]) -> ModelCapabilities:
+        """A card's capability words as ours. No raw text wire: Ollama's
+        /v1/completions wraps the prompt as one chat turn and thinks
+        unseen. Decoding is constrained server-side (`format`) for every
+        model."""
+        # "thinking" is on or off — the card grades nothing, and the
+        # /v1 wire spends a rung as the switch — and no budget exists.
+        return ModelCapabilities(
+            vision="vision" in caps,
+            audio="audio" in caps,
+            reasoning_efforts=frozenset(),
+            reasoning_switch="thinking" in caps,
+            reasoning_budget=False,
+            text_completion=False,
+            structured_output=True,
+        )
 
 
-def _parse_host(value: str) -> str | None:
-    """The host of a `host:port`, `http://host[:port]`, or bare `host`
-    string; None when there is none (`:port`, a bare port, empty)."""
-    trimmed = value.strip()
-    for scheme in ("http://", "https://"):
-        if trimmed.startswith(scheme):
-            trimmed = trimmed[len(scheme) :]
+class OllamaCompletion(OpenAICompletion):
+    # Any temperature and any penalty: forwarded to the runner's floats.
+    bounds: ClassVar[dict[str, Bounds]] = {
+        "temperature": (0, None),
+        "presence_penalty": (None, None),
+        "frequency_penalty": (None, None),
+    }
+
+
+class OllamaClient(OpenAIClient):
+    id = "ollama"
+    label = "Ollama"
+    locality = Locality.LOCAL
+    env_key = "OLLAMA_API_KEY"
+    models_class = OllamaModels
+    completion_class = OllamaCompletion
+
+    @classmethod
+    def autoconfigure(cls) -> ProviderConfig:
+        """The first-run section, its host and port from OLLAMA_HOST — a
+        remote server stays remote."""
+        scheme, host, port, path = _parse_ollama_host(os.environ.get("OLLAMA_HOST") or "")
+        return ProviderConfig(
+            name=cls.id,
+            url=f"{scheme}://{host}:{port}{path}/v1",
+            keep_alive="24h",
+        )
+
+
+def _parse_ollama_host(value: str) -> tuple[str, str, int, str]:
+    """OLLAMA_HOST read the way Ollama reads it: `host:port`, `:port`,
+    a bare `host` (digits included — a bare number is a host to Ollama,
+    not a port), a bare IPv6 address (bracketed for the url), or
+    `scheme://host[:port][/path]`. The scheme is kept; a port left out
+    is Ollama's 11434, unless a scheme was written, where it is the
+    scheme's own (80, 443); a path is kept, as Ollama's client keeps it;
+    surrounding quotes are shed; an empty or invalid value is the local
+    default. Returns (scheme, host, port, path)."""
+    scheme, host, port, path = "http", "localhost", 11434, ""
+    trimmed = value.strip().strip("\"'")
+    for prefix in ("http://", "https://"):
+        if trimmed.lower().startswith(prefix):
+            scheme = prefix[:-3]
+            port = 443 if scheme == "https" else 80
+            trimmed = trimmed[len(prefix) :]
             break
-    trimmed = trimmed.split("/", 1)[0]
-    host, colon, _ = trimmed.rpartition(":")
-    if not colon:
-        return None if not trimmed or trimmed.isdigit() else trimmed
-    return host or None
-
-
-def _parse_port(value: str) -> int | None:
-    """The port of a `host:port`, `:port`, `http://host:port`, or bare
-    `port` string; None when the tail is not a valid port."""
-    try:
-        port = int(value.rsplit(":", 1)[-1].strip())
-    except ValueError:
-        return None
-    return port if 1 <= port <= 65535 else None
+    trimmed, _, rest = trimmed.partition("/")
+    if rest.strip("/"):
+        path = "/" + rest.strip("/")
+    written = ""
+    if trimmed.startswith("["):
+        # A bracketed IPv6 address, with or without a port.
+        close = trimmed.find("]")
+        if close > 0:
+            host = trimmed[: close + 1]
+            written = trimmed[close + 1 :].lstrip(":")
+    elif trimmed.count(":") > 1:
+        host = f"[{trimmed}]"  # a bare IPv6 address
+    else:
+        head, colon, tail = trimmed.rpartition(":")
+        if colon:
+            host, written = head or host, tail
+        else:
+            host = trimmed or host
+    if written:
+        try:
+            number = int(written)
+        except ValueError:
+            number = 0
+        port = number if 1 <= number <= 65535 else port
+    # A bind-all address (0.0.0.0, ::) is the server's to listen on;
+    # Ollama's own consumers dial the loopback in its place.
+    with contextlib.suppress(ValueError):
+        address = ipaddress.ip_address(host.strip("[]"))
+        if address.is_unspecified:
+            host = "127.0.0.1" if address.version == 4 else "[::1]"
+    return scheme, host, port, path

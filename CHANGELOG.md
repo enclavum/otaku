@@ -5,6 +5,109 @@ All notable changes to otaku are documented in this file. The format is based on
 [Semantic Versioning](https://semver.org/) — while pre-1.0, minor releases may include breaking
 changes.
 
+## [0.5.0] - 2026-09-17
+
+**TL;DR**
+
+Web UI:
+
+- The web interface can now serve over HTTPS. Turn on `https` in
+  `~/.otaku/configs/config.toml` and otaku generates a self-signed certificate, which you can
+  also replace with your own if you need to. Browsers will show warnings about an untrusted
+  certificate. That is unavoidable with a self-signed certificate, but the encryption is real —
+  _you should turn it on if you run otaku over a public network_.
+- The web interface can be password-protected — set the password in the same config file.
+  _It's also a must if you run otaku over a public network_.
+- Edit messages directly in the transcript by double-clicking them. Double-clicking to edit various
+  fields now also works in the stories browser, but there, unlike in the transcript, not all fields
+  can be edited — look for the edit button.
+- Fixed a scrolling issue while an LLM response is streaming.
+
+Mobile:
+
+- The web interface has been optimized for mobile: removed unnecessary elements to free up space on
+  screen.
+- iPhone: the site can be added to the home screen to launch in full-screen mode. Open the site,
+  tap Share → Add to Home Screen → Open as Web App → Add.
+- Android and iPad: added a full-screen button.
+- Enter starts a new line; the Send button sends.
+
+Backend:
+
+- The providers layer is rewritten from scratch. Models report how their thinking is set — a
+  ladder of efforts, an on/off switch, or a budget in tokens — and what else they can do (vision,
+  audio, etc.).
+- Three more sampling parameters: `top_k`, `min_p` and `repetition_penalty`. Since supported
+  parameters vary per provider, the UI shows and lets you edit supported parameters only.
+- The thinking level is set at the model level now, not globally as before. The UI shows and lets
+  you choose only what the current model takes: its levels, `off`/`on` where it only switches, and
+  a number of tokens where the engine holds a thinking budget (0 = off).
+- Provider API keys can be set in environment variables (e.g., `OPENROUTER_API_KEY`).
+- llama.cpp's router mode: its models listed, loaded and unloaded from the picker.
+
+Full list of changes: [CHANGELOG.md](https://github.com/enclavum/otaku/blob/main/CHANGELOG.md)
+
+Tentative roadmap: [ROADMAP.md](https://github.com/enclavum/otaku/blob/main/ROADMAP.md)
+
+### Added
+
+- Provider API keys can come from the environment: `OPENROUTER_API_KEY`, `NANOGPT_API_KEY`,
+  `LMSTUDIO_API_KEY`, `OMLX_API_KEY`, `OLLAMA_API_KEY`, `LLAMACPP_API_KEY`, `KOBOLDCPP_API_KEY`,
+  `GENERIC_API_KEY`. A key typed into the panel wins; the variable is never written to the file.
+- The llama.cpp and KoboldCpp sections are first written with the port the running server was
+  launched with.
+- llama.cpp in router mode (`llama-server --models-dir`): its models are listed, loaded and
+  unloaded from the picker.
+- `/info` reports what the model can do: vision, text completion, and how its thinking is set —
+  the levels, `on / off`, `token budget` — or `unknown` where the engine cannot say.
+- Three more sampling parameters: `top_k`, `min_p` and `repetition_penalty`.
+- `stop` takes several strings, typed as JSON strings: `/set parameter stop "\nUser:" "END"`.
+- A provider failure is filed in the error log with its traceback.
+- `otaku web` serves over HTTPS with `https = true` in `[web]`: a self-signed certificate is
+  generated into the state dir's `cert/`, or your own pair goes there.
+- `password` in `[web]` protects the page. A sign-in lasts 4 hours, or 30 days with "stay signed
+  in".
+- `otaku web` quits on Ctrl+D as on Ctrl+C, and restarts on fresh sources on Ctrl+R.
+
+### Changed
+
+- The thinking level is the model's, kept in `models.toml`; the level `state.toml` held moves to
+  the remembered model at the first launch. `/set think` offers only what the model takes: its
+  levels, `off`/`on` where it only switches, a number of tokens where the engine holds a budget
+  (0 = off). `unset` replaces `default` and sends nothing.
+- `/set parameter` offers only what reaches the model in use, and the web's settings list every
+  parameter with the unsupported ones closed; any known parameter can still be set, and one the
+  provider does not read is kept for the model and said so. The bounds are the engine's own: a
+  local engine takes any temperature.
+- A model's context is two figures: its own maximum and what the loaded instance serves. A turn
+  on a model that is not loaded loads it first, so the prompt is cut to the real window.
+- A reply cut at `max_tokens` is said so under it. A cancelled reply counts in `/usage`.
+- An error names the provider and carries the server's whole explanation, and says when to try
+  again where the server said; the lore pass waits out a rate limit and a busy engine.
+- The web page stays live while a model loads, and with stream smoothing off. Loading a model
+  can be cut short; typing cuts the lore pass and the warm-up at once.
+- The web's provider card says why a provider does not answer. A model Ollama serves from
+  ollama.com counts as remote.
+- The web API renames its fields after the backend: `engines` is `providers`, a card's `name` is
+  `id`, `can_load_unload` is `can_manage`, `context` is `max_context_catalogue` on a model and
+  `max_context` on the session, `engine` is `provider`, the play event `thinking` is `reasoning`,
+  `/api/alive` is `/api/status`, and the page's `.otk-thinking` class is `.otk-reasoning`.
+- A new config.toml spells `[web] host` as `localhost`.
+
+### Fixed
+
+- `/set think` had no effect on llama.cpp and omlx beyond on and off, and `none` did not switch
+  thinking off on every model.
+- A reply the engine cut short mid-stream was filed as complete.
+- With smoothing on, a cancel during the prefill did not reach the engine, and a Ctrl+C mid-reply
+  was not recorded.
+- `OLLAMA_HOST` is read the way Ollama reads it: scheme, port, path, a bare IPv6 address.
+- The picker offered embedding, reranker and audio models, and KoboldCpp's `inactive`.
+- A local engine's url typed without `/v1` failed every turn.
+- A url with a letter in its port, a url a proxy redirects, and a key with a character a header
+  cannot carry each ended in a traceback or a wrong failure.
+- A launch that sealed an API key left the plain key in the dated backup it wrote.
+
 ## [0.4.3] - 2026-09-08
 
 **TL;DR**

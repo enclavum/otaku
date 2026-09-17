@@ -10,6 +10,7 @@ import httpx
 import pytest
 
 from otaku.backend.paths import Paths
+from otaku.providers import ALL_CLIENTS, ModelState, UnreachableError
 from otaku.providers.clients.omlx import OmlxClient
 from otaku.settings import config as config_mod
 from otaku.settings import providers as providers_mod
@@ -23,7 +24,7 @@ def live_app(
     tmp_path: Path, server: ModelServer, provider_config: ProviderConfig, model: str
 ) -> App:
     """The real app over `provider_config`, set to play `model`. The scripted
-    `server` carries only the harness plumbing (its "test" provider);
+    `server` carries only the harness plumbing (its "generic" provider);
     the story itself goes to the live endpoint."""
     root = tmp_path / "state"
     paths = Paths.resolve(root)
@@ -55,34 +56,37 @@ def require_env(name: str) -> str:
     return value
 
 
-def case_key(engine: str, var: str, required: frozenset[str] | set[str]) -> str:
-    """The key an engine's case carries: required for a catalog (pytest
-    skips without it), optional for an engine that may or may not demand
+def case_key(provider: str, var: str, required: frozenset[str] | set[str]) -> str:
+    """The key a provider's case carries: required for a catalog (pytest
+    skips without it), optional for a provider that may or may not demand
     one, the one omlx's own autoconfiguration reads off the machine, none
     for the rest."""
-    if engine == "omlx":
+    if provider == "omlx":
         return OmlxClient.autoconfigure().api_key
     if not var:
         return ""
     return require_env(var) if var in required else os.environ.get(var, "")
 
 
-def case_model(engine: str, url: str, key: str, named: str) -> str:
-    """The model a case plays, the server probed first — a server that is
-    down skips the case, as the engine's own module skips. omlx plays a
-    LOADED model unless one is named (its listing carries the unloaded
-    too, and a smoke does not wait on a load); the rest play the named
-    one, else the first the endpoint lists."""
-    if engine == "omlx":
-        try:
-            rows = OmlxClient(ProviderConfig(name="omlx", url=url, api_key=key)).models(timeout=5.0)
-        except Exception:
-            pytest.skip(f"no server at {url}")
-        loaded = [row.name for row in rows if row.loaded]
-        if named:
-            return named
-        if not loaded:
+def case_model(provider: str, url: str, key: str, named: str) -> str:
+    """The model a case plays, as the provider's own client lists it (the
+    name the client's `model` answers to — Kobold strips its prefix, say),
+    the server probed first: a server that is down skips the case, as the
+    provider's own module skips. omlx plays a LOADED model unless one is
+    named (its listing carries the unloaded too, and a smoke does not
+    wait on a load); the rest play the named one, else the first listed."""
+    client = ALL_CLIENTS[provider](ProviderConfig(name=provider, url=url, api_key=key))
+    try:
+        rows = client.models.list(timeout=5.0)
+    except UnreachableError:
+        pytest.skip(f"no server at {url}")
+    if named:
+        # As listed: Ollama tags a bare name ":latest".
+        return next((r.name for r in rows if r.name in (named, f"{named}:latest")), named)
+    if provider == "omlx":
+        rows = [row for row in rows if row.state is ModelState.LOADED]
+        if not rows:
             pytest.skip("no model loaded in omlx")
-        return loaded[0]
-    first = first_model(url, key)
-    return named or first
+    if not rows:
+        pytest.skip(f"{url} lists no models")
+    return rows[0].name

@@ -19,8 +19,9 @@ touch only the run's own event. Frontends inherit this rule from here.
 """
 
 import contextlib
+import threading
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Self
 
@@ -29,34 +30,59 @@ from otaku.context import assembler
 from otaku.context.assembler import AssembledPrompt, ContextShape
 from otaku.formatting import pretty_path
 from otaku.logging import ErrorLog
-from otaku.providers import Locality, OpenAIClient, ProviderConfig, Registry
+from otaku.providers import Locality, OpenAIClient, ProviderConfig, Registry, reasoning
 from otaku.settings import models as models_file
 from otaku.settings import state as state_file
 from otaku.settings.config import Config, TerminalSettings, WebSettings
 from otaku.settings.prompts import Prompts
-from otaku.settings.state import THINK_DEFAULT, State
+from otaku.settings.state import State
 from otaku.store import Store
 from otaku.store.schema import Message
 from otaku.worker import Worker
 
-# The /set think ladder as every menu offers it: default first (the way
-# out), then the levels by effort. A frontend-shared ORDER, so it lives
-# here with the rest of the /set vocabulary — the file's own vocabulary
-# is `settings.state.THINK_LEVELS` (a set), and a unit test pins the
-# two consistent. The typed sugar (`on`/`off`) is the command surface's
-# and stays out of a menu of VALUES.
-THINK_MENU: tuple[str, ...] = (THINK_DEFAULT, "none", "low", "medium", "high", "xhigh", "max")
+# The /set think menu for a model nobody has described: unset first
+# (the way out: no level, nothing sent), then the wire's own ladder of
+# efforts in its order. What a model takes is a subset of it, or the
+# switch's two words instead, or a budget besides — and that is what a
+# menu offers (`api.settings.think_choices`). Bound here so a frontend
+# reads the whole /set vocabulary off one module.
+THINK_UNSET: str = models_file.THINK_UNSET
+THINK_MENU: tuple[str, ...] = (THINK_UNSET, *reasoning.EFFORT_LEVELS)
 
-# The inference parameters otaku understands, and how each is read from
-# the saved file or a `/set parameter` argument.
-KNOWN_PARAMS: dict[str, type] = {
-    "temperature": float,
-    "top_p": float,
-    "max_tokens": int,
-    "presence_penalty": float,
-    "frequency_penalty": float,
-    "seed": int,
-    "stop": str,
+# The ladder's rungs in the wire's order, weakest to strongest, and the
+# switch's two words, for a frontend listing what a model takes.
+EFFORT_LEVELS: tuple[str, ...] = reasoning.EFFORT_LEVELS
+SWITCH_LEVELS: tuple[str, ...] = reasoning.SWITCH_LEVELS
+
+
+@dataclass(frozen=True)
+class Parameter:
+    """One inference parameter as /set takes it: how a typed word or a
+    saved value is read, and the range the engines agree on — the
+    protocol's own bounds for what it defines, the samplers' natural
+    ones. `low` None takes any value of the kind (a seed, a stop
+    string); `high` None is no ceiling. Checked once, in the setter,
+    for both frontends."""
+
+    kind: type
+    low: float | None = None
+    high: float | None = None
+
+
+# The inference parameters otaku understands.
+PARAMETERS: dict[str, Parameter] = {
+    "temperature": Parameter(float, 0, 2),
+    "top_p": Parameter(float, 0, 1),
+    "top_k": Parameter(int, 0),
+    "min_p": Parameter(float, 0, 1),
+    "max_tokens": Parameter(int, 1),
+    "presence_penalty": Parameter(float, -2, 2),
+    "frequency_penalty": Parameter(float, -2, 2),
+    "repetition_penalty": Parameter(float, 0, 2),
+    "seed": Parameter(int),
+    # Stop strings, several: every engine takes a list, and a stop may
+    # hold a newline or a space (`api.settings.parse_stops` reads them).
+    "stop": Parameter(list),
 }
 
 # What every model-facing door says while no model is selected, and
@@ -94,7 +120,7 @@ class Session:
     _notify: Callable[[str], None] | None
     # What to do with this thread while a reply is waited on — a
     # frontend that runs its own work on it attaches one (`set_on_idle`).
-    _on_idle: Callable[[], None] | None
+    _on_idle: Callable[[], bool | None] | None
     # Product state (read through the properties below). The model is
     # `_state`'s — it is what state.toml remembers, and the halves the
     # app works in are its own to split.
@@ -102,6 +128,7 @@ class Session:
     _system: str
     _messages: list[Message]
     _params: dict[str, object]
+    _think: str  # the model's thinking level (`reasoning.is_level`), or THINK_UNSET
     # The stories content index behind `api.stories.search` — built on
     # the first search, invalidated by the write primitives below.
     _search_index: dict[int, str] | None
@@ -147,16 +174,18 @@ class Session:
         session._system = ""
         session._messages = []
         session._params = {}
+        session._think = models_file.THINK_UNSET
         session._search_index = None
         session._config = config
         session._prompts = prompts
-        session._state = state.settled()
+        session._state = state
         session._paths = paths
         session._store = store
         session._providers_registry = registry
         session._worker = worker
         session._closed = False
-        session._reload_params()
+        session._reload_model_settings()
+        session._read_model()
         # Reattach the story the previous session was on, so bare `otaku`
         # reopens it mid-scene; one deleted since simply starts fresh.
         if state.story and store.stories.exists(state.story):
@@ -180,22 +209,13 @@ class Session:
         return self._state.provider
 
     @property
-    def engine(self) -> str:
-        """The KIND of server behind the model — "ollama", "generic" — as
-        against `provider`, which is the section that configured it: a
-        section somebody named themselves is not named after its engine.
-        "" while no model is selected."""
-        client = self._client()
-        return client.kind if client is not None else ""
-
-    @property
     def on_cloud(self) -> bool:
         """Whether the story is played against a hosted catalog — the
         prompt marker's question, answered per turn. The generic provider
         is not one: its url could name a catalog, but the marker says
         what is known, not what might be."""
         client = self._client()
-        return client is not None and client.locality is Locality.REMOTE
+        return client is not None and client.locality_of(self.model) is Locality.REMOTE
 
     @property
     def model(self) -> str:
@@ -223,8 +243,10 @@ class Session:
 
     @property
     def think(self) -> str | None:
-        """A `state.THINK_LEVELS` value; None = defer to the model."""
-        return None if self._state.think == THINK_DEFAULT else self._state.think
+        """The model's thinking level — a rung of `reasoning.EFFORT_LEVELS`,
+        off or on, or a budget in tokens as digits; None = defer to the
+        model. Saved per model, beside its parameters."""
+        return None if self._think == THINK_UNSET else self._think
 
     @property
     def verbose(self) -> bool:
@@ -241,10 +263,10 @@ class Session:
         return self._state.notification
 
     @property
-    def max_context(self) -> int:
+    def max_context_setting(self) -> int:
         """Tokens the prompt may use at most — config.toml's [context]
         value, which /set max_context edits in place; 0 means the
-        model's whole window."""
+        model's own max context."""
         return self._config.max_context
 
     @property
@@ -268,28 +290,40 @@ class Session:
     @property
     def custom_web_dir(self) -> Path:
         """The reader's OWN directory in the state dir — the stylesheet
-        and typefaces the page loads last, which otaku never writes. The
-        one path a frontend is handed: it is the one part of the tree
-        that belongs to the reader rather than the app, and the rest of
-        the layout stays the composition root's."""
+        and typefaces the page loads last, which otaku never writes. One
+        of the two paths a frontend is handed, and handed because it
+        belongs to the reader rather than to the app; the rest of the
+        layout stays the composition root's."""
         return self._paths.custom_web_dir
+
+    @property
+    def cert_dir(self) -> Path:
+        """Where the web frontend's TLS pair lives. The other path handed
+        out, for the opposite reason: the medium's own file, which only
+        the frontend that speaks HTTP has any use for."""
+        return self._paths.cert_dir
 
     # ---------- what frontends may call ----------
 
-    def context_size(self) -> int | None:
-        """The loaded model's window, for a header to state — None when
+    def max_context(self) -> int | None:
+        """The context the model gets, for a header to state — None when
         nobody can say. Best-effort and never blocking on the internet:
         a CLOUD catalog is not asked, because its answer lives across
         the internet and a launch does not wait for that; the generic
-        provider answers from its cache alone, nothing over the wire.
+        provider, whose url could name one, answers from its cache
+        alone, nothing over the wire — None until a listing warmed it.
         Not a property: a local engine is asked over its own socket."""
         client = self._client()
-        if client is None or client.locality is Locality.REMOTE:
+        if client is None or client.locality_of(self.model) is Locality.REMOTE:
             return None
         try:
-            return client.get_context_size(self.model)
+            if client.locality is Locality.UNKNOWN:
+                found = client.models.cached(self.model)
+            else:
+                found = client.models.get(self.model)
         except Exception:
             return None
+        return found.max_context if found else None
 
     def start_worker(self) -> None:
         """Start the background actor — called once by the frontend, the
@@ -324,13 +358,19 @@ class Session:
         """The status repaint hook (thread-safe on the caller's side)."""
         self._worker.on_status = repaint
 
-    def set_on_idle(self, tick: Callable[[], None] | None) -> Callable[[], None] | None:
+    def set_on_idle(
+        self, tick: Callable[[], bool | None] | None
+    ) -> Callable[[], bool | None] | None:
         """What to do with this thread while a reply is being waited on.
         Called on the session's OWN thread, many times a second, from
         the moment a request goes out until the last token — a frontend
         that shares that thread (the web serves its reads on it) uses
-        this to stay answerable while the model talks. Whatever it
-        raises is swallowed: a hook may not break a reply.
+        this to stay answerable while the model talks. It may answer
+        False to say nobody reads the reply any more (a page that hung
+        up): the reply ends at once, its request cut and what arrived
+        kept. The terminal needs no answer, its Ctrl+C lands in the wait
+        itself. Whatever the hook raises is swallowed: it may not break
+        a reply.
 
         Returns the hook it replaces, so a frontend borrowing the
         session for a while (`/web`) can put the owner's back."""
@@ -376,7 +416,7 @@ class Session:
         with contextlib.suppress(Exception):
             self._store.history.add(text)
 
-    def assemble(self, context_max: int | None) -> AssembledPrompt:
+    def assemble(self, max_context: int | None) -> AssembledPrompt:
         """The next request — the one binding of the session's fields to
         `assembler.assemble_story`, so the turn, the preview, and every
         other call site can never disagree on what is sent. Raises
@@ -388,7 +428,7 @@ class Session:
             system=self._system,
             messages=list(self._messages),
             shape=self._shape(),
-            context_max=context_max,
+            max_context=max_context,
         )
 
     # ---------- state primitives (backend package internal) ----------
@@ -398,18 +438,13 @@ class Session:
         the registry by name — never a snapshot."""
         if not self.provider:
             return None
-        try:
-            return self._providers_registry.get_client(self.provider).config
-        except ValueError:
-            return None
+        client = self._providers_registry.get(self.provider)
+        return client.config if client is not None else None
 
     def _client(self) -> OpenAIClient | None:
         if not self.model:
             return None
-        try:
-            return self._providers_registry.get_client(self.provider)
-        except ValueError:
-            return None
+        return self._providers_registry.get(self.provider)
 
     def _shape(self) -> ContextShape:
         """The assembly shape: config's window settings + the prompts'
@@ -417,7 +452,7 @@ class Session:
         return ContextShape(
             head_messages=self._config.head_messages,
             min_tail_messages=self._config.min_tail_messages,
-            max_context=self.max_context,
+            max_context_setting=self.max_context_setting,
             recap_header=self._prompts.recap_header,
             card_framing=self._prompts.card_framing,
         )
@@ -497,22 +532,78 @@ class Session:
         if self._story_id is not None:
             self._store.stories.set_system(self._story_id, text)
 
-    def _reload_params(self) -> None:
-        """Replace the live parameters with the current model's saved
-        ones — parameters follow the model, at startup and on a switch.
-        A saved value the vocabulary no longer makes sense of lands in
-        `notices` and is skipped."""
+    def _read_model(self) -> None:
+        """Read the model's row once the model is current — at launch and
+        on a switch — so what the menus read off the cache, how the
+        model's thinking is set above all, is there before the first
+        turn's ask would fill it in. A LOCAL engine is asked at once,
+        over its own socket: a /set think menu must not change under
+        the reader between the first keystroke and the first reply. A
+        REMOTE catalog's row lives across the internet and a launch does
+        not wait for that (`max_context`'s rule), so it is asked on a
+        thread of its own and lands moments later — until then the
+        menus offer everything, as they do for an engine that does not
+        answer. The generic provider is not asked, as the header does
+        not ask it: its cache fills on the first listing."""
+        client = self._client()
+        if client is None or client.locality is Locality.UNKNOWN:
+            return
+        if client.locality is Locality.LOCAL:
+            with contextlib.suppress(Exception):
+                client.models.get(self.model)
+            # Listed, the model may turn out served elsewhere (Ollama's
+            # ollama.com rows): asked once more is asked of the internet,
+            # so nothing more is read of one.
+            return
+        model = self.model
+
+        def read() -> None:
+            with contextlib.suppress(Exception):
+                client.models.get(model)
+
+        threading.Thread(target=read, name="otaku-model-read", daemon=True).start()
+
+    def _reload_model_settings(self) -> None:
+        """Replace the live parameters and thinking level with the
+        current model's saved ones — they follow the model, at startup
+        and on a switch. A saved value the vocabulary no longer makes
+        sense of lands in `notices` and is skipped."""
         self._params = {}
+        self._think = models_file.THINK_UNSET
         saved = models_file.load(self._paths.models_file).get(self.model, {})
         for name, value in saved.items():
-            coerce = KNOWN_PARAMS.get(name)
-            if coerce is None:
+            if name == models_file.THINK_KEY:
+                # A level the wire spells, or the way out — anything else
+                # is a hand edit the engine would refuse. A budget is
+                # digits, quoted or not.
+                if isinstance(value, str | int) and (
+                    value == models_file.THINK_UNSET or reasoning.is_level(str(value))
+                ):
+                    self._think = str(value)
+                else:
+                    self._note(f"Ignoring invalid think value {value!r} saved for {self.model}.")
+                continue
+            known = PARAMETERS.get(name)
+            if known is None:
                 self._note(f"Ignoring unknown parameter {name!r} saved for {self.model}.")
                 continue
             try:
-                self._params[name] = coerce(value)
+                self._params[name] = self._saved_parameter(known, value)
             except (TypeError, ValueError):
                 self._note(f"Ignoring invalid {name} value {value!r} saved for {self.model}.")
+
+    @staticmethod
+    def _saved_parameter(parameter: Parameter, value: object) -> object:
+        """A saved value as the live one: the kind's own, and for a list —
+        the stop strings — the array as saved, or one string from a file
+        written when stop held one. Raises ValueError for anything else."""
+        if parameter.kind is not list:
+            return parameter.kind(value)
+        if isinstance(value, str):
+            return [value]
+        if isinstance(value, list) and all(isinstance(item, str) for item in value):
+            return list(value)
+        raise ValueError(value)
 
     def _update_state(self, **fields: Any) -> None:
         """Change what state.toml remembers — `fields` are `State`'s own —

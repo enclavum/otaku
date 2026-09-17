@@ -7,6 +7,7 @@ duplicates."""
 import contextlib
 import json
 import signal
+import threading
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -367,6 +368,79 @@ class TestFailedPass:
 
         app.server.script = scripted.default_script
         app.play("/extract")
+        assert len(app.store.scenes.get_current(story_id, ids)) == 1
+
+    def test_ctrl_c_cuts_the_pass_in_its_prefill(self, app: App) -> None:
+        # Before the first token the pass is a blocked read, and the
+        # cancel reaches it all the same: the request is cut where it
+        # blocks, not waited out for the engine's next word.
+        for i in range(3):
+            app.play(f"Turn number {i}.")
+        app.server.headers_delay = 2.0
+        threading.Timer(0.3, lambda: signal.raise_signal(signal.SIGINT)).start()
+        started = time.monotonic()
+        try:
+            with contextlib.suppress(KeyboardInterrupt):
+                app.play("/extract")
+            assert time.monotonic() - started < 1.5  # never the server's two seconds
+        finally:
+            app.server.headers_delay = 0.0
+
+    def test_a_rate_limited_pass_waits_the_servers_word_and_retries(self, app: App) -> None:
+        # A 429 with a Retry-After: the pass waits that long and sends
+        # again, rather than giving up on the story's lore for the
+        # rate-limited stretch.
+        for i in range(3):
+            app.play(f"Turn number {i}.")
+        refused = 0
+
+        def once(body: dict[str, Any]) -> int | None:
+            nonlocal refused
+            if refused:
+                return None
+            refused += 1
+            return 429
+
+        app.server.refuse = once
+        app.server.retry_after = "1"
+        started = time.monotonic()
+        try:
+            app.play("/extract")
+        finally:
+            app.server.refuse = lambda body: None
+            app.server.retry_after = None
+        assert refused == 1 and time.monotonic() - started >= 1.0
+        story_id = app.session.story_id
+        ids = app.store.stories.get_messages_ids(story_id)
+        assert len(app.store.scenes.get_current(story_id, ids)) == 1
+
+    def test_a_busy_engine_is_waited_out_by_the_pass(self, app: App) -> None:
+        # KoboldCpp serves one request at a time and says so with a 503
+        # in its own envelope: the pass reads the sentence and tries
+        # again, as it does a dropped connection.
+        for i in range(3):
+            app.play(f"Turn number {i}.")
+        calls = 0
+
+        def busy_once(body: dict[str, Any]) -> int | None:
+            nonlocal calls
+            calls += 1
+            return 503 if calls == 1 else None
+
+        app.server.refuse = busy_once
+        app.server.refusal_body = {
+            "detail": {
+                "msg": "Server is busy; please try again later.",
+                "type": "service_unavailable",
+            }
+        }
+        try:
+            app.play("/extract")
+        finally:
+            app.server.refuse = lambda body: None
+            app.server.refusal_body = None
+        story_id = app.session.story_id
+        ids = app.store.stories.get_messages_ids(story_id)
         assert len(app.store.scenes.get_current(story_id, ids)) == 1
 
     def test_an_empty_reply_is_a_failure_not_a_cancellation(self, app: App, capsys) -> None:
@@ -777,13 +851,13 @@ class TestWarmUp:
     """The post-close prompt warm-up exists for a LOCAL server's prefix
     cache. A cloud provider has no per-session cache the request could
     warm — sending it there bills a full context window for one token —
-    so the close warms local engines and never a hosted catalog."""
+    so the close warms local providers and never a hosted catalog."""
 
     def test_a_local_close_warms_the_next_prompt(
         self, server: scripted.ModelServer, tmp_path: Path
     ) -> None:
         # The same scripted server behind a provider the registry builds
-        # as an engine ON THIS MACHINE — the section's NAME picks the
+        # as a provider ON THIS MACHINE — the section's NAME picks the
         # class.
         root = tmp_path / "state"
         set_config_provider(root, server, name="llamacpp")
@@ -824,6 +898,27 @@ class TestWarmUp:
             assert _warm_requests(app.server, within=0) == 0
         finally:
             app.close()
+
+    def test_a_close_on_a_model_ollama_serves_from_the_cloud_never_warms(
+        self, tmp_path: Path
+    ) -> None:
+        # Ollama is on this machine, but a model it serves from
+        # ollama.com is not: the warm-up reads where the MODEL runs, and
+        # the window-for-a-token request never crosses the internet.
+        server = scripted.ModelServer(models=("cloud",), managed=True)
+        server.remote = {"cloud"}
+        try:
+            root = tmp_path / "state"
+            set_config_provider(root, server, name="ollama")
+            app = launch(root, server, spec="ollama/cloud")
+            try:
+                remembered(app)
+                time.sleep(1.5)  # the window the local warm-up starts within
+                assert _warm_requests(app.server, within=0) == 0
+            finally:
+                app.close()
+        finally:
+            server.close()
 
 
 def _warm_requests(server: scripted.ModelServer, *, within: float) -> int:

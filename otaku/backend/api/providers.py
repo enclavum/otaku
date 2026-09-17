@@ -7,16 +7,23 @@ call, so an edit is live at once; a write that could not land is SAID,
 not swallowed.
 """
 
-from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Literal
 
-import httpx
-
 from otaku.backend.session import Refused, Session
 from otaku.encryption import SealedError, seal
-from otaku.formatting import printable, toml_key, toml_scalar
-from otaku.providers import CLIENTS, Locality, ManagedClient, Provider, ProviderConfig
+from otaku.formatting import toml_key, toml_scalar
+from otaku.providers import (
+    ALL_CLIENTS,
+    KeySource,
+    Locality,
+    ModelState,
+    OpenAIClient,
+    ProviderConfig,
+    ProviderError,
+    ProviderFailure,
+    ProviderInfo,
+)
 from otaku.settings.migrations import PROMPT_CACHE_ROW, surgery
 
 # The two fields of a section a panel edits — what `save_field` and
@@ -29,13 +36,13 @@ def switch_model(session: Session, provider: str, model: str) -> str:
     models on one prompt: switch, then regenerate). Parameters follow the
     model; the switch is remembered. Returns the confirmation; raises
     Refused for an unknown provider or a no-op."""
-    known = {config.name for config in session._providers_registry.configured()}
-    if provider not in known:
+    if provider not in session._providers_registry.list():
         raise Refused(f"Unknown provider {provider!r}.")
     if f"{provider}/{model}" == session.full_model_name:
         raise Refused(f"Already using {session.full_model_name}.")
     session._update_state(model=f"{provider}/{model}")
-    session._reload_params()
+    session._reload_model_settings()
+    session._read_model()
     return f"Switched to {session.full_model_name}."
 
 
@@ -45,78 +52,119 @@ def switch_spec(session: Session, raw: str) -> str:
     lists the known providers, then wraps `switch_model`. Both frontends'
     chat boxes route here; the picker and the web PUT use the structured
     form."""
-    known = {config.name for config in session._providers_registry.configured()}
+    known = session._providers_registry.list()
     head, _, rest = raw.strip().partition("/")
     if head not in known or not rest:
-        names = ", ".join(sorted(known))
+        names = ", ".join(known)
         raise Refused(f"Use PROVIDER/MODEL (providers: {names}), or /model with no args to pick.")
     return switch_model(session, head, rest)
 
 
-def get_providers(
-    session: Session, skip: set[str] | None = None
-) -> tuple[list[Provider], set[str]]:
-    """Every reachable provider with its models, plus the reachable set —
-    the picker's one query; `skip` lets it fetch cloud catalogs after
-    its screen is up."""
-    return session._providers_registry.get_providers(skip)
+def listed_spec(session: Session) -> str:
+    """The session's model as its provider lists it — "provider/name",
+    the spec a picker rows it under, which is where a picker's cursor
+    lands on the model in use. Ollama lists a bare name under its
+    ":latest" tag, and a spec typed without the tag must still be
+    found. The remembered spelling where the provider has not listed
+    the model, and "" without one."""
+    client = session._client()
+    found = client.models.cached(session.model) if client is not None else None
+    if found is None:
+        return session.full_model_name
+    return f"{session.provider}/{found.name}"
 
 
 @dataclass(frozen=True)
-class Engine:
-    """One supported engine, as the provider panel captions it — name
-    (the section key), label (the project's own spelling), and where it
-    runs (a catalog's url is fixed and its models billed; the generic
-    provider's url could name either, so it says unknown)."""
+class Panel:
+    """The picker's one query answered: every reachable provider with
+    its models, the reachable set, and for each provider asked that
+    could not answer, the package's sentence for why — a dead server, a
+    rejected key, an error status — so a picker says more than "not
+    connected"."""
 
-    name: str
+    rows: list[ProviderInfo]
+    reachable: set[str]
+    failures: dict[str, str]
+
+
+def get_providers(session: Session, skip: set[str] | None = None) -> Panel:
+    """Every reachable provider with its models, and why the others are
+    not — the picker's one query; `skip` lets it fetch cloud catalogs
+    after its screen is up."""
+    registry = session._providers_registry
+    asked = [name for name in registry.list() if name not in (skip or ())]
+    answers = registry.map(registry.info, asked)
+    rows = [answer for answer in answers if isinstance(answer, ProviderInfo)]
+    failures = {
+        answer.id: answer.message for answer in answers if isinstance(answer, ProviderFailure)
+    }
+    return Panel(rows, {row.id for row in rows}, failures)
+
+
+@dataclass(frozen=True)
+class SupportedProvider:
+    """One provider otaku ships a client for, as the provider panel
+    captions it — its id (which names its section), label (the
+    project's own spelling), and where it runs (a catalog's url is
+    fixed and its models billed; the generic provider's url could name
+    either, so it says unknown)."""
+
+    id: str
     label: str
     locality: Locality
 
 
-def engines(session: Session) -> list[Engine]:
-    """The supported engines in the panel's canonical order — the ONE
+def supported(session: Session) -> list[SupportedProvider]:
+    """The supported providers in the panel's canonical order — the ONE
     source of the captions and the where-it-runs split, so no frontend
     keeps its own table."""
-    return [Engine(cls.kind, cls.label, cls.locality) for cls in CLIENTS.values()]
+    return [SupportedProvider(cls.id, cls.label, cls.locality) for cls in ALL_CLIENTS.values()]
 
 
 def configured(session: Session) -> set[str]:
     """The configured providers' names — what the panel's one-provider
     refresh skips everything but, and nothing more: the sections
     themselves come one at a time through `section`."""
-    return {config.name for config in session._providers_registry.configured()}
+    return set(session._providers_registry.list())
 
 
 def loaded_models(session: Session, provider: str) -> set[str]:
-    """Which of an engine's models are loaded right now — the picker's
-    read-back after a load or unload, asked of that ONE engine with the
+    """Which of a provider's models are loaded right now — the picker's
+    read-back after a load or unload, asked of that ONE provider with the
     listing's own patience (a server that just loaded a model is the
     slowest it ever is). Raises Refused when it cannot be reached: a
     refresh that failed quietly would leave the panel claiming the
     opposite of what just happened."""
+    client = session._providers_registry.get(provider)
+    if client is None:
+        raise Refused(f"Unknown provider {provider!r}.")
     try:
-        client = session._providers_registry.get_client(provider)
-    except ValueError as e:
+        return {m.name for m in client.models.list() if m.state is ModelState.LOADED}
+    except ProviderError as e:
         raise Refused(str(e)) from e
-    try:
-        return {model.name for model in client.models() if model.loaded}
-    except httpx.HTTPStatusError as e:
-        detail = printable(" ".join(e.response.text.split()))[:300]
-        raise Refused(f"The engine refused: {detail or e.response.status_code}") from e
-    except httpx.RequestError as e:
-        raise Refused(f"Could not reach {provider}.") from e
 
 
 def section(session: Session, provider: str) -> ProviderConfig:
-    """The engine's current section when configured, its autoconfigured
-    default otherwise — what the panel shows either way."""
-    configured = {config.name: config for config in session._providers_registry.configured()}
-    if provider in configured:
-        return configured[provider]
-    if provider in CLIENTS:
-        return CLIENTS[provider].autoconfigure()
-    return ProviderConfig(name=provider, url="")
+    """The provider's current section when configured, its autoconfigured
+    default otherwise — what the panel shows either way. Raises Refused
+    for a name no supported provider answers to: a section is its
+    provider's name."""
+    known = session._providers_registry.configs.get(provider)
+    if known is not None:
+        return known
+    if provider not in ALL_CLIENTS:
+        raise Refused(f"No supported provider is named {provider}.")
+    return ALL_CLIENTS[provider].autoconfigure()
+
+
+def key_source(session: Session, provider: str) -> KeySource | None:
+    """Where the key the panel's field stands for comes from — the
+    section's, the engine's environment variable, or none — so a field
+    can say which without showing the value. Read off the section a
+    save or a clear just moved, so the caption follows at once. Raises
+    Refused as `section` does."""
+    config = section(session, provider)
+    return ALL_CLIENTS[provider].key_source(config)
 
 
 def save_field(session: Session, provider: str, attr: ProviderField, value: str) -> str:
@@ -143,9 +191,9 @@ def save_field(session: Session, provider: str, attr: ProviderField, value: str)
             raise Refused(f"Save failed: {e}") from e
         line = f"api_key = {toml_scalar(sealed_value)}"
         updated = replace(config, api_key=value)
-    # An engine not in providers.toml yet gets its section written
-    # first — this is how a cloud provider is added deliberately. An
-    # engine that honours cache breakpoints is founded with the
+    # A provider not in providers.toml yet gets its section written
+    # first — this is how a cloud provider is added deliberately. A
+    # provider that honours cache breakpoints is founded with the
     # prompt_cache row, the same line the upgrade migration writes, so
     # the setting is visible in the file however the section got there.
     # The name is QUOTED, as every other writer of this file quotes it
@@ -153,14 +201,14 @@ def save_field(session: Session, provider: str, attr: ProviderField, value: str)
     # by concatenation is a way to write any row anywhere in the file,
     # and this one takes its name from a request.
     block = f"[{toml_key(provider)}]\nurl = {toml_scalar(config.url)}\n" + 'api_key = ""'
-    if provider in CLIENTS and CLIENTS[provider].cache_markers:
+    if provider in ALL_CLIENTS and ALL_CLIENTS[provider].completion_class.can_mark_cache:
         block += "\n" + PROMPT_CACHE_ROW
     written = surgery.update_providers(
         session._paths.providers_file,
         session._paths.config_backups_dir,
         [surgery.ensure_section(provider, block), surgery.set_key(provider, attr, line)],
     )
-    session._providers_registry.update_provider(updated)
+    session._providers_registry.update(updated)
     if not written:
         # The registry took the value, the file did not — say so, or the
         # next launch silently forgets what the panel confirmed.
@@ -187,39 +235,39 @@ def clear_field(session: Session, provider: str, attr: ProviderField) -> str:
         # value stays — in the session too, so the panel stays honest.
         return "Not forgotten — providers.toml could not be written."
     cleared = replace(config, url="") if attr == "url" else replace(config, api_key="")
-    session._providers_registry.update_provider(cleared)
+    session._providers_registry.update(cleared)
     return ""
 
 
 def load(session: Session, provider: str, model: str) -> None:
-    """Load on a managed engine; blocks until the server answers. Every
-    failure raises Refused with the curated sentence (not managed, the
-    engine unreachable, the engine's own error text) — no transport
+    """Load on a provider that manages its models; blocks until the
+    server answers. Every failure raises Refused with the curated
+    sentence (not managed, the provider unreachable, the server's own
+    error text) — no transport
     exception type ever crosses the boundary."""
-    _perform(_managed(session, provider).load_model, model, provider)
+    models = _managed(session, provider).models
+    # The session's idle hook is ticked while the engine works: the
+    # web's one thread answers its reads meanwhile, and a page that left
+    # cuts the wait. A failure is the provider package's own sentence,
+    # which names the provider.
+    try:
+        models.load(model, on_idle=session._on_idle)
+    except ProviderError as e:
+        raise Refused(str(e)) from e
 
 
 def unload(session: Session, provider: str, model: str) -> None:
-    _perform(_managed(session, provider).unload_model, model, provider)
-
-
-def _managed(session: Session, provider: str) -> ManagedClient:
+    models = _managed(session, provider).models
     try:
-        client = session._providers_registry.get_client(provider)
-    except ValueError as e:
+        models.unload(model, on_idle=session._on_idle)
+    except ProviderError as e:
         raise Refused(str(e)) from e
-    if not isinstance(client, ManagedClient):
+
+
+def _managed(session: Session, provider: str) -> OpenAIClient:
+    client = session._providers_registry.get(provider)
+    if client is None:
+        raise Refused(f"Unknown provider {provider!r}.")
+    if not client.capabilities.model_management:
         raise Refused(f"{provider} cannot load or unload models.")
     return client
-
-
-def _perform(action: Callable[[str], None], model: str, provider: str) -> None:
-    """One load/unload call, its failures curated into Refused — shared
-    by both doors, so the wording cannot fork."""
-    try:
-        action(model)
-    except httpx.HTTPStatusError as e:
-        detail = printable(" ".join(e.response.text.split()))[:300]
-        raise Refused(f"The engine refused: {detail or e.response.status_code}") from e
-    except httpx.RequestError as e:
-        raise Refused(f"Could not reach {provider}.") from e

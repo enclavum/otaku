@@ -194,6 +194,14 @@ def format_duration(seconds: float) -> str:
     return f"{seconds:.0f}s"
 
 
+def format_seconds(seconds: float) -> str:
+    """Seconds as a sentence carries them — "0.5 seconds", "1 second",
+    "30 seconds": tenths below ten, whole from ten up, the noun
+    agreeing. `format_duration` is the log's terse span."""
+    figure = f"{seconds:.1f}".rstrip("0").rstrip(".") if seconds < 10 else f"{seconds:.0f}"
+    return f"{figure} second" if figure == "1" else f"{figure} seconds"
+
+
 def format_context(tokens: int | None) -> str:
     """A context window the way the catalogs label it: '8K', '128K', '1M';
     "" when unknown. K and M are DECIMAL first — that is how the catalogs
@@ -244,12 +252,15 @@ def toml_key(name: str) -> str:
 
 
 def toml_scalar(value: object) -> str:
-    """One TOML value (str, int, float, bool), control characters escaped
-    so no value can render a file that fails to parse back."""
+    """One TOML value (str, int, float, bool, or an array of them),
+    control characters escaped so no value can render a file that fails
+    to parse back."""
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, int | float):
         return repr(value)
+    if isinstance(value, list | tuple):
+        return "[" + ", ".join(toml_scalar(item) for item in value) + "]"
     return '"' + _escaped(str(value)) + '"'
 
 

@@ -86,7 +86,7 @@ const bridge = {
 
 const py = await loadPyodide({ stderr: (s) => process.stderr.write("[pyodide] " + s + "\n") });
 console.log("pyodide up; loading packages…");
-await py.loadPackage(["sqlite3", "cryptography", "click", "httpx"], { messageCallback: () => {} });
+await py.loadPackage(["sqlite3", "ssl", "cryptography", "click", "httpx", "httpcore", "idna"], { messageCallback: () => {} });
 await py.loadPackage([wheel("prompt_toolkit-"), wheel("wcwidth-"), wheel("otaku-")], {
   messageCallback: () => {},
 });

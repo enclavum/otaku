@@ -103,7 +103,7 @@ openapi: 3.1.0
 
 info:
   title: otaku web API
-  version: 0.4.2
+  version: 0.5.0
   contact:
     name: otaku
     url: https://otaku.sh
@@ -133,7 +133,7 @@ info:
     `GET /api/balance`, and
     `PATCH /api/providers/{provider}/models/{model}`.
 
-    *Neither.* `/api/alive` and `/api/watch`, answered by the handler
+    *Neither.* `/api/status` and `/api/watch`, answered by the handler
     thread and never touching the session — which is what makes the
     heartbeat an answer about the SERVER rather than about the story.
 
@@ -851,7 +851,7 @@ paths:
           schema: { type: string, enum: [local, cloud] }
           description: >
             Which slice to probe and list — the terminal's own two-phase
-            rule: "local" the engines on this machine, "cloud" the rest
+            rule: "local" the providers on this machine, "cloud" the rest
             (the hosted catalogs and the generic provider, whose url could
             point anywhere), absent the whole set. A single provider is
             /api/providers/{provider}.
@@ -873,7 +873,7 @@ paths:
       description: |
         A provider that answers with models is configured and one that
         does not is not; the test IS this read. Same envelope as the
-        collection, one engine in it.
+        collection, one provider in it.
       responses:
         "200":
           description: One provider, re-probed — which is what a Test connection is.
@@ -912,7 +912,7 @@ paths:
     patch:
       operationId: patchProviderModel
       tags: [Models]
-      summary: Load or unload a model on a managed engine
+      summary: Load or unload a model on a provider that manages models
       description: |
         Residency is a property of the model, so it is a PATCH of one.
         A long one: loading holds the session's thread, and every GET
@@ -990,7 +990,7 @@ paths:
       summary: The machine's memory gauge, alone
       description: >
         The same figure the picker opens with, on its own so the page can
-        watch it while a model loads — one syscall, no engine probed.
+        watch it while a model loads — one syscall, no provider probed.
       responses:
         default: { $ref: "#/components/responses/Failed" }
         "200":
@@ -1159,10 +1159,11 @@ paths:
       tags: [Settings]
       summary: Set one session-wide knob
       description: |
-        The value's type is the knob's: a word for `think` (one of the
-        ladder in `Settings.think_levels`), a boolean for the three
-        toggles, an integer for `max_context` where 0 means the model's
-        whole window. Per-model inference parameters are not here — they
+        The value's type is the knob's: for `think` one of the words in
+        `Settings.think_levels`, or a number of tokens (0 = off) where
+        `Settings.think_budget` says one is taken; a boolean for the
+        three toggles; an integer for `max_context` where 0 means the
+        model's own max context. Per-model inference parameters are not here — they
         belong to a model, and live under the session's model.
       requestBody:
         content:
@@ -1183,24 +1184,25 @@ paths:
 
   # ---------- Neither lane: the server, not the session ----------
 
-  /api/alive:
+  /api/status:
     get:
-      operationId: getAlive
+      operationId: getStatus
       tags: [Server]
-      summary: The page's heartbeat
+      summary: What the backend is doing
       description: |
         Answered by the handler thread itself, never the session — an
         otaku deep in a reply still answers, which is what makes this
-        an answer about the SERVER. Carries the background worker's
-        one-line status and the sentences it has said since the last
-        beat.
+        an answer about the SERVER. Carries the backend's one-line
+        status and the sentences it has said since the page last asked.
+        The page asks every few seconds; being answered is how it knows
+        otaku is there.
       responses:
         default: { $ref: "#/components/responses/Failed" }
         "200":
-          description: The page's heartbeat.
+          description: What the backend is doing.
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Alive" }
+              schema: { $ref: "#/components/schemas/Status" }
 
   /api/watch:
     get:
@@ -1222,6 +1224,73 @@ paths:
           content:
             text/event-stream: {}
 
+  /api/login:
+    get:
+      operationId: getLogin
+      tags: [Server]
+      summary: Whether a password is asked for, and whether this browser is through it
+      description: |
+        Answered without a credential, by the handler thread itself. The
+        page asks before it draws anything: the cookie is `HttpOnly`, so
+        whether it holds a good one is the server's to say.
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: Whether a password is asked for, and whether this browser is through it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginState" }
+    post:
+      operationId: postLogin
+      tags: [Server]
+      summary: Sign in
+      description: |
+        The password in the body, answered without a credential and in
+        neither lane. A good one answers `{}` with the token in an
+        `HttpOnly`, `SameSite=Strict` cookie named for the port — `Secure`
+        under TLS, kept 30 days when `remember` is true and 4 hours when
+        it is not. A wrong one answers 401 with a
+        Notice. With no password configured, every attempt is a refusal.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password: { type: string }
+                remember: { type: boolean }
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: "Signed in (`{}` and the cookie), or refused because no password is set (a Notice)."
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                  - $ref: "#/components/schemas/Notice"
+        "401":
+          description: Not the password. No cookie is set, and no `WWW-Authenticate` is sent.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Notice" }
+    delete:
+      operationId: deleteLogin
+      tags: [Server]
+      summary: Sign out
+      description: |
+        Answers `{}` and clears the cookie — the page cannot, since it is
+        not allowed to see it. The token itself is stateless: a copy kept
+        elsewhere stays good until it runs out.
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: Signed out.
+          content:
+            application/json:
+              schema: { type: object }
+
 components:
   responses:
     Answered:
@@ -1236,8 +1305,9 @@ components:
     Failed:
       description: |
         The request was not answered, and the STATUS says why: 400 a
-        malformed request, 403 a write from somewhere that is not
-        otaku's page, 404 a path or subject that is not there, 421 a
+        malformed request, 401 no credential where a password is asked
+        for (with no `WWW-Authenticate`, so no browser dialog), 403 a
+        write from somewhere that is not otaku's page, 404 a path or subject that is not there, 421 a
         Host that does not name this machine, 500 a bug, 503 a server on
         its way out. There is no body — deliberately. otaku has one
         client on one machine: a refusal a reader should SEE comes back
@@ -1247,16 +1317,16 @@ components:
 
   # Alphabetical.
   schemas:
-    Alive:
+    Status:
       type: object
       properties:
         status:
           type: string
-          description: The background worker's one-line account; "" when idle.
+          description: The backend's one-line account of what it is doing; "" when idle.
         notices:
           type: array
           items: { type: string }
-          description: What the worker has said since the last beat.
+          description: What the backend has said since the page last asked.
 
     Balance:
       type: object
@@ -1280,7 +1350,7 @@ components:
             type: object
             properties:
               provider: { type: string, description: "The config section's own name — what a reader would type." }
-              label: { type: string, description: "The engine's caption, for a frontend that captions rather than keys." }
+              label: { type: string, description: "The provider's caption, for a frontend that captions rather than keys." }
               money:
                 description: What the account has left; null when it would not say.
                 oneOf:
@@ -1330,11 +1400,12 @@ components:
             tail_setting: { type: integer, description: "The configured min_tail_messages." }
             system_tokens: { type: integer }
             transcript_tokens: { type: integer }
-            limit: { type: integer, description: "What the prompt measured against — the smaller of the model's window and max_context, minus the reply reserve." }
+            limit: { type: integer, description: "What the prompt measured against — the smaller of the context a request gets (the loaded size, or the model's own on a catalog) and max_context, minus the reply reserve." }
             kept: { type: integer, description: "Derived: head + tail." }
             total_tokens: { type: integer, description: "Derived: system + transcript." }
             used: { type: integer, description: "Derived: percent of the limit." }
         lede: { type: string, description: "The summary said in words." }
+        note: { type: string, description: "What the preview could not know, as a sentence — the model is not loaded, so the window is the assembler's substitute until a turn loads it; \"\" when it knew everything." }
         parts:
           type: array
           description: One part per message, exactly as the wire will carry it.
@@ -1398,6 +1469,17 @@ components:
         currency: { type: string, example: "USD" }
         text: { type: string, example: "$4.82" }
 
+    LoginState:
+      type: object
+      required: [required, signed_in]
+      properties:
+        required:
+          type: boolean
+          description: Whether `[web] password` is set, so the page asks for it.
+        signed_in:
+          type: boolean
+          description: Whether this request carried a good credential; always false when `required` is false.
+
     Notice:
       type: object
       description: |
@@ -1422,7 +1504,7 @@ components:
               description: 'The record''s own dim line — the dice a /roll rolled; "" otherwise.'
         - type: object
           properties:
-            type: { const: thinking }
+            type: { const: reasoning }
             text: { type: string }
         - type: object
           properties:
@@ -1444,7 +1526,25 @@ components:
             type: { const: done }
             stats:
               type: string
-              description: 'The verbose stats line the terminal prints after a reply; "" unless /set verbose.'
+              description: 'The verbose stats line the terminal prints after a reply — the report''s text(); "" unless /set verbose.'
+            notice:
+              type: string
+              description: 'What the reader is told of the reply beyond its text: it was cut short at the max_tokens limit; "" otherwise.'
+            report:
+              type: object
+              nullable: true
+              description: What the reply came to (backend.api.play.ReplyReport); null when the stream said nothing of itself.
+              properties:
+                total_seconds: { type: number, description: "Request sent → stream ended." }
+                first_token_seconds: { type: number, nullable: true, description: "The prefill wait; null when no token came." }
+                prompt_tokens: { type: integer, nullable: true }
+                cached_tokens: { type: integer, nullable: true }
+                completion_tokens: { type: integer, nullable: true }
+                max_context: { type: integer, nullable: true, description: "The context the prompt was measured against." }
+                finish_reason: { type: string, nullable: true, description: 'Why the model stopped, in the wire''s word: "stop", "length", …; null where it said none.' }
+                truncated: { type: boolean, description: "Derived: the reply was cut at the reply limit." }
+                rate: { type: number, nullable: true, description: "Derived: tokens per second over the generation alone." }
+                context_used: { type: integer, nullable: true, description: "Derived: percent of the context the prompt took." }
 
     PreparedCard:
       type: object
@@ -1468,42 +1568,99 @@ components:
         The gauge is not here: it moves on its own clock, so it is
         /api/machine and nothing carries a second copy.
       properties:
-        current: { type: string, description: '"provider/model"; "" without a model.' }
-        engines:
+        current: { type: string, description: '"provider/model" as the provider lists the model (Ollama tags a bare name ":latest"), which is how the page finds its row; "" without a model.' }
+        providers:
           type: array
           items:
             type: object
             properties:
-              name: { type: string }
+              id: { type: string, description: "The provider's id, which names its section." }
               label: { type: string }
               order:
                 type: integer
                 description: >
-                  The card's position in the panel — the engines in their
-                  canonical order, then hand-written sections, which share
+                  The card's position in the panel — the supported providers
+                  in their canonical order, then hand-written sections, which share
                   one rank and sort by name. Runs across the two scoped
                   phases, so the page merges them by it.
               locality:
                 type: string
                 enum: [local, remote, unknown]
                 description: >
-                  Where the engine runs, as its client knows it: the
+                  Where the provider's server runs, as its client knows it: the
                   generic provider (and a hand-written section) cannot say.
                   The url is editable unless remote; sizes and load state
                   exist only when local.
               connected: { type: boolean }
+              reason: { type: string, description: 'Why the provider is not connected, in the package''s own sentence — a dead server, a rejected key, an error status; "" when connected or never asked.' }
               url: { type: string }
-              has_key: { type: boolean, description: "Whether a key is SET — never the value." }
+              key_source:
+                type: string
+                nullable: true
+                enum: [config, env]
+                description: >
+                  Where the key in force comes from — the section's, or the
+                  engine's environment variable — never the value; null where
+                  there is none.
+              capabilities:
+                type: object
+                nullable: true
+                description: >
+                  What the provider can do, as its client states it; null on
+                  a card whose provider did not answer.
+                properties:
+                  tokenizer: { type: boolean, description: "The engine lends its own tokenizer: token counts are exact." }
+                  prompt_cache: { type: boolean, description: "Prompt-cache breakpoints are honoured." }
+                  model_management: { type: boolean, description: "Load and unload work; false where the provider serves what it serves." }
+                  supported_params:
+                    type: array
+                    items: { type: string }
+                    description: "The /set parameters the wire reads, in the vocabulary's order; one outside it is not sent."
               models:
                 type: array
                 items:
                   type: object
                   properties:
                     name: { type: string }
-                    loaded: { type: boolean }
-                    can_load_unload: { type: boolean }
+                    loaded:
+                      type: boolean
+                      description: >
+                        Whether an instance serves it now — one still
+                        loading is not loaded. Always true where the provider
+                        does not manage models.
                     size: { type: string }
-                    context: { type: string }
+                    locality:
+                      type: string
+                      enum: [local, remote, unknown]
+                      description: "Where the model is served: its own where it differs from its provider's (Ollama's ollama.com models are remote), the provider's otherwise. What a caption on the model reads."
+                    max_context_catalogue: { type: string, description: "The model's own maximum context, formatted; \"\" when the provider states none." }
+                    max_context_loaded: { type: string, description: "What the running instance serves, formatted; \"\" while none runs or the engine does not say." }
+                    capabilities:
+                      type: object
+                      nullable: true
+                      description: >
+                        What the model can do, as the provider states it: each
+                        flag null where it cannot say; null altogether where it
+                        says nothing of the model.
+                      properties:
+                        vision: { type: boolean, nullable: true }
+                        audio: { type: boolean, nullable: true }
+                        supported_params:
+                          type: array
+                          nullable: true
+                          items: { type: string }
+                          description: "The /set parameters this route honours, in the vocabulary's order, where a catalog states them per model (OpenRouter); null where the provider's set is the only word."
+                        reasoning_efforts:
+                          type: array
+                          nullable: true
+                          items: { type: string }
+                          description: "The ladder's rungs the model grades, weakest to strongest, \"none\" among them where that rung switches it off; empty where no rung reaches; null where unknown."
+                        reasoning_switch: { type: boolean, nullable: true, description: "Whether its thinking is on or off and nothing between (then `reasoning_efforts` is empty)." }
+                        reasoning_budget: { type: boolean, nullable: true, description: "Whether a budget in tokens holds, beside either." }
+                        text_completion: { type: boolean, nullable: true }
+                        structured_output: { type: boolean, nullable: true }
+                    reasoning_words: { type: string, description: "The info report's Reasoning row for the model, verbatim (backend.api.reports.reasoning_words): the rungs, \"on / off\", \"token budget\", \"not supported\" or \"unknown\"." }
+                    capability_words: { type: string, description: "The info report's Capabilities row for the model, verbatim (backend.api.reports.capability_words): what it has in the dataclass's order, \"none\" or \"unknown\"." }
 
     Scene:
       type: object
@@ -1528,14 +1685,20 @@ components:
       type: object
       description: |
         What the rail and the runhead draw, without reading a story or
-        probing an engine. The knobs are NOT here — they are
+        probing a provider. The knobs are NOT here — they are
         `/api/settings`, and a figure with two homes has two truths; nor
         is the premise, which is the open story's and comes with it.
       properties:
         version: { type: string }
         model: { type: string, description: "The bare model name; \"(no model)\" when none." }
-        engine: { type: string }
-        context: { type: string, description: "The window, formatted; \"\" when unknown." }
+        provider: { type: string, description: "The provider serving the model; \"\" without a model." }
+        max_context:
+          type: string
+          description: >
+            The context a request gets, formatted: the loaded instance's
+            size, or the model's own where nothing loads (the generic
+            provider's rows). "" when unknown — and always for a hosted
+            catalog, which a launch never asks across the internet.
         story: { type: string, description: "The open story's name; \"\" when none." }
         story_id: { type: [integer, "null"] }
         turns: { type: integer, description: "How many, so the runhead needs no chain." }
@@ -1547,20 +1710,33 @@ components:
         think_levels:
           type: array
           items: { type: string }
-          description: The effort ladder in its one shared order (backend.session.THINK_MENU).
+          description: >
+            The words /set think takes on the session's model, in the one
+            shared order (backend.api.settings.think_choices): unset always,
+            then the ladder's rungs the provider says the model grades, or off
+            and on where it switches — every rung where it cannot say.
+        think_budget: { type: boolean, description: "Whether /set think takes a number of tokens as well, 0 = off." }
         verbose: { type: boolean }
         autocorrect: { type: boolean }
         notification: { type: boolean }
-        max_context: { type: integer, description: "Tokens the prompt may use at most; 0 = the model's whole window." }
+        max_context: { type: integer, description: "Tokens the prompt may use at most; 0 = the model's own max context." }
         model: { type: string, description: "Whose parameters these are — the read is a snapshot, and a switch mid-slip would silently retitle it." }
         parameters:
           type: array
+          description: >
+            Every parameter /set knows, in the vocabulary's order, each
+            saying whether the session's provider reads it for the model in
+            use (backend.api.settings.parameter_read): the page draws an
+            unsupported one closed.
           items:
             type: object
             properties:
               name: { type: string }
-              value: { type: string, description: '"" when at the model''s own default.' }
-              type: { type: string, description: "float / int / str — how a typed value parses." }
+              supported: { type: boolean, description: "Whether the provider in use reads this parameter for the model — the same answer the menus give; false draws the field closed." }
+              value: { type: string, description: '"" when not set (the engine''s own default applies); the stop strings as JSON strings separated by spaces, as the setter reads them back (backend.api.settings.parse_stops).' }
+              type: { type: string, description: "float / int / str — how a typed value parses; the stop list is a str field, read by the setter." }
+              min: { type: number, nullable: true, description: "The least the setter takes — the provider's own bound where it states one (backend.api.settings.parameter_bounds); null for no floor." }
+              max: { type: number, nullable: true, description: "The most the setter takes; null for no ceiling." }
 
     Story:
       type: object

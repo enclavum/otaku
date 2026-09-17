@@ -10,11 +10,14 @@ original text — the same object — when nothing changed or when the
 result no longer parses as TOML.
 """
 
+import tomllib
+
 from otaku.settings.migrations.surgery import (
     apply_migrations,
     drop_key_everywhere,
     ensure_key,
     ensure_section,
+    redacted,
     rename_section,
     set_key,
 )
@@ -210,6 +213,63 @@ class TestDropKeyEverywhere:
 
     def test_absent_everywhere_is_untouched(self) -> None:
         assert drop_key_everywhere("supports_thinking")(BASE) is BASE
+
+
+class TestRedacted:
+    """What a backup may keep: every `api_key` and `password` the edit
+    CHANGED is replaced with "[REDACTED]", and everything else is the
+    pre-edit text."""
+
+    BEFORE = (
+        "[openrouter]\n"
+        'url = "https://openrouter.ai/api/v1"\n'
+        'api_key = "sk-plain"\n'
+        "\n"
+        "[ollama]\n"
+        'api_key = "enc:already"\n'
+        "\n"
+        "[web]\n"
+        'password = "hunter2"         # the note\n'
+    )
+
+    def test_a_secret_the_edit_replaced_is_redacted(self) -> None:
+        after = self.BEFORE.replace("sk-plain", "enc:sealed").replace('"hunter2"', '"$scrypt$v"')
+        kept = tomllib.loads(redacted(self.BEFORE, after))
+        assert kept["openrouter"]["api_key"] == "[REDACTED]"
+        assert kept["web"]["password"] == "[REDACTED]"
+        assert "sk-plain" not in redacted(self.BEFORE, after)
+        assert "hunter2" not in redacted(self.BEFORE, after)
+
+    def test_a_secret_the_edit_left_alone_is_kept(self) -> None:
+        # Restoring the backup still restores it.
+        after = self.BEFORE.replace("sk-plain", "enc:sealed")
+        kept = tomllib.loads(redacted(self.BEFORE, after))
+        assert kept["ollama"]["api_key"] == "enc:already"
+        assert kept["web"]["password"] == "hunter2"
+
+    def test_everything_that_is_not_a_secret_is_the_pre_edit_text(self) -> None:
+        after = self.BEFORE.replace("sk-plain", "enc:sealed").replace(
+            "https://openrouter.ai/api/v1", "https://elsewhere.example/v1"
+        )
+        kept = tomllib.loads(redacted(self.BEFORE, after))
+        assert kept["openrouter"]["url"] == "https://openrouter.ai/api/v1"
+
+    def test_a_secret_whose_section_went_away_is_redacted(self) -> None:
+        # Moved to another file, sealed there: this backup keeps no copy.
+        after = self.BEFORE.split("[ollama]")[0].replace("[openrouter]", "[other]")
+        assert "sk-plain" not in redacted(self.BEFORE, after)
+
+    def test_a_secret_in_a_nested_table_is_redacted(self) -> None:
+        # An old config's provider sections are tables inside [providers].
+        before = '[providers.openrouter]\napi_key = "sk-plain"\n'
+        assert "sk-plain" not in redacted(before, "[settings]\n")
+
+    def test_nothing_changed_is_nothing_redacted(self) -> None:
+        assert redacted(self.BEFORE, self.BEFORE) == self.BEFORE
+
+    def test_text_that_does_not_parse_is_kept_as_it_is(self) -> None:
+        broken = self.BEFORE + "[unfinished"
+        assert redacted(broken, self.BEFORE) == broken
 
 
 class TestApplyMigrations:

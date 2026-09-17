@@ -25,9 +25,9 @@ class TestLlamaCpp:
         assert chain[1].body.strip()
 
     def test_the_context_window_reads_from_props(self, live_app) -> None:  # type: ignore[no-untyped-def]
-        rows, _ = api_providers.get_providers(live_app.session)
-        engine = next(r for r in rows if r.config.name == "llamacpp")
-        assert any(m.context for m in engine.models)
+        rows = api_providers.get_providers(live_app.session).rows
+        provider = next(r for r in rows if r.id == "llamacpp")
+        assert any(m.max_context_loaded for m in provider.models)
 
 
 @pytest.fixture

@@ -31,11 +31,11 @@ class TestLmStudio:
         assert chain[1].role == "assistant"
         assert chain[1].body.strip()
 
-    def test_the_registry_lists_rich_rows(self, live_app) -> None:  # type: ignore[no-untyped-def]
-        providers, _ = api_providers.get_providers(live_app.session)
-        engine = next(r for r in providers if r.config.name == "lmstudio")
-        assert engine.models
-        assert all(row.name for row in engine.models)
+    def test_the_registry_lists_rich_models(self, live_app) -> None:  # type: ignore[no-untyped-def]
+        providers = api_providers.get_providers(live_app.session).rows
+        provider = next(r for r in providers if r.id == "lmstudio")
+        assert provider.models
+        assert all(row.name for row in provider.models)
 
 
 @pytest.fixture

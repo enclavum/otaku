@@ -1,9 +1,9 @@
 {
  "facts": {
-  "version": "0.4.3",
+  "version": "0.5.0",
   "model": "",
-  "engine": "",
-  "context": "",
+  "provider": "",
+  "max_context": "",
   "story": "The River That Forgot Its Name",
   "story_id": 1,
   "turns": 14
@@ -311,6 +311,7 @@
    "used": 4
   },
   "lede": "Context preview — the exact request to be sent. Context summary:\n\n  ~1,332 tokens · 4% of the 32,574 limit\n  system 73 · transcript 1,259\n  14 messages verbatim",
+  "note": "",
   "parts": [
    {
     "role": "system",

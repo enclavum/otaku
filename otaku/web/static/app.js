@@ -16,16 +16,28 @@
 
 import * as api from "./js/api.js";
 import { closeAll } from "./js/browser.js";
-import { keepsScreen, openMessages, run as runCommand } from "./js/commands.js";
+import { editTurn, keepsScreen, openMessages, run as runCommand } from "./js/commands.js";
+import { showSignOut, signIn, signOut } from "./js/login.js";
 import { focusComposer, primeHistory, wire as wireComposer } from "./js/composer.js";
 import { $, $$, watchTextareas } from "./js/dom.js";
-import { disconnected, showFacts, watchServer, wireTheme } from "./js/shell.js";
+import { disconnected, showFacts, watchServer, wireFullscreen, wireTheme } from "./js/shell.js";
 import { load as loadTable } from "./js/table.js";
-import { showTurns } from "./js/transcript.js";
+import { showTurns, whenEdited } from "./js/transcript.js";
 import { watchForChanges } from "./js/watch.js";
 
 async function boot() {
   try {
+    /* Before anything is drawn: a password asked for and this browser
+       not through it means the dialog comes first, rather than four
+       reads refused in the background. A cookie that runs out LATER is
+       caught at the request it refuses (`api.whenUnauthorized`). */
+    const login = await api.loginState();
+    showSignOut(login.required);
+    // The dialog opens as `signIn` is called, so it is already in front
+    // when the shell is shown behind it.
+    const signingIn = login.required && !login.signed_in ? signIn() : null;
+    shown();
+    if (signingIn) await signingIn;
     const [facts, language, turns, history] = await Promise.all([
       api.facts(),
       api.syntax(),
@@ -38,13 +50,23 @@ async function boot() {
     primeHistory(history);
     disconnected(false);
   } catch {
+    shown();
     disconnected();
   }
 }
 
+/** The shell, shown once the page knows what comes first (`data-booting`). */
+function shown() {
+  delete document.documentElement.dataset.booting;
+}
+
 function start() {
+  api.whenUnauthorized(signIn);
+  // the transcript draws a turn as an editor and hands the write here
+  whenEdited(editTurn);
   wireComposer();
   wireTheme();
+  wireFullscreen();
   watchTextareas();
   /* The page opens with the caret where the story is written, so the
      first keystroke is the first word. Not on a phone: a focused box
@@ -78,6 +100,13 @@ function start() {
       foldRail();
       return;
     }
+    // The contents row that leaves the session rather than opening
+    // anything: not a command, since the terminal has none to leave.
+    if (event.target.closest("[data-sign-out]")) {
+      foldRail();
+      signOut();
+      return;
+    }
     // The contents row that is not a command: the open story's messages.
     if (event.target.closest("button[data-goto]")) {
       openMessages();
@@ -95,8 +124,9 @@ function start() {
     if (turn && turn.getAttribute("aria-disabled") !== "true") {
       runCommand(turn.dataset.turn === "undo" ? "/undo" : "/regen");
       // Either verb is about the last exchange, and the next one is
-      // typed: the caret comes back to the box.
-      focusComposer();
+      // typed: the caret comes back to the box — not on a touch screen,
+      // where focus raises the keyboard over the reply about to be read.
+      if (!window.matchMedia("(pointer: coarse)").matches) focusComposer();
     }
   });
 
@@ -114,7 +144,8 @@ function start() {
     // the pointer WAS: outside the panel's box, or not a pointer at all
     // (a keyboard-activated button reports the button, never this).
     dialog.addEventListener("click", (event) => {
-      if (event.target !== dialog) return;
+      // A fixed dialog has nothing behind it to fall back to.
+      if (event.target !== dialog || dialog.hasAttribute("data-fixed")) return;
       const box = dialog.getBoundingClientRect();
       const outside =
         event.clientX < box.left ||
@@ -172,6 +203,8 @@ function onKey(event) {
       return;
     }
     event.preventDefault();
+    // Nor does Esc close one: under it is a page that cannot answer.
+    if (dialog.hasAttribute("data-fixed")) return;
     /* The depths inside a popup — a filter, a field editor, a confirm —
        claim Esc before it reaches here. What is left is
        the outermost level: the popup itself. */

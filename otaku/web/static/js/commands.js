@@ -17,7 +17,7 @@ import { landed, refresh, watchExtraction } from "./shell.js";
 import { openStories } from "./stories.js";
 import { confirmFork, openStory } from "./story.js";
 import { tell } from "./status.js";
-import { clear, isPlaying, play, stopPlaying } from "./transcript.js";
+import { clear, isPlaying, play, stopPlaying, takeBack } from "./transcript.js";
 import { exportStory, importCard, importDocument } from "./transfer.js";
 
 const SCREENS = {
@@ -171,11 +171,13 @@ export async function playLine(line) {
    next one is still arriving would take back the WRONG one: the request
    queues behind the reply and lands after it. */
 
+const _MID_REPLY = "Wait for the reply to finish, or stop it.";
+
 export function midReply() {
   if (!isPlaying()) return false;
   // Under the prompt, where the reader is: this is about the box, not
   // about the scene, and the story must not carry a line nobody played.
-  tell("Wait for the reply to finish, or stop it.");
+  tell(_MID_REPLY);
   return true;
 }
 
@@ -186,7 +188,8 @@ async function undo() {
      prompt, and the FLAG is what says so; the page never reads the
      wording. */
   const answer = await api.undo();
-  await landed("", { redraw: "always", keepPlace: true });
+  if (!answer.refused) takeBack(await api.turns());
+  await landed("");
   if (answer.refused) tell(answer.notice);
 }
 
@@ -203,6 +206,24 @@ async function regenerate() {
   } catch (e) {
     if (e?.answered) tell(String(e.message ?? e), "otk-error");
   }
+}
+
+// The page's own sentence: a fault of the medium, not the story's.
+const _BEHIND = "The story changed since this page drew it — reload the page to edit this message.";
+
+/** A turn corrected in the transcript (`transcript.whenEdited`). The page
+    keeps no message ids: the turn is found by its place, and written only
+    while it still holds the text the page drew. */
+export async function editTurn(position, drawn, text) {
+  // a write mid-reply would wait behind the reply with the field open
+  if (isPlaying()) return { notice: _MID_REPLY, refused: true };
+  const [facts, turns] = await Promise.all([api.facts(), api.turns()]);
+  const turn = turns[position];
+  if (turn?.body !== drawn) return { notice: _BEHIND, refused: true };
+  const answer = await api.editMessage(facts.story_id, turn.id, text);
+  // the story's name falls back to its first line, so the runhead asks again
+  if (!answer.refused) await landed("");
+  return answer;
 }
 
 /* What the backend says when there is no story to act on. COPIED,

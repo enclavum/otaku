@@ -11,23 +11,28 @@
 #                          too; anything already running stays untouched)
 #
 # Ollama (:11434) and oMLX (:8000) are assumed to be running already,
-# each with a model loaded. A small GGUF (~490 MB, Qwen2.5 0.5B Q4_K_M)
-# is downloaded on first use into $OTAKU_LIVE_MODELS_DIR (default
-# ~/models/otaku-live) and shared by llama-server and koboldcpp.
+# each with a model loaded. A reasoning model that sees — Gemma 4 E4B
+# Q4_0 (~4.6 GB) with its projector (~560 MB) — is downloaded on first
+# use into $OTAKU_LIVE_MODELS_DIR (default ~/models/otaku-live) and
+# shared by llama-server and koboldcpp: the thinking smokes need a
+# model with a switch, the image smoke one that takes a photo.
 # Ctrl+C stops everything this script started.
 
 set -euo pipefail
 
 MODELS_DIR="${OTAKU_LIVE_MODELS_DIR:-$HOME/models/otaku-live}"
-GGUF="$MODELS_DIR/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf"
-GGUF_URL="https://huggingface.co/bartowski/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/Qwen2.5-0.5B-Instruct-Q4_K_M.gguf"
+GGUF="$MODELS_DIR/gemma-4-E4B-it-Q4_0.gguf"
+MMPROJ="$MODELS_DIR/mmproj-gemma-4-E4B-it-Q8_0.gguf"
+REPO_URL="https://huggingface.co/ggml-org/gemma-4-E4B-it-GGUF/resolve/main"
 
 mkdir -p "$MODELS_DIR"
-if [ ! -f "$GGUF" ]; then
-    echo "downloading the small model (~490 MB) into $MODELS_DIR ..."
-    curl -L --fail -o "$GGUF.part" "$GGUF_URL"
-    mv "$GGUF.part" "$GGUF"
-fi
+for file in "$GGUF" "$MMPROJ"; do
+    if [ ! -f "$file" ]; then
+        echo "downloading $(basename "$file") into $MODELS_DIR ..."
+        curl -L --fail -o "$file.part" "$REPO_URL/$(basename "$file")"
+        mv "$file.part" "$file"
+    fi
+done
 
 pids=()
 started_lms=""
@@ -51,13 +56,13 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 echo "llama-server on :8080 (log: /tmp/otaku-live-llamacpp.log)"
-llama-server -m "$GGUF" -c 4096 --host 127.0.0.1 --port 8080 \
+llama-server -m "$GGUF" --mmproj "$MMPROJ" -c 8192 --jinja --host 127.0.0.1 --port 8080 \
     >/tmp/otaku-live-llamacpp.log 2>&1 &
 pids+=($!)
 
 echo "koboldcpp on :5001 (log: /tmp/otaku-live-koboldcpp.log)"
-koboldcpp --model "$GGUF" --host 127.0.0.1 --port 5001 --contextsize 4096 --quiet \
-    >/tmp/otaku-live-koboldcpp.log 2>&1 &
+koboldcpp --model "$GGUF" --mmproj "$MMPROJ" --host 127.0.0.1 --port 5001 --contextsize 8192 \
+    --quiet >/tmp/otaku-live-koboldcpp.log 2>&1 &
 pids+=($!)
 
 if command -v lms >/dev/null 2>&1; then

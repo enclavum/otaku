@@ -1,29 +1,34 @@
-"""Provider lookup and fan-out.
+"""Provider lookup and fan-out — and the probe that asks a provider
+before it is saved.
 
-The provider's section name selects its engine — the generic provider
-("generic", the protocol alone), the single-model engines ("llamacpp",
-"koboldcpp"), the local managed registries ("ollama", "omlx",
-"lmstudio"), and the cloud catalogs ("openrouter", "nanogpt") each get
-their native client; any other name is served by the generic client.
-First-run autoconfiguration writes sections for the local engines only —
-the generic provider and a cloud one are added deliberately, url and
-keys and all.
+The section name IS the engine: `ALL_CLIENTS` maps the eight names to
+their clients in the model picker's canonical order — the generic
+provider first, the engines on this machine, the catalogs — and a
+section named anything else is not served: the registry leaves it out
+and names it in `ignored`, for the launch to say so. One section per
+engine; a second server of one kind is not a thing yet. First-run
+autoconfiguration writes sections for the local engines only; the
+generic provider and a cloud one are added deliberately, url and key
+and all.
 
 The `Registry` is composed by the backend package and injected
-everywhere a client
-is resolved: the configured providers, the request-log sink, the
-smoothing flag, and the per-provider client cache. File persistence is
-NOT here — the panel saves write through settings and then call
-`update_provider`. Nothing here ever blocks or exits the app: an
-unreachable provider is skipped in fan-outs, and a dead one costs its
-own timeout — overlapped with the others, never the launch.
+everywhere a client is resolved: the configured providers, the
+request-log and error-log sinks, the smoothing flag, and the per-provider client
+cache. File persistence is NOT here — the panel saves write through
+settings and then call `update_provider`. Nothing here ever blocks or
+exits the app: an unreachable provider is skipped in fan-outs, and a
+dead one costs its own timeout — overlapped with the others, never
+the launch.
 """
 
-from collections.abc import Callable
+import enum
+import os
+import threading
+from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from typing import TypeVar
 
-from otaku.providers.base import ManagedClient, OpenAIClient, Provider, RequestSink
 from otaku.providers.clients.generic import GenericClient
 from otaku.providers.clients.koboldcpp import KoboldCppClient
 from otaku.providers.clients.llamacpp import LlamaCppClient
@@ -32,114 +37,216 @@ from otaku.providers.clients.nanogpt import NanoGptClient
 from otaku.providers.clients.ollama import OllamaClient
 from otaku.providers.clients.omlx import OmlxClient
 from otaku.providers.clients.openrouter import OpenRouterClient
+from otaku.providers.errors import ProviderError, UnauthorizedError, UnreachableError
+from otaku.providers.http import LISTING_TIMEOUT, ErrorSink
+from otaku.providers.openai.auth import KeySource
+from otaku.providers.openai.client import OpenAIClient, ProviderCapabilities
+from otaku.providers.openai.completion import RequestSink
+from otaku.providers.openai.models import Locality, ModelInfo
 from otaku.settings.providers import ProviderConfig
 
 _T = TypeVar("_T")  # Registry.map's result type
 
-# The client classes with a native API, by the provider name that
-# activates them, in the model picker's canonical order — the generic
-# provider first, the engines on this machine, the catalogs; every other
-# name gets the generic client too.
-CLIENTS: dict[str, type[OpenAIClient]] = {
-    GenericClient.kind: GenericClient,
-    LlamaCppClient.kind: LlamaCppClient,
-    KoboldCppClient.kind: KoboldCppClient,
-    OllamaClient.kind: OllamaClient,
-    OmlxClient.kind: OmlxClient,
-    LmStudioClient.kind: LmStudioClient,
-    OpenRouterClient.kind: OpenRouterClient,
-    NanoGptClient.kind: NanoGptClient,
+ALL_CLIENTS: dict[str, type[OpenAIClient]] = {
+    LlamaCppClient.id: LlamaCppClient,
+    KoboldCppClient.id: KoboldCppClient,
+    OllamaClient.id: OllamaClient,
+    OmlxClient.id: OmlxClient,
+    LmStudioClient.id: LmStudioClient,
+    GenericClient.id: GenericClient,
+    OpenRouterClient.id: OpenRouterClient,
+    NanoGptClient.id: NanoGptClient,
 }
+
+
+@dataclass(frozen=True)
+class ProviderInfo:
+    """One reachable provider with its models — what `Registry.info`
+    answers and the model pickers list, as data: the client's identity
+    and what it can do, never the client."""
+
+    id: str
+    label: str
+    locality: Locality
+    key_source: KeySource | None
+    capabilities: ProviderCapabilities
+    models: list[ModelInfo]
+
+
+class ProbeStatus(enum.Enum):
+    """How a probe ended. A frontend reads only this; the sentence
+    beside it is what it shows."""
+
+    OK = "ok"
+    EMPTY = "empty"  # the server answered, but lists no models
+    UNREACHABLE = "unreachable"
+    UNAUTHORIZED = "unauthorized"
+    ERROR = "error"  # the server answered with an error status
+
+
+@dataclass(frozen=True)
+class ProviderFailure:
+    """Why a configured provider is not listed — what `Registry.info`
+    answers in place of a `ProviderInfo`: the probe's verdict and the
+    package's sentence for it, a dead server, a rejected key, an error
+    status, so a picker can say more than "not connected"."""
+
+    id: str
+    status: ProbeStatus
+    message: str
+
+
+@dataclass(frozen=True)
+class Probe:
+    """What `probe` found: the outcome, how many models the provider
+    listed, where the key it was asked with came from, and the sentence
+    that says it."""
+
+    status: ProbeStatus
+    models_count: int
+    key_source: KeySource | None
+    message: str
+
+
+# Named at module level, where `list` is still the builtin: the class
+# below has a method of that name.
+Ids = list[str]
+Results = list[_T]
 
 
 class Registry:
     def __init__(
         self,
-        providers: dict[str, ProviderConfig],
+        configs: dict[str, ProviderConfig],
         *,
-        request_log: RequestSink | None = None,
-        smooth: bool = True,
+        request_sink: RequestSink | None = None,
+        error_sink: ErrorSink | None = None,
+        smooth: bool = False,
     ) -> None:
-        self._providers = providers
-        self._request_log = request_log
+        # The sections an engine serves, and the names of those none does.
+        self.configs = {name: config for name, config in configs.items() if name in ALL_CLIENTS}
+        self.ignored: tuple[str, ...] = tuple(sorted(set(configs) - set(ALL_CLIENTS)))
+        self._request_sink = request_sink
+        self._error_sink = error_sink
         self._smooth = smooth
         self._clients: dict[str, OpenAIClient] = {}
+        self._lock = threading.Lock()  # a fan-out builds beside a panel save
 
-    def get_client(self, provider: str) -> OpenAIClient:
+    def list(self) -> Ids:
+        """The configured providers' ids, sorted."""
+        return sorted(self.configs)
+
+    def get(self, provider: str) -> OpenAIClient | None:
         """The named provider's client, cached — its engine chosen by the
-        name (see the module docstring). Raises ValueError for an
-        unconfigured provider."""
-        if provider in self._clients:
-            return self._clients[provider]
-        config = self._providers.get(provider)
-        if config is None:
-            raise ValueError(f"no provider {provider!r} in the configuration")
-        cls = CLIENTS.get(provider, GenericClient)
-        client = cls(config, request_log=self._request_log, smooth=self._smooth)
-        self._clients[provider] = client
-        return client
-
-    def configured(self) -> list[ProviderConfig]:
-        """Every configured provider, name-sorted — reachable or not; the
-        provider panel edits them all."""
-        return [self._providers[name] for name in sorted(self._providers)]
-
-    def update_provider(self, config: ProviderConfig) -> None:
-        """Swap one provider's configuration for the running session and
-        drop its cached client, so the next request is built against the
-        new url and key. Persisting the change is the caller's business."""
-        self._providers[config.name] = config
-        self._clients.pop(config.name, None)
-
-    def map(self, fn: Callable[[str, ProviderConfig], _T]) -> list[_T]:
-        """Run `fn(provider, config)` for every configured provider
-        concurrently, results in configuration order — one dead
-        provider's timeout overlaps the others instead of adding to
-        them. `fn` handles its own errors; an exception propagates."""
-        items = list(self._providers.items())
-        if not items:
-            return []
-        with ThreadPoolExecutor(max_workers=len(items)) as pool:
-            return list(pool.map(lambda item: fn(item[0], item[1]), items))
-
-    def get_providers(self, skip: set[str] | None = None) -> tuple[list[Provider], set[str]]:
-        """Every reachable provider with its models, plus the reachable
-        set — the model picker's one query, each engine answering with
-        its rich rows in one pass. `skip` names providers to leave out:
-        the picker opens on the local engines' answers and fetches the
-        cloud catalogs asynchronously, after the screen is up."""
-
-        # Inner on purpose: the filter closes over the skip set.
-        def gather(provider: str, config: ProviderConfig) -> tuple[str, Provider] | None:
-            if skip and provider in skip:
+        name (see the module docstring); None for a provider that is not
+        configured."""
+        with self._lock:
+            if provider in self._clients:
+                return self._clients[provider]
+            config = self.configs.get(provider)
+            if config is None:
                 return None
-            return self._gather(provider, config)
+            return self._build(config)
 
-        results = [r for r in self.map(gather) if r is not None]
-        return [row for _name, row in results], {name for name, _row in results}
+    def update(self, config: ProviderConfig) -> None:
+        """Swap one provider's configuration for the running session and
+        rebuild its client against the new url and key — the panel lists
+        the models right after. Persisting the change is the caller's
+        business. Raises ValueError for a name no engine answers to: the
+        registry serves the engines' sections and founds no other."""
+        if config.name not in ALL_CLIENTS:
+            raise ValueError(f"no supported provider is named {config.name!r}")
+        with self._lock:
+            self.configs[config.name] = config
+            self._build(config)
 
-    def _gather(self, provider: str, config: ProviderConfig) -> tuple[str, Provider] | None:
-        """One provider's row, or None when it is unreachable."""
-        client = self.get_client(provider)
-        try:
-            models = client.models(timeout=5.0)
-        except Exception:
+    def info(self, provider: str) -> ProviderInfo | ProviderFailure | None:
+        """One provider's identity and models, listed now — or why not:
+        a `ProviderFailure` for one that cannot answer, a dead server, a
+        rejected key, an error status, with the sentence that says so;
+        None for one not configured. The pickers fan it out with `map`."""
+        client = self.get(provider)
+        if client is None:
             return None
-        return provider, Provider(
-            config, models, isinstance(client, ManagedClient), client.locality
+        try:
+            models = client.models.list(timeout=LISTING_TIMEOUT)
+        except UnreachableError as e:
+            return ProviderFailure(client.id, ProbeStatus.UNREACHABLE, str(e))
+        except UnauthorizedError as e:
+            return ProviderFailure(client.id, ProbeStatus.UNAUTHORIZED, str(e))
+        except ProviderError as e:
+            return ProviderFailure(client.id, ProbeStatus.ERROR, str(e))
+        return ProviderInfo(
+            client.id,
+            client.label,
+            client.locality,
+            client.auth.key_source,
+            client.capabilities,
+            models,
         )
 
+    def map(self, fn: Callable[[str], _T], ids: Iterable[str] | None = None) -> Results[_T]:
+        """Run `fn(id)` for every configured provider — or the `ids`
+        given — concurrently, results in that order: one dead provider's
+        timeout overlaps the others instead of adding to them. `fn`
+        handles its own errors; an exception propagates."""
+        asked = list(self.configs if ids is None else ids)
+        if not asked:
+            return []
+        with ThreadPoolExecutor(max_workers=len(asked)) as pool:
+            return list(pool.map(fn, asked))
 
-def autoconfigure_providers() -> dict[str, ProviderConfig]:
-    """The first-run provider sections: one per local engine, present
-    whether or not the engine is installed, each with its configuration
-    (port, api key) detected from the machine. Runs only at the one
-    first-run config write; the file is the user's thereafter."""
-    configured = (
-        LlamaCppClient.autoconfigure(),
-        KoboldCppClient.autoconfigure(),
-        OllamaClient.autoconfigure(),
-        OmlxClient.autoconfigure(),
-        LmStudioClient.autoconfigure(),
+    def _build(self, config: ProviderConfig) -> OpenAIClient:
+        client = ALL_CLIENTS[config.name](
+            config,
+            request_sink=self._request_sink,
+            error_sink=self._error_sink,
+            smooth=self._smooth,
+        )
+        self._clients[config.name] = client
+        return client
+
+
+def probe(config: ProviderConfig, *, timeout: float = LISTING_TIMEOUT) -> Probe:
+    """Ask the provider `config` describes — saved or not — whether it
+    answers and what it lists, the way the panel wants to know before
+    Save. Never raises: unreachable, a rejected key, an error status and
+    an empty listing are ANSWERS, each with the sentence that says it."""
+    cls = ALL_CLIENTS.get(config.name)
+    if cls is None:
+        return Probe(ProbeStatus.ERROR, 0, None, f"No supported provider is named {config.name}.")
+    client = cls(config)
+    source = client.auth.key_source
+    try:
+        models = client.models.list(timeout)
+    except UnreachableError as e:
+        return Probe(ProbeStatus.UNREACHABLE, 0, source, str(e))
+    except UnauthorizedError as e:
+        return Probe(ProbeStatus.UNAUTHORIZED, 0, source, str(e))
+    except ProviderError as e:
+        return Probe(ProbeStatus.ERROR, 0, source, str(e))
+    if not models:
+        return Probe(
+            ProbeStatus.EMPTY, 0, source, f"Reached {config.name}, but it lists no models."
+        )
+    return Probe(
+        ProbeStatus.OK, len(models), source, f"Reached {config.name}: {len(models)} models."
     )
-    return {config.name: config for config in configured}
+
+
+def autoconfigure() -> dict[str, ProviderConfig]:
+    """The provider sections every launch makes sure of, in the panel's
+    order: one per local engine, installed or not, its port and key
+    detected from the machine; and one per cloud catalog whose key the
+    shell carries, on its fixed endpoint with no key in the section —
+    the variable is read at request time, never written, and setting
+    it is the deliberate act that adds a catalog. What first run
+    writes, and what a later launch founds where missing, so a catalog
+    appears the first launch that finds its variable and stays. The
+    generic provider is never founded: its url is nobody's to guess."""
+    return {
+        cls.id: cls.autoconfigure()
+        for cls in ALL_CLIENTS.values()
+        if cls.locality is Locality.LOCAL
+        or (cls.locality is Locality.REMOTE and cls.env_key and os.environ.get(cls.env_key))
+    }

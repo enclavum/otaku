@@ -37,14 +37,20 @@ class TerminalSettings:
 
 @dataclass(frozen=True)
 class WebSettings:
-    """Where the web frontend listens — the other slice of config.toml
-    that is a frontend's business, and the only one needed before a
-    session exists. Loopback by default: this is one person's
-    application, and reaching it from another machine is a decision to
-    make on purpose."""
+    """Where the web frontend listens and what it asks of whoever
+    reaches it — the other slice of config.toml that is a frontend's
+    business, and the only one needed before a session exists. Loopback,
+    no TLS and no password by default: this is one person's application,
+    and reaching it from another machine is a decision to make on
+    purpose — the one decision that makes the other two worth taking."""
 
-    host: str = "127.0.0.1"
+    host: str = "localhost"
     port: int = 9600
+    https: bool = False
+    # The hash of `[web] password` that `backend.passwords` made, never
+    # the password itself: the launch hashes a typed one before anything
+    # reads it. "" is no password at all.
+    password: str = ""
 
 
 @dataclass(frozen=True)
@@ -68,8 +74,10 @@ class Config:
     dialogue_color: str = "auto"
     dialogue_bold: bool = False
     # [web]
-    web_host: str = "127.0.0.1"
+    web_host: str = "localhost"
     web_port: int = 9600
+    web_https: bool = False
+    web_password: str = ""
     # [context]
     head_messages: int = 20
     min_tail_messages: int = 150
@@ -103,13 +111,15 @@ class Config:
             row(f"dialogue_bold = {toml_scalar(self.dialogue_bold)}", "also bold the spoken lines"),
             "",
             "[web]",
-            row(f"host = {toml_scalar(self.web_host)}", "where `otaku web` listens; anything but 127.0.0.1 opens it to the network"),
-            row(f"port = {self.web_port}", "…and on which port"),
+            row(f"host = {toml_scalar(self.web_host)}", '"localhost": reachable from this machine only; "0.0.0.0": from the whole network — set https and a password first'),
+            row(f"port = {self.web_port}", "the port `otaku web` listens on"),
+            row(f"https = {toml_scalar(self.web_https)}", "RECOMMENDED to turn on when the host is not local; the certificate lives in cert/: drop in your own, or one is generated"),
+            row(f"password = {toml_scalar(self.web_password)}", "RECOMMENDED to set when the host is not local; typed in plain text, it is replaced by its hash at the next launch"),
             "",
             "[context]",
             row(f"head_messages = {self.head_messages}", "opening messages kept verbatim in the prompt"),
             row(f"min_tail_messages = {self.min_tail_messages}", "at least this many recent messages kept verbatim"),
-            row(f"max_context = {self.max_context}", "the prompt may use at most this many tokens; 0 = the model's whole window"),
+            row(f"max_context = {self.max_context}", "the prompt may use at most this many tokens; 0 = the model's own max context"),
             "",
             "[lore_extraction]",
             row(f"enabled = {toml_scalar(self.lore_enabled)}", "extract lore on idle (/extract always works)"),
@@ -142,7 +152,12 @@ class Config:
     @property
     def web(self) -> WebSettings:
         """The web frontend's slice, cut like `terminal` below."""
-        return WebSettings(host=self.web_host, port=self.web_port)
+        return WebSettings(
+            host=self.web_host,
+            port=self.web_port,
+            https=self.web_https,
+            password=self.web_password,
+        )
 
     @property
     def terminal(self) -> TerminalSettings:
@@ -192,13 +207,15 @@ def load(path: Path) -> Config:
             notification_sound=str(settings.get("notification_sound", "default")),
             dialogue_color=str(terminal.get("dialogue_color", "auto")),
             dialogue_bold=bool(terminal.get("dialogue_bold", False)),
-            web_host=str(web.get("host", "127.0.0.1")),
+            web_host=str(web.get("host", "localhost")),
             # Clamped to the range a socket accepts, 0 excluded: a port
             # of 0 asks the OS to pick one, and `otaku web` says where
             # the page is BEFORE it binds — an address nobody can be
             # told is no use for a page somebody has to open. A second
             # otaku on one machine names its own port here.
             web_port=min(65535, max(1, _int(web, "port", 9600))),
+            web_https=bool(web.get("https", False)),
+            web_password=str(web.get("password", "")),
             head_messages=max(0, _int(context, "head_messages", 20)),
             min_tail_messages=max(1, _int(context, "min_tail_messages", 150)),
             max_context=max(0, _int(context, "max_context", 0)),
