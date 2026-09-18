@@ -102,10 +102,10 @@ class TestWeb:
         state = tmp_path / "state"
         set_config_provider(state, server)
         terminal = Terminal(str(state), args=("web", "--port", str(_free_port())))
-        terminal.expect("web ui is available on", timeout=20.0)
+        terminal.expect("Running on", timeout=20.0)
         terminal.send(CTRL_R, 1.0)
         terminal.expect("Restarting")
-        _expect_count(terminal, "web ui is available on", 2, timeout=20.0)
+        _expect_count(terminal, "Running on", 2, timeout=20.0)
         terminal.send(CTRL_D, 1.0)
         terminal.expect("Shutting down")
         assert terminal.wait() == 0
@@ -123,7 +123,7 @@ class TestWeb:
         play(terminal, "I enter the hall.", "stirred")
         terminal.send("/web")
         terminal.send(ENTER, 1.0)
-        terminal.expect("web ui is available on")
+        terminal.expect("Running on")
         terminal.send(CTRL_R, 1.0)  # not a key here: the serving goes on
         terminal.send(CTRL_D, 1.0)
         terminal.expect("Shutting down")

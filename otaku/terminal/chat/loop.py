@@ -18,7 +18,6 @@ from otaku.backend.api import play as api_play
 from otaku.backend.api import stories as api_stories
 from otaku.backend.session import Refused, Session
 from otaku.console import banner
-from otaku.formatting import truncate_label
 from otaku.terminal.chat import bindings, stream
 from otaku.terminal.chat.chat import RESUME_TURNS, Chat
 from otaku.terminal.prompt import PLACEHOLDER, Carry, LineAssembler, build_prompt, pictures
@@ -66,15 +65,13 @@ def run(session: Session) -> None:
         screen_models.pick(session)
     if session.terminal.show_banner:
         # Each field a public read; the no-model fallback is this
-        # frontend's own wording, and the story is cut to the same width
-        # as the landed line printed under it.
+        # frontend's own wording.
         print(
             banner.render_terminal(
                 banner.SessionFacts(
                     model=session.model or "(no model)",
                     provider=session.provider,
                     max_context=session.max_context(),
-                    story=truncate_label(api_stories.headline(session), api_stories.LABEL_WIDTH),
                 )
             )
         )

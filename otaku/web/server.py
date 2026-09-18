@@ -232,8 +232,8 @@ _DISCONNECTED = (
 )
 
 # The spellings of "this machine" — all of them reachable as `localhost`,
-# which is what the printed address READS as (`web.run.address`, this
-# tuple's other reader and the reason it is public).
+# which is what the printed address READS as (`console.banner.address`,
+# this tuple's other reader and the reason it is public).
 LOOPBACK = ("127.0.0.1", "0.0.0.0", "::", "::1", "localhost", "")
 
 # The spellings of "every interface": a bind that is not this machine

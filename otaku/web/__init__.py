@@ -21,6 +21,6 @@ what the page may ask, as tables; `thread` is the one that owns the
 session.
 """
 
-from otaku.web.run import ServeError, address, run, serve, settings
+from otaku.web.run import ServeError, run, serve, settings
 
-__all__ = ["ServeError", "address", "run", "serve", "settings"]
+__all__ = ["ServeError", "run", "serve", "settings"]

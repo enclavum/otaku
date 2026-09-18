@@ -31,7 +31,7 @@ from collections.abc import Callable, Iterator
 from datetime import datetime
 from types import TracebackType
 
-from otaku.console import DIM, ERASE_BELOW, MARGIN, RESET, UP
+from otaku.console import DIM, ERASE_BELOW, RESET, UP
 from otaku.formatting import truncate
 
 # POSIX-only raw-terminal control: absent on Windows, where the quiet
@@ -52,7 +52,7 @@ _CLOCK_WIDTH = 8  # HH:MM:SS
 
 
 class Ticker:
-    """The last few lines, redrawn in place under the banner's rule.
+    """The last few lines, redrawn in place under the banner.
 
     Thread-safe by construction: the requests arrive on the server's own
     threads, and two landing together must not interleave inside one
@@ -125,11 +125,10 @@ class Ticker:
         # From the cursor down, not row by row: the tail is one block and
         # a shorter redraw must not leave the old bottom row behind.
         out.append(ERASE_BELOW)
-        room = shutil.get_terminal_size((80, 24)).columns - MARGIN - _CLOCK_WIDTH - 2
+        room = shutil.get_terminal_size((80, 24)).columns - _CLOCK_WIDTH - 2
         for clock, text, times in self._rows:
             line = text if times == 1 else f"{text} x{times}"
-            row = f"{self._dim}{clock}  {truncate(line, room)}{self._reset}"
-            out.append(f"{' ' * MARGIN}{row}\n")
+            out.append(f"{self._dim}{clock}  {truncate(line, room)}{self._reset}\n")
         self._drawn = len(self._rows)
         sys.stdout.write("".join(out))
         sys.stdout.flush()

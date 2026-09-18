@@ -566,23 +566,22 @@ mechanics live in the module docstrings:
 
 SENTENCES COME FROM THE BACKEND, verbatim. A frontend never rewords a
 refusal, a notice or a report — it decides only WHERE the text appears.
-Wording about the medium itself ("close · esc", "ctrl+c to stop", a key
-caption, a fault the reader can do nothing about) is the frontend's
-alone. `/help` is the case in point: the tokens, argument shapes,
-descriptions, group names (`commands.GROUP_LABELS`) and the prose row
-(`PROSE_*`) are the shared table's; each frontend lays them out for its
-own medium — columns and a keys section in the terminal, a definition
-list per group on the page — and neither keeps a second copy of the
-words. Where a sentence cannot be asked for (the page has no story, so
-no endpoint to ask), it is COPIED with a comment naming its home.
+Wording about the medium itself ("close · esc", "Press CTRL+C to quit",
+a key caption, a fault the reader can do nothing about) is the
+frontend's alone. `/help` is the case in point: the tokens, argument
+shapes, descriptions, group names (`commands.GROUP_LABELS`) and the
+prose row (`PROSE_*`) are the shared table's; each frontend lays them
+out for its own medium — columns and a keys section in the terminal, a
+definition list per group on the page — and neither keeps a second copy
+of the words. Where a sentence cannot be asked for (the page has no
+story, so no endpoint to ask), it is COPIED with a comment naming its
+home.
 
 User-facing printed messages start with a capital letter. Deliberately
 lowercase: the `otaku: …` stderr warnings (the Unix `program: message`
 convention), system-log lines, the transient status-line fragments a
-worker updates in place, the dim `[ … ]` report blocks beside a turn
-(the stats line's family), and the banner family — the launch banner's
-rows and the one-line address that stands in for it when the banner is
-off.
+worker updates in place, and the dim `[ … ]` report blocks beside a
+turn (the stats line's family).
 
 ## Module conventions
 

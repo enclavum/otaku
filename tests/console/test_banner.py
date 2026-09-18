@@ -1,17 +1,17 @@
-"""Where the page is, and who else can reach it.
+"""What the banner of a served session says about where it listens.
 
-Two answers `web.run` gives before anything is bound: the address a
-reader is handed, and whether that address reaches more than this
-machine. A launch states each of them once, for the one host it was
-configured with — so the cases that matter are the ones nobody runs.
+A launch states the address once, for the one host it was configured
+with — so the cases that matter are the ones nobody runs.
 """
 
+import pytest
+
 from otaku.backend import WebSettings
-from otaku.web.run import _is_loopback, address, address_notes
+from otaku.console.banner import _is_public, address, render_web
 
 
 class TestAddress:
-    """`web.run.address` — the url the terminal prints and a reader pastes."""
+    """`banner.address` — the url the terminal prints and a reader pastes."""
 
     def test_the_scheme_follows_the_setting(self) -> None:
         assert address(WebSettings()).startswith("http://")
@@ -40,50 +40,65 @@ class TestAddress:
         assert not address(WebSettings()).endswith("/")
 
 
-class TestAddressNotes:
-    """`web.run.address_notes` — whether the banner says the address is
-    public: on every host but localhost and 127.0.0.1, whatever else is
-    set."""
+class TestRenderWeb:
+    """`banner.render_web` — whether the banner says the address is
+    public: on every host that reaches past this machine, whatever else
+    is set."""
 
-    def test_a_loopback_host_gets_no_note(self) -> None:
-        for host in ("localhost", "127.0.0.1"):
-            assert address_notes(WebSettings(host=host)) == "", host
+    def test_the_address_is_said(self) -> None:
+        where = WebSettings(host="192.168.1.5", https=True)
+        assert address(where) in render_web(where)
+
+    def test_a_loopback_host_is_not_said_to_be_public(self) -> None:
+        for host in ("localhost", "127.0.0.1", "::1"):
+            assert "public" not in render_web(WebSettings(host=host)), host
 
     def test_any_other_host_is_said_to_be_public(self) -> None:
-        for host in ("0.0.0.0", "::", "::1", "192.168.1.5"):
-            assert "public" in address_notes(WebSettings(host=host)), host
+        for host in ("0.0.0.0", "::", "192.168.1.5", "otaku.local"):
+            assert "public" in render_web(WebSettings(host=host)), host
 
     def test_a_public_host_is_still_said_so_with_tls_and_a_password(self) -> None:
         # Secured is not the same as private.
-        notes = address_notes(WebSettings(host="0.0.0.0", https=True, password="hash"))
-        assert "public" in notes and "no " not in notes
+        banner = render_web(WebSettings(host="0.0.0.0", https=True, password="hash"))
+        assert "public" in banner and "no " not in banner
+
+    def test_a_password_is_noted(self) -> None:
+        # On loopback, where no warning row speaks of one.
+        assert "password" not in render_web(WebSettings())
+        assert "password" in render_web(WebSettings(password="hash"))
 
 
-class TestLoopback:
-    """`web.run._is_loopback` — whether an address reaches THIS MACHINE
-    only, which is what decides whether a launch says anything about
+class TestPublic:
+    """`banner._is_public` — whether an address reaches PAST this
+    machine, which is what decides whether a launch says anything about
     what the address is missing."""
 
-    def test_every_loopback_address_is_one(self) -> None:
+    def test_no_loopback_address_is_public(self) -> None:
         for host in ("127.0.0.1", "127.0.0.53", "127.255.255.254", "::1", "localhost"):
-            assert _is_loopback(host), host
+            assert not _is_public(host), host
 
     def test_a_bracketed_ipv6_address_is_read_inside_its_brackets(self) -> None:
-        assert _is_loopback("[::1]")
+        assert not _is_public("[::1]")
 
-    def test_no_wildcard_is_loopback(self) -> None:
+    def test_every_wildcard_is_public(self) -> None:
         # The whole reason this is not `server.LOOPBACK`: that set
         # answers what ARRIVES here, and a wildcard bind does arrive as
         # localhost — while being the most exposed address there is.
         for host in ("0.0.0.0", "::", ""):
-            assert not _is_loopback(host), host
+            assert _is_public(host), host
 
-    def test_an_address_on_the_network_is_not(self) -> None:
+    def test_an_address_on_the_network_is_public(self) -> None:
         for host in ("192.168.1.5", "10.0.0.7", "::ffff:c0a8:105"):
-            assert not _is_loopback(host), host
+            assert _is_public(host), host
 
     def test_no_name_but_localhost_is_taken_on_trust(self) -> None:
         # Anything else would be a DNS call at the launch, and a name
         # that resolves to 127.0.0.1 somewhere else is not this machine.
         for host in ("otaku.local", "localhost.localdomain", "example.com"):
-            assert not _is_loopback(host), host
+            assert _is_public(host), host
+
+
+@pytest.fixture(autouse=True)
+def _plain(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No escape codes: what is asserted is what the banner says."""
+    monkeypatch.setenv("NO_COLOR", "1")
