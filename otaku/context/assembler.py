@@ -48,9 +48,15 @@ from dataclasses import dataclass, replace
 from otaku.context import syntax
 from otaku.context.cards import card_to_wire
 from otaku.store import Store
+from otaku.store.files import FileStore
 from otaku.store.schema import Message, Scene
 
 _DEFAULT_CONTEXT = 8_192  # when the provider states no max context
+# What one picture costs on the wire, as the budget counts it. Engines
+# differ widely (Gemma 3 spends 256 a picture, Qwen2.5-VL about 3,000 at
+# the wire size, Llama 3.2 1,600 a tile); the stats line reports the
+# real prompt count after every reply, so this is a first estimate.
+IMAGE_TOKENS = 1_500
 # The reply reserve is sized from the story itself: the longest of the
 # last _RESERVE_SAMPLE assistant replies, _RESERVE_HEADROOM on top.
 _RESERVE_SAMPLE = 5
@@ -82,15 +88,27 @@ class ContextShape:
 
 
 @dataclass(frozen=True)
+class WirePicture:
+    """One picture as SENT: its bytes and their media type, read from
+    the files folder for a verbatim row. Satisfies `providers.WireImage`
+    structurally — this package imports no provider."""
+
+    data: bytes
+    media_type: str
+
+
+@dataclass(frozen=True)
 class WireTurn:
-    """One turn as SENT — composed wire text, nothing else. A distinct
-    type from the stored `Message` on purpose: a stored row's body is
-    the line as typed, a wire turn's body is what the model receives,
-    and the boundary between them is type-checked, not remembered.
-    (`body`, not `text`, so it satisfies `providers.WireMessage`.)"""
+    """One turn as SENT — composed wire text and the pictures riding on
+    it, nothing else. A distinct type from the stored `Message` on
+    purpose: a stored row's body is the line as typed, a wire turn's
+    body is what the model receives, and the boundary between them is
+    type-checked, not remembered. (`body`, not `text`, so it satisfies
+    `providers.WireMessage`.)"""
 
     role: str
     body: str
+    images: tuple[WirePicture, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -111,6 +129,11 @@ class AssembledPrompt:
     tail_setting: int  # the configured min_tail_messages, for comparison
     transcript_kept: int  # verbatim messages on the wire (head + tail)
     transcript_total: int
+    pictures_sent: int = 0  # riding the verbatim rows, `IMAGE_TOKENS` each in transcript_tokens
+    pictures_omitted: int = 0  # attached to verbatim rows but not sent: no vision, or a file gone
+    pictures_held: int = (
+        0  # on earlier verbatim rows, held back: the engine takes the latest turn's alone
+    )
 
     @property
     def total_tokens(self) -> int:
@@ -130,15 +153,22 @@ def assemble_story(
     messages: list[Message],
     shape: ContextShape,
     max_context: int | None,
+    vision: bool = False,
+    newest_pictures_only: bool = False,
 ) -> AssembledPrompt:
     """The next request over the story's CURRENT scenes and card
     archives — the one door every call site (the turn, the preview, the
     warm-up) goes through, so none can disagree on what is sent. Card
     rows compose HERE, from the cast's current archives: the stored row
     is the line as typed, and what it sends follows the TOML wherever a
-    lore edit took it. The package's one store read; it writes nothing.
-    Raises `ContextOverflowError` (case 6) when even the case-5 floor
-    cannot fit."""
+    lore edit took it. Pictures ride their rows only with `vision` — a
+    model that cannot see is sent none — read from the files folder for
+    the rows that stay verbatim, and only those; with
+    `newest_pictures_only`, the newest pictured row's alone, for an
+    engine that would gather every row's onto its latest prompt
+    (`providers` says which). The package's store reads;
+    it writes nothing. Raises `ContextOverflowError` (case 6) when even
+    the case-5 floor cannot fit."""
     scenes = _current_scenes(store, story_id, messages)
     return _assemble(
         system,
@@ -146,6 +176,8 @@ def assemble_story(
         max_context,
         scenes=scenes,
         shape=shape,
+        files=store.files if vision else None,
+        newest_pictures_only=newest_pictures_only,
     )
 
 
@@ -159,14 +191,19 @@ def _assemble(
     *,
     scenes: Sequence[Scene] = (),
     shape: ContextShape,
+    files: FileStore | None = None,
+    newest_pictures_only: bool = False,
 ) -> AssembledPrompt:
     """The whole algorithm, pure over its inputs (card rows must arrive
-    with their bodies already composed): build by cases 1-3, degrade the
-    recap (case 4), degrade the tail (case 5) — the first fit wins. The
-    shape's `recap_header`, when non-empty, opens the recap block; it is
-    sent, so the preview needs no heading of its own. Raises
-    `ContextOverflowError` (case 6) when even the case-5 floor cannot
-    fit."""
+    with their bodies already composed; `files` is the folder a row's
+    pictures are read from, None for a model that cannot see;
+    `newest_pictures_only` holds
+    every row's pictures back but the newest row's): build by cases 1-3,
+    degrade the recap (case 4), degrade the tail (case 5) — the first
+    fit wins. The shape's `recap_header`, when non-empty, opens the
+    recap block; it is sent, so the preview needs no heading of its own.
+    Raises `ContextOverflowError` (case 6) when even the case-5 floor
+    cannot fit."""
     max_context = max_context or _DEFAULT_CONTEXT
     setting = shape.max_context_setting
     # The context in force: the model's, or the setting where it is lower.
@@ -177,7 +214,17 @@ def _assemble(
 
     for tail_target in _tail_ladder(shape.min_tail_messages):  # case 5
         prompt = _compose(
-            system, messages, scenes, shape, tail_target, budget, max_context, limit, system_tokens
+            system,
+            messages,
+            scenes,
+            shape,
+            tail_target,
+            budget,
+            max_context,
+            limit,
+            system_tokens,
+            files,
+            newest_pictures_only,
         )
         if prompt.transcript_tokens <= budget:
             return prompt
@@ -223,13 +270,40 @@ def _compose(
     max_context: int,
     limit: int,
     system_tokens: int,
+    files: FileStore | None,
+    newest_pictures_only: bool,
 ) -> AssembledPrompt:
     """One rung of the ladder: the context by cases 1-3, then case 4's
     degrade levels until one fits the budget. Returns the deepest level
     when none does — the ladder reads the size and steps down."""
     head, covered, tail = _split_transcript(messages, scenes, shape.head_messages, tail_target)
-    head_tokens = sum(_wire_tokens(m) for m in head)
-    tail_tokens = sum(_wire_tokens(m, is_last=i == len(tail) - 1) for i, m in enumerate(tail))
+    # Which rows' pictures are TO SEND: every verbatim row's, read from
+    # the folder here and only here, for the rows that stay verbatim —
+    # or, where the engine gathers every picture onto the latest prompt,
+    # the newest row's that carries any, so a follow-up question without
+    # a picture still reaches the model with the picture it is about,
+    # and no second row's stacks under it. By POSITION, searched back
+    # from the last verbatim row (a short story is all head, and its
+    # tail is empty); identity tells the rows apart here because the
+    # list holds each object once. None for a model that cannot see.
+    verbatim_messages = head + tail
+    newest_pictured_message = next((m for m in reversed(verbatim_messages) if m.attachments), None)
+    pictures_to_send: list[tuple[WirePicture, ...]] = []
+    for message in verbatim_messages:
+        message_pictures: list[WirePicture] = []
+        if files is not None and (not newest_pictures_only or message is newest_pictured_message):
+            for attachment in message.attachments:
+                found = files.get(attachment.file)
+                if found is not None:  # a file that is gone is skipped
+                    message_pictures.append(WirePicture(*found))
+        pictures_to_send.append(tuple(message_pictures))
+    head_tokens = sum(
+        _wire_tokens(m, pictures) for m, pictures in zip(head, pictures_to_send, strict=False)
+    )
+    tail_tokens = sum(
+        _wire_tokens(m, pictures, is_last=i == len(tail) - 1)
+        for i, (m, pictures) in enumerate(zip(tail, pictures_to_send[len(head) :], strict=True))
+    )
 
     # The doc's case 4 drops summaries until the context fits and only
     # then swaps the history in; here every candidate level carries its
@@ -250,7 +324,25 @@ def _compose(
     wire: list[WireTurn] = []
     if system:
         wire.append(WireTurn(role="system", body=system))
-    wire.extend(_wire_turns(head + recap_rows + tail))
+    # The recap rows carry none: a summarized turn's picture is gone.
+    wire.extend(
+        _wire_turns(
+            head + recap_rows + tail,
+            pictures_to_send[: len(head)] + [()] * len(recap_rows) + pictures_to_send[len(head) :],
+        )
+    )
+    # A picture is counted only where its row stays verbatim: a
+    # summarized row's is neither sent nor missed, the summary is what
+    # remains of the turn. Held back is what `newest_pictures_only` kept off the
+    # earlier rows; omitted is what would not load — no vision, a file
+    # gone.
+    pictures_attached = sum(len(m.attachments) for m in verbatim_messages)
+    pictures_sent = sum(len(pictures) for pictures in pictures_to_send)
+    pictures_held = sum(
+        len(m.attachments)
+        for m in verbatim_messages
+        if files is not None and newest_pictures_only and m is not newest_pictured_message
+    )
     return AssembledPrompt(
         messages=wire,
         max_context=max_context,
@@ -266,6 +358,9 @@ def _compose(
         tail_setting=shape.min_tail_messages,
         transcript_kept=len(head) + len(tail),
         transcript_total=len(messages),
+        pictures_sent=pictures_sent,
+        pictures_omitted=pictures_attached - pictures_sent - pictures_held,
+        pictures_held=pictures_held,
     )
 
 
@@ -413,23 +508,32 @@ def _wire_text(message: Message, *, is_last: bool = False) -> str:
     return syntax.to_wire(message, is_last=is_last)
 
 
-def _wire_tokens(message: Message, *, is_last: bool = False) -> int:
-    """Tokens one row costs on the wire."""
-    return estimate_tokens(_wire_text(message, is_last=is_last))
+def _wire_tokens(
+    message: Message, pictures: tuple[WirePicture, ...], *, is_last: bool = False
+) -> int:
+    """Tokens one row costs on the wire: its text, and `IMAGE_TOKENS` for
+    each picture to send with it."""
+    return estimate_tokens(_wire_text(message, is_last=is_last)) + IMAGE_TOKENS * len(pictures)
 
 
-def _wire_turns(kept: list[Message]) -> list[WireTurn]:
-    """Transcript rows → wire turns: each turn's own text and nothing else.
-    Consecutive same-role rows rejoin into one turn — storage granularity is
-    otaku's bookkeeping; the model sees one prompt per exchange."""
+def _wire_turns(
+    rows: list[Message], pictures_to_send: Sequence[tuple[WirePicture, ...]]
+) -> list[WireTurn]:
+    """Transcript rows → wire turns: each turn's own text and pictures
+    and nothing else. Consecutive same-role rows rejoin into one turn,
+    pictures and all — storage granularity is otaku's bookkeeping; the
+    model sees one prompt per exchange."""
     out: list[WireTurn] = []
-    for position, message in enumerate(kept):
+    for position, message in enumerate(rows):
         # Newest = the LAST POSITION, never object identity: two turns can
         # hold the same text, and only where a row sits decides whether its
         # cue is still live.
-        text = _wire_text(message, is_last=position == len(kept) - 1)
+        text = _wire_text(message, is_last=position == len(rows) - 1)
+        images = pictures_to_send[position]
         if out and out[-1].role == message.role:
-            out[-1] = WireTurn(role=message.role, body=out[-1].body + "\n\n" + text)
+            out[-1] = WireTurn(
+                role=message.role, body=out[-1].body + "\n\n" + text, images=out[-1].images + images
+            )
         else:
-            out.append(WireTurn(role=message.role, body=text))
+            out.append(WireTurn(role=message.role, body=text, images=images))
     return out

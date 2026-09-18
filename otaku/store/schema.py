@@ -4,13 +4,16 @@ Always the CURRENT shape: a fresh database is created from it directly,
 and `store.migrations` brings old databases to it. The semantics ride in
 from the old module unchanged with the DDL text: stories/messages are
 source, scenes/characters/journals derivatives, sibling trees via
-parent_id, the two-level rollup pattern, per-field sealing, audit-only
-timestamps.
+parent_id, the two-level rollup pattern, per-field sealing (the `attachments`
+column plain on purpose: the app's facts about files the folder beside
+the database holds sealed), audit-only timestamps.
 """
 
+import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 
-SCHEMA_VERSION = "4"
+SCHEMA_VERSION = "5"
 
 SCHEMA_DDL = """
 -- ---------- source: what was actually said ----------
@@ -43,6 +46,7 @@ CREATE TABLE messages (
     model       TEXT,
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL,
+    attachments TEXT,                    -- the turn's pictures as a JSON list, see Attachment; NULL when none
     UNIQUE (story_id, id),               -- composite-FK target: same-story references only
     FOREIGN KEY (story_id, parent_id) REFERENCES messages(story_id, id),
     CHECK (parent_id IS NULL OR parent_id < id)
@@ -136,6 +140,24 @@ class Story:
 
 
 @dataclass(frozen=True)
+class Attachment:
+    """One picture on a turn, as the `attachments` column records it: the
+    app's facts about a file in the folder beside the database, none of
+    the reader's words — which is why the column is plain where the file
+    is sealed. `file` is the file's name in the folder, extension
+    included (`store.files` draws it; the extension says the type), the
+    rest their measure as the model sees them — recorded here so that no
+    reader has to open a sealed file to describe a picture. The reader's
+    original file name is not kept: nothing needs it once the picture
+    is in."""
+
+    file: str
+    width: int
+    height: int
+    size: int
+
+
+@dataclass(frozen=True)
 class Message:
     """One turn of a story. `id` is 0 on a turn not yet stored; `append`
     assigns the real one. `kind` is 'dialogue' | 'narration' | 'ooc' |
@@ -150,6 +172,9 @@ class Message:
     speaker_id: int | None = None
     provider: str | None = None  # set on assistant turns ('card' on a card greeting)
     model: str | None = None
+    attachments: tuple[
+        Attachment, ...
+    ] = ()  # the turn's pictures; the files folder holds the bytes
     id: int = 0
 
 
@@ -185,3 +210,39 @@ class Journal:
     state: str
     history: str = ""
     updated_at: str = ""  # audit column, surfaced for display alone
+
+
+def attachments_to_json(attachments: Sequence[Attachment]) -> str | None:
+    """The column's text for these pictures: a JSON list, or NULL (None)
+    for a turn without any — the column never holds an empty list
+    pretending to be absent. The keys are a contract with the SQL that
+    reads the column back (`$.file` is what the sweep extracts)."""
+    if not attachments:
+        return None
+    return json.dumps(
+        [
+            {
+                "file": a.file,
+                "width": a.width,
+                "height": a.height,
+                "size": a.size,
+            }
+            for a in attachments
+        ]
+    )
+
+
+def attachments_from_json(text: str | None) -> tuple[Attachment, ...]:
+    """The column read back; NULL → no pictures, which is also what a
+    row written before the column existed reads as."""
+    if not text:
+        return ()
+    return tuple(
+        Attachment(
+            file=str(item["file"]),
+            width=int(item["width"]),
+            height=int(item["height"]),
+            size=int(item["size"]),
+        )
+        for item in json.loads(text)
+    )

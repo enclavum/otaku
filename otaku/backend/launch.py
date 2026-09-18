@@ -108,6 +108,11 @@ def open_session(root: str | Path | None = None, *, ask_secret: AskSecret | None
         system_log.record(note.text)
         if note.show:
             notices.append(note.show)
+    # The files folder, swept against what the rows still name — what a
+    # crash between a delete's rows and its files left behind.
+    swept = store.stories.sweep_files()
+    if swept:
+        system_log.record(f"files folder swept: {swept} unreferenced file(s) removed")
     # The worker's own store connection (WAL makes the concurrent write
     # safe), opened lazily on its thread; keep=0 — the session's open
     # above owns the daily snapshot. It exists whatever [lore_extraction]

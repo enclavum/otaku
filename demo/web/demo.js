@@ -42,6 +42,11 @@ const ROUTES = {
   // Playing
   "GET /api/play": () => ({ messages: store.turns() }),
   "GET /api/play/syntax": () => store.syntax(),
+  // A turn's pictures: the demo's model cannot see, so no turn carries
+  // one and no file is stored — a fingerprint nothing is stored under
+  // answers 404, as the product does.
+  "GET /api/files/{file}": () => null,
+  "GET /api/files/{file}/thumb": () => null,
   "GET /api/cast": () => store.cast(),
   "DELETE /api/play/last": () => store.undo(),
   "GET /api/history": () => ({ lines: store.history() }),
@@ -459,6 +464,11 @@ function play(body, regenerate, signal) {
     return json({ notice: "Nothing to regenerate.", refused: true });
   }
   const line = String(body.line ?? "");
+  if (Array.isArray(body.files) && body.files.length) {
+    // The product's own sentence, refused eagerly as it is there (copied
+    // from `backend.files.CANNOT_SEE`: the demo cannot ask a backend).
+    return json({ notice: "This model cannot see pictures.", refused: true });
+  }
   const events = [];
   if (regenerate) {
     store.dropLastReply();

@@ -7,19 +7,23 @@ principle, not a stub: sealed bytes on disk, a wrong key refused, a
 missing keystore refused BEFORE the ceremony could mint over it."""
 
 import base64
+import re
 import secrets
 import sqlite3
 import subprocess
 import tomllib
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
 from otaku import encryption
 from otaku import logging as otaku_logging
+from otaku.backend import files as backend_files
 from otaku.backend import launch as backend_launch
+from otaku.backend.files import RawFile
 from otaku.backend.paths import Paths
-from otaku.encryption import EncryptionError, PlainCipher
+from otaku.encryption import Cipher, EncryptionError, PlainCipher
 from otaku.formatting import toml_string
 from otaku.settings import config as config_mod
 from otaku.settings import prompts as prompts_mod
@@ -29,14 +33,22 @@ from otaku.settings.migrations.prompt_texts import EXTRACT_0_2_2
 from otaku.store import DatabaseError, Store, is_encrypted
 from otaku.store import migrations as store_migrations
 from otaku.store.database import check_value
+from otaku.store.files import FileStore
 from otaku.store.migrations import v2 as store_v2
 from otaku.store.migrations import v3 as store_v3
 from otaku.store.migrations import v4 as store_v4
-from otaku.store.schema import SCHEMA_DDL
+from otaku.store.migrations import v5 as store_v5
+from otaku.store.schema import SCHEMA_DDL, Attachment, Message
 from otaku.terminal.tty import BOLD, RESET
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch, run_otaku, set_config, set_config_provider
 from scenarios.support.server import ModelServer
+
+FILES_KEY = b"k" * 32  # the folder scenarios' raw keys; KEY below is the config's base64
+FILES_OTHER_KEY = b"o" * 32
+CAT = b"\xff\xd8 not a real jpeg, but the store never looks"
+THUMB = b"thumb bytes"
+CAT_PHOTO = Path(__file__).parent / "fixtures" / "cat.jpg"
 
 
 def load_config(paths: Paths):
@@ -237,10 +249,13 @@ class TestSchemaMigration:
         paths = _v1_database(tmp_path / "state")
         store = _open(paths)
         try:
-            assert any("Database migrated (v1 → v4)" in note.show for note in store.notes)
+            assert any("Database migrated (v1 → v5)" in note.show for note in store.notes)
             (message,) = store.stories.get_messages(1)
             # The v1 `framing` column reads back through the renamed one.
             assert (message.body, message.template) == ("I enter.", "TPL")
+            # The v5 `attachments` column trails: a v1 row reads NULL there,
+            # which is a turn without pictures.
+            assert message.attachments == ()
             # The v1 character reads whole through the widened row: the
             # added `card` column trails, so nothing shifted into it.
             (keeper,) = store.characters.list(1)
@@ -257,7 +272,7 @@ class TestSchemaMigration:
             assert store.journals.get_current(1, ids)[keeper.id].state == "at the gate"
         finally:
             store.close()
-        assert _meta_version(paths) == "4"
+        assert _meta_version(paths) == "5"
 
     def test_a_migration_that_ran_is_reported_at_launch(
         self, server: ModelServer, tmp_path
@@ -368,6 +383,22 @@ class TestSchemaMigration:
             end = shipped.index(");", start) + 1
             assert shipped[start:end] == frozen, table
 
+    def test_the_frozen_v4_is_what_the_release_shipped(self) -> None:
+        """The same non-circular check for step 5's precondition, against
+        the schema the v0.5.0 tag shipped (version 4)."""
+        proc = subprocess.run(
+            ["git", "show", "v0.5.0:otaku/store/schema.py"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if proc.returncode != 0:
+            pytest.skip("the v0.5.0 tag is not reachable here")
+        shipped = proc.stdout
+        start = shipped.index("CREATE TABLE messages")
+        end = shipped.index(");", start) + 1
+        assert shipped[start:end] == store_v5._V4_MESSAGES
+
     def test_the_ladder_resumes_from_where_it_stamped(self, tmp_path, monkeypatch) -> None:
         paths = _v1_database(tmp_path / "state")
         monkeypatch.setitem(store_migrations._STEPS, 3, _raise)
@@ -377,10 +408,165 @@ class TestSchemaMigration:
         monkeypatch.setitem(store_migrations._STEPS, 3, store_v3.to_3)
         resumed = _open(paths)
         try:
-            assert any("Database migrated (v2 → v4)" in note.show for note in resumed.notes)
+            assert any("Database migrated (v2 → v5)" in note.show for note in resumed.notes)
         finally:
             resumed.close()
-        assert _meta_version(paths) == "4"
+        assert _meta_version(paths) == "5"
+
+
+class TestFilesFolder:
+    """The folder beside the database: a turn's pictures on disk, sealed
+    with the database's cipher, named by story, day and a short
+    digest of the bytes, shared by a fork, swept when no message names them —
+    the files are what running the app cannot show."""
+
+    def test_a_picture_lands_sealed_beside_the_database(self, tmp_path) -> None:
+        paths = _state(tmp_path)
+        store = Store.open(
+            paths.database_file, Cipher(FILES_KEY), backups_dir=paths.backups_dir, keep=0
+        )
+        try:
+            name = store.files.add(24, CAT, "image/jpeg", thumb=THUMB)
+            # Readable in a listing: the kind, the story, the day, a short
+            # digest of the bytes, the picture's own extension — and the
+            # thumbnail beside it.
+            assert re.fullmatch(r"pic-0024-\d{8}-[0-9a-f]{8}\.jpg", name)
+            names = {path.name for path in _files(paths)}
+            assert names == {name, name.removesuffix(".jpg") + "-thumb.jpg"}
+            sealed = (paths.database_dir / "files" / name).read_bytes()
+            assert CAT not in sealed
+            assert store.files.get(name) == (CAT, "image/jpeg")
+            assert store.files.get_thumb(name) == THUMB
+        finally:
+            store.close()
+
+    def test_under_provider_none_the_file_is_the_picture(self, tmp_path) -> None:
+        paths = _state(tmp_path)
+        store = _open(paths)
+        try:
+            name = store.files.add(1, CAT, "image/jpeg")
+            assert (paths.database_dir / "files" / name).read_bytes() == CAT
+            assert store.files.get_thumb(name) is None  # none was given
+        finally:
+            store.close()
+
+    def test_another_key_reads_the_folder_as_absent(self, tmp_path) -> None:
+        paths = _state(tmp_path)
+        store = Store.open(
+            paths.database_file, Cipher(FILES_KEY), backups_dir=paths.backups_dir, keep=0
+        )
+        try:
+            name = store.files.add(1, CAT, "image/jpeg")
+        finally:
+            store.close()
+        other = FileStore(paths.database_dir / "files", Cipher(FILES_OTHER_KEY))
+        assert other.get(name) is None
+
+    def test_the_same_picture_twice_in_a_story_is_one_file(self, tmp_path) -> None:
+        paths = _state(tmp_path)
+        store = _open(paths)
+        try:
+            first = store.files.add(1, CAT, "image/jpeg")
+            assert store.files.add(1, CAT, "image/jpeg") == first
+            assert len(_files(paths)) == 1
+            # Another story's copy is its own file, under its own number.
+            assert store.files.add(2, CAT, "image/jpeg") != first
+            assert len(_files(paths)) == 2
+        finally:
+            store.close()
+
+    def test_a_fork_shares_the_picture(self, tmp_path) -> None:
+        paths = _state(tmp_path)
+        store = _open(paths)
+        try:
+            story = store.stories.add("Cats")
+            picture = _attach(store, story, CAT)
+            store.stories.append(story, Message(role="user", body="Look.", attachments=(picture,)))
+            copy = store.stories.fork(story)
+            (message,) = store.stories.get_messages(copy)
+            assert message.attachments == (picture,)  # the origin's name, shared
+            assert len(_files(paths)) == 1
+        finally:
+            store.close()
+
+    def test_deleting_a_story_sweeps_what_no_message_names(self, tmp_path) -> None:
+        paths = _state(tmp_path)
+        store = _open(paths)
+        try:
+            story = store.stories.add("Cats")
+            picture = _attach(store, story, CAT)
+            store.stories.append(story, Message(role="user", body="Look.", attachments=(picture,)))
+            copy = store.stories.fork(story)
+            store.stories.delete(copy)
+            assert len(_files(paths)) == 1  # the original still names it
+            store.stories.delete(story)
+            assert _files(paths) == []
+        finally:
+            store.close()
+
+    def test_an_abandoned_sibling_keeps_its_picture(self, tmp_path) -> None:
+        # Undo moves the head and deletes nothing: the turn stays in the
+        # tree, so its picture stays in the folder.
+        paths = _state(tmp_path)
+        store = _open(paths)
+        try:
+            story = store.stories.add("Cats")
+            picture = _attach(store, story, CAT)
+            store.stories.append(story, Message(role="user", body="Look.", attachments=(picture,)))
+            store.stories.set_head(story, None)
+            assert store.stories.sweep_files() == 0
+            assert len(_files(paths)) == 1
+        finally:
+            store.close()
+
+    def test_a_stray_temporary_is_swept(self, tmp_path) -> None:
+        paths = _state(tmp_path)
+        store = _open(paths)
+        try:
+            story = store.stories.add("Cats")
+            picture = _attach(store, story, CAT)
+            store.stories.append(story, Message(role="user", body="Look.", attachments=(picture,)))
+            (paths.database_dir / "files" / ".deadbeef.tmp").write_bytes(b"half")
+            assert store.stories.sweep_files() == 1
+            assert [path.name for path in _files(paths)] == [picture.file]
+        finally:
+            store.close()
+
+    def test_the_launch_sweeps_what_a_crash_left(self, server: ModelServer, tmp_path) -> None:
+        # Convergent like a settings migration: a file the delete's crash
+        # left behind goes on the next launch, and nothing else does.
+        paths = _state(tmp_path)
+        store = _open(paths)
+        try:
+            story = store.stories.add("Cats")
+            picture = _attach(store, story, CAT)
+            store.stories.append(story, Message(role="user", body="Look.", attachments=(picture,)))
+        finally:
+            store.close()
+        (paths.database_dir / "files" / "pic-0009-20260101-deadbeef.jpg").write_bytes(b"orphan")
+        app = launch(paths.root, server)
+        try:
+            assert [path.name for path in _files(paths)] == [picture.file]
+        finally:
+            app.close()
+
+    def test_a_photo_read_and_saved_lands_with_its_thumbnail(self, tmp_path) -> None:
+        # The real photograph, through the real pipeline, into the folder:
+        # the row's facts are the file's, and both files decode.
+        paths = _state(tmp_path)
+        store = _open(paths)
+        try:
+            read = backend_files.read_picture(RawFile(CAT_PHOTO.read_bytes(), "cat.jpg"))
+            picture = backend_files.save(store.files, read, 1)
+            assert picture.file.endswith(".jpg")
+            assert max(picture.width, picture.height) <= backend_files.WIRE_EDGE
+            stored = store.files.get(picture.file)
+            assert stored is not None and len(stored[0]) == picture.size
+            assert store.files.get_thumb(picture.file) is not None
+            names = {path.name for path in _files(paths)}
+            assert names == {picture.file, picture.file.removesuffix(".jpg") + "-thumb.jpg"}
+        finally:
+            store.close()
 
 
 class TestConfigMigration:
@@ -898,6 +1084,24 @@ def _v1_database(root) -> Paths:
 
 def _open(paths: Paths) -> Store:
     return Store.open(paths.database_file, PlainCipher(), backups_dir=paths.backups_dir, keep=0)
+
+
+def _state(tmp_path) -> Paths:
+    paths = Paths.resolve(tmp_path / "state")
+    paths.ensure_tree()
+    return paths
+
+
+def _files(paths: Paths) -> list:
+    folder = paths.database_dir / "files"
+    return sorted(folder.iterdir()) if folder.is_dir() else []
+
+
+def _attach(store: Store, story_id: int, data: bytes) -> Attachment:
+    """A picture into the folder under the story's number, and the row
+    that names it."""
+    name = store.files.add(story_id, data, "image/jpeg")
+    return Attachment(file=name, width=2, height=2, size=len(data))
 
 
 def _unsealed(paths: Paths, value: str) -> str:

@@ -66,7 +66,8 @@ export async function openStories(answered = "", { selectId = null } = {}) {
         ),
       );
       return [
-        span("otk-label", `touched ${when(story.updated_at)} · ${ago(story.updated_at)}`),
+        // the number a story's files are named by (`store.files`)
+        span("otk-label", `touched ${when(story.updated_at)} · ${ago(story.updated_at)} · id ${story.id}`),
         element("h3", "otk-detail__title", label(story.label) || "(untitled)"),
         span(
           "otk-meta",

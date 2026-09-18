@@ -151,14 +151,15 @@ async function confirmed({ title, body, note = "", action, cancel = "Cancel", ru
     state (`api.whenLost` → `shell.disconnected`); what is reported here
     is the other kind — a fault the server ANSWERED, which is a bug to
     show and never a state to draw. */
-export async function playLine(line) {
+export async function playLine(line, files = []) {
   try {
-    await play(line);
+    const refused = await play(line, { files });
     /* A played line is a write like any other and the runhead is drawn
        from facts that just changed — the first line of a session makes
        the story, and every line after it moves the count. No notice: the
-       reply IS the answer. */
-    await landed("");
+       reply IS the answer — unless the line was refused, and then the
+       refusal stands through the landing rather than being wiped by it. */
+    await landed(refused ?? "", { kind: refused ? "otk-error" : "" });
   } catch (e) {
     if (e?.answered) tell(String(e.message ?? e), "otk-error");
   }

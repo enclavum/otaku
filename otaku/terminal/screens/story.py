@@ -69,6 +69,7 @@ from otaku.terminal.screens.base import (
 )
 from otaku.terminal.tty import latin_key
 from otaku.terminal.tty.render import message as render_message
+from otaku.terminal.tty.render import pictures_note
 from otaku.terminal.tty.theme import theme
 from otaku.terminal.tty.typography import highlight_toml
 
@@ -387,11 +388,18 @@ class Dossier(ListScreen):
             # that, syntax included, so nothing is composed here. Slice
             # first: this renders per keystroke, and avail chars never
             # need more than a slice of a huge message.
-            head = truncate(flatten(m.body[: 4 * avail]), avail) or "(empty)"
+            # A turn's pictures are noted after the line by `render`, the
+            # way the played block notes them; the note's width comes off
+            # the cut, so the row still fits.
+            pictures = len(m.attachments)
+            note_w = len(pictures_note(pictures)) + 1 if pictures else 0
+            head = truncate(flatten(m.body[: 4 * avail]), max(4, avail - note_w))
+            if not head and not pictures:
+                head = "(empty)"
             # Styled AFTER the cut, so no escape can be sliced in half —
             # and on every row, selected or not: what a line says it is
             # does not depend on where the cursor happens to be.
-            head = self._render(head, m.role)
+            head = self._render(head, m.role, pictures=pictures)
             # The original message number, so a filtered row still reads
             # as its true position in the story.
             row = f"{orig + 1:>4} · {m.role:<{role_w}} · {head}"
@@ -479,12 +487,12 @@ class Dossier(ListScreen):
             return [("class:preview.muted", "nothing to preview")]
         m = self.msgs[self.turn_filtered[self.cursor]]
         out: StyleAndTextTuples = []
-        if m.body:
+        if m.body or m.attachments:
             # Whatever `render` makes of it, parsed into fragments so
             # the window's own wrapping carries styles across wrapped
             # rows. Editing swaps this window out, so the buffer stays
             # raw text.
-            body = self._render(m.body, m.role)
+            body = self._render(m.body, m.role, pictures=len(m.attachments))
             if not body.endswith("\n"):
                 body += "\n"
             out.extend(ansi_fragments(body, "class:preview.body"))

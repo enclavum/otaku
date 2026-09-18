@@ -47,6 +47,11 @@ dependencies = [
     "cryptography>=49,<51; sys_platform != 'darwin' or platform_machine == 'arm64'",
     "cryptography>=48,<49; sys_platform == 'darwin' and platform_machine == 'x86_64'",
     "httpx>=0.28,<1.0",
+    # Pictures on a turn: Pillow decodes, orients, downsizes and re-encodes
+    # them; pillow-heif adds HEIC, what an iPhone shoots, with libheif in
+    # its wheels.
+    "pillow>=12.3,<13.0",
+    "pillow-heif>=1.7,<2.0",
     "prompt_toolkit>=3.0.53,<4.0",
 ]
 

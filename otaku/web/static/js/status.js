@@ -14,9 +14,13 @@
 import { $ } from "./dom.js";
 
 const line = $(".otk-status");
-const lamp = $(".otk-status__lamp", line);
 const text = $(".otk-status__text", line);
 const action = $(".otk-status__action", line);
+// A refusal is also drawn above the composer, where the refused line was
+// typed — the rail's line is a drawer on a narrow screen. Its own row,
+// touched by `complain` and `settle` alone: nothing said on the status
+// line moves it.
+const complaint = $(".otk-composer__error");
 
 /* What the lamp is saying, most severe first. `offline` outranks
    everything (nothing else is true while otaku is gone), `working`
@@ -41,6 +45,21 @@ export function tell(sentence, kind = "") {
   text.title = sentence || _RESTING;
   line.classList.toggle("otk-status--said", Boolean(sentence) && kind !== "otk-error");
   line.classList.toggle("otk-status--error", Boolean(sentence) && kind === "otk-error");
+}
+
+/** What refused the line just typed, above the box it was typed in. It
+    stands there, whatever the status line says meanwhile, until
+    `settle` — the reader changing the words, or trying again. */
+export function complain(sentence) {
+  if (!complaint) return;
+  complaint.textContent = sentence;
+  complaint.hidden = false;
+}
+
+export function settle() {
+  if (!complaint) return;
+  complaint.textContent = "";
+  complaint.hidden = true;
 }
 
 /** What is on the line right now — for the beat, which takes its own

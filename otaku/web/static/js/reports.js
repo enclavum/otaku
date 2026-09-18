@@ -55,8 +55,13 @@ export async function openContext() {
   const wire = element("div", "otk-context__wire");
   for (const part of preview.parts) {
     const passage = element("div", "otk-passage");
+    // The pictures riding the part, beside the role — the report's own
+    // count, drawn where the terminal draws it.
+    const riding = part.pictures
+      ? ` · ${part.pictures} picture${part.pictures === 1 ? "" : "s"} attached`
+      : "";
     passage.append(
-      span("otk-passage__rubric", part.role),
+      span("otk-passage__rubric", part.role + riding),
       element(
         "p",
         part.role === "user" ? "otk-prose otk-prose--said" : "otk-prose otk-prose--wire",

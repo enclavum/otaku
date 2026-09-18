@@ -45,6 +45,9 @@ export function showFacts(facts) {
   // to be somewhere: hovering the name is where.
   const named = $('[data-fact="model"]');
   if (named) named.title = fields.model;
+  // The attach hint is a fact of the model in use: there while it can
+  // see, gone otherwise. The backend refuses a picture regardless.
+  for (const button of $$("[data-attach]")) button.hidden = !facts.vision;
   drawn = facts.story_id;
 }
 
@@ -59,7 +62,7 @@ export async function refresh() {
     draws is no longer the one that is open, because a redraw costs the
     reader their place. `corrected` — `[position, text]` — is one turn
     corrected elsewhere, shown where the transcript draws it instead. */
-export async function landed(notice, { redraw = "if-moved", corrected = null } = {}) {
+export async function landed(notice, { redraw = "if-moved", corrected = null, kind = "" } = {}) {
   const facts = await api.facts();
   const moved = facts.story_id !== drawn;
   showFacts(facts);
@@ -68,7 +71,7 @@ export async function landed(notice, { redraw = "if-moved", corrected = null } =
   } else if (corrected) {
     showCorrected(...corrected);
   }
-  tell(notice);
+  tell(notice, kind);
 }
 
 /* How often the page asks whether otaku is still there. Without it the

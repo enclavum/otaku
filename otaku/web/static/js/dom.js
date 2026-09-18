@@ -67,12 +67,45 @@ export function watchTextareas() {
     forever. Two screens open it (a story to import, a premise to read),
     which is why it lives here rather than in either of them. */
 export function pickFile(accept) {
+  return pickFiles(accept, { several: false }).then((files) => files[0] ?? null);
+}
+
+/** The same dialog for several files at once — the pictures a line
+    attaches — as an array, empty if the reader closed it. */
+export function pickFiles(accept, { several = true } = {}) {
   return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
     input.accept = accept;
-    input.onchange = () => resolve(input.files[0] ?? null);
-    input.oncancel = () => resolve(null);
+    input.multiple = several;
+    /* In the document while it asks, though never seen: iOS Safari
+       answers a click on an input that is not in the document with
+       nothing at all, and the promise would never settle. */
+    input.hidden = true;
+    const settle = (files) => {
+      input.remove();
+      resolve(files);
+    };
+    input.onchange = () => settle([...input.files]);
+    input.oncancel = () => settle([]);
+    document.body.append(input);
     input.click();
+  });
+}
+
+/** One picked file as the play body carries it: the name, the type the
+    browser reported, and the bytes as base64 — the data URL's payload,
+    which is how a browser encodes a file without touching its bytes. */
+export function encodeFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onload = () =>
+      resolve({
+        name: file.name,
+        media_type: file.type,
+        data: String(reader.result).split(",", 2)[1] ?? "",
+      });
+    reader.readAsDataURL(file);
   });
 }

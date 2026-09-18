@@ -179,7 +179,10 @@ def _regen(chat: Chat, raw: str) -> None:
         chat.say(marker + "\n")
         # The typed line stays above the marker — nothing of it to erase.
         chat.ledger.typed_gone()
-        chat.ledger.echo_block(message(prompt.body, "user") if prompt else "", above=marker)
+        chat.ledger.echo_block(
+            message(prompt.body, "user", pictures=len(prompt.attachments)) if prompt else "",
+            above=marker,
+        )
     while stream.show(chat, events):
         events = api_play.regenerate(session)
 

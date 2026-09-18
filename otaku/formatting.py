@@ -186,6 +186,12 @@ def format_size(size: int | None) -> str:
     return f"{size / 1024**3:.1f} GB"
 
 
+def format_megabytes(size: int) -> str:
+    """Bytes → megabytes with one decimal, the whole number bare —
+    "3.2 MB", "10 MB" — decimal, as a phone shows a picture's size."""
+    return f"{size / 1_000_000:.1f} MB".replace(".0 MB", " MB")
+
+
 def format_duration(seconds: float) -> str:
     """Seconds → "42s" under a minute, "3m 07s" above — the system log's
     span format."""

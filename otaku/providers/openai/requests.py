@@ -9,14 +9,29 @@ from dataclasses import dataclass
 from typing import Protocol
 
 
+class WireImage(Protocol):
+    """What a chat request needs of a picture on a message: its bytes
+    and their media type. `Image` is the concrete one; the assembler's
+    own picture satisfies it structurally, the way its wire turn
+    satisfies `WireMessage`."""
+
+    @property
+    def data(self) -> bytes: ...
+    @property
+    def media_type(self) -> str: ...
+
+
 class WireMessage(Protocol):
-    """What a chat request needs of a message: a role and its wire text.
-    `store.schema.Message` satisfies it structurally."""
+    """What a chat request needs of a message: a role, its wire text,
+    and the pictures riding on it (none, for most). `context`'s
+    `WireTurn` satisfies it structurally."""
 
     @property
     def role(self) -> str: ...
     @property
     def body(self) -> str: ...
+    @property
+    def images(self) -> Sequence[WireImage]: ...
 
 
 @dataclass(frozen=True)
@@ -34,17 +49,19 @@ def chat_completion_body(
     messages: Sequence[WireMessage],
     params: dict[str, object],
     *,
-    images: Sequence[Image] = (),
     cache_ttl: str | None = None,
 ) -> dict[str, object]:
-    """A streaming chat request. `cache_ttl` marks prompt-cache
-    breakpoints ("5m" or "1h"); None leaves the messages plain strings.
-    `images` ride on the LAST message, the one asking about them."""
+    """A streaming chat request. Each message's pictures ride on it as
+    content parts after its text. `cache_ttl` marks prompt-cache
+    breakpoints ("5m" or "1h") — on a row that carries pictures, on its
+    last part, so the pictures sit inside the cached prefix; None leaves
+    the messages plain strings."""
     wire: list[dict[str, object]] = [{"role": m.role, "content": m.body} for m in messages]
+    for at, message in enumerate(messages):
+        if message.images:
+            wire[at] = _with_images(wire[at], message.images)
     if cache_ttl and wire:
         _mark_cache(wire, cache_ttl)
-    if images and wire:
-        wire[-1] = _with_images(wire[-1], images)
     return {
         "model": model,
         "messages": wire,
@@ -79,9 +96,18 @@ def _mark_cache(wire: list[dict[str, object]], ttl: str) -> None:
         marker["ttl"] = "1h"
 
     def marked(row: dict[str, object]) -> dict[str, object]:
-        if not row["content"]:
+        content = row["content"]
+        if isinstance(content, list):
+            # Already parts — a row with pictures: the mark goes on the
+            # last one, so the whole row is inside the cached prefix.
+            if not content:
+                return row
+            parts = list(content)
+            parts[-1] = {**parts[-1], "cache_control": dict(marker)}
+            return {**row, "content": parts}
+        if not content:
             return row  # an empty text part is refused by the catalogs
-        part = {"type": "text", "text": row["content"], "cache_control": dict(marker)}
+        part = {"type": "text", "text": content, "cache_control": dict(marker)}
         return {**row, "content": [part]}
 
     if wire[0]["role"] == "system":
@@ -90,7 +116,7 @@ def _mark_cache(wire: list[dict[str, object]], ttl: str) -> None:
         wire[-1] = marked(wire[-1])
 
 
-def _with_images(message: dict[str, object], images: Sequence[Image]) -> dict[str, object]:
+def _with_images(message: dict[str, object], images: Sequence[WireImage]) -> dict[str, object]:
     """`message` with the images appended as content parts, the text
     becoming a part of its own where it was a plain string."""
     content = message["content"]

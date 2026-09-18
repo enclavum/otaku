@@ -87,6 +87,7 @@ CAT = Path(__file__).parent.parent / "fixtures" / "cat.jpg"
 class Turn:
     role: str
     body: str
+    images: tuple[Image, ...] = ()
 
 
 @pytest.fixture(params=CASES, ids=_IDS)
@@ -175,14 +176,13 @@ class TestMatrix:
             pytest.skip(f"{model} does not take images, or its provider cannot say")
         messages = [
             Turn("system", "Answer with one word."),
-            Turn("user", "What animal is this?"),
+            Turn("user", "What animal is this?", (Image(CAT.read_bytes(), "image/jpeg"),)),
         ]
         chunks = client.completion.chat(
             model,
             messages,
             {"max_tokens": 200, "temperature": 0},
             level="none",
-            images=[Image(CAT.read_bytes(), "image/jpeg")],
             watched=False,
         )
         answer = "".join(c.text for c in chunks if isinstance(c, Text)).lower()

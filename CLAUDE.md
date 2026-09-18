@@ -144,6 +144,33 @@ migrated database equals a fresh one, `sqlite_master` row for row.
 may ever rely on them. UI display use (e.g. ordering the story list by
 recency, "extracted 4m ago") is allowed.
 
+A turn's pictures are the one thing the database only NAMES:
+`messages.attachments` is a plain JSON list (`schema.Attachment` — the
+app's facts, none of the reader's words, so unsealed on purpose), and
+the bytes live in `database/files/` beside the database, sealed with the
+session cipher, as `pic-<story, 4 digits>-<day>-<BLAKE2, 8 hex>.<ext>`
+with the thumbnail beside it as `…-thumb.jpg`: readable in a listing,
+sorted by story and day, the same bytes in one story on one day one
+file (a plain hash, so under encryption a holder of the folder can
+confirm a picture they already have — judged not worth a keyed hash);
+a fork's rows keep the origin's names and share the files. The row
+carries the file's NAME, extension included, and its measure. `store/files.py` owns the folder; deletion is a sweep against
+what the messages still reference (`stories.sweep_files`, after a story
+is deleted and once at launch), so a crash between rows and files heals
+on the next run. A story that does not exist yet is made before its
+first pictures are saved, since the name needs its number. The daily
+snapshot is of the database file alone: the folder is not backed up.
+
+A picture enters through ONE reader below both frontends,
+`backend.files.read_picture` then `save` (Pillow, HEIC via pillow-heif): the type sniffed
+from the bytes, the camera orientation applied, downsized to 1568 px and
+never upsized, every metadata block dropped but the colour profile, PNG
+kept as PNG and everything else made JPEG, a 512 px thumbnail cut from
+the same image, then into the folder. Its limits are its own module
+constants (10 MB a file, 40 megapixels, 8 pictures a turn); every refusal
+is a `Refused` sentence. A model without vision is never sent a picture,
+and the attach affordances exist only while the model in use has it.
+
 ### Providers
 
 A provider section's name IS its engine: `[generic]`, `[llamacpp]`,
@@ -190,6 +217,23 @@ stands on its own (`checked`, `fresh`, `quiet`). So
 exception is a CAPABILITY (`ModelCapabilities.vision`, `text_completion`): those
 are the trade's own words, spelled as every engine spells them.
 Applied in `otaku/providers` so far; a new boolean anywhere follows it.
+
+### Pictures on the wire
+
+A picture rides the message it was attached to, on every verbatim row,
+`IMAGE_TOKENS` each in the budget — except where the ENGINE cannot keep
+it there: omlx 0.6 gathers every picture in a request onto the latest
+prompt, so a model asked about the second turn's picture reads both,
+stacked. That is a QUIRK of one engine's wire, not a capability: it is
+written on that client alone as `OpenAICompletion.pictures_ride`
+("each" everywhere, "latest" on omlx), the session reads it off the
+completion half, and the assembler then sends the newest PICTURED row's
+pictures alone (a follow-up without one still carries the picture it
+is about), counting the rest as `pictures_held`; the `/context` summary says
+so, and each part's marker counts what rides it. Flip omlx back to
+"each" once a release keeps pictures on their messages. Engine sources are checked out under
+`~/repos` (llama.cpp, koboldcpp, ollama, omlx) — read the engine before
+guessing what it does with a request.
 
 ### Inside the terminal
 
@@ -363,6 +407,16 @@ autocompletion (the menu pops at `@` and filters while typing — see
 that reads a path strips a leading `@` (`removeprefix("@")`) and never
 branches on it — it is a UI trigger, not part of any name or value.
 
+In a PLAYED line — prose, or a direction like `/me` — `@path` means one
+thing more: a token that names an existing picture file is an
+attachment. The terminal resolves it on ITS side (`terminal.prompt.pictures`,
+the way `/system FILE` is read there): the token leaves the line, one
+adjacent space with it, and the bytes ride `play.submit(files=)`; a token
+naming nothing stays prose ("@Mara"). The stored body never holds the
+token. The menu behind it lists directories and picture files, and pops
+only while the model in use can see (`session.vision`); the backend
+refuses a picture regardless when it cannot.
+
 ## Web conventions
 
 The package is one secret per module — `run` (the frontend's life; the
@@ -376,7 +430,9 @@ mechanics live in the module docstrings:
 
 - **Nothing is cached, BY DESIGN**: what is on disk is what the browser
   has, always — `no-store`, no validator, read per request. The
-  versioned fonts are the one immutable exception. `/api/watch`
+  versioned fonts, and a turn's pictures (`/api/files/{file}` and its
+  `/thumb`, a `Blob` answer: a file never changes once written), are the
+  immutable exceptions. `/api/watch`
   finishes the rule rather than a dev mode: the page reloads itself when
   a file it is made of changes.
 - **Three guards in front of every request**: the `Host` must name this
@@ -403,6 +459,13 @@ mechanics live in the module docstrings:
 - **An entity made answers 201** and names where it now lives in
   `Location` (`Created`). A refusal stays 200: nothing was made, so
   there is nowhere to point.
+- **A picture reaches the API inside the play body**: `files`, each
+  `{name, media_type, data}` with the bytes as base64, decoded on the
+  handler's thread so a body that is not what it claims is a 400 before
+  the session is asked; the backend's refusals (cannot see, too many,
+  not a picture) come back as a Notice. A turn's row carries
+  `attachments` ([] when none) and the session facts `vision`, which is
+  what shows the attach button.
 - **A ROW ID in a path is digits; a name is anything** (`server._NUMERIC`).
   So a page that lost its story cannot address `/api/stories/null/…` —
   no route matches, the answer is a plain 404, and no handler is ever

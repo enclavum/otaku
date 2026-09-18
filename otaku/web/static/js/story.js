@@ -31,6 +31,7 @@ import {
 } from "./browser.js";
 import { $, $$, actionButton, element, pickFile, row, span } from "./dom.js";
 import { ago, excerpt, label } from "./format.js";
+import { thumbs } from "./pictures.js";
 import { typeset } from "./prose.js";
 import { landed } from "./shell.js";
 
@@ -199,10 +200,18 @@ function buildMessages(view, pane) {
     rows,
     drawRow: (message) => {
       const who = message.role === "user" ? "you" : message.speaker || "—";
+      /* The words, and right after them the turn's pictures counted, as
+         the terminal's list sets its note (`terminal.screens.story`): the
+         count reads with the line, and stays in view when the line is
+         cut. The kind keeps the row's end. */
+      const title = element("span", "otk-row__title otk-row__title--noted");
+      title.append(span("otk-row__text", excerpt(message.body, 300)));
+      const pictures = message.attachments?.length ?? 0;
+      if (pictures) title.append(span("otk-tag", `${pictures} picture${pictures === 1 ? "" : "s"}`));
       const drawn = row(
         span("otk-row__id", String(message.position)),
         span(message.role === "user" ? "otk-row__who otk-row__who--you" : "otk-row__who", who),
-        span("otk-row__title", excerpt(message.body, 300)),
+        title,
       );
       if (message.kind && message.kind !== "dialogue") drawn.append(span("otk-tag", message.kind));
       // what a save finds its row by: the cursor may be elsewhere by then
@@ -263,6 +272,10 @@ function drawReader(view, pane, message, edit) {
 
   const out = [head, body];
 
+  // The pictures that rode the turn, as the transcript shows them: tiles
+  // that open the picture at full size.
+  if (message.attachments?.length) out.push(sectionOf("Attachments", [thumbs(message.attachments)]));
+
   /* What the session recorded WITH the turn. The model rides a fact row;
      the template is the TEXT the direction filled, and prose wraps
      rather than running under its own label. */
@@ -312,7 +325,7 @@ async function saveMessage(view, message, text) {
     () => {
       message.body = text;
       message.haystack = `${text} ${message.speaker ?? ""}`.toLowerCase();
-      const line = $(`[data-pane="messages"] .otk-row[data-id="${message.id}"] .otk-row__title`, view.popup);
+      const line = $(`[data-pane="messages"] .otk-row[data-id="${message.id}"] .otk-row__text`, view.popup);
       if (line) line.textContent = excerpt(text, 300);
     },
   );

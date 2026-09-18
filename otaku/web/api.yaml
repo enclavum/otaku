@@ -103,7 +103,7 @@ openapi: 3.1.0
 
 info:
   title: otaku web API
-  version: 0.5.0
+  version: 0.6.0
   contact:
     name: otaku
     url: https://otaku.sh
@@ -230,6 +230,22 @@ paths:
               required: [line]
               properties:
                 line: { type: string }
+                files:
+                  type: array
+                  description: |
+                    The pictures the reader attached, as picked — the backend
+                    normalises them (`backend.files`): downsized to the wire
+                    edge, metadata stripped, PNG kept, everything else made
+                    JPEG. Refused eagerly, as a Notice, when the model cannot
+                    see, when there are more than eight, or when one is no
+                    picture; a `data` that is not base64 is a 400.
+                  items:
+                    type: object
+                    required: [data]
+                    properties:
+                      name: { type: string, description: "What the reader called it; for the refusal sentences alone, never kept." }
+                      media_type: { type: string, description: "As the browser reported it; the bytes decide." }
+                      data: { type: string, format: byte, description: "The file, base64." }
       responses:
         "200":
           description: Play one line.
@@ -293,6 +309,41 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Syntax" }
+
+  /api/files/{file}:
+    parameters:
+      - { name: file, in: path, required: true, schema: { type: string }, description: "The picture's file name in the store, extension included, as a turn's attachments carry it." }
+    get:
+      operationId: getFile
+      tags: [Playing]
+      summary: A picture on a turn, as the model saw it
+      description: |
+        The bytes, under their media type. A file never changes once
+        written, so the answer is `immutable` for a year — the one
+        exception beside the fonts to "nothing is cached". A name
+        nothing is stored under is a plain 404.
+      responses:
+        "200":
+          description: The picture.
+          content:
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/png: { schema: { type: string, format: binary } }
+        "404": { description: No such picture. }
+
+  /api/files/{file}/thumb:
+    parameters:
+      - { name: file, in: path, required: true, schema: { type: string }, description: "The picture's file name in the store, extension included." }
+    get:
+      operationId: getThumbnail
+      tags: [Playing]
+      summary: Its thumbnail
+      description: A JPEG, 512 px on the long edge, for the transcript; cached like the picture.
+      responses:
+        "200":
+          description: The thumbnail.
+          content:
+            image/jpeg: { schema: { type: string, format: binary } }
+        "404": { description: No such picture. }
 
   /api/cast:
     get:
@@ -1401,6 +1452,9 @@ components:
             system_tokens: { type: integer }
             transcript_tokens: { type: integer }
             limit: { type: integer, description: "What the prompt measured against — the smaller of the context a request gets (the loaded size, or the model's own on a catalog) and max_context, minus the reply reserve." }
+            pictures_sent: { type: integer, description: "Pictures riding the verbatim messages, counted at the assembler's estimate each inside transcript_tokens." }
+            pictures_held: { type: integer, description: "On earlier verbatim messages but held back: the engine puts every picture on the latest message, so only the latest turn's ride." }
+            pictures_omitted: { type: integer, description: "On verbatim messages but not sent: the model cannot see, or the file is gone." }
             kept: { type: integer, description: "Derived: head + tail." }
             total_tokens: { type: integer, description: "Derived: system + transcript." }
             used: { type: integer, description: "Derived: percent of the limit." }
@@ -1414,6 +1468,7 @@ components:
             properties:
               role: { type: string }
               body: { type: string }
+              pictures: { type: integer, description: "Pictures riding this part; 0 for most." }
 
     Export:
       type: object
@@ -1702,6 +1757,7 @@ components:
         story: { type: string, description: "The open story's name; \"\" when none." }
         story_id: { type: [integer, "null"] }
         turns: { type: integer, description: "How many, so the runhead needs no chain." }
+        vision: { type: boolean, description: "Whether the model in use takes pictures — what shows the attach button; a picture is refused regardless." }
 
     Settings:
       type: object
@@ -1833,6 +1889,23 @@ components:
         template:
           type: [string, "null"]
           description: "The template the turn was played with, filled at wire time."
+        attachments:
+          type: array
+          description: "The turn's pictures; [] when none."
+          items: { $ref: "#/components/schemas/Attachment" }
+
+    Attachment:
+      type: object
+      description: |
+        One picture on a turn, the row's own facts: the file name the
+        routes take (`/api/files/{file}`, `…/thumb`), whose extension
+        says the type, and its measure as the model sees it. The
+        reader's file name is not kept.
+      properties:
+        file: { type: string, description: "The file's name in the store: pic-<story>-<day>-<8 hex>.jpg or .png." }
+        width: { type: integer }
+        height: { type: integer }
+        size: { type: integer, description: "Bytes, as stored." }
 
     Usage:
       type: object

@@ -21,7 +21,7 @@ from otaku.console import banner
 from otaku.formatting import truncate_label
 from otaku.terminal.chat import bindings, stream
 from otaku.terminal.chat.chat import RESUME_TURNS, Chat
-from otaku.terminal.prompt import PLACEHOLDER, Carry, LineAssembler, build_prompt
+from otaku.terminal.prompt import PLACEHOLDER, Carry, LineAssembler, build_prompt, pictures
 from otaku.terminal.screens import models as screen_models
 from otaku.terminal.tty import (
     BOLD,
@@ -198,8 +198,12 @@ def submit(chat: Chat, line: str) -> None:
     try:
         if bindings.dispatch(chat, line):
             return
+        # The terminal's own affordance, resolved on its side: an `@path`
+        # naming a picture leaves the line and rides the turn as bytes.
+        # Whether the model can see is the backend's to refuse.
+        line, files = pictures.extract_pictures(line)
         try:
-            events = api_play.submit(session, line)
+            events = api_play.submit(session, line, files)
         except Refused as e:
             # Checked before it plays: invalid syntax leaves the story
             # untouched rather than half-playing a line nobody can read.

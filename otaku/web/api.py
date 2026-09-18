@@ -26,7 +26,7 @@ its text.
 import base64
 import secrets
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -53,6 +53,7 @@ from otaku.backend.api.lore import FieldKind, WorkerRun
 from otaku.backend.api.play import Declined, Done, Failed, PlayEvent, Reasoning, Recorded, Text
 from otaku.backend.api.providers import SupportedProvider
 from otaku.backend.commands import COMMANDS, PROSE_DESCRIPTION
+from otaku.backend.files import RawFile
 from otaku.backend.session import EFFORT_LEVELS, PARAMETERS, THINK_UNSET, Refused, Session
 from otaku.formatting import Money, format_context, format_size
 
@@ -60,12 +61,14 @@ __all__ = [
     "FLOWS",
     "ROUTES",
     "Ask",
+    "Blob",
     "Created",
     "NotFound",
     "Pending",
     "context",
     "event",
     "facts",
+    "files_from",
     "play",
     "regenerate",
     "settings",
@@ -121,6 +124,17 @@ class Created:
     extra: Mapping[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class Blob:
+    """A read that answers with BYTES rather than JSON — a picture, its
+    thumbnail — and the media type to say. A file never changes once
+    written, so the server lets a browser keep it: the one exception
+    beside the fonts to "nothing is cached"."""
+
+    data: bytes
+    media_type: str
+
+
 class NotFound(Exception):  # noqa: N818 — a 404 is an expected answer, not an error
     """The path parsed but the SUBJECT it names is not there — a story id
     the database does not hold, a provider name nothing is configured
@@ -150,6 +164,9 @@ def facts(session: Session) -> dict[str, Any]:
         "story_id": session.story_id,
         # How many, so the runhead needs no chain.
         "turns": len(session.messages),
+        # Whether the model in use takes pictures — what shows the attach
+        # button; the backend refuses a picture regardless.
+        "vision": session.vision,
     }
 
 
@@ -1003,11 +1020,40 @@ def _start_extract(session: Session, ask: Ask, pending: Pending) -> dict[str, An
 # ---------- the reply stream ----------
 
 
-def play(session: Session, line: str) -> Iterator[PlayEvent]:
-    """One submitted story line. Validation is eager, so a Refused
-    reaches the caller before any of this is streamed — and before
-    anything is recorded."""
-    return api_play.submit(session, line)
+def play(session: Session, line: str, files: Sequence[RawFile] = ()) -> Iterator[PlayEvent]:
+    """One submitted story line, with the pictures attached to it.
+    Validation is eager, so a Refused reaches the caller before any of
+    this is streamed — and before anything is recorded."""
+    return api_play.submit(session, line, files)
+
+
+def files_from(body: Mapping[str, Any]) -> list[RawFile]:
+    """The pictures a play body carries: `files`, each a name and its
+    bytes as base64 — decoded here, on the handler's thread, so a body
+    that is not what it claims is a malformed request (400) before the
+    session's thread is asked for anything."""
+    rows = body.get("files") or []
+    if not isinstance(rows, list):
+        raise TypeError("files is not a list")
+    return [
+        RawFile(base64.b64decode(str(row["data"]), validate=True), str(row.get("name", "")))
+        for row in rows
+    ]
+
+
+def _picture(session: Session, name: str) -> Blob:
+    found = api_play.picture(session, name)
+    if found is None:
+        raise NotFound
+    data, media_type = found
+    return Blob(data, media_type)
+
+
+def _thumbnail(session: Session, name: str) -> Blob:
+    data = api_play.thumbnail(session, name)
+    if data is None:
+        raise NotFound
+    return Blob(data, "image/jpeg")
 
 
 def regenerate(session: Session) -> Iterator[PlayEvent]:
@@ -1088,6 +1134,9 @@ def _turn(message: Message) -> dict[str, Any]:
         "provider": message.provider,
         "model": message.model,
         "template": message.template,
+        # The turn's pictures, the column's own facts: the name the
+        # file routes take, the media type, the measure. [] when none.
+        "attachments": [asdict(picture) for picture in message.attachments],
     }
 
 
@@ -1120,6 +1169,11 @@ ROUTES: dict[tuple[str, str], _Route] = {
     ("GET", "/api/play"): lambda session, ask: {"messages": _turns(session)},
     ("DELETE", "/api/play/last"): lambda session, ask: _undo(session),
     ("GET", "/api/play/syntax"): lambda session, ask: syntax(),
+    # A turn's pictures, by the name its row names them under.
+    ("GET", "/api/files/{file}"): lambda session, ask: _picture(session, ask.params["file"]),
+    ("GET", "/api/files/{file}/thumb"): lambda session, ask: _thumbnail(
+        session, ask.params["file"]
+    ),
     ("GET", "/api/cast"): lambda session, ask: cast(session),
     ("GET", "/api/history"): lambda session, ask: {"lines": _history(session)},
     ("POST", "/api/history"): _record_history,

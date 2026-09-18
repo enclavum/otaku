@@ -136,6 +136,11 @@ export const status = () => get("/api/status");
 // ---------- playing ----------
 
 export const turns = () => get("/api/play").then((it) => it.messages);
+/** Where a turn's picture and its thumbnail are served from, by the
+    fingerprint the turn's attachments name it under — an address, not a
+    request: an `img` asks for it, and the answer is immutable. */
+export const pictureUrl = (fingerprint) => `/api/files/${fingerprint}`;
+export const thumbnailUrl = (fingerprint) => `/api/files/${fingerprint}/thumb`;
 export const syntax = () => get("/api/play/syntax");
 export const cast = () => get("/api/cast");
 export const undo = () => remove("/api/play/last");
@@ -230,14 +235,15 @@ export const resetParameter = (name) =>
 
 /** Play a line, or regenerate the standing reply. Returns either the
     refusal — checked before anything is recorded — or the event stream. */
-export async function play(line, { regenerate = false, signal } = {}) {
+export async function play(line, { regenerate = false, signal, files = [] } = {}) {
   /* A POST like any other; what differs is the body, read frame by
-     frame below. `signal` is how a reader gives up: aborting takes the
+     frame below. `files` are the line's pictures, each as `encodeFile`
+     makes it. `signal` is how a reader gives up: aborting takes the
      socket away, which is the backend's cancel-and-keep door. */
   const response = await ask(regenerate ? "/api/play/last" : "/api/play", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(regenerate ? {} : { line }),
+    body: JSON.stringify(regenerate ? {} : { line, files }),
     signal,
   });
   if (response.headers.get("Content-Type")?.startsWith("application/json")) {

@@ -361,9 +361,12 @@ _PAGE = {
     "status": {"dom"},
     "watch": {"dom"},
     "prose": {"dom"},
+    # A turn's pictures: the tiles and the lightbox, drawn by the
+    # transcript and by the dossier's reader alike, so below both.
+    "pictures": {"api", "dom"},
     # `browser` for the kit's editor: a stored turn is corrected where it
     # is read, as the dossier corrects one. The kit is below the frame.
-    "transcript": {"api", "browser", "dom", "prose", "status", "table"},
+    "transcript": {"api", "browser", "dom", "pictures", "prose", "status", "table"},
     "browser": {"dom", "status"},
     # `format` for the runhead's story name: a title is cut the same way
     # wherever the page writes one.
@@ -374,7 +377,7 @@ _PAGE = {
     "help": {"browser", "dom", "table"},
     # `story` is the dossier under the browser: the browser reaches into
     # it (Open story), never the other way — its route back is a command.
-    "story": {"api", "browser", "dom", "format", "prose", "shell"},
+    "story": {"api", "browser", "dom", "format", "pictures", "prose", "shell"},
     "stories": {"api", "browser", "dom", "format", "shell", "story", "transfer"},
     "models": {"api", "browser", "dom", "shell"},
     "settings": {"api", "browser", "dom", "table"},

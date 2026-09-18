@@ -52,6 +52,7 @@ class TestEvent:
             "provider": None,
             "model": None,
             "template": None,
+            "attachments": [],
         }
 
 

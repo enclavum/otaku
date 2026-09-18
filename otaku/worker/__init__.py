@@ -27,7 +27,7 @@ from otaku.context import assembler
 from otaku.context.assembler import ContextShape
 from otaku.formatting import format_duration
 from otaku.logging import ErrorLog, SystemLog
-from otaku.providers import Locality, OpenAIClient, ProviderError, Registry
+from otaku.providers import Locality, ModelInfo, OpenAIClient, ProviderError, Registry
 from otaku.store import Store
 from otaku.store.schema import Message
 from otaku.worker.extraction import ExtractionSettings, Extractor, PassResult, Report
@@ -298,6 +298,7 @@ class Worker:
         started = time.monotonic()
         self._log.record(f"warm-up started (story {job.story_id})")
         self._set_status("warming the prompt cache")
+        found: ModelInfo | None = None
         try:
             # Loaded first where cold, as the turn loads it: what is
             # warmed must be the prefix the turn sends, cut to the same
@@ -315,6 +316,11 @@ class Worker:
                 messages=job.messages,
                 shape=job.shape,
                 max_context=max_context,
+                # The turn's own prefix, pictures included where the
+                # model sees them — a warm-up without them warms nothing.
+                vision=found is not None
+                and found.capabilities is not None
+                and found.capabilities.vision is True,
             ).messages
         except assembler.ContextOverflowError:
             # Nothing sendable to warm with — the next turn will say so.

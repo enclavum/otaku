@@ -34,7 +34,7 @@ from otaku.providers.openai.models import (
     ModelState,
     OpenAIModels,
 )
-from otaku.providers.openai.requests import Image, WireMessage
+from otaku.providers.openai.requests import WireMessage
 from otaku.settings.providers import ProviderConfig
 
 # The listing's names that are no model, as the server spells them —
@@ -182,14 +182,13 @@ class KoboldCppCompletion(OpenAICompletion):
         messages: Sequence[WireMessage],
         *,
         level: str | None = None,
-        images: Sequence[Image] = (),
         timeout: float = ASK_TIMEOUT,
     ) -> int | None:
         # Given messages, the count renders them through the same
         # transform a chat turn gets, jinja template included — the
         # template's default, though: the endpoint reads no template
         # kwargs, and it renders an image as a placeholder line.
-        body, _ = self._chat_request(model, messages, {}, level=level, images=images)
+        body, _ = self._chat_request(model, messages, {}, level=level)
         return self._count({"messages": body["messages"]}, timeout)
 
     def count_text_tokens(

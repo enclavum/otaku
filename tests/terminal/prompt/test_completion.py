@@ -17,7 +17,12 @@ from prompt_toolkit.completion import CompleteEvent, Completion
 from prompt_toolkit.document import Document
 
 from otaku.backend.session import PARAMETERS, THINK_MENU
-from otaku.terminal.prompt.completion import CommandCompleter, InlinerCompleter, SlashCompleter
+from otaku.terminal.prompt.completion import (
+    CommandCompleter,
+    InlinerCompleter,
+    PictureCompleter,
+    SlashCompleter,
+)
 
 
 class TestInlinerSurface:
@@ -308,3 +313,49 @@ def _partial(text: str, block: str = "") -> str | None:
     """What the prompt would ask, with `block` standing in for whatever an
     open \"\"\" block has collected so far."""
     return SlashCompleter.build(lambda: block).partial(text)
+
+
+class TestPictureSurface:
+    """The picture menu belongs behind an `@` token at the cursor on a
+    PLAYED line — prose or a direction — never on a command line, where
+    `@` is the command completer's trigger; and only while the model can
+    see, which the completer is asked live."""
+
+    def test_an_at_token_in_prose_opens_it(self) -> None:
+        assert PictureCompleter.applies("look @pi") is True
+        assert PictureCompleter.applies("look @") is True
+
+    def test_the_partial_is_the_whole_token(self) -> None:
+        assert PictureCompleter.partial("look @pics/ca") == "@pics/ca"
+        assert PictureCompleter.partial("look @") == "@"
+
+    def test_past_the_space_the_token_is_finished(self) -> None:
+        assert PictureCompleter.applies("look @cat.jpg ") is False
+
+    def test_a_direction_line_is_story_and_takes_it(self) -> None:
+        assert PictureCompleter.applies("/me Mara @pi") is True
+        assert PictureCompleter.applies("/ooc @pi") is True
+
+    def test_a_command_line_keeps_at_for_the_command_completer(self) -> None:
+        assert PictureCompleter.applies("/card @pi") is False
+        assert PictureCompleter.applies("/import @") is False
+
+    def test_an_at_inside_a_word_opens_nothing(self) -> None:
+        assert PictureCompleter.applies("mail me@ca") is False
+
+    def test_prose_alone_opens_nothing(self) -> None:
+        assert PictureCompleter.applies("look at this") is False
+
+    def test_the_menu_opens_only_while_pictures_are_accepted(self) -> None:
+        blind = SlashCompleter.build(pictures_accepted=lambda: False)
+        seeing = SlashCompleter.build(pictures_accepted=lambda: True)
+        assert blind.partial("look @pi") is None
+        assert seeing.partial("look @pi") == "@pi"
+        # Never asked by default.
+        assert SlashCompleter.build().partial("look @pi") is None
+
+    def test_a_command_line_still_reaches_the_command_completer(self) -> None:
+        # The picture surface declines the line, so the command surface
+        # answers exactly as before.
+        seeing = SlashCompleter.build(pictures_accepted=lambda: True)
+        assert seeing.partial("/card @pi") == CommandCompleter.partial("/card @pi")

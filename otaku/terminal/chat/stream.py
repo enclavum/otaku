@@ -77,7 +77,9 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                     # comes back until the first delta. The record's own
                     # note (a /roll's dice) prints dim under the block —
                     # the card import's report line is the family.
-                    chat.ledger.echo_block(message(event.message.body, "user"))
+                    chat.ledger.echo_block(
+                        message(event.message.body, "user", pictures=len(event.message.attachments))
+                    )
                     if event.note:
                         out.write(f"{DIM}[ {event.note} ]{RESET}\n\n")
                     spinner.start()

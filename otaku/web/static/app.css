@@ -664,6 +664,9 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
    ========================================================================== */
 .otk-composer { flex: none; position: relative; display: flex; flex-direction: column; gap: 12px; padding: 16px 28px 20px; background: var(--otk-band); border-top: var(--otk-hair) solid var(--otk-line-soft); }
 .otk-composer__row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; }
+/* what refused the line: one row above the box, in the status line's voice
+   and the refusal's colour, there only while something is wrong */
+.otk-composer__error { margin: 0; font-family: var(--otk-font-mono); font-size: var(--otk-size-label); letter-spacing: 0.06em; color: var(--otk-danger); overflow-wrap: anywhere; }
 .otk-composer__input { flex: 1 1 300px; min-width: 280px; display: flex; align-items: flex-start; gap: 10px; }
 .otk-composer__input textarea {
   flex: 1 1 auto; min-width: 0; min-height: 30px; max-height: 180px;
@@ -672,6 +675,11 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
   overflow-y: auto;
 }
 .otk-composer__input textarea::placeholder { color: var(--otk-faint); }
+/* The pictures door: a clip at Send's left, among the verbs, in Send's own
+   ink — the two are one gesture — and the accent when pointed at. `hidden`
+   — no vision — wins over it, so the rule is written for the shown state. */
+.otk-attach-btn:not([hidden]) { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0; color: var(--otk-ink); cursor: pointer; }
+.otk-attach-btn:hover, .otk-attach-btn:focus-visible { color: var(--otk-accent); }
 .otk-composer__verbs { flex: 0 1 auto; margin-left: auto; display: flex; align-items: center; gap: 7px; }
 .otk-hints { margin: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 16px; font-family: var(--otk-font-mono); font-size: var(--otk-size-tag); letter-spacing: var(--otk-track-foot); text-transform: uppercase; color: var(--otk-faint); }
 .otk-hints > * { white-space: nowrap; }
@@ -682,6 +690,52 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
    the UA stylesheet resets casing and tracking on a form control, so they
    are taken back from the line. */
 .otk-hints > button { text-transform: inherit; letter-spacing: inherit; }
+
+/* =============================================================================
+   PICTURES — squared like everything else, and always tied to a turn
+
+   Staged under the prefixes, before Send: a count and small tiles, each with
+   its cross. Landed, under the turn they rode and in the dossier's reader:
+   tiles that open the picture at full size (`pictures.js` draws both). A
+   tile is paper ground until the picture lands in it, which
+   is also what a browser that cannot draw a HEIC shows.
+   ========================================================================== */
+.otk-attach { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 6px; }
+.otk-attach__label { margin-right: 4px; font-family: var(--otk-font-mono); font-size: var(--otk-size-tag); letter-spacing: var(--otk-track-foot); text-transform: uppercase; color: var(--otk-faint); }
+.otk-thumb { position: relative; display: block; flex: none; width: 68px; height: 68px; padding: 0; overflow: hidden; background: var(--otk-well); border: var(--otk-hair) solid var(--otk-line); }
+.otk-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.otk-thumb--sm { width: 48px; height: 48px; }
+.otk-thumb__drop { position: absolute; top: 0; right: 0; width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; padding: 0; background: var(--otk-paper); border: 0; border-left: var(--otk-hair) solid var(--otk-line); border-bottom: var(--otk-hair) solid var(--otk-line); font-family: var(--otk-font-mono); font-size: 13px; line-height: 1; color: var(--otk-muted); cursor: pointer; }
+.otk-thumb__drop:hover { color: var(--otk-danger); }
+/* under a played turn, centred with it and held to its measure: three tiles
+   across the body's 430px with the gap between them, so the strip's edges
+   are the text's — the size is that division, never a number of its own,
+   and on a narrow column the same division makes three still fit. A tile
+   there is a way in, and says so. */
+.otk-thumbs { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; width: 100%; max-width: 430px; padding-top: 2px; }
+.otk-thumbs .otk-thumb { width: calc((100% - 16px) / 3); height: auto; aspect-ratio: 1; cursor: zoom-in; }
+.otk-thumbs .otk-thumb:hover, .otk-thumbs .otk-thumb:focus-visible { border-color: var(--otk-accent); }
+/* the same tiles in the dossier's reader, set flush with its text */
+.otk-detail__section > .otk-thumbs { justify-content: flex-start; }
+/* full size: the picture on the desk, held to the window, its measure beneath */
+.otk-lightbox { display: flex; flex-direction: column; max-width: calc(100vw - 96px); max-height: calc(100dvh - 96px); background: var(--otk-paper); border: var(--otk-hair) solid var(--otk-line); box-shadow: var(--otk-shadow-panel); }
+.otk-lightbox__frame { position: relative; flex: 1 1 auto; min-height: 0; width: min(64vw, 820px); background: var(--otk-well); }
+/* the way to a turn's other pictures: a chip on either side, paper on the
+   picture, absent when the turn has one; at an end the arrow stays and fades */
+.otk-lightbox__arrow:not([hidden]) { position: absolute; top: 50%; transform: translateY(-50%); display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0; background: var(--otk-paper); border: var(--otk-hair) solid var(--otk-line); color: var(--otk-ink); cursor: pointer; }
+.otk-lightbox__arrow--prev { left: 10px; }
+.otk-lightbox__arrow--next { right: 10px; }
+.otk-lightbox__arrow:hover, .otk-lightbox__arrow:focus-visible { border-color: var(--otk-ink); }
+.otk-lightbox__arrow[aria-disabled="true"] { opacity: 0.35; cursor: default; }
+.otk-lightbox__count { color: var(--otk-body); font-variant-numeric: tabular-nums; }
+.otk-lightbox img { width: 100%; height: 100%; max-height: calc(100dvh - 160px); object-fit: contain; display: block; }
+.otk-lightbox__foot { flex: none; display: flex; align-items: center; gap: 16px; padding: 12px var(--otk-panel-pad); border-top: var(--otk-hair) solid var(--otk-line-soft); background: var(--otk-band); font-family: var(--otk-font-mono); font-size: var(--otk-size-mono-sm); color: var(--otk-body); }
+.otk-lightbox__meta { color: var(--otk-faint); }
+.otk-lightbox__foot .otk-btn { margin-left: auto; }
+@media (max-width: 600px) {
+  .otk-lightbox { max-width: calc(100vw - 32px); }
+  .otk-lightbox__frame { width: calc(100vw - 32px); }
+}
 
 /* the prefix menu: the story's own typed openers, grouped by what they reach */
 .otk-prefixes { position: absolute; left: 14px; bottom: 100%; margin-bottom: 8px; width: 428px; max-width: calc(100% - 28px); display: flex; flex-direction: column; padding: 4px 0 6px; background: var(--otk-paper); border: var(--otk-hair) solid var(--otk-line); box-shadow: var(--otk-shadow-slip); }
@@ -772,6 +826,17 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
 .otk-row--indent { padding-left: 40px; }
 .otk-row[aria-selected="true"] { border-left-color: var(--otk-accent); background: var(--otk-accent-tint); }
 .otk-row__title { flex: 1 1 0%; min-width: 132px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--otk-font-prose); font-size: var(--otk-size-row); line-height: var(--otk-leading-row); color: var(--otk-body); }
+/* a title with a note right after its words: the words give way, the note
+   never does. The note is centred on the words' CAPITALS — the band from
+   the cap line to the baseline — not on their line: the line's descender
+   room lies below, so a box centred on it (or set on the baseline) hangs
+   under the words. The band's centre sits a tenth of the prose size above
+   the line's, hence the bottom margin of twice that. Words that are none
+   take no room, so the note starts where they would. */
+.otk-row__title--noted { display: flex; align-items: center; gap: 10px; }
+.otk-row__title--noted > .otk-tag { margin-bottom: calc(var(--otk-size-row) * 0.2); }
+.otk-row__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.otk-row__text:empty { display: none; }
 .otk-row__id { width: 26px; flex: none; text-align: right; font-family: var(--otk-font-mono); font-size: var(--otk-size-mono-sm); line-height: var(--otk-leading-row); color: var(--otk-faint); font-variant-numeric: tabular-nums; }
 .otk-row__who { width: 58px; flex: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--otk-font-mono); font-size: var(--otk-size-label); line-height: var(--otk-leading-row); letter-spacing: 0.14em; text-transform: uppercase; color: var(--otk-faint); }
 .otk-row__who--you { color: var(--otk-accent-ink); }

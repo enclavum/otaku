@@ -102,6 +102,8 @@ export function facts(version) {
     story: story ? label(story) : "",
     story_id: state.open,
     turns: story ? story.turns.length : 0,
+    // The demo's model cannot see: no attach button, no pictures anywhere.
+    vision: false,
   };
 }
 
@@ -710,6 +712,7 @@ export function recordTurn(role, body) {
     provider: role === "assistant" ? PROVIDER : null,
     model: role === "assistant" ? state.model : null,
     template: null,
+    attachments: [],
   };
   story.turns.push(turn);
   touch(state.open);
@@ -739,6 +742,7 @@ export function importCard(landed) {
     provider: null,
     model: null,
     template: null,
+    attachments: [],
   });
   const memory = memoryOf(state.open);
   const characterId = memory.characters.reduce((top, c) => Math.max(top, c.id), 0) + 1;
@@ -763,6 +767,8 @@ export function importCard(landed) {
       provider: "card",
       model: landed.fileName,
       template: null,
+      attachments: [],
+    attachments: [],
     });
   }
   touch(state.open);

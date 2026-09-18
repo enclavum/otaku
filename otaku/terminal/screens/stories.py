@@ -103,7 +103,8 @@ class StoryPicker(Dossier):
                 row.updated_at.astimezone().strftime("%a %Y-%m-%d %H:%M")
                 + " · "
                 + human_age(row.updated_at)
-                + "\n",
+                # the number a story's files are named by (`store.files`)
+                + f" · id {row.id}\n",
             ),
         ]
         # Title (if any) before the arc, each block separated by a blank

@@ -416,12 +416,35 @@ class Session:
         with contextlib.suppress(Exception):
             self._store.history.add(text)
 
+    @property
+    def vision(self) -> bool:
+        """Whether the model in use takes pictures on a message: its
+        engine said so (`ModelCapabilities.vision`), and unknown reads as
+        no, the capability's own rule. Read off the cached row, never a
+        probe — the prompt's `@` menu asks this per keystroke."""
+        client = self._client()
+        if client is None:
+            return False
+        row = client.models.cached(self.model)
+        return row is not None and row.capabilities is not None and row.capabilities.vision is True
+
+    @property
+    def pictures_ride(self) -> str:
+        """Where a picture ends up on the wire of the provider in use:
+        "each" (its own message) or "latest" (gathered onto the newest
+        prompt — omlx's quirk, `OpenAICompletion.pictures_ride`). "each"
+        without a client: nothing is sent anyway."""
+        client = self._client()
+        return "each" if client is None else client.completion.pictures_ride
+
     def assemble(self, max_context: int | None) -> AssembledPrompt:
         """The next request — the one binding of the session's fields to
         `assembler.assemble_story`, so the turn, the preview, and every
-        other call site can never disagree on what is sent. Raises
-        `ContextOverflowError` when the story cannot fit the limit even
-        fully degraded."""
+        other call site can never disagree on what is sent. The pictures
+        ride only while the model can see them, and only the latest
+        turn's where the engine would gather every turn's onto it.
+        Raises `ContextOverflowError` when the story cannot fit the
+        limit even fully degraded."""
         return assembler.assemble_story(
             self._store,
             self._story_id,
@@ -429,6 +452,8 @@ class Session:
             messages=list(self._messages),
             shape=self._shape(),
             max_context=max_context,
+            vision=self.vision,
+            newest_pictures_only=self.pictures_ride == "latest",
         )
 
     # ---------- state primitives (backend package internal) ----------

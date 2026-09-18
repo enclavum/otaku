@@ -19,8 +19,9 @@
 import * as api from "./api.js";
 import { editable, edited } from "./browser.js";
 import { $, $$, element, span } from "./dom.js";
+import { thumbs } from "./pictures.js";
 import { typesetBody } from "./prose.js";
-import { tell, working } from "./status.js";
+import { complain, settle, tell, working } from "./status.js";
 import { isToken } from "./table.js";
 
 const transcript = $(".otk-transcript");
@@ -250,6 +251,9 @@ function drawTurn(turn, position) {
     const article = element("article", "otk-turn");
     const rubric = element("span", "otk-turn__rubric", `◆ ${position} · you`);
     article.append(rubric, correctable("otk-turn__body", turn.body, withSlashTokens));
+    // The pictures that rode the line, under it: the row's own facts,
+    // the tiles asked for by address ([] on a turn without any).
+    if (turn.attachments?.length) article.append(thumbs(turn.attachments));
     return article;
   }
   const article = element("article", "otk-reply");
@@ -312,14 +316,14 @@ function showTurnBar() {
 
 /** Play a line and draw the reply as it streams. `line` is null for a
     regenerate, where the prompt is already on screen and in the store. */
-export async function play(line, { regenerate = false } = {}) {
+export async function play(line, { regenerate = false, files = [] } = {}) {
   // Without this the first of two plays to finish unlocks the composer
   // for both, leaving prose on screen that the store never took.
   if (playing) return;
   const turn = beginTurn(regenerate);
   let refused = null;
   try {
-    const answer = await api.play(line ?? "", { regenerate, signal: arriving.signal });
+    const answer = await api.play(line ?? "", { regenerate, signal: arriving.signal, files });
     // A line that is not valid syntax never becomes a stream: the usage
     // sentence comes back instead, and the story is untouched.
     if (answer.refused) {
@@ -338,9 +342,15 @@ export async function play(line, { regenerate = false } = {}) {
   } finally {
     endTurn(turn);
     // said AFTER the turn settles, or its cleanup sweeps the refusal
-    // away before anyone reads it
-    if (refused) tell(refused, "otk-error");
+    // away before anyone reads it — and above the box, where it stands
+    if (refused) {
+      tell(refused, "otk-error");
+      complain(refused);
+    }
   }
+  // The caller lands the turn and would otherwise say nothing over
+  // this; handed back so the refusal stands.
+  return refused;
 }
 
 function beginTurn(regenerate) {
@@ -354,6 +364,7 @@ function beginTurn(regenerate) {
   settled = new Promise((resolve) => (over = resolve));
   turnOver(true);
   tell("");
+  settle(); // a new attempt takes the last refusal down
   // Stop is the composer's own button, where the reply was asked for, so
   // the status line says only that something is running
   working(true);

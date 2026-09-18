@@ -11,10 +11,21 @@ of them the wire promise holds: the model sees the stored messages and
 nothing the code invented but the recap.
 """
 
+from dataclasses import replace
+
 import pytest
 
-from otaku.context.assembler import ContextOverflowError, ContextShape, _assemble
-from otaku.store.schema import Message, Scene
+from otaku.context.assembler import (
+    IMAGE_TOKENS,
+    ContextOverflowError,
+    ContextShape,
+    WirePicture,
+    _assemble,
+)
+from otaku.store.schema import Attachment, Message, Scene
+
+CAT = Attachment(file="pic-0001-20260918-a3f9c1e2.jpg", width=2, height=2, size=3)
+CAT_PICTURE = WirePicture(b"cat", "image/jpeg")
 
 
 def assemble(
@@ -27,9 +38,12 @@ def assemble(
     head_messages: int = 20,
     min_tail_messages: int = 150,
     max_context_setting: int = 0,
+    files=None,
+    newest_pictures_only: bool = False,
 ):
     """The doc's vocabulary over the `shape` argument, so every case
-    below reads like its section."""
+    below reads like its section. `files` is the folder the pictures are
+    read from; None by default, as for a model that cannot see."""
     shape = ContextShape(
         head_messages=head_messages,
         min_tail_messages=min_tail_messages,
@@ -37,7 +51,15 @@ def assemble(
         recap_header=recap_header,
         card_framing="",
     )
-    return _assemble(system, messages, max_context, scenes=scenes, shape=shape)
+    return _assemble(
+        system,
+        messages,
+        max_context,
+        scenes=scenes,
+        shape=shape,
+        files=files,
+        newest_pictures_only=newest_pictures_only,
+    )
 
 
 class TestShortStory:
@@ -367,3 +389,103 @@ def replace_history(s: Scene, history: str) -> Scene:
         summary=s.summary,
         history=history,
     )
+
+
+class TestPictures:
+    """A picture rides the verbatim row it was attached to, and costs
+    the estimate there; a summarized row's is neither sent nor missed;
+    a loader that answers nothing — no vision, a file gone — sends none
+    and counts the omission on the verbatim rows alone."""
+
+    def test_a_picture_rides_its_verbatim_row(self) -> None:
+        messages = [Message("user", "look", attachments=(CAT,)), Message("assistant", "a cat")]
+        prompt = assemble("", messages, None, files=CAT_FOLDER)
+        assert prompt.messages[0].images == (CAT_PICTURE,)
+        assert prompt.messages[1].images == ()
+        assert (prompt.pictures_sent, prompt.pictures_omitted) == (1, 0)
+
+    def test_a_picture_costs_its_estimate(self) -> None:
+        with_it = assemble(
+            "", [Message("user", "look", attachments=(CAT,))], None, files=CAT_FOLDER
+        )
+        without = assemble("", [Message("user", "look")], None)
+        assert with_it.transcript_tokens - without.transcript_tokens == IMAGE_TOKENS
+
+    def test_without_a_loader_nothing_rides_and_the_omission_is_counted(self) -> None:
+        prompt = assemble("", [Message("user", "look", attachments=(CAT,))], None)
+        assert prompt.messages[0].images == ()
+        assert (prompt.pictures_sent, prompt.pictures_omitted) == (0, 1)
+        assert (
+            prompt.transcript_tokens
+            == assemble("", [Message("user", "look")], None).transcript_tokens
+        )
+
+    def test_a_file_the_folder_cannot_answer_for_is_an_omission(self) -> None:
+        gone = Attachment(file="pic-0001-20260918-7b02d4ee.png", width=1, height=1, size=1)
+        messages = [Message("user", "look", attachments=(CAT, gone))]
+        prompt = assemble("", messages, None, files=CAT_FOLDER)
+        assert prompt.messages[0].images == (CAT_PICTURE,)
+        assert (prompt.pictures_sent, prompt.pictures_omitted) == (1, 1)
+
+    def test_a_summarized_row_loses_its_picture_and_a_tail_row_keeps_it(self) -> None:
+        # Option A's story: 220 turns, scenes 1-3 summarized, the tail
+        # from turn 65. A picture on turn 30 rides the summary away —
+        # neither sent nor counted as missed; one on turn 200 rides.
+        story = turns(220)
+        story[29] = replace(story[29], attachments=(CAT,))
+        story[199] = replace(story[199], attachments=(CAT,))
+        scenes = (scene(25, "sum one"), scene(42, "sum two"), scene(64, "sum three"))
+        prompt = assemble("", story, 65536, scenes=scenes, min_tail_messages=150, files=CAT_FOLDER)
+        assert prompt.scenes_summarized == 3
+        (with_it,) = [turn for turn in prompt.messages if turn.images]
+        assert "turn 200." in with_it.body and "turn 30." not in with_it.body
+        assert (prompt.pictures_sent, prompt.pictures_omitted) == (1, 0)
+
+    def test_with_newest_pictures_only_earlier_rows_pictures_are_held_back(self) -> None:
+        # An engine that gathers every picture onto the latest prompt
+        # gets the newest row's alone; the earlier row's is held, not
+        # omitted, and costs nothing.
+        messages = [
+            Message("user", "one", attachments=(CAT,)),
+            Message("assistant", "a cat"),
+            Message("user", "two", attachments=(CAT,)),
+        ]
+        prompt = assemble("", messages, None, files=CAT_FOLDER, newest_pictures_only=True)
+        assert [turn.images for turn in prompt.messages] == [(), (), (CAT_PICTURE,)]
+        assert (prompt.pictures_sent, prompt.pictures_held, prompt.pictures_omitted) == (1, 1, 0)
+        plain = assemble("", [replace(m, attachments=()) for m in messages], None)
+        assert prompt.transcript_tokens - plain.transcript_tokens == IMAGE_TOKENS
+
+    def test_with_newest_pictures_only_the_newest_pictured_row_rides(self) -> None:
+        # A follow-up without a picture still reaches the model with the
+        # picture it is about: the newest row that carries any rides,
+        # however many rows after it carry none.
+        messages = [
+            Message("user", "one", attachments=(CAT,)),
+            Message("assistant", "a cat"),
+            Message("user", "and the left corner?"),
+        ]
+        prompt = assemble("", messages, None, files=CAT_FOLDER, newest_pictures_only=True)
+        assert [turn.images for turn in prompt.messages] == [(CAT_PICTURE,), (), ()]
+        assert (prompt.pictures_sent, prompt.pictures_held) == (1, 0)
+
+    def test_same_role_rows_rejoin_with_their_pictures(self) -> None:
+        messages = [
+            Message("user", "one", attachments=(CAT,)),
+            Message("user", "two", attachments=(CAT,)),
+        ]
+        prompt = assemble("", messages, None, files=CAT_FOLDER)
+        (turn,) = prompt.messages
+        assert turn.images == (CAT_PICTURE, CAT_PICTURE)
+        assert prompt.pictures_sent == 2
+
+
+class _CatFolder:
+    """A files folder holding the cat and nothing else: the store's own
+    `get`, answered in memory."""
+
+    def get(self, name: str) -> tuple[bytes, str] | None:
+        return (b"cat", "image/jpeg") if name == CAT.file else None
+
+
+CAT_FOLDER = _CatFolder()

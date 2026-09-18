@@ -12,9 +12,13 @@ import socket
 import threading
 import time
 import tomllib
+import urllib.error
+import urllib.request
 from http.client import HTTPConnection
 from pathlib import Path
 from urllib.parse import urlsplit
+
+import pytest
 
 from otaku.backend.session import PARAMETERS, THINK_MENU
 from scenarios.support.harness import set_config, set_config_provider
@@ -775,3 +779,53 @@ def _watchers() -> int:
     """The serving threads this process is holding — one per request in
     flight, which for a held-open stream means one per open tab."""
     return sum(1 for thread in threading.enumerate() if "process_request" in thread.name)
+
+
+class TestPictures:
+    """The page's side of a picture: the play body's files, the two file
+    routes, and what a row and the session say. The fixture's model
+    cannot see, which is what makes the refusal the sentence; the files
+    themselves are put in the folder through the scenario's own store."""
+
+    def test_the_session_says_whether_the_model_has_vision(self, page: Page) -> None:
+        assert page.get("/api/session")["vision"] is False
+
+    def test_a_turn_without_pictures_carries_an_empty_list(self, page: Page) -> None:
+        page.play("I listen.")
+        assert [turn["attachments"] for turn in page.get("/api/play")["messages"]] == [[], []]
+
+    def test_files_for_a_model_that_cannot_see_are_refused_eagerly(self, page: Page) -> None:
+        answer = page.post("/api/play", {"line": "look", "files": [_file(b"x")]})
+        assert answer == {"notice": "This model cannot see pictures.", "refused": True}
+        assert page.get("/api/play")["messages"] == []
+
+    def test_a_file_that_is_not_base64_is_a_400(self, page: Page) -> None:
+        with pytest.raises(urllib.error.HTTPError) as caught:
+            page.post("/api/play", {"line": "look", "files": [{"name": "x", "data": "@@@"}]})
+        assert caught.value.code == 400
+
+    def test_a_stored_picture_and_its_thumbnail_are_served_immutable(self, page: Page) -> None:
+        name = page.store.files.add(1, CAT.read_bytes(), "image/jpeg", thumb=b"thumb")
+        status, headers, body = _fetch(page, f"/api/files/{name}")
+        assert (status, body) == (200, CAT.read_bytes())
+        assert headers["Content-Type"] == "image/jpeg"
+        assert "immutable" in headers["Cache-Control"]
+        status, headers, body = _fetch(page, f"/api/files/{name}/thumb")
+        assert (status, headers["Content-Type"], body) == (200, "image/jpeg", b"thumb")
+
+    def test_a_name_nothing_is_stored_under_is_404(self, page: Page) -> None:
+        assert page.status("/api/files/pic-0001-20260101-deadbeef.jpg") == 404
+        assert page.status("/api/files/pic-0001-20260101-deadbeef.jpg/thumb") == 404
+
+
+CAT = Path(__file__).parent.parent / "fixtures" / "cat.jpg"
+
+
+def _file(data: bytes) -> dict[str, str]:
+    return {"name": "cat.jpg", "media_type": "image/jpeg", "data": base64.b64encode(data).decode()}
+
+
+def _fetch(page: Page, path: str) -> tuple[int, dict[str, str], bytes]:
+    """A raw GET: the status, the headers, the bytes."""
+    with urllib.request.urlopen(page.url + path, timeout=10, context=page.context) as reply:
+        return reply.status, dict(reply.headers), reply.read()

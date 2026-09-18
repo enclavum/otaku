@@ -48,7 +48,7 @@ import ssl
 import sys
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib.resources import files
@@ -58,6 +58,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from otaku.backend import WebSettings, passwords
 from otaku.backend.api.play import PlayEvent
+from otaku.backend.files import RawFile
 from otaku.backend.session import Refused, Session
 from otaku.web import api, auth
 from otaku.web.thread import SessionRunner, StoppingError
@@ -455,7 +456,12 @@ class _Handler(BaseHTTPRequestHandler):
         # The two that answer with a STREAM rather than a payload, so
         # neither can be a row in the table.
         elif path == "/api/play":
-            self._play(str(body.get("line", "")))
+            try:
+                files = api.files_from(body)
+            except (KeyError, TypeError, ValueError) as e:
+                self._failed(400, e)  # malformed, as every other body fault is
+                return
+            self._play(str(body.get("line", "")), files=files)
         elif path == "/api/play/last":
             self._play("", regenerate=True)
         else:
@@ -817,12 +823,16 @@ class _Handler(BaseHTTPRequestHandler):
             )
         elif isinstance(payload, str):
             self._json({"notice": payload})
+        elif isinstance(payload, api.Blob):
+            # A file never changes once written: kept for a year, like
+            # the fonts.
+            self._send(payload.data, payload.media_type, _IMMUTABLE)
         else:
             self._json(payload)
 
     # ---------- the reply stream ----------
 
-    def _play(self, line: str, *, regenerate: bool = False) -> None:
+    def _play(self, line: str, *, regenerate: bool = False, files: Sequence[RawFile] = ()) -> None:
         """One story line, its reply streamed as it arrives — or a fresh
         take on the standing one, which streams the same way.
 
@@ -834,7 +844,7 @@ class _Handler(BaseHTTPRequestHandler):
         browser that goes away breaks the write, which closes the
         generator: the backend's cancel-and-keep, reached by the same
         door Ctrl+C uses in the terminal."""
-        produce = api.regenerate if regenerate else (lambda session: api.play(session, line))
+        produce = api.regenerate if regenerate else (lambda session: api.play(session, line, files))
         self._streaming = False
         try:
             self.server.runner.run(lambda session: self._pump(produce(session), session))

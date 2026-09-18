@@ -198,6 +198,7 @@ def build_prompt(
     completer = SlashCompleter.build(
         lambda: assembler.prefix,
         cast=lambda: _cast(session),
+        pictures_accepted=lambda: session.vision,
         shortcuts={token: caption for token, (_key, caption) in shortcuts.items()},
         levels=lambda: api_settings.think_choices(session).levels,
         parameters=lambda: api_settings.parameter_names(session),

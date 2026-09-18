@@ -13,7 +13,7 @@ from dataclasses import dataclass, fields
 from otaku.backend.api import settings as api_settings
 from otaku.backend.api import stories
 from otaku.backend.session import NO_MODEL_HINT, Refused, Session
-from otaku.context.assembler import AssembledPrompt, ContextOverflowError
+from otaku.context.assembler import IMAGE_TOKENS, AssembledPrompt, ContextOverflowError
 from otaku.formatting import (
     Money,
     format_context,
@@ -46,6 +46,11 @@ class AssembledShape:
     system_tokens: int
     transcript_tokens: int
     limit: int  # what the prompt measured against: min(window, max_context) - reply reserve
+    pictures_sent: int  # riding the verbatim rows, IMAGE_TOKENS each inside transcript_tokens
+    pictures_omitted: int  # on verbatim rows but not sent: the model cannot see, or a file is gone
+    pictures_held: (
+        int  # on earlier verbatim rows, held back: the engine takes the latest turn's alone
+    )
 
     @property
     def kept(self) -> int:
@@ -64,10 +69,12 @@ class AssembledShape:
 
 @dataclass(frozen=True)
 class ContextPart:
-    """One message of the request, as the wire will carry it."""
+    """One message of the request, as the wire will carry it — its text,
+    and how many pictures ride it."""
 
     role: str
     body: str
+    pictures: int = 0
 
 
 @dataclass(frozen=True)
@@ -92,7 +99,11 @@ class ContextReport:
         bracket the role markers, so a terminal can fade them."""
         out = [self.summary] + ([self.note] if self.note else [])
         for part in self.parts:
-            out.extend(["", f"{dim}[{part.role}]{reset}", part.body])
+            # The marker names the pictures riding the part beside the
+            # role: they are content the wire carries, drawn as a count.
+            plural = "s" if part.pictures != 1 else ""
+            riding = f" · {part.pictures} picture{plural} attached" if part.pictures else ""
+            out.extend(["", f"{dim}[{part.role}{riding}]{reset}", part.body])
         return "\n".join(out)
 
 
@@ -121,7 +132,11 @@ def context(session: Session) -> ContextReport:
         shape=shape,
         summary=_summary(shape),
         parts=tuple(
-            ContextPart(turn.role, "\n".join(_preview_body(printable(turn.body), prompt.recap)))
+            ContextPart(
+                turn.role,
+                "\n".join(_preview_body(printable(turn.body), prompt.recap)),
+                pictures=len(turn.images),
+            )
             for turn in prompt.messages
         ),
         note=(
@@ -591,6 +606,9 @@ def _shape(prompt: AssembledPrompt) -> AssembledShape:
         system_tokens=prompt.system_tokens,
         transcript_tokens=prompt.transcript_tokens,
         limit=prompt.limit,
+        pictures_sent=prompt.pictures_sent,
+        pictures_omitted=prompt.pictures_omitted,
+        pictures_held=prompt.pictures_held,
     )
 
 
@@ -625,6 +643,24 @@ def _summary(shape: AssembledShape) -> str:
         # Cases 1-2: a short story, or nothing covering the middle —
         # everything verbatim.
         lines.append(f"  {shape.kept} messages verbatim")
+    if shape.pictures_sent:
+        plural = "s" if shape.pictures_sent != 1 else ""
+        lines.append(
+            f"  {shape.pictures_sent} picture{plural} riding the verbatim messages, counted at "
+            f"~{IMAGE_TOKENS:,} tokens each"
+        )
+    if shape.pictures_held:
+        plural = "s" if shape.pictures_held != 1 else ""
+        lines.append(
+            f"  {shape.pictures_held} picture{plural} on earlier messages held back: this engine "
+            "puts every picture in a request on the latest message, so only the latest turn's ride"
+        )
+    if shape.pictures_omitted:
+        plural = "s" if shape.pictures_omitted != 1 else ""
+        lines.append(
+            f"  {shape.pictures_omitted} picture{plural} on the verbatim messages not sent: "
+            "the model cannot see, or the file is gone"
+        )
     if shape.tail_target < shape.tail_setting:
         # Case 5: the tail stepped down so the context could fit (a
         # case-6 refusal never reaches this report — the preview refuses

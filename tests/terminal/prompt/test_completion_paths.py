@@ -58,3 +58,13 @@ class TestMatches:
 
     def test_nothing_matching_is_an_empty_list(self) -> None:
         assert matches(self.ENTRIES, "zzz") == []
+
+
+class TestKeep:
+    def test_a_filter_narrows_the_files_and_never_the_directories(self) -> None:
+        entries = [("cat.jpg", False), ("notes.txt", False), ("pics", True)]
+        assert matches(entries, "", keep=lambda name: name.endswith(".jpg")) == ["cat.jpg", "pics/"]
+
+    def test_without_a_filter_every_entry_is_offered(self) -> None:
+        entries = [("cat.jpg", False), ("notes.txt", False)]
+        assert matches(entries, "") == ["cat.jpg", "notes.txt"]

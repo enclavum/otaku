@@ -11,11 +11,20 @@ stream. A new reply arms the worker's idle-debounced extraction pass;
 every submission (submit, regenerate, undo) defers pending work first.
 """
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 
 from otaku.backend.api.cards import drop_unplayed_card
 from otaku.backend.api.lore import build_job
+from otaku.backend.files import (
+    CANNOT_SEE,
+    MAX_PICTURES,
+    TOO_MANY,
+    Picture,
+    RawFile,
+    read_picture,
+    save,
+)
 from otaku.backend.session import NO_MODEL_HINT, Refused, Session
 from otaku.context import syntax
 from otaku.context.assembler import ContextOverflowError
@@ -136,13 +145,18 @@ class Done:
 PlayEvent = Recorded | Text | Reasoning | Declined | Failed | Done
 
 
-def submit(session: Session, line: str) -> Iterator[PlayEvent]:
+def submit(session: Session, line: str, files: Sequence[RawFile] = ()) -> Iterator[PlayEvent]:
     """One submitted story line (prose or a direction — never a command;
-    the frontend routed those already). Validation is EAGER: invalid
-    syntax raises Refused (the usage line) before the iterator is
-    returned and before anything is recorded — the body is a plain
-    function that validates and returns the inner generator, never a
-    generator itself. Then: the typed name settles to the cast's
+    the frontend routed those already), with `files` the pictures the
+    reader attached to it — a line may be empty when it carries one.
+    Validation is EAGER: invalid syntax raises Refused (the usage line)
+    before the iterator is returned and before anything is recorded —
+    the body is a plain function that validates and returns the inner
+    generator, never a generator itself — and so does every picture:
+    made ready here, refused here (the model cannot see, too many, a
+    file that is no picture), stored only when the turn records, so a
+    refusal leaves the story and the folder untouched. Then: the typed
+    name settles to the cast's
     spelling, the turn records, Recorded is yielded, and the reply
     streams as Reasoning/Text deltas, Failed on a stream error, Done at
     the end. With no model selected the turn is still recorded — it is
@@ -155,7 +169,14 @@ def submit(session: Session, line: str) -> Iterator[PlayEvent]:
     error = frame.check()
     if error is not None:
         raise Refused(error)
-    return _submit_events(session, frame, line)
+    # Every picture read here, eagerly like the syntax: a refusal leaves
+    # the story and the folder untouched, and nothing is saved before
+    # the turn records.
+    if files and not session.vision:
+        raise Refused(CANNOT_SEE)
+    if len(files) > MAX_PICTURES:
+        raise Refused(TOO_MANY)
+    return _submit_events(session, frame, line, [read_picture(file) for file in files])
 
 
 def regenerate(session: Session) -> Iterator[PlayEvent]:
@@ -188,10 +209,27 @@ def undo(session: Session) -> list[Message]:
     return popped
 
 
+# ---------- the pictures on a turn ----------
+
+
+def picture(session: Session, name: str) -> tuple[bytes, str] | None:
+    """A stored picture as the model saw it, with its media type, under
+    the name a turn's attachments carry — for a page that
+    draws the transcript. None when the folder has no such file."""
+    return session._store.files.get(name)
+
+
+def thumbnail(session: Session, name: str) -> bytes | None:
+    """Its thumbnail, a JPEG, under the same rule."""
+    return session._store.files.get_thumb(name)
+
+
 # ---------- the stream internals ----------
 
 
-def _submit_events(session: Session, frame: syntax.Line, line: str) -> Iterator[PlayEvent]:
+def _submit_events(
+    session: Session, frame: syntax.Line, line: str, pictures: Sequence[Picture]
+) -> Iterator[PlayEvent]:
     session.defer()
     # The named character, resolved once and used three ways: the
     # autocorrect rewrite, the request's speaker (/me — the line IS their
@@ -210,6 +248,13 @@ def _submit_events(session: Session, frame: syntax.Line, line: str) -> Iterator[
         # the wire all read one text — a played line never moves after.
         line = frame.update_name(known.name)
     request_speaker = known if frame.speaks == "request" else None
+    # The pictures go into the folder before the turn records, under
+    # the story's number — so a story that does not exist yet is made
+    # here, a step before the turn would have made it. Nothing was
+    # written before this point.
+    attachments = tuple(
+        save(session._store.files, picture, session._ensure_story()) for picture in pictures
+    )
     session._record_turn(
         Message(
             role="user",
@@ -224,6 +269,7 @@ def _submit_events(session: Session, frame: syntax.Line, line: str) -> Iterator[
             ),
             speaker=request_speaker.name if request_speaker else None,
             speaker_id=request_speaker.id if request_speaker else None,
+            attachments=attachments,
         )
     )
     yield Recorded(session._messages[-1], note=frame.note)
