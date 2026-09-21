@@ -9,6 +9,7 @@ import json
 import signal
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -162,6 +163,22 @@ class TestExtract:
         assert memory.history == "I saw the guest."
         assert len(lore_calls(app)) == 1  # the extraction; no rollup calls
 
+    def test_a_block_in_a_reply_is_invisible_to_the_pass(self, app: App) -> None:
+        # A reply may carry a tool's block — the model's own aside. The
+        # analysis model never sees it, tags and all, while the prose
+        # around it and the numbering stay whole; the story keeps the
+        # reply exactly as it streamed.
+        reply = "She nods.\n\n<otk-notes>Reveal the letter next turn.</otk-notes>"
+        app.server.script = chat_script(reply)
+        for i in range(3):
+            app.play(f"Turn number {i}.")
+        app.play("/extract")
+        analyst = next(p for p in lore_calls(app) if "You are a story analyst" in p)
+        assert "otk-notes" not in analyst
+        assert "Reveal the letter" not in analyst
+        assert "[6] She nods." in analyst
+        assert app.store.stories.get_messages(app.session.story_id)[-1].body == reply
+
     def test_an_edited_template_with_literal_json_still_extracts(self, server, tmp_path) -> None:
         # The prompts file's promise: what you edit is exactly what the
         # model sees. A template holding a literal JSON example — braces
@@ -244,6 +261,39 @@ class TestIdleScheduling:
                 time.sleep(0.1)
             assert ends, "the idle pass never closed a scene"
             assert ids.index(ends[-1]) == 3  # the newest two messages stayed open
+        finally:
+            app.close()
+
+    def test_blocks_do_not_count_toward_the_scene_gate(self, server, tmp_path) -> None:
+        # The gate measures story text. Three exchanges whose replies are
+        # padded with a block far past scene_min_chars still hold too
+        # little play (19 characters an exchange), so the pass declines;
+        # three more carry the story itself over the line, and it closes.
+        set_config(
+            tmp_path / "state",
+            settle_messages=0,
+            scene_min_chars=100,
+            scene_min_messages=2,
+            idle_seconds=0.1,
+        )
+        server.script = chat_script("Fine.<otk-notes>" + "x" * 400 + "</otk-notes>")
+        app = launch(tmp_path / "state", server)
+        try:
+            for i in range(3):
+                app.play(f"Turn number {i}.")
+            time.sleep(0.6)  # several idle windows — nothing may close
+            story_id = app.session.story_id
+            ids = app.store.stories.get_messages_ids(story_id)
+            assert app.store.scenes.get_current_ends(story_id, ids) == []
+            for i in range(3, 6):
+                app.play(f"Turn number {i}.")
+            deadline = time.time() + 10
+            closed = False
+            while time.time() < deadline and not closed:
+                ids = app.store.stories.get_messages_ids(story_id)
+                closed = bool(app.store.scenes.get_current_ends(story_id, ids))
+                time.sleep(0.1)
+            assert closed, "the story itself never carried the gate"
         finally:
             app.close()
 
@@ -948,6 +998,19 @@ def browse(app: App, story_id: int, keys: str) -> str | None:
     with contextlib.suppress(EOFError):
         return run_screen(keys, lambda: screen_story.browse(app.session, "scenes"))
     return None
+
+
+def chat_script(reply: str) -> Callable[[dict[str, Any]], str]:
+    """A script answering every chat turn with `reply` and every lore
+    prompt the default way — the canned extraction and rollups."""
+
+    def script(body: dict[str, Any]) -> str:
+        prompt = scripted.content_text(body.get("messages", [{}])[-1])
+        if "You are a story analyst" in prompt or prompt.startswith(("Combine", "Write ")):
+            return scripted.default_script(body)
+        return reply
+
+    return script
 
 
 def lore_calls(app: App) -> list[str]:

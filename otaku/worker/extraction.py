@@ -36,7 +36,11 @@ template, while a reply has no template at all — and the extract
 template reads "out of character" off that shape, so unmarked it would
 be read as something that happened in the scene. Out-of-character rows
 are mined for decisions but never speaker-attributed and never part of
-the scene's story.
+the scene's story. A block in a body (`context.blocks`: any
+`<otk-NAME>…</otk-NAME>`) is the model's own aside, not the scene: it
+is left out, tags and all, before
+a row is measured by the gate, packed into a span, or numbered for the
+analysis model.
 """
 
 import builtins
@@ -45,9 +49,10 @@ import json
 import threading
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Self
 
+from otaku.context import blocks
 from otaku.context.assembler import WireTurn
 from otaku.context.syntax import OOC_FRAME, to_wire
 from otaku.formatting import format_duration, render
@@ -241,7 +246,7 @@ class Extractor:
         tail_ids = ids if last_end is None else [i for i in ids if i > last_end]
         if not force and settings.settle > 0:
             tail_ids = tail_ids[: max(0, len(tail_ids) - settings.settle)]
-        chars = self._store.messages.count_body_chars(tail_ids)
+        chars = self._store.messages.count_body_chars(tail_ids, blocks.strip)
         too_short = chars < settings.min_chars or len(tail_ids) < settings.min_messages
         if not tail_ids or (not force and too_short):
             self._log(
@@ -325,7 +330,7 @@ class Extractor:
             self._log(f"extraction declined (story {self._story_id}): the story changed mid-pass")
             return PassResult.CANCELLED
         tail = [by_id[i] for i in tail_ids]
-        sizes = [len(m.body) for m in tail]
+        sizes = [len(blocks.strip(m.body)) for m in tail]
         spans = [
             tail[a:b]
             for a, b in pack(
@@ -723,7 +728,9 @@ def pack(sizes: list[int], *, min_chars: int, min_messages: int) -> list[tuple[i
 
 def numbered_chat(span: Sequence[Message]) -> str:
     """The numbered scene block for the extract template — the one owner
-    of the `[n] Speaker: …` format.
+    of the `[n] Speaker: …` format. A block is left out first; a
+    row that empties keeps its number, since the speaker labels come
+    back by number.
 
     A row is composed for the wire FIRST and decorated after, with the two
     things the analysis model needs and the wire must never carry: the
@@ -735,10 +742,11 @@ def numbered_chat(span: Sequence[Message]) -> str:
     for n, item in enumerate(span, 1):
         # is_last=False always: a cue steers one reply, it is not something
         # that happened in the scene.
-        text = to_wire(item, is_last=False)
+        body = blocks.strip(item.body)
+        text = to_wire(replace(item, body=body), is_last=False)
         if item.kind == "ooc" and item.role == "assistant":
             text = OOC_FRAME.replace("{body}", text)
-        elif item.speaker and item.body:
+        elif item.speaker and body:
             text = f"{item.speaker}: {text}"
         lines.append(f"[{n}] {text}")
     return "\n".join(lines)

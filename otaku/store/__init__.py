@@ -12,6 +12,7 @@ per table:
     store.journals    per-character memory (derivatives)
     store.usage       token accounting
     store.history     the terminal's Up/Down input history
+    store.globals     the user's content that belongs to every story
     store.files       the files folder beside the database: a turn's pictures (`FileStore`)
 """
 
@@ -22,7 +23,7 @@ from otaku.encryption import Cipher
 from otaku.store.database import Database, DatabaseError, Note, is_encrypted
 from otaku.store.files import FileStore
 from otaku.store.ops.lore import CharacterOps, JournalOps, SceneOps
-from otaku.store.ops.records import HistoryOps, UsageOps
+from otaku.store.ops.records import GlobalOps, HistoryOps, UsageOps
 from otaku.store.ops.stories import MessagesOps, StoryOps
 
 __all__ = ["DatabaseError", "Note", "Store", "is_encrypted"]
@@ -39,6 +40,7 @@ class Store:
         self.journals = JournalOps(db)
         self.usage = UsageOps(db)
         self.history = HistoryOps(db)
+        self.globals = GlobalOps(db)
         self.files = files
         self._db = db
 

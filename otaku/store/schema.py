@@ -6,14 +6,16 @@ from the old module unchanged with the DDL text: stories/messages are
 source, scenes/characters/journals derivatives, sibling trees via
 parent_id, the two-level rollup pattern, per-field sealing (the `attachments`
 column plain on purpose: the app's facts about files the folder beside
-the database holds sealed), audit-only timestamps.
+the database holds sealed), audit-only timestamps. `globals` is the one
+table of CONTENT that belongs to no story: what the user wrote to be
+played in every one (a setting is a config file's, never this table's).
 """
 
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-SCHEMA_VERSION = "5"
+SCHEMA_VERSION = "6"
 
 SCHEMA_DDL = """
 -- ---------- source: what was actually said ----------
@@ -26,6 +28,7 @@ CREATE TABLE stories (
     system         BLOB,                 -- the story's system prompt
     created_at     TEXT NOT NULL,
     updated_at     TEXT NOT NULL,
+    settings       BLOB,                 -- the story's settings as JSON, sealed; NULL when none
     FOREIGN KEY (id, head_id) REFERENCES messages(story_id, id)
 );
 
@@ -94,6 +97,15 @@ CREATE TABLE journals (
     UNIQUE (scene_id, character_id),
     FOREIGN KEY (story_id, scene_id) REFERENCES scenes(story_id, id) ON DELETE CASCADE,
     FOREIGN KEY (story_id, character_id) REFERENCES characters(story_id, id) ON DELETE CASCADE
+);
+
+-- ---------- the user's own, outside any story ----------
+
+CREATE TABLE globals (                   -- content that belongs to every story, sealed
+    key        TEXT PRIMARY KEY,         -- 'reminder'
+    value      BLOB NOT NULL,            -- sealed; an emptied value deletes its row
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
 );
 
 -- ---------- bookkeeping ----------

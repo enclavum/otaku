@@ -25,6 +25,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Self
 
+from otaku.backend import features
 from otaku.backend.paths import Paths
 from otaku.context import assembler
 from otaku.context.assembler import AssembledPrompt, ContextShape
@@ -126,6 +127,7 @@ class Session:
     # app works in are its own to split.
     _story_id: int | None
     _system: str
+    _settings: str  # the story's settings, the JSON text the store keeps (`features`)
     _messages: list[Message]
     _params: dict[str, object]
     _think: str  # the model's thinking level (`reasoning.is_level`), or THINK_UNSET
@@ -172,6 +174,7 @@ class Session:
         session._on_idle = None
         session._story_id = None
         session._system = ""
+        session._settings = ""
         session._messages = []
         session._params = {}
         session._think = models_file.THINK_UNSET
@@ -472,14 +475,20 @@ class Session:
         return self._providers_registry.get(self.provider)
 
     def _shape(self) -> ContextShape:
-        """The assembly shape: config's window settings + the prompts'
-        recap header and card template, read fresh each call."""
+        """The assembly shape: config's window settings, the prompts'
+        recap header and card template, and what the story's switched-on
+        features inject — read fresh each call."""
+        found = features.read(self._settings)
+        # The global reminder's text is read only where a story has it on.
+        shared = any(f.on for f in found if f.name == features.USE_GLOBAL_REMINDER)
+        global_reminder = self._store.globals.get(features.GLOBALS_REMINDER_KEY) if shared else ""
         return ContextShape(
             head_messages=self._config.head_messages,
             min_tail_messages=self._config.min_tail_messages,
             max_context_setting=self.max_context_setting,
             recap_header=self._prompts.recap_header,
             card_framing=self._prompts.card_framing,
+            injections=features.injections(found, self._prompts, global_reminder),
         )
 
     def _switch_to(self, story_id: int, messages: list[Message] | None = None) -> None:
@@ -489,6 +498,7 @@ class Session:
         forget a piece."""
         self._story_id = story_id
         self._system = self._store.stories.get_system(story_id)
+        self._settings = self._store.stories.get_settings(story_id)
         self._messages = (
             self._store.stories.get_messages(story_id) if messages is None else messages
         )
@@ -508,6 +518,8 @@ class Session:
             self._story_id = self._store.stories.add()
             if self._system:
                 self._store.stories.set_system(self._story_id, self._system)
+            if self._settings:
+                self._store.stories.set_settings(self._story_id, self._settings)
             self._update_state()
         return self._story_id
 
@@ -556,6 +568,13 @@ class Session:
         self._system = text
         if self._story_id is not None:
             self._store.stories.set_system(self._story_id, text)
+
+    def _set_settings(self, raw: str) -> None:
+        """The story's settings — persisted with the story when one exists;
+        a story created later picks them up at creation, as the premise."""
+        self._settings = raw
+        if self._story_id is not None:
+            self._store.stories.set_settings(self._story_id, raw)
 
     def _read_model(self) -> None:
         """Read the model's row once the model is current — at launch and

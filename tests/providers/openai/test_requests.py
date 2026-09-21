@@ -14,6 +14,7 @@ class _Turn:
     role: str
     body: str
     images: tuple[Image, ...] = ()
+    volatile: bool = False
 
 
 def _turns(*pairs: tuple[str, str]) -> list[_Turn]:
@@ -76,6 +77,27 @@ class TestCacheMarks:
         assert messages[1]["content"] == "u1" and messages[2]["content"] == "a1"
         assert messages[3]["content"] == [
             {"type": "text", "text": "u2", "cache_control": {"type": "ephemeral"}}
+        ]
+
+    def test_the_trailing_mark_sits_above_the_first_volatile_row(self) -> None:
+        # A volatile row reads differently next request: a mark on it, or
+        # after it, would cache a prefix no later request can match.
+        turns = [_Turn("system", "s"), _Turn("user", "u1"), _Turn("assistant", "a1")]
+        turns += [_Turn("user", "u2", volatile=True), _Turn("assistant", "a2", volatile=True)]
+        messages = _messages(chat_completion_body("m", turns, {}, cache_ttl="5m"))
+        assert messages[2]["content"] == [
+            {"type": "text", "text": "a1", "cache_control": {"type": "ephemeral"}}
+        ]
+        assert [m["content"] for m in messages[3:]] == ["u2", "a2"]
+
+    def test_with_every_row_volatile_the_system_row_alone_is_marked(self) -> None:
+        turns = [_Turn("system", "s"), _Turn("user", "u", volatile=True)]
+        messages = _messages(chat_completion_body("m", turns, {}, cache_ttl="5m"))
+        assert "cache_control" in messages[0]["content"][0]
+        assert messages[1]["content"] == "u"
+        alone = [_Turn("user", "u", volatile=True)]
+        assert _messages(chat_completion_body("m", alone, {}, cache_ttl="5m")) == [
+            {"role": "user", "content": "u"}
         ]
 
     def test_an_hour_is_spelled_five_minutes_is_the_default_and_is_not(self) -> None:

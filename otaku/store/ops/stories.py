@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import builtins
 import re
-from collections.abc import Container
+from collections.abc import Callable, Container
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -186,6 +186,25 @@ class StoryOps:
             )
             # fmt: on
 
+    def get_settings(self, story_id: int) -> str:
+        """The story's settings as the JSON text they were written as; ""
+        when it has none. What they mean is the caller's business."""
+        row = self._db.conn.execute(
+            "SELECT settings FROM stories WHERE id = ?", (story_id,)
+        ).fetchone()
+        return self._db.unseal(row[0]) if row else ""
+
+    def set_settings(self, story_id: int, text: str) -> None:
+        """Deliberately does not bump updated_at, as a title does not: a
+        switch flipped must not reorder the story list."""
+        with self._db.conn as conn:
+            # fmt: off
+            conn.execute(
+                "UPDATE stories SET settings = ? WHERE id = ?",
+                (self._db.seal_opt(text or None), story_id),
+            )
+            # fmt: on
+
     def get_head(self, story_id: int) -> int | None:
         row = self._db.conn.execute(
             "SELECT head_id FROM stories WHERE id = ?", (story_id,)
@@ -292,6 +311,7 @@ class StoryOps:
         title: str | None = None,
     ) -> int:
         """A new story branched off at `from_message_id` (default: the head).
+        A branch keeps its origin's premise and settings.
         An explicit `title` is used verbatim; otherwise the source's title
         gains a number ("<title> - N") — one that already carries a number
         is renumbered, never suffixed again — and an untitled source forks
@@ -324,8 +344,8 @@ class StoryOps:
         with self._db.conn as conn:
             # fmt: off
             cur = conn.execute(
-                "INSERT INTO stories (forked_from_id, title, system, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-                (story_id, self._db.seal_opt(title or None), self._db.seal_opt(source.system or None), now, now),
+                "INSERT INTO stories (forked_from_id, title, system, settings, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (story_id, self._db.seal_opt(title or None), self._db.seal_opt(source.system or None), self._db.seal_opt(self.get_settings(story_id) or None), now, now),
             )
             new_story = int(cur.lastrowid or 0)
 
@@ -527,10 +547,14 @@ class MessagesOps:
         ).fetchone()
         return row[0] if row else None
 
-    def count_body_chars(self, message_ids: list[int]) -> int:
+    def count_body_chars(
+        self, message_ids: list[int], strip: Callable[[str], str] | None = None
+    ) -> int:
         """Total characters of these messages' bodies — what the scene gate
-        measures. Decrypts only the rows asked for; it has to decrypt, since
-        a sealed blob's byte length is a bad proxy for character count."""
+        measures. Each body goes through `strip` first when one is given:
+        the caller says what counts, and the text never leaves here.
+        Decrypts only the rows asked for; it has to decrypt, since a sealed
+        blob's byte length is a bad proxy for character count."""
         if not message_ids:
             return 0
         placeholders = ",".join("?" * len(message_ids))
@@ -540,7 +564,8 @@ class MessagesOps:
             tuple(message_ids),
         ).fetchall()
         # fmt: on
-        return sum(len(self._db.unseal(row[0])) for row in rows)
+        bodies = (self._db.unseal(row[0]) for row in rows)
+        return sum(len(strip(body) if strip else body) for body in bodies)
 
 
 def unique_title(base: str, taken: Container[str]) -> str | None:

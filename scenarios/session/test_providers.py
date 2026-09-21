@@ -69,6 +69,7 @@ class Turn:
     role: str
     body: str
     images: tuple[Image, ...] = ()
+    volatile: bool = False
 
 
 @dataclass

@@ -8,7 +8,8 @@ summarized away. Case 4: over the limit — the smaller of the window and
 through the last replaced scene. Case 5: still over, the tail target
 steps down to its floor; past the floor the assembly refuses. Across all
 of them the wire promise holds: the model sees the stored messages and
-nothing the code invented but the recap.
+nothing the code invented but the recap — and the injections it was
+handed, each where it was told to go.
 """
 
 from dataclasses import replace
@@ -19,6 +20,7 @@ from otaku.context.assembler import (
     IMAGE_TOKENS,
     ContextOverflowError,
     ContextShape,
+    Injection,
     WirePicture,
     _assemble,
 )
@@ -40,6 +42,7 @@ def assemble(
     max_context_setting: int = 0,
     files=None,
     newest_pictures_only: bool = False,
+    injections: tuple[Injection, ...] = (),
 ):
     """The doc's vocabulary over the `shape` argument, so every case
     below reads like its section. `files` is the folder the pictures are
@@ -50,6 +53,7 @@ def assemble(
         max_context_setting=max_context_setting,
         recap_header=recap_header,
         card_framing="",
+        injections=injections,
     )
     return _assemble(
         system,
@@ -356,6 +360,116 @@ class TestWirePromise:
         assert [m.role for m in prompt.messages] == ["assistant", "user"]
 
 
+class TestInjections:
+    """Text the context carries besides the story. At "system" it is
+    appended to the system message, after the premise; at a negative
+    number it is a user row of its own, placed as `list.insert` would —
+    -1 above the newest message, which so keeps the last word — that
+    never climbs past the recap, and rejoins its same-role neighbour like
+    any row. An empty one is not sent. It costs its tokens, and the turn
+    a numbered one lands in, with every turn after, is `volatile`: next
+    request it reads differently."""
+
+    def test_minus_one_rides_above_the_newest_message(self) -> None:
+        prompt = assemble("", exchange(), 8192, injections=(end("Remember."),))
+        assert [(m.role, m.body) for m in prompt.messages] == [
+            ("user", "One."),
+            ("assistant", "Two."),
+            ("user", "Remember.\n\nThree."),
+        ]
+
+    def test_a_position_counts_messages_from_the_end(self) -> None:
+        below = assemble("", exchange(), 8192, injections=(end("Remember.", -2),))
+        assert below.messages[0].body == "One.\n\nRemember."
+        above = assemble("", exchange(), 8192, injections=(end("Remember.", -3),))
+        assert above.messages[0].body == "Remember.\n\nOne."
+
+    def test_the_newest_message_always_keeps_the_last_word(self) -> None:
+        # What is not negative is no place from the end: it rides as -1.
+        for position in (0, 2):
+            prompt = assemble("", exchange(), 8192, injections=(end("Remember.", position),))
+            assert prompt.messages[-1].body == "Remember.\n\nThree."
+
+    def test_a_position_past_the_top_stops_at_the_top(self) -> None:
+        prompt = assemble("", exchange(), 8192, injections=(end("Remember.", -99),))
+        assert prompt.messages[0].body == "Remember.\n\nOne."
+
+    def test_the_recap_is_a_wall(self) -> None:
+        # The recap stands where the middle was; an injection stays in the
+        # tail under it, however deep it was asked to go.
+        prompt = assemble(
+            "",
+            turns(40),
+            8192,
+            scenes=(scene(20, "The heist unfolded."),),
+            head_messages=5,
+            min_tail_messages=10,
+            injections=(end("Remember.", -99),),
+        )
+        sent = "\n\n".join(m.body for m in prompt.messages)
+        recap, injected, tail = (
+            sent.index("The heist unfolded."),
+            sent.index("Remember."),
+            sent.index("turn 21."),
+        )
+        assert recap < injected < tail
+
+    def test_the_same_place_keeps_the_order_given(self) -> None:
+        both = (end("First."), end("Second."))
+        prompt = assemble("", exchange(), 8192, injections=both)
+        assert prompt.messages[-1].body == "First.\n\nSecond.\n\nThree."
+
+    def test_a_system_injection_follows_the_premise(self) -> None:
+        prompt = assemble("Be terse.", exchange(), 8192, injections=(system("Ask rarely."),))
+        assert (prompt.messages[0].role, prompt.messages[0].body) == (
+            "system",
+            "Be terse.\n\nAsk rarely.",
+        )
+        assert [m.body for m in prompt.messages[1:]] == ["One.", "Two.", "Three."]
+
+    def test_without_a_premise_the_system_message_is_the_injection(self) -> None:
+        prompt = assemble("", exchange(), 8192, injections=(system("Ask rarely."),))
+        assert (prompt.messages[0].role, prompt.messages[0].body) == ("system", "Ask rarely.")
+
+    def test_an_empty_injection_is_not_sent(self) -> None:
+        plain = assemble("", exchange(), 8192)
+        prompt = assemble("", exchange(), 8192, injections=(end(""), system("")))
+        assert prompt.messages == plain.messages
+
+    def test_an_injection_costs_its_tokens(self) -> None:
+        text = "x" * 400
+        plain = assemble("", exchange(), 8192)
+        at_end = assemble("", exchange(), 8192, injections=(end(text),))
+        assert at_end.transcript_tokens == plain.transcript_tokens + 100
+        in_system = assemble("", exchange(), 8192, injections=(system(text),))
+        assert in_system.system_tokens == 100
+        assert in_system.transcript_tokens == plain.transcript_tokens
+
+    def test_an_injection_that_does_not_fit_refuses_like_the_story(self) -> None:
+        with pytest.raises(ContextOverflowError):
+            assemble("", exchange(), 2048, injections=(end("x" * 40_000),))
+
+    def test_the_newest_cue_stays_live_under_an_injection(self) -> None:
+        rows = [user("One."), assistant("Two."), user("I go. /cue hurry")]
+        prompt = assemble("", rows, 8192, injections=(end("Remember."),))
+        assert prompt.messages[-1].body == "Remember.\n\nI go. ((OOC: hurry))"
+
+    def test_a_picture_still_rides_its_own_message(self) -> None:
+        rows = [user("One."), assistant("Two."), replace(user("Look."), attachments=(CAT,))]
+        prompt = assemble("", rows, 8192, files=_CatFolder(), injections=(end("Remember.", -2),))
+        assert [m.images for m in prompt.messages] == [(), (), (CAT_PICTURE,)]
+
+    def test_the_turn_it_lands_in_and_every_turn_after_are_volatile(self) -> None:
+        newest = assemble("Be terse.", exchange(), 8192, injections=(end("Remember."),))
+        assert [m.volatile for m in newest.messages] == [False, False, False, True]
+        deeper = assemble("Be terse.", exchange(), 8192, injections=(end("Remember.", -2),))
+        assert [m.volatile for m in deeper.messages] == [False, True, True, True]
+
+    def test_a_system_injection_makes_nothing_volatile(self) -> None:
+        prompt = assemble("", exchange(), 8192, injections=(system("Ask rarely."),))
+        assert not any(m.volatile for m in prompt.messages)
+
+
 # ---------- fixtures ----------
 
 
@@ -369,6 +483,20 @@ def assistant(body: str) -> Message:
 
 def card(message_id: int, body: str) -> Message:
     return Message(id=message_id, role="user", body=body, kind="card")
+
+
+def exchange() -> list[Message]:
+    """A played exchange awaiting its reply: the newest message is the user's."""
+    return [user("One."), assistant("Two."), user("Three.")]
+
+
+def end(text: str, position: int = -1) -> Injection:
+    """An injection counted from the end."""
+    return Injection(name="reminder", text=text, position=position)
+
+
+def system(text: str) -> Injection:
+    return Injection(name="ask", text=text, position="system")
 
 
 def turns(n: int) -> list[Message]:

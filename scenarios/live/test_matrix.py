@@ -88,6 +88,7 @@ class Turn:
     role: str
     body: str
     images: tuple[Image, ...] = ()
+    volatile: bool = False
 
 
 @pytest.fixture(params=CASES, ids=_IDS)

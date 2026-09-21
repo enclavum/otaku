@@ -23,7 +23,9 @@ class WireImage(Protocol):
 
 class WireMessage(Protocol):
     """What a chat request needs of a message: a role, its wire text,
-    and the pictures riding on it (none, for most). `context`'s
+    the pictures riding on it (none, for most), and whether it is
+    `volatile` — reads differently from one request to the next, so
+    no prompt-cache mark may sit on it or after it. `context`'s
     `WireTurn` satisfies it structurally."""
 
     @property
@@ -32,6 +34,8 @@ class WireMessage(Protocol):
     def body(self) -> str: ...
     @property
     def images(self) -> Sequence[WireImage]: ...
+    @property
+    def volatile(self) -> bool: ...
 
 
 @dataclass(frozen=True)
@@ -61,7 +65,9 @@ def chat_completion_body(
         if message.images:
             wire[at] = _with_images(wire[at], message.images)
     if cache_ttl and wire:
-        _mark_cache(wire, cache_ttl)
+        # What holds still: everything above the first volatile message.
+        stable = next((at for at, m in enumerate(messages) if m.volatile), len(wire))
+        _mark_cache(wire, cache_ttl, stable)
     return {
         "model": model,
         "messages": wire,
@@ -83,14 +89,16 @@ def text_completion_body(model: str, prompt: str, params: dict[str, object]) -> 
     }
 
 
-def _mark_cache(wire: list[dict[str, object]], ttl: str) -> None:
-    """Prompt-cache breakpoints, in place: the system row and the final
-    row become content PARTS carrying `cache_control`; everything
-    between stays a plain string. Two breakpoints are enough — the
-    provider's lookup scans block boundaries backwards from a marker for
-    the longest cached prefix, so one rolling trailing mark per request
-    finds last turn's entry on its own. "5m" is the marking's own
-    default and is not spelled; "1h" is."""
+def _mark_cache(wire: list[dict[str, object]], ttl: str, stable: int) -> None:
+    """Prompt-cache breakpoints, in place: the system row and the last
+    of the first `stable` rows become content PARTS carrying
+    `cache_control`; everything else stays a plain string. The rows
+    from `stable` on read differently next request, and a mark among
+    them would cache a prefix nothing later matches. Two breakpoints
+    are enough — the provider's lookup scans block boundaries backwards
+    from a marker for the longest cached prefix, so one rolling trailing
+    mark per request finds last turn's entry on its own. "5m" is the
+    marking's own default and is not spelled; "1h" is."""
     marker: dict[str, object] = {"type": "ephemeral"}
     if ttl == "1h":
         marker["ttl"] = "1h"
@@ -112,8 +120,9 @@ def _mark_cache(wire: list[dict[str, object]], ttl: str) -> None:
 
     if wire[0]["role"] == "system":
         wire[0] = marked(wire[0])
-    if len(wire) > 1 or wire[0]["role"] != "system":
-        wire[-1] = marked(wire[-1])
+    last = stable - 1
+    if last > 0 or (last == 0 and wire[0]["role"] != "system"):
+        wire[last] = marked(wire[last])
 
 
 def _with_images(message: dict[str, object], images: Sequence[WireImage]) -> dict[str, object]:

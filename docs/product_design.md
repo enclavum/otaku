@@ -39,9 +39,7 @@ To view the extracted lore, you can use the /lore and /cast commands.
 ## Context building
 
 Otaku doesn't rebuild the context, except for replacing older messages with summaries (see
-below). Every prompt is appended when it is sent and then keeps its place. Nothing is ever
-inserted into the story's past afterwards, neither on trigger words nor on any other condition.
-No past message changes unless the user edits it in the messages picker.
+below). Every prompt is appended when it is sent and then keeps its place.
 
 The first 20 and approximately the last 150 messages are always sent to the LLM verbatim, to
 maintain the prose style. Messages in the middle are replaced with scene summaries — except for

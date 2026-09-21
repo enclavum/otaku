@@ -38,6 +38,7 @@ from otaku.store.migrations import v2 as store_v2
 from otaku.store.migrations import v3 as store_v3
 from otaku.store.migrations import v4 as store_v4
 from otaku.store.migrations import v5 as store_v5
+from otaku.store.migrations import v6 as store_v6
 from otaku.store.schema import SCHEMA_DDL, Attachment, Message
 from otaku.terminal.tty import BOLD, RESET
 from scenarios.support import server as scripted
@@ -249,7 +250,7 @@ class TestSchemaMigration:
         paths = _v1_database(tmp_path / "state")
         store = _open(paths)
         try:
-            assert any("Database migrated (v1 → v5)" in note.show for note in store.notes)
+            assert any("Database migrated (v1 → v6)" in note.show for note in store.notes)
             (message,) = store.stories.get_messages(1)
             # The v1 `framing` column reads back through the renamed one.
             assert (message.body, message.template) == ("I enter.", "TPL")
@@ -270,9 +271,15 @@ class TestSchemaMigration:
             (scene,) = store.scenes.get_current(1, ids)
             assert scene.summary == "The entry."
             assert store.journals.get_current(1, ids)[keeper.id].state == "at the gate"
+            # The v6 `settings` column trails the story's row: a v1 story
+            # reads none, takes some, and the table v6 created answers.
+            assert store.stories.get_settings(1) == ""
+            store.stories.set_settings(1, '{"ask": {"on": true}}')
+            assert store.stories.get_settings(1) == '{"ask": {"on": true}}'
+            assert store.globals.get("reminder") == ""
         finally:
             store.close()
-        assert _meta_version(paths) == "5"
+        assert _meta_version(paths) == "6"
 
     def test_a_migration_that_ran_is_reported_at_launch(
         self, server: ModelServer, tmp_path
@@ -378,6 +385,8 @@ class TestSchemaMigration:
             # token_usage shipped unchanged from v1 through v3, so the
             # v4 step's precondition is checkable against the same tag.
             ("token_usage", store_v4._V3_TOKEN_USAGE),
+            # stories shipped unchanged from v1 through v5: step 6's too.
+            ("stories", store_v6._V5_STORIES),
         ):
             start = shipped.index(f"CREATE TABLE {table}")
             end = shipped.index(");", start) + 1
@@ -408,10 +417,10 @@ class TestSchemaMigration:
         monkeypatch.setitem(store_migrations._STEPS, 3, store_v3.to_3)
         resumed = _open(paths)
         try:
-            assert any("Database migrated (v2 → v5)" in note.show for note in resumed.notes)
+            assert any("Database migrated (v2 → v6)" in note.show for note in resumed.notes)
         finally:
             resumed.close()
-        assert _meta_version(paths) == "5"
+        assert _meta_version(paths) == "6"
 
 
 class TestFilesFolder:
@@ -1032,10 +1041,15 @@ def _v1_database(root) -> Paths:
         ("journals", store_v3._V2_JOURNALS),
         # Unchanged v1 → v3, so step 4's precondition IS the v1 text.
         ("token_usage", store_v4._V3_TOKEN_USAGE),
+        # Unchanged v1 → v5, so step 6's precondition IS the v1 text.
+        ("stories", store_v6._V5_STORIES),
     ):
         start = v1_ddl.index(f"CREATE TABLE {table}")
         end = v1_ddl.index(");", start) + 1
         v1_ddl = v1_ddl[:start] + shipped + v1_ddl[end:]
+    # Version 1 had no `globals` table at all: step 6 creates it.
+    start = v1_ddl.index("CREATE TABLE globals")
+    v1_ddl = v1_ddl[:start] + v1_ddl[v1_ddl.index(");", start) + 2 :]
     conn = sqlite3.connect(paths.database_file)
     conn.executescript("BEGIN;" + v1_ddl)
     # fmt: off

@@ -37,13 +37,21 @@ The wire unit is the exchange: consecutive same-role rows (a `/me`
 direction beside its line, the recap beside the tail) merge into one
 turn, blank-line separated, so the wire alternates the way a chat API
 expects; roles are fixed as stored — nothing relabels them. The wire
-promise: the code adds NOTHING but the recap — bodies go out exactly
-as stored, composed per turn by `syntax.to_wire`.
+promise: the code adds NOTHING but the recap and the injections it was
+handed — bodies go out exactly as stored, composed per turn by
+`syntax.to_wire`.
+
+An `Injection` is text the context carries besides the story, never
+stored: appended to the system message, or a synthesized user row
+(`kind="injection"`, wire-only like the recap's) a fixed place from
+the end, joined by the same merge. Where one comes from — a tool's
+instruction, the user's reminder — is the caller's business.
 """
 
 from bisect import bisect_left
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, replace
+from typing import Literal
 
 from otaku.context import syntax
 from otaku.context.cards import card_to_wire
@@ -73,6 +81,26 @@ class ContextOverflowError(Exception):
     message is the sentence to show."""
 
 
+# Where an injection rides: "system", or a negative number counted from
+# the end the way a Python index is — -1 is above the newest message.
+Position = Literal["system"] | int
+
+
+@dataclass(frozen=True)
+class Injection:
+    """Text the context carries besides the story, sent as it is; an
+    empty one is not sent. At "system" it is appended to the system
+    message, after the premise. At a negative number it is a user row of
+    its own, placed as `list.insert` would place it: -1 above the newest
+    message — which so keeps the last word, and its cue the last row's —
+    -3 above the last three; never past the recap. A number that is not
+    negative rides as -1."""
+
+    name: str  # what it is, for whoever reports it
+    text: str
+    position: Position = -1
+
+
 @dataclass(frozen=True)
 class ContextShape:
     """The shaping settings an assembly runs under — read off the session
@@ -85,6 +113,7 @@ class ContextShape:
     max_context_setting: int  # tokens the prompt may use at most; 0 = the model's max context
     recap_header: str
     card_framing: str  # the card block template, for composing card rows
+    injections: tuple[Injection, ...]  # in the order they are sent where they share a place
 
 
 @dataclass(frozen=True)
@@ -109,6 +138,9 @@ class WireTurn:
     role: str
     body: str
     images: tuple[WirePicture, ...] = ()
+    # Reads differently next request: an injection that moves with the
+    # end landed in it, or above it. A prompt-cache mark belongs before.
+    volatile: bool = False
 
 
 @dataclass(frozen=True)
@@ -118,8 +150,8 @@ class AssembledPrompt:
     messages: list[WireTurn]  # [system?] + the wire turns
     max_context: int  # the model's, or the default where it states none
     limit: int  # what the prompt measured against: min(max_context, setting) - reply reserve
-    system_tokens: int
-    transcript_tokens: int  # head + recap + tail estimate
+    system_tokens: int  # the premise and what was injected after it
+    transcript_tokens: int  # head + recap + tail estimate, the injected rows among them
     head_count: int  # verbatim opening messages on the wire
     scenes_summarized: int  # scene summaries standing in for the middle
     scenes_rolled_up: int  # scenes the history recap covers instead, 0 without one
@@ -204,6 +236,11 @@ def _assemble(
     recap block; it is sent, so the preview needs no heading of its own.
     Raises `ContextOverflowError` (case 6) when even the case-5 floor
     cannot fit."""
+    system = "\n\n".join(
+        part
+        for part in (system, *(i.text for i in shape.injections if i.position == "system"))
+        if part
+    )
     max_context = max_context or _DEFAULT_CONTEXT
     setting = shape.max_context_setting
     # The context in force: the model's, or the setting where it is lower.
@@ -305,6 +342,9 @@ def _compose(
         for i, (m, pictures) in enumerate(zip(tail, pictures_to_send[len(head) :], strict=True))
     )
 
+    injected = [i for i in shape.injections if i.position != "system" and i.text]
+    injected_tokens = sum(estimate_tokens(i.text) for i in injected)
+
     # The doc's case 4 drops summaries until the context fits and only
     # then swaps the history in; here every candidate level carries its
     # history INSIDE the fit test, and one more scene is absorbed when a
@@ -316,7 +356,7 @@ def _compose(
     recap_tokens = 0
     for level in _degrade_levels(covered, shape.recap_header):
         recap_tokens = estimate_tokens(_recap_text(level[0])) if level[0] else 0
-        if head_tokens + recap_tokens + tail_tokens <= budget:
+        if head_tokens + recap_tokens + tail_tokens + injected_tokens <= budget:
             break  # the first fit wins; the deepest level rides otherwise
     recap_rows, history, summarized, rolled = level
     recap = _recap_text(recap_rows)
@@ -325,12 +365,17 @@ def _compose(
     if system:
         wire.append(WireTurn(role="system", body=system))
     # The recap rows carry none: a summarized turn's picture is gone.
-    wire.extend(
-        _wire_turns(
-            head + recap_rows + tail,
-            pictures_to_send[: len(head)] + [()] * len(recap_rows) + pictures_to_send[len(head) :],
-        )
+    pictures_by_row: list[tuple[WirePicture, ...]] = [
+        *pictures_to_send[: len(head)],
+        *[()] * len(recap_rows),
+        *pictures_to_send[len(head) :],
+    ]
+    # The recap is a wall: an injection stays in the tail under it.
+    wall = len(head) + len(recap_rows) if recap_rows else 0
+    rows, pictures_by_row = _with_injections(
+        head + recap_rows + tail, pictures_by_row, injected, wall
     )
+    wire.extend(_wire_turns(rows, pictures_by_row))
     # A picture is counted only where its row stays verbatim: a
     # summarized row's is neither sent nor missed, the summary is what
     # remains of the turn. Held back is what `newest_pictures_only` kept off the
@@ -348,7 +393,7 @@ def _compose(
         max_context=max_context,
         limit=limit,
         system_tokens=system_tokens,
-        transcript_tokens=head_tokens + recap_tokens + tail_tokens,
+        transcript_tokens=head_tokens + recap_tokens + tail_tokens + injected_tokens,
         head_count=len(head),
         scenes_summarized=summarized,
         scenes_rolled_up=rolled,
@@ -496,14 +541,45 @@ def _recap_row(text: str) -> Message:
     return Message(role="user", body=text, kind="recap")
 
 
+def _with_injections(
+    rows: list[Message],
+    pictures: list[tuple[WirePicture, ...]],
+    injected: Sequence[Injection],
+    wall: int,
+) -> tuple[list[Message], list[tuple[WirePicture, ...]]]:
+    """The rows with each injection's own row in its place, the pictures
+    kept in step (an injected row carries none). A place is counted
+    from the end of the rows AS THEY STAND — a position counts messages,
+    never another injection — never above `wall`, and never after the
+    newest row; injections sharing a place keep the order given. Only
+    a story with no rows at all sends one on its own."""
+    by_place: dict[int, list[Injection]] = {}
+    for injection in injected:
+        # "system" never comes here; what is not negative rides as -1.
+        back = injection.position if isinstance(injection.position, int) else -1
+        place = max(wall, len(rows) + min(back, -1))
+        by_place.setdefault(place, []).append(injection)
+    placed_rows: list[Message] = []
+    placed_pictures: list[tuple[WirePicture, ...]] = []
+    for at in range(len(rows) + 1):
+        for injection in by_place.get(at, ()):
+            # Wire-only, as a recap row is: its body is already wire text.
+            placed_rows.append(Message(role="user", body=injection.text, kind="injection"))
+            placed_pictures.append(())
+        if at < len(rows):
+            placed_rows.append(rows[at])
+            placed_pictures.append(pictures[at])
+    return placed_rows, placed_pictures
+
+
 def _wire_text(message: Message, *, is_last: bool = False) -> str:
-    """One row's wire text. A recap row's body IS its wire text —
-    synthesized here, never stored, so it never reaches `syntax.to_wire`;
-    every other row (card rows included: their bodies arrive composed,
-    and `to_wire`'s card branch returns them untouched — card prose that
-    happens to spell an inliner is never split as syntax) composes per
-    turn."""
-    if message.kind == "recap":
+    """One row's wire text. A recap row's body IS its wire text, and an
+    injected row's — synthesized here, never stored, so neither reaches
+    `syntax.to_wire`; every other row (card rows included: their bodies
+    arrive composed, and `to_wire`'s card branch returns them untouched —
+    card prose that happens to spell an inliner is never split as
+    syntax) composes per turn."""
+    if message.kind in ("recap", "injection"):
         return message.body
     return syntax.to_wire(message, is_last=is_last)
 
@@ -524,16 +600,21 @@ def _wire_turns(
     pictures and all — storage granularity is otaku's bookkeeping; the
     model sees one prompt per exchange."""
     out: list[WireTurn] = []
+    volatile = False  # from the first injected row on: it moves with the end
     for position, message in enumerate(rows):
         # Newest = the LAST POSITION, never object identity: two turns can
         # hold the same text, and only where a row sits decides whether its
-        # cue is still live.
+        # cue is still live. An injected row never sits there.
         text = _wire_text(message, is_last=position == len(rows) - 1)
         images = pictures_to_send[position]
+        volatile = volatile or message.kind == "injection"
         if out and out[-1].role == message.role:
             out[-1] = WireTurn(
-                role=message.role, body=out[-1].body + "\n\n" + text, images=out[-1].images + images
+                role=message.role,
+                body=out[-1].body + "\n\n" + text,
+                images=out[-1].images + images,
+                volatile=volatile,
             )
         else:
-            out.append(WireTurn(role=message.role, body=text, images=images))
+            out.append(WireTurn(role=message.role, body=text, images=images, volatile=volatile))
     return out

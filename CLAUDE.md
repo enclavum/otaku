@@ -129,13 +129,104 @@ written down rather than going quiet. A new command is a row in the
 shared table, a row in the terminal's, and a decision recorded there —
 the suite fails until all three exist.
 
+### Tools: what the model writes
+
+A model uses a tool by writing a tagged block in its reply
+(`<otk-ask>…</otk-ask>`, `<otk-notes>…</otk-notes>`): otaku owns the
+convention, never the API's `tools` field, so it works on every engine.
+The body is stored verbatim, tags included.
+
+WHAT a block is, is the `otk-` namespace and nothing else
+(`context.blocks`: split, strip, the streaming splitter — pure, and no
+list of tools is consulted). A body keeps its tags for good while the
+tools come and go between builds, so "not story" has to be a property
+of the TEXT: a block stays one in a build that never heard of its
+tool, and nothing outside the namespace is ever one — the INSIDE goes
+with a block, so `<i>never</i>` keeps its word and a chat log's
+`<Alice>` its line. A block is not story: the lore pass leaves it out,
+tags and all (`blocks.strip`: the gate, the span packing, the numbered
+chat).
+
+WHICH tools there are is `context.tools`, the model's language as
+`context.syntax` is the user's, beside it for the same reason — it is
+read BELOW the backend: one class per tool, in `syntax`'s shape (a
+class declares, an instance is one block read), and the one registry,
+`TOOLS`, keyed by the tag's name (`ask` for `<otk-ask>`; letters
+alone). Who answers a block is its `Actor`: nobody (an aside,
+`notes`), the user (a call, `ask`), or otaku itself (`SYSTEM`, not
+supported yet — and what such a tool DOES will be the backend's, as a
+direction is declared in `syntax` and played in `backend.api.play`).
+A new tool is a subclass and its name in `TOOLS`.
+
+### Injections
+
+An `Injection` (`context.assembler`) is text the context carries besides
+the story: never stored, never seen by the lore pass, shown by
+`/context` because it is on the wire. It rides `ContextShape`, so the
+turn, the preview and the worker's warm-up cannot disagree, and the
+assembler never learns where one came from. Where it rides is ONE
+value, its `position`. "system" appends it to the system message,
+after the premise — the stored premise is untouched. A negative number
+makes it a synthesized user row, wire-only as a recap row is and
+joined by the same merge, placed as `list.insert` would place it: -1
+above the newest message, -3 above the last three. Never after the
+newest — it keeps the last word and its cue stays live, since no
+injected row ever sits last — and never past the recap, which is a
+wall. It costs its tokens in the fit.
+
+A numbered injection MOVES with the end, so the turn it lands in and
+every turn after are `volatile` (`WireTurn`, `providers.WireMessage`):
+they read differently next request. The prompt-cache mark therefore
+sits on the last row ABOVE them, not on the final row
+(`requests._mark_cache`) — marked among them, a hosted cache would
+match nothing from one turn to the next. A local engine re-reads from
+where the injection sat; a "system" one costs nothing.
+
+### Features
+
+A feature is one switch of a STORY: a tool, whose injection is its
+instruction (`ask_instruction`, `notes_instruction` in prompts.toml —
+one global text each, named by the tool's `instruction_field`), or a
+reminder, the user's own text. There are two, each a switch of its
+own: the GLOBAL reminder, whose text is written once for every story
+and which a story only turns on, and the STORY reminder, whose text is
+the story's. `backend.features` is the meaning, pure over plain data:
+`ALL_FEATURES` names them all — `use_global_reminder`, `use_story_reminder`,
+then every registered tool by the name its class states (`Tool.feature`:
+`allow_assistant_notes`, `allow_questions`) — and a name is what a
+story's switch is STORED under, so a rename orphans stored settings;
+`read` and `write` work over the story's settings JSON, and `injections`,
+which the session calls in `_shape()` at every assembly — the global
+reminder, the story's, then the tools. otaku frames its own texts and
+the user's go as written: an instruction is enclosed `((OOC: …))` in
+chat and bare in the system message; a reminder is verbatim. A
+feature states every position it may take as a closed list
+(`Feature.allowed_positions`), so a frontend offers the list and
+decides nothing: "system" and -1 … -8 for a tool, the numbers alone
+for a reminder — it exists because a model forgets its system
+message, which is the premise's. `backend.api.features` is the
+operations.
+
+Where it is kept follows two questions. ONE STORY'S? Then the
+database, always: `stories.settings`, one sealed JSON with a key per
+setting, because it must fork, export and die with its story — a
+write keeps every key it does not know (a JSON key bumps no schema
+version), a new story starts with everything off, and until a first
+turn makes the story the session holds them, as it holds the premise.
+GLOBAL? Then a SETTING — a choice about how otaku behaves, a shipped
+template included — is a config file's, and CONTENT — prose the user
+wrote to be played — is the `globals` table's (key/value, sealed; an
+emptied value deletes its row). The test for a doubtful case: with
+encryption on, must it be unreadable on disk? `history` is the
+precedent.
+
 ### The data model
 
 The data model lives in `otaku/store/schema.py` (the DDL, its
 semantics, and the row types) — always the CURRENT shape: a fresh
 database is created from it directly, and `store/migrations` — a
 versioned ladder over `meta.schema_version` — brings old databases to
-it. Each step is a FROZEN module per version (`v2.py`, `v3.py`, `v4.py`):
+it. Each step is a FROZEN module per version (`v2.py` … `v6.py`):
 a step writes what its target version WAS, never what schema.py says now
 (backup-first, unharmed-on-failure, newer-refused). The invariant: a
 migrated database equals a fresh one, `sqlite_master` row for row.

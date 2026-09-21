@@ -6,7 +6,8 @@ into a turn's `template` verbatim — nothing is filled at write time, so
 the turn keeps the wording this file had when it played; `{name}` and
 `{body}` mark where the turn's own name and text slot in at wire time.
 The lore templates build the memory; `recap_header` carries the finished
-scene summaries back into the request.
+scene summaries back into the request; a tool's instruction is sent
+while the tool is switched on, never stored.
 
 The stub is written on first use with every template active; once the
 file exists it is the source — edit a value to change it, delete the
@@ -132,6 +133,70 @@ Rules:
 {entries}
 """
 
+# The tools' instructions: what tells the model how a tool is used
+# (`context.tools`). Sent as an injection while the tool is switched on
+# for the story — bare in the system message, inside the OOC enclosure
+# in chat — so neither carries an enclosure of its own.
+ASK_INSTRUCTION_DEFAULT = (
+    "When the story reaches a fork you should not decide alone, you may ask the reader "
+    "ONE question. Write it as the last thing in your reply, inside <otk-ask> tags: the "
+    "question on the first line, then, only if the answers are a fixed set, the possible "
+    "answers as numbered lines. The numbered lines are answers for the reader to pick "
+    "from, never further questions. Like this, from an unrelated story:\n"
+    "\n"
+    "<otk-ask>\n"
+    "Does Mara confess tonight, or wait for the ball?\n"
+    "1. She confesses tonight\n"
+    "2. She waits for the ball\n"
+    "3. She confesses, but to the wrong person\n"
+    "</otk-ask>\n"
+    "\n"
+    "A question without a fixed set of answers has no numbered lines. Stop after the "
+    "closing tag. The reader's next message is the answer; then continue the scene from "
+    "where you stopped, without repeating what you wrote. Ask rarely, at most once per "
+    "reply, and never inside your reasoning."
+)
+
+NOTES_INSTRUCTION_DEFAULT = """\
+## Private notes
+
+Before your reply, you may open a <otk-notes>...</otk-notes> block. Nothing inside it
+reaches the user. Write the visible scene after the closing tag.
+
+The transcript already records everything said and done. Notes are for what it
+can't show: a motive a character kept to themselves, the truth behind something
+they claimed, a detail you placed on purpose and mean to use later, where you
+intend this to go. If a careful reader could infer it from the visible text,
+leave it out.
+
+Within that, use the space however you like. There is no required format and no
+fields to fill.
+
+- Skip the block when there's nothing to record. Many turns have nothing. An
+  empty gesture at it is worse than none.
+- Keep it brief. It costs the same context the story does.
+- Your earlier notes are above. Write only what's new or what changed — never
+  restate them.
+- They are intentions, not events. If the scene went somewhere else, abandon
+  the plan. Only what reaches the page is real.
+- The visible scene must never acknowledge the notes or carry their register
+  into the prose.
+
+Two examples, from an unrelated story. The form is free — these only show the
+range.
+
+<otk-notes>
+Toln recognized the seal. Saying nothing yet — he wants to see if she offers it
+first.
+</otk-notes>
+
+<otk-notes>
+She's been agreeing too readily for three turns and it's flattening her. The
+sword was never really hers to promise; I want that surfacing soon, but not by
+confession — better if Kael finds the second seal himself and she has to
+account for it. Slowing this scene down.
+</otk-notes>"""
+
 _DEFAULTS = {
     "me_framing": "((OOC: The user writes as {name}.))\n{body}",
     "you_framing": (
@@ -161,6 +226,8 @@ _DEFAULTS = {
     "scene_history_prompt": SCENE_HISTORY_DEFAULT,
     "journal_history_prompt": JOURNAL_HISTORY_DEFAULT,
     "recap_header": "[The story so far — the scenes between these moments:]",
+    "ask_instruction": ASK_INSTRUCTION_DEFAULT,
+    "notes_instruction": NOTES_INSTRUCTION_DEFAULT,
 }
 
 # Placeholders a template cannot do without: every one its built-in text
@@ -202,6 +269,8 @@ class Prompts:
     scene_history_prompt: str = _DEFAULTS["scene_history_prompt"]
     journal_history_prompt: str = _DEFAULTS["journal_history_prompt"]
     recap_header: str = _DEFAULTS["recap_header"]
+    ask_instruction: str = _DEFAULTS["ask_instruction"]
+    notes_instruction: str = _DEFAULTS["notes_instruction"]
 
 
 def load(path: Path) -> tuple[Prompts, list[str]]:
