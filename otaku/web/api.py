@@ -552,12 +552,30 @@ def context(session: Session) -> dict[str, Any]:
     draws the role markers as the design draws them, around the report's
     own text."""
     report = reports.context(session)
-    shape = report.shape
+    prompt = report.prompt
     return {
-        # The derived numbers ride along: `asdict` sees fields only, and
-        # the page draws kept/total/used exactly as the terminal says them.
-        "shape": asdict(shape)
-        | {"kept": shape.kept, "total_tokens": shape.total_tokens, "used": shape.used},
+        # The numbers alone — never the wire, which `parts` carries — the
+        # derived ones among them, so the page draws kept/total/used
+        # exactly as the terminal says them.
+        "shape": {
+            "head": prompt.head,
+            "middle": prompt.middle,
+            "history": prompt.history,
+            "rolled_up": prompt.scenes_rolled_up,
+            "summaries": prompt.scenes_summarized,
+            "tail": prompt.tail,
+            "tail_target": prompt.tail_target,
+            "tail_setting": report.tail_setting,
+            "system_tokens": prompt.system_tokens,
+            "transcript_tokens": prompt.transcript_tokens,
+            "limit": prompt.limit,
+            "pictures_sent": prompt.pictures_sent,
+            "pictures_omitted": prompt.pictures_omitted,
+            "pictures_held": prompt.pictures_held,
+            "kept": report.kept,
+            "total_tokens": prompt.total_tokens,
+            "used": report.used,
+        },
         "lede": report.summary,
         # What the preview could not know, in the report's words; "".
         "note": report.note,
@@ -689,6 +707,49 @@ def _head(session: Session, ask: Ask) -> str:
     message = ask.body.get("message")
     return api_stories.land(
         session, int(ask.body["story"]), None if message is None else int(message), action
+    )
+
+
+def story_settings(session: Session, story_id: int) -> dict[str, Any]:
+    """A story's settings as they stand, in the order they are sent: the
+    switch, where it injects (null for one that injects nothing) and the
+    positions it may take, and the story's own text (null for one with
+    none). Any story's; a story that is not there is the spec's 404."""
+    if all(row.id != story_id for row in api_stories.listing(session)):
+        raise NotFound(f"no story {story_id}")
+    return {
+        "settings": [
+            {
+                "name": setting.name,
+                "label": setting.label,
+                "enabled": setting.enabled,
+                "position": setting.injection_position,
+                "allowed_positions": list(setting.allowed_positions),
+                "text": setting.text,
+            }
+            for setting in api_stories.get_settings(session, story_id)
+        ]
+    }
+
+
+def _update_setting(session: Session, ask: Ask) -> str:
+    """One setting of a story, the fields given laid over it; what each
+    may take is the setting's to refuse (`backend.story`). A flag that
+    is not a boolean is a malformed request, as a null title is."""
+    story_id = ask.id("story")
+    if all(row.id != story_id for row in api_stories.listing(session)):
+        raise NotFound(f"no story {story_id}")
+    enabled = ask.body.get("enabled")
+    if enabled is not None and not isinstance(enabled, bool):
+        raise TypeError("enabled is not a boolean")
+    text = ask.text("text") if "text" in ask.body else None
+    return api_stories.update_setting(
+        session,
+        ask.params["setting"],
+        enabled=enabled,
+        position=ask.body.get("position"),
+        text=text,
+        story_id=story_id,
     )
 
 
@@ -1191,6 +1252,10 @@ ROUTES: dict[tuple[str, str], _Route] = {
     ),
     # Inside a story
     ("PUT", "/api/stories/{story}/premise"): _premise,
+    ("GET", "/api/stories/{story}/settings"): lambda session, ask: story_settings(
+        session, ask.id("story")
+    ),
+    ("PATCH", "/api/stories/{story}/settings/{setting}"): _update_setting,
     ("PATCH", "/api/stories/{story}/scenes/{scene}"): _edit_scene,
     ("PATCH", "/api/stories/{story}/characters/{character}"): _edit_character,
     ("PUT", "/api/stories/{story}/characters/{character}/merge"): _merge,
@@ -1216,6 +1281,14 @@ ROUTES: dict[tuple[str, str], _Route] = {
     # Settings
     ("GET", "/api/settings"): lambda session, ask: settings(session),
     ("PUT", "/api/settings/{setting}"): _set_knob,
+    # The reminder stories share: a text, the database's, not a knob of
+    # the /set family.
+    ("GET", "/api/shared_reminder"): lambda session, ask: {
+        "text": api_stories.get_shared_reminder(session)
+    },
+    ("PUT", "/api/shared_reminder"): lambda session, ask: api_stories.set_shared_reminder(
+        session, ask.need("text")
+    ),
 }
 
 # The five paths whose work outlives the request that started it — a

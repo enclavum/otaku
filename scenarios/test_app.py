@@ -39,7 +39,7 @@ from otaku.store.migrations import v3 as store_v3
 from otaku.store.migrations import v4 as store_v4
 from otaku.store.migrations import v5 as store_v5
 from otaku.store.migrations import v6 as store_v6
-from otaku.store.schema import SCHEMA_DDL, Attachment, Message
+from otaku.store.schema import SCHEMA_DDL, Attachment, Message, StorySettingDB
 from otaku.terminal.tty import BOLD, RESET
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch, run_otaku, set_config, set_config_provider
@@ -273,10 +273,13 @@ class TestSchemaMigration:
             assert store.journals.get_current(1, ids)[keeper.id].state == "at the gate"
             # The v6 `settings` column trails the story's row: a v1 story
             # reads none, takes some, and the table v6 created answers.
-            assert store.stories.get_settings(1) == ""
-            store.stories.set_settings(1, '{"ask": {"on": true}}')
-            assert store.stories.get_settings(1) == '{"ask": {"on": true}}'
-            assert store.globals.get("reminder") == ""
+            assert store.stories.get_settings(1) == ()
+            asking = StorySettingDB("allow_questions", enabled=True)
+            store.stories.set_setting(1, asking)
+            assert store.stories.get_settings(1) == (asking,)
+            # The row carries them, as a message carries its attachments.
+            assert store.stories.get(1).settings == (asking,)
+            assert store.settings.get("shared_reminder") == ""
         finally:
             store.close()
         assert _meta_version(paths) == "6"
@@ -1047,8 +1050,8 @@ def _v1_database(root) -> Paths:
         start = v1_ddl.index(f"CREATE TABLE {table}")
         end = v1_ddl.index(");", start) + 1
         v1_ddl = v1_ddl[:start] + shipped + v1_ddl[end:]
-    # Version 1 had no `globals` table at all: step 6 creates it.
-    start = v1_ddl.index("CREATE TABLE globals")
+    # Version 1 had no `settings` table at all: step 6 creates it.
+    start = v1_ddl.index("CREATE TABLE settings")
     v1_ddl = v1_ddl[:start] + v1_ddl[v1_ddl.index(");", start) + 2 :]
     conn = sqlite3.connect(paths.database_file)
     conn.executescript("BEGIN;" + v1_ddl)

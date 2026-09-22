@@ -6,14 +6,17 @@ from the old module unchanged with the DDL text: stories/messages are
 source, scenes/characters/journals derivatives, sibling trees via
 parent_id, the two-level rollup pattern, per-field sealing (the `attachments`
 column plain on purpose: the app's facts about files the folder beside
-the database holds sealed), audit-only timestamps. `globals` is the one
-table of CONTENT that belongs to no story: what the user wrote to be
-played in every one (a setting is a config file's, never this table's).
+the database holds sealed), audit-only timestamps. A story's settings
+are one sealed JSON on its row (`StorySettingDB`); the `settings` table
+holds the ones stories SHARE. A setting is that table's when it is a
+text that may need sealing — a config file is never sealed — and a
+config file's otherwise.
 """
 
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Literal, Self
 
 SCHEMA_VERSION = "6"
 
@@ -99,15 +102,6 @@ CREATE TABLE journals (
     FOREIGN KEY (story_id, character_id) REFERENCES characters(story_id, id) ON DELETE CASCADE
 );
 
--- ---------- the user's own, outside any story ----------
-
-CREATE TABLE globals (                   -- content that belongs to every story, sealed
-    key        TEXT PRIMARY KEY,         -- 'reminder'
-    value      BLOB NOT NULL,            -- sealed; an emptied value deletes its row
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
 -- ---------- bookkeeping ----------
 
 CREATE TABLE token_usage (
@@ -129,6 +123,13 @@ CREATE TABLE history (                   -- the REPL's Up/Down input history, ca
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE settings (                  -- settings that stories share; the texts that may need sealing
+    key        TEXT PRIMARY KEY,         -- 'shared_reminder'
+    value      BLOB NOT NULL,            -- sealed; an emptied value deletes its row
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);   -- schema_version, check
 
 CREATE INDEX idx_messages_story    ON messages (story_id);
@@ -142,6 +143,79 @@ CREATE INDEX idx_token_usage_story ON token_usage (story_id);
 """
 
 
+# Where what a setting injects rides (`context.assembler.Injection`):
+# "system", or a negative number counted from the end the way a Python
+# index is — -1 is above the newest message.
+InjectionPosition = Literal["system"] | int
+
+
+@dataclass(frozen=True)
+class StorySettingDB:
+    """One setting of a story, as the `settings` column records it: a
+    switch, where what it injects rides, and the story's own text where
+    it has one. WHICH settings there are, and what each may take, is no
+    business of the column's (`backend.story`)."""
+
+    name: str
+    enabled: bool = False
+    position: InjectionPosition | None = None  # None: unsaid, the setting's default applies
+    text: str = ""
+
+    @classmethod
+    def from_json(cls, text: str) -> tuple[Self, ...]:
+        """The column read back: every setting it holds, in its order.
+        What makes no sense reads as unsaid — `enabled` that is not `true`
+        is False, a position that is not "system" or a negative number is
+        None — and a text that is no JSON object of objects holds none."""
+        out = []
+        for name, state in cls._parse(text).items():
+            if not isinstance(state, dict):
+                continue
+            said, words = state.get("position"), state.get("text")
+            # By type first: to Python True is 1 and -1.0 is -1, and neither is a position.
+            placed = said == "system" or (type(said) is int and said < 0)
+            out.append(
+                cls(
+                    name=name,
+                    enabled=state.get("enabled") is True,
+                    position=said if placed else None,
+                    text=words if isinstance(words, str) else "",
+                )
+            )
+        return tuple(out)
+
+    @classmethod
+    def to_json(cls, settings: Sequence[Self], current: str = "") -> str:
+        """The column's text with these settings in it — a MERGE over
+        `current`, never a rewrite: a JSON key bumps no schema version, so
+        an older build can meet a newer one's keys and must hand them back
+        whole. Only what is said is written; an emptied text leaves the
+        column."""
+        column = cls._parse(current)
+        for setting in settings:
+            state = column.get(setting.name)
+            state = dict(state) if isinstance(state, dict) else {}
+            state["enabled"] = setting.enabled
+            if setting.position is not None:
+                state["position"] = setting.position
+            if setting.text:
+                state["text"] = setting.text
+            else:
+                state.pop("text", None)
+            column[setting.name] = state
+        return json.dumps(column, ensure_ascii=False)
+
+    @staticmethod
+    def _parse(text: str) -> dict[str, object]:
+        """The column's text parsed: the JSON object it holds, or an empty
+        dict for anything else — nothing, garbage, a list."""
+        try:
+            parsed = json.loads(text) if text else {}
+        except ValueError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
+
 @dataclass(frozen=True)
 class Story:
     id: int
@@ -149,6 +223,7 @@ class Story:
     system: str
     head_id: int | None
     forked_from_id: int | None
+    settings: tuple[StorySettingDB, ...] = ()  # what the story has stored, see StorySettingDB
 
 
 @dataclass(frozen=True)
@@ -167,6 +242,42 @@ class Attachment:
     width: int
     height: int
     size: int
+
+    @classmethod
+    def from_json(cls, text: str | None) -> tuple[Self, ...]:
+        """The column read back; NULL → no pictures, which is also what a
+        row written before the column existed reads as."""
+        if not text:
+            return ()
+        return tuple(
+            cls(
+                file=str(item["file"]),
+                width=int(item["width"]),
+                height=int(item["height"]),
+                size=int(item["size"]),
+            )
+            for item in json.loads(text)
+        )
+
+    @classmethod
+    def to_json(cls, attachments: Sequence[Self]) -> str | None:
+        """The column's text for these pictures: a JSON list, or NULL (None)
+        for a turn without any — the column never holds an empty list
+        pretending to be absent. The keys are a contract with the SQL that
+        reads the column back (`$.file` is what the sweep extracts)."""
+        if not attachments:
+            return None
+        return json.dumps(
+            [
+                {
+                    "file": a.file,
+                    "width": a.width,
+                    "height": a.height,
+                    "size": a.size,
+                }
+                for a in attachments
+            ]
+        )
 
 
 @dataclass(frozen=True)
@@ -222,39 +333,3 @@ class Journal:
     state: str
     history: str = ""
     updated_at: str = ""  # audit column, surfaced for display alone
-
-
-def attachments_to_json(attachments: Sequence[Attachment]) -> str | None:
-    """The column's text for these pictures: a JSON list, or NULL (None)
-    for a turn without any — the column never holds an empty list
-    pretending to be absent. The keys are a contract with the SQL that
-    reads the column back (`$.file` is what the sweep extracts)."""
-    if not attachments:
-        return None
-    return json.dumps(
-        [
-            {
-                "file": a.file,
-                "width": a.width,
-                "height": a.height,
-                "size": a.size,
-            }
-            for a in attachments
-        ]
-    )
-
-
-def attachments_from_json(text: str | None) -> tuple[Attachment, ...]:
-    """The column read back; NULL → no pictures, which is also what a
-    row written before the column existed reads as."""
-    if not text:
-        return ()
-    return tuple(
-        Attachment(
-            file=str(item["file"]),
-            width=int(item["width"]),
-            height=int(item["height"]),
-            size=int(item["size"]),
-        )
-        for item in json.loads(text)
-    )

@@ -55,7 +55,7 @@ _ALLOWED = {
         "logging",
         "formatting",
     },
-    "context": {"store"},
+    "context": {"store", "providers"},
     # `formatting` for `Money`: what a provider reports a balance IN is a
     # value type, and value types live in the leaf everyone may reach.
     "providers": {"settings", "formatting"},

@@ -51,7 +51,7 @@ review:
     console    → formatting
     worker     → context, providers, store, logging, formatting
     backend    → worker, context, providers, store, settings, encryption, logging, formatting
-    context    → store (reads only)
+    context    → store (reads only), providers (its wire vocabulary)
     providers  → settings (its ProviderConfig and sections live there), formatting
     store      → encryption
     settings   → formatting
@@ -145,34 +145,61 @@ tool, and nothing outside the namespace is ever one — the INSIDE goes
 with a block, so `<i>never</i>` keeps its word and a chat log's
 `<Alice>` its line. A block is not story: the lore pass leaves it out,
 tags and all (`blocks.strip`: the gate, the span packing, the numbered
-chat).
+chat). `blocks` is the one piece of the tools below the backend,
+because the worker reads it.
 
-WHICH tools there are is `context.tools`, the model's language as
-`context.syntax` is the user's, beside it for the same reason — it is
-read BELOW the backend: one class per tool, in `syntax`'s shape (a
-class declares, an instance is one block read), and the one registry,
-`TOOLS`, keyed by the tag's name (`ask` for `<otk-ask>`; letters
-alone). Who answers a block is its `Actor`: nobody (an aside,
-`notes`), the user (a call, `ask`), or otaku itself (`SYSTEM`, not
-supported yet — and what such a tool DOES will be the backend's, as a
-direction is declared in `syntax` and played in `backend.api.play`).
-A new tool is a subclass and its name in `TOOLS`.
+WHICH tools there are is `backend.tools`: one class per tool, in
+`syntax`'s shape — a class declares its `tag` (`ask` for `<otk-ask>`;
+letters alone), who answers its block (`Actor`: nobody for an aside,
+`notes`; the user for a call, `ask`; otaku itself, `SYSTEM`, not
+supported yet) and the prompts.toml field of its instruction
+(`prompt_name`); an instance is one block READ, which is the play
+stream's business — nothing is instantiated to inject an instruction.
+The one registry is `TOOLS`, keyed by tag. A new tool is a subclass
+and its name in `TOOLS`; the story setting that switches it on is the
+setting's to declare (`backend.story`), not the tool's.
 
 ### Injections
 
-An `Injection` (`context.assembler`) is text the context carries besides
-the story: never stored, never seen by the lore pass, shown by
-`/context` because it is on the wire. It rides `ContextShape`, so the
-turn, the preview and the worker's warm-up cannot disagree, and the
-assembler never learns where one came from. Where it rides is ONE
-value, its `position`. "system" appends it to the system message,
-after the premise — the stored premise is untouched. A negative number
-makes it a synthesized user row, wire-only as a recap row is and
-joined by the same merge, placed as `list.insert` would place it: -1
-above the newest message, -3 above the last three. Never after the
-newest — it keeps the last word and its cue stays live, since no
-injected row ever sits last — and never past the recap, which is a
-wall. It costs its tokens in the fit.
+An `Injection` is text the context carries besides the story: never
+stored, never seen by the lore pass, shown by `/context` because it is
+on the wire. `context.injections` owns what one is — its `owner` (the
+setting's name, later a lorebook's), its text, its `position` — and
+where it goes (`inject_into_system`, `inject_into_tail`); the assembler
+decides only WHEN, and counts the tokens. Who MAKES one is above the
+package: a story's settings (`backend.story`, `StorySettings.injections`),
+later a lorebook; the assembler is handed them built and never learns
+where one came from, which is how a new source arrives without an
+assembler change. So `assemble_story(store, story_id, *, system,
+messages, injections, prompts, shape, pictures_ride)` takes what the
+caller holds — a story may not exist yet, and the worker's warm-up
+assembles from a snapshot, so its `Job` carries the same fields in the
+same order — and reads from the store only what it cannot hold: the
+scenes, the card archives, the pictures. The prompts object is handed
+in whole (`assembler.PromptTexts`, which the settings' `Prompts`
+satisfies structurally: `context` may not import `settings`) for the
+recap header and the card template. `ContextShape` is the window: the
+config's two counts and ONE `max_context`, the context in force —
+`context_in_force(model_window, cap)`, the lower of the model's window
+(the default where none) and the cap. A Job's shape carries the cap
+alone; the warm-up finishes it with the window it asks the engine for
+once the model is loaded, as the turn does. Where a turn's pictures
+ride is `providers.PicturesRide` — NONE for a model that cannot see,
+EACH on its own message, LATEST gathered onto the newest (omlx's
+quirk) — answered in one place, `client.pictures_ride(model)`, off the
+cached row. `assemble_story` is ONE function, the store reads included,
+so its unit tests hand it a stand-in store; inside, `_Assembly` is what
+every rung of the case-5 ladder composes from, with the cases as its
+methods.
+
+Where an injection rides is ONE value, its `position`. "system"
+appends it to the system message, after the premise — the stored
+premise is untouched. A negative number makes it a synthesized user
+row, wire-only as a recap row is and joined by the same merge, placed
+as `list.insert` would place it: -1 above the newest message, -3 above
+the last three. Never after the newest — it keeps the last word and its
+cue stays live, since no injected row ever sits last — and never past
+the recap, which is a wall. It costs its tokens in the fit.
 
 A numbered injection MOVES with the end, so the turn it lands in and
 every turn after are `volatile` (`WireTurn`, `providers.WireMessage`):
@@ -182,43 +209,66 @@ sits on the last row ABOVE them, not on the final row
 match nothing from one turn to the next. A local engine re-reads from
 where the injection sat; a "system" one costs nothing.
 
-### Features
+### Story settings
 
-A feature is one switch of a STORY: a tool, whose injection is its
-instruction (`ask_instruction`, `notes_instruction` in prompts.toml —
-one global text each, named by the tool's `instruction_field`), or a
-reminder, the user's own text. There are two, each a switch of its
-own: the GLOBAL reminder, whose text is written once for every story
-and which a story only turns on, and the STORY reminder, whose text is
-the story's. `backend.features` is the meaning, pure over plain data:
-`ALL_FEATURES` names them all — `use_global_reminder`, `use_story_reminder`,
-then every registered tool by the name its class states (`Tool.feature`:
-`allow_assistant_notes`, `allow_questions`) — and a name is what a
-story's switch is STORED under, so a rename orphans stored settings;
-`read` and `write` work over the story's settings JSON, and `injections`,
-which the session calls in `_shape()` at every assembly — the global
-reminder, the story's, then the tools. otaku frames its own texts and
-the user's go as written: an instruction is enclosed `((OOC: …))` in
-chat and bare in the system message; a reminder is verbatim. A
-feature states every position it may take as a closed list
-(`Feature.allowed_positions`), so a frontend offers the list and
-decides nothing: "system" and -1 … -8 for a tool, the numbers alone
-for a reminder — it exists because a model forgets its system
-message, which is the premise's. `backend.api.features` is the
-operations.
+What a user sees as the app's features are, below the frontends, a
+STORY's settings: each is one switch of a story, one class each in
+`backend.story`. A tool's (`StorySettingQuestions`,
+`StorySettingAssistantNotes`) lets the model use the tool and injects
+its instruction, read off the prompts under the tool's `prompt_name`
+and enclosed `((OOC: …))` in chat, bare in the system message; a
+reminder's injects the user's own text verbatim — two of them, each a
+switch of its own: the SHARED reminder (`StorySettingSharedReminder`),
+one text every story that switched it on is sent, and the STORY
+reminder (`StorySettingReminder`), whose text is the story's; and a
+flag (`StorySettingMode`, story mode, not built yet) injects nothing.
 
-Where it is kept follows two questions. ONE STORY'S? Then the
-database, always: `stories.settings`, one sealed JSON with a key per
-setting, because it must fork, export and die with its story — a
-write keeps every key it does not know (a JSON key bumps no schema
-version), a new story starts with everything off, and until a first
-turn makes the story the session holds them, as it holds the premise.
-GLOBAL? Then a SETTING — a choice about how otaku behaves, a shipped
-template included — is a config file's, and CONTENT — prose the user
-wrote to be played — is the `globals` table's (key/value, sealed; an
-emptied value deletes its row). The test for a doubtful case: with
-encryption on, must it be unreadable on disk? `history` is the
-precedent.
+Every setting answers the same questions, so a frontend draws them
+alike: `name` (what a story stores it under — `use_shared_reminder`,
+`use_story_reminder`, `allow_assistant_notes`, `allow_questions`,
+`story_mode`; a rename orphans stored settings), `label`, `enabled`,
+`injection_position` (None for one that injects nothing),
+`allowed_positions` (EVERY position it may take, a closed list a
+frontend offers and decides nothing about: "system" and -1 … -8 for a
+tool, the numbers alone for a reminder — it exists because a model
+forgets its system message, which is the premise's; empty for a flag),
+and `text` (the story's own, None for one with none). A stored
+position off the list reads as the default (-1 for a tool, -3 for a
+reminder). What a setting TAKES is the setting's: `to_db(enabled=,
+position=, text=)` is the row to store with the given laid over it,
+and raises `Refused` for what this setting does not take; `injection`
+is what a switched-on one sends, None while off or empty.
+`StorySettings(from_db, store, prompts_file)` is every setting of one
+story as it stands — it reads the prompts file and the shared
+reminder itself, so a caller hands over only the rows it holds — and
+`injections` is what the switched-on ones send, in the order they
+share a place: the shared reminder, the story's, then the tools.
+
+What a story STORES is the store's: `schema.StorySettingDB` — a name,
+`enabled`, a position, a text — with its column's JSON codec on it
+(`from_json`, `to_json`, as `Attachment` has its own), carried by the
+row (`Story.settings`) as `Message.attachments` is; the store hands
+out typed rows and merges a write into the column, keeping every key it
+does not know (a JSON key bumps no schema version). The operations are
+`backend.api.stories`': `get_settings` (a `StorySettings`),
+`update_setting`, `get_shared_reminder`, `set_shared_reminder`; the
+page reaches them at `/api/stories/{story}/settings` (GET, and PATCH
+of one setting) and `/api/shared_reminder` — not a `/api/settings`
+knob, since every knob must be drawn on the settings slip.
+`Refused` lives in `backend.errors`, a leaf, so a class below the
+session can raise it; `backend.session` re-exports it.
+
+Where a setting is kept. ONE STORY'S is the database's, always:
+`stories.settings`, one sealed JSON with a key per setting, because it
+must fork, export and die with its story; a new story starts with
+everything off, and until a first turn makes the story the session
+holds the rows, as it holds the premise. One that stories SHARE is the
+`settings` table's (key/value, sealed; an emptied value deletes its
+row — `SettingsOps.get_shared_reminder`/`set_shared_reminder` are its
+typed door) when it is a TEXT THAT MAY NEED SEALING — a config file is
+never sealed — and a config file's otherwise. `history` is the
+precedent: a convenience any other program keeps in a dotfile, sealed
+in the database because it holds what the user typed.
 
 ### The data model
 

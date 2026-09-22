@@ -22,14 +22,15 @@ let version = "";
 const ready = (async () => {
   const load = async (name) =>
     (await realFetch(new URL(`./fixtures/${name}.json`, import.meta.url))).json();
-  const [syntax, settings, river, tour] = await Promise.all([
+  const [syntax, settings, storySettings, river, tour] = await Promise.all([
     load("syntax"),
     load("settings"),
+    load("story_settings"),
     load("river"),
     load("tour"),
   ]);
   version = river.facts.version;
-  store.seed({ syntax, settings, river, tour });
+  store.seed({ syntax, settings, storySettings, river, tour });
 })();
 
 // ---------- the routes ----------
@@ -73,6 +74,12 @@ const ROUTES = {
   "GET /api/stories/{story}/export": (p) => store.exportDocument(num(p.story)),
   // Inside a story
   "PUT /api/stories/{story}/premise": (p, q, b) => store.setSystem(num(p.story), String(b.text)),
+  "GET /api/stories/{story}/settings": (p) => store.storySettings(num(p.story)),
+  "PATCH /api/stories/{story}/settings/{setting}": (p, q, b) =>
+    // A flag that is not a boolean is malformed, as the server answers it.
+    b.enabled != null && typeof b.enabled !== "boolean"
+      ? status(400)
+      : store.updateSetting(num(p.story), p.setting, b),
   "PATCH /api/stories/{story}/scenes/{scene}": (p, q, b) =>
     store.editLore(
       num(p.story),
@@ -137,6 +144,8 @@ const ROUTES = {
   // Settings
   "GET /api/settings": () => store.settings(),
   "PUT /api/settings/{setting}": (p, q, b) => store.setKnob(p.setting, b.value),
+  "GET /api/shared_reminder": () => store.sharedReminder(),
+  "PUT /api/shared_reminder": (p, q, b) => store.setSharedReminder(String(b.text)),
 };
 
 // The path parameters that are row ids, as `web/server.py` declares

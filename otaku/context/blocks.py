@@ -2,7 +2,7 @@
 story.
 
 The `otk-` namespace is the whole test of what a block is. No list of
-tools is consulted (`context.tools` owns those): a body keeps its tags
+tools is consulted (`backend.tools` owns those): a body keeps its tags
 for good while the tools come and go between builds, so "not story" has
 to be a property of the TEXT — a block stays one in a build that never
 heard of its tool. A tag matches in any case, ASCII letters only; a

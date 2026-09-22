@@ -25,7 +25,7 @@ from datetime import datetime
 
 from otaku.store.database import Database
 from otaku.store.files import FileStore
-from otaku.store.schema import Message, Story, attachments_from_json, attachments_to_json
+from otaku.store.schema import Attachment, Message, Story, StorySettingDB
 
 # The numbered suffix a fork's title carries — every one it has collected,
 # so numbering works off the stem and the suffixes can never pile up
@@ -83,7 +83,7 @@ class StoryOps:
     def get(self, story_id: int) -> Story | None:
         # fmt: off
         row = self._db.conn.execute(
-            "SELECT id, title, system, head_id, forked_from_id FROM stories WHERE id = ?",
+            "SELECT id, title, system, head_id, forked_from_id, settings FROM stories WHERE id = ?",
             (story_id,),
         ).fetchone()
         # fmt: on
@@ -95,6 +95,7 @@ class StoryOps:
             system=self._db.unseal(row[2]),
             head_id=row[3],
             forked_from_id=row[4],
+            settings=StorySettingDB.from_json(self._db.unseal(row[5])),
         )
 
     def list(self) -> builtins.list[StoryListing]:
@@ -186,22 +187,30 @@ class StoryOps:
             )
             # fmt: on
 
-    def get_settings(self, story_id: int) -> str:
-        """The story's settings as the JSON text they were written as; ""
-        when it has none. What they mean is the caller's business."""
+    def get_settings(self, story_id: int) -> tuple[StorySettingDB, ...]:
+        """Every setting the story has stored, as the column records them
+        (`schema.StorySettingDB`); none for a story that stored none. Which
+        settings there ARE, and their defaults, is the caller's business."""
         row = self._db.conn.execute(
             "SELECT settings FROM stories WHERE id = ?", (story_id,)
         ).fetchone()
-        return self._db.unseal(row[0]) if row else ""
+        return StorySettingDB.from_json(self._db.unseal(row[0]) if row else "")
 
-    def set_settings(self, story_id: int, text: str) -> None:
-        """Deliberately does not bump updated_at, as a title does not: a
-        switch flipped must not reorder the story list."""
+    def set_setting(self, story_id: int, setting_db: StorySettingDB) -> None:
+        """Store one setting, merged into what the story holds: every key
+        this build does not know is kept. Deliberately does not bump
+        updated_at, as a title does not: a switch flipped must not reorder
+        the story list."""
         with self._db.conn as conn:
             # fmt: off
+            row = conn.execute(
+                "SELECT settings FROM stories WHERE id = ?",
+                (story_id,),
+            ).fetchone()
+            text = StorySettingDB.to_json([setting_db], self._db.unseal(row[0]) if row else "")
             conn.execute(
                 "UPDATE stories SET settings = ? WHERE id = ?",
-                (self._db.seal_opt(text or None), story_id),
+                (self._db.seal(text), story_id),
             )
             # fmt: on
 
@@ -234,7 +243,7 @@ class StoryOps:
             # fmt: off
             cur = conn.execute(
                 "INSERT INTO messages (story_id, parent_id, role, kind, speaker_id, speaker, body, template, provider, model, created_at, updated_at, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (story_id, head, message.role, message.kind, message.speaker_id, self._db.seal_opt(message.speaker), self._db.seal(message.body), self._db.seal_opt(message.template), message.provider, message.model, now, now, attachments_to_json(message.attachments)),
+                (story_id, head, message.role, message.kind, message.speaker_id, self._db.seal_opt(message.speaker), self._db.seal(message.body), self._db.seal_opt(message.template), message.provider, message.model, now, now, Attachment.to_json(message.attachments)),
             )
             message_id = int(cur.lastrowid or 0)
             conn.execute(
@@ -272,7 +281,7 @@ class StoryOps:
                 template=self._db.unseal_opt(template),
                 provider=provider,
                 model=model,
-                attachments=attachments_from_json(attachments),
+                attachments=Attachment.from_json(attachments),
             )
             for mid, role, kind, speaker_id, speaker, body, template, provider, model, attachments in rows
         ]
@@ -344,8 +353,8 @@ class StoryOps:
         with self._db.conn as conn:
             # fmt: off
             cur = conn.execute(
-                "INSERT INTO stories (forked_from_id, title, system, settings, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (story_id, self._db.seal_opt(title or None), self._db.seal_opt(source.system or None), self._db.seal_opt(self.get_settings(story_id) or None), now, now),
+                "INSERT INTO stories (forked_from_id, title, system, settings, created_at, updated_at) VALUES (?, ?, ?, (SELECT settings FROM stories WHERE id = ?), ?, ?)",
+                (story_id, self._db.seal_opt(title or None), self._db.seal_opt(source.system or None), story_id, now, now),
             )
             new_story = int(cur.lastrowid or 0)
 

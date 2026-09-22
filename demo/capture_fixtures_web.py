@@ -99,6 +99,9 @@ def main() -> None:
                 fixtures = {
                     "syntax": web_api.syntax(),
                     "settings": settings,
+                    # What every story's settings read as until it changes
+                    # one: the defaults, which the demo copies per story.
+                    "story_settings": web_api.story_settings(session, river_id),
                     "river": {
                         "facts": facts,
                         "story": next(r for r in rows if r["id"] == river_id),

@@ -5,8 +5,8 @@ as one sealed JSON — appended after the last column and before the table
 constraint, for step 5's reasons (the record format is positional, so
 existing rows read NULL there) and by step 5's procedure, its helpers
 copied here because a step's helpers are frozen with it. And the
-`globals` table arrives: content that belongs to every story, sealed —
-the first table a step CREATES, so its literal is the statement itself.
+`settings` table arrives: the settings stories share, sealed — the
+first table a step CREATES, so its literal is the statement itself.
 """
 
 import re
@@ -41,8 +41,8 @@ _V6_STORIES = """CREATE TABLE stories (
 
 # New in V6, as schema.py spells it: `sqlite_master` keeps the statement
 # as written, and a migrated database must equal a fresh one.
-_V6_GLOBALS = """CREATE TABLE globals (                   -- content that belongs to every story, sealed
-    key        TEXT PRIMARY KEY,         -- 'reminder'
+_V6_SETTINGS = """CREATE TABLE settings (                  -- settings that stories share; the texts that may need sealing
+    key        TEXT PRIMARY KEY,         -- 'shared_reminder'
     value      BLOB NOT NULL,            -- sealed; an emptied value deletes its row
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -51,7 +51,7 @@ _V6_GLOBALS = """CREATE TABLE globals (                   -- content that belong
 
 def to_6(conn: sqlite3.Connection) -> None:
     _rewrite(conn, "stories", _V5_STORIES, _V6_STORIES)
-    conn.execute(_V6_GLOBALS)
+    conn.execute(_V6_SETTINGS)
 
 
 def _rewrite(conn: sqlite3.Connection, table: str, expect: str, write: str) -> None:

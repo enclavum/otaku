@@ -180,6 +180,8 @@ tags:
     description: What otaku is reading, what it will send next, and what it has spent.
   - name: Settings
     description: The knobs, one door each.
+  - name: Signing in
+    description: The password, where one is set — neither lane, and the one door that is slow on purpose.
   - name: Server
     description: Neither lane — the server, not the session.
 
@@ -474,7 +476,7 @@ paths:
               schema: { type: string, example: /api/stories/7 }
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/StoryMade" }
+              schema: { $ref: "#/components/schemas/StoryCreated" }
         "200":
           description: >
             No story was made, and the sentence says why — a document that
@@ -770,6 +772,67 @@ paths:
         "200": { $ref: "#/components/responses/Answered" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "403": { $ref: "#/components/responses/CrossOrigin" }
+
+  # A story's settings: what a story may switch — under the story, as its premise is.
+
+  /api/stories/{story}/settings:
+    parameters:
+      - { name: story, in: path, required: true, schema: { type: integer } }
+    get:
+      operationId: getStorySettings
+      tags: [Dossier]
+      summary: The story's settings as they stand
+      description: |
+        Every setting of the story, in the order their injections are
+        sent: a tool's switch (questions, assistant notes), the two
+        reminders, and a flag. Read whole, written one at a time. A
+        story stores only what was set; the rest reads at its default.
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: The story's settings.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StorySettings" }
+        "404": { description: No story with that id. }
+
+  /api/stories/{story}/settings/{setting}:
+    parameters:
+      - { name: story, in: path, required: true, schema: { type: integer } }
+      - name: setting
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [use_shared_reminder, use_story_reminder, allow_assistant_notes, allow_questions, story_mode]
+    patch:
+      operationId: patchStorySetting
+      tags: [Dossier]
+      summary: Change one setting of the story
+      description: |
+        What is not sent stays. `position` must be one of the setting's
+        `allowed_positions` ("system", or a negative count from the end)
+        and is refused for a setting that injects nothing; `text` is
+        taken by the story reminder alone — the shared reminder's text
+        is /api/shared_reminder's. `enabled`
+        that is not a boolean is malformed.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled: { type: boolean }
+                position:
+                  oneOf:
+                    - { type: string, enum: [system] }
+                    - { type: integer, maximum: -1 }
+                text: { type: string, description: The story reminder's own text; "" clears it. }
+      responses:
+        "200": { $ref: "#/components/responses/Answered" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "404": { description: No story with that id. }
 
   # ---------- Extraction — the pass that reads played turns into scenes and cast ----------
 
@@ -1233,6 +1296,105 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "403": { $ref: "#/components/responses/CrossOrigin" }
 
+  /api/shared_reminder:
+    get:
+      operationId: getSharedReminder
+      tags: [Settings]
+      summary: The reminder stories share
+      description: |
+        One text, sent to every story that switched `use_shared_reminder`
+        on (a story setting, under the story). Not a knob of the /set
+        family: it is the database's, sealed with the rest, not a file's.
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: The text; "" when none.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SharedReminder" }
+    put:
+      operationId: putSharedReminder
+      tags: [Settings]
+      summary: Set the reminder stories share
+      description: Paragraphs, so a body and not a line; "" clears it.
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SharedReminder" }
+      responses:
+        "200": { $ref: "#/components/responses/Answered" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+
+  # ---------- Signing in ----------
+
+  /api/login:
+    get:
+      operationId: getLogin
+      tags: [Signing in]
+      summary: Whether a password is asked for, and whether this browser is through it
+      description: |
+        Answered without a credential, by the handler thread itself. The
+        page asks before it draws anything: the cookie is `HttpOnly`, so
+        whether it holds a good one is the server's to say.
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: Whether a password is asked for, and whether this browser is through it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginState" }
+    post:
+      operationId: postLogin
+      tags: [Signing in]
+      summary: Sign in
+      description: |
+        The password in the body, answered without a credential and in
+        neither lane. A good one answers `{}` with the token in an
+        `HttpOnly`, `SameSite=Strict` cookie named for the port — `Secure`
+        under TLS, kept 30 days when `remember` is true and 4 hours when
+        it is not. A wrong one answers 401 with a
+        Notice. With no password configured, every attempt is a refusal.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password: { type: string }
+                remember: { type: boolean }
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: "Signed in (`{}` and the cookie), or refused because no password is set (a Notice)."
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                  - $ref: "#/components/schemas/Notice"
+        "401":
+          description: Not the password. No cookie is set, and no `WWW-Authenticate` is sent.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Notice" }
+    delete:
+      operationId: deleteLogin
+      tags: [Signing in]
+      summary: Sign out
+      description: |
+        Answers `{}` and clears the cookie — the page cannot, since it is
+        not allowed to see it. The token itself is stateless: a copy kept
+        elsewhere stays good until it runs out.
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: Signed out.
+          content:
+            application/json:
+              schema: { type: object }
+
   # ---------- Neither lane: the server, not the session ----------
 
   /api/status:
@@ -1274,73 +1436,6 @@ paths:
           description: The files the page is made of, as they change.
           content:
             text/event-stream: {}
-
-  /api/login:
-    get:
-      operationId: getLogin
-      tags: [Server]
-      summary: Whether a password is asked for, and whether this browser is through it
-      description: |
-        Answered without a credential, by the handler thread itself. The
-        page asks before it draws anything: the cookie is `HttpOnly`, so
-        whether it holds a good one is the server's to say.
-      responses:
-        default: { $ref: "#/components/responses/Failed" }
-        "200":
-          description: Whether a password is asked for, and whether this browser is through it.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/LoginState" }
-    post:
-      operationId: postLogin
-      tags: [Server]
-      summary: Sign in
-      description: |
-        The password in the body, answered without a credential and in
-        neither lane. A good one answers `{}` with the token in an
-        `HttpOnly`, `SameSite=Strict` cookie named for the port — `Secure`
-        under TLS, kept 30 days when `remember` is true and 4 hours when
-        it is not. A wrong one answers 401 with a
-        Notice. With no password configured, every attempt is a refusal.
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [password]
-              properties:
-                password: { type: string }
-                remember: { type: boolean }
-      responses:
-        default: { $ref: "#/components/responses/Failed" }
-        "200":
-          description: "Signed in (`{}` and the cookie), or refused because no password is set (a Notice)."
-          content:
-            application/json:
-              schema:
-                oneOf:
-                  - type: object
-                  - $ref: "#/components/schemas/Notice"
-        "401":
-          description: Not the password. No cookie is set, and no `WWW-Authenticate` is sent.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Notice" }
-    delete:
-      operationId: deleteLogin
-      tags: [Server]
-      summary: Sign out
-      description: |
-        Answers `{}` and clears the cookie — the page cannot, since it is
-        not allowed to see it. The token itself is stateless: a copy kept
-        elsewhere stays good until it runs out.
-      responses:
-        default: { $ref: "#/components/responses/Failed" }
-        "200":
-          description: Signed out.
-          content:
-            application/json:
-              schema: { type: object }
 
 components:
   responses:
@@ -1794,6 +1889,39 @@ components:
               min: { type: number, nullable: true, description: "The least the setter takes — the provider's own bound where it states one (backend.api.settings.parameter_bounds); null for no floor." }
               max: { type: number, nullable: true, description: "The most the setter takes; null for no ceiling." }
 
+    SharedReminder:
+      type: object
+      required: [text]
+      properties:
+        text: { type: string }
+
+    StorySettings:
+      type: object
+      properties:
+        settings:
+          type: array
+          description: Every setting, in the order their injections are sent where they share a place.
+          items:
+            type: object
+            properties:
+              name: { type: string, description: What the story stores it under — the path segment a PATCH takes. }
+              label: { type: string }
+              enabled: { type: boolean }
+              position:
+                nullable: true
+                description: Where its injection rides — "system" appends it to the system message, a negative number places it that many messages from the end; null for a setting that injects nothing.
+                oneOf:
+                  - { type: string, enum: [system] }
+                  - { type: integer, maximum: -1 }
+              allowed_positions:
+                type: array
+                description: Every position it may take, as a menu offers them; empty for a setting that injects nothing.
+                items:
+                  oneOf:
+                    - { type: string, enum: [system] }
+                    - { type: integer, maximum: -1 }
+              text: { type: string, nullable: true, description: "The story's own text (the story reminder's); null for a setting with none of its own." }
+
     Story:
       type: object
       description: One story, whole — what the dossier's four tabs draw.
@@ -1824,7 +1952,7 @@ components:
           type: string
           description: 'Those messages as "N-M"; "" when none are open.'
 
-    StoryMade:
+    StoryCreated:
       allOf:
         - $ref: "#/components/schemas/Watched"
         - type: object

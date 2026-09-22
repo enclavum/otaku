@@ -15,6 +15,7 @@ through the transport it is handed; it knows nothing of the model half.
 """
 
 import contextlib
+import enum
 import json
 import time
 from collections.abc import Callable, Generator, Iterator, Sequence
@@ -136,6 +137,18 @@ _SAMPLER_WORDS: frozenset[str] = SAMPLER_PARAMS | {"repeat_penalty"}
 Bounds = tuple[float | None, float | None]
 
 
+class PicturesRide(enum.Enum):
+    """Where a turn's pictures ride in a request: nowhere (the model
+    cannot see), each on the message it was sent on, or gathered with
+    every other picture in the request onto the latest prompt — an
+    engine's quirk (`OpenAICompletion.pictures_ride`), which the
+    assembler works around by sending such an engine the latest turn's alone."""
+
+    NONE = "none"
+    EACH = "each"
+    LATEST = "latest"
+
+
 class OpenAICompletion:
     # ---------- class knowledge: what is true of the engine's wire ----------
 
@@ -170,13 +183,12 @@ class OpenAICompletion:
     # engine's fact, not a model's.
     can_count_tokens: ClassVar[bool] = False
     # Where a picture ends up on this engine's wire: on the message it
-    # was sent on ("each"), or gathered with every other picture in the
-    # request onto the latest prompt ("latest") — omlx's VLM prompt
-    # building at 0.6, which cannot keep two turns' pictures apart and
-    # shows the model one stacked image. Not a capability: a quirk of
-    # one engine's wire, written on that client, which the assembler
-    # works around by sending such an engine the latest turn's alone.
-    pictures_ride: ClassVar[str] = "each"
+    # was sent on, or gathered with every other picture in the request
+    # onto the latest prompt — omlx's VLM prompt building at 0.6, which
+    # cannot keep two turns' pictures apart and shows the model one
+    # stacked image. Not a capability: a quirk of one engine's wire,
+    # written on that client. Never NONE here: that is the model's.
+    pictures_ride: ClassVar[PicturesRide] = PicturesRide.EACH
 
     def __init__(
         self,

@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 
 from otaku.backend.api import lore as api_lore
+from otaku.backend.api import stories as api_stories
 from otaku.backend.formats import exports, imports
 from otaku.backend.paths import Paths
 from otaku.backend.session import Refused
@@ -917,6 +918,30 @@ class TestWarmUp:
             # The waiter is answered BEFORE the warm-up, so the request
             # may still be in flight when /extract returns.
             assert _warm_requests(app.server, within=5.0) == 1
+        finally:
+            app.close()
+
+    def test_the_warm_up_carries_what_the_turn_carries(
+        self, server: scripted.ModelServer, tmp_path: Path
+    ) -> None:
+        # The Job snapshots the story's injections built, and the warm-up
+        # cuts the prompt as the turn does: what a switched-on setting
+        # puts in a turn's request is in the prefill's, at the same place.
+        root = tmp_path / "state"
+        set_config_provider(root, server, name="llamacpp")
+        app = launch(root, server, spec="llamacpp/test-model")
+        try:
+            api_stories.update_setting(
+                app.session, "use_story_reminder", enabled=True, text="Rain."
+            )
+            remembered(app)
+            assert _warm_requests(app.server, within=5.0) == 1
+            warmed = next(r for r in app.server.requests if r.get("max_tokens") == 1)
+            texts = [scripted.content_text(m) for m in warmed["messages"]]
+            # -3 is the reminder's default: above the last three messages,
+            # which the merge folds into the turn before them.
+            assert any("Rain." in t for t in texts)
+            assert "Rain." not in texts[-1]
         finally:
             app.close()
 

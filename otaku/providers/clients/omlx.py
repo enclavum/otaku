@@ -20,6 +20,7 @@ from otaku.providers.openai.completion import (
     SAMPLER_PARAMS,
     Bounds,
     OpenAICompletion,
+    PicturesRide,
 )
 from otaku.providers.openai.models import (
     Listing,
@@ -190,8 +191,8 @@ class OmlxCompletion(OpenAICompletion):
     # one list and placed on the latest prompt, the messages handed on
     # as text (`omlx.utils.image.extract_images_from_messages`), so a
     # model asked about the second turn's picture reads both, stacked.
-    # Flip back to "each" once a release keeps them on their messages.
-    pictures_ride = "latest"
+    # Flip back to EACH once a release keeps them on their messages.
+    pictures_ride = PicturesRide.LATEST
 
     def count_chat_tokens(
         self,

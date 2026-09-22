@@ -13,6 +13,8 @@ from dataclasses import dataclass, replace
 from typing import Literal
 
 from otaku.backend.session import NO_MODEL_HINT, NO_STORY_HINT, Refused, Session
+from otaku.backend.story import StorySettings
+from otaku.context.assembler import ContextShape
 from otaku.formatting import flatten
 from otaku.store.schema import Character, Journal, Scene
 from otaku.worker import Job
@@ -49,7 +51,15 @@ def build_job(session: Session, *, force: bool = False) -> Job:
         story_id=story_id,
         system=session.system,
         messages=list(session.messages),
-        shape=session._shape(),
+        injections=StorySettings(
+            session._settings_db, session._store, session._paths.prompts_file
+        ).injections,
+        prompts=prompts,
+        shape=ContextShape(
+            head_messages=config.head_messages,
+            min_tail_messages=config.min_tail_messages,
+            max_context=config.max_context,  # the cap; the warm-up adds the model's window
+        ),
         extraction_settings=ExtractionSettings(
             extract_template=prompts.extract_prompt,
             scene_history_template=prompts.scene_history_prompt,

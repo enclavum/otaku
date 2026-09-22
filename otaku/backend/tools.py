@@ -1,26 +1,21 @@
 """The model's language: the tools it may use by writing a tagged block
 in its reply — one class each, and the one registry.
 
-`context.syntax` reads what the user typed; this reads what the model
-wrote, and lives here for the same reason: it is read BELOW the backend.
-A class declares a tool, an instance is one block of it read, and
-`TOOLS` is the registry. WHAT a block is — `<otk-NAME>…</otk-NAME>`,
-whatever the name — is `context.blocks`' business, which knows no
-tool: a body keeps its tags for good, and a block must stay one in a
-build that never heard of its tool. What a tool DOES once called is
-the backend's.
+A class declares a tool: its tag, who answers its block, and the name of
+its instruction in prompts.toml. An instance is one block of it, read at
+construction — what the play stream makes of a reply. WHAT a block is —
+`<otk-NAME>…</otk-NAME>`, whatever the name — is `context.blocks`'
+business, which knows no tool: a body keeps its tags for good, and a
+block must stay one in a build that never heard of its tool. Whether a
+story lets the model use a tool, and where its instruction rides, is the
+story's setting (`backend.story`).
 
 A new tool is a subclass and its name in `TOOLS`.
 """
 
 import enum
 import re
-from typing import ClassVar, Literal
-
-# An answer line of an ask: `1.` `1)` `a.` `a)` at the head of a line,
-# then the answer itself.
-_OPTION = re.compile(r"\s*(?:\d{1,2}|[A-Za-z])[.)]\s+(\S.*)")
-_MAX_OPTIONS = 9
+from typing import ClassVar
 
 
 class Actor(enum.Enum):
@@ -37,17 +32,9 @@ class Tool:
 
     tag: ClassVar[str] = ""  # its name in the namespace: <otk-TAG>…</otk-TAG>
     actor: ClassVar[Actor] = Actor.NOBODY
-    # The story's feature that allows it — the name its switch is kept
-    # under, so a rename orphans what stories have stored.
-    feature: ClassVar[str] = ""
-    label: ClassVar[str] = ""  # what the tool is called where it is switched
-    # The prompts.toml key of its instruction — what tells the model how
-    # the tool is used. Named, never read: this module reads no settings.
-    instruction_field: ClassVar[str] = ""
-    # Where that instruction rides until a story says otherwise (an
-    # injection's position): above the newest message — all the recency,
-    # and nothing to re-read.
-    default_position: ClassVar[Literal["system"] | int] = -1
+    # The prompts.toml field of its instruction — what tells the model how
+    # the tool is used. The story's setting reads the text under it.
+    prompt_name: ClassVar[str] = ""
 
     text: str  # the block's inside, as written
 
@@ -55,17 +42,15 @@ class Tool:
         self.text = text
 
 
-class Notes(Tool):
+class ToolAssistantNotes(Tool):
     """`<otk-notes>…</otk-notes>` — the model's private aside before its reply:
     what the visible scene cannot show, kept for its own later turns."""
 
     tag = "notes"
-    feature = "allow_assistant_notes"
-    label = "Assistant notes"
-    instruction_field = "notes_instruction"
+    prompt_name = "notes_instruction"
 
 
-class Ask(Tool):
+class ToolQuestions(Tool):
     """`<otk-ask>…</otk-ask>` — ONE question to the user, closing the reply:
     the `question`, then the `options` to pick from — none when the
     question is free-form, `_MAX_OPTIONS` at most. Whatever follows the
@@ -74,9 +59,11 @@ class Ask(Tool):
 
     tag = "ask"
     actor = Actor.USER
-    feature = "allow_questions"
-    label = "Questions"
-    instruction_field = "ask_instruction"
+    prompt_name = "ask_instruction"
+    # An answer line: `1.` `1)` `a.` `a)` at the head of a line, then the
+    # answer itself.
+    _OPTION: ClassVar[re.Pattern[str]] = re.compile(r"\s*(?:\d{1,2}|[A-Za-z])[.)]\s+(\S.*)")
+    _MAX_OPTIONS: ClassVar[int] = 9
 
     question: str
     options: tuple[str, ...]
@@ -86,17 +73,17 @@ class Ask(Tool):
         question: list[str] = []
         options: list[str] = []
         for line in text.splitlines():
-            found = _OPTION.fullmatch(line)
+            found = self._OPTION.fullmatch(line)
             if found is not None:
                 options.append(found.group(1).rstrip())
             elif not options:
                 question.append(line)
         self.question = "\n".join(question).strip()
-        self.options = tuple(options[:_MAX_OPTIONS])
+        self.options = tuple(options[: self._MAX_OPTIONS])
 
 
 # Every tool, keyed by its tag — the one registry.
-TOOLS: dict[str, type[Tool]] = {cls.tag: cls for cls in (Notes, Ask)}
+TOOLS: dict[str, type[Tool]] = {cls.tag: cls for cls in (ToolAssistantNotes, ToolQuestions)}
 
 
 def read(tag: str, text: str) -> Tool:

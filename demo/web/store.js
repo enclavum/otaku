@@ -58,6 +58,9 @@ const state = {
   nextMessage: 1,
   model: "demo-model",
   settings: null, // seeded from the settings fixture; values live here
+  storySettingDefaults: null, // every story's settings as a fresh story reads them
+  storySettings: new Map(), // id → the settings a story changed, in the read's shape
+  sharedReminder: "", // the text every story with use_shared_reminder on is sent
   history: [], // the composer's ↑/↓ lines, most recent first
   usage: [], // one row per completed reply: {story, prompt, completion, seconds}
   syntax: null, // the story's typed language, for the menu and the sheet
@@ -66,9 +69,10 @@ const state = {
 };
 
 export function seed(fixtures) {
-  const { river, tour, settings, syntax } = fixtures;
+  const { river, tour, settings, storySettings, syntax } = fixtures;
   state.syntax = syntax;
   state.settings = structuredClone(settings);
+  state.storySettingDefaults = storySettings.settings;
   // Both shipped samples, the way a fresh install seeds them; the row's
   // own `open` flag says which one the demo lands in.
   for (const sample of [river, tour].filter(Boolean)) {
@@ -458,6 +462,69 @@ export function setSystem(storyId, text) {
     touch(storyId);
   }
   return say(`System prompt set (${text.length} chars).`);
+}
+
+export function storySettings(storyId) {
+  /* A story's settings as they stand — what it changed, over the
+     defaults every story starts from. Null for a story that is not
+     there: the product's 404. */
+  if (!state.stories.has(storyId)) return null;
+  return { settings: structuredClone(_settingsOf(storyId)) };
+}
+
+export function updateSetting(storyId, name, body) {
+  /* One setting, the fields given laid over it. The refusals and the
+     confirmation are the product's sentences, copied: what a setting
+     takes is decided in `backend.story` and said in
+     `backend.api.stories.update_setting`, which the demo cannot ask. */
+  if (!state.stories.has(storyId)) return null;
+  const settings = _settingsOf(storyId);
+  const setting = settings.find((s) => s.name === name);
+  if (!setting) {
+    const known = settings.map((s) => s.name).join(", ");
+    return refuse(`Unknown setting '${name}'. Settings: ${known}.`);
+  }
+  if (body.position != null) {
+    if (!setting.allowed_positions.length) {
+      return refuse(`${setting.label} has no position: it injects nothing.`);
+    }
+    if (!setting.allowed_positions.includes(body.position)) {
+      return refuse(
+        `${setting.label} takes one of these positions: ${setting.allowed_positions.join(", ")}.`,
+      );
+    }
+  }
+  if (body.text != null && setting.text === null) {
+    return refuse(`${setting.label} has no text of its own in a story.`);
+  }
+  if (body.enabled != null) setting.enabled = body.enabled;
+  if (body.position != null) setting.position = body.position;
+  if (body.text != null) setting.text = String(body.text);
+  if (!setting.enabled) return say(`${setting.label}: off.`);
+  if (setting.position === null) return say(`${setting.label}: on.`);
+  if (setting.position === "system") return say(`${setting.label}: on, in the system message.`);
+  const back = -setting.position;
+  return say(`${setting.label}: on, ${back} message${back === 1 ? "" : "s"} from the end.`);
+}
+
+export function sharedReminder() {
+  return { text: state.sharedReminder };
+}
+
+export function setSharedReminder(text) {
+  // The sentences are `backend.api.stories.set_shared_reminder`'s.
+  state.sharedReminder = text.trim();
+  return say(text.trim() ? "Shared reminder saved." : "Shared reminder cleared.");
+}
+
+function _settingsOf(storyId) {
+  // Held once a story changes one; the defaults, copied, until then.
+  let held = state.storySettings.get(storyId);
+  if (!held) {
+    held = structuredClone(state.storySettingDefaults);
+    state.storySettings.set(storyId, held);
+  }
+  return held;
 }
 
 export function renameStory(storyId, title) {

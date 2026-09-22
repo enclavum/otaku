@@ -12,7 +12,7 @@ nothing the code invented but the recap — and the injections it was
 handed, each where it was told to go.
 """
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 import pytest
 
@@ -20,10 +20,12 @@ from otaku.context.assembler import (
     IMAGE_TOKENS,
     ContextOverflowError,
     ContextShape,
-    Injection,
     WirePicture,
-    _assemble,
+    assemble_story,
+    context_in_force,
 )
+from otaku.context.injections import Injection
+from otaku.providers import PicturesRide
 from otaku.store.schema import Attachment, Message, Scene
 
 CAT = Attachment(file="pic-0001-20260918-a3f9c1e2.jpg", width=2, height=2, size=3)
@@ -44,25 +46,28 @@ def assemble(
     newest_pictures_only: bool = False,
     injections: tuple[Injection, ...] = (),
 ):
-    """The doc's vocabulary over the `shape` argument, so every case
-    below reads like its section. `files` is the folder the pictures are
-    read from; None by default, as for a model that cannot see."""
+    """The doc's vocabulary over the door's arguments, so every case
+    below reads like its section, with a stand-in store answering the
+    reads the door makes. `files` is the folder the pictures are read
+    from; None, the default, is a model that cannot see."""
     shape = ContextShape(
         head_messages=head_messages,
         min_tail_messages=min_tail_messages,
-        max_context_setting=max_context_setting,
-        recap_header=recap_header,
-        card_framing="",
-        injections=injections,
+        max_context=context_in_force(max_context, max_context_setting),
     )
-    return _assemble(
-        system,
-        messages,
-        max_context,
-        scenes=scenes,
+    if files is None:
+        pictures_ride = PicturesRide.NONE
+    else:
+        pictures_ride = PicturesRide.LATEST if newest_pictures_only else PicturesRide.EACH
+    return assemble_story(
+        _Store(scenes, files),
+        1,
+        system=system,
+        messages=messages,
+        injections=injections,
+        prompts=_Prompts(recap_header),
         shape=shape,
-        files=files,
-        newest_pictures_only=newest_pictures_only,
+        pictures_ride=pictures_ride,
     )
 
 
@@ -96,7 +101,7 @@ class TestNoSummaries:
 
     def test_everything_is_sent_verbatim(self) -> None:
         prompt = assemble("", turns(40), 8192, head_messages=5, min_tail_messages=10)
-        assert prompt.transcript_kept == 40
+        assert prompt.head + prompt.tail == 40
         assert prompt.scenes_summarized == 0
 
     def test_a_scene_ending_in_head_or_tail_does_not_count(self) -> None:
@@ -109,7 +114,7 @@ class TestNoSummaries:
             min_tail_messages=10,
         )
         assert prompt.scenes_summarized == 0
-        assert prompt.transcript_kept == 40
+        assert prompt.head + prompt.tail == 40
 
 
 class TestScenesCoverTheMiddle:
@@ -134,7 +139,7 @@ class TestScenesCoverTheMiddle:
         assert "turn 65." in sent  # the tail starts right after scene 3
         assert "turn 64." not in sent  # summarized away
         assert "turn 20." in sent and "turn 21." not in sent  # the head's edge
-        assert prompt.head_count == 20
+        assert prompt.head == 20
 
     def test_option_b_fewer_scenes_move_the_boundary_earlier(self) -> None:
         scenes = (scene(25, "sum one"), scene(42, "sum two"))
@@ -162,7 +167,7 @@ class TestScenesCoverTheMiddle:
         # verbatim and the tail grows past the minimum.
         at_boundary = assemble("", turns(220), 65536, scenes=(scene(70, "sum"),))
         assert at_boundary.scenes_summarized == 0
-        assert at_boundary.transcript_kept == 220
+        assert at_boundary.head + at_boundary.tail == 220
         before_boundary = assemble("", turns(220), 65536, scenes=(scene(69, "sum"),))
         sent = "\n".join(m.body for m in before_boundary.messages)
         assert before_boundary.scenes_summarized == 1
@@ -171,8 +176,8 @@ class TestScenesCoverTheMiddle:
 
     def test_no_history_and_the_full_tail_in_the_plain_case(self) -> None:
         prompt = assemble("", turns(220), 65536, scenes=(scene(64, "sum"),))
-        assert prompt.history == ""
-        assert prompt.tail_target == prompt.tail_setting == 150
+        assert not prompt.history
+        assert prompt.tail_target == 150
 
 
 class TestCharacterCards:
@@ -225,7 +230,7 @@ class TestRecapDegrades:
             min_tail_messages=10,
         )
         sent = "\n".join(m.body for m in prompt.messages)
-        assert prompt.history == "Arc through two."
+        assert prompt.history and "Arc through two." in sent
         assert prompt.scenes_rolled_up == 2
         assert prompt.scenes_summarized == 1
         assert "delta delta" in sent  # the kept summary
@@ -236,13 +241,13 @@ class TestRecapDegrades:
         one, two, three = self._scenes()
         scenes = (one, replace_history(two, ""), three)
         prompt = assemble("", turns(40), 2524, scenes=scenes, head_messages=5, min_tail_messages=10)
-        assert prompt.history == "Arc through one."
+        assert prompt.history and "Arc through one." in prompt.recap
         assert prompt.scenes_rolled_up == 1
 
     def test_without_any_rung_the_dropped_scenes_go_uncovered(self) -> None:
         scenes = tuple(replace_history(s, "") for s in self._scenes())
         prompt = assemble("", turns(40), 2524, scenes=scenes, head_messages=5, min_tail_messages=10)
-        assert prompt.history == ""
+        assert not prompt.history
         assert prompt.scenes_rolled_up == 0
         assert prompt.scenes_summarized == 1
 
@@ -267,9 +272,8 @@ class TestRecapDegrades:
             min_tail_messages=10,
             max_context_setting=2524,
         )
-        assert prompt.history == "Arc through two."
+        assert prompt.history and "Arc through two." in prompt.recap
         assert prompt.limit == 1500  # the cap minus the reserve
-        assert prompt.max_context == 131072
 
     def test_max_context_zero_means_the_whole_window(self) -> None:
         prompt = assemble(
@@ -281,7 +285,7 @@ class TestRecapDegrades:
             min_tail_messages=10,
             max_context_setting=0,
         )
-        assert prompt.history == ""  # everything fits — case 4 never fires
+        assert not prompt.history  # everything fits — case 4 never fires
         assert prompt.scenes_summarized == 3
         assert prompt.limit == 65536 - 1024  # the window minus the reserve (no replies yet)
 
@@ -304,9 +308,8 @@ class TestTailDegrades:
             scene(320, "sum four", history="Arc through four."),
         )
         prompt = assemble("", rows, 3024, scenes=scenes, head_messages=5, min_tail_messages=150)
-        assert prompt.tail_setting == 150
         assert prompt.tail_target == 50
-        assert prompt.transcript_kept - prompt.head_count == 80  # messages 321-400
+        assert prompt.tail == 80  # messages 321-400
         assert prompt.transcript_tokens <= 3024 - 1024
 
 
@@ -492,11 +495,11 @@ def exchange() -> list[Message]:
 
 def end(text: str, position: int = -1) -> Injection:
     """An injection counted from the end."""
-    return Injection(name="reminder", text=text, position=position)
+    return Injection(owner="reminder", text=text, position=position)
 
 
 def system(text: str) -> Injection:
-    return Injection(name="ask", text=text, position="system")
+    return Injection(owner="ask", text=text, position="system")
 
 
 def turns(n: int) -> list[Message]:
@@ -617,3 +620,36 @@ class _CatFolder:
 
 
 CAT_FOLDER = _CatFolder()
+
+
+class _Store:
+    """The store as the door reads it — the story's current scenes, its
+    cast's archives (none: a card row sends its body as it stands) and
+    the files folder — answered in memory, nothing on disk."""
+
+    def __init__(self, scenes: tuple, files: object) -> None:
+        self.scenes = _Scenes(scenes)
+        self.characters = _Characters()
+        self.files = files if files is not None else _CatFolder()
+
+
+class _Scenes:
+    def __init__(self, scenes: tuple) -> None:
+        self._scenes = list(scenes)
+
+    def get_current(self, story_id: int, message_ids: list[int]) -> list[Scene]:
+        return self._scenes
+
+
+class _Characters:
+    def list(self, story_id: int) -> list:
+        return []
+
+
+@dataclass(frozen=True)
+class _Prompts:
+    """What the door reads of the prompts: the recap header and the card
+    template (empty: no archive to compose from anyway)."""
+
+    recap_header: str
+    card_framing: str = ""
