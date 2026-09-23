@@ -470,11 +470,30 @@ job is a reply arriving token by token. So the queue is TWO: a write
 waits its turn, a READ is answered in the gaps. `docs/diagrams.md` draws
 the module graph and names the five moments the thread is called.
 
-Three secrets, one module each — `thread` (WHEN work runs), `api` (WHAT
+Three secrets, one home each — `thread` (WHEN work runs), `api` (WHAT
 may be asked, as data), `server` (HOW it arrives). `thread` imports only
 `Session` and has never heard of `api`; `api` knows no thread and no
-HTTP; `server` is the only one that knows both. The medium's own rules
-are under Web conventions below.
+HTTP; `server` is the only one that knows both. The two big ones are
+packages: `api` mirrors `backend.api` — one module per twin (`play`,
+`stories`, `lore`, `cards`, `providers`, `settings`, `reports`,
+`transfer`), each holding its own rows, merged into the one
+`ROUTES`/`FLOWS` in `api/__init__` (a path in two modules fails at
+import), and `request` for what every row is handed (`Ask`, `Pending`)
+and hands back (`Created`, `Blob`, `NotFound`, `landed_story`). A
+module CALLS its own twin and nothing else of `backend.api`; what it
+needs of another twin it takes from that twin's sibling (`stories.story`
+takes the lore half of its answer from `lore.memory`, the picker's
+model words come through `reports.model_words`, the document half of
+the new-story flow is `transfer.imported`) — so every translation of
+one twin is in one module. `tests/test_architecture.py` holds the rule;
+`request` is its one declared exception, importing two twins' TYPES
+for `Pending` and calling neither. `server` is the dispatcher
+(`server/__init__`: `bind`, the route table, `Handler`) over `base`
+(the hooks, the socket `Server`, `Wire` — the handler methods that
+read a request and write an answer), with the handler's two halves as
+mixins — `guards` (who may ask) and `streams` (the two answers that
+stream) — beside `assets` (the closed table) and `watch` (the poller).
+The medium's own rules are under Web conventions below.
 
 ## Configuration files
 
@@ -650,7 +669,7 @@ mechanics live in the module docstrings:
   a good credential (else 401). Which headers count, and why a request
   carrying neither of the first two is left to the bind, are in
   `_from_this_machine` and `_from_our_page`; what is answered without a
-  credential is `server._OPEN` — a change to any of them is a change to
+  credential is `server.guards.OPEN` — a change to any of them is a change to
   what a LAN can do to this server.
 - **The METHOD is the lane** (why: Architecture — inside the web): a GET
   only reads and is answered in the gaps of a streaming reply; every
@@ -716,11 +735,12 @@ mechanics live in the module docstrings:
   their own go beside it in `web/fonts/` and are asked for under
   `/web-fonts/`, a prefix of its own so a name of theirs can never
   shadow a packaged one.
-- **What may be served is a CLOSED table** in `web/server.py`: a request
-  path is looked up in it and never joined onto a directory, so nothing
-  composes its way to `configs/providers.toml`. That is a property of
-  the LOOKUP, not of who wrote the list — so the two families that grow
-  are read from their directories at import (`server._packaged`) and
+- **What may be served is a CLOSED table** in `web/server/assets.py`: a
+  request path is looked up in it and never joined onto a directory, so
+  nothing composes its way to `configs/providers.toml`. That is a
+  property of the LOOKUP, not of who wrote the list — so the two
+  families that grow are read from their directories at import
+  (`assets._packaged`) and
   adding a script or a font is one file and no row. A file added while
   otaku is running needs a restart; editing one does not. The reader's
   own typefaces are looked up the same way: their directory is listed,

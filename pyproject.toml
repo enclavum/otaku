@@ -101,6 +101,9 @@ select = ["B", "E", "F", "I", "N", "RUF", "SIM", "UP", "W"]
 # The rendered config: one setting per source line, whatever the width
 # (see the `# fmt: off` block in to_toml).
 "otaku/settings/config.py" = ["E501"]
+# The dispatcher's `do_GET`, `do_POST`, …: http.server dispatches on the
+# method's name, spelled as the verb is.
+"otaku/web/server/__init__.py" = ["N802"]
 "tests/*" = ["RUF001"]
 "scenarios/*" = ["RUF001"]
 

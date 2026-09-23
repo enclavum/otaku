@@ -70,7 +70,7 @@ def main() -> None:
             app = launch(root, server, spec="ollama/test-model")
             try:
                 session = app.session
-                rows = web_api.stories(session)
+                rows = web_api.stories.stories(session)
                 river_id = next(r["id"] for r in rows if r["open"])
                 tour_id = next(r["id"] for r in rows if not r["open"])
 
@@ -92,9 +92,9 @@ def main() -> None:
                 # The harness provider is scaffolding, not content; the
                 # demo names its own model (`demo/web/store.js`).
                 facts.update(model="", provider="", max_context="")
-                settings = web_api.settings(session)
+                settings = web_api.settings.settings(session)
                 settings["model"] = ""
-                rows = web_api.stories(session)  # after both landings: river open
+                rows = web_api.stories.stories(session)  # after both landings: river open
                 for row in rows:
                     row["model"] = ""
 
