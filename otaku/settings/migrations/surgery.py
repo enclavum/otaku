@@ -1,5 +1,6 @@
 """The migration toolkit: parse-guided textual surgery over the settings
-files, and the write machinery every edit rides.
+files, committed by the write every settings edit rides
+(`settings.commit`).
 
 Applicability is decided on the PARSED file (a key mentioned in a
 comment or a string can never false-match; a commented-out `# key = …`
@@ -15,15 +16,13 @@ they hold no multiline strings by construction; prompts.toml (multiline
 templates) must not be edited with these tools.
 """
 
-import os
 import re
 import tomllib
 from collections.abc import Callable
-from datetime import datetime
 from pathlib import Path
 
 from otaku.formatting import decode_text
-from otaku.settings import write_atomic
+from otaku.settings import commit
 
 # The keys whose values are secrets wherever they appear — a provider's
 # api key, the web password — and so never kept in a backup once an
@@ -214,19 +213,17 @@ def update_config(config_path: Path, backups_dir: Path, changes: list[Migration]
     """One committed edit of config.toml — the launch table rides this.
     A missing file is bootstrap's business, and OSError is swallowed: an
     edit is never worth a crash. Returns whether the file changed."""
-    return update_settings_file(config_path, backups_dir, "config", changes)
+    return update_settings_file(config_path, backups_dir, changes)
 
 
 def update_providers(providers_path: Path, backups_dir: Path, changes: list[Migration]) -> bool:
     """Same machinery over providers.toml — the provider moves and the
     model picker's field saves ride this. Returns whether the file
     changed; False also covers an edit that could not land."""
-    return update_settings_file(providers_path, backups_dir, "providers", changes)
+    return update_settings_file(providers_path, backups_dir, changes)
 
 
-def update_settings_file(
-    path: Path, backups_dir: Path, stem: str, changes: list[Migration]
-) -> bool:
+def update_settings_file(path: Path, backups_dir: Path, changes: list[Migration]) -> bool:
     try:
         raw = path.read_bytes()
     except OSError:
@@ -240,45 +237,9 @@ def update_settings_file(
     migrated = apply_migrations(text, changes)
     if migrated == text and text.encode("utf-8") == raw:
         return False
-    return commit(path, backup_path(backups_dir, stem), text, migrated)
-
-
-# ---------- the write machinery ----------
-
-
-def backup_path(backups_dir: Path, stem: str) -> Path:
-    """The next free dated backup name: `stem-YYYYMMDD.toml` for the
-    day's first edit, `-N` appended for every further one — no edit ever
-    overwrites an earlier state."""
-    stamp = datetime.now().astimezone().strftime("%Y%m%d")
-    path = backups_dir / f"{stem}-{stamp}.toml"
-    n = 0
-    while path.exists():
-        n += 1
-        path = backups_dir / f"{stem}-{stamp}-{n}.toml"
-    return path
-
-
-def commit(file: Path, backup: Path, text: str, migrated: str) -> bool:
-    """The write behind every config edit: the pre-edit text kept under
-    its own dated backup name — born 0600 in a 0700 backups dir — then
-    the atomic replace. OSError is swallowed — an edit is never worth a
-    crash — and False reports it.
-
-    What is kept is `redacted`: a secret this edit replaced is redacted in
-    the backup, so sealing a key or hashing a password does not leave the
-    plain value behind in a file nobody deletes."""
-    try:
-        backup.parent.mkdir(parents=True, exist_ok=True)
-        os.chmod(backup.parent, 0o700)
-        # Born 0600: never a moment (or a crash residue) at umask perms.
-        fd = os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
-            f.write(redacted(text, migrated))
-        write_atomic(file, migrated)
-    except OSError:
-        return False
-    return True
+    # What the backup keeps is `redacted`: a secret this edit replaced
+    # must not stay plain in a file nobody deletes.
+    return commit(path, backups_dir, redacted(text, migrated), migrated)
 
 
 def redacted(text: str, migrated: str) -> str:

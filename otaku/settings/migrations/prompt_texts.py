@@ -201,6 +201,5 @@ def refresh_template(key: str, stale: str, current: str) -> Migration:
 
 def update_prompts(prompts_path: Path, backups_dir: Path, changes: list[Migration]) -> bool:
     """One committed edit of prompts.toml — the same read-heal-commit
-    every settings file gets, with this file's stem. Returns whether
-    the file changed."""
-    return update_settings_file(prompts_path, backups_dir, "prompts", changes)
+    every settings file gets. Returns whether the file changed."""
+    return update_settings_file(prompts_path, backups_dir, changes)

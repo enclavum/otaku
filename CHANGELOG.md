@@ -5,6 +5,26 @@ All notable changes to otaku are documented in this file. The format is based on
 [Semantic Versioning](https://semver.org/) — while pre-1.0, minor releases may include breaking
 changes.
 
+## [Unreleased]
+
+### Added
+
+- Tools the model may use by writing a tagged block in its reply, each a per-story switch on the
+  web page's new Tools tab: **questions** — the narrator may ask you one question, with numbered
+  answers to pick from, and waits for your answer; **assistant notes** — the narrator keeps a
+  private note between turns, never played into the story, shown or hidden with a switch of its
+  own. A tool's prompt is `prompts.toml`'s (`tool_questions_prompt`, `tool_assistant_notes_prompt`)
+  and is edited from the page; emptied, the shipped text stands again.
+- Two reminders, each a per-story switch: the story's own text, and a shared text every story that
+  switches it on is sent. Both go out of character (`((OOC: …))`).
+- Where each of these goes in the request is chosen on a depth ruler: the system message, or
+  before one of your recent messages, counted from the end.
+- A switched-off tool's past blocks go back to the model as prose (a question alone, a note not at
+  all); a tool otaku no longer has never reaches the wire. The lore pass never reads a block.
+- The web API: `GET`/`PATCH /api/stories/{story}/settings`, `GET`/`PUT /api/shared_reminder`,
+  `GET`/`PUT /api/prompts/{tool}`; a turn's `segments` and the `tool_call` stream event, so the
+  page draws a block without parsing it.
+
 ## [0.5.0] - 2026-09-17
 
 **TL;DR**

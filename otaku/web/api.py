@@ -50,7 +50,16 @@ from otaku.backend.api import stories as api_stories
 from otaku.backend.api import transfer as api_transfer
 from otaku.backend.api.cards import PreparedCard
 from otaku.backend.api.lore import FieldKind, WorkerRun
-from otaku.backend.api.play import Declined, Done, Failed, PlayEvent, Reasoning, Recorded, Text
+from otaku.backend.api.play import (
+    Declined,
+    Done,
+    Failed,
+    PlayEvent,
+    Reasoning,
+    Recorded,
+    Text,
+    ToolCall,
+)
 from otaku.backend.api.providers import SupportedProvider
 from otaku.backend.commands import COMMANDS, PROSE_DESCRIPTION
 from otaku.backend.files import RawFile
@@ -722,10 +731,12 @@ def story_settings(session: Session, story_id: int) -> dict[str, Any]:
             {
                 "name": setting.name,
                 "label": setting.label,
+                "tool": setting.tool.name if setting.tool else None,
+                "allowed_positions": list(setting.allowed_positions),
                 "enabled": setting.enabled,
                 "position": setting.injection_position,
-                "allowed_positions": list(setting.allowed_positions),
-                "text": setting.text,
+                "reminder_text": setting.reminder_text,
+                "display_notes": setting.display_notes,
             }
             for setting in api_stories.get_settings(session, story_id)
         ]
@@ -739,17 +750,20 @@ def _update_setting(session: Session, ask: Ask) -> str:
     story_id = ask.id("story")
     if all(row.id != story_id for row in api_stories.listing(session)):
         raise NotFound(f"no story {story_id}")
-    enabled = ask.body.get("enabled")
-    if enabled is not None and not isinstance(enabled, bool):
-        raise TypeError("enabled is not a boolean")
-    text = ask.text("text") if "text" in ask.body else None
+    flags = {}
+    for name in ("enabled", "display_notes"):
+        flags[name] = ask.body.get(name)
+        if flags[name] is not None and not isinstance(flags[name], bool):
+            raise TypeError(f"{name} is not a boolean")
+    reminder_text = ask.text("reminder_text") if "reminder_text" in ask.body else None
     return api_stories.update_setting(
         session,
         ask.params["setting"],
-        enabled=enabled,
-        position=ask.body.get("position"),
-        text=text,
         story_id=story_id,
+        enabled=flags["enabled"],
+        position=ask.body.get("position"),
+        reminder_text=reminder_text,
+        display_notes=flags["display_notes"],
     )
 
 
@@ -1137,6 +1151,15 @@ def event(happened: PlayEvent) -> dict[str, Any]:
             return {"type": "reasoning", "text": happened.text}
         case Text():
             return {"type": "text", "text": happened.text}
+        case ToolCall():
+            # A piece of a tool call, the tool's name and its inside;
+            # `closed` marks the piece the closing tag ended.
+            return {
+                "type": "tool_call",
+                "tool": happened.name,
+                "text": happened.text,
+                "closed": happened.closed,
+            }
         case Declined():
             return {"type": "declined", "reason": happened.reason}
         case Failed():
@@ -1158,6 +1181,9 @@ def event(happened: PlayEvent) -> dict[str, Any]:
                 if report is not None
                 else None,
                 "notice": report.notice if report is not None else "",
+                # The reply as stored — split, tags and all — so the page lands
+                # it as the turn it is; null when nothing arrived.
+                "reply": _turn(happened.reply) if happened.reply else None,
             }
 
 
@@ -1198,6 +1224,10 @@ def _turn(message: Message) -> dict[str, Any]:
         # The turn's pictures, the column's own facts: the name the
         # file routes take, the media type, the measure. [] when none.
         "attachments": [asdict(picture) for picture in message.attachments],
+        # The body split: prose, and each block as its tool's facts — the
+        # page draws from these and parses nothing. A block of a tag no
+        # tool owns is a block all the same, with its text alone.
+        "segments": api_play.segments(message.body),
     }
 
 
@@ -1288,6 +1318,13 @@ ROUTES: dict[tuple[str, str], _Route] = {
     },
     ("PUT", "/api/shared_reminder"): lambda session, ask: api_stories.set_shared_reminder(
         session, ask.need("text")
+    ),
+    # A tool's prompt: prompts.toml's, edited in place.
+    ("GET", "/api/prompts/{tool}"): lambda session, ask: {
+        "text": api_settings.get_tool_prompt(session, ask.params["tool"])
+    },
+    ("PUT", "/api/prompts/{tool}"): lambda session, ask: api_settings.set_tool_prompt(
+        session, ask.params["tool"], ask.need("text")
     ),
 }
 

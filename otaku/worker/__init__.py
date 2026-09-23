@@ -26,6 +26,7 @@ from dataclasses import dataclass, field, replace
 from otaku.context import assembler
 from otaku.context.assembler import ContextShape, PromptTexts
 from otaku.context.injections import Injection
+from otaku.context.tool_calls import ToolSet
 from otaku.formatting import format_duration
 from otaku.logging import ErrorLog, SystemLog
 from otaku.providers import Locality, ModelInfo, OpenAIClient, ProviderError, Registry
@@ -57,6 +58,7 @@ class Job:
     system: str
     messages: list[Message]
     injections: tuple[Injection, ...]  # what the story's settings inject, built
+    tool_set: ToolSet  # how the story's tool calls go on the wire
     prompts: PromptTexts  # the prompts object, whole
     # Its `max_context` is the config's cap alone: the warm-up finishes
     # it with the model's window once the model is loaded.
@@ -324,6 +326,7 @@ class Worker:
                 system=job.system,
                 messages=job.messages,
                 injections=job.injections,
+                tool_set=job.tool_set,
                 prompts=job.prompts,
                 shape=replace(
                     job.shape,

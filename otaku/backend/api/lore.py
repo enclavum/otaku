@@ -45,15 +45,15 @@ def build_job(session: Session, *, force: bool = False) -> Job:
     story_id = session.story_id
     assert story_id is not None  # callers gate on a recorded story
     config, prompts = session._config, session._prompts
+    settings = StorySettings(session._settings_db, session._store, session._paths.prompts_file)
     return Job(
         provider=session.provider,
         model=session.model,
         story_id=story_id,
         system=session.system,
         messages=list(session.messages),
-        injections=StorySettings(
-            session._settings_db, session._store, session._paths.prompts_file
-        ).injections,
+        injections=settings.injections,
+        tool_set=settings.tool_set,
         prompts=prompts,
         shape=ContextShape(
             head_messages=config.head_messages,

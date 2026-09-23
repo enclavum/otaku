@@ -20,6 +20,7 @@ from urllib.parse import urlsplit
 
 import pytest
 
+from otaku.backend.paths import Paths
 from otaku.backend.session import PARAMETERS, THINK_MENU
 from scenarios.support.harness import set_config, set_config_provider
 from scenarios.support.server import ModelServer
@@ -344,6 +345,33 @@ class TestPlaying:
         assert stored[-2].body == "I unroll the county survey."
         assert stored[-1].role == "assistant"
 
+    def test_a_tool_call_reaches_the_page_split_and_read(
+        self, page: Page, server: ModelServer
+    ) -> None:
+        # The page parses nothing: a call streams as `tool_call` pieces,
+        # the stored turn arrives in segments with the call read — and
+        # the play read carries the same, for a page opening on it.
+        server.script = lambda body: "The door creaks.<otk-question>Go in?\n1. Yes</otk-question>"
+        events = page.play("I enter the hall.")
+        calls = [event for event in events if event["type"] == "tool_call"]
+        assert calls and all(event["tool"] == "question" for event in calls)
+        assert "".join(event["text"] for event in calls) == "Go in?\n1. Yes"
+        assert all("<otk-" not in e["text"] for e in events if e["type"] == "text")
+        done = events[-1]
+        assert done["reply"]["segments"] == [
+            {"kind": "prose", "text": "The door creaks."},
+            {
+                "kind": "tool_call",
+                "tool": "question",
+                "text": "Go in?\n1. Yes",
+                "question": "Go in?",
+                "options": ["Yes"],
+            },
+        ]
+        played = page.get("/api/play")
+        assert set(played) == {"messages"}
+        assert played["messages"][-1]["segments"] == done["reply"]["segments"]
+
     def test_the_wire_carries_what_the_page_typed(self, page: Page, server: ModelServer) -> None:
         page.play("I mark the river's true course.")
         assert server.requests[-1]["messages"][-1]["content"] == "I mark the river's true course."
@@ -499,6 +527,98 @@ class TestWrites:
         cut = f'{{"story": {played}, "discard": true}}'.encode()
         assert page.status("/api/session/head", method="PUT", data=cut) == 400
         assert page.get("/api/session")["story_id"] == blank
+
+
+class TestStorySettings:
+    """The story's settings over HTTP: every setting with the same
+    fields, a PATCH of one field with the backend's refusals as answers
+    and a malformed flag as a bad request, the shared reminder and a
+    tool's prompt at their own paths."""
+
+    FIELDS = (
+        "name",
+        "label",
+        "tool",
+        "allowed_positions",
+        "enabled",
+        "position",
+        "reminder_text",
+        "display_notes",
+    )
+
+    def test_every_setting_answers_the_same_questions(self, page: Page) -> None:
+        page.play("I listen at the culvert mouth.")
+        story = page.get("/api/session")["story_id"]
+        settings = page.get(f"/api/stories/{story}/settings")["settings"]
+        assert settings and all(tuple(row) == self.FIELDS for row in settings)
+        by_name = {row["name"]: row for row in settings}
+        # What a setting has none of is null: the questions tool no
+        # reminder and nothing to display, a reminder no tool.
+        assert by_name["allow_questions"]["tool"] == "question"
+        assert by_name["allow_questions"]["reminder_text"] is None
+        assert by_name["allow_questions"]["display_notes"] is None
+        assert by_name["allow_assistant_notes"]["display_notes"] is True
+        assert by_name["use_story_reminder"]["tool"] is None
+        assert by_name["use_story_reminder"]["reminder_text"] == ""
+        assert by_name["use_story_reminder"]["allowed_positions"] == list(range(1, 9))
+
+    def test_a_patch_moves_one_field_and_the_store_follows(self, page: Page) -> None:
+        page.play("I listen at the culvert mouth.")
+        story = page.get("/api/session")["story_id"]
+        path = f"/api/stories/{story}/settings/use_story_reminder"
+        answer = page.patch(path, {"enabled": True, "position": 3, "reminder_text": "Rain."})
+        assert answer["notice"] and "refused" not in answer
+        row = next(
+            s
+            for s in page.get(f"/api/stories/{story}/settings")["settings"]
+            if s["name"] == "use_story_reminder"
+        )
+        assert (row["enabled"], row["position"], row["reminder_text"]) == (True, 3, "Rain.")
+        stored = {s.name: s for s in page.store.stories.get_settings(story)}
+        assert stored["use_story_reminder"].reminder_text == "Rain."
+        answer = page.patch(
+            f"/api/stories/{story}/settings/allow_assistant_notes", {"display_notes": False}
+        )
+        assert "refused" not in answer
+        assert page.store.stories.get_settings(story)[-1].display_notes is False
+
+    def test_what_a_setting_does_not_take_is_a_refusal_not_a_fault(self, page: Page) -> None:
+        page.play("I listen at the culvert mouth.")
+        story = page.get("/api/session")["story_id"]
+        answer = page.patch(f"/api/stories/{story}/settings/allow_questions", {"position": 9})
+        assert answer["refused"] is True
+        answer = page.patch(
+            f"/api/stories/{story}/settings/allow_questions", {"display_notes": False}
+        )
+        assert answer["refused"] is True
+        answer = page.patch(f"/api/stories/{story}/settings/plan", {"enabled": True})
+        assert answer["refused"] is True
+
+    def test_a_flag_that_is_not_a_boolean_is_a_bad_request(self, page: Page) -> None:
+        page.play("I listen at the culvert mouth.")
+        story = page.get("/api/session")["story_id"]
+        path = f"/api/stories/{story}/settings/allow_assistant_notes"
+        assert page.status(path, method="PATCH", data=b'{"display_notes": "yes"}') == 400
+        assert page.status(path, method="PATCH", data=b'{"enabled": 1}') == 400
+
+    def test_the_shared_reminder_has_a_path_of_its_own(self, page: Page) -> None:
+        assert page.get("/api/shared_reminder") == {"text": ""}
+        answer = page.put("/api/shared_reminder", {"text": "Stay grim."})
+        assert answer["notice"] and "refused" not in answer
+        assert page.get("/api/shared_reminder") == {"text": "Stay grim."}
+        assert page.store.settings.get_shared_reminder() == "Stay grim."
+
+    def test_a_tools_prompt_is_read_and_written_at_its_path(self, page: Page) -> None:
+        shipped = page.get("/api/prompts/question")["text"]
+        assert shipped
+        answer = page.put("/api/prompts/question", {"text": "ASK ANEW"})
+        assert answer["notice"] and "refused" not in answer
+        assert page.get("/api/prompts/question") == {"text": "ASK ANEW"}
+        assert "ASK ANEW" in Paths.resolve(page.root).prompts_file.read_text()
+        answer = page.put("/api/prompts/question", {"text": ""})
+        assert "refused" not in answer
+        assert page.get("/api/prompts/question") == {"text": shipped}
+        assert page.get("/api/prompts/plan")["refused"] is True
 
 
 class TestTheFlows:

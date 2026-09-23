@@ -136,6 +136,8 @@ export const status = () => get("/api/status");
 // ---------- playing ----------
 
 export const turns = () => get("/api/play").then((it) => it.messages);
+// The same read whole: the turns, and the question the story stands on.
+export const played = () => get("/api/play");
 /** Where a turn's picture and its thumbnail are served from, by the
     fingerprint the turn's attachments name it under — an address, not a
     request: an `img` asks for it, and the answer is immutable. */
@@ -175,6 +177,9 @@ export const editJournal = (story, record, fields) =>
   patch(`/api/stories/${story}/journals/${record}`, fields);
 export const mergeCharacter = (story, character, into) =>
   put(`/api/stories/${story}/characters/${character}/merge`, { into });
+export const storySettings = (story) => get(`/api/stories/${story}/settings`);
+export const updateSetting = (story, name, fields) =>
+  patch(`/api/stories/${story}/settings/${name}`, fields);
 
 // ---------- extraction ----------
 
@@ -225,6 +230,12 @@ export const usage = (scope = "") => get(`/api/usage${query({ scope })}`);
 // ---------- settings ----------
 
 export const settings = () => get("/api/settings");
+// The reminder stories share: a text, not a knob of the /set family.
+export const sharedReminder = () => get("/api/shared_reminder");
+export const setSharedReminder = (text) => put("/api/shared_reminder", { text });
+// A tool's prompt: prompts.toml's text, edited in place.
+export const prompt = (tool) => get(`/api/prompts/${tool}`);
+export const setPrompt = (tool, text) => put(`/api/prompts/${tool}`, { text });
 export const setSetting = (name, value) => put(`/api/settings/${name}`, { value });
 export const setParameter = (name, value) =>
   put(`/api/session/model/parameters/${encodeURIComponent(name)}`, { value });

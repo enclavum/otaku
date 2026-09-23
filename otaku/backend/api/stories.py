@@ -214,10 +214,11 @@ def update_setting(
     session: Session,
     name: str,
     *,
+    story_id: int | None = None,
     enabled: bool | None = None,
     position: InjectionPosition | None = None,
-    text: str | None = None,
-    story_id: int | None = None,
+    reminder_text: str | None = None,
+    display_notes: bool | None = None,
 ) -> str:
     """Change one setting of a story — the open one, or the one
     `story_id` names; what is not given stays. Returns the confirmation.
@@ -228,7 +229,12 @@ def update_setting(
     if setting is None:
         known = ", ".join(each.name for each in settings)
         raise Refused(f"Unknown setting {name!r}. Settings: {known}.")
-    row = setting.to_db(enabled=enabled, position=position, text=text)
+    row = setting.to_db(
+        enabled=enabled,
+        position=position,
+        reminder_text=reminder_text,
+        display_notes=display_notes,
+    )
     if story_id is not None and story_id != session.story_id:
         session._store.stories.set_setting(story_id, row)
     else:
@@ -240,8 +246,13 @@ def update_setting(
         return f"{setting.label}: on."
     if not isinstance(row.position, int):
         return f"{setting.label}: on, in the system message."
-    back = -row.position
-    return f"{setting.label}: on, {back} message{'s' if back != 1 else ''} from the end."
+    # before which of the reader's messages, counted from the end
+    if row.position == 1:
+        return f"{setting.label}: on, before your latest message."
+    if row.position == 2:
+        return f"{setting.label}: on, before your previous message."
+    suffix = "rd" if row.position == 3 else "th"
+    return f"{setting.label}: on, before your {row.position}{suffix}-last message."
 
 
 def get_shared_reminder(session: Session) -> str:

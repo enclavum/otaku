@@ -19,7 +19,16 @@ import time
 from collections.abc import Iterator
 from typing import Any, Self
 
-from otaku.backend.api.play import Declined, Done, Failed, PlayEvent, Reasoning, Recorded, Text
+from otaku.backend.api.play import (
+    Declined,
+    Done,
+    Failed,
+    PlayEvent,
+    Reasoning,
+    Recorded,
+    Text,
+    ToolCall,
+)
 from otaku.console.sound import ring
 from otaku.formatting import printable
 from otaku.terminal.chat.chat import Chat
@@ -58,6 +67,7 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
     streamed = False  # any prose shown yet (the error line's lead blank)
     chars = 0
     interrupted = False
+    call_open = False  # inside a tool call, its opening tag already printed
     start = time.monotonic()
 
     spinner = Spinner()
@@ -107,6 +117,18 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                     streamer.feed(event.text)
                     streamed = True
                     chars += len(event.text)
+                elif isinstance(event, ToolCall):
+                    # A call prints as it streamed, tags and all, until its
+                    # look is decided: the opening tag ahead of its first
+                    # piece, the closing tag after the piece that closed it.
+                    if in_thinking:
+                        out.write(RESET + "\n" * max(0, 2 - thinking_nl))
+                        in_thinking = False
+                    opening = "" if call_open else f"<otk-{event.name}>"
+                    closing = f"</otk-{event.name}>" if event.closed else ""
+                    call_open = not event.closed
+                    streamer.feed(opening + event.text + closing)
+                    streamed = True
                 elif isinstance(event, Declined):
                     out.write(event.reason + "\n")
                 elif isinstance(event, Failed):

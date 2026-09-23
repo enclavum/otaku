@@ -45,12 +45,20 @@ class TestSettingsColumn:
         raw = json.dumps(
             {
                 "allow_questions": {"enabled": True, "position": "system"},
-                "use_story_reminder": {"enabled": True, "position": -5, "text": "Stay grim."},
+                "use_story_reminder": {
+                    "enabled": True,
+                    "position": 5,
+                    "reminder_text": "Stay grim.",
+                },
+                "allow_assistant_notes": {"display_notes": False},
             }
         )
         assert StorySettingDB.from_json(raw) == (
             StorySettingDB("allow_questions", enabled=True, position="system"),
-            StorySettingDB("use_story_reminder", enabled=True, position=-5, text="Stay grim."),
+            StorySettingDB(
+                "use_story_reminder", enabled=True, position=5, reminder_text="Stay grim."
+            ),
+            StorySettingDB("allow_assistant_notes", display_notes=False),
         )
 
     def test_a_setting_it_never_heard_of_is_read_all_the_same(self) -> None:
@@ -60,21 +68,31 @@ class TestSettingsColumn:
         )
 
     def test_what_makes_no_sense_reads_as_unsaid(self) -> None:
-        # By type first: to Python True is 1 and -1.0 is -1, and neither is a position.
-        for said in ("end", "-2", 0, 3, True, -1.0, None):
+        # By type first: to Python True is 1 and 1.0 is 1, and neither is a position.
+        for said in ("end", "2", 0, -3, True, 1.0, None):
             raw = json.dumps({"allow_questions": {"position": said}})
             assert StorySettingDB.from_json(raw) == (StorySettingDB("allow_questions"),), said
         for said in ("yes", 1, None):
             raw = json.dumps({"allow_questions": {"enabled": said}})
             assert StorySettingDB.from_json(raw) == (StorySettingDB("allow_questions"),), said
+        # A display flag that is not `false` reads as displayed, the default.
+        for said in ("no", 0, None):
+            raw = json.dumps({"allow_assistant_notes": {"display_notes": said}})
+            found = StorySettingDB.from_json(raw)
+            assert found == (StorySettingDB("allow_assistant_notes"),), said
+            assert found[0].display_notes is True
 
     def test_text_that_is_not_an_object_of_objects_holds_no_settings(self) -> None:
         for raw in ("not json", "[1, 2]", '"text"', '{"allow_questions": "on"}'):
             assert StorySettingDB.from_json(raw) == ()
 
     def test_a_written_setting_reads_back(self) -> None:
-        setting = StorySettingDB("use_story_reminder", enabled=True, position=-4, text="Stay grim.")
+        setting = StorySettingDB(
+            "use_story_reminder", enabled=True, position=4, reminder_text="Stay grim."
+        )
         assert StorySettingDB.from_json(StorySettingDB.to_json([setting], "")) == (setting,)
+        hidden = StorySettingDB("allow_assistant_notes", enabled=True, display_notes=False)
+        assert StorySettingDB.from_json(StorySettingDB.to_json([hidden], "")) == (hidden,)
 
     def test_every_key_it_does_not_know_is_kept(self) -> None:
         # A JSON key bumps no schema version: an older build can meet a
@@ -87,24 +105,36 @@ class TestSettingsColumn:
         }
 
     def test_only_what_is_said_is_written(self) -> None:
+        # No position, no reminder, the notes displayed: the defaults are
+        # not written, so only the exception ever is.
         assert json.loads(StorySettingDB.to_json([ASKING])) == {
             "allow_questions": {"enabled": True}
+        }
+        hidden = StorySettingDB("allow_assistant_notes", display_notes=False)
+        assert json.loads(StorySettingDB.to_json([hidden])) == {
+            "allow_assistant_notes": {"enabled": False, "display_notes": False}
         }
 
     def test_several_settings_are_written_at_once(self) -> None:
         reminding = StorySettingDB(
-            "use_story_reminder", enabled=True, position=-3, text="Stay grim."
+            "use_story_reminder", enabled=True, position=3, reminder_text="Stay grim."
         )
         assert StorySettingDB.from_json(StorySettingDB.to_json([ASKING, reminding])) == (
             ASKING,
             reminding,
         )
 
-    def test_an_emptied_text_leaves_the_column(self) -> None:
-        reminding = StorySettingDB("use_story_reminder", enabled=True, text="Stay grim.")
+    def test_an_emptied_reminder_leaves_the_column(self) -> None:
+        reminding = StorySettingDB("use_story_reminder", enabled=True, reminder_text="Stay grim.")
         raw = StorySettingDB.to_json([reminding])
-        cleared = json.loads(StorySettingDB.to_json([replace(reminding, text="")], raw))
+        cleared = json.loads(StorySettingDB.to_json([replace(reminding, reminder_text="")], raw))
         assert cleared == {"use_story_reminder": {"enabled": True}}
+
+    def test_notes_displayed_again_leave_the_flag_out(self) -> None:
+        hidden = StorySettingDB("allow_assistant_notes", enabled=True, display_notes=False)
+        raw = StorySettingDB.to_json([hidden])
+        shown = json.loads(StorySettingDB.to_json([replace(hidden, display_notes=True)], raw))
+        assert shown == {"allow_assistant_notes": {"enabled": True}}
 
     def test_over_garbage_it_starts_clean(self) -> None:
         written = json.loads(StorySettingDB.to_json([ASKING], "not json"))

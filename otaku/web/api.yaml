@@ -208,6 +208,7 @@ paths:
                 properties:
                   messages:
                     type: array
+                    description: The turns, each split into segments; a page that opens on a reply whose last call is a question poses it again.
                     items: { $ref: "#/components/schemas/Turn" }
     post:
       operationId: postPlay
@@ -811,7 +812,8 @@ paths:
       summary: Change one setting of the story
       description: |
         What is not sent stays. `position` must be one of the setting's
-        `allowed_positions` ("system", or a negative count from the end)
+        `allowed_positions` ("system", or which of the reader's messages,
+        counted from the end, the text goes before — 1 the latest)
         and is refused for a setting that injects nothing; `text` is
         taken by the story reminder alone — the shared reminder's text
         is /api/shared_reminder's. `enabled`
@@ -826,8 +828,9 @@ paths:
                 position:
                   oneOf:
                     - { type: string, enum: [system] }
-                    - { type: integer, maximum: -1 }
-                text: { type: string, description: The story reminder's own text; "" clears it. }
+                    - { type: integer, minimum: 1 }
+                reminder_text: { type: string, description: The story's own reminder; "" clears it. }
+                display_notes: { type: boolean, description: Whether the reader is shown the notes the model writes; refused for a setting with nothing to display. }
       responses:
         "200": { $ref: "#/components/responses/Answered" }
         "400": { $ref: "#/components/responses/BadRequest" }
@@ -1326,6 +1329,43 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "403": { $ref: "#/components/responses/CrossOrigin" }
 
+  /api/prompts/{tool}:
+    parameters:
+      - name: tool
+        in: path
+        required: true
+        schema: { type: string, enum: [question, note] }
+    get:
+      operationId: getPrompt
+      tags: [Settings]
+      summary: A tool's prompt
+      description: |
+        What the model is told about the tool — prompts.toml's text, read
+        fresh, which every story with the tool switched on is sent.
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: The prompt.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Prompt" }
+    put:
+      operationId: putPrompt
+      tags: [Settings]
+      summary: Set a tool's prompt
+      description: |
+        Written into prompts.toml, that key alone, the pre-edit file
+        backed up; "" drops the key and the shipped text stands again.
+        Refused, with the sentence, when the file could not be edited.
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Prompt" }
+      responses:
+        "200": { $ref: "#/components/responses/Answered" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+
   # ---------- Signing in ----------
 
   /api/login:
@@ -1463,16 +1503,18 @@ components:
 
   # Alphabetical.
   schemas:
-    Status:
+    Attachment:
       type: object
+      description: |
+        One picture on a turn, the row's own facts: the file name the
+        routes take (`/api/files/{file}`, `…/thumb`), whose extension
+        says the type, and its measure as the model sees it. The
+        reader's file name is not kept.
       properties:
-        status:
-          type: string
-          description: The backend's one-line account of what it is doing; "" when idle.
-        notices:
-          type: array
-          items: { type: string }
-          description: What the backend has said since the page last asked.
+        file: { type: string, description: "The file's name in the store: pic-<story>-<day>-<8 hex>.jpg or .png." }
+        width: { type: integer }
+        height: { type: integer }
+        size: { type: integer, description: "Bytes, as stored." }
 
     Balance:
       type: object
@@ -1607,6 +1649,17 @@ components:
         state: { type: string, description: 'Where it left them; "" when the pass wrote none.' }
         updated_at: { type: string, format: date-time, description: "When the extractor last wrote the record — display alone." }
 
+    LoginState:
+      type: object
+      required: [required, signed_in]
+      properties:
+        required:
+          type: boolean
+          description: Whether `[web] password` is set, so the page asks for it.
+        signed_in:
+          type: boolean
+          description: Whether this request carried a good credential; always false when `required` is false.
+
     Money:
       type: object
       description: |
@@ -1618,17 +1671,6 @@ components:
         amount: { type: string, example: "4.82" }
         currency: { type: string, example: "USD" }
         text: { type: string, example: "$4.82" }
-
-    LoginState:
-      type: object
-      required: [required, signed_in]
-      properties:
-        required:
-          type: boolean
-          description: Whether `[web] password` is set, so the page asks for it.
-        signed_in:
-          type: boolean
-          description: Whether this request carried a good credential; always false when `required` is false.
 
     Notice:
       type: object
@@ -1660,6 +1702,13 @@ components:
           properties:
             type: { const: text }
             text: { type: string }
+        - type: object
+          description: A piece of a tool call — the tool's name and its inside, never a raw tag; the deltas are parsed for the page, which parses nothing.
+          properties:
+            type: { const: tool_call }
+            tool: { type: string, description: The tool's name — question, note; a name no tool owns is a call all the same. }
+            text: { type: string }
+            closed: { type: boolean, description: This piece is the one the closing tag ended. }
         - type: object
           description: The stream declines mid-way; what already happened stands.
           properties:
@@ -1695,6 +1744,10 @@ components:
                 truncated: { type: boolean, description: "Derived: the reply was cut at the reply limit." }
                 rate: { type: number, nullable: true, description: "Derived: tokens per second over the generation alone." }
                 context_used: { type: integer, nullable: true, description: "Derived: percent of the context the prompt took." }
+            reply:
+              nullable: true
+              description: The reply as stored, the turn whole — split into segments, tags and all — for the page to land in place; null when nothing arrived.
+              allOf: [{ $ref: "#/components/schemas/Turn" }]
 
     PreparedCard:
       type: object
@@ -1711,6 +1764,12 @@ components:
             tokens: { type: integer, description: "The composed block's cost estimate." }
             large: { type: boolean, description: "Worth warning — it rides every request." }
             persona: { type: string, description: "The remembered {{user}} name; \"\" when none." }
+
+    Prompt:
+      type: object
+      required: [text]
+      properties:
+        text: { type: string }
 
     Providers:
       type: object
@@ -1895,32 +1954,16 @@ components:
       properties:
         text: { type: string }
 
-    StorySettings:
+    Status:
       type: object
       properties:
-        settings:
+        status:
+          type: string
+          description: The backend's one-line account of what it is doing; "" when idle.
+        notices:
           type: array
-          description: Every setting, in the order their injections are sent where they share a place.
-          items:
-            type: object
-            properties:
-              name: { type: string, description: What the story stores it under — the path segment a PATCH takes. }
-              label: { type: string }
-              enabled: { type: boolean }
-              position:
-                nullable: true
-                description: Where its injection rides — "system" appends it to the system message, a negative number places it that many messages from the end; null for a setting that injects nothing.
-                oneOf:
-                  - { type: string, enum: [system] }
-                  - { type: integer, maximum: -1 }
-              allowed_positions:
-                type: array
-                description: Every position it may take, as a menu offers them; empty for a setting that injects nothing.
-                items:
-                  oneOf:
-                    - { type: string, enum: [system] }
-                    - { type: integer, maximum: -1 }
-              text: { type: string, nullable: true, description: "The story's own text (the story reminder's); null for a setting with none of its own." }
+          items: { type: string }
+          description: What the backend has said since the page last asked.
 
     Story:
       type: object
@@ -1977,6 +2020,35 @@ components:
         turns: { type: integer, description: "How many — a count is `turns`, the chain itself is `messages`." }
         open: { type: boolean, description: "Whether this is the session's open story." }
 
+    StorySettings:
+      type: object
+      properties:
+        settings:
+          type: array
+          description: Every setting, in the order their injections are sent where they share a place.
+          items:
+            type: object
+            properties:
+              name: { type: string, description: What the story stores it under — the path segment a PATCH takes. }
+              label: { type: string }
+              tool: { type: string, nullable: true, description: "The name of the tool this setting switches (question, note) — its prompt is /api/prompts/{tool}'s; null for a setting that is no tool's." }
+              allowed_positions:
+                type: array
+                description: Every position it may take, as a menu offers them; empty for a setting that injects nothing.
+                items:
+                  oneOf:
+                    - { type: string, enum: [system] }
+                    - { type: integer, minimum: 1 }
+              enabled: { type: boolean }
+              position:
+                nullable: true
+                description: Where its injection rides — "system" appends it to the system message; a number puts it before that one of the reader's messages counted from the end, 1 the latest; null for a setting that injects nothing.
+                oneOf:
+                  - { type: string, enum: [system] }
+                  - { type: integer, minimum: 1 }
+              reminder_text: { type: string, nullable: true, description: "The story's own reminder; null for a setting that has none (every one but the story reminder's)." }
+              display_notes: { type: boolean, nullable: true, description: "Whether the reader is shown the notes the model writes; null for a setting with nothing to display." }
+
     Syntax:
       type: object
       description: |
@@ -2021,19 +2093,26 @@ components:
           type: array
           description: "The turn's pictures; [] when none."
           items: { $ref: "#/components/schemas/Attachment" }
-
-    Attachment:
-      type: object
-      description: |
-        One picture on a turn, the row's own facts: the file name the
-        routes take (`/api/files/{file}`, `…/thumb`), whose extension
-        says the type, and its measure as the model sees it. The
-        reader's file name is not kept.
-      properties:
-        file: { type: string, description: "The file's name in the store: pic-<story>-<day>-<8 hex>.jpg or .png." }
-        width: { type: integer }
-        height: { type: integer }
-        size: { type: integer, description: "Bytes, as stored." }
+        segments:
+          type: array
+          description: The body split in order — prose, and each tool call as its tool's facts — so the page draws a turn without parsing it. The body itself stays whole above, for the editor.
+          items:
+            oneOf:
+              - type: object
+                properties:
+                  kind: { const: prose }
+                  text: { type: string }
+              - type: object
+                description: A tool call; a tool's carries what it read (backend.tools.Tool.to_json), one of a name no tool owns its text alone.
+                properties:
+                  kind: { const: tool_call }
+                  tool: { type: string, description: The tool's name — question, note; any other is one no tool owns. }
+                  text: { type: string, description: The call's inside, as written. }
+                  question: { type: string, description: "A question's: the question itself." }
+                  options:
+                    type: array
+                    description: "A question's: the answers to pick from; [] for a free-form one."
+                    items: { type: string }
 
     Usage:
       type: object

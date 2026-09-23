@@ -143,43 +143,47 @@ CREATE INDEX idx_token_usage_story ON token_usage (story_id);
 """
 
 
-# Where what a setting injects rides (`context.assembler.Injection`):
-# "system", or a negative number counted from the end the way a Python
-# index is — -1 is above the newest message.
+# Where what a setting injects rides (`context.injections.Injection`):
+# "system", or which of the reader's messages it goes BEFORE, counted
+# from the end — 1 is the newest, 2 the one before it.
 InjectionPosition = Literal["system"] | int
 
 
 @dataclass(frozen=True)
 class StorySettingDB:
     """One setting of a story, as the `settings` column records it: a
-    switch, where what it injects rides, and the story's own text where
-    it has one. WHICH settings there are, and what each may take, is no
-    business of the column's (`backend.story`)."""
+    switch, where what it injects rides, the story's own reminder, and
+    whether the reader is shown the notes the model writes — the last two
+    each one setting's, the others every injecting setting's.
+    WHICH settings there are, and what each may take, is no business of
+    the column's (`backend.story`)."""
 
     name: str
     enabled: bool = False
     position: InjectionPosition | None = None  # None: unsaid, the setting's default applies
-    text: str = ""
+    reminder_text: str = ""
+    display_notes: bool = True
 
     @classmethod
     def from_json(cls, text: str) -> tuple[Self, ...]:
         """The column read back: every setting it holds, in its order.
         What makes no sense reads as unsaid — `enabled` that is not `true`
-        is False, a position that is not "system" or a negative number is
+        is False, a position that is not "system" or a count from 1 is
         None — and a text that is no JSON object of objects holds none."""
         out = []
         for name, state in cls._parse(text).items():
             if not isinstance(state, dict):
                 continue
-            said, words = state.get("position"), state.get("text")
-            # By type first: to Python True is 1 and -1.0 is -1, and neither is a position.
-            placed = said == "system" or (type(said) is int and said < 0)
+            position, reminder_text = state.get("position"), state.get("reminder_text")
+            # By type first: to Python True is 1 and 1.0 is 1, and neither is a position.
+            placed = position == "system" or (type(position) is int and position >= 1)
             out.append(
                 cls(
                     name=name,
                     enabled=state.get("enabled") is True,
-                    position=said if placed else None,
-                    text=words if isinstance(words, str) else "",
+                    position=position if placed else None,
+                    reminder_text=reminder_text if isinstance(reminder_text, str) else "",
+                    display_notes=state.get("display_notes") is not False,
                 )
             )
         return tuple(out)
@@ -189,8 +193,8 @@ class StorySettingDB:
         """The column's text with these settings in it — a MERGE over
         `current`, never a rewrite: a JSON key bumps no schema version, so
         an older build can meet a newer one's keys and must hand them back
-        whole. Only what is said is written; an emptied text leaves the
-        column."""
+        whole. Only what is said is written; an emptied reminder leaves
+        the column."""
         column = cls._parse(current)
         for setting in settings:
             state = column.get(setting.name)
@@ -198,10 +202,14 @@ class StorySettingDB:
             state["enabled"] = setting.enabled
             if setting.position is not None:
                 state["position"] = setting.position
-            if setting.text:
-                state["text"] = setting.text
+            if setting.reminder_text:
+                state["reminder_text"] = setting.reminder_text
             else:
-                state.pop("text", None)
+                state.pop("reminder_text", None)
+            if setting.display_notes:
+                state.pop("display_notes", None)  # the default; only the exception is said
+            else:
+                state["display_notes"] = False
             column[setting.name] = state
         return json.dumps(column, ensure_ascii=False)
 

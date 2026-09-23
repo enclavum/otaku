@@ -452,6 +452,7 @@ class Session:
             system=self._system,
             messages=list(self._messages),
             injections=settings.injections,
+            tool_set=settings.tool_set,
             prompts=self._prompts,
             shape=shape,
             pictures_ride=(

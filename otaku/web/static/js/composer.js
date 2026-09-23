@@ -74,6 +74,14 @@ let at = null;
 /** Put the caret back in the box. The page's resting state is a reader
     about to write, so every screen that closes hands the keys back to
     it — and a disabled box (otaku gone) is left alone. */
+/** A line put in the box to be edited before it is sent — an option
+    of the model's question, copied rather than picked. */
+export function draft(line) {
+  setValue(composer, line);
+  typed = composer.value;
+  focusComposer();
+}
+
 export function focusComposer() {
   if (!composer.disabled) composer.focus();
 }
@@ -120,7 +128,8 @@ let typed = "";
 export function wire() {
   composer.addEventListener("input", () => {
     // A line about the last attempt is over the moment the next one is
-    // being typed.
+    // being typed. The model's question stays until the line is SENT:
+    // whatever is typed answers it, and it is read while being answered.
     tell("");
     if (composer.value !== typed) settle();
     typed = composer.value;

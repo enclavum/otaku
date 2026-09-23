@@ -2,81 +2,91 @@
  "settings": [
   {
    "name": "use_shared_reminder",
-   "label": "Shared reminder",
-   "enabled": false,
-   "position": -3,
+   "label": "Use shared reminder",
+   "tool": null,
    "allowed_positions": [
-    -1,
-    -2,
-    -3,
-    -4,
-    -5,
-    -6,
-    -7,
-    -8
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
    ],
-   "text": null
+   "enabled": false,
+   "position": 2,
+   "reminder_text": null,
+   "display_notes": null
   },
   {
    "name": "use_story_reminder",
-   "label": "Story reminder",
-   "enabled": false,
-   "position": -3,
+   "label": "Set story reminder",
+   "tool": null,
    "allowed_positions": [
-    -1,
-    -2,
-    -3,
-    -4,
-    -5,
-    -6,
-    -7,
-    -8
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
    ],
-   "text": ""
+   "enabled": false,
+   "position": 2,
+   "reminder_text": "",
+   "display_notes": null
   },
   {
    "name": "allow_assistant_notes",
-   "label": "Assistant notes",
-   "enabled": false,
-   "position": -1,
+   "label": "Allow assistant notes",
+   "tool": "note",
    "allowed_positions": [
     "system",
-    -1,
-    -2,
-    -3,
-    -4,
-    -5,
-    -6,
-    -7,
-    -8
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
    ],
-   "text": null
+   "enabled": false,
+   "position": 1,
+   "reminder_text": null,
+   "display_notes": true
   },
   {
    "name": "allow_questions",
-   "label": "Questions",
-   "enabled": false,
-   "position": -1,
+   "label": "Allow questions",
+   "tool": "question",
    "allowed_positions": [
     "system",
-    -1,
-    -2,
-    -3,
-    -4,
-    -5,
-    -6,
-    -7,
-    -8
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
    ],
-   "text": null
+   "enabled": false,
+   "position": 1,
+   "reminder_text": null,
+   "display_notes": null
   },
   {
    "name": "story_mode",
    "label": "Story mode",
+   "tool": null,
+   "allowed_positions": [],
    "enabled": false,
    "position": null,
-   "allowed_positions": [],
-   "text": null
+   "reminder_text": null,
+   "display_notes": null
   }
  ]
 }

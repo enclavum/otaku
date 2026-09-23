@@ -3,7 +3,11 @@ the takes over it (regenerate, undo).
 
 The stream is the frontend's to drive: iterate to render, close to
 cancel. The event vocabulary lives here, `Text` and `Reasoning` included
-(re-exported from providers — members of this module's union). Closing
+(re-exported from providers — members of this module's union) and
+`ToolCall` (`context.tool_calls`': a piece of a call, the tool's name
+and its inside, never a raw tag — the deltas are fed through a
+`ReplyParser`, so neither frontend parses). What is RECORDED is
+everything that arrived, tags included. Closing
 mid-stream keeps and records what arrived — Ctrl+C and Ctrl+R are the
 frontend closing the generator; a Ctrl+R then simply calls `regenerate`
 for the fresh take. Exactly one of Declined, Failed, or Done ends a
@@ -11,7 +15,7 @@ stream. A new reply arms the worker's idle-debounced extraction pass;
 every submission (submit, regenerate, undo) defers pending work first.
 """
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 
 from otaku.backend.api.cards import drop_unplayed_card
@@ -26,8 +30,12 @@ from otaku.backend.files import (
     save,
 )
 from otaku.backend.session import NO_MODEL_HINT, Refused, Session
-from otaku.context import syntax
+from otaku.backend.story import StorySettings, ToolSetting
+from otaku.backend.tools import TOOLS, Actor, read
+from otaku.context import syntax, tool_calls
 from otaku.context.assembler import ContextOverflowError
+from otaku.context.tool_calls import Prose, ReplyParser
+from otaku.context.tool_calls import ToolCall as ToolCall
 from otaku.formatting import format_context
 from otaku.providers import ProviderError, Stats
 from otaku.providers import Reasoning as Reasoning
@@ -135,14 +143,17 @@ class Done:
     """The turn's end: the recorded reply (None when nothing arrived),
     what it came to (None when the stream said nothing of itself), and
     the verbose stats line — the report's `text()`, "" unless /set
-    verbose, so a frontend prints it as it is."""
+    verbose, so a frontend prints it as it is. A reply that ended on a
+    question is in the reply's own segments, for a frontend to pose:
+    the next line played is the answer, and nothing more is built
+    around answering."""
 
     reply: Message | None
     report: ReplyReport | None
     stats: str
 
 
-PlayEvent = Recorded | Text | Reasoning | Declined | Failed | Done
+PlayEvent = Recorded | Text | Reasoning | ToolCall | Declined | Failed | Done
 
 
 def submit(session: Session, line: str, files: Sequence[RawFile] = ()) -> Iterator[PlayEvent]:
@@ -195,6 +206,22 @@ def regenerate(session: Session) -> Iterator[PlayEvent]:
     if not session.messages:
         raise Refused("Nothing to regenerate.")
     return _regenerate_events(session)
+
+
+def segments(body: str) -> list[dict[str, object]]:
+    """A stored body split for a frontend that parses nothing: prose
+    (`{"kind": "prose", "text"}`) and each tool call as its tool's facts
+    (`{"kind": "tool_call", …}` — a name no tool owns is a call all the
+    same, with its tool and text alone), in order."""
+    out: list[dict[str, object]] = []
+    for part in tool_calls.parse_reply(body):
+        if isinstance(part, Prose):
+            out.append({"kind": "prose", "text": part.text})
+        elif part.name in TOOLS:
+            out.append({"kind": "tool_call", **read(part.name, part.text).to_json()})
+        else:
+            out.append({"kind": "tool_call", "tool": part.name, "text": part.text})
+    return out
 
 
 def undo(session: Session) -> list[Message]:
@@ -337,10 +364,15 @@ def _reply_events(
     held = ""  # a whitespace run the stream has not yet earned sending
     final: Stats | None = None
     error: str | None = None
+    # The tool calls told apart from the prose as they stream; the
+    # closing tag of each the user answers among the stops, so the reply
+    # ends where the question does.
+    parser = ReplyParser()
+    answered = _answered_switched_on(session)
     stream = client.completion.chat(
         session.model,
         wire,
-        dict(session.params),
+        _with_stops(session.params, answered),
         level=session.think,
         purpose="chat",
         # The thread this runs on belongs to the frontend between
@@ -367,9 +399,10 @@ def _reply_events(
                     if not text:
                         continue
                     content.append(text)
-                    yield Text(text)
+                    yield from _pieces(parser.feed(text))
                 elif isinstance(chunk, Stats):
                     final = chunk
+            yield from _pieces(parser.flush())
         finally:
             close = getattr(stream, "close", None)
             if callable(close):
@@ -386,6 +419,12 @@ def _reply_events(
         # The provider package's own sentence: it names the provider and
         # carries the server's explanation where there was one.
         error = str(e)
+    # The server keeps the stop string it stopped on: a reply that ended
+    # on a closing tag ended INSIDE the call, and the history must teach
+    # the model closed calls, so the tag is put back.
+    name = parser.current_call
+    if name in answered and final is not None and final.finish_reason == "stop":
+        content.append(tool_calls.closing(name))
     reply = _land_reply(session, content, final, reply_kind, reply_speaker)
     if error is not None:
         yield Failed(error)
@@ -393,6 +432,35 @@ def _reply_events(
     report = ReplyReport(final, max_context) if final is not None else None
     stats = report.text() if session.verbose and report is not None else ""
     yield Done(reply=reply, report=report, stats=stats)
+
+
+def _pieces(found: list[Prose | ToolCall]) -> Iterator[PlayEvent]:
+    """What the parser decided, as events: prose as `Text`, a call's
+    piece as the `ToolCall` it is."""
+    for piece in found:
+        yield Text(piece.text) if isinstance(piece, Prose) else piece
+
+
+def _answered_switched_on(session: Session) -> frozenset[str]:
+    """The names of the tools the user answers that the story has
+    switched on — whose closing tag ends the reply."""
+    settings = StorySettings(session._settings_db, session._store, session._paths.prompts_file)
+    return frozenset(
+        setting.tool.name
+        for setting in settings
+        if isinstance(setting, ToolSetting) and setting.enabled and setting.tool.actor is Actor.USER
+    )
+
+
+def _with_stops(params: Mapping[str, object], answered: frozenset[str]) -> dict[str, object]:
+    """The request's parameters with the closing tag of each tool the
+    user answers among the stops, after the reader's own."""
+    if not answered:
+        return dict(params)
+    own = params.get("stop")
+    stops = [str(stop) for stop in own] if isinstance(own, list) else []
+    stops += [tool_calls.closing(name) for name in sorted(answered)]
+    return {**params, "stop": stops}
 
 
 def _land_reply(

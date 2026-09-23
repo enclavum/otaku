@@ -83,9 +83,9 @@ const backToStories = (storyId) => openStories("", { selectId: storyId });
     which live on the dossier the way its scenes and cast do. A UI door,
     not a token — so the dossier stays reachable without inventing a
     command nobody typed. */
-export async function openMessages() {
+export async function openTab(tab) {
   try {
-    await openStory({ tab: "messages", allStories: backToStories });
+    await openStory({ tab, allStories: backToStories });
   } catch (e) {
     console.error(e);
     tell(String(e.message ?? e), "otk-error");

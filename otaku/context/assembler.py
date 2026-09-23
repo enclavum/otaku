@@ -53,7 +53,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Protocol
 
-from otaku.context import syntax
+from otaku.context import syntax, tool_calls
 from otaku.context.cards import card_to_wire
 from otaku.context.injections import ROW_KIND, Injection, inject_into_system, inject_into_tail
 from otaku.providers import PicturesRide
@@ -190,6 +190,7 @@ def assemble_story(
     system: str,
     messages: list[Message],
     injections: Sequence[Injection],
+    tool_set: tool_calls.ToolSet,
     prompts: PromptTexts,
     shape: ContextShape,
     pictures_ride: PicturesRide = PicturesRide.NONE,
@@ -208,6 +209,7 @@ def assemble_story(
         messages=_composed_cards(store, story_id, messages, prompts.card_framing),
         scenes=scenes,
         injections=injections,
+        tool_set=tool_set,
         recap_header=prompts.recap_header,
         shape=shape,
         files=store.files,
@@ -266,6 +268,7 @@ class _Assembly:
     messages: list[Message]  # card rows composed
     scenes: Sequence[Scene]
     injections: Sequence[Injection]
+    tool_set: tool_calls.ToolSet  # how a row's tool calls go on the wire
     recap_header: str
     shape: ContextShape
     files: FileStore  # where a row's pictures are read from
@@ -469,17 +472,18 @@ class _Assembly:
         already wire text (see `_wire_text`)."""
         return Message(role="user", body=text, kind=_RECAP_KIND)
 
-    @staticmethod
-    def _wire_text(message: Message, *, is_last: bool = False) -> str:
+    def _wire_text(self, message: Message, *, is_last: bool = False) -> str:
         """One row's wire text. A recap row's body IS its wire text, and an
         injected row's — synthesized here, never stored, so neither reaches
         `syntax.to_wire`; every other row (card rows included: their bodies
         arrive composed, and `to_wire`'s card branch returns them untouched —
         card prose that happens to spell an inliner is never split as
-        syntax) composes per turn."""
+        syntax) composes per turn, its tool calls first put as the tool
+        set has them (`tool_calls.to_wire`)."""
         if message.kind in (_RECAP_KIND, ROW_KIND):
             return message.body
-        return syntax.to_wire(message, is_last=is_last)
+        body = tool_calls.to_wire(message.body, self.tool_set)
+        return syntax.to_wire(replace(message, body=body), is_last=is_last)
 
     def _wire_tokens(
         self, message: Message, pictures: tuple[WirePicture, ...], *, is_last: bool = False

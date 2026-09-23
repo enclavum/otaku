@@ -61,6 +61,8 @@ const state = {
   storySettingDefaults: null, // every story's settings as a fresh story reads them
   storySettings: new Map(), // id → the settings a story changed, in the read's shape
   sharedReminder: "", // the text every story with use_shared_reminder on is sent
+  shipped: null, // every tool's prompt as shipped, by name — what an emptied one restores
+  prompts: null, // every tool's prompt as it stands, by name
   history: [], // the composer's ↑/↓ lines, most recent first
   usage: [], // one row per completed reply: {story, prompt, completion, seconds}
   syntax: null, // the story's typed language, for the menu and the sheet
@@ -69,10 +71,12 @@ const state = {
 };
 
 export function seed(fixtures) {
-  const { river, tour, settings, storySettings, syntax } = fixtures;
+  const { river, tour, settings, storySettings, prompts, syntax } = fixtures;
   state.syntax = syntax;
   state.settings = structuredClone(settings);
   state.storySettingDefaults = storySettings.settings;
+  state.shipped = prompts;
+  state.prompts = structuredClone(prompts);
   // Both shipped samples, the way a fresh install seeds them; the row's
   // own `open` flag says which one the demo lands in.
   for (const sample of [river, tour].filter(Boolean)) {
@@ -494,12 +498,16 @@ export function updateSetting(storyId, name, body) {
       );
     }
   }
-  if (body.text != null && setting.text === null) {
-    return refuse(`${setting.label} has no text of its own in a story.`);
+  if (body.reminder_text != null && setting.reminder_text === null) {
+    return refuse(`${setting.label} has no reminder of its own.`);
   }
+  if (body.display_notes != null && setting.display_notes === null) {
+    return refuse(`${setting.label} has nothing to display.`);
+  }
+  if (body.display_notes != null) setting.display_notes = body.display_notes;
   if (body.enabled != null) setting.enabled = body.enabled;
   if (body.position != null) setting.position = body.position;
-  if (body.text != null) setting.text = String(body.text);
+  if (body.reminder_text != null) setting.reminder_text = String(body.reminder_text);
   if (!setting.enabled) return say(`${setting.label}: off.`);
   if (setting.position === null) return say(`${setting.label}: on.`);
   if (setting.position === "system") return say(`${setting.label}: on, in the system message.`);
@@ -515,6 +523,24 @@ export function setSharedReminder(text) {
   // The sentences are `backend.api.stories.set_shared_reminder`'s.
   state.sharedReminder = text.trim();
   return say(text.trim() ? "Shared reminder saved." : "Shared reminder cleared.");
+}
+
+export function prompt(tool) {
+  // The refusal is `backend.api.settings._tool_prompt_name`'s sentence, copied.
+  if (!(tool in state.prompts)) return _unknownTool(tool);
+  return { text: state.prompts[tool] };
+}
+
+export function setPrompt(tool, text) {
+  // The sentences are `backend.api.settings.set_tool_prompt`'s.
+  if (!(tool in state.prompts)) return _unknownTool(tool);
+  const typed = text.trim();
+  state.prompts[tool] = typed || state.shipped[tool];
+  return say(typed ? "Prompt saved." : "Prompt restored to the built-in.");
+}
+
+function _unknownTool(tool) {
+  return refuse(`Unknown tool '${tool}'. Tools: ${Object.keys(state.prompts).join(", ")}.`);
 }
 
 function _settingsOf(storyId) {
@@ -780,6 +806,9 @@ export function recordTurn(role, body) {
     model: role === "assistant" ? state.model : null,
     template: null,
     attachments: [],
+    // The demo's model writes prose and no tagged block, so a turn it
+    // records is one prose segment (`backend.api.play.segments`).
+    segments: [{ kind: "prose", text: body }],
   };
   story.turns.push(turn);
   touch(state.open);
@@ -810,6 +839,7 @@ export function importCard(landed) {
     model: null,
     template: null,
     attachments: [],
+    segments: [{ kind: "prose", text: landed.line }],
   });
   const memory = memoryOf(state.open);
   const characterId = memory.characters.reduce((top, c) => Math.max(top, c.id), 0) + 1;
@@ -835,6 +865,7 @@ export function importCard(landed) {
       model: landed.fileName,
       template: null,
       attachments: [],
+      segments: [{ kind: "prose", text: landed.greeting }],
     attachments: [],
     });
   }

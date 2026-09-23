@@ -164,18 +164,18 @@ class TestExtract:
         assert memory.history == "I saw the guest."
         assert len(lore_calls(app)) == 1  # the extraction; no rollup calls
 
-    def test_a_block_in_a_reply_is_invisible_to_the_pass(self, app: App) -> None:
-        # A reply may carry a tool's block — the model's own aside. The
+    def test_a_tool_call_in_a_reply_is_invisible_to_the_pass(self, app: App) -> None:
+        # A reply may carry a tool call — the model's own aside. The
         # analysis model never sees it, tags and all, while the prose
         # around it and the numbering stay whole; the story keeps the
         # reply exactly as it streamed.
-        reply = "She nods.\n\n<otk-notes>Reveal the letter next turn.</otk-notes>"
+        reply = "She nods.\n\n<otk-note>Reveal the letter next turn.</otk-note>"
         app.server.script = chat_script(reply)
         for i in range(3):
             app.play(f"Turn number {i}.")
         app.play("/extract")
         analyst = next(p for p in lore_calls(app) if "You are a story analyst" in p)
-        assert "otk-notes" not in analyst
+        assert "otk-note" not in analyst
         assert "Reveal the letter" not in analyst
         assert "[6] She nods." in analyst
         assert app.store.stories.get_messages(app.session.story_id)[-1].body == reply
@@ -265,7 +265,7 @@ class TestIdleScheduling:
         finally:
             app.close()
 
-    def test_blocks_do_not_count_toward_the_scene_gate(self, server, tmp_path) -> None:
+    def test_tool_calls_do_not_count_toward_the_scene_gate(self, server, tmp_path) -> None:
         # The gate measures story text. Three exchanges whose replies are
         # padded with a block far past scene_min_chars still hold too
         # little play (19 characters an exchange), so the pass declines;
@@ -277,7 +277,7 @@ class TestIdleScheduling:
             scene_min_messages=2,
             idle_seconds=0.1,
         )
-        server.script = chat_script("Fine.<otk-notes>" + "x" * 400 + "</otk-notes>")
+        server.script = chat_script("Fine.<otk-note>" + "x" * 400 + "</otk-note>")
         app = launch(tmp_path / "state", server)
         try:
             for i in range(3):
@@ -932,15 +932,15 @@ class TestWarmUp:
         app = launch(root, server, spec="llamacpp/test-model")
         try:
             api_stories.update_setting(
-                app.session, "use_story_reminder", enabled=True, text="Rain."
+                app.session, "use_story_reminder", enabled=True, reminder_text="Rain."
             )
             remembered(app)
             assert _warm_requests(app.server, within=5.0) == 1
             warmed = next(r for r in app.server.requests if r.get("max_tokens") == 1)
             texts = [scripted.content_text(m) for m in warmed["messages"]]
-            # -3 is the reminder's default: above the last three messages,
-            # which the merge folds into the turn before them.
-            assert any("Rain." in t for t in texts)
+            # 2 is the reminder's default: before the reader's previous
+            # message, enclosed out of character — never the newest row.
+            assert any("((OOC: Rain.))" in t for t in texts)
             assert "Rain." not in texts[-1]
         finally:
             app.close()

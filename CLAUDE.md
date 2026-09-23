@@ -131,33 +131,76 @@ the suite fails until all three exist.
 
 ### Tools: what the model writes
 
-A model uses a tool by writing a tagged block in its reply
-(`<otk-ask>…</otk-ask>`, `<otk-notes>…</otk-notes>`): otaku owns the
-convention, never the API's `tools` field, so it works on every engine.
-The body is stored verbatim, tags included.
+A model uses a tool by writing a TOOL CALL in its reply — a tagged
+span, `<otk-question>…</otk-question>`, `<otk-note>…</otk-note>`:
+otaku owns the convention, never the API's `tools` field, so it works
+on every engine. The body is stored verbatim, tags included. A reply is
+therefore prose and tool calls; the model's reasoning is neither — it
+arrives on the wire's own field, streams beside them, and is never
+stored.
 
-WHAT a block is, is the `otk-` namespace and nothing else
-(`context.blocks`: split, strip, the streaming splitter — pure, and no
-list of tools is consulted). A body keeps its tags for good while the
-tools come and go between builds, so "not story" has to be a property
-of the TEXT: a block stays one in a build that never heard of its
-tool, and nothing outside the namespace is ever one — the INSIDE goes
-with a block, so `<i>never</i>` keeps its word and a chat log's
-`<Alice>` its line. A block is not story: the lore pass leaves it out,
-tags and all (`blocks.strip`: the gate, the span packing, the numbered
-chat). `blocks` is the one piece of the tools below the backend,
-because the worker reads it.
+WHAT a tool call is, is the `otk-` namespace and nothing else
+(`context.tool_calls`: `ToolCall(name, text, closed)`, `Prose`, the
+`ReplyParser` over a stream and `parse_reply` over a body — pure, and
+no list of tools is consulted). A body keeps its tags for good while
+the tools come and go between builds, so "not story" has to be a
+property of the TEXT: a call stays one in a build that never heard of
+its tool, and nothing outside the namespace is ever one — the INSIDE
+goes with a call, so `<i>never</i>` keeps its word and a chat log's
+`<Alice>` its line. Calls never nest: an opening tag inside a call ends
+it, any closing tag ends the open one, a stray closing tag is dropped.
+A call is not story: the lore pass leaves it out, tags and all
+(`tool_calls.strip`: the gate, the span packing, the numbered chat).
+The same grammar sends a stored reply back on the wire under the
+story's `ToolSet(on, off)` (`tool_calls.to_wire`, the mirror of
+`syntax.to_wire`): a call of a tool that is on goes as its canonical
+self, one of a tool that is off becomes what the tool's `to_prose` makes
+of it (a question alone; nothing for a note), and one of any other name
+leaves the wire — a white list, so a decommissioned tool never rides.
+`tool_calls` lives in `context` because the worker and the assembler
+read it below the backend; it is the reply-side module in the
+request-side package, and may move when the package is renamed.
 
 WHICH tools there are is `backend.tools`: one class per tool, in
-`syntax`'s shape — a class declares its `tag` (`ask` for `<otk-ask>`;
-letters alone), who answers its block (`Actor`: nobody for an aside,
-`notes`; the user for a call, `ask`; otaku itself, `SYSTEM`, not
-supported yet) and the prompts.toml field of its instruction
-(`prompt_name`); an instance is one block READ, which is the play
-stream's business — nothing is instantiated to inject an instruction.
-The one registry is `TOOLS`, keyed by tag. A new tool is a subclass
-and its name in `TOOLS`; the story setting that switches it on is the
-setting's to declare (`backend.story`), not the tool's.
+`syntax`'s shape — a class declares its `name` (`question` for
+`<otk-question>`; letters alone), who answers its call (`Actor`: nobody
+for an aside, `note`; the user, `question`; otaku itself, `SYSTEM`, not
+supported yet) and the prompts.toml key of its prompt (`prompt_name`:
+`tool_questions_prompt`, `tool_assistant_notes_prompt`); an instance is
+one call READ, which is the play stream's business — nothing is
+instantiated to inject a prompt. The one registry is `TOOLS`, keyed by
+name. A new tool is a subclass and its name in `TOOLS`; the story
+setting that switches it on is the setting's to declare
+(`backend.story`), not the tool's.
+
+In the play stream (`backend.api.play`) the deltas go through a
+`ReplyParser`: prose streams as `Text`, a call's inside as `ToolCall`
+pieces (the tool's name, the text, `closed` on the piece its closing
+tag ended), and a raw tag is never yielded — neither frontend parses.
+What is RECORDED is everything that arrived, tags included. While a
+tool the user answers (`Actor.USER`) is switched on for the story, its
+closing tag joins the request's stops after the reader's own, so the
+reply ends where the question does; the server keeps the stop it
+stopped on, so the recorder puts the closing tag back (a reply cut at
+the length limit keeps its call open). A stored turn reaches a
+frontend split (`play.segments(body)`: prose, and each call as its
+tool's `to_json()`, kind `tool_call` — `ToolQuestions`: the question and
+its options), so a frontend draws calls from facts and keeps no
+parser. Which question the story STANDS on is the frontend's own
+reading of the newest reply's segments, the tool names hardcoded
+(`transcript.questionPosed`: a reply whose last call is a question,
+nothing after it but notes and whitespace) — so a story resumed on one
+shows it again, and nothing is stored or reported for it. Answering is
+an ordinary line: whatever is played next answers it, verbatim, no
+frame, no mode. The page draws a question as the ask panel, a note as
+the notes block while the story's `display_notes` says so, each in its
+place among the prose, streaming and landed alike; the terminal prints
+a call as it streamed, tags and all, until its look is decided. On the
+wire: the `tool_call` event, `done.reply` (the turn as stored), and
+`segments` on every turn; whether the reader is shown the notes is the
+setting's (`enabled` and `display_notes`), read off the settings
+endpoint — the page holds that rule until the terminal draws notes
+too.
 
 ### Injections
 
@@ -194,12 +237,13 @@ methods.
 
 Where an injection rides is ONE value, its `position`. "system"
 appends it to the system message, after the premise — the stored
-premise is untouched. A negative number makes it a synthesized user
-row, wire-only as a recap row is and joined by the same merge, placed
-as `list.insert` would place it: -1 above the newest message, -3 above
-the last three. Never after the newest — it keeps the last word and its
-cue stays live, since no injected row ever sits last — and never past
-the recap, which is a wall. It costs its tokens in the fit.
+premise is untouched. A number makes it a synthesized user row,
+wire-only as a recap row is and joined by the same merge, placed
+BEFORE that one of the reader's messages counted from the end — 1 the
+latest, 2 the previous — so the merge heads that message with it; a
+reply, a recap row or another injection is never counted. Never after
+the newest row — it keeps the last word and its cue stays live — and
+never past the recap, which is a wall. It costs its tokens in the fit.
 
 A numbered injection MOVES with the end, so the turn it lands in and
 every turn after are `volatile` (`WireTurn`, `providers.WireMessage`):
@@ -215,9 +259,12 @@ What a user sees as the app's features are, below the frontends, a
 STORY's settings: each is one switch of a story, one class each in
 `backend.story`. A tool's (`StorySettingQuestions`,
 `StorySettingAssistantNotes`) lets the model use the tool and injects
-its instruction, read off the prompts under the tool's `prompt_name`
-and enclosed `((OOC: …))` in chat, bare in the system message; a
-reminder's injects the user's own text verbatim — two of them, each a
+its prompt, read off the prompts under the tool's `prompt_name` and
+enclosed `((OOC: …))` in chat, bare in the system message; a
+reminder's injects the user's own text, enclosed the same way — it
+rides a message of the reader's, where bare text would read as the
+reader's line, and every text injected into the chat is out of
+character; only the system message takes one bare — two of them, each a
 switch of its own: the SHARED reminder (`StorySettingSharedReminder`),
 one text every story that switched it on is sent, and the STORY
 reminder (`StorySettingReminder`), whose text is the story's; and a
@@ -229,23 +276,28 @@ alike: `name` (what a story stores it under — `use_shared_reminder`,
 `story_mode`; a rename orphans stored settings), `label`, `enabled`,
 `injection_position` (None for one that injects nothing),
 `allowed_positions` (EVERY position it may take, a closed list a
-frontend offers and decides nothing about: "system" and -1 … -8 for a
+frontend offers and decides nothing about: "system" and 1 … 8 for a
 tool, the numbers alone for a reminder — it exists because a model
 forgets its system message, which is the premise's; empty for a flag),
-and `text` (the story's own, None for one with none). A stored
-position off the list reads as the default (-1 for a tool, -3 for a
-reminder). What a setting TAKES is the setting's: `to_db(enabled=,
-position=, text=)` is the row to store with the given laid over it,
-and raises `Refused` for what this setting does not take; `injection`
-is what a switched-on one sends, None while off or empty.
-`StorySettings(from_db, store, prompts_file)` is every setting of one
-story as it stands — it reads the prompts file and the shared
-reminder itself, so a caller hands over only the rows it holds — and
+`reminder_text` (the story reminder's own; None for every other
+setting) and `display_notes` (whether the reader is shown the notes;
+None for every setting but the notes tool's). A stored position off
+the list reads as the default (1 for a tool, 2 for a reminder). What a
+setting TAKES is the setting's: `to_db(enabled=, position=,
+reminder_text=, display_notes=)` is the row to store with the given
+laid over it, and raises `Refused` for what this setting does not
+take; `injection` is what a switched-on one sends, None while off or
+empty. `StorySettings(from_db, store, prompts_file)` is every setting
+of one story as it stands — it reads the prompts file and the shared
+reminder itself, so a caller hands over only the rows it holds —
 `injections` is what the switched-on ones send, in the order they
-share a place: the shared reminder, the story's, then the tools.
+share a place: the shared reminder, the story's, then the tools; and
+`tool_set` is the story's tools each on or off, for the wire.
 
 What a story STORES is the store's: `schema.StorySettingDB` — a name,
-`enabled`, a position, a text — with its column's JSON codec on it
+`enabled`, a position, `reminder_text`, `display_notes` (the last two
+written only when said: an emptied text leaves the column, and only a
+`false` flag is written) — with its column's JSON codec on it
 (`from_json`, `to_json`, as `Attachment` has its own), carried by the
 row (`Story.settings`) as `Message.attachments` is; the store hands
 out typed rows and merges a write into the column, keeping every key it
@@ -256,7 +308,18 @@ page reaches them at `/api/stories/{story}/settings` (GET, and PATCH
 of one setting) and `/api/shared_reminder` — not a `/api/settings`
 knob, since every knob must be drawn on the settings slip.
 `Refused` lives in `backend.errors`, a leaf, so a class below the
-session can raise it; `backend.session` re-exports it.
+session can raise it; `backend.session` re-exports it. A tool's
+PROMPT is prompts.toml's, edited from the app in place — "prompt" on
+the backend and the wire, whatever a frontend calls it (the page's
+button says "Instructions"): `api.settings.get_tool_prompt`/`set_tool_prompt`
+(keyed by the tool's name, which a setting reports as `tool`; the
+page's `/api/prompts/{tool}`) write that one key with
+`settings.prompts.set_prompt` — no migration mechanism: a plain edit
+of one key, the pre-edit file kept as a dated backup by the write
+every settings edit rides (`settings.commit`, which names the backup
+after the file's stem) — then read the file back and refuse unless it
+holds what was saved; an emptied text drops the key, so the shipped
+text stands again.
 
 Where a setting is kept. ONE STORY'S is the database's, always:
 `stories.settings`, one sealed JSON with a key per setting, because it
@@ -519,6 +582,11 @@ milliseconds. The fast offline suite is therefore
 ## Process rules
 
 - Never commit without the user's explicit approval.
+- Every change to a frontend's LOOK or WORDING — a caption, a menu's
+  entries, a layout, a sentence the page or the terminal shows — is made
+  on an explicit request naming it, never as a side effect of a backend
+  change or on the assistant's own judgement. A backend change passes
+  its data through and leaves the drawing as it was.
 - A commit message is ONE line, under 150 characters — no body. Name what
   changed, not every detail; the changelog and the code carry those.
 - Challenge design and implementation decisions and ask questions — the user

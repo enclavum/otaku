@@ -10,7 +10,16 @@ says which lane a row takes, because the METHOD is the lane.
 
 from typing import get_args
 
-from otaku.backend.api.play import Declined, Done, Failed, PlayEvent, Reasoning, Recorded, Text
+from otaku.backend.api.play import (
+    Declined,
+    Done,
+    Failed,
+    PlayEvent,
+    Reasoning,
+    Recorded,
+    Text,
+    ToolCall,
+)
 from otaku.store.schema import Message
 from otaku.web import api
 
@@ -22,9 +31,10 @@ class TestEvent:
         assert api.event(Recorded(Message(role="user", body="hi")))["type"] == "recorded"
         assert api.event(Reasoning("hm"))["type"] == "reasoning"
         assert api.event(Text("word"))["type"] == "text"
+        assert api.event(ToolCall("note", "a plan", closed=True))["type"] == "tool_call"
         assert api.event(Declined("no model"))["type"] == "declined"
         assert api.event(Failed("the provider hung up"))["type"] == "failed"
-        assert api.event(Done(reply="done", report=None, stats="7 tok/s"))["type"] == "done"
+        assert api.event(Done(reply=None, report=None, stats="7 tok/s"))["type"] == "done"
 
     def test_the_union_is_covered(self) -> None:
         # The match is exhaustive by construction; this is what makes
@@ -33,6 +43,7 @@ class TestEvent:
             "Recorded",
             "Reasoning",
             "Text",
+            "ToolCall",
             "Declined",
             "Failed",
             "Done",
@@ -40,6 +51,34 @@ class TestEvent:
 
     def test_a_text_event_carries_its_text(self) -> None:
         assert api.event(Text("the light"))["text"] == "the light"
+
+    def test_a_tool_call_carries_the_tool_its_piece_and_whether_it_closed(self) -> None:
+        assert api.event(ToolCall("question", "Go in?", closed=False)) == {
+            "type": "tool_call",
+            "tool": "question",
+            "text": "Go in?",
+            "closed": False,
+        }
+
+    def test_done_carries_the_reply_as_stored_split_into_segments(self) -> None:
+        # A question the reply ended on is in the segments, read: the
+        # page poses it from there, and nothing else says so.
+        body = "Creak.<otk-question>Go in?\n1. Yes</otk-question>"
+        done = api.event(
+            Done(reply=Message(id=5, role="assistant", body=body), report=None, stats="")
+        )
+        assert done["reply"]["segments"] == [
+            {"kind": "prose", "text": "Creak."},
+            {
+                "kind": "tool_call",
+                "tool": "question",
+                "text": "Go in?\n1. Yes",
+                "question": "Go in?",
+                "options": ["Yes"],
+            },
+        ]
+        assert "call" not in done
+        assert api.event(Done(reply=None, report=None, stats=""))["reply"] is None
 
     def test_a_recorded_event_carries_the_turn(self) -> None:
         turn = api.event(Recorded(Message(id=4, role="user", body="I listen.")))["turn"]
@@ -53,6 +92,7 @@ class TestEvent:
             "model": None,
             "template": None,
             "attachments": [],
+            "segments": [{"kind": "prose", "text": "I listen."}],
         }
 
 

@@ -3,19 +3,20 @@
 `inject_into_system` appends every "system" injection after the premise,
 a blank line between, and is the injections alone without one; a
 numbered injection is not its business. `inject_into_tail` gives each
-numbered injection a row of its own, placed as `list.insert` would place
-it: -1 above the newest row, -3 above the last three, never above the
-wall (where the recap ends) and never after the newest row; a number
-that is not negative rides as -1, injections sharing a place keep the
-order given, and an empty one is not sent. Only a story with no rows at
-all sends one on its own.
+numbered injection a row of its own, placed before that one of the
+reader's messages counted from the end — 1 the newest, 2 the previous;
+a reply, a recap row or another injection is never counted — never
+above the wall (where the recap ends) and never after the newest row; a
+number below 1 rides as 1, injections sharing a place keep the order
+given, and an empty one is not sent. Only a story with no rows at all
+sends one on its own.
 """
 
 from otaku.context.injections import ROW_KIND, Injection, inject_into_system, inject_into_tail
 from otaku.store.schema import Message
 
-ONE = Injection("one", "One.", -1)
-THREE = Injection("three", "Three.", -3)
+ONE = Injection("one", "One.", 1)
+TWO = Injection("two", "Two.", 2)
 TOP = Injection("top", "Top.", "system")
 
 
@@ -27,7 +28,7 @@ class TestIntoTheSystemMessage:
         assert inject_into_system("", [TOP]) == "Top."
 
     def test_a_numbered_injection_is_not_its_business(self) -> None:
-        assert inject_into_system("Premise.", [ONE, THREE]) == "Premise."
+        assert inject_into_system("Premise.", [ONE, TWO]) == "Premise."
 
     def test_an_empty_one_is_not_sent(self) -> None:
         assert inject_into_system("Premise.", [Injection("x", "", "system")]) == "Premise."
@@ -38,26 +39,29 @@ class TestIntoTheSystemMessage:
 
 
 class TestIntoTheTail:
-    def test_minus_one_rides_above_the_newest_row(self) -> None:
+    def test_one_rides_before_the_newest_row(self) -> None:
         assert bodies(inject_into_tail(rows(3), [ONE], 0)) == ["r1", "r2", "One.", "r3"]
 
-    def test_a_position_counts_rows_from_the_end(self) -> None:
-        assert bodies(inject_into_tail(rows(5), [THREE], 0)) == [
+    def test_a_position_counts_the_readers_rows_from_the_end(self) -> None:
+        # r5, r3 and r1 are the reader's; the replies between are not counted.
+        assert bodies(inject_into_tail(rows(5), [TWO], 0)) == [
             "r1",
             "r2",
-            "Three.",
+            "Two.",
             "r3",
             "r4",
             "r5",
         ]
+        third = Injection("third", "Third.", 3)
+        assert bodies(inject_into_tail(rows(5), [third], 0))[:2] == ["Third.", "r1"]
 
     def test_the_newest_row_always_keeps_the_last_word(self) -> None:
-        for position in (0, 2):
+        for position in (0, -1):
             placed = inject_into_tail(rows(3), [Injection("x", "X.", position)], 0)
             assert bodies(placed) == ["r1", "r2", "X.", "r3"]
 
     def test_a_position_past_the_top_stops_at_the_top(self) -> None:
-        assert bodies(inject_into_tail(rows(2), [Injection("x", "X.", -8)], 0)) == [
+        assert bodies(inject_into_tail(rows(2), [Injection("x", "X.", 8)], 0)) == [
             "X.",
             "r1",
             "r2",
@@ -65,15 +69,15 @@ class TestIntoTheTail:
 
     def test_the_wall_is_never_crossed(self) -> None:
         # The recap ends at row 2: an injection asked above it stays under it.
-        placed = inject_into_tail(rows(4), [Injection("x", "X.", -8)], 2)
+        placed = inject_into_tail(rows(4), [Injection("x", "X.", 8)], 2)
         assert bodies(placed) == ["r1", "r2", "X.", "r3", "r4"]
 
     def test_the_same_place_keeps_the_order_given(self) -> None:
-        other = Injection("other", "Other.", -1)
+        other = Injection("other", "Other.", 1)
         assert bodies(inject_into_tail(rows(1), [ONE, other], 0)) == ["One.", "Other.", "r1"]
 
     def test_a_system_injection_and_an_empty_one_are_not_placed(self) -> None:
-        placed = inject_into_tail(rows(2), [TOP, Injection("x", "", -1)], 0)
+        placed = inject_into_tail(rows(2), [TOP, Injection("x", "", 1)], 0)
         assert bodies(placed) == ["r1", "r2"]
 
     def test_a_story_with_no_rows_sends_the_injection_alone(self) -> None:
@@ -85,7 +89,7 @@ class TestIntoTheTail:
 
     def test_the_rows_given_are_untouched(self) -> None:
         given = rows(3)
-        inject_into_tail(given, [ONE, THREE], 0)
+        inject_into_tail(given, [ONE, TWO], 0)
         assert bodies(given) == ["r1", "r2", "r3"]
 
 

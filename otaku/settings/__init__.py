@@ -12,8 +12,10 @@ here. Api-key sealing is NOT here: it is encryption's second plane
 key material.
 """
 
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from otaku.formatting import decode_text
@@ -80,3 +82,31 @@ def write_atomic(path: Path, text: str) -> None:
     with tmp.open("w", encoding="utf-8", newline="") as f:
         f.write(text)
     tmp.replace(path)
+
+
+def commit(file: Path, backups_dir: Path, kept: str, text: str) -> bool:
+    """The write behind every settings-file edit: `kept` — the pre-edit
+    text, as the caller may keep it (a migration redacts the secrets it
+    replaced, `migrations.surgery.redacted`) — under the next free dated
+    backup name in `backups_dir`, `<file's stem>-YYYYMMDD.toml` for the
+    day's first edit and `-N` appended for every further one, so no edit
+    ever overwrites an earlier state; born 0600 in a 0700 dir; then the
+    atomic replace of `file` with `text`. OSError is swallowed — an edit
+    is never worth a crash — and False reports it."""
+    stamp = datetime.now().astimezone().strftime("%Y%m%d")
+    backup = backups_dir / f"{file.stem}-{stamp}.toml"
+    n = 0
+    while backup.exists():
+        n += 1
+        backup = backups_dir / f"{file.stem}-{stamp}-{n}.toml"
+    try:
+        backups_dir.mkdir(parents=True, exist_ok=True)
+        os.chmod(backups_dir, 0o700)
+        # Born 0600: never a moment (or a crash residue) at umask perms.
+        fd = os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
+            f.write(kept)
+        write_atomic(file, text)
+    except OSError:
+        return False
+    return True

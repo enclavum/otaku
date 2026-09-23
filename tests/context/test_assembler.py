@@ -9,7 +9,8 @@ through the last replaced scene. Case 5: still over, the tail target
 steps down to its floor; past the floor the assembly refuses. Across all
 of them the wire promise holds: the model sees the stored messages and
 nothing the code invented but the recap — and the injections it was
-handed, each where it was told to go.
+handed, each where it was told to go, a stored reply's tool calls as the
+story's tool set has them.
 """
 
 from dataclasses import dataclass, replace
@@ -25,11 +26,13 @@ from otaku.context.assembler import (
     context_in_force,
 )
 from otaku.context.injections import Injection
+from otaku.context.tool_calls import ToolSet
 from otaku.providers import PicturesRide
 from otaku.store.schema import Attachment, Message, Scene
 
 CAT = Attachment(file="pic-0001-20260918-a3f9c1e2.jpg", width=2, height=2, size=3)
 CAT_PICTURE = WirePicture(b"cat", "image/jpeg")
+NO_TOOLS = ToolSet()  # every call leaves the wire
 
 
 def assemble(
@@ -45,6 +48,7 @@ def assemble(
     files=None,
     newest_pictures_only: bool = False,
     injections: tuple[Injection, ...] = (),
+    tool_set: ToolSet = NO_TOOLS,
 ):
     """The doc's vocabulary over the door's arguments, so every case
     below reads like its section, with a stand-in store answering the
@@ -65,6 +69,7 @@ def assemble(
         system=system,
         messages=messages,
         injections=injections,
+        tool_set=tool_set,
         prompts=_Prompts(recap_header),
         shape=shape,
         pictures_ride=pictures_ride,
@@ -365,15 +370,15 @@ class TestWirePromise:
 
 class TestInjections:
     """Text the context carries besides the story. At "system" it is
-    appended to the system message, after the premise; at a negative
-    number it is a user row of its own, placed as `list.insert` would —
-    -1 above the newest message, which so keeps the last word — that
-    never climbs past the recap, and rejoins its same-role neighbour like
-    any row. An empty one is not sent. It costs its tokens, and the turn
-    a numbered one lands in, with every turn after, is `volatile`: next
-    request it reads differently."""
+    appended to the system message, after the premise; at a number it
+    is a user row of its own, placed before that one of the reader's
+    messages counted from the end — 1 the newest, which so keeps the
+    last word — that never climbs past the recap, and rejoins its
+    same-role neighbour like any row. An empty one is not sent. It
+    costs its tokens, and the turn a numbered one lands in, with every
+    turn after, is `volatile`: next request it reads differently."""
 
-    def test_minus_one_rides_above_the_newest_message(self) -> None:
+    def test_one_rides_before_the_newest_message(self) -> None:
         prompt = assemble("", exchange(), 8192, injections=(end("Remember."),))
         assert [(m.role, m.body) for m in prompt.messages] == [
             ("user", "One."),
@@ -381,20 +386,28 @@ class TestInjections:
             ("user", "Remember.\n\nThree."),
         ]
 
-    def test_a_position_counts_messages_from_the_end(self) -> None:
-        below = assemble("", exchange(), 8192, injections=(end("Remember.", -2),))
-        assert below.messages[0].body == "One.\n\nRemember."
-        above = assemble("", exchange(), 8192, injections=(end("Remember.", -3),))
-        assert above.messages[0].body == "Remember.\n\nOne."
+    def test_a_position_counts_the_readers_messages_from_the_end(self) -> None:
+        # A reply is never counted: 2 is the reader's previous message.
+        rows = [user("One."), assistant("Two."), user("Three."), assistant("Four."), user("Five.")]
+        previous = assemble("", rows, 8192, injections=(end("Remember.", 2),))
+        assert [m.body for m in previous.messages] == [
+            "One.",
+            "Two.",
+            "Remember.\n\nThree.",
+            "Four.",
+            "Five.",
+        ]
+        third = assemble("", rows, 8192, injections=(end("Remember.", 3),))
+        assert third.messages[0].body == "Remember.\n\nOne."
 
     def test_the_newest_message_always_keeps_the_last_word(self) -> None:
-        # What is not negative is no place from the end: it rides as -1.
-        for position in (0, 2):
+        # A number below 1 is no place from the end: it rides as 1.
+        for position in (0, -1):
             prompt = assemble("", exchange(), 8192, injections=(end("Remember.", position),))
             assert prompt.messages[-1].body == "Remember.\n\nThree."
 
     def test_a_position_past_the_top_stops_at_the_top(self) -> None:
-        prompt = assemble("", exchange(), 8192, injections=(end("Remember.", -99),))
+        prompt = assemble("", exchange(), 8192, injections=(end("Remember.", 99),))
         assert prompt.messages[0].body == "Remember.\n\nOne."
 
     def test_the_recap_is_a_wall(self) -> None:
@@ -407,7 +420,7 @@ class TestInjections:
             scenes=(scene(20, "The heist unfolded."),),
             head_messages=5,
             min_tail_messages=10,
-            injections=(end("Remember.", -99),),
+            injections=(end("Remember.", 99),),
         )
         sent = "\n\n".join(m.body for m in prompt.messages)
         recap, injected, tail = (
@@ -459,18 +472,38 @@ class TestInjections:
 
     def test_a_picture_still_rides_its_own_message(self) -> None:
         rows = [user("One."), assistant("Two."), replace(user("Look."), attachments=(CAT,))]
-        prompt = assemble("", rows, 8192, files=_CatFolder(), injections=(end("Remember.", -2),))
+        prompt = assemble("", rows, 8192, files=_CatFolder(), injections=(end("Remember.", 2),))
         assert [m.images for m in prompt.messages] == [(), (), (CAT_PICTURE,)]
 
     def test_the_turn_it_lands_in_and_every_turn_after_are_volatile(self) -> None:
         newest = assemble("Be terse.", exchange(), 8192, injections=(end("Remember."),))
         assert [m.volatile for m in newest.messages] == [False, False, False, True]
-        deeper = assemble("Be terse.", exchange(), 8192, injections=(end("Remember.", -2),))
+        deeper = assemble("Be terse.", exchange(), 8192, injections=(end("Remember.", 2),))
         assert [m.volatile for m in deeper.messages] == [False, True, True, True]
 
     def test_a_system_injection_makes_nothing_volatile(self) -> None:
         prompt = assemble("", exchange(), 8192, injections=(system("Ask rarely."),))
         assert not any(m.volatile for m in prompt.messages)
+
+
+class TestToolCalls:
+    """A stored reply's tool calls go on the wire as the story's tool set
+    has them: a call of a tool that is on as written, one of a tool that
+    is off as what its rule makes of it, one of any other tool gone —
+    the reader's rows untouched."""
+
+    def test_a_call_of_a_tool_that_is_on_goes_as_written(self) -> None:
+        prompt = assemble("", noted(), 8192, tool_set=ToolSet(on=frozenset({"note"})))
+        assert prompt.messages[1].body == "Two.\n\n<otk-note>the seal</otk-note>"
+
+    def test_a_call_of_a_tool_that_is_off_becomes_its_rule_text(self) -> None:
+        tools = ToolSet(off={"note": lambda inside: f"({inside})"})
+        prompt = assemble("", noted(), 8192, tool_set=tools)
+        assert prompt.messages[1].body == "Two.\n\n(the seal)"
+
+    def test_a_call_of_any_other_tool_leaves_the_wire(self) -> None:
+        prompt = assemble("", noted(), 8192, tool_set=NO_TOOLS)
+        assert [m.body for m in prompt.messages] == ["One.", "Two.", "Three."]
 
 
 # ---------- fixtures ----------
@@ -493,8 +526,13 @@ def exchange() -> list[Message]:
     return [user("One."), assistant("Two."), user("Three.")]
 
 
-def end(text: str, position: int = -1) -> Injection:
-    """An injection counted from the end."""
+def noted() -> list[Message]:
+    """An exchange whose reply carries a note."""
+    return [user("One."), assistant("Two.\n\n<otk-note>the seal</otk-note>"), user("Three.")]
+
+
+def end(text: str, position: int = 1) -> Injection:
+    """An injection before one of the reader's messages, counted from the end."""
     return Injection(owner="reminder", text=text, position=position)
 
 

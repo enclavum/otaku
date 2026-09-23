@@ -22,10 +22,12 @@ from collections.abc import Callable
 
 import pytest
 
+from otaku.backend.api import settings as api_settings
 from otaku.backend.api import stories as api_stories
 from otaku.backend.paths import Paths
 from otaku.backend.session import Refused, Session
 from otaku.backend.story import StorySetting
+from otaku.settings.prompts import Prompts
 from otaku.terminal.screens import stories as screen_stories
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch
@@ -420,12 +422,12 @@ class TestNew:
 
 
 class TestSettingsOfTools:
-    def test_a_tool_switched_on_sends_its_instruction_above_the_newest_line(
+    def test_a_tool_switched_on_sends_its_prompt_before_the_newest_line(
         self, server, tmp_path
     ) -> None:
-        # The instruction comes FROM prompts.toml, so the file is edited:
+        # The prompt comes FROM prompts.toml, so the file is edited:
         # asserting the built-in wording would pass with the load path gone.
-        app = with_instruction(tmp_path / "state", server)
+        app = with_prompt(tmp_path / "state", server)
         try:
             api_stories.update_setting(app.session, "allow_questions", enabled=True)
             app.play("I push the door.")
@@ -439,7 +441,7 @@ class TestSettingsOfTools:
             app.close()
 
     def test_switched_off_it_is_gone(self, server, tmp_path) -> None:
-        app = with_instruction(tmp_path / "state", server)
+        app = with_prompt(tmp_path / "state", server)
         try:
             api_stories.update_setting(app.session, "allow_questions", enabled=True)
             app.play("I push the door.")
@@ -451,7 +453,7 @@ class TestSettingsOfTools:
             app.close()
 
     def test_in_the_system_message_it_follows_the_premise_bare(self, server, tmp_path) -> None:
-        app = with_instruction(tmp_path / "state", server)
+        app = with_prompt(tmp_path / "state", server)
         try:
             app.play("/system Be terse.")
             api_stories.update_setting(
@@ -467,12 +469,14 @@ class TestSettingsOfTools:
         finally:
             app.close()
 
-    def test_a_position_counts_messages_from_the_end(self, server, tmp_path) -> None:
-        app = with_instruction(tmp_path / "state", server)
+    def test_a_position_counts_the_readers_messages_from_the_end(self, server, tmp_path) -> None:
+        # 2 is before the reader's previous line: the replies between are
+        # not counted.
+        app = with_prompt(tmp_path / "state", server)
         try:
             app.play("One.")
             app.play("Two.")
-            api_stories.update_setting(app.session, "allow_questions", enabled=True, position=-3)
+            api_stories.update_setting(app.session, "allow_questions", enabled=True, position=2)
             app.play("Three.")
             bodies = [body for _, body in messages(app, "Three.")]
             assert bodies[2] == f"((OOC: {HOW_TO_ASK}))\n\nTwo."
@@ -482,47 +486,68 @@ class TestSettingsOfTools:
 
 
 class TestSettingsOfReminders:
-    def test_both_go_as_written_the_shared_one_leading(self, app: App) -> None:
+    def test_both_go_out_of_character_the_shared_one_leading(self, app: App) -> None:
+        # A reminder rides a message of the reader's, where bare text
+        # would read as the reader's line.
         api_stories.set_shared_reminder(app.session, "Stay grim.")
-        api_stories.update_setting(app.session, "use_shared_reminder", enabled=True, position=-1)
+        api_stories.update_setting(app.session, "use_shared_reminder", enabled=True, position=1)
         api_stories.update_setting(
-            app.session, "use_story_reminder", enabled=True, position=-1, text="[Here: rain]"
+            app.session,
+            "use_story_reminder",
+            enabled=True,
+            position=1,
+            reminder_text="[Here: rain]",
         )
         app.play("I push the door.")
         assert messages(app, "I push the door.") == [
-            ("user", "Stay grim.\n\n[Here: rain]\n\nI push the door.")
+            ("user", "((OOC: Stay grim.))\n\n((OOC: [Here: rain]))\n\nI push the door.")
         ]
 
     def test_each_is_a_switch_of_its_own(self, app: App) -> None:
         api_stories.set_shared_reminder(app.session, "Stay grim.")
         api_stories.update_setting(
-            app.session, "use_story_reminder", enabled=True, position=-1, text="[Here: rain]"
+            app.session,
+            "use_story_reminder",
+            enabled=True,
+            position=1,
+            reminder_text="[Here: rain]",
         )
         app.play("I push the door.")
-        assert messages(app, "I push the door.") == [("user", "[Here: rain]\n\nI push the door.")]
+        assert messages(app, "I push the door.") == [
+            ("user", "((OOC: [Here: rain]))\n\nI push the door.")
+        ]
 
     def test_each_rides_at_its_own_position(self, app: App) -> None:
         api_stories.set_shared_reminder(app.session, "Stay grim.")
         app.play("One.")
-        api_stories.update_setting(app.session, "use_shared_reminder", enabled=True, position=-3)
+        api_stories.update_setting(app.session, "use_shared_reminder", enabled=True, position=2)
         api_stories.update_setting(
-            app.session, "use_story_reminder", enabled=True, position=-1, text="[Here: rain]"
+            app.session,
+            "use_story_reminder",
+            enabled=True,
+            position=1,
+            reminder_text="[Here: rain]",
         )
         app.play("Two.")
         bodies = [body for _, body in messages(app, "Two.")]
-        assert bodies[0] == "Stay grim.\n\nOne."
-        assert bodies[2] == "[Here: rain]\n\nTwo."
+        assert bodies[0] == "((OOC: Stay grim.))\n\nOne."
+        assert bodies[2] == "((OOC: [Here: rain]))\n\nTwo."
 
     def test_the_text_is_shared_and_the_switch_is_each_story_s(self, app: App) -> None:
         api_stories.set_shared_reminder(app.session, "Stay grim.")
-        api_stories.update_setting(app.session, "use_shared_reminder", enabled=True, position=-1)
+        api_stories.update_setting(app.session, "use_shared_reminder", enabled=True, position=1)
         app.play("I push the door.")
         app.play("/new")
         app.play("A second story.")  # a new story has it off
         assert messages(app, "A second story.") == [("user", "A second story.")]
-        api_stories.update_setting(app.session, "use_shared_reminder", enabled=True, position=-1)
+        api_stories.update_setting(app.session, "use_shared_reminder", enabled=True, position=1)
         app.play("And on.")
-        assert messages(app, "And on.")[-1] == ("user", "Stay grim.\n\nAnd on.")
+        assert messages(app, "And on.")[-1] == ("user", "((OOC: Stay grim.))\n\nAnd on.")
+
+    def test_a_reminder_with_nothing_written_sends_nothing(self, app: App) -> None:
+        api_stories.update_setting(app.session, "use_story_reminder", enabled=True, position=1)
+        app.play("I push the door.")
+        assert messages(app, "I push the door.") == [("user", "I push the door.")]
 
     def test_cleared_it_is_gone_from_the_store(self, app: App) -> None:
         api_stories.set_shared_reminder(app.session, "Stay grim.")
@@ -535,7 +560,7 @@ class TestSettingsOfReminders:
 
 class TestSettingsAreTheStorys:
     def test_a_switch_flipped_before_the_first_turn_is_kept(self, server, tmp_path) -> None:
-        app = with_instruction(tmp_path / "state", server)
+        app = with_prompt(tmp_path / "state", server)
         try:
             assert app.session.story_id is None
             api_stories.update_setting(app.session, "allow_questions", enabled=True)
@@ -547,14 +572,16 @@ class TestSettingsAreTheStorys:
             app.close()
 
     def test_the_switches_survive_a_launch(self, server, tmp_path) -> None:
-        app = with_instruction(tmp_path / "state", server)
-        api_stories.update_setting(app.session, "allow_questions", enabled=True, position=-2)
+        app = with_prompt(tmp_path / "state", server)
+        api_stories.update_setting(app.session, "allow_questions", enabled=True, position=2)
+        api_stories.update_setting(app.session, "allow_assistant_notes", display_notes=False)
         app.play("I push the door.")
         app.close()
         app = launch(tmp_path / "state", server)
         try:
             ask = setting(app, "allow_questions")
-            assert (ask.enabled, ask.injection_position) == (True, -2)
+            assert (ask.enabled, ask.injection_position) == (True, 2)
+            assert setting(app, "allow_assistant_notes").display_notes is False
         finally:
             app.close()
 
@@ -591,22 +618,66 @@ class TestSettingsAreTheStorys:
         assert app.session.story_id == second
 
 
+class TestToolPrompts:
+    """A tool's prompt is prompts.toml's, edited in place from the app:
+    the one key rewritten, the pre-edit file kept as a dated backup named
+    after the file, and the next request carrying what was saved."""
+
+    def test_a_saved_prompt_lands_in_the_file_and_on_the_wire(self, server, tmp_path) -> None:
+        app = with_prompt(tmp_path / "state", server)
+        try:
+            api_stories.update_setting(app.session, "allow_questions", enabled=True)
+            said = api_settings.set_tool_prompt(app.session, "question", "ASK ANEW")
+            assert said
+            text = app.paths.prompts_file.read_text()
+            assert text.count("tool_questions_prompt = ") == 1 and "ASK ANEW" in text
+            assert HOW_TO_ASK not in text
+            kept = list(app.paths.config_backups_dir.iterdir())  # the pre-edit file waits
+            assert [path.name[: len("prompts-")] for path in kept] == ["prompts-"]
+            assert HOW_TO_ASK in kept[0].read_text()
+            assert api_settings.get_tool_prompt(app.session, "question") == "ASK ANEW"
+            app.play("I push the door.")
+            assert messages(app, "I push the door.") == [
+                ("user", "((OOC: ASK ANEW))\n\nI push the door.")
+            ]
+        finally:
+            app.close()
+
+    def test_an_emptied_prompt_restores_the_built_in(self, server, tmp_path) -> None:
+        app = with_prompt(tmp_path / "state", server)
+        try:
+            api_settings.set_tool_prompt(app.session, "question", "  ")
+            assert "tool_questions_prompt" not in app.paths.prompts_file.read_text()
+            shipped = Prompts().tool_questions_prompt
+            assert api_settings.get_tool_prompt(app.session, "question") == shipped
+        finally:
+            app.close()
+
+    def test_a_name_no_tool_owns_is_refused(self, app: App) -> None:
+        with pytest.raises(Refused):
+            api_settings.get_tool_prompt(app.session, "plan")
+        with pytest.raises(Refused):
+            api_settings.set_tool_prompt(app.session, "plan", "x")
+
+
 class TestSettingsRefused:
     def test_what_a_setting_cannot_take_is_refused(self, app: App) -> None:
         for asked in (
             {"name": "plan", "enabled": True},
             {"name": "allow_questions", "position": "end"},
             {"name": "allow_questions", "position": 0},
-            {"name": "allow_questions", "position": -9},
-            {"name": "allow_questions", "position": "-2"},
-            {"name": "allow_questions", "text": "Ask about the weather."},
+            {"name": "allow_questions", "position": 9},
+            {"name": "allow_questions", "position": "2"},
+            {"name": "allow_questions", "reminder_text": "Ask about the weather."},
+            # Only the notes tool has something to display.
+            {"name": "allow_questions", "display_notes": False},
             # A reminder is never the system message's: that is the premise's.
             {"name": "use_story_reminder", "position": "system"},
             {"name": "use_shared_reminder", "position": "system"},
             # The shared reminder's text is no one story's.
-            {"name": "use_shared_reminder", "text": "Stay grim."},
+            {"name": "use_shared_reminder", "reminder_text": "Stay grim."},
             # A flag injects nothing, so it rides nowhere.
-            {"name": "story_mode", "position": -1},
+            {"name": "story_mode", "position": 1},
         ):
             with pytest.raises(Refused):
                 api_stories.update_setting(app.session, **asked)  # type: ignore[arg-type]
@@ -640,11 +711,11 @@ def two_stories(app: App) -> tuple[int, int]:
     return first, app.session.story_id
 
 
-def with_instruction(root, server) -> App:
-    """The app over a prompts.toml whose ask instruction is `HOW_TO_ASK`."""
+def with_prompt(root, server) -> App:
+    """The app over a prompts.toml whose questions prompt is `HOW_TO_ASK`."""
     paths = Paths.resolve(root)
     paths.ensure_tree()
-    paths.prompts_file.write_text(f'ask_instruction = "{HOW_TO_ASK}"\n')
+    paths.prompts_file.write_text(f'tool_questions_prompt = "{HOW_TO_ASK}"\n')
     return launch(root, server)
 
 

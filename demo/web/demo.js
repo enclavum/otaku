@@ -22,15 +22,16 @@ let version = "";
 const ready = (async () => {
   const load = async (name) =>
     (await realFetch(new URL(`./fixtures/${name}.json`, import.meta.url))).json();
-  const [syntax, settings, storySettings, river, tour] = await Promise.all([
+  const [syntax, settings, storySettings, prompts, river, tour] = await Promise.all([
     load("syntax"),
     load("settings"),
     load("story_settings"),
+    load("prompts"),
     load("river"),
     load("tour"),
   ]);
   version = river.facts.version;
-  store.seed({ syntax, settings, storySettings, river, tour });
+  store.seed({ syntax, settings, storySettings, prompts, river, tour });
 })();
 
 // ---------- the routes ----------
@@ -41,6 +42,7 @@ const ready = (async () => {
    literal segment is never eaten by a parameter. */
 const ROUTES = {
   // Playing
+  // The demo's model never asks a question, so no story stands on one.
   "GET /api/play": () => ({ messages: store.turns() }),
   "GET /api/play/syntax": () => store.syntax(),
   // A turn's pictures: the demo's model cannot see, so no turn carries
@@ -77,7 +79,8 @@ const ROUTES = {
   "GET /api/stories/{story}/settings": (p) => store.storySettings(num(p.story)),
   "PATCH /api/stories/{story}/settings/{setting}": (p, q, b) =>
     // A flag that is not a boolean is malformed, as the server answers it.
-    b.enabled != null && typeof b.enabled !== "boolean"
+    (b.enabled != null && typeof b.enabled !== "boolean") ||
+    (b.display_notes != null && typeof b.display_notes !== "boolean")
       ? status(400)
       : store.updateSetting(num(p.story), p.setting, b),
   "PATCH /api/stories/{story}/scenes/{scene}": (p, q, b) =>
@@ -146,6 +149,8 @@ const ROUTES = {
   "PUT /api/settings/{setting}": (p, q, b) => store.setKnob(p.setting, b.value),
   "GET /api/shared_reminder": () => store.sharedReminder(),
   "PUT /api/shared_reminder": (p, q, b) => store.setSharedReminder(String(b.text)),
+  "GET /api/prompts/{tool}": (p) => store.prompt(p.tool),
+  "PUT /api/prompts/{tool}": (p, q, b) => store.setPrompt(p.tool, String(b.text)),
 };
 
 // The path parameters that are row ids, as `web/server.py` declares
@@ -496,10 +501,11 @@ function play(body, regenerate, signal) {
   const land = () => {
     // Whatever ended the stream — the last chunk or a closed reader —
     // what arrived is recorded, exactly as the backend keeps a partial.
-    if (!streamed) return;
-    store.recordTurn("assistant", streamed);
+    if (!streamed) return null;
+    const reply = store.recordTurn("assistant", streamed);
     store.recordUsage(promptTokens, Math.ceil(streamed.length / 4), (Date.now() - started) / 1000);
     streamed = "";
+    return reply;
   };
 
   const encoder = new TextEncoder();
@@ -535,8 +541,9 @@ function play(body, regenerate, signal) {
           const stats = store.verbose()
             ? `[ total ${seconds.toFixed(1)}s, prompt ${promptTokens} tok, eval ${tokens} tok @ ${rate} tok/s ]`
             : "";
-          land();
-          // The product's shape: the report's facts beside the line, and
+          const reply = land();
+          // The product's shape: the report's facts beside the line, the
+          // reply as stored, no question (the demo's model asks none), and
           // a notice the page's own model never has — it finishes what
           // it starts.
           const report = {
@@ -551,7 +558,7 @@ function play(body, regenerate, signal) {
             rate: Number(rate),
             context_used: null,
           };
-          frame(controller, { type: "done", stats, report, notice: "" });
+          frame(controller, { type: "done", stats, report, notice: "", reply });
           over = true;
           controller.close();
           return;

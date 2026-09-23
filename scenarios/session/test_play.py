@@ -11,7 +11,8 @@ import pytest
 from otaku.backend.api import play as api_play
 from otaku.backend.api import providers as api_providers
 from otaku.backend.api import reports
-from otaku.backend.api.play import Done
+from otaku.backend.api import stories as api_stories
+from otaku.backend.api.play import Done, Text, ToolCall
 from otaku.backend.files import RawFile
 from otaku.backend.formats import EXPORT_MARKER
 from otaku.backend.paths import Paths
@@ -553,6 +554,97 @@ class TestCancelAndKeep:
             assert chat.requests == 1 and chat.seconds > 0
         finally:
             app.close()
+
+
+class TestToolCalls:
+    """A tool call in a reply is not story: it streams apart from the
+    prose as `ToolCall` pieces, never as a raw tag, and is stored tags
+    and all. A tool the user answers ends the reply where its call
+    ends: its closing tag is a stop while the story has it on, put back
+    where the server kept it. The reply as stored carries the call for
+    a frontend to read (`segments`); a call of a tool the story has
+    switched off goes back on the wire as prose, one of a tool this
+    build does not know not at all."""
+
+    ASKED = "The door creaks.\n\n<otk-question>Go in?\n1. Yes\n2. No</otk-question>"
+
+    def test_a_call_streams_apart_from_the_prose_and_is_stored_whole(self, app: App) -> None:
+        app.server.script = lambda body: "<otk-note>a plan</otk-note>The hall glows."
+        events = list(api_play.submit(app.session, "I enter the hall."))
+        prose = "".join(event.text for event in events if isinstance(event, Text))
+        calls = [event for event in events if isinstance(event, ToolCall)]
+        assert (prose, "".join(call.text for call in calls)) == ("The hall glows.", "a plan")
+        assert all("<otk-" not in event.text for event in events if isinstance(event, Text))
+        assert {call.name for call in calls} == {"note"}
+        assert app.session.messages[-1].body == "<otk-note>a plan</otk-note>The hall glows."
+
+    def test_a_closing_tag_is_a_stop_while_the_story_has_the_tool_on(self, app: App) -> None:
+        app.play('/set parameter stop "The End"')
+        api_stories.update_setting(app.session, "allow_questions", enabled=True)
+        app.play("I enter the hall.")
+        assert app.server.requests[-1]["stop"] == ["The End", "</otk-question>"]
+        api_stories.update_setting(app.session, "allow_questions", enabled=False)
+        app.play("I look around.")
+        assert app.server.requests[-1]["stop"] == ["The End"]
+
+    def test_the_tag_the_server_kept_is_put_back(self, app: App) -> None:
+        # A server strips the stop it stopped on: the reply arrives with
+        # its call open, and the history must teach closed calls.
+        api_stories.update_setting(app.session, "allow_questions", enabled=True)
+        app.server.script = lambda body: "The door creaks.\n\n<otk-question>Go in?\n1. Yes\n2. No"
+        app.play("I enter the hall.")
+        assert app.session.messages[-1].body == self.ASKED
+
+    def test_a_call_left_open_by_a_cut_reply_stays_open(self, app: App) -> None:
+        api_stories.update_setting(app.session, "allow_questions", enabled=True)
+        app.server.script = lambda body: "<otk-question>Go in?"
+        app.server.finish = "length"
+        app.play("I enter the hall.")
+        assert app.session.messages[-1].body == "<otk-question>Go in?"
+
+    def test_the_stored_reply_carries_the_call_read(self, app: App) -> None:
+        app.server.script = lambda body: self.ASKED
+        (done,) = [
+            e for e in api_play.submit(app.session, "I enter the hall.") if isinstance(e, Done)
+        ]
+        assert done.reply is not None
+        assert api_play.segments(done.reply.body) == [
+            {"kind": "prose", "text": "The door creaks.\n\n"},
+            {
+                "kind": "tool_call",
+                "tool": "question",
+                "text": "Go in?\n1. Yes\n2. No",
+                "question": "Go in?",
+                "options": ["Yes", "No"],
+            },
+        ]
+
+    def test_a_call_of_a_tool_that_is_on_goes_back_on_the_wire_as_written(self, app: App) -> None:
+        api_stories.update_setting(app.session, "allow_assistant_notes", enabled=True)
+        app.server.script = lambda body: "The hall glows.\n\n<otk-note>a plan</otk-note>"
+        app.play("I enter the hall.")
+        app.play("I look around.")
+        sent = app.server.requests[-1]["messages"]
+        assert sent[-2]["content"] == "The hall glows.\n\n<otk-note>a plan</otk-note>"
+
+    def test_a_call_of_a_tool_that_is_off_goes_back_as_prose(self, app: App) -> None:
+        # The question alone: the reader's answer that follows still has
+        # something to answer, and the menu is what the model must not
+        # learn from a tool it is no longer told about.
+        app.server.script = lambda body: self.ASKED
+        app.play("I enter the hall.")
+        app.play("Yes")
+        sent = app.server.requests[-1]["messages"]
+        assert sent[-2]["content"] == "The door creaks.\n\nGo in?"
+
+    def test_a_call_of_a_tool_this_build_does_not_know_leaves_the_wire(self, app: App) -> None:
+        app.server.script = lambda body: "The hall glows.\n\n<otk-plan>later</otk-plan>"
+        app.play("I enter the hall.")
+        app.play("I look around.")
+        sent = app.server.requests[-1]["messages"]
+        assert sent[-2]["content"] == "The hall glows."
+        # only the wire: the stored body keeps the call, tags and all
+        assert app.session.messages[-3].body == "The hall glows.\n\n<otk-plan>later</otk-plan>"
 
 
 class TestPictures:

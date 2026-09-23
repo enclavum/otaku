@@ -1,12 +1,14 @@
-"""The tools a model may use by writing a tagged block in its reply.
+"""The tools a model may use by writing a call in its reply.
 
-A tool is declared by its class — its tag, who answers its block, the
-prompts field of its instruction — and registered under its tag; `read`
-binds one block to the tool its tag names, in any case. An `ToolQuestions` reads
-its block as a question and the answers to pick from: the question is
+A tool is declared by its class — its name, who answers its call, the
+prompts key of its prompt — and registered under its name; `read` binds
+one call to the tool its name says, in any case. `ToolQuestions` reads
+its call as a question and the answers to pick from: the question is
 everything before the first answer line; an answer line opens `1.`,
 `1)`, `a.` or `a)`; none makes the question free-form; whatever follows
-the answers that is not one is no answer; nine at most.
+the answers that is not one is no answer; nine at most. `to_json` is
+the call as a frontend draws it; `to_prose` what a call reads as on the
+wire while its tool is off — the question alone, nothing for a note.
 """
 
 import re
@@ -57,37 +59,53 @@ class TestAsk:
         ask = ToolQuestions("Which?\n" + "\n".join(f"{n}. Door {n}" for n in range(1, 13)))
         assert ask.options == tuple(f"Door {n}" for n in range(1, 10))
 
-    def test_the_block_is_kept_as_written(self) -> None:
+    def test_the_call_is_kept_as_written(self) -> None:
         text = "\nStay or go?\n1. She stays\n"
         assert ToolQuestions(text).text == text
 
+    def test_to_json_carries_the_tool_and_what_it_read(self) -> None:
+        assert ToolQuestions("Stay or go?\n1. Stay").to_json() == {
+            "tool": "question",
+            "text": "Stay or go?\n1. Stay",
+            "question": "Stay or go?",
+            "options": ["Stay"],
+        }
+        assert ToolAssistantNotes("the seal").to_json() == {"tool": "note", "text": "the seal"}
+
+    def test_off_a_question_reads_as_the_question_alone_and_a_note_as_nothing(self) -> None:
+        # The options were the menu's — a model no longer offered the tool
+        # must not learn one; the question still gives the answer that
+        # follows something to answer.
+        assert ToolQuestions.to_prose("Stay or go?\n1. Stay\n2. Go") == "Stay or go?"
+        assert ToolAssistantNotes.to_prose("the seal") == ""
+
 
 class TestRead:
-    def test_a_block_is_read_as_the_tool_its_tag_names(self) -> None:
-        ask = read("ask", "Stay or go?\n1. Stay")
+    def test_a_call_is_read_as_the_tool_its_name_says(self) -> None:
+        ask = read("question", "Stay or go?\n1. Stay")
         assert isinstance(ask, ToolQuestions) and ask.options == ("Stay",)
-        assert isinstance(read("notes", "the letter is forged"), ToolAssistantNotes)
+        assert isinstance(read("note", "the letter is forged"), ToolAssistantNotes)
 
-    def test_the_tag_is_read_in_any_case(self) -> None:
-        assert isinstance(read("NOTES", "x"), ToolAssistantNotes)
+    def test_the_name_is_read_in_any_case(self) -> None:
+        assert isinstance(read("NOTE", "x"), ToolAssistantNotes)
 
-    def test_a_tag_no_tool_owns_is_a_key_error(self) -> None:
+    def test_a_name_no_tool_owns_is_a_key_error(self) -> None:
         with pytest.raises(KeyError):
             read("plan", "x")
 
 
 class TestRegistry:
-    def test_every_tool_is_registered_under_its_own_tag(self) -> None:
-        # Holds a forgotten registration AND a tag two tools claim: the
-        # registry keeps one class per tag, so one of the two would miss.
+    def test_every_tool_is_registered_under_its_own_name(self) -> None:
+        # Holds a forgotten registration AND a name two tools claim: the
+        # registry keeps one class per name, so one of the two would miss.
         for tool in every_tool(Tool):
-            assert TOOLS.get(tool.tag) is tool, tool.__name__
+            assert TOOLS.get(tool.name) is tool, tool.__name__
 
-    def test_a_tag_is_one_lowercase_word(self) -> None:
-        for tag in TOOLS:
-            assert re.fullmatch(r"[a-z]+", tag), tag
+    def test_a_name_is_one_lowercase_word(self) -> None:
+        for name in TOOLS:
+            assert re.fullmatch(r"[a-z]+", name), name
 
-    def test_every_tool_names_an_instruction_the_prompts_hold(self) -> None:
+    def test_every_tool_names_a_prompt_the_prompts_hold(self) -> None:
         held = {field.name for field in fields(Prompts)}
         for tool in TOOLS.values():
             assert tool.prompt_name in held, tool.__name__

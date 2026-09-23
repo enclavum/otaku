@@ -67,8 +67,7 @@
       <button type="button" class="otk-toc__row" data-goto="messages"><span>Messages</span></button>
       <button type="button" class="otk-toc__row" data-command="/lore"><span>Scenes</span></button>
       <button type="button" class="otk-toc__row" data-command="/cast"><span>Cast</span></button>
-      <span class="otk-toc__gap"></span>
-      <button type="button" class="otk-toc__row" data-command="/card"><span>Import card</span></button>
+      <button type="button" class="otk-toc__row" data-goto="tools"><span>Tools</span></button>
       <span class="otk-toc__gap"></span>
       <button type="button" class="otk-toc__row" data-command="/model"><span>Models</span></button>
       <button type="button" class="otk-toc__row" data-command="/balance"><span>Balance</span></button>
@@ -198,7 +197,7 @@
   <footer class="otk-panel__foot"><span data-note></span></footer>
 </dialog>
 
-<!-- level 2: inside one story. Four tabs share this shell. -->
+<!-- level 2: inside one story. Five tabs share this shell. -->
 <dialog class="otk-panel" data-popup="/story" aria-label="Story">
   <header class="otk-panel__head">
     <span class="otk-eyebrow" data-story-title>Story</span>
@@ -212,6 +211,7 @@
     <button type="button" class="otk-tab" role="tab" data-tab="messages">Messages</button>
     <button type="button" class="otk-tab" role="tab" data-tab="scenes">Scenes</button>
     <button type="button" class="otk-tab" role="tab" data-tab="cast">Cast</button>
+    <button type="button" class="otk-tab" role="tab" data-tab="tools">Tools</button>
     <span class="otk-tabs__aside" data-tabs-aside></span>
   </div>
 
@@ -258,6 +258,20 @@
       <div class="otk-actions">
         <button type="button" class="otk-btn" data-import-system>Read from a file&hellip;</button>
       </div>
+    </div>
+  </div>
+
+  <!-- tools: the story's settings, one switch each — what the model
+       may use, and the reminders it is sent. One capped column that
+       scrolls, like the premise. -->
+  <div class="otk-panel__body otk-panel__body--tools" data-pane="tools" hidden>
+    <div class="otk-tools">
+      <div class="otk-tools__head">
+        <span class="otk-label otk-label--accent">story settings</span>
+        <h3 class="otk-reading__title otk-reading__title--lg">Tools</h3>
+        <p class="otk-note otk-premise__lede">Tools to use in the story, reminders to put in the context</p>
+      </div>
+      <div class="otk-features" data-features></div>
     </div>
   </div>
 
@@ -423,6 +437,31 @@
 </dialog>
 
 <!-- a story to start, and the one thing worth saying up front -->
+<!-- a tool's instruction, edited whole: what the model is told about the
+     tool, one text for every story. Esc discards; Save writes prompts.toml. -->
+<dialog class="otk-dialog otk-dialog--wide" data-dialog="instruction" aria-labelledby="otk-instruction-title">
+  <span class="otk-eyebrow" data-title id="otk-instruction-title">Instructions</span>
+  <p class="otk-dialog__body">What the narrator is told about this tool. Sent with every reply while the switch is on; emptied, the shipped text stands again.</p>
+  <textarea class="otk-field otk-field--mono otk-field--tall" aria-label="Instructions"></textarea>
+  <div class="otk-dialog__foot">
+    <button type="button" class="otk-btn" data-choice="cancel" autofocus>Cancel</button>
+    <button type="button" class="otk-btn otk-btn--primary" data-choice="save">Save</button>
+  </div>
+</dialog>
+
+<!-- where each setting's text rides: the ruler, one row per setting and one
+     tick per place the backend allows, built when it opens (`story.placement`).
+     A tick moves the setting there and saves at once; the marker drags too. -->
+<dialog class="otk-dialog otk-dialog--wide" data-dialog="placement" aria-labelledby="otk-placement-title">
+  <span class="otk-eyebrow" id="otk-placement-title">Injection depths</span>
+  <p class="otk-dialog__body">Where each text goes in the next request: into the system message, or before one of your messages</p>
+  <div class="otk-ruler" data-ruler></div>
+  <p class="otk-note">Click a tick or drag the marker</p>
+  <div class="otk-dialog__foot">
+    <button type="button" class="otk-btn" data-choice="close" autofocus>Close <span class="otk-btn__key">esc</span></button>
+  </div>
+</dialog>
+
 <dialog class="otk-dialog" data-dialog="new-story" aria-labelledby="otk-new-title">
   <span class="otk-eyebrow" data-title id="otk-new-title">New story</span>
   <div class="otk-dialog__field">

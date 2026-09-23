@@ -8,15 +8,14 @@ from collections.abc import Callable
 from pathlib import Path
 
 from otaku.formatting import toml_key, toml_scalar
-from otaku.settings import read_settings, write_atomic
+from otaku.settings import commit, read_settings, write_atomic
 from otaku.settings.migrations.surgery import (
     Migration,
     attached_start,
-    backup_path,
-    commit,
     ensure_section,
     joined,
     parse,
+    redacted,
     set_key,
     update_providers,
 )
@@ -55,7 +54,8 @@ def move_providers(config_path: Path, providers_path: Path, backups_dir: Path) -
             write_atomic(providers_path, grown)
         except OSError:
             return
-    commit(config_path, backup_path(backups_dir, "config"), text, remaining)
+    # the keys that left are in the new file: the backup must not keep them plain
+    commit(config_path, backups_dir, redacted(text, remaining), remaining)
 
 
 def move_providers_text(text: str, taken: set[str]) -> tuple[str, str] | None:

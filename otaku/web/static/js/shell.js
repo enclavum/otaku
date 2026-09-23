@@ -11,7 +11,7 @@ import { guard } from "./browser.js";
 import { $, $$ } from "./dom.js";
 import { label } from "./format.js";
 import { offline, reached, tell, told, working } from "./status.js";
-import { isPlaying, showCorrected, showTurns } from "./transcript.js";
+import { displayTools, isPlaying, showCorrected, showPlayed } from "./transcript.js";
 
 const app = $(".otk-app");
 const icon = $('link[rel="icon"]');
@@ -53,8 +53,21 @@ export function showFacts(facts) {
 
 /** The session again, and the transcript with it. */
 export async function refresh() {
-  showFacts(await api.facts());
-  showTurns(await api.turns());
+  const facts = await api.facts();
+  showFacts(facts);
+  await drawPlayed(facts.story_id);
+}
+
+/** The transcript from the store: the turns, and — off the story's
+    settings, which a story that does not exist yet has none of — which
+    tools' calls the reader is shown. */
+export async function drawPlayed(storyId) {
+  const [played, held] = await Promise.all([
+    api.played(),
+    storyId === null ? null : api.storySettings(storyId),
+  ]);
+  displayTools(held?.settings ?? []);
+  showPlayed(played);
 }
 
 /** What a write answered with, shown where it belongs. The facts are
@@ -67,9 +80,9 @@ export async function landed(notice, { redraw = "if-moved", corrected = null, ki
   const moved = facts.story_id !== drawn;
   showFacts(facts);
   if (redraw === "always" || (redraw === "if-moved" && moved)) {
-    showTurns(await api.turns());
+    await drawPlayed(facts.story_id);
   } else if (corrected) {
-    showCorrected(...corrected);
+    await showCorrected(...corrected);
   }
   tell(notice, kind);
 }
