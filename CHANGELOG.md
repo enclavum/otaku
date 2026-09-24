@@ -9,21 +9,39 @@ changes.
 
 ### Added
 
+- Pictures on a turn, for a model that can see: `@path` in the terminal (the menu lists picture
+  files while the model has vision), the attach button or a paste into the composer on the page.
+  A picture is downsized, stripped of its metadata and kept sealed beside the database; it rides
+  its message on every request, and the lore pass reads it too, so a summarized turn's picture is
+  put into words before it leaves the context. `/context` counts what rides and what is held back.
 - Tools the model may use by writing a tagged block in its reply, each a per-story switch on the
-  web page's new Tools tab: **questions** — the narrator may ask you one question, with numbered
-  answers to pick from, and waits for your answer; **assistant notes** — the narrator keeps a
-  private note between turns, never played into the story, shown or hidden with a switch of its
-  own. A tool's prompt is `prompts.toml`'s (`tool_questions_prompt`, `tool_assistant_notes_prompt`)
-  and is edited from the page; emptied, the shipped text stands again.
+  new Tools tab — the page's, and the terminal dossier's (Ctrl+L, then → to it): **questions** —
+  the narrator may ask you one question, with numbered answers to pick from, and waits for your
+  answer; in the terminal the answers stand above the prompt, ↑/↓ walk them, Enter sends one, →
+  takes it into the line to edit; **assistant notes** — the narrator keeps a private note between
+  turns, never played into the story, shown or hidden with a switch of its own. Questions, notes
+  and the model's thinking draw as blocks behind a bar in the terminal, the notes and thinking
+  dimmed. A tool's prompt is `prompts.toml`'s (`tool_questions_prompt`,
+  `tool_assistant_notes_prompt`) and is edited from either frontend; emptied, the shipped text
+  stands again.
 - Two reminders, each a per-story switch: the story's own text, and a shared text every story that
   switches it on is sent. Both go out of character (`((OOC: …))`).
 - Where each of these goes in the request is chosen on a depth ruler: the system message, or
-  before one of your recent messages, counted from the end.
+  before one of your recent messages, counted from the end. `/context` lists what is injected,
+  where, and what it costs.
 - A switched-off tool's past blocks go back to the model as prose (a question alone, a note not at
   all); a tool otaku no longer has never reaches the wire. The lore pass never reads a block.
 - The web API: `GET`/`PATCH /api/stories/{story}/settings`, `GET`/`PUT /api/shared_reminder`,
   `GET`/`PUT /api/prompts/{tool}`; a turn's `segments` and the `tool_call` stream event, so the
-  page draws a block without parsing it.
+  page draws a block without parsing it; `injections` on the context preview; pictures as `files`
+  in the play body and `attachments` on a turn.
+
+### Changed
+
+- The terminal draws the model's thinking as a dim block behind a bar, like a note, without the
+  `(thinking)` label.
+- `otaku web` on a public host warns only about what is missing: with both HTTPS and a password
+  set, nothing is said.
 
 ## [0.5.0] - 2026-09-17
 

@@ -137,7 +137,10 @@ otaku owns the convention, never the API's `tools` field, so it works
 on every engine. The body is stored verbatim, tags included. A reply is
 therefore prose and tool calls; the model's reasoning is neither — it
 arrives on the wire's own field, streams beside them, and is never
-stored.
+stored. The terminal streams it as a dim block behind the bar, as a
+note is, no label; it ends at the first piece of anything else, one
+blank line to what follows as after any block, and no echo ever shows
+it.
 
 WHAT a tool call is, is the `otk-` namespace and nothing else
 (`context.tool_calls`: `ToolCall(name, text, closed)`, `Prose`, the
@@ -193,23 +196,90 @@ nothing after it but notes and whitespace) — so a story resumed on one
 shows it again, and nothing is stored or reported for it. Answering is
 an ordinary line: whatever is played next answers it, verbatim, no
 frame, no mode. The page draws a question as the ask panel, a note as
-the notes block while the story's `display_notes` says so, each in its
-place among the prose, streaming and landed alike; the terminal prints
-a call as it streamed, tags and all, until its look is decided. On the
+the notes block while the story displays notes, each in its place
+among the prose, streaming and landed alike. The terminal draws each
+call as a BLOCK of its own in the flow — a blank line before it,
+however many newlines the model left, and exactly one after it where
+prose goes on, the prose's own leading newlines dropped
+(`tty.render.spaced`); a bar `│ ` opening EVERY row of it, the text
+wrapped at the width by the terminal's own rule (a character's columns
+as the ledger's `RowTracker` counts them) so a long line never wraps
+past the bar, plain, none of the story's typesetting
+(`render.BlockStream`, written past the typesetter because the
+typesetter sanitizes escapes away; a word is placed once complete);
+streamed word by word, and echoed through the same object at the same
+width, so stream and echo cannot differ. A question is the QUESTION
+alone at full weight (`render.QuestionStream`: the lines before the
+first option, parted as the call streams — a line whose first token is
+an option's head is held until its newline tells, by the tool's own
+rule `ToolQuestions.is_option`, and from the first option on nothing
+is drawn); a note is dim, bar and all, and drawn only while the story
+displays notes (`render.notes_displayed` over the story's settings,
+read through `Chat.notes_displayed` as each echo draws and once per
+stream; otherwise left out, tags and all, so a hidden note is never
+seen). The dossier's preview wraps them to its own panel
+(`message(width=)`), and its message rows flatten the drawing back to
+one line. A
+reply already on screen keeps the look it was drawn with when the
+switch moves; the next echo or play follows the switch. A question's
+answers are rows ABOVE the
+prompt line, part of the prompt's own message (`prompt.AnswerMenu`,
+opened as each prompt's `pre_run`): while the story stands on a
+question with a fixed set (`render.asked`, the page's `questionPosed`
+rule copied, read off the newest message as the prompt opens), the
+answers stand over the line behind the question's bar (`render.BAR`,
+wrapped to the width by `render.block` as its block is), numbered as
+the model listed them, the one under the cursor starred and in the
+accent; the blank line before that prompt is the PROMPT'S OWN first
+row then — the loop leaves it unprinted (`ledger.gap(deferred=)`, and
+the resume echo's blank likewise, when `AnswerMenu.posed`) and the menu
+draws it (`top_row`): the bar alone while the rows show, so the
+question's block runs on into its answers, a plain blank the moment
+they hide or the line is sent; the row is on screen either way, so the
+ledger's one-standing-blank count holds —
+↑/↓ walk them, Enter sends that one
+as the line, → takes it into the line to be edited (the one key every
+terminal reports that means nothing on an empty line: a modified Enter
+is plain Enter wherever the terminal encodes no modifiers), a typed
+character is the
+reader's own answer and the rows go, the empty line brings them back,
+Esc dismisses them. The final render is the prefix alone, so once the
+line is sent the rows leave the screen and the scrollback holds the
+question alone.
+Every other call still prints as it streamed, tags and all, until its
+look is decided. On the
 wire: the `tool_call` event, `done.reply` (the turn as stored), and
-`segments` on every turn; whether the reader is shown the notes is the
-setting's (`enabled` and `display_notes`), read off the settings
-endpoint — the page holds that rule until the terminal draws notes
-too.
+`segments` on every turn. Whether the reader is shown the notes is a
+conjunction of two facts the setting reports — the notes tool on, with
+its display switch on — and each frontend reads it off them: the page
+in `transcript.displayTools`, the terminal in `render.notes_displayed`,
+each naming the other (the language barrier is the one reason a rule
+exists twice; a one-line conjunction earns no backend property).
 
 ### Injections
 
 An `Injection` is text the context carries besides the story: never
 stored, never seen by the lore pass, shown by `/context` because it is
-on the wire. `context.injections` owns what one is — its `owner` (the
-setting's name, later a lorebook's), its text, its `position` — and
-where it goes (`inject_into_system`, `inject_into_tail`); the assembler
-decides only WHEN, and counts the tokens. Who MAKES one is above the
+on the wire — and REPORTED there as facts: the assembler records each
+one sent (`AssembledPrompt.injections`, `InjectionSent(owner, position,
+tokens)`), the report names the owner as the reader knows it and its
+place as the depth ruler names it (`ContextReport.injections`,
+`ContextInjection(label, position, position_text, tokens)`; the
+terminal's `text()` lists them as bullets under `injected:`, the page
+draws a bullet list under the stages, the wire carries `injections`).
+Where a text rides is ONE VALUE of one type, `InjectionPosition`
+(`store.schema`, a frozen dataclass: a `depth` from 1, or none for
+the system message; its `value` is the plain form the column and the
+wire hold, "system" or the number, and `from_value` reads one back;
+`text`, its name as every
+frontend shows it — "system", "2nd last" for 1, the reader's newest
+message being the last, … "9th last" for 8); the terminal reads the
+name off it, the page keeps the rule copied in its own language
+(`tools.js placeName`). `context.injections` owns what one is
+— its `owner` (the setting's name, later a lorebook's), its text, its
+`position` — and where it goes (`inject_into_system`,
+`inject_into_tail`); the assembler decides only WHEN, and counts the
+tokens. Who MAKES one is above the
 package: a story's settings (`backend.story`, `StorySettings.injections`),
 later a lorebook; the assembler is handed them built and never learns
 where one came from, which is how a new source arrives without an
@@ -306,7 +376,22 @@ does not know (a JSON key bumps no schema version). The operations are
 `update_setting`, `get_shared_reminder`, `set_shared_reminder`; the
 page reaches them at `/api/stories/{story}/settings` (GET, and PATCH
 of one setting) and `/api/shared_reminder` — not a `/api/settings`
-knob, since every knob must be drawn on the settings slip.
+knob, since every knob must be drawn on the settings slip. The
+terminal reaches them on the dossier's Tools tab (`screens.story`): one
+row per captioned setting — a `[x]` checkbox and the name; Space checks
+and unchecks it — with the setting's fields in the panel beside, at
+the margin, one blank line between: the notes' display, a reminder's
+text under its label, and last where its text rides. Enter or Tab
+moves the cursor into the panel, ↑/↓ walk the fields (the one under the cursor
+banded), Enter acts on one — a checkbox toggles, the depth opens the
+closed list of places as a dropdown under the field itself, nothing
+else moving (↑/↓, Enter — no dialog; the places named by
+`InjectionPosition.text`, "system", "2nd last" …), a text becomes the editor exactly where it
+is read, the fields
+above and below it standing (`base._preview_panel`'s `alternate` body:
+three windows around the one edit buffer) — and Esc returns to the
+list; the prompts are not edited there. `InjectionPosition` is
+re-exported by `backend` for it, a type alias being inert data.
 `Refused` lives in `backend.errors`, a leaf, so a class below the
 session can raise it; `backend.session` re-exports it. A tool's
 PROMPT is prompts.toml's, edited from the app in place — "prompt" on
@@ -435,7 +520,15 @@ completion half, and the assembler then sends the newest PICTURED row's
 pictures alone (a follow-up without one still carries the picture it
 is about), counting the rest as `pictures_held`; the `/context` summary says
 so, and each part's marker counts what rides it. Flip omlx back to
-"each" once a release keeps pictures on their messages. Engine sources are checked out under
+"each" once a release keeps pictures on their messages. The lore pass
+sees them too: a summarized row loses its picture, so the pass is the
+one moment its content can be put into words that last — each is
+marked `(picture n)` at its line of the numbered scene, and while the
+model can see the first `_MAX_PICTURES` (8) of the scene ride the
+extraction request in that order (`extraction._scene_pictures`); the
+extract prompt asks for what matters in them, and the changed shipped
+text is carried to existing files by a `refresh_template` step
+(`EXTRACT_0_5_0`). Engine sources are checked out under
 `~/repos` (llama.cpp, koboldcpp, ollama, omlx) — read the engine before
 guessing what it does with a request.
 
@@ -652,7 +745,8 @@ ONLY module that prints, into the terminal it was launched from),
 `server` (HTTP alone), `api` (what the page may ask: `ROUTES` and
 `FLOWS`, keyed by method and path template; cross-request state in
 `Pending`), `thread` (the one that owns the session; see Architecture),
-`cert` (the TLS pair it serves under), `auth` (the sign-in token).
+`cert` (the TLS pair it serves under); the sign-in token is the
+server's own, `server.auth`, read by its guards alone.
 The rules that span them are below, held by `scenarios/web`; the
 mechanics live in the module docstrings:
 
@@ -693,7 +787,12 @@ mechanics live in the module docstrings:
   the session is asked; the backend's refusals (cannot see, too many,
   not a picture) come back as a Notice. A turn's row carries
   `attachments` ([] when none) and the session facts `vision`, which is
-  what shows the attach button.
+  what shows the attach button. The page stages a picture two ways, the
+  attach button's picker and a PASTE into the composer (`composer.js`:
+  the `paste` event on the textarea alone, so it fires only with the
+  focus in the box; only the clipboard's image items are taken, and a
+  paste without one stays the browser's text paste); both reach the
+  same staged list, and the backend refuses either the same way.
 - **A ROW ID in a path is digits; a name is anything** (`server._NUMERIC`).
   So a page that lost its story cannot address `/api/stories/null/…` —
   no route matches, the answer is a plain 404, and no handler is ever

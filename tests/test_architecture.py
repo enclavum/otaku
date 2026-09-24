@@ -16,6 +16,8 @@ import ast
 import dataclasses
 import enum
 import re
+import types
+import typing
 from pathlib import Path
 
 import otaku.backend
@@ -182,7 +184,10 @@ def _absolute(node: ast.ImportFrom, path: Path) -> str:
 
 def _is_inert(obj: object) -> bool:
     """Data, not behavior: a frozen dataclass, an enum (a closed set of
-    constants) or an exception type."""
+    constants), an exception type — or a type alias, a name for a shape
+    with nothing behind it (`InjectionPosition`)."""
+    if isinstance(obj, types.UnionType) or typing.get_origin(obj) is not None:
+        return True
     if not isinstance(obj, type):
         return False
     if issubclass(obj, BaseException | enum.Enum):

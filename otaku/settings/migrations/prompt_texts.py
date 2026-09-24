@@ -168,6 +168,77 @@ and do not answer in English because these instructions are in English.
 """
 
 
+EXTRACT_0_5_0 = """\
+You are a story analyst. Read the scene below — the latest exchange of an
+interactive story — and extract its memory.
+
+Known characters so far (use these exact names when referring to them):
+{cast}
+
+Character journals so far — their story to date; continue it, do not restart it:
+{journals}
+
+LANGUAGE: write every value you produce — the title, the summary, the entries,
+the states — in the SAME LANGUAGE the scene below is written in: an English
+scene gets English values, a French scene French ones. Match the scene, not
+these instructions. Only the JSON keys stay in English.
+
+Extract from THIS SCENE ONLY and reply with ONLY a JSON object, no prose, in this shape:
+{
+  "scene": {"title": "...",
+             "summary": "a detailed narrative recap of the scene, 250-400 words"},
+  "speakers": [{"n": 1, "speaker": "who speaks or acts in message [n], or null"}],
+  "characters": [{"name": "...", "aliases": ["..."],
+                   "description": "one line, or null"}],
+  "journals": [{"character": "name",
+                 "entry": "their own record of this scene",
+                 "state": "their situation right now"}]
+}
+
+Rules:
+- Reply with ONE flat JSON object: "scene", "speakers", "characters" and
+  "journals" are ALL top-level keys of it — never put "characters" or
+  "journals" inside "scene".
+- "summary": prose, chronological, written like a story recap — not a synopsis.
+  This summary is the ONLY record the story keeps of this scene: once it scrolls
+  out of the recent messages, nothing else about it reaches the model. Write it
+  so someone who never read the scene could continue the story from it. Cover,
+  in order: who is present and where; what each of them does and says that
+  matters; every decision, promise, threat, or refusal, and who made it; what is
+  revealed, and to whom; anything given, taken, shown, or hidden; how moods and
+  relationships shift; and what is left unresolved. Quote a line verbatim when
+  its exact wording matters. Stay inside 250-400 words — past that the recap
+  stops being memory and starts crowding the story itself out of the context.
+- "speakers": for EVERY numbered message, the single character who speaks or acts
+  in it (their exact name); null when it is narration, several characters, or out
+  of character.
+- "characters": only NEW characters first appearing in this scene. A character
+  worth listing was present: write their "journals" row too.
+- "journals": one for EVERY character present in this scene — speaking, acting,
+  or silently there; anyone named in "speakers" or "characters" was present and
+  gets one. The journal row is the story's record of their presence, so
+  a character with nothing to say still gets one.
+  "entry" is that character's own record of THIS SCENE ONLY — what they did, saw,
+  heard, and felt, in the order they experienced it; when they arrive or leave
+  partway through, the entry says so at the point it happens. Up to ~250 words,
+  in proportion to how much of the scene is theirs: a silent bystander gets a
+  line or two, the character the scene turns on gets the full length. Write only
+  what they witnessed or were told — a character does not know what happened
+  while they were absent, and a secret kept from them is not in their entry. This
+  entry is permanent and is never rewritten, so put everything of theirs into it
+  now.
+  "state" is a snapshot, not a history: 1-3 sentences — where they are, what they
+  wear and carry, how they feel, what they want, right now.
+- Lines marked ((OOC: …)) are the players talking out of character: never part of
+  the scene's story, but decisions made there belong in the summary and journals.
+- Every value stays in the scene's own language (see LANGUAGE above).
+- Empty lists are fine. JSON only.
+
+SCENE (numbered messages):
+{chunk}
+"""
+
+
 def rename_template(old: str, new: str) -> Migration:
     """Renames a template's KEY, leaving whatever value it holds — edited
     or shipped — untouched. Line-wise, tracking the `'''` literals

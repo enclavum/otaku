@@ -91,6 +91,11 @@ Rules:
   wear and carry, how they feel, what they want, right now.
 - Lines marked ((OOC: …)) are the players talking out of character: never part of
   the scene's story, but decisions made there belong in the summary and journals.
+- A picture the reader attached is marked (picture 1), (picture 2), … at the
+  message it came with and, when this request carries pictures, attached in that
+  order. The pictures themselves are not kept: put what matters in them — a face,
+  a place, an object, a written text — into the summary and the journals, as the
+  characters saw it.
 - Every value stays in the scene's own language (see LANGUAGE above).
 - Empty lists are fine. JSON only.
 
@@ -138,45 +143,41 @@ Rules:
 # (`backend.tools`). Sent as an injection while the tool is switched on
 # for the story — bare in the system message, inside the OOC enclosure
 # in chat — so neither carries an enclosure of its own.
-TOOL_QUESTIONS_DEFAULT = (
-    "When the story reaches a fork you should not decide alone, you may ask the reader "
-    "ONE question. Write it as the last thing in your reply, inside <otk-question> tags: the "
-    "question on the first line, then, only if the answers are a fixed set, the possible "
-    "answers as numbered lines. The numbered lines are answers for the reader to pick "
-    "from, never further questions; when you list them, list at least two — one is no "
-    "choice. Like this, from an unrelated story:\n"
-    "\n"
-    "<otk-question>\n"
-    "Does Mara confess tonight, or wait for the ball?\n"
-    "1. She confesses tonight\n"
-    "2. She waits for the ball\n"
-    "3. She confesses, but to the wrong person\n"
-    "</otk-question>\n"
-    "\n"
-    "A question without a fixed set of answers has no numbered lines. Close the block "
-    "before anything else follows, never put a block inside another, and stop after the "
-    "closing tag. The reader's next message is the answer; then continue the scene from "
-    "where you stopped, without repeating what you wrote. Ask rarely, at most once per "
-    "reply, and never inside your reasoning."
-)
+TOOL_QUESTIONS_DEFAULT = """\
+You may ask the reader ONE question when a choice is theirs to make rather than
+yours. Write it as the last thing in your reply, inside <otk-question> tags: the
+question on the first line, then the answers for the reader to pick from as
+numbered lines, at least two. Like this, from an unrelated story:
+
+<otk-question>
+Does Mara confess tonight, or wait for the ball?
+1. She confesses tonight
+2. She waits for the ball
+3. She confesses, but to the wrong person
+</otk-question>
+
+The reader's next message is the answer; then go on from where you stopped,
+without repeating what you wrote. Ask rarely, at most once per reply, and never
+inside your reasoning.
+
+Close the block before anything else follows, never put a block inside another,
+and stop after the closing tag."""
 
 TOOL_ASSISTANT_NOTES_DEFAULT = """\
-After the visible scene you may add a <otk-note>...</otk-note> block. Nothing
-inside it reaches the reader. Close the block before anything else follows, and
-never put a block inside another.
+You may end a reply with a <otk-note>...</otk-note> block: a note to yourself
+that the reader never sees.
 
-Write there only what the text does not say and you will need, or find useful,
-in the next turns: a motive a character kept to themselves, the truth behind
-something they claimed, a detail you placed on purpose and mean to use later,
-where you intend this to go. Your earlier notes are above — add what is new or
-what changed, never what is already there or in the visible text. Many turns
-have nothing to add; then write no block at all.
+Write there only what your reply does not say and you will need, or find
+useful, in later turns: something you decided but did not state, why you
+answered as you did, what you are holding back or mean to bring up later,
+where you intend this to go. Any notes you wrote before are in your earlier
+replies — add what is new or what changed, never what is already there or in
+the visible text. Many turns have nothing to add; then write no block at all.
 
-The reader never sees the notes, so write them in whatever form is clear to you
-later — shorthand, fragments, a list — and keep them brief: they cost the same
-context the story does.
+Write the notes in whatever form is clear to you later — shorthand, fragments,
+a list — and keep them brief: they cost the same context as everything else.
 
-Two examples, from an unrelated story. The form is free — these only show the
+Two examples, from unrelated exchanges. The form is free — these only show the
 range.
 
 <otk-note>
@@ -185,11 +186,13 @@ first.
 </otk-note>
 
 <otk-note>
-She's been agreeing too readily for three turns and it's flattening her. The
-sword was never really hers to promise; I want that surfacing soon, but not by
-confession — better if Kael finds the second seal himself and she has to
-account for it. Slowing this scene down.
-</otk-note>"""
+Third time they've asked for the short version: one paragraph from now on
+unless asked for more. The figure they gave earlier was 40k, not 4k — a slip,
+not worth correcting unless it comes to matter.
+</otk-note>
+
+Close the block before anything else follows, and never put a block inside
+another."""
 
 _DEFAULTS = {
     "me_framing": "((OOC: The user writes as {name}.))\n{body}",

@@ -9,11 +9,13 @@
    caret is mid-sentence — and nothing else: a command is a button, and
    the box has never been a place to type one.
 
-   Pictures are staged beside the box and ride the line when it is sent.
-   Nothing reaches otaku before Send: the tiles are the browser's own
-   previews of the picked files, and the bytes go in the play body. The
-   attach hint shows only while the model can see (`shell.showFacts`);
-   whether a picture is taken is the backend's to refuse. */
+   Pictures are staged beside the box and ride the line when it is sent —
+   picked with the attach button, or pasted into the box from the
+   clipboard. Nothing reaches otaku before Send: the tiles are the
+   browser's own previews of the files, and the bytes go in the play
+   body. The attach hint shows only while the model can see
+   (`shell.showFacts`); whether a picture is taken is the backend's to
+   refuse. */
 
 import * as api from "./api.js";
 import { midReply, playLine, run } from "./commands.js";
@@ -137,6 +139,19 @@ export function wire() {
   });
   composer.addEventListener("blur", hideMenu);
   composer.addEventListener("keydown", onKey);
+  // A picture on the clipboard, pasted while the box has the focus (a
+  // paste lands where the focus is, so no other paste is touched), is
+  // staged as if picked; only the image items are taken, and a paste
+  // that holds none stays the browser's own text paste.
+  composer.addEventListener("paste", (event) => {
+    const pictures = [...(event.clipboardData?.items ?? [])]
+      .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+      .map((item) => item.getAsFile())
+      .filter(Boolean);
+    if (!pictures.length) return;
+    event.preventDefault();
+    stage(pictures);
+  });
   // Sent by the button, the caret comes back to the box: the next line
   // is typed, not clicked for.
   $(".otk-composer [data-send]")?.addEventListener("click", () => {

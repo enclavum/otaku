@@ -36,8 +36,10 @@ _DEEPEST_POSITION = 8
 # The closed lists a frontend offers. A reminder has the numbers alone —
 # it exists because a model forgets its system message — a tool has
 # "system" too.
-_REMINDER_POSITIONS: tuple[InjectionPosition, ...] = tuple(range(1, _DEEPEST_POSITION + 1))
-_TOOL_POSITIONS: tuple[InjectionPosition, ...] = ("system", *_REMINDER_POSITIONS)
+_REMINDER_POSITIONS: tuple[InjectionPosition, ...] = tuple(
+    InjectionPosition(depth) for depth in range(1, _DEEPEST_POSITION + 1)
+)
+_TOOL_POSITIONS: tuple[InjectionPosition, ...] = (InjectionPosition(), *_REMINDER_POSITIONS)
 
 
 class StorySetting:
@@ -91,7 +93,7 @@ class InjectingSetting(StorySetting):
     say, within the closed list a frontend offers — a stored position
     off the list reads as the default."""
 
-    default_position: ClassVar[InjectionPosition] = 1
+    default_position: ClassVar[InjectionPosition] = InjectionPosition(1)
 
     injection_position: InjectionPosition
 
@@ -112,7 +114,8 @@ class InjectingSetting(StorySetting):
         body = self._injection_text().strip() if self.enabled else ""
         if not body:
             return None
-        text = body if self.injection_position == "system" else OOC_FRAME.replace("{body}", body)
+        system = self.injection_position.depth is None
+        text = body if system else OOC_FRAME.replace("{body}", body)
         return Injection(self.name, text, self.injection_position)
 
     def to_db(
@@ -123,12 +126,8 @@ class InjectingSetting(StorySetting):
         reminder_text: str | None = None,
         display_notes: bool | None = None,
     ) -> StorySettingDB:
-        # By type first: to Python True is 1 and 1.0 is 1, and neither
-        # is a position.
-        if position is not None and (
-            type(position) not in (int, str) or position not in self.allowed_positions
-        ):
-            allowed = ", ".join(str(place) for place in self.allowed_positions)
+        if position is not None and position not in self.allowed_positions:
+            allowed = ", ".join(str(each.value) for each in self.allowed_positions)
             raise Refused(f"{self.label} takes one of these positions: {allowed}.")
         row = super().to_db(
             enabled=enabled, reminder_text=reminder_text, display_notes=display_notes
@@ -149,7 +148,7 @@ class ToolSetting(InjectingSetting):
     tool: ClassVar[type[Tool]] = Tool  # narrowed: a tool's switch always has one
     # Before the reader's newest message: all the recency, and nothing to
     # re-read.
-    default_position = 1
+    default_position = InjectionPosition(1)
     allowed_positions = _TOOL_POSITIONS
 
     prompt: str
@@ -205,7 +204,7 @@ class StorySettingReminder(InjectingSetting):
     label = "Set story reminder"
     # Deeper than a tool's prompt — before the reader's previous message: a
     # reminder is to be kept in mind, not obeyed at once.
-    default_position = 2
+    default_position = InjectionPosition(2)
     allowed_positions = _REMINDER_POSITIONS
 
     reminder_text: str
@@ -238,7 +237,7 @@ class StorySettingSharedReminder(InjectingSetting):
 
     name = "use_shared_reminder"
     label = "Use shared reminder"
-    default_position = 2
+    default_position = InjectionPosition(2)
     allowed_positions = _REMINDER_POSITIONS
 
     shared_reminder_text: str  # not the story's own (`reminder_text` stays None)

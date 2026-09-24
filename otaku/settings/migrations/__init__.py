@@ -19,6 +19,7 @@ from otaku.settings.migrations.config_file import hash_plain_password
 from otaku.settings.migrations.prompt_texts import (
     EXTRACT_0_2_2,
     EXTRACT_0_3_0,
+    EXTRACT_0_5_0,
     HISTORY_0_3_0,
     STORY_SO_FAR_0_3_0,
     refresh_template,
@@ -195,6 +196,10 @@ _PROMPT_MIGRATIONS: list[Migration] = [
     # the other two, whose 0.2.2 and 0.3.0 texts are identical.
     refresh_template("extract_prompt", EXTRACT_0_3_0, EXTRACT_DEFAULT),
     refresh_template("scene_history_prompt", STORY_SO_FAR_0_3_0, SCENE_HISTORY_DEFAULT),
+    # 0.6.0 — a scene's pictures reach the pass, marked in the text and
+    # attached where the model can see: the template asks for what
+    # matters in them, since a summarized row loses its picture.
+    refresh_template("extract_prompt", EXTRACT_0_5_0, EXTRACT_DEFAULT),
 ]
 
 

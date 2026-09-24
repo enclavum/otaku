@@ -297,6 +297,9 @@ export function context() {
     },
     lede,
     note: "",
+    // The recompute assembles no injections — a switched-on setting's text
+    // is not in these parts either — so it reports none, honestly.
+    injections: [],
     parts: [
       ...(system ? [{ role: "system", body: system }] : []),
       ...bodies.map((t) => ({ role: t.role, body: t.body })),

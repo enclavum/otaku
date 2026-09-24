@@ -6,6 +6,7 @@ title or an uploaded document."""
 from typing import Any
 
 from otaku import __version__
+from otaku.backend import InjectionPosition
 from otaku.backend.api import stories as api_stories
 from otaku.backend.session import Session
 from otaku.formatting import format_context
@@ -120,9 +121,13 @@ def story_settings(session: Session, story_id: int) -> dict[str, Any]:
                 "name": setting.name,
                 "label": setting.label,
                 "tool": setting.tool.name if setting.tool else None,
-                "allowed_positions": list(setting.allowed_positions),
+                "allowed_positions": [each.value for each in setting.allowed_positions],
                 "enabled": setting.enabled,
-                "position": setting.injection_position,
+                "position": (
+                    setting.injection_position.value
+                    if setting.injection_position is not None
+                    else None
+                ),
                 "reminder_text": setting.reminder_text,
                 "display_notes": setting.display_notes,
             }
@@ -144,12 +149,19 @@ def _update_setting(session: Session, ask: Ask) -> str:
         if flags[name] is not None and not isinstance(flags[name], bool):
             raise TypeError(f"{name} is not a boolean")
     reminder_text = ask.text("reminder_text") if "reminder_text" in ask.body else None
+    # "system" or a count from 1 is a position (which the setting may
+    # still refuse); anything else is not one, a malformed request.
+    position = None
+    if (raw := ask.body.get("position")) is not None:
+        position = InjectionPosition.from_value(raw)
+        if position is None:
+            raise TypeError('position is not "system" or a count from 1')
     return api_stories.update_setting(
         session,
         ask.params["setting"],
         story_id=story_id,
         enabled=flags["enabled"],
-        position=ask.body.get("position"),
+        position=position,
         reminder_text=reminder_text,
         display_notes=flags["display_notes"],
     )

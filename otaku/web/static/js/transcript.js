@@ -84,9 +84,11 @@ function questionPosed(turn) {
 
 /** Which tools' calls the reader is shown, from the story's settings
     (`GET /api/stories/{story}/settings`): a tool that is on, with its
-    display switch on — the notes. The RULE is held here until the
-    terminal draws notes too, when it moves below both. Whoever sets
-    it draws the transcript again: what it draws just changed. */
+    display switch on — the notes. The terminal keeps the same rule in
+    its own language (`terminal.tty.render.notes_displayed`): a
+    conjunction of two facts the setting reports, so each frontend reads
+    it off them. Whoever sets it draws the transcript again: what it
+    draws just changed. */
 export function displayTools(settings) {
   shownTools = new Set(
     settings.filter((s) => s.tool && s.enabled && s.display_notes).map((s) => s.tool),

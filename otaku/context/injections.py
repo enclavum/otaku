@@ -22,24 +22,24 @@ ROW_KIND = "injection"
 
 @dataclass(frozen=True)
 class Injection:
-    """Text sent as it is; an empty one is not sent. At "system" it is
-    appended to the system message, after the premise. At a number it is
-    a user row of its own, placed BEFORE that one of the reader's
-    messages counted from the end — 1 the newest, 2 the one before —
-    which the merge then heads with it; never past the recap, and never
-    after the newest row, which keeps the last word and its cue. A
-    number below 1 rides as 1."""
+    """Text sent as it is; an empty one is not sent. At the system
+    position it is appended to the system message, after the premise.
+    At a depth it is a user row of its own, placed BEFORE that one of
+    the reader's messages counted from the end — 1 the newest, 2 the
+    one before — which the merge then heads with it; never past the
+    recap, and never after the newest row, which keeps the last word and
+    its cue."""
 
     owner: str  # what made it — a setting's name, later a lorebook's — for whoever reports it
     text: str
-    position: InjectionPosition = 1
+    position: InjectionPosition
 
 
 def inject_into_system(system: str, injections: Iterable[Injection]) -> str:
     """The system message with every "system" injection after the
     premise, a blank line between; without a premise, the injections
     alone."""
-    texts = (i.text for i in injections if i.position == "system")
+    texts = (i.text for i in injections if i.position.depth is None)
     return "\n\n".join(part for part in (system, *texts) if part)
 
 
@@ -55,9 +55,9 @@ def inject_into_tail(
     given. Only a story with no rows at all sends one on its own."""
     by_place: dict[int, list[Injection]] = {}
     for injection in injections:
-        if not isinstance(injection.position, int) or not injection.text:
-            continue  # "system" is `inject_into_system`'s; an empty one is not sent
-        wanted = max(1, injection.position)
+        if injection.position.depth is None or not injection.text:
+            continue  # the system position is `inject_into_system`'s; an empty one is not sent
+        wanted = injection.position.depth
         place = wall
         seen = 0
         for at in range(len(rows) - 1, wall - 1, -1):

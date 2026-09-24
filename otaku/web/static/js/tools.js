@@ -316,6 +316,8 @@ function instructionsButton(view, setting) {
   return button;
 }
 
+/* A position's name is decided below both frontends (`InjectionPosition.text`,
+   `store.schema`); this is the rule copied for the page's own drawing. */
 function nth(position) {
   const n = position + 1; // 1 → 2nd, 8 → 9th: the reader's newest message is the last
   const suffix = n === 2 ? "nd" : n === 3 ? "rd" : "th";

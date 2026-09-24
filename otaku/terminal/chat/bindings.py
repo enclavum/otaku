@@ -145,7 +145,8 @@ def _report_undo_ending(chat: Chat) -> None:
         chat.say("Undone. The story is now empty (its turns stay in the tree).")
         return
     report = f"{DIM}[ undone. the story now ends with: ]{RESET}"
-    chat.say(f"{report}\n\n{last_turns(list(chat.session.messages), 2)}")
+    turns = last_turns(list(chat.session.messages), 2, notes=chat.notes_displayed)
+    chat.say(f"{report}\n\n{turns}")
     chat.restore_tail(2, above=report)
 
 
@@ -205,7 +206,7 @@ def _last(chat: Chat, raw: str) -> None:
     # story shows everything it has, and the report must not over-claim.
     shown = (len(list(session.messages)[-rows:]) + 1) // 2
     report = f"The last {shown} turns of this story:"
-    chat.say(f"{report}\n\n{last_turns(list(session.messages), rows)}")
+    chat.say(f"{report}\n\n{last_turns(list(session.messages), rows, notes=chat.notes_displayed)}")
     chat.restore_tail(rows, above=report)
 
 
@@ -261,7 +262,7 @@ def _landed(chat: Chat, landed: str | None) -> None:
     if landed is None:
         return
     chat.ledger.rule()
-    turns = last_turns(list(chat.session.messages), RESUME_TURNS)
+    turns = last_turns(list(chat.session.messages), RESUME_TURNS, notes=chat.notes_displayed)
     # A story with nothing played echoes no turns, and no blank for them.
     chat.say(f"{landed}\n\n{turns}" if turns else landed)
     if turns:
@@ -380,7 +381,7 @@ def _card(chat: Chat, raw: str) -> None:
     print(f"{DIM}[ {landed.report} ]{RESET}", file=out)
     if landed.greeting is not None:
         print(file=out)
-        print(message(landed.greeting.body, "assistant"), file=out)
+        print(message(landed.greeting.body, "assistant", notes=chat.notes_displayed), file=out)
 
 
 def _import(chat: Chat, raw: str) -> None:
@@ -407,7 +408,7 @@ def _import(chat: Chat, raw: str) -> None:
         if report is not None:
             chat.say(report)
     chat.ledger.rule()
-    turns = last_turns(list(chat.session.messages), RESUME_TURNS)
+    turns = last_turns(list(chat.session.messages), RESUME_TURNS, notes=chat.notes_displayed)
     chat.say(f"The last turns of this story:\n\n{turns}")
     chat.restore_tail(RESUME_TURNS)
 

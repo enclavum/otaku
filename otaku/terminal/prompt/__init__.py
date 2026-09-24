@@ -1,10 +1,11 @@
 """One submission in: everything between the keyboard and one submitted
 line — the prompt_toolkit session (store-backed history via the backend,
 the slash menu from `completion`, the shortcut keybindings), `Carry`
-(what a shortcut hands across the prompt's exit), and `LineAssembler`
-(the `\"\"\"` multiline convention). The loop only prompts, feeds, and
-submits; and nothing here needs `Chat` — the prompt sits below the chat
-surface.
+(what a shortcut hands across the prompt's exit), `LineAssembler` (the
+`\"\"\"` multiline convention), and `AnswerMenu` — the answers to a
+question the story stands on, drawn ABOVE the prompt line as rows of
+its own message. The loop only prompts, feeds, and submits; and nothing
+here needs `Chat` — the prompt sits below the chat surface.
 
 A shortcut key exits the prompt with its command as the result, stashing
 the in-progress text in `Carry` so the next prompt restores it; the keys
@@ -18,7 +19,7 @@ between the delimiters (newlines preserved) is sent as a single message.
 `LineAssembler` implements the state machine.
 """
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from prompt_toolkit import PromptSession
@@ -47,8 +48,12 @@ from otaku.backend.session import Session
 from otaku.formatting import flatten, truncate
 from otaku.terminal.prompt.completion import SlashCompleter
 from otaku.terminal.tty import statusline
-from otaku.terminal.tty.render import command_tokens, message
+from otaku.terminal.tty.render import BAR, asked, block, command_tokens, message
 from otaku.terminal.tty.theme import theme
+
+# The blank before a prompt that opens on a question's answers, while
+# they show: the bar alone, the question's block running on into the rows.
+_BARRED = BAR.rstrip()
 
 PLACEHOLDER = FormattedText([("class:placeholder", "Send a message")])
 
@@ -78,6 +83,83 @@ class Carry:
     def take_shortcut(self) -> bool:
         taken, self.shortcut = self.shortcut, False
         return taken
+
+
+class AnswerMenu:
+    """The answers to the question the story stands on, above the prompt
+    line: the rows of the prompt's MESSAGE, behind the bar the question
+    stands behind (`render.BAR`, wrapped to the width as its block is),
+    numbered as the model listed them, the one under the cursor starred
+    and in the accent, redrawn as ↑/↓ move it, a blank line before the
+    prompt.
+    The blank line before the prompt is the menu's own first row while
+    the loop leaves it to the menu (`top_row`, the ledger's deferred
+    gap): the bar alone while the rows show, so the question's block
+    runs on into them, a plain blank once they hide. Shown on the empty
+    line alone — a character typed is the reader's own answer and the
+    rows go, the empty line brings them back — and
+    gone once the line is sent, so the scrollback keeps the
+    question alone, as a past question is shown. Enter sends the answer
+    under the cursor as the line; → takes it into the line to be edited;
+    Esc dismisses the rows for this prompt. `answers` is asked as each
+    prompt opens (`open`, its `pre_run`): the question is the newest
+    reply's, and the line played answers it."""
+
+    def __init__(self, answers: Callable[[], Sequence[str]]) -> None:
+        self._answers = answers
+        self.rows: tuple[str, ...] = ()
+        self.choice = 0
+        self.dismissed = False
+        self.top_row = False  # the blank before the prompt is this menu's to draw
+
+    def open(self) -> None:
+        self.rows = tuple(self._answers())
+        self.choice = 0
+        self.dismissed = False
+
+    @property
+    def posed(self) -> bool:
+        """Whether the story stands on a question with answers to offer —
+        what the next prompt will open with, asked before it opens: the
+        loop then leaves the blank before the prompt to the menu
+        (`top_row`)."""
+        return bool(self._answers())
+
+    def shown(self) -> bool:
+        app = get_app()
+        return bool(self.rows) and not self.dismissed and not app.current_buffer.text
+
+    def chosen(self) -> str:
+        return self.rows[self.choice]
+
+    def move(self, step: int) -> None:
+        self.choice = (self.choice + step) % len(self.rows)
+
+    def message(self, prefix: str) -> StyleAndTextTuples:
+        """The prompt's message: the answers as rows over the prefix while
+        they are shown, the prefix alone otherwise — and alone again in
+        the final render, once the line is sent (`is_done`), so the rows
+        leave the screen with the menu."""
+        out: StyleAndTextTuples = []
+        showing = self.shown() and not get_app().is_done
+        if self.top_row:
+            out.append(("class:answer", _BARRED + "\n") if showing else ("", "\n"))
+        if showing:
+            # Behind the bar, the chosen row marked with a star in the two
+            # columns after it; an answer longer than a row wraps behind
+            # the bar and past the mark; a blank line before the prompt.
+            width = get_app().output.get_size().columns
+            for i, answer in enumerate(self.rows):
+                chosen = i == self.choice
+                style = "class:answer.current" if chosen else "class:answer"
+                rows = block(f"{i + 1}. {answer}", width - 2).split("\n")
+                for n, row in enumerate(rows):
+                    mark = "*" if chosen and n == 0 else " "
+                    out.append(("class:answer", BAR))
+                    out.append((style, f"{mark} {row[len(BAR) :]}\n"))
+            out.append(("", "\n"))
+        out.append(("class:prompt", prefix))
+        return out
 
 
 class LineAssembler:
@@ -176,9 +258,10 @@ def build_prompt(
     assembler: LineAssembler,
     *,
     shortcuts: Mapping[str, tuple[str, str]],
-) -> PromptSession[str]:
-    """The assembled prompt session: history, menu, style, the activity
-    toolbar reading `session.status()`, and the shortcut keybindings —
+) -> tuple[PromptSession[str], AnswerMenu]:
+    """The assembled prompt session and the answer menu it draws above
+    its line: history, menu, style, the activity toolbar reading
+    `session.status()`, and the shortcut keybindings —
     `shortcuts` maps a command token to its key in both spellings, the
     binding form and the menu caption (`chat.bindings.SHORTCUTS` passed
     as data, not an import: the prompt sits below the chat surface).
@@ -206,11 +289,12 @@ def build_prompt(
     menu_line = Condition(
         lambda: completer.partial(get_app().current_buffer.document.text_before_cursor) is not None
     )
+    answers = AnswerMenu(lambda: _answers(session))
     prompt_session: PromptSession[str] = PromptSession(
         history=_SessionHistory(session),
         completer=completer,
         lexer=_CommandLexer(),
-        key_bindings=_make_bindings(carry, menu_line, shortcuts),
+        key_bindings=_make_bindings(carry, menu_line, shortcuts, answers),
         complete_while_typing=menu_line,
         enable_history_search=False,
         style=_prompt_style(),
@@ -232,7 +316,15 @@ def build_prompt(
         )
     # Pre-select the first row whenever the menu (re)populates.
     prompt_session.default_buffer.on_completions_changed += lambda buf: _preselect_first(buf)
-    return prompt_session
+    return prompt_session, answers
+
+
+def _answers(session: Session) -> Sequence[str]:
+    """The answers to pick from, while the story stands on a question
+    with a fixed set — read as each prompt opens: the line played next
+    answers the question, and the rows go."""
+    question = asked(session.messages[-1] if session.messages else None)
+    return question.options if question is not None else ()
 
 
 def _cast(session: Session) -> list[tuple[str, str]]:
@@ -274,6 +366,10 @@ def _prompt_style() -> Style:
             # pinned row it hands off to.
             "bottom-toolbar": "noreverse",
             "bottom-toolbar.text": "noreverse fg:ansibrightblack",
+            # The answer rows above the prompt: the one under the cursor in
+            # the accent, as the command menu picks its row out.
+            "answer": "fg:default",
+            "answer.current": accent,
         }
     )
 
@@ -296,7 +392,10 @@ def _activity_toolbar(session: Session) -> Callable[[], FormattedText]:
 
 
 def _make_bindings(
-    carry: Carry, menu_line: Condition, shortcuts: Mapping[str, tuple[str, str]]
+    carry: Carry,
+    menu_line: Condition,
+    shortcuts: Mapping[str, tuple[str, str]],
+    answers: AnswerMenu,
 ) -> KeyBindings:
     kb = KeyBindings()
     for command, (key, _caption) in shortcuts.items():
@@ -357,6 +456,45 @@ def _make_bindings(
             event.current_buffer.start_completion(select_first=False)
         else:
             event.current_buffer.cancel_completion()
+
+    # The answers above the line, while they are shown: ↑/↓ walk them
+    # (added after the history keys, so they win while the rows are up),
+    # Enter sends the one under the cursor, → takes it into the line,
+    # Esc dismisses. → because it is the one key every terminal reports
+    # that means nothing on an empty line: Shift+Enter and Ctrl+Enter
+    # are plain Enter wherever the terminal encodes no modifiers.
+    rows_up = Condition(answers.shown)
+
+    @kb.add("up", filter=rows_up)
+    def _answer_up(event: Any) -> None:
+        answers.move(-1)
+
+    @kb.add("down", filter=rows_up)
+    def _answer_down(event: Any) -> None:
+        answers.move(1)
+
+    @kb.add("enter", filter=rows_up)
+    def _answer_send(event: Any) -> None:
+        event.current_buffer.insert_text(answers.chosen())
+        event.current_buffer.validate_and_handle()
+
+    @kb.add("right", filter=rows_up)
+    def _answer_take(event: Any) -> None:
+        event.current_buffer.insert_text(answers.chosen())
+
+    @kb.add("escape", filter=rows_up, eager=True)
+    def _answer_dismiss(event: Any) -> None:
+        answers.dismissed = True
+
+    # ^C while the story stands on a question — rows opened for this
+    # prompt, shown or not — erases the prompt, rows and all, instead of
+    # leaving the aborted line where the next prompt draws the rows again
+    # under it. The flag is prompt_toolkit's own, read at its final
+    # redraw; the run loop resets it (`chat.loop`).
+    @kb.add("c-c", filter=Condition(lambda: bool(answers.rows)))
+    def _answer_abort(event: Any) -> None:
+        event.app.erase_when_done = True
+        event.app.exit(exception=KeyboardInterrupt(), style="class:aborting")
 
     return kb
 

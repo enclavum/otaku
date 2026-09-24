@@ -17,14 +17,16 @@ from typing import Any
 import pytest
 
 from otaku.backend.api import lore as api_lore
+from otaku.backend.api import providers as api_providers
 from otaku.backend.api import stories as api_stories
 from otaku.backend.formats import exports, imports
 from otaku.backend.paths import Paths
 from otaku.backend.session import Refused
 from otaku.terminal.screens import story as screen_story
+from scenarios.session import test_play
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch, set_config, set_config_provider
-from scenarios.support.screens import CTRL_S, DOWN, ENTER, ESC, SHIFT_TAB, TAB, run_screen
+from scenarios.support.screens import CTRL_S, DOWN, ENTER, ESC, LEFT, RIGHT, run_screen
 from scenarios.support.server import numbered_script
 
 CHAPEL = Path(__file__).parent.parent / "fixtures" / "chapel.md"
@@ -54,7 +56,7 @@ class TestLoreBrowser:
 
     def test_the_cast_lens_edits_a_description(self, app: App) -> None:
         story_id = remembered(app)
-        browse(app, story_id, TAB + ENTER + ENTER + "!" + CTRL_S + ESC * 3)
+        browse(app, story_id, RIGHT + ENTER + ENTER + "!" + CTRL_S + ESC * 3)
         keeper = app.store.characters.list(story_id)[0]
         assert (
             keeper.description == "!warden of the gate"
@@ -104,11 +106,11 @@ class TestLoreBrowser:
         assert app.store.journals.list(story_id)[-1].state == before
 
     def test_the_premise_tab_writes_the_system_prompt(self, app: App) -> None:
-        # Two tabs back from the scenes sits the premise, edited in
+        # Two tabs to the left of the scenes sits the premise, edited in
         # place. It is the same field /system sets, and this is the open
         # story — so the session follows the store.
         story_id = remembered(app)
-        browse(app, story_id, SHIFT_TAB * 2 + ENTER + "!" + CTRL_S + ESC * 2)
+        browse(app, story_id, LEFT * 2 + ENTER + "!" + CTRL_S + ESC * 2)
         assert app.store.stories.get_system(story_id) == "!"
         assert app.session.system == "!"
 
@@ -117,7 +119,7 @@ class TestLoreBrowser:
         # and the landing line rides back for the caller to echo — the
         # dossier lands exactly the way the story browser does.
         story_id = remembered(app)
-        assert browse(app, story_id, SHIFT_TAB + ENTER)
+        assert browse(app, story_id, LEFT + ENTER)
 
 
 class TestEditAddressing:
@@ -210,6 +212,34 @@ class TestExtract:
             assert "{this} stays literal" in analyst
         finally:
             app.close()
+
+
+class TestExtractSeesPictures:
+    """The lore pass is the one moment a summarized row's picture can be
+    put into words that last: each is marked `(picture n)` at its line
+    of the numbered scene, and while the model can see, the pictures
+    ride the extraction request in that order."""
+
+    def test_the_pictures_ride_the_extraction_request_marked_by_number(self, tmp_path) -> None:
+        with test_play._seeing(tmp_path) as app:
+            test_play._play(app, "Look at this door.", [test_play._cat()])
+            app.play("And the hall beyond.")
+            app.play("/extract")
+            analyst = analyst_prompt(app)
+            # the prompt is text and then the picture, as a turn's are
+            assert analyst[0]["type"] == "text" and analyst[1]["type"] == "image_url"
+            assert "[1] (picture 1) Look at this door." in analyst[0]["text"]
+            assert analyst[1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+
+    def test_a_model_that_cannot_see_gets_the_marks_alone(self, tmp_path) -> None:
+        with test_play._seeing(tmp_path) as app:
+            test_play._play(app, "Look at this door.", [test_play._cat()])
+            app.play("And the hall beyond.")
+            # the pass runs on a model that cannot see: the generic provider's
+            api_providers.switch_model(app.session, "generic", "test-model")
+            app.play("/extract")
+            analyst = analyst_prompt(app)
+            assert isinstance(analyst, str) and "(picture 1)" in analyst
 
 
 class TestIdleScheduling:
@@ -1036,6 +1066,17 @@ def chat_script(reply: str) -> Callable[[dict[str, Any]], str]:
         return reply
 
     return script
+
+
+def analyst_prompt(app: App) -> Any:
+    """The extraction request's prompt as sent — a string, or the parts a
+    pictured one is made of. A managed engine's other requests (the
+    listing, a model's card) carry no messages and are passed over."""
+    return next(
+        r["messages"][-1]["content"]
+        for r in app.server.requests
+        if "messages" in r and "You are a story analyst" in str(r["messages"][-1]["content"])
+    )
 
 
 def lore_calls(app: App) -> list[str]:

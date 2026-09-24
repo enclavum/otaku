@@ -23,6 +23,7 @@ from otaku.formatting import (
     truncate_label,
 )
 from otaku.providers import ALL_CLIENTS, Locality, ModelCapabilities, ModelState, reasoning
+from otaku.store.schema import InjectionPosition
 
 
 @dataclass(frozen=True)
@@ -36,10 +37,22 @@ class ContextPart:
 
 
 @dataclass(frozen=True)
+class ContextInjection:
+    """One text the request carries besides the story: whose — the
+    setting's label — where it rides (the `position`, and its
+    `position_text` as the depth ruler names it) and what it costs."""
+
+    label: str
+    position: InjectionPosition
+    position_text: str
+    tokens: int
+
+
+@dataclass(frozen=True)
 class ContextReport:
     """The next request EXACTLY as it will be sent: the assembled prompt
-    — the facts the diagram and the summary are drawn from — and one
-    part per message.
+    — the facts the diagram and the summary are drawn from — the
+    injections it carries, and one part per message.
 
     Nothing in it is otaku's own text except the summary and the role
     markers `text` brackets (they stand for the JSON role field) — every
@@ -48,6 +61,7 @@ class ContextReport:
     prompt: AssembledPrompt
     tail_setting: int  # the configured min_tail_messages the rung is compared with
     parts: tuple[ContextPart, ...]
+    injections: tuple[ContextInjection, ...] = ()
     # What the preview could not know: "" when it knew everything, else
     # the sentence — the model is not loaded, so the window it was cut
     # to is the assembler's substitute until the turn loads it.
@@ -103,9 +117,22 @@ def context(session: Session) -> ContextReport:
         and max_context is None
         and found.state in (ModelState.UNLOADED, ModelState.LOADING)
     )
+    # An injection names its owner, a setting; the report names the
+    # setting as the reader knows it. One this build has no setting for
+    # keeps its name.
+    settings = stories.get_settings(session)
     return ContextReport(
         prompt=prompt,
         tail_setting=session._config.min_tail_messages,
+        injections=tuple(
+            ContextInjection(
+                label=setting.label if (setting := settings.get(sent.owner)) else sent.owner,
+                position=sent.position,
+                position_text=sent.position.text,
+                tokens=sent.tokens,
+            )
+            for sent in prompt.injections
+        ),
         parts=tuple(
             ContextPart(
                 turn.role,
@@ -615,6 +642,15 @@ def _summary(report: ContextReport) -> str:
         lines.append(
             f"  {prompt.pictures_omitted} picture{plural} on the verbatim messages not sent: "
             "the model cannot see, or the file is gone"
+        )
+    if report.injections:
+        # What rides besides the story, each where the story put it — a
+        # bullet each, the label lowercased like the lines around it; the
+        # texts themselves are in the parts, being the wire.
+        lines.append("  injected:")
+        lines.extend(
+            f"  - {i.label.lower()} ({i.position_text}, ~{i.tokens:,} tokens)"
+            for i in report.injections
         )
     if prompt.tail_target < report.tail_setting:
         # Case 5: the tail stepped down so the context could fit (a

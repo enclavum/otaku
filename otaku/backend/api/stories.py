@@ -244,15 +244,16 @@ def update_setting(
         return f"{setting.label}: off."
     if row.position is None:
         return f"{setting.label}: on."
-    if not isinstance(row.position, int):
+    if row.position.depth is None:
         return f"{setting.label}: on, in the system message."
     # before which of the reader's messages, counted from the end
-    if row.position == 1:
+    depth = row.position.depth
+    if depth == 1:
         return f"{setting.label}: on, before your latest message."
-    if row.position == 2:
+    if depth == 2:
         return f"{setting.label}: on, before your previous message."
-    suffix = "rd" if row.position == 3 else "th"
-    return f"{setting.label}: on, before your {row.position}{suffix}-last message."
+    suffix = "rd" if depth == 3 else "th"
+    return f"{setting.label}: on, before your {depth}{suffix}-last message."
 
 
 def get_shared_reminder(session: Session) -> str:

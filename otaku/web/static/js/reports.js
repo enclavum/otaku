@@ -51,6 +51,27 @@ export async function openContext() {
 
   const head = element("div", "otk-v otk-v--lg");
   head.append(summary, stages(shape));
+  if (preview.injections.length) {
+    /* What rides besides the story — each setting's text, where the
+       story put it and what it costs — under the stages: a label, then
+       a bullet per injection in the summary's figure dress, the label
+       lowercased like the figures around it. The texts themselves are
+       in the wire below. */
+    const injected = element("div", "otk-v otk-v--xs");
+    injected.append(span("otk-label", "injected"));
+    const list = element("ul", "otk-context__injected");
+    for (const injection of preview.injections) {
+      list.append(
+        element(
+          "li",
+          "otk-meta",
+          `${injection.label.toLowerCase()} · ${injection.position_text} · ~${count(injection.tokens)} tokens`,
+        ),
+      );
+    }
+    injected.append(list);
+    head.append(injected);
+  }
 
   const wire = element("div", "otk-context__wire");
   for (const part of preview.parts) {

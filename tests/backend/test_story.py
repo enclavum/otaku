@@ -27,39 +27,42 @@ from otaku.backend.story import (
     StorySettingSharedReminder,
 )
 from otaku.settings.prompts import Prompts
-from otaku.store.schema import StorySettingDB
+from otaku.store.schema import InjectionPosition, StorySettingDB
 
 PROMPTS = replace(
     Prompts(), tool_questions_prompt="ASK HOW", tool_assistant_notes_prompt="NOTE HOW"
 )
-FROM_THE_END = (1, 2, 3, 4, 5, 6, 7, 8)
+FROM_THE_END = tuple(InjectionPosition(depth) for depth in range(1, 9))
+SYSTEM = InjectionPosition()
 
 
 class TestAsItStands:
     def test_a_story_that_stored_nothing_has_the_setting_off_at_its_default(self) -> None:
         assert not questions().enabled
-        assert questions().injection_position == 1
-        assert reminder().injection_position == 2
+        assert questions().injection_position == InjectionPosition(1)
+        assert reminder().injection_position == InjectionPosition(2)
         assert reminder().reminder_text == ""
         assert notes().display_notes is True
 
     def test_what_the_story_stored_stands(self) -> None:
-        stored = StorySettingDB("allow_questions", enabled=True, position=4)
+        stored = StorySettingDB("allow_questions", enabled=True, position=InjectionPosition(4))
         found = questions(stored)
-        assert (found.enabled, found.injection_position) == (True, 4)
+        assert (found.enabled, found.injection_position) == (True, InjectionPosition(4))
         stored = StorySettingDB("use_story_reminder", reminder_text="Rain.")
         assert reminder(stored).reminder_text == "Rain."
         stored = StorySettingDB("allow_assistant_notes", display_notes=False)
         assert notes(stored).display_notes is False
 
     def test_a_position_the_setting_may_not_take_reads_as_its_default(self) -> None:
-        assert questions(StorySettingDB("allow_questions", position=9)).injection_position == 1
-        stored = StorySettingDB("use_story_reminder", position="system")
-        assert reminder(stored).injection_position == 2
+        assert questions(
+            StorySettingDB("allow_questions", position=InjectionPosition(9))
+        ).injection_position == InjectionPosition(1)
+        stored = StorySettingDB("use_story_reminder", position=SYSTEM)
+        assert reminder(stored).injection_position == InjectionPosition(2)
 
     def test_the_positions_are_a_closed_list(self) -> None:
-        assert StorySettingQuestions.allowed_positions == ("system", *FROM_THE_END)
-        assert StorySettingAssistantNotes.allowed_positions == ("system", *FROM_THE_END)
+        assert StorySettingQuestions.allowed_positions == (SYSTEM, *FROM_THE_END)
+        assert StorySettingAssistantNotes.allowed_positions == (SYSTEM, *FROM_THE_END)
         assert StorySettingReminder.allowed_positions == FROM_THE_END
         assert StorySettingSharedReminder.allowed_positions == FROM_THE_END
 
@@ -96,35 +99,43 @@ class TestAsItStands:
 
 class TestToDb:
     def test_nothing_given_is_the_row_as_it_stands(self) -> None:
-        assert questions().to_db() == StorySettingDB("allow_questions", position=1)
+        assert questions().to_db() == StorySettingDB(
+            "allow_questions", position=InjectionPosition(1)
+        )
         assert reminder().to_db() == StorySettingDB(
-            "use_story_reminder", position=2, reminder_text=""
+            "use_story_reminder", position=InjectionPosition(2), reminder_text=""
         )
         assert notes().to_db() == StorySettingDB(
-            "allow_assistant_notes", position=1, display_notes=True
+            "allow_assistant_notes", position=InjectionPosition(1), display_notes=True
         )
         assert StorySettingMode().to_db() == StorySettingDB("story_mode")
 
     def test_what_is_given_is_laid_over_it(self) -> None:
-        row = questions(StorySettingDB("allow_questions", position=2)).to_db(enabled=True)
-        assert row == StorySettingDB("allow_questions", enabled=True, position=2)
-        row = reminder().to_db(enabled=True, position=4, reminder_text="Rain.")
+        row = questions(StorySettingDB("allow_questions", position=InjectionPosition(2))).to_db(
+            enabled=True
+        )
+        assert row == StorySettingDB("allow_questions", enabled=True, position=InjectionPosition(2))
+        row = reminder().to_db(enabled=True, position=InjectionPosition(4), reminder_text="Rain.")
         assert row == StorySettingDB(
-            "use_story_reminder", enabled=True, position=4, reminder_text="Rain."
+            "use_story_reminder", enabled=True, position=InjectionPosition(4), reminder_text="Rain."
         )
         row = notes().to_db(display_notes=False)
-        assert row == StorySettingDB("allow_assistant_notes", position=1, display_notes=False)
+        assert row == StorySettingDB(
+            "allow_assistant_notes", position=InjectionPosition(1), display_notes=False
+        )
 
     def test_a_position_outside_the_list_is_refused(self) -> None:
-        for position in ("end", 0, 9, -1, "2", True):
-            with pytest.raises(Refused):
-                questions().to_db(position=position)  # type: ignore[arg-type]
+        # Off the list: past the deepest place, or the system message for
+        # a reminder. (What is not a position at all never becomes one:
+        # `InjectionPosition.from_value` refuses it at the boundary.)
         with pytest.raises(Refused):
-            reminder().to_db(position="system")
+            questions().to_db(position=InjectionPosition(9))
+        with pytest.raises(Refused):
+            reminder().to_db(position=SYSTEM)
 
     def test_a_flag_takes_no_position(self) -> None:
         with pytest.raises(Refused):
-            StorySettingMode().to_db(position=1)
+            StorySettingMode().to_db(position=InjectionPosition(1))
 
     def test_only_the_story_reminder_takes_a_reminder(self) -> None:
         with pytest.raises(Refused):
@@ -155,21 +166,24 @@ class TestInjection:
         assert (found.owner, found.text, found.position) == (
             "allow_questions",
             "((OOC: ASK HOW))",
-            1,
+            InjectionPosition(1),
         )
 
     def test_a_tool_in_the_system_message_is_bare(self) -> None:
-        found = notes(StorySettingDB("allow_assistant_notes", enabled=True, position="system"))
+        found = notes(StorySettingDB("allow_assistant_notes", enabled=True, position=SYSTEM))
         assert found.injection is not None
-        assert (found.injection.text, found.injection.position) == ("NOTE HOW", "system")
+        assert (found.injection.text, found.injection.position) == ("NOTE HOW", SYSTEM)
 
     def test_the_story_reminder_is_enclosed_out_of_character(self) -> None:
         stored = StorySettingDB(
-            "use_story_reminder", enabled=True, position=4, reminder_text="[Style: terse]\n"
+            "use_story_reminder",
+            enabled=True,
+            position=InjectionPosition(4),
+            reminder_text="[Style: terse]\n",
         )
         found = reminder(stored).injection
         assert found is not None
-        assert (found.text, found.position) == ("((OOC: [Style: terse]))", 4)
+        assert (found.text, found.position) == ("((OOC: [Style: terse]))", InjectionPosition(4))
 
     def test_the_shared_reminder_sends_the_text_stories_share(self) -> None:
         found = shared(
@@ -179,7 +193,7 @@ class TestInjection:
         assert (found.owner, found.text, found.position) == (
             "use_shared_reminder",
             "((OOC: Stay grim.))",
-            2,
+            InjectionPosition(2),
         )
 
     def test_a_reminder_with_nothing_to_say_is_not_sent(self) -> None:

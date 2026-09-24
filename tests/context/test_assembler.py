@@ -28,7 +28,7 @@ from otaku.context.assembler import (
 from otaku.context.injections import Injection
 from otaku.context.tool_calls import ToolSet
 from otaku.providers import PicturesRide
-from otaku.store.schema import Attachment, Message, Scene
+from otaku.store.schema import Attachment, InjectionPosition, Message, Scene
 
 CAT = Attachment(file="pic-0001-20260918-a3f9c1e2.jpg", width=2, height=2, size=3)
 CAT_PICTURE = WirePicture(b"cat", "image/jpeg")
@@ -401,10 +401,10 @@ class TestInjections:
         assert third.messages[0].body == "Remember.\n\nOne."
 
     def test_the_newest_message_always_keeps_the_last_word(self) -> None:
-        # A number below 1 is no place from the end: it rides as 1.
-        for position in (0, -1):
-            prompt = assemble("", exchange(), 8192, injections=(end("Remember.", position),))
-            assert prompt.messages[-1].body == "Remember.\n\nThree."
+        # The nearest place is before the newest message: no position
+        # names one after it.
+        prompt = assemble("", exchange(), 8192, injections=(end("Remember.", 1),))
+        assert prompt.messages[-1].body == "Remember.\n\nThree."
 
     def test_a_position_past_the_top_stops_at_the_top(self) -> None:
         prompt = assemble("", exchange(), 8192, injections=(end("Remember.", 99),))
@@ -531,13 +531,13 @@ def noted() -> list[Message]:
     return [user("One."), assistant("Two.\n\n<otk-note>the seal</otk-note>"), user("Three.")]
 
 
-def end(text: str, position: int = 1) -> Injection:
+def end(text: str, depth: int = 1) -> Injection:
     """An injection before one of the reader's messages, counted from the end."""
-    return Injection(owner="reminder", text=text, position=position)
+    return Injection(owner="reminder", text=text, position=InjectionPosition(depth))
 
 
 def system(text: str) -> Injection:
-    return Injection(owner="ask", text=text, position="system")
+    return Injection(owner="ask", text=text, position=InjectionPosition())
 
 
 def turns(n: int) -> list[Message]:

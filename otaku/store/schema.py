@@ -16,7 +16,7 @@ config file's otherwise.
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Literal, Self
+from typing import Self
 
 SCHEMA_VERSION = "6"
 
@@ -143,87 +143,6 @@ CREATE INDEX idx_token_usage_story ON token_usage (story_id);
 """
 
 
-# Where what a setting injects rides (`context.injections.Injection`):
-# "system", or which of the reader's messages it goes BEFORE, counted
-# from the end — 1 is the newest, 2 the one before it.
-InjectionPosition = Literal["system"] | int
-
-
-@dataclass(frozen=True)
-class StorySettingDB:
-    """One setting of a story, as the `settings` column records it: a
-    switch, where what it injects rides, the story's own reminder, and
-    whether the reader is shown the notes the model writes — the last two
-    each one setting's, the others every injecting setting's.
-    WHICH settings there are, and what each may take, is no business of
-    the column's (`backend.story`)."""
-
-    name: str
-    enabled: bool = False
-    position: InjectionPosition | None = None  # None: unsaid, the setting's default applies
-    reminder_text: str = ""
-    display_notes: bool = True
-
-    @classmethod
-    def from_json(cls, text: str) -> tuple[Self, ...]:
-        """The column read back: every setting it holds, in its order.
-        What makes no sense reads as unsaid — `enabled` that is not `true`
-        is False, a position that is not "system" or a count from 1 is
-        None — and a text that is no JSON object of objects holds none."""
-        out = []
-        for name, state in cls._parse(text).items():
-            if not isinstance(state, dict):
-                continue
-            position, reminder_text = state.get("position"), state.get("reminder_text")
-            # By type first: to Python True is 1 and 1.0 is 1, and neither is a position.
-            placed = position == "system" or (type(position) is int and position >= 1)
-            out.append(
-                cls(
-                    name=name,
-                    enabled=state.get("enabled") is True,
-                    position=position if placed else None,
-                    reminder_text=reminder_text if isinstance(reminder_text, str) else "",
-                    display_notes=state.get("display_notes") is not False,
-                )
-            )
-        return tuple(out)
-
-    @classmethod
-    def to_json(cls, settings: Sequence[Self], current: str = "") -> str:
-        """The column's text with these settings in it — a MERGE over
-        `current`, never a rewrite: a JSON key bumps no schema version, so
-        an older build can meet a newer one's keys and must hand them back
-        whole. Only what is said is written; an emptied reminder leaves
-        the column."""
-        column = cls._parse(current)
-        for setting in settings:
-            state = column.get(setting.name)
-            state = dict(state) if isinstance(state, dict) else {}
-            state["enabled"] = setting.enabled
-            if setting.position is not None:
-                state["position"] = setting.position
-            if setting.reminder_text:
-                state["reminder_text"] = setting.reminder_text
-            else:
-                state.pop("reminder_text", None)
-            if setting.display_notes:
-                state.pop("display_notes", None)  # the default; only the exception is said
-            else:
-                state["display_notes"] = False
-            column[setting.name] = state
-        return json.dumps(column, ensure_ascii=False)
-
-    @staticmethod
-    def _parse(text: str) -> dict[str, object]:
-        """The column's text parsed: the JSON object it holds, or an empty
-        dict for anything else — nothing, garbage, a list."""
-        try:
-            parsed = json.loads(text) if text else {}
-        except ValueError:
-            return {}
-        return parsed if isinstance(parsed, dict) else {}
-
-
 @dataclass(frozen=True)
 class Story:
     id: int
@@ -231,7 +150,7 @@ class Story:
     system: str
     head_id: int | None
     forked_from_id: int | None
-    settings: tuple[StorySettingDB, ...] = ()  # what the story has stored, see StorySettingDB
+    settings: tuple["StorySettingDB", ...] = ()  # what the story has stored, see StorySettingDB
 
 
 @dataclass(frozen=True)
@@ -341,3 +260,107 @@ class Journal:
     state: str
     history: str = ""
     updated_at: str = ""  # audit column, surfaced for display alone
+
+
+@dataclass(frozen=True)
+class StorySettingDB:
+    """One setting of a story, as the `settings` column records it: a
+    switch, where what it injects rides, the story's own reminder, and
+    whether the reader is shown the notes the model writes — the last two
+    each one setting's, the others every injecting setting's.
+    WHICH settings there are, and what each may take, is no business of
+    the column's (`backend.story`)."""
+
+    name: str
+    enabled: bool = False
+    position: "InjectionPosition | None" = None  # None: unsaid, the setting's default applies
+    reminder_text: str = ""
+    display_notes: bool = True
+
+    @classmethod
+    def from_json(cls, text: str) -> tuple[Self, ...]:
+        """The column read back: every setting it holds, in its order.
+        What makes no sense reads as unsaid — `enabled` that is not `true`
+        is False, a position that is not "system" or a count from 1 is
+        None — and a text that is no JSON object of objects holds none."""
+        out = []
+        for name, state in cls._parse(text).items():
+            if not isinstance(state, dict):
+                continue
+            reminder_text = state.get("reminder_text")
+            out.append(
+                cls(
+                    name=name,
+                    enabled=state.get("enabled") is True,
+                    position=InjectionPosition.from_value(state.get("position")),
+                    reminder_text=reminder_text if isinstance(reminder_text, str) else "",
+                    display_notes=state.get("display_notes") is not False,
+                )
+            )
+        return tuple(out)
+
+    @classmethod
+    def to_json(cls, settings: Sequence[Self], current: str = "") -> str:
+        """The column's text with these settings in it — a MERGE over
+        `current`, never a rewrite: a JSON key bumps no schema version, so
+        an older build can meet a newer one's keys and must hand them back
+        whole. Only what is said is written; an emptied reminder leaves
+        the column."""
+        column = cls._parse(current)
+        for setting in settings:
+            state = column.get(setting.name)
+            state = dict(state) if isinstance(state, dict) else {}
+            state["enabled"] = setting.enabled
+            if setting.position is not None:
+                state["position"] = setting.position.value
+            if setting.reminder_text:
+                state["reminder_text"] = setting.reminder_text
+            else:
+                state.pop("reminder_text", None)
+            if setting.display_notes:
+                state.pop("display_notes", None)  # the default; only the exception is said
+            else:
+                state["display_notes"] = False
+            column[setting.name] = state
+        return json.dumps(column, ensure_ascii=False)
+
+    @staticmethod
+    def _parse(text: str) -> dict[str, object]:
+        """The column's text parsed: the JSON object it holds, or an empty
+        dict for anything else — nothing, garbage, a list."""
+        try:
+            parsed = json.loads(text) if text else {}
+        except ValueError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
+
+@dataclass(frozen=True)
+class InjectionPosition:
+    """Where an injected text rides: before the reader's `depth`-th
+    message from the end (1 the newest), or, with no depth, in the
+    system message. `value` is the plain form the column and the wire
+    hold — "system" or the number — and `from_value` reads one back;
+    `text` names it as every frontend does ("system", "2nd last" for 1:
+    the reader's newest message is the last; the page copies the rule
+    in `tools.js placeName`)."""
+
+    depth: int | None = None
+
+    @property
+    def value(self) -> str | int:
+        return "system" if self.depth is None else self.depth
+
+    @property
+    def text(self) -> str:
+        if self.depth is None:
+            return "system"
+        nth = self.depth + 1
+        return f"{nth}{'nd' if nth == 2 else 'rd' if nth == 3 else 'th'} last"
+
+    @classmethod
+    def from_value(cls, value: object) -> Self | None:
+        """ "system" or an int from 1 (by type: True is not one); else None."""
+        if value == "system":
+            return cls()
+        return cls(value) if type(value) is int and value >= 1 else None

@@ -42,8 +42,9 @@ class TestAddress:
 
 class TestRenderWeb:
     """`banner.render_web` — whether the banner says the address is
-    public: on every host that reaches past this machine, whatever else
-    is set."""
+    public: on a host that reaches past this machine without both TLS
+    and a password; with both on, nothing is missing and nothing is
+    said."""
 
     def test_the_address_is_said(self) -> None:
         where = WebSettings(host="192.168.1.5", https=True)
@@ -57,10 +58,12 @@ class TestRenderWeb:
         for host in ("0.0.0.0", "::", "192.168.1.5", "otaku.local"):
             assert "public" in render_web(WebSettings(host=host)), host
 
-    def test_a_public_host_is_still_said_so_with_tls_and_a_password(self) -> None:
-        # Secured is not the same as private.
-        banner = render_web(WebSettings(host="0.0.0.0", https=True, password="hash"))
-        assert "public" in banner and "no " not in banner
+    def test_a_public_host_with_tls_and_a_password_gets_no_warning(self) -> None:
+        # Both on is the configuration the file recommends: nothing is missing.
+        assert "public" not in render_web(WebSettings(host="0.0.0.0", https=True, password="hash"))
+        # One of the two missing is still said.
+        assert "no password" in render_web(WebSettings(host="0.0.0.0", https=True))
+        assert "no TLS" in render_web(WebSettings(host="0.0.0.0", password="hash"))
 
     def test_a_password_is_noted(self) -> None:
         # On loopback, where no warning row speaks of one.

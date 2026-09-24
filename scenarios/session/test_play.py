@@ -3,10 +3,17 @@ roleplay commands /me, /you, /ooc, and the inline pair typed inside a
 line."""
 
 import contextlib
+import threading
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from prompt_toolkit.application import create_app_session
+from prompt_toolkit.formatted_text import StyleAndTextTuples
+from prompt_toolkit.input import create_pipe_input
+from prompt_toolkit.output import DummyOutput
+from prompt_toolkit.shortcuts import PromptSession
 
 from otaku.backend.api import play as api_play
 from otaku.backend.api import providers as api_providers
@@ -17,8 +24,12 @@ from otaku.backend.files import RawFile
 from otaku.backend.formats import EXPORT_MARKER
 from otaku.backend.paths import Paths
 from otaku.backend.session import Refused
+from otaku.terminal.chat.bindings import SHORTCUTS
+from otaku.terminal.prompt import Carry, LineAssembler, build_prompt
+from otaku.terminal.tty import render
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch, set_config, set_config_provider
+from scenarios.support.screens import BACKSPACE, CTRL_C, DOWN, ENTER, ESC, RIGHT
 
 
 class TestTurns:
@@ -647,6 +658,121 @@ class TestToolCalls:
         assert app.session.messages[-3].body == "The hall glows.\n\n<otk-plan>later</otk-plan>"
 
 
+class TestCallsOnScreen:
+    """What the terminal shows of a reply's calls, streamed and echoed
+    alike: a question as the question alone, a note dim while the story
+    displays notes and not at all otherwise, each a block behind the bar
+    set apart from the prose by a blank line — and the stream draws what
+    the echo draws, so a story resumed reads as it played."""
+
+    NOTED = "The door creaks.\n\n<otk-note>Keep the key in play.</otk-note>\n\nIt opens."
+    ASKED = "The door creaks.<otk-question>Go in?\n1. Yes\n2. No</otk-question>"
+
+    def test_a_question_streams_as_the_question_alone(self, app: App, capsys) -> None:
+        api_stories.update_setting(app.session, "allow_questions", enabled=True)
+        app.server.script = lambda body: self.ASKED
+        app.play("I enter the hall.")
+        out = capsys.readouterr().out
+        assert "The door creaks.\n\n│ Go in?" in out
+        assert "1. Yes" not in out and "otk-" not in out  # the answers are the prompt's menu
+
+    def test_a_note_is_dim_while_displayed_and_gone_otherwise(self, app: App, capsys) -> None:
+        api_stories.update_setting(app.session, "allow_assistant_notes", enabled=True)
+        app.server.script = lambda body: self.NOTED
+        app.play("I enter the hall.")
+        out = capsys.readouterr().out
+        assert "The door creaks.\n\n\x1b[2m│ Keep the key in play.\x1b[22m\n\nIt opens." in out
+        api_stories.update_setting(app.session, "allow_assistant_notes", display_notes=False)
+        app.play("Again.")
+        out = capsys.readouterr().out
+        # gone, and no hole left where it was
+        assert "Keep the key" not in out and "The door creaks.\n\nIt opens." in out
+
+    def test_the_stream_draws_what_the_echo_draws(self, app: App, capsys) -> None:
+        api_stories.update_setting(app.session, "allow_assistant_notes", enabled=True)
+        api_stories.update_setting(app.session, "allow_questions", enabled=True)
+        app.server.chunk_size = 2  # every tag split, every newline its own piece
+        for body in (self.NOTED, self.ASKED):
+            app.server.script = lambda _line, body=body: body
+            app.play("Next.")
+            streamed = capsys.readouterr().out.split("> Next.", 1)[1]
+            echoed = render.message(body, "assistant", notes=True)
+            assert echoed in streamed, body
+
+
+class TestAnswerMenu:
+    """The answers to the question the story stands on, as the prompt
+    offers them: rows above the line behind the question's bar while the
+    line is empty; Enter sends the one under the cursor, → takes it into
+    the line to edit, a typed character is the reader's own answer and
+    the rows go, Esc dismisses them; Ctrl+C erases the prompt whole so
+    the rows return in place. Driven through the real prompt over a pipe,
+    each key a beat apart — the rows arrive asynchronously, and a queue
+    of keys would outrun them."""
+
+    ASKED = "The door creaks.<otk-question>Go in?\n1. Yes\n2. No\n3. Wait</otk-question>"
+
+    def test_enter_sends_the_answer_under_the_cursor(self, app: App) -> None:
+        self.ask(app)
+        assert typed(app, ENTER) == "Yes"
+        assert typed(app, DOWN, ENTER) == "No"
+        assert typed(app, DOWN, DOWN, DOWN, ENTER) == "Yes"  # ↓ wraps
+
+    def test_right_takes_the_answer_into_the_line_to_edit(self, app: App) -> None:
+        self.ask(app)
+        assert typed(app, DOWN, DOWN, RIGHT, ", but quietly", ENTER) == "Wait, but quietly"
+        # once the line has text, → is the cursor's own: no second copy
+        assert typed(app, RIGHT, RIGHT, ENTER) == "Yes"
+
+    def test_a_typed_character_is_the_readers_own_answer(self, app: App) -> None:
+        self.ask(app)
+        assert typed(app, "I knock.", ENTER) == "I knock."
+        # taken back, the empty line brings the rows back
+        assert typed(app, "I", BACKSPACE, DOWN, ENTER) == "No"
+
+    def test_escape_dismisses_the_rows_for_this_prompt(self, app: App) -> None:
+        self.ask(app)
+        assert typed(app, ESC, ENTER) == ""
+
+    def test_the_rows_are_drawn_behind_the_bar_with_the_blank_before_the_prompt(
+        self, app: App
+    ) -> None:
+        self.ask(app)
+        # the loop leaves the blank before the prompt to the menu (`top_row`)
+        drawn = frames(app, DOWN, ENTER, top_row=True)
+        first = next(frame for frame in drawn if "1. Yes" in frame)
+        assert first.split("\n") == ["│", "│ * 1. Yes", "│   2. No", "│   3. Wait", "", "> "]
+        moved = next(frame for frame in drawn if "* 2." in frame)
+        assert "│   1. Yes" in moved
+        # the final render is the blank and the prefix alone: the rows leave with the menu
+        assert drawn[-1] == "\n> "
+
+    def test_ctrl_c_erases_the_prompt_whole_while_a_question_is_posed(self, app: App) -> None:
+        self.ask(app)
+        run = Prompting(app)
+        with pytest.raises(KeyboardInterrupt):
+            run.drive(RIGHT, CTRL_C)
+        assert run.session.app.erase_when_done  # the rows and the line go together
+        # once answered, a ^C leaves the line, as a shell does
+        app.server.script = lambda body: "You step in."
+        app.play("Yes")
+        run = Prompting(app)
+        with pytest.raises(KeyboardInterrupt):
+            run.drive("x", CTRL_C)
+        assert not run.session.app.erase_when_done
+
+    def test_no_menu_once_the_question_is_answered(self, app: App) -> None:
+        self.ask(app)
+        app.server.script = lambda body: "You step in."
+        app.play("Yes")
+        assert typed(app, ENTER) == ""
+
+    def ask(self, app: App) -> None:
+        api_stories.update_setting(app.session, "allow_questions", enabled=True)
+        app.server.script = lambda body: self.ASKED
+        app.play("I enter the hall.")
+
+
 class TestPictures:
     """A turn with pictures: what the model gets, what the store keeps,
     and the refusals — a picture rides only while the model can see."""
@@ -906,3 +1032,48 @@ def sent_headers(app: App) -> dict[str, str]:
     """The last request's headers, keyed lowercase — a header name is
     case-insensitive on the wire, and the assertion should not care."""
     return {name.lower(): value for name, value in app.server.request_headers[-1].items()}
+
+
+def typed(app: App, *strokes: str) -> str:
+    """The line the prompt returns for `strokes`, sent a beat apart."""
+    return Prompting(app).drive(*strokes)
+
+
+def frames(app: App, *strokes: str, top_row: bool = False) -> list[str]:
+    """Every rendering of the prompt's message, as text, over `strokes`;
+    `top_row` as the loop sets it when it leaves the blank before the
+    prompt to the menu."""
+    run = Prompting(app)
+    run.drive(*strokes, top_row=top_row)
+    return run.drawn
+
+
+class Prompting:
+    """One prompt over a pipe: the real `build_prompt`, its session built
+    INSIDE the pipe's app session (prompt_toolkit binds an application to
+    the input it is created under), the keys fed a beat apart."""
+
+    def __init__(self, app: App) -> None:
+        self.app = app
+        self.drawn: list[str] = []
+        self.session: PromptSession[str]
+
+    def drive(self, *strokes: str, top_row: bool = False) -> str:
+        with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
+            self.session, answers = build_prompt(
+                self.app.session, Carry(), LineAssembler(), shortcuts=SHORTCUTS
+            )
+            answers.top_row = top_row
+
+            def feed() -> None:
+                for stroke in strokes:
+                    time.sleep(0.15)
+                    pipe.send_text(stroke)
+
+            def message() -> StyleAndTextTuples:
+                fragments = answers.message("> ")
+                self.drawn.append("".join(text for _, text in fragments))
+                return fragments
+
+            threading.Thread(target=feed, daemon=True).start()
+            return self.session.prompt(message, pre_run=answers.open)

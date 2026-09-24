@@ -409,7 +409,9 @@ class TestThink:
         app.play("/set think high")
         app.server.script = lambda body: ("Let me consider the hall.", "The door creaks open.")
         app.play("I enter the hall.")
-        assert "(thinking) Let me consider the hall." in capsys.readouterr().out
+        # Streamed as a dim block behind the bar, apart from the reply.
+        shown = capsys.readouterr().out
+        assert "\x1b[2m│ Let me consider the hall.\x1b[22m\n\nThe door creaks open." in shown
         # Only the reply became part of the story...
         assert [m.body for m in app.session.messages] == [
             "I enter the hall.",

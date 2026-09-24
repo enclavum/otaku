@@ -18,10 +18,12 @@ switches are the story's — kept across a launch, carried by a fork, off
 in a new story.
 """
 
+import contextlib
 from collections.abc import Callable
 
 import pytest
 
+from otaku.backend import InjectionPosition
 from otaku.backend.api import settings as api_settings
 from otaku.backend.api import stories as api_stories
 from otaku.backend.paths import Paths
@@ -29,6 +31,7 @@ from otaku.backend.session import Refused, Session
 from otaku.backend.story import StorySetting
 from otaku.settings.prompts import Prompts
 from otaku.terminal.screens import stories as screen_stories
+from otaku.terminal.screens import story as screen_story
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch
 from scenarios.support.screens import (
@@ -38,7 +41,9 @@ from scenarios.support.screens import (
     DOWN,
     ENTER,
     ESC,
-    SHIFT_TAB,
+    LEFT,
+    RIGHT,
+    SPACE,
     TAB,
     run_screen,
 )
@@ -158,7 +163,7 @@ class TestStoryBrowser:
         # row under the cursor — not the open one — the premise tab's
         # save lands on that story, and the open story keeps its own.
         first, _second = two_stories(app)
-        assert self.pick(app, DOWN + ENTER + SHIFT_TAB + ENTER + "!" + CTRL_S + ESC + ESC) is None
+        assert self.pick(app, DOWN + ENTER + LEFT + ENTER + "!" + CTRL_S + ESC + ESC) is None
         assert app.store.stories.get_system(first) == "!"
         assert app.session.system == ""  # the open story's premise is untouched
 
@@ -167,9 +172,9 @@ class TestStoryBrowser:
         # reported — the trap this covers is "" falling through to the
         # report and the clear silently not landing.
         first, _second = two_stories(app)
-        assert self.pick(app, DOWN + ENTER + SHIFT_TAB + ENTER + "!" + CTRL_S + ESC + ESC) is None
+        assert self.pick(app, DOWN + ENTER + LEFT + ENTER + "!" + CTRL_S + ESC + ESC) is None
         assert app.store.stories.get_system(first) == "!"
-        keys = DOWN + ENTER + SHIFT_TAB + ENTER + DELETE + CTRL_S + ESC + ESC
+        keys = DOWN + ENTER + LEFT + ENTER + DELETE + CTRL_S + ESC + ESC
         assert self.pick(app, keys) is None
         assert app.store.stories.get_system(first) == ""
 
@@ -187,7 +192,7 @@ class TestStoryBrowser:
         first = app.session.story_id
         app.play("/new")
         app.play("The second story begins.")
-        keys = DOWN + ENTER + TAB + ENTER + DOWN + ENTER + "!" + CTRL_S + ESC * 3
+        keys = DOWN + ENTER + RIGHT + ENTER + DOWN + ENTER + "!" + CTRL_S + ESC * 3
         assert self.pick(app, keys) is None
         ids = app.store.stories.get_messages_ids(first)
         scene = app.store.scenes.get_current(first, ids)[0]
@@ -457,7 +462,7 @@ class TestSettingsOfTools:
         try:
             app.play("/system Be terse.")
             api_stories.update_setting(
-                app.session, "allow_questions", enabled=True, position="system"
+                app.session, "allow_questions", enabled=True, position=InjectionPosition()
             )
             app.play("I push the door.")
             assert messages(app, "I push the door.") == [
@@ -476,7 +481,9 @@ class TestSettingsOfTools:
         try:
             app.play("One.")
             app.play("Two.")
-            api_stories.update_setting(app.session, "allow_questions", enabled=True, position=2)
+            api_stories.update_setting(
+                app.session, "allow_questions", enabled=True, position=InjectionPosition(2)
+            )
             app.play("Three.")
             bodies = [body for _, body in messages(app, "Three.")]
             assert bodies[2] == f"((OOC: {HOW_TO_ASK}))\n\nTwo."
@@ -490,12 +497,14 @@ class TestSettingsOfReminders:
         # A reminder rides a message of the reader's, where bare text
         # would read as the reader's line.
         api_stories.set_shared_reminder(app.session, "Stay grim.")
-        api_stories.update_setting(app.session, "use_shared_reminder", enabled=True, position=1)
+        api_stories.update_setting(
+            app.session, "use_shared_reminder", enabled=True, position=InjectionPosition(1)
+        )
         api_stories.update_setting(
             app.session,
             "use_story_reminder",
             enabled=True,
-            position=1,
+            position=InjectionPosition(1),
             reminder_text="[Here: rain]",
         )
         app.play("I push the door.")
@@ -509,7 +518,7 @@ class TestSettingsOfReminders:
             app.session,
             "use_story_reminder",
             enabled=True,
-            position=1,
+            position=InjectionPosition(1),
             reminder_text="[Here: rain]",
         )
         app.play("I push the door.")
@@ -520,12 +529,14 @@ class TestSettingsOfReminders:
     def test_each_rides_at_its_own_position(self, app: App) -> None:
         api_stories.set_shared_reminder(app.session, "Stay grim.")
         app.play("One.")
-        api_stories.update_setting(app.session, "use_shared_reminder", enabled=True, position=2)
+        api_stories.update_setting(
+            app.session, "use_shared_reminder", enabled=True, position=InjectionPosition(2)
+        )
         api_stories.update_setting(
             app.session,
             "use_story_reminder",
             enabled=True,
-            position=1,
+            position=InjectionPosition(1),
             reminder_text="[Here: rain]",
         )
         app.play("Two.")
@@ -535,17 +546,23 @@ class TestSettingsOfReminders:
 
     def test_the_text_is_shared_and_the_switch_is_each_story_s(self, app: App) -> None:
         api_stories.set_shared_reminder(app.session, "Stay grim.")
-        api_stories.update_setting(app.session, "use_shared_reminder", enabled=True, position=1)
+        api_stories.update_setting(
+            app.session, "use_shared_reminder", enabled=True, position=InjectionPosition(1)
+        )
         app.play("I push the door.")
         app.play("/new")
         app.play("A second story.")  # a new story has it off
         assert messages(app, "A second story.") == [("user", "A second story.")]
-        api_stories.update_setting(app.session, "use_shared_reminder", enabled=True, position=1)
+        api_stories.update_setting(
+            app.session, "use_shared_reminder", enabled=True, position=InjectionPosition(1)
+        )
         app.play("And on.")
         assert messages(app, "And on.")[-1] == ("user", "((OOC: Stay grim.))\n\nAnd on.")
 
     def test_a_reminder_with_nothing_written_sends_nothing(self, app: App) -> None:
-        api_stories.update_setting(app.session, "use_story_reminder", enabled=True, position=1)
+        api_stories.update_setting(
+            app.session, "use_story_reminder", enabled=True, position=InjectionPosition(1)
+        )
         app.play("I push the door.")
         assert messages(app, "I push the door.") == [("user", "I push the door.")]
 
@@ -556,6 +573,82 @@ class TestSettingsOfReminders:
         api_stories.set_shared_reminder(app.session, "")
         assert app.store.settings.get("shared_reminder") == ""
         assert api_stories.get_shared_reminder(app.session) == ""
+
+
+class TestToolsTab:
+    """The dossier's Tools tab: one row per captioned setting — Space
+    checks and unchecks it — with the setting's fields in the panel
+    beside: Enter or Tab moves in, ↑/↓ walk the fields, Enter acts on
+    one (a checkbox toggles, the depth opens its dropdown, a reminder's
+    text edits in place, the instructions open the prompt over the
+    panel), Esc returns to the list. Every change lands through
+    `backend.api`, so the store is what the keys are held against."""
+
+    def test_space_checks_and_unchecks_a_setting(self, app: App) -> None:
+        app.play("I push the door.")
+        self.tools(app, SPACE + ESC)
+        assert self.setting(app, "allow_questions").enabled
+        self.tools(app, SPACE + ESC)
+        assert not self.setting(app, "allow_questions").enabled
+
+    def test_the_depth_is_picked_from_the_dropdown(self, app: App) -> None:
+        app.play("I push the door.")
+        # questions: Enter into the panel lands on the instructions; ↓ to
+        # the depth; Enter opens the closed list, ↓ picks the next place,
+        # Enter sets it; Esc back to the list, Esc quits.
+        self.tools(app, ENTER + DOWN + ENTER + DOWN + ENTER + ESC + ESC)
+        assert self.setting(app, "allow_questions").injection_position == InjectionPosition(2)
+        # Tab is the other way in, and never a way back
+        self.tools(app, TAB + DOWN + ENTER + DOWN + ENTER + ESC + ESC)
+        assert self.setting(app, "allow_questions").injection_position == InjectionPosition(3)
+
+    def test_the_story_reminder_edits_in_place(self, app: App) -> None:
+        app.play("I push the door.")
+        # third row; its first field is the text: Enter edits, Ctrl+S saves
+        self.tools(app, DOWN + DOWN + ENTER + ENTER + "Rain." + CTRL_S + ESC + ESC)
+        assert self.setting(app, "use_story_reminder").reminder_text == "Rain."
+
+    def test_the_shared_reminder_is_every_storys(self, app: App) -> None:
+        app.play("I push the door.")
+        self.tools(app, DOWN * 3 + ENTER + ENTER + "Stay grim." + CTRL_S + ESC + ESC)
+        assert api_stories.get_shared_reminder(app.session) == "Stay grim."
+
+    def test_the_notes_display_is_a_checkbox_in_the_panel(self, app: App) -> None:
+        app.play("I push the door.")
+        # second row: Space in the panel toggles the display; Space on the
+        # list, after Esc, checks the tool itself
+        self.tools(app, DOWN + ENTER + SPACE + ESC + SPACE + ESC)
+        notes = self.setting(app, "allow_assistant_notes")
+        assert (notes.enabled, notes.display_notes) == (True, False)
+
+    def test_the_instructions_row_edits_the_tools_prompt(self, app: App) -> None:
+        app.play("I push the door.")
+        shipped = api_settings.get_tool_prompt(app.session, "question")
+        # the row opens the prompt over the panel; typed at its start
+        self.tools(app, ENTER + ENTER + "Be brief. " + CTRL_S + ESC + ESC)
+        assert api_settings.get_tool_prompt(app.session, "question") == "Be brief. " + shipped
+        # Esc in the editor writes nothing
+        self.tools(app, ENTER + ENTER + "Dropped. " + ESC + ESC + ESC)
+        assert api_settings.get_tool_prompt(app.session, "question") == "Be brief. " + shipped
+        # the notes tool's instructions are its own
+        self.tools(app, DOWN + ENTER + DOWN + ENTER + "Short. " + CTRL_S + ESC + ESC)
+        assert api_settings.get_tool_prompt(app.session, "note").startswith("Short. ")
+
+    def test_the_prompts_file_holds_what_was_saved(self, app: App) -> None:
+        app.play("I push the door.")
+        self.tools(app, ENTER + ENTER + "Be brief. " + CTRL_S + ESC + ESC)
+        text = app.paths.prompts_file.read_text()
+        assert "Be brief. " in text
+
+    def tools(self, app: App, keys: str) -> None:
+        # the dossier opens on the scenes; two tabs to the right sit the tools
+        with contextlib.suppress(EOFError):
+            run_screen(RIGHT + RIGHT + keys, lambda: screen_story.browse(app.session, "scenes"))
+
+    def setting(self, app: App, name: str) -> StorySetting:
+        found = api_stories.get_settings(app.session).get(name)
+        assert found is not None
+        return found
 
 
 class TestSettingsAreTheStorys:
@@ -573,14 +666,16 @@ class TestSettingsAreTheStorys:
 
     def test_the_switches_survive_a_launch(self, server, tmp_path) -> None:
         app = with_prompt(tmp_path / "state", server)
-        api_stories.update_setting(app.session, "allow_questions", enabled=True, position=2)
+        api_stories.update_setting(
+            app.session, "allow_questions", enabled=True, position=InjectionPosition(2)
+        )
         api_stories.update_setting(app.session, "allow_assistant_notes", display_notes=False)
         app.play("I push the door.")
         app.close()
         app = launch(tmp_path / "state", server)
         try:
             ask = setting(app, "allow_questions")
-            assert (ask.enabled, ask.injection_position) == (True, 2)
+            assert (ask.enabled, ask.injection_position) == (True, InjectionPosition(2))
             assert setting(app, "allow_assistant_notes").display_notes is False
         finally:
             app.close()
@@ -593,7 +688,7 @@ class TestSettingsAreTheStorys:
 
     def test_a_fork_plays_the_way_its_origin_does(self, app: App) -> None:
         api_stories.update_setting(
-            app.session, "allow_assistant_notes", enabled=True, position="system"
+            app.session, "allow_assistant_notes", enabled=True, position=InjectionPosition()
         )
         app.play("I push the door.")
         origin = app.session.story_id
@@ -603,7 +698,7 @@ class TestSettingsAreTheStorys:
             app.store.stories.get_settings(origin)
         )
         notes = setting(app, "allow_assistant_notes")
-        assert (notes.enabled, notes.injection_position) == (True, "system")
+        assert (notes.enabled, notes.injection_position) == (True, InjectionPosition())
 
     def test_a_story_that_is_not_open_is_reached_by_its_id(self, app: App) -> None:
         first, second = two_stories(app)
@@ -664,20 +759,20 @@ class TestSettingsRefused:
     def test_what_a_setting_cannot_take_is_refused(self, app: App) -> None:
         for asked in (
             {"name": "plan", "enabled": True},
-            {"name": "allow_questions", "position": "end"},
-            {"name": "allow_questions", "position": 0},
-            {"name": "allow_questions", "position": 9},
-            {"name": "allow_questions", "position": "2"},
+            # Past the deepest place. (What is not a position at all —
+            # "end", 0, "2" — never becomes one: `InjectionPosition.from_value`
+            # reads None at the wire.)
+            {"name": "allow_questions", "position": InjectionPosition(9)},
             {"name": "allow_questions", "reminder_text": "Ask about the weather."},
             # Only the notes tool has something to display.
             {"name": "allow_questions", "display_notes": False},
             # A reminder is never the system message's: that is the premise's.
-            {"name": "use_story_reminder", "position": "system"},
-            {"name": "use_shared_reminder", "position": "system"},
+            {"name": "use_story_reminder", "position": InjectionPosition()},
+            {"name": "use_shared_reminder", "position": InjectionPosition()},
             # The shared reminder's text is no one story's.
             {"name": "use_shared_reminder", "reminder_text": "Stay grim."},
             # A flag injects nothing, so it rides nowhere.
-            {"name": "story_mode", "position": 1},
+            {"name": "story_mode", "position": InjectionPosition(1)},
         ):
             with pytest.raises(Refused):
                 api_stories.update_setting(app.session, **asked)  # type: ignore[arg-type]

@@ -13,7 +13,7 @@ settings into the text and keeps every key it does not know.
 import json
 from dataclasses import replace
 
-from otaku.store.schema import Attachment, StorySettingDB
+from otaku.store.schema import Attachment, InjectionPosition, StorySettingDB
 
 CAT = Attachment(file="pic-0001-20260918-a3f9c1e2.jpg", width=1568, height=1043, size=312044)
 DOG = Attachment(file="pic-0001-20260918-7b02d4ee.png", width=800, height=600, size=90210)
@@ -37,6 +37,44 @@ class TestAttachmentsColumn:
         assert set(row) == {"file", "width", "height", "size"}
 
 
+class TestInjectionPosition:
+    """`InjectionPosition` — where an injected text rides: the system
+    message (no depth) or before the reader's Nth-last message. Its
+    plain form is what the column and the wire hold; `text` names it as
+    the depth ruler does."""
+
+    def test_the_plain_form_is_system_or_the_depth(self) -> None:
+        assert InjectionPosition().value == "system"
+        assert InjectionPosition(1).value == 1
+        assert InjectionPosition(8).value == 8
+
+    def test_the_plain_form_reads_back(self) -> None:
+        for position in (InjectionPosition(), *(InjectionPosition(d) for d in range(1, 9))):
+            assert InjectionPosition.from_value(position.value) == position
+
+    def test_what_is_not_a_position_reads_as_none(self) -> None:
+        # By type first: to Python True is 1 and 1.0 is 1, and neither is a position.
+        for value in (0, -1, True, 1.0, "3", "end", None, [1], {"depth": 1}):
+            assert InjectionPosition.from_value(value) is None, value
+
+    def test_named_as_the_depth_ruler_names_it(self) -> None:
+        # The reader's newest message is the last; before it is "2nd last".
+        assert InjectionPosition().text == "system"
+        assert [InjectionPosition(d).text for d in (1, 2, 3, 4, 8)] == [
+            "2nd last",
+            "3rd last",
+            "4th last",
+            "5th last",
+            "9th last",
+        ]
+
+    def test_equal_by_value(self) -> None:
+        assert InjectionPosition(2) == InjectionPosition(2)
+        assert InjectionPosition() == InjectionPosition()
+        assert InjectionPosition(2) != InjectionPosition(3) != InjectionPosition()
+        assert len({InjectionPosition(2), InjectionPosition(2), InjectionPosition()}) == 2
+
+
 class TestSettingsColumn:
     def test_a_story_without_settings_has_none(self) -> None:
         assert StorySettingDB.from_json("") == ()
@@ -54,9 +92,12 @@ class TestSettingsColumn:
             }
         )
         assert StorySettingDB.from_json(raw) == (
-            StorySettingDB("allow_questions", enabled=True, position="system"),
+            StorySettingDB("allow_questions", enabled=True, position=InjectionPosition()),
             StorySettingDB(
-                "use_story_reminder", enabled=True, position=5, reminder_text="Stay grim."
+                "use_story_reminder",
+                enabled=True,
+                position=InjectionPosition(5),
+                reminder_text="Stay grim.",
             ),
             StorySettingDB("allow_assistant_notes", display_notes=False),
         )
@@ -88,7 +129,10 @@ class TestSettingsColumn:
 
     def test_a_written_setting_reads_back(self) -> None:
         setting = StorySettingDB(
-            "use_story_reminder", enabled=True, position=4, reminder_text="Stay grim."
+            "use_story_reminder",
+            enabled=True,
+            position=InjectionPosition(4),
+            reminder_text="Stay grim.",
         )
         assert StorySettingDB.from_json(StorySettingDB.to_json([setting], "")) == (setting,)
         hidden = StorySettingDB("allow_assistant_notes", enabled=True, display_notes=False)
@@ -117,7 +161,10 @@ class TestSettingsColumn:
 
     def test_several_settings_are_written_at_once(self) -> None:
         reminding = StorySettingDB(
-            "use_story_reminder", enabled=True, position=3, reminder_text="Stay grim."
+            "use_story_reminder",
+            enabled=True,
+            position=InjectionPosition(3),
+            reminder_text="Stay grim.",
         )
         assert StorySettingDB.from_json(StorySettingDB.to_json([ASKING, reminding])) == (
             ASKING,

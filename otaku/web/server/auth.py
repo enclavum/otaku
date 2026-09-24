@@ -2,7 +2,7 @@
 
 The page signs in ONCE, with the password in the body of one request,
 and the server answers with the token in an `HttpOnly` cookie the browser
-sends on every request after (`server._set_cookie`). What the token is, is an
+sends on every request after (`guards._set_cookie`). What the token is, is an
 HS256 JWT — the ordinary shape, so anything that reads one can read this.
 What it is NOT is server state: nothing here is remembered between
 requests, so signing out is the cookie being taken away and there is

@@ -601,6 +601,39 @@ class TestStorySettings:
         assert page.status(path, method="PATCH", data=b'{"display_notes": "yes"}') == 400
         assert page.status(path, method="PATCH", data=b'{"enabled": 1}') == 400
 
+    def test_what_is_not_a_position_is_a_bad_request(self, page: Page) -> None:
+        # "system" or a count from 1 is a position (which the setting may
+        # still refuse); anything else is a malformed request.
+        page.play("I listen at the culvert mouth.")
+        story = page.get("/api/session")["story_id"]
+        path = f"/api/stories/{story}/settings/allow_questions"
+        for body in (
+            b'{"position": "end"}',
+            b'{"position": 0}',
+            b'{"position": true}',
+            b'{"position": "2"}',
+        ):
+            assert page.status(path, method="PATCH", data=body) == 400, body
+
+    def test_the_context_preview_carries_the_injections(self, page: Page) -> None:
+        page.play("I listen at the culvert mouth.")
+        story = page.get("/api/session")["story_id"]
+        assert page.get("/api/session/context")["injections"] == []
+        page.patch(
+            f"/api/stories/{story}/settings/allow_questions",
+            {"enabled": True, "position": "system"},
+        )
+        page.patch(
+            f"/api/stories/{story}/settings/use_story_reminder",
+            {"enabled": True, "position": 2, "reminder_text": "Rain."},
+        )
+        injections = page.get("/api/session/context")["injections"]
+        assert [(i["label"], i["position"], i["position_text"]) for i in injections] == [
+            ("Set story reminder", 2, "3rd last"),
+            ("Allow questions", "system", "system"),
+        ]
+        assert all(i["tokens"] > 0 for i in injections)
+
     def test_the_shared_reminder_has_a_path_of_its_own(self, page: Page) -> None:
         assert page.get("/api/shared_reminder") == {"text": ""}
         answer = page.put("/api/shared_reminder", {"text": "Stay grim."})

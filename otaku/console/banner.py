@@ -104,9 +104,11 @@ def render_web(where: WebFacts) -> str:
     """What a served session opens with, said the way a server says it:
     the name, where the page is and how to quit — no mark, and the model
     and the story are on the page itself. After the address, that a
-    password is set; under it, on any host that reaches past this
-    machine, that the address is public, with what it is missing — the
-    one row of words that is not dimmed."""
+    password is set; under it, on a host that reaches past this machine
+    WITHOUT both TLS and a password, that the address is public and what
+    it is missing — the one row of words that is not dimmed. Public with
+    both on is the configuration the file recommends, and warrants no
+    warning."""
     style = _style()
     note = f"{style.dim} (password set){style.reset}" if where.password else ""
     rows = [_name(style), f"{style.dim}Running on{style.reset} {address(where)}{note}"]
@@ -118,8 +120,6 @@ def render_web(where: WebFacts) -> str:
         ]
         if missing:
             rows.append(f"Warning: public, yet with {' and '.join(missing)} - set in config.toml")
-        else:
-            rows.append("Warning: public")
     rows.append(f"{style.dim}Press CTRL+C to quit{style.reset}")
     return "\n".join([*rows, ""])
 

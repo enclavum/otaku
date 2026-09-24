@@ -11,7 +11,7 @@ import http.cookies
 from typing import Any
 
 from otaku.backend import passwords
-from otaku.web import auth
+from otaku.web.server import auth
 from otaku.web.server.assets import ASSETS, CUSTOM_FONTS
 from otaku.web.server.base import Server, Wire
 from otaku.web.server.streams import WATCH

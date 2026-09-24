@@ -80,6 +80,32 @@ class TestAsk:
         assert ToolAssistantNotes.to_prose("the seal") == ""
 
 
+class TestIsOption:
+    """`ToolQuestions.is_option` — the rule the parse parts a question
+    from its options by, for a reader of the call as it streams."""
+
+    def test_an_option_is_a_head_then_the_answer(self) -> None:
+        for line in ("1. Yes", "2) No", "a. Yes", "B) No", "12. Twelve", "  3. Indented"):
+            assert ToolQuestions.is_option(line), line
+
+    def test_a_head_alone_or_glued_to_its_text_is_not_one(self) -> None:
+        for line in ("1.", "1.Yes", "1", "Yes", "", "A question?", "10x. No", "123. Too long"):
+            assert not ToolQuestions.is_option(line), line
+
+    def test_agrees_with_the_parse(self) -> None:
+        text = "Go in?\n1. Yes\n2. No\nA remark.\n3. Wait"
+        lines = text.splitlines()
+        question = "\n".join(line for line in lines if not ToolQuestions.is_option(line))
+        # the parse keeps the lines before the first option as the question
+        assert ToolQuestions(text).question == "Go in?"
+        assert question.startswith("Go in?")
+        assert [line for line in lines if ToolQuestions.is_option(line)] == [
+            "1. Yes",
+            "2. No",
+            "3. Wait",
+        ]
+
+
 class TestRead:
     def test_a_call_is_read_as_the_tool_its_name_says(self) -> None:
         ask = read("question", "Stay or go?\n1. Stay")

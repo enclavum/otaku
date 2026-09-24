@@ -10,7 +10,7 @@ one — and never an `<otk-…>` block.
 
 import pytest
 
-from otaku.store.schema import Message
+from otaku.store.schema import Attachment, Message
 from otaku.worker.extraction import _parse_json, numbered_chat, pack
 
 
@@ -95,6 +95,28 @@ class TestNumberedChat:
         reply = Message(role="assistant", body="She <i>never</i> nods.<plan>x</plan>")
         assert numbered_chat([reply]) == "[1] She <i>never</i> nods.<plan>x</plan>"
 
+    def test_a_picture_is_marked_at_its_line_numbered_through_the_scene(self) -> None:
+        # One mark per picture, in the order the request attaches them —
+        # so the model can name what it saw by number.
+        span = [
+            Message(role="user", body="Look.", attachments=(picture("a"),)),
+            Message(role="assistant", body="A door."),
+            Message(role="user", body="And these.", attachments=(picture("b"), picture("c"))),
+        ]
+        assert numbered_chat(span).splitlines() == [
+            "[1] (picture 1) Look.",
+            "[2] A door.",
+            "[3] (picture 2) (picture 3) And these.",
+        ]
+
+    def test_the_mark_is_a_decoration_the_speaker_still_heads(self) -> None:
+        line = Message(role="user", body="Look.", speaker="Ryn", attachments=(picture("a"),))
+        assert numbered_chat([line]) == "[1] Ryn: (picture 1) Look."
+
+    def test_a_picture_with_no_words_is_the_mark_alone(self) -> None:
+        line = Message(role="user", body="", attachments=(picture("a"),))
+        assert numbered_chat([line]) == "[1] (picture 1)"
+
 
 class TestParseJson:
     """The reply parser's tolerances: fences and prose around the object,
@@ -118,3 +140,8 @@ class TestParseJson:
     def test_a_broken_object_still_refuses(self) -> None:
         with pytest.raises(ValueError):
             _parse_json('{"scene": }')
+
+
+def picture(name: str) -> Attachment:
+    """A picture on a turn, as the column records one."""
+    return Attachment(file=f"pic-{name}.jpg", width=10, height=10, size=100)

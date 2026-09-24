@@ -307,20 +307,28 @@ class ScreenLedger:
         self._ruled = False
         self._suppress_gap = False
 
-    def gap(self) -> None:
+    def gap(self, *, deferred: bool = False) -> bool:
         """The between-submissions blank line, printed by the run loop
         after every submission — or skipped when nothing calls for one (a
         shortcut that said nothing left the screen untouched) or the
         screen already ends in the standing blank (an erased undo, an
-        echo no reply followed). Ends the submission: the typed count and
-        the wrote flag reset with it."""
+        echo no reply followed). `deferred` leaves a wanted blank to the
+        PROMPT to draw as its own first row (the bar over a question's
+        answers, a blank once they hide): True says the prompt owes it —
+        the row is on screen either way, so the row math above holds.
+        Ends the submission: the typed count and the wrote flag reset
+        with it."""
         wants = self._typed_rows > 0 or self._wrote
         suppressed = self._suppress_gap
         self._suppress_gap = False
         self._typed_rows = 0
         self._wrote = False
-        if wants and not suppressed:
-            print()
+        if not (wants and not suppressed):
+            return False
+        if deferred:
+            return True
+        print()
+        return False
 
     # ---------- the say protocol's side ----------
 

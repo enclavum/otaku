@@ -1068,6 +1068,7 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 .otk-context__lead { display: inline-flex; align-items: baseline; gap: 10px; }
 .otk-context__lead .otk-context__figure { font-size: 30px; }
 .otk-context__stages { display: flex; border: var(--otk-hair) solid var(--otk-ink); background: var(--otk-band); }
+.otk-context__injected { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 3px; }
 .otk-context__cell { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 5px; padding: 18px 14px; background: var(--otk-paper); }
 .otk-context__cell + .otk-context__cell { border-left: var(--otk-hair) solid var(--otk-line); }
 .otk-context__cell--idle { background: none; }

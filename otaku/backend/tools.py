@@ -97,6 +97,14 @@ class ToolQuestions(Tool):
         return {**super().to_json(), "question": self.question, "options": list(self.options)}
 
     @classmethod
+    def is_option(cls, line: str) -> bool:
+        """Whether `line` is an answer to pick from — the head every
+        option has, then the answer — for a reader of the call as it
+        streams, which must part the question from its options by the
+        same rule the parse does."""
+        return cls._OPTION.fullmatch(line) is not None
+
+    @classmethod
     def to_prose(cls, text: str) -> str:
         # The question alone, as the narrator's own: the reader's answer
         # that follows still has something to answer. The options were

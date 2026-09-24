@@ -13,11 +13,11 @@ sends one on its own.
 """
 
 from otaku.context.injections import ROW_KIND, Injection, inject_into_system, inject_into_tail
-from otaku.store.schema import Message
+from otaku.store.schema import InjectionPosition, Message
 
-ONE = Injection("one", "One.", 1)
-TWO = Injection("two", "Two.", 2)
-TOP = Injection("top", "Top.", "system")
+ONE = Injection("one", "One.", InjectionPosition(1))
+TWO = Injection("two", "Two.", InjectionPosition(2))
+TOP = Injection("top", "Top.", InjectionPosition())
 
 
 class TestIntoTheSystemMessage:
@@ -31,10 +31,12 @@ class TestIntoTheSystemMessage:
         assert inject_into_system("Premise.", [ONE, TWO]) == "Premise."
 
     def test_an_empty_one_is_not_sent(self) -> None:
-        assert inject_into_system("Premise.", [Injection("x", "", "system")]) == "Premise."
+        assert (
+            inject_into_system("Premise.", [Injection("x", "", InjectionPosition())]) == "Premise."
+        )
 
     def test_several_keep_the_order_given(self) -> None:
-        second = Injection("second", "Second.", "system")
+        second = Injection("second", "Second.", InjectionPosition())
         assert inject_into_system("", [TOP, second]) == "Top.\n\nSecond."
 
 
@@ -52,16 +54,20 @@ class TestIntoTheTail:
             "r4",
             "r5",
         ]
-        third = Injection("third", "Third.", 3)
+        third = Injection("third", "Third.", InjectionPosition(3))
         assert bodies(inject_into_tail(rows(5), [third], 0))[:2] == ["Third.", "r1"]
 
     def test_the_newest_row_always_keeps_the_last_word(self) -> None:
-        for position in (0, -1):
-            placed = inject_into_tail(rows(3), [Injection("x", "X.", position)], 0)
-            assert bodies(placed) == ["r1", "r2", "X.", "r3"]
+        # The nearest place is before the newest row: a position cannot
+        # name a place after it (`InjectionPosition.from_value` reads no
+        # depth below 1).
+        placed = inject_into_tail(rows(3), [ONE], 0)
+        assert bodies(placed) == ["r1", "r2", "One.", "r3"]
 
     def test_a_position_past_the_top_stops_at_the_top(self) -> None:
-        assert bodies(inject_into_tail(rows(2), [Injection("x", "X.", 8)], 0)) == [
+        assert bodies(
+            inject_into_tail(rows(2), [Injection("x", "X.", InjectionPosition(8))], 0)
+        ) == [
             "X.",
             "r1",
             "r2",
@@ -69,15 +75,15 @@ class TestIntoTheTail:
 
     def test_the_wall_is_never_crossed(self) -> None:
         # The recap ends at row 2: an injection asked above it stays under it.
-        placed = inject_into_tail(rows(4), [Injection("x", "X.", 8)], 2)
+        placed = inject_into_tail(rows(4), [Injection("x", "X.", InjectionPosition(8))], 2)
         assert bodies(placed) == ["r1", "r2", "X.", "r3", "r4"]
 
     def test_the_same_place_keeps_the_order_given(self) -> None:
-        other = Injection("other", "Other.", 1)
+        other = Injection("other", "Other.", InjectionPosition(1))
         assert bodies(inject_into_tail(rows(1), [ONE, other], 0)) == ["One.", "Other.", "r1"]
 
     def test_a_system_injection_and_an_empty_one_are_not_placed(self) -> None:
-        placed = inject_into_tail(rows(2), [TOP, Injection("x", "", 1)], 0)
+        placed = inject_into_tail(rows(2), [TOP, Injection("x", "", InjectionPosition(1))], 0)
         assert bodies(placed) == ["r1", "r2"]
 
     def test_a_story_with_no_rows_sends_the_injection_alone(self) -> None:

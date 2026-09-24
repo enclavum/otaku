@@ -55,6 +55,17 @@ def context(session: Session) -> dict[str, Any]:
         "lede": report.summary,
         # What the preview could not know, in the report's words; "".
         "note": report.note,
+        # What rides besides the story, each with its place named as the
+        # depth ruler names it, and its cost.
+        "injections": [
+            {
+                "label": injection.label,
+                "position": injection.position.value,
+                "position_text": injection.position_text,
+                "tokens": injection.tokens,
+            }
+            for injection in report.injections
+        ],
         "parts": [asdict(part) for part in report.parts],
     }
 

@@ -16,7 +16,7 @@ import json
 
 import pytest
 
-from otaku.web import auth
+from otaku.web.server import auth
 
 # Shaped like what the launch stores; signing never looks inside one.
 PASSWORD_HASH = "$scrypt$ln=15,r=8,p=1$c2FsdHNhbHRzYWx0$aGFzaGhhc2hoYXNoaGFzaA"

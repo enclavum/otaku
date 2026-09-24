@@ -59,7 +59,7 @@ from otaku.context.injections import ROW_KIND, Injection, inject_into_system, in
 from otaku.providers import PicturesRide
 from otaku.store import Store
 from otaku.store.files import FileStore
-from otaku.store.schema import Message, Scene
+from otaku.store.schema import InjectionPosition, Message, Scene
 
 _DEFAULT_CONTEXT = 8_192  # when the provider states no max context
 # The kind of a recap row: wire-only, its body already wire text — as
@@ -135,6 +135,18 @@ class WireTurn:
 
 
 @dataclass(frozen=True)
+class InjectionSent:
+    """One injection as the request carries it: whose (its `owner`, a
+    setting's name), where it was asked to go, and what it costs — in
+    `system_tokens` at the system position, in `transcript_tokens` at a
+    depth."""
+
+    owner: str
+    position: InjectionPosition
+    tokens: int
+
+
+@dataclass(frozen=True)
 class AssembledPrompt:
     """The wire-ready request plus the numbers behind it."""
 
@@ -163,6 +175,9 @@ class AssembledPrompt:
     pictures_held: int = (
         0  # on earlier verbatim rows, held back: the engine takes the latest turn's alone
     )
+
+    # The injections, in the order given — what `/context` reports of them.
+    injections: tuple[InjectionSent, ...] = ()
 
     @property
     def total_tokens(self) -> int:
@@ -312,7 +327,9 @@ class _Assembly:
         )
         # What the numbered injections cost; the system ones are in `system`.
         injected_tokens = sum(
-            estimate_tokens(i.text) for i in self.injections if i.position != "system" and i.text
+            estimate_tokens(i.text)
+            for i in self.injections
+            if i.position.depth is not None and i.text
         )
 
         # The doc's case 4 drops summaries until the context fits and only
@@ -355,6 +372,11 @@ class _Assembly:
             pictures_sent=pictures_sent,
             pictures_omitted=pictures_attached - pictures_sent - pictures_held,
             pictures_held=pictures_held,
+            injections=tuple(
+                InjectionSent(i.owner, i.position, estimate_tokens(i.text))
+                for i in self.injections
+                if i.text
+            ),
         )
 
     def _split(self, tail_target: int) -> tuple[list[Message], list[_CoveredScene], list[Message]]:

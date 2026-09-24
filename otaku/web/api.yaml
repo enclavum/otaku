@@ -814,10 +814,11 @@ paths:
         What is not sent stays. `position` must be one of the setting's
         `allowed_positions` ("system", or which of the reader's messages,
         counted from the end, the text goes before — 1 the latest)
-        and is refused for a setting that injects nothing; `text` is
-        taken by the story reminder alone — the shared reminder's text
-        is /api/shared_reminder's. `enabled`
-        that is not a boolean is malformed.
+        and is refused for a setting that injects nothing;
+        `reminder_text` is taken by the story reminder alone — the shared
+        reminder's text is /api/shared_reminder's; `display_notes` by the
+        notes tool alone. A flag that is not a boolean is malformed. The
+        answer's notice says where the setting now stands.
       requestBody:
         content:
           application/json:
@@ -1597,6 +1598,18 @@ components:
             used: { type: integer, description: "Derived: percent of the limit." }
         lede: { type: string, description: "The summary said in words." }
         note: { type: string, description: "What the preview could not know, as a sentence — the model is not loaded, so the window is the assembler's substitute until a turn loads it; \"\" when it knew everything." }
+        injections:
+          type: array
+          description: What the request carries besides the story — each switched-on setting's text, in the order sent; the texts themselves are in the parts, being the wire.
+          items:
+            type: object
+            properties:
+              label: { type: string, description: "The setting's label, as the Tools tab shows it." }
+              position:
+                description: Where the setting put it — "system", or before the Nth of the reader's messages counted from the end.
+                oneOf: [{ type: string, enum: [system] }, { type: integer, minimum: 1 }]
+              position_text: { type: string, description: "The position named as the depth ruler names it: \"system\", \"2nd last\" …" }
+              tokens: { type: integer, description: "The assembler's estimate of its cost — inside system_tokens at \"system\", inside transcript_tokens otherwise." }
         parts:
           type: array
           description: One part per message, exactly as the wire will carry it.

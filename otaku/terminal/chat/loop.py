@@ -12,6 +12,7 @@ does not, so a picker cancelled without a word leaves the screen exactly
 as it was.
 """
 
+import functools
 import sys
 
 from otaku.backend.api import play as api_play
@@ -75,15 +76,23 @@ def run(session: Session) -> None:
                 )
             )
         )
+    carry = Carry()
+    assembler = LineAssembler()
+    prompt_session, answers = build_prompt(session, carry, assembler, shortcuts=bindings.SHORTCUTS)
+
     if session.messages:
         # A resumed story starts mid-scene: name what was resumed and
         # show its last turns, so the scene is on screen before the
         # prompt — and hand them to the ledger, so /undo and /regen can
-        # take them back.
+        # take them back. The blank before the prompt is the prompt's own
+        # when it opens on a question's answers (`AnswerMenu.top_row`) —
+        # unless a notice is to follow, which wants the plain blank.
         print(api_stories.landed_line(session))
         print()
-        print(last_turns(list(session.messages), RESUME_TURNS))
-        print()
+        print(last_turns(list(session.messages), RESUME_TURNS, notes=chat.notes_displayed))
+        answers.top_row = answers.posed and not session.notice
+        if not answers.top_row:
+            print()
         chat.restore_tail(RESUME_TURNS)
     if session.notice:
         # The one bold hint, below the echoed turns — which are then no
@@ -92,10 +101,6 @@ def run(session: Session) -> None:
         print()
         session.notice = ""
         chat.ledger.invalidate()
-
-    carry = Carry()
-    assembler = LineAssembler()
-    prompt_session = build_prompt(session, carry, assembler, shortcuts=bindings.SHORTCUTS)
 
     # One status callback, two surfaces: the prompt's toolbar while the
     # prompt is up, the pinned bottom row while a reply streams. Each is
@@ -127,18 +132,35 @@ def run(session: Session) -> None:
             prefix = PROMPT_PREFIX
         placeholder = None if assembler.in_block else PLACEHOLDER
         try:
-            line = prompt_session.prompt(prefix, placeholder=placeholder, default=carry.take_text())
+            # the answers to a pending question, as rows over the prefix
+            message = functools.partial(answers.message, prefix)
+            line = prompt_session.prompt(
+                message, placeholder=placeholder, default=carry.take_text(), pre_run=answers.open
+            )
         except EOFError:
             break
         except KeyboardInterrupt:
             # ^C clears the line; inside a """ block it also drops the
             # buffer. The aborted prompt line stays on screen as a row
             # the ledger cannot measure, so erasing is off until the
-            # next play.
+            # next play — except while the story stands on a question,
+            # where the abort erased the prompt, answers and all
+            # (`prompt._answer_abort`), so the next prompt draws them in
+            # place and the ledger has nothing new to count; a block's
+            # collected lines above still stand. The prompt's own blank
+            # (`top_row`) stays owed after an erased abort — the erase
+            # took it too — and is on screen otherwise.
+            erased = prompt_session.app.erase_when_done
+            prompt_session.app.erase_when_done = False
+            if assembler.in_block or not erased:
+                chat.ledger.invalidate()
+                answers.top_row = False
             assembler.reset()
             chat.ledger.typed_gone()
-            chat.ledger.invalidate()
             continue
+        # The prompt drew its blank, if it owed one; whatever follows
+        # stands under the line it read.
+        answers.top_row = False
 
         if carry.take_shortcut():
             # A shortcut key exited the prompt with its command as the
@@ -176,7 +198,10 @@ def run(session: Session) -> None:
             # What it left mid-row is not the ledger's to count.
             print()
             chat.ledger.invalidate()
-        chat.ledger.gap()  # the systematic blank before the next prompt
+        # The systematic blank before the next prompt — the prompt's own
+        # to draw when it opens on a question's answers, so the question's
+        # block runs on into them.
+        answers.top_row = chat.ledger.gap(deferred=answers.posed)
 
 
 def submit(chat: Chat, line: str) -> None:
