@@ -145,7 +145,7 @@ class ReplyParser:
         return 0
 
 
-def closing(name: str) -> str:
+def closing_tag(name: str) -> str:
     """The tag that closes a call of `name` — what a request stops on,
     and what is put back where a server kept it."""
     return f"</{NAMESPACE}{name}>"
@@ -200,7 +200,8 @@ def to_wire(body: str, tools: ToolSet) -> str:
             end = stop = ended.start()
         inside = body[opened.end() : stop]
         if name in tools.on:
-            out.append(body[at : opened.start()] + f"<{NAMESPACE}{name}>{inside}{closing(name)}")
+            opening = f"<{NAMESPACE}{name}>"
+            out.append(body[at : opened.start()] + opening + inside + closing_tag(name))
             at = end
             continue
         rule = tools.off.get(name)

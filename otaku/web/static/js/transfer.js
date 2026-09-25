@@ -11,7 +11,7 @@
 
 import * as api from "./api.js";
 import { $, element, pickFile } from "./dom.js";
-import { ask, guard, wiring } from "./browser.js";
+import { ask, closeAll, guard, wiring } from "./browser.js";
 import { landed, watchExtraction } from "./shell.js";
 import { tell } from "./status.js";
 
@@ -206,6 +206,10 @@ export async function importCard() {
   // no default stands in for a name — the prefill IS the default.
   const persona = $("#otk-card-persona").value.trim();
   const { notice } = await api.addCard(prepared.token, persona);
+  // The card is in: the screen it was asked from goes, as a confirmed
+  // question's does, and the landing is read in the flow. A cancelled
+  // dialog left that screen exactly as it was.
+  closeAll();
   await landed(notice, { redraw: "always" });
 }
 

@@ -13,6 +13,7 @@ from dataclasses import dataclass, fields
 from otaku.backend.api import settings as api_settings
 from otaku.backend.api import stories
 from otaku.backend.session import NO_MODEL_HINT, Refused, Session
+from otaku.backend.story import InjectingSetting
 from otaku.context.assembler import IMAGE_TOKENS, AssembledPrompt, ContextOverflowError
 from otaku.formatting import (
     Money,
@@ -38,9 +39,10 @@ class ContextPart:
 
 @dataclass(frozen=True)
 class ContextInjection:
-    """One text the request carries besides the story: whose — the
-    setting's label — where it rides (the `position`, and its
-    `position_text` as the depth ruler names it) and what it costs."""
+    """One text the request carries besides the story: its name — the
+    setting's `injection_label`, what the depth ruler places — where it
+    rides (the `position`, and its `position_text` as the ruler names
+    it) and what it costs."""
 
     label: str
     position: InjectionPosition
@@ -52,7 +54,9 @@ class ContextInjection:
 class ContextReport:
     """The next request EXACTLY as it will be sent: the assembled prompt
     — the facts the diagram and the summary are drawn from — the
-    injections it carries, and one part per message.
+    injections it carries (in the request's order: the system message
+    first, then the deepest first, the costlier first at one place), and
+    one part per message.
 
     Nothing in it is otaku's own text except the summary and the role
     markers `text` brackets (they stand for the JSON role field) — every
@@ -117,22 +121,31 @@ def context(session: Session) -> ContextReport:
         and max_context is None
         and found.state in (ModelState.UNLOADED, ModelState.LOADING)
     )
-    # An injection names its owner, a setting; the report names the
-    # setting as the reader knows it. One this build has no setting for
-    # keeps its name.
+    # An injection names its owner, a setting; the report names the text
+    # as the setting names what it injects. One this build has no
+    # setting for keeps its owner's name. Listed in the request's own
+    # order — the system message first, then the deepest first, the one
+    # before the newest message last; the costlier first where two share
+    # a place — whatever order they were sent in.
     settings = stories.get_settings(session)
+    injections = [
+        ContextInjection(
+            label=(
+                setting.injection_label
+                if isinstance(setting := settings.get(sent.owner), InjectingSetting)
+                else sent.owner
+            ),
+            position=sent.position,
+            position_text=sent.position.text,
+            tokens=sent.tokens,
+        )
+        for sent in prompt.injections
+    ]
+    injections.sort(key=lambda each: (-(each.position.depth or 99), -each.tokens))
     return ContextReport(
         prompt=prompt,
         tail_setting=session._config.min_tail_messages,
-        injections=tuple(
-            ContextInjection(
-                label=setting.label if (setting := settings.get(sent.owner)) else sent.owner,
-                position=sent.position,
-                position_text=sent.position.text,
-                tokens=sent.tokens,
-            )
-            for sent in prompt.injections
-        ),
+        injections=tuple(injections),
         parts=tuple(
             ContextPart(
                 turn.role,
@@ -645,12 +658,14 @@ def _summary(report: ContextReport) -> str:
         )
     if report.injections:
         # What rides besides the story, each where the story put it — a
-        # bullet each, the label lowercased like the lines around it; the
-        # texts themselves are in the parts, being the wire.
-        lines.append("  injected:")
+        # bullet each, named as the setting names what it injects; the
+        # total where there is something to total. The texts themselves
+        # are in the parts, being the wire.
+        total = sum(i.tokens for i in report.injections)
+        summed = f" (~{total:,} total)" if len(report.injections) > 1 else ""
+        lines.append(f"  injected{summed}:")
         lines.extend(
-            f"  - {i.label.lower()} ({i.position_text}, ~{i.tokens:,} tokens)"
-            for i in report.injections
+            f"  - {i.label} ({i.position_text}, ~{i.tokens:,} tokens)" for i in report.injections
         )
     if prompt.tail_target < report.tail_setting:
         # Case 5: the tail stepped down so the context could fit (a

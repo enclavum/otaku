@@ -256,6 +256,7 @@ export function settings() {
     autocorrect: s.autocorrect,
     notification: s.notification,
     max_context: s.max_context ?? 65536,
+    idle_seconds: s.idle_seconds ?? 300,
     model: state.model,
     parameters: s.parameters.map((p) => ({ ...p })),
   };

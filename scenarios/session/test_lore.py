@@ -231,6 +231,23 @@ class TestExtractSeesPictures:
             assert "[1] (picture 1) Look at this door." in analyst[0]["text"]
             assert analyst[1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
 
+    def test_every_picture_of_the_scene_rides_in_its_order(self, tmp_path) -> None:
+        # No cap: a scene's pictures all reach the analyst, each marked at
+        # its line and riding in the order of the lines.
+        with test_play._seeing(tmp_path) as app:
+            for n in range(1, 4):
+                test_play._play(app, f"Picture number {n}.", [test_play._cat()])
+            app.play("/extract")
+            analyst = analyst_prompt(app)
+            assert [part["type"] for part in analyst] == [
+                "text",
+                "image_url",
+                "image_url",
+                "image_url",
+            ]
+            for n in range(1, 4):  # the reader's lines are the odd ones; the replies between
+                assert f"[{2 * n - 1}] (picture {n}) Picture number {n}." in analyst[0]["text"]
+
     def test_a_model_that_cannot_see_gets_the_marks_alone(self, tmp_path) -> None:
         with test_play._seeing(tmp_path) as app:
             test_play._play(app, "Look at this door.", [test_play._cat()])

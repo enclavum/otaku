@@ -99,7 +99,7 @@ export async function openTab(tab) {
     answer, and the reader was taken out of the screen for nothing), and
     one whose whole result belongs to that screen. */
 export function keepsScreen(token) {
-  return ["/new", "/fork", "/extract", "/import", "/export"].includes(token);
+  return ["/new", "/fork", "/extract", "/import", "/export", "/card"].includes(token);
 }
 
 async function newStory() {
@@ -237,27 +237,46 @@ const _NO_STORY = {
 };
 
 async function extractNow() {
-  /* A pass is minutes of model time, so the question says so — and says
-     what happens if the reader waits instead, waiting being the normal
-     way this runs. */
+  /* The question says what a pass does — and that, left alone, it
+     happens anyway, which is the normal way this runs. With nothing
+     outside a scene there is nothing to ask: the pass would only
+     decline. */
   const facts = await api.facts();
-  const opened = facts.story_id == null ? null : await api.story(facts.story_id).catch(() => null);
-  const unread = opened?.unread ?? 0;
+  if (facts.story_id === null) {
+    tell(_NO_STORY.extract, "otk-error");
+    return;
+  }
+  const [opened, knobs] = await Promise.all([
+    api.story(facts.story_id).catch(() => null),
+    api.settings().catch(() => null),
+  ]);
+  const pending = opened?.unread ?? 0;
+  if (!pending) {
+    tell("Every message already belongs to a scene. There is nothing to extract.");
+    return;
+  }
   await confirmed({
-    title: "Read them now?",
+    title: "Extract the lore now?",
     body:
-      (unread
-        ? `${unread} ${unread === 1 ? "message has" : "messages have"} not been read into scenes and cast. `
-        : "Everything played has been read already. ") +
-      "Reading asks the model for a summary, a history and a journal per character — it can take a minute or two.",
-    note: "Otherwise it happens on its own, five minutes after you stop typing.",
-    action: "Read now",
-    cancel: "Wait",
-    run: () =>
-      facts.story_id === null
-        ? tell(_NO_STORY.extract, "otk-error")
-        : extract(facts.story_id),
+      `The last ${pending} ${pending === 1 ? "message belongs" : "messages belong"} to no scene yet. ` +
+      "Extracting cuts them into scenes — a title and a summary each, a journal entry for every " +
+      "character present.",
+    note: `Left alone, otaku does this by itself after ${idleSpan(knobs?.idle_seconds)} at the prompt.`,
+    action: "Extract now",
+    run: () => extract(facts.story_id),
   });
+}
+
+function idleSpan(seconds) {
+  /* The configured idle wait, said as a reader counts it: whole minutes
+     where it is one, seconds otherwise; the default where the figure
+     did not arrive. */
+  const total = Number.isFinite(seconds) ? seconds : 300;
+  if (total >= 60 && total % 60 === 0) {
+    const minutes = total / 60;
+    return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
+  }
+  return `${total} ${total === 1 ? "second" : "seconds"}`;
 }
 
 async function extract(story) {

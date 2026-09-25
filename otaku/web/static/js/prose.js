@@ -21,7 +21,9 @@
    any of them. A span closes on the mark it opened with, so a
    file_name inside *emphasis* cannot end it. Inline only — a heading, a
    list or a fence is block structure, and a reply is prose, so they
-   stay as the characters the model wrote.
+   stay as the characters the model wrote — as does a thematic break, a
+   line of three or more `*`, `-` or `_`, which would otherwise read as
+   an emphasis that never closes.
 
    Forward-only, because a reply arrives a character at a time and there
    is nothing ahead to read: a quote left open is spoken to the end of
@@ -47,6 +49,12 @@ const _HANDOVER_AFTER = ",.!?…:;";
 const _MARKS = "*_";
 
 const _WORD = /[\p{L}\p{N}]/u;
+
+// A line that is nothing but three or more of one mark — `***`, `---`,
+// `___`, spaces between allowed — is Markdown's thematic break, a scene
+// break as models write one: the characters themselves, never an
+// emphasis that opens and a dash that speaks.
+const _BREAK = /^\s*(?:\*\s*){3,}$|^\s*(?:-\s*){3,}$|^\s*(?:_\s*){3,}$/;
 
 /** One paragraph as NODES, ready to put in a `<p>`: the runs above, each
     wrapped in what it is. `spoken` says the whole paragraph was speech,
@@ -234,7 +242,15 @@ export function runs(paragraph) {
     take(ch);
   };
 
-  for (const ch of paragraph) consume(ch);
+  paragraph.split("\n").forEach((line, i) => {
+    if (i) consume("\n");
+    if (_BREAK.test(line)) {
+      cut();
+      for (const ch of line) take(ch);
+    } else {
+      for (const ch of line) consume(ch);
+    }
+  });
   /* A mark still waiting when the paragraph ends: the one that CLOSES an
      open span, most often — `*worn*` ending a line — and otherwise a
      character the model simply typed. */

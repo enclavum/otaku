@@ -4,8 +4,8 @@ The major features planned for the versions ahead, tentatively; smaller ones wil
 along the way.
 
 - 0.5: the providers layer rewritten, web UI updates
-- 0.6: vision: attaching pictures to the conversation
-- 0.7: text completion and story mode
+- 0.6: vision and tool calls
+- 0.7: text completion and story mode, maybe a web search tool call
 - 0.8: a director model called before and after each turn, per-character context, global
   character view
 - 0.9: lorebooks in addition to lore extraction; fully fledged context injection

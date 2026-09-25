@@ -1604,7 +1604,7 @@ components:
           items:
             type: object
             properties:
-              label: { type: string, description: "The setting's label, as the Tools tab shows it." }
+              label: { type: string, description: "The name of the text, as its setting names what it injects (injection_label)." }
               position:
                 description: Where the setting put it — "system", or before the Nth of the reader's messages counted from the end.
                 oneOf: [{ type: string, enum: [system] }, { type: integer, minimum: 1 }]
@@ -1943,6 +1943,7 @@ components:
         autocorrect: { type: boolean }
         notification: { type: boolean }
         max_context: { type: integer, description: "Tokens the prompt may use at most; 0 = the model's own max context." }
+        idle_seconds: { type: number, description: "How long the prompt stands idle before the lore pass runs on its own ([lore] idle_seconds) — a fact, not a knob." }
         model: { type: string, description: "Whose parameters these are — the read is a snapshot, and a switch mid-slip would silently retitle it." }
         parameters:
           type: array
@@ -2043,7 +2044,8 @@ components:
             type: object
             properties:
               name: { type: string, description: What the story stores it under — the path segment a PATCH takes. }
-              label: { type: string }
+              label: { type: string, description: "The switch's label, as the Tools tab shows it." }
+              injection_label: { type: string, nullable: true, description: "The name of the TEXT the setting injects — what a depth ruler places and /context lists — lowercase (questions, assistant notes, story reminder, shared reminder); null for a setting that injects nothing." }
               tool: { type: string, nullable: true, description: "The name of the tool this setting switches (question, note) — its prompt is /api/prompts/{tool}'s; null for a setting that is no tool's." }
               allowed_positions:
                 type: array

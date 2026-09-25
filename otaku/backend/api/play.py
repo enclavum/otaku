@@ -424,7 +424,7 @@ def _reply_events(
     # the model closed calls, so the tag is put back.
     name = parser.current_call
     if name in answered and final is not None and final.finish_reason == "stop":
-        content.append(tool_calls.closing(name))
+        content.append(tool_calls.closing_tag(name))
     reply = _land_reply(session, content, final, reply_kind, reply_speaker)
     if error is not None:
         yield Failed(error)
@@ -459,7 +459,7 @@ def _with_stops(params: Mapping[str, object], answered: frozenset[str]) -> dict[
         return dict(params)
     own = params.get("stop")
     stops = [str(stop) for stop in own] if isinstance(own, list) else []
-    stops += [tool_calls.closing(name) for name in sorted(answered)]
+    stops += [tool_calls.closing_tag(name) for name in sorted(answered)]
     return {**params, "stop": stops}
 
 

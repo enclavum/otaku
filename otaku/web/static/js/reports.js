@@ -15,6 +15,9 @@ import { count } from "./format.js";
 
 // ---------- context: the request as a document ----------
 
+// A row's name is the backend's lowercase name of the text placed, capitalised for a row.
+const capitalised = (name) => name.charAt(0).toUpperCase() + name.slice(1);
+
 export async function openContext() {
   const popup = popups.get("/context");
   const body = $("[data-context]", popup);
@@ -52,24 +55,29 @@ export async function openContext() {
   const head = element("div", "otk-v otk-v--lg");
   head.append(summary, stages(shape));
   if (preview.injections.length) {
-    /* What rides besides the story — each setting's text, where the
-       story put it and what it costs — under the stages: a label, then
-       a bullet per injection in the summary's figure dress, the label
-       lowercased like the figures around it. The texts themselves are
-       in the wire below. */
-    const injected = element("div", "otk-v otk-v--xs");
-    injected.append(span("otk-label", "injected"));
-    const list = element("ul", "otk-context__injected");
+    /* What rides besides the story, as the design lists it under the
+       stages: a section head with the total, then a row per injection —
+       the name of the text placed (the backend's, capitalised for a
+       row), a dotted leader, where it rides, what it costs — in the
+       request's order, as the backend lists them. The texts themselves
+       are in the wire below. */
+    const injected = element("div", "otk-context__injected");
+    const total = preview.injections.reduce((sum, injection) => sum + injection.tokens, 0);
+    const heading = element("div", "otk-section otk-context__injrow otk-context__injhead");
+    // the total, where there is something to total: one row says its own
+    const summed = preview.injections.length > 1 ? `~${count(total)} tokens` : "";
+    heading.append(span("", "Injected"), span(""), span(""), span("otk-context__injtok", summed));
+    injected.append(heading);
     for (const injection of preview.injections) {
-      list.append(
-        element(
-          "li",
-          "otk-meta",
-          `${injection.label.toLowerCase()} · ${injection.position_text} · ~${count(injection.tokens)} tokens`,
-        ),
+      const row = element("div", "otk-context__injrow");
+      row.append(
+        span("otk-context__injname", capitalised(injection.label)),
+        span("otk-context__injdots"),
+        span("otk-context__injat", injection.position_text),
+        span("otk-context__injtok", `~${count(injection.tokens)} tokens`),
       );
+      injected.append(row);
     }
-    injected.append(list);
     head.append(injected);
   }
 

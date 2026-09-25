@@ -7,6 +7,27 @@ changes.
 
 ## [Unreleased]
 
+**TL;DR**
+
+- Vision. If the selected model supports vision, you can attach images to your messages — in the
+  terminal after the `@` sign, with the paperclip button in the web UI.
+- Story tools. A new tab is added to the story dossier, featuring four tools:
+  - Questions — when turned on, the model will be instructed how to ask you a question. This also
+    makes an assisted roleplay possible: instead of typing a prompt, you pick one of the suggested
+    answers.
+  - Assistant notes — the model will be instructed to keep private notes between turns, hidden
+    unless you choose to see them. This can improve roleplay: the model carries its intentions from
+    one turn to the next.
+  - Story reminder (aka "Author's notes") — your own text, inserted near the end of the story at
+    a depth you choose.
+  - Shared reminder — the same but shared between stories.
+- The import card action is moved from the main menu to the story dossier.
+- The banner displayed at the start is reworked and the mascot is replaced with a house mark.
+
+Full list of changes: [CHANGELOG.md](https://github.com/enclavum/otaku/blob/main/CHANGELOG.md)
+
+Tentative roadmap: [ROADMAP.md](https://github.com/enclavum/otaku/blob/main/ROADMAP.md)
+
 ### Added
 
 - Pictures on a turn, for a model that can see: `@path` in the terminal (the menu lists picture
@@ -34,14 +55,29 @@ changes.
 - The web API: `GET`/`PATCH /api/stories/{story}/settings`, `GET`/`PUT /api/shared_reminder`,
   `GET`/`PUT /api/prompts/{tool}`; a turn's `segments` and the `tool_call` stream event, so the
   page draws a block without parsing it; `injections` on the context preview; pictures as `files`
-  in the play body and `attachments` on a turn.
+  in the play body and `attachments` on a turn; `idle_seconds` on the settings.
 
 ### Changed
 
-- The terminal draws the model's thinking as a dim block behind a bar, like a note, without the
-  `(thinking)` label.
+- The model's thinking draws as a block like a note in both frontends — dimmed behind a bar in the
+  terminal, dimmed behind a rule of its own on the page — without the `(thinking)` label.
+- The launch banner is a house mark beside three dimmed lines — the name, the model with its
+  context, the provider — and `otaku web` opens the way a server does: the name, the address,
+  whether a password is set, how to quit.
 - `otaku web` on a public host warns only about what is missing: with both HTTPS and a password
   set, nothing is said.
+- The story dossier's extraction block: "Extract now" is greyed when every message already belongs
+  to a scene, its confirmation says what a pass does, and the "read through" and "unread" captions
+  are gone — the scene index marks what is not summarized yet.
+- On a phone, a panel's list and its detail each keep a share of the screen and scroll within it,
+  so the picked model's "Use for this story" and a message's reader are on screen instead of a
+  list's length down; the dossier's "Import card" and "Extract now" sit at the screen's foot; the
+  context window's stages stand in two rows.
+
+### Fixed
+
+- Three asterisks on a line of their own were drawn on the page as one, not as a break.
+- Closing the card import opened from the dossier closed the dossier with it.
 
 ## [0.5.0] - 2026-09-17
 

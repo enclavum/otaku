@@ -43,9 +43,8 @@ a row is measured by the gate, packed into a span, or numbered for the
 analysis model. A picture the reader attached IS part of the scene, and
 the pass is the one moment its content can be put into words that last
 — a summarized row loses its picture — so each is marked `(picture n)`
-at its line and, while the model can see, the first few ride the
-request in that order (`_MAX_PICTURES`); the template asks for what
-matters in them.
+at its line and, while the model can see, every one rides the request
+in that order; the template asks for what matters in them.
 """
 
 import builtins
@@ -95,11 +94,6 @@ _ATTEMPTS = 3
 _BACKOFF_SECONDS = 1.0
 _TRANSIENT_STATUSES = frozenset({429, 503})
 _RETRY_AFTER_CAP = 60.0  # the longest a pass waits on the server's word
-# How many of a scene's pictures ride the extraction request: a scene is
-# many turns and a picture costs what a page of story does
-# (`assembler.IMAGE_TOKENS`), so the first few in scene order, the rest
-# marked in the text and not shown.
-_MAX_PICTURES = 8
 
 # Null-object cancel: callers pass a real Event or nothing; normalizing to
 # a never-set Event deletes the `is not None` guard at every check site.
@@ -661,14 +655,13 @@ class Extractor:
                 )
 
     def _scene_pictures(self, span: Sequence[Message]) -> tuple[WirePicture, ...]:
-        """The scene's pictures as the request carries them, in the order
-        `numbered_chat` numbers them — read from the folder while the
-        model can see, the first `_MAX_PICTURES` at most. None for a model
-        that cannot: the markers alone say a picture was shown. A file
-        that is gone is skipped."""
+        """The scene's pictures as the request carries them, every one, in
+        the order `numbered_chat` numbers them — read from the folder while
+        the model can see. None for a model that cannot: the markers alone
+        say a picture was shown. A file that is gone is skipped."""
         if self._client.pictures_ride(self._model) is PicturesRide.NONE:
             return ()
-        named = [a for item in span for a in item.attachments][:_MAX_PICTURES]
+        named = [a for item in span for a in item.attachments]
         found = (self._store.files.get(a.file) for a in named)
         return tuple(WirePicture(*f) for f in found if f is not None)
 

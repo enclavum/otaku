@@ -76,6 +76,13 @@ def think_choices(session: Session) -> ThinkChoices:
     return ThinkChoices(tuple(levels), bool(caps.reasoning_budget))
 
 
+def idle_seconds(session: Session) -> float:
+    """How long the prompt stands idle before the lore pass runs on its
+    own (`[lore] idle_seconds`) — a fact for a frontend that says when,
+    read off the config the session was opened with."""
+    return session._config.idle_seconds
+
+
 def parameter_names(session: Session) -> tuple[str, ...]:
     """The /set parameters that reach the model in use, in PARAMETERS's
     order (`OpenAIClient.supported_params_of`: the wire's set, and the

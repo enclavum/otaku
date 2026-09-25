@@ -135,288 +135,176 @@ A model uses a tool by writing a TOOL CALL in its reply — a tagged
 span, `<otk-question>…</otk-question>`, `<otk-note>…</otk-note>`:
 otaku owns the convention, never the API's `tools` field, so it works
 on every engine. The body is stored verbatim, tags included. A reply is
-therefore prose and tool calls; the model's reasoning is neither — it
-arrives on the wire's own field, streams beside them, and is never
-stored. The terminal streams it as a dim block behind the bar, as a
-note is, no label; it ends at the first piece of anything else, one
-blank line to what follows as after any block, and no echo ever shows
-it.
+prose and tool calls; the model's reasoning is neither — it arrives on
+the wire's own field, streams beside them, and is never stored.
 
 WHAT a tool call is, is the `otk-` namespace and nothing else
 (`context.tool_calls`: `ToolCall(name, text, closed)`, `Prose`, the
-`ReplyParser` over a stream and `parse_reply` over a body — pure, and
-no list of tools is consulted). A body keeps its tags for good while
-the tools come and go between builds, so "not story" has to be a
-property of the TEXT: a call stays one in a build that never heard of
-its tool, and nothing outside the namespace is ever one — the INSIDE
-goes with a call, so `<i>never</i>` keeps its word and a chat log's
-`<Alice>` its line. Calls never nest: an opening tag inside a call ends
+`ReplyParser` over a stream and `parse_reply` over a body — pure, no
+list of tools consulted): a call stays one in a build that never heard
+of its tool, nothing outside the namespace is ever one, and the inside
+goes with the call. Calls never nest: an opening tag inside a call ends
 it, any closing tag ends the open one, a stray closing tag is dropped.
 A call is not story: the lore pass leaves it out, tags and all
-(`tool_calls.strip`: the gate, the span packing, the numbered chat).
-The same grammar sends a stored reply back on the wire under the
-story's `ToolSet(on, off)` (`tool_calls.to_wire`, the mirror of
-`syntax.to_wire`): a call of a tool that is on goes as its canonical
-self, one of a tool that is off becomes what the tool's `to_prose` makes
-of it (a question alone; nothing for a note), and one of any other name
-leaves the wire — a white list, so a decommissioned tool never rides.
-`tool_calls` lives in `context` because the worker and the assembler
-read it below the backend; it is the reply-side module in the
-request-side package, and may move when the package is renamed.
+(`tool_calls.strip`). A stored reply goes back on the wire under the
+story's `ToolSet(on, off)` (`tool_calls.to_wire`): a call of a tool
+that is on goes as itself, one of a tool that is off becomes its
+`to_prose` (a question alone; nothing for a note), any other name
+leaves the wire — a white list. `tool_calls` lives in `context`
+because the worker and the assembler read it below the backend.
 
-WHICH tools there are is `backend.tools`: one class per tool, in
-`syntax`'s shape — a class declares its `name` (`question` for
-`<otk-question>`; letters alone), who answers its call (`Actor`: nobody
-for an aside, `note`; the user, `question`; otaku itself, `SYSTEM`, not
-supported yet) and the prompts.toml key of its prompt (`prompt_name`:
-`tool_questions_prompt`, `tool_assistant_notes_prompt`); an instance is
-one call READ, which is the play stream's business — nothing is
-instantiated to inject a prompt. The one registry is `TOOLS`, keyed by
-name. A new tool is a subclass and its name in `TOOLS`; the story
-setting that switches it on is the setting's to declare
-(`backend.story`), not the tool's.
+WHICH tools there are is `backend.tools`: one class per tool, declaring
+its `name` (`question` for `<otk-question>`), who answers its call
+(`Actor`: nobody for `note`, the user for `question`, `SYSTEM` not
+supported yet) and its prompt's key in prompts.toml (`prompt_name`);
+an instance is one call READ. The registry is `TOOLS`; a new tool is a
+subclass and its name there, and the story setting that switches it on
+is the setting's to declare (`backend.story`), not the tool's.
 
-In the play stream (`backend.api.play`) the deltas go through a
-`ReplyParser`: prose streams as `Text`, a call's inside as `ToolCall`
-pieces (the tool's name, the text, `closed` on the piece its closing
-tag ended), and a raw tag is never yielded — neither frontend parses.
-What is RECORDED is everything that arrived, tags included. While a
-tool the user answers (`Actor.USER`) is switched on for the story, its
-closing tag joins the request's stops after the reader's own, so the
-reply ends where the question does; the server keeps the stop it
-stopped on, so the recorder puts the closing tag back (a reply cut at
-the length limit keeps its call open). A stored turn reaches a
-frontend split (`play.segments(body)`: prose, and each call as its
-tool's `to_json()`, kind `tool_call` — `ToolQuestions`: the question and
-its options), so a frontend draws calls from facts and keeps no
-parser. Which question the story STANDS on is the frontend's own
-reading of the newest reply's segments, the tool names hardcoded
-(`transcript.questionPosed`: a reply whose last call is a question,
-nothing after it but notes and whitespace) — so a story resumed on one
-shows it again, and nothing is stored or reported for it. Answering is
-an ordinary line: whatever is played next answers it, verbatim, no
-frame, no mode. The page draws a question as the ask panel, a note as
-the notes block while the story displays notes, each in its place
-among the prose, streaming and landed alike. The terminal draws each
-call as a BLOCK of its own in the flow — a blank line before it,
-however many newlines the model left, and exactly one after it where
-prose goes on, the prose's own leading newlines dropped
-(`tty.render.spaced`); a bar `│ ` opening EVERY row of it, the text
-wrapped at the width by the terminal's own rule (a character's columns
-as the ledger's `RowTracker` counts them) so a long line never wraps
-past the bar, plain, none of the story's typesetting
-(`render.BlockStream`, written past the typesetter because the
-typesetter sanitizes escapes away; a word is placed once complete);
-streamed word by word, and echoed through the same object at the same
-width, so stream and echo cannot differ. A question is the QUESTION
-alone at full weight (`render.QuestionStream`: the lines before the
-first option, parted as the call streams — a line whose first token is
-an option's head is held until its newline tells, by the tool's own
-rule `ToolQuestions.is_option`, and from the first option on nothing
-is drawn); a note is dim, bar and all, and drawn only while the story
-displays notes (`render.notes_displayed` over the story's settings,
-read through `Chat.notes_displayed` as each echo draws and once per
-stream; otherwise left out, tags and all, so a hidden note is never
-seen). The dossier's preview wraps them to its own panel
-(`message(width=)`), and its message rows flatten the drawing back to
-one line. A
-reply already on screen keeps the look it was drawn with when the
-switch moves; the next echo or play follows the switch. A question's
-answers are rows ABOVE the
-prompt line, part of the prompt's own message (`prompt.AnswerMenu`,
-opened as each prompt's `pre_run`): while the story stands on a
-question with a fixed set (`render.asked`, the page's `questionPosed`
-rule copied, read off the newest message as the prompt opens), the
-answers stand over the line behind the question's bar (`render.BAR`,
-wrapped to the width by `render.block` as its block is), numbered as
-the model listed them, the one under the cursor starred and in the
-accent; the blank line before that prompt is the PROMPT'S OWN first
-row then — the loop leaves it unprinted (`ledger.gap(deferred=)`, and
-the resume echo's blank likewise, when `AnswerMenu.posed`) and the menu
-draws it (`top_row`): the bar alone while the rows show, so the
-question's block runs on into its answers, a plain blank the moment
-they hide or the line is sent; the row is on screen either way, so the
-ledger's one-standing-blank count holds —
-↑/↓ walk them, Enter sends that one
-as the line, → takes it into the line to be edited (the one key every
-terminal reports that means nothing on an empty line: a modified Enter
-is plain Enter wherever the terminal encodes no modifiers), a typed
-character is the
-reader's own answer and the rows go, the empty line brings them back,
-Esc dismisses them. The final render is the prefix alone, so once the
-line is sent the rows leave the screen and the scrollback holds the
-question alone.
-Every other call still prints as it streamed, tags and all, until its
-look is decided. On the
-wire: the `tool_call` event, `done.reply` (the turn as stored), and
-`segments` on every turn. Whether the reader is shown the notes is a
-conjunction of two facts the setting reports — the notes tool on, with
-its display switch on — and each frontend reads it off them: the page
-in `transcript.displayTools`, the terminal in `render.notes_displayed`,
-each naming the other (the language barrier is the one reason a rule
-exists twice; a one-line conjunction earns no backend property).
+The play stream (`backend.api.play`) runs the deltas through a
+`ReplyParser`: prose as `Text`, a call's inside as `ToolCall` pieces
+(`closed` on the piece its closing tag ended), never a raw tag —
+neither frontend parses; everything that arrived is recorded, tags
+included. While a tool the user answers is on, its closing tag joins
+the request's stops after the reader's own, and the recorder puts back
+the tag the server kept (a reply cut at the length limit keeps its
+call open). A stored turn reaches a frontend split (`play.segments`:
+prose, and each call as its tool's `to_json()`, kind `tool_call`), so
+a frontend keeps no parser. Which question the story STANDS on is each
+frontend's own reading of the newest reply's segments — the page's
+`transcript.questionPosed`, the terminal's `render.asked`, each naming
+the other: a reply whose last call is a question, nothing after it but
+notes and whitespace — nothing is stored or reported for it, and
+answering is an ordinary line. A PAST question shows the question
+alone in both frontends. Whether notes are shown is the conjunction of
+two facts the setting reports — the tool on, its display switch on —
+read the same way in both (`transcript.displayTools`,
+`render.notes_displayed`); a one-line conjunction earns no backend
+property.
+
+The page draws a question as the ask panel, grown as it streams
+(`transcript.streamAsk`, `ToolQuestions._OPTION`'s rule copied as
+`readAsk`), and a note as the notes block, each in its place among the
+prose. The terminal draws every call as a BLOCK behind a bar
+(`render.BlockStream`; `QuestionStream` draws the question alone,
+parted from its options by `ToolQuestions.is_option`; a note is dim
+and a hidden one left out, tags and all; thinking is dim with no
+label; one blank line before and after, `render.spaced`), streamed and
+echoed through the same object so the two cannot differ. A question's
+answers are rows above the prompt line (`prompt.AnswerMenu`: ↑/↓
+walk, Enter sends one, → takes it into the line, a typed character or
+Esc dismisses, the empty line brings them back; the blank line before
+that prompt is the menu's own row, `ledger.gap(deferred=)`), and the
+scrollback keeps the question alone. Every other call prints as it
+streamed until its look is decided.
 
 ### Injections
 
 An `Injection` is text the context carries besides the story: never
-stored, never seen by the lore pass, shown by `/context` because it is
-on the wire — and REPORTED there as facts: the assembler records each
-one sent (`AssembledPrompt.injections`, `InjectionSent(owner, position,
-tokens)`), the report names the owner as the reader knows it and its
-place as the depth ruler names it (`ContextReport.injections`,
-`ContextInjection(label, position, position_text, tokens)`; the
-terminal's `text()` lists them as bullets under `injected:`, the page
-draws a bullet list under the stages, the wire carries `injections`).
-Where a text rides is ONE VALUE of one type, `InjectionPosition`
-(`store.schema`, a frozen dataclass: a `depth` from 1, or none for
-the system message; its `value` is the plain form the column and the
-wire hold, "system" or the number, and `from_value` reads one back;
-`text`, its name as every
-frontend shows it — "system", "2nd last" for 1, the reader's newest
-message being the last, … "9th last" for 8); the terminal reads the
-name off it, the page keeps the rule copied in its own language
-(`tools.js placeName`). `context.injections` owns what one is
-— its `owner` (the setting's name, later a lorebook's), its text, its
+stored, never seen by the lore pass, on the wire and so shown and
+REPORTED by `/context` (`AssembledPrompt.injections` →
+`ContextReport.injections`, `ContextInjection(label, position,
+position_text, tokens)`, the label the setting's `injection_label`;
+bullets under `injected:` in the terminal, a list under the stages on
+the page). `context.injections` owns what one is — `owner`, text,
 `position` — and where it goes (`inject_into_system`,
 `inject_into_tail`); the assembler decides only WHEN, and counts the
-tokens. Who MAKES one is above the
-package: a story's settings (`backend.story`, `StorySettings.injections`),
-later a lorebook; the assembler is handed them built and never learns
-where one came from, which is how a new source arrives without an
-assembler change. So `assemble_story(store, story_id, *, system,
-messages, injections, prompts, shape, pictures_ride)` takes what the
-caller holds — a story may not exist yet, and the worker's warm-up
-assembles from a snapshot, so its `Job` carries the same fields in the
-same order — and reads from the store only what it cannot hold: the
-scenes, the card archives, the pictures. The prompts object is handed
-in whole (`assembler.PromptTexts`, which the settings' `Prompts`
-satisfies structurally: `context` may not import `settings`) for the
-recap header and the card template. `ContextShape` is the window: the
-config's two counts and ONE `max_context`, the context in force —
-`context_in_force(model_window, cap)`, the lower of the model's window
-(the default where none) and the cap. A Job's shape carries the cap
-alone; the warm-up finishes it with the window it asks the engine for
-once the model is loaded, as the turn does. Where a turn's pictures
-ride is `providers.PicturesRide` — NONE for a model that cannot see,
-EACH on its own message, LATEST gathered onto the newest (omlx's
-quirk) — answered in one place, `client.pictures_ride(model)`, off the
-cached row. `assemble_story` is ONE function, the store reads included,
-so its unit tests hand it a stand-in store; inside, `_Assembly` is what
-every rung of the case-5 ladder composes from, with the cases as its
-methods.
+tokens. Who MAKES one is above the package (`StorySettings.injections`,
+later a lorebook): `assemble_story(store, story_id, *, system,
+messages, injections, prompts, shape, pictures_ride)` is handed them
+built, so a new source needs no assembler change, and reads from the
+store only what a caller cannot hold (scenes, card archives,
+pictures); the worker's `Job` carries the same fields in the same
+order. `prompts` is `assembler.PromptTexts`, which the settings'
+`Prompts` satisfies structurally (`context` may not import
+`settings`). `ContextShape` is the window: the config's two counts and
+ONE `max_context`, `context_in_force(model_window, cap)`; a Job's
+shape carries the cap alone and the warm-up finishes it once the model
+is loaded. `assemble_story` is ONE function, the store reads included,
+so its unit tests hand it a stand-in store; `_Assembly` is what every
+rung of the case-5 ladder composes from.
 
-Where an injection rides is ONE value, its `position`. "system"
-appends it to the system message, after the premise — the stored
-premise is untouched. A number makes it a synthesized user row,
-wire-only as a recap row is and joined by the same merge, placed
-BEFORE that one of the reader's messages counted from the end — 1 the
-latest, 2 the previous — so the merge heads that message with it; a
-reply, a recap row or another injection is never counted. Never after
-the newest row — it keeps the last word and its cue stays live — and
-never past the recap, which is a wall. It costs its tokens in the fit.
+Where a text rides is ONE value of one type, `InjectionPosition`
+(`store.schema`, frozen: a `depth` from 1, or none for the system
+message; `value` the plain form the column and the wire hold,
+`from_value` reads it back, `text` its name in every frontend —
+"system", "2nd last" for 1 … "9th last" for 8; the page keeps the
+rule copied in `tools.js placeName`). "system" appends it to the
+system message after the premise, the stored premise untouched. A
+number makes it a synthesized user row, wire-only as a recap row is
+and joined by the same merge, placed BEFORE that one of the reader's
+messages counted from the end — 1 the latest; a reply, a recap row or
+another injection is never counted; never after the newest row, never
+past the recap. It costs its tokens in the fit.
 
 A numbered injection MOVES with the end, so the turn it lands in and
-every turn after are `volatile` (`WireTurn`, `providers.WireMessage`):
-they read differently next request. The prompt-cache mark therefore
-sits on the last row ABOVE them, not on the final row
+every turn after are `volatile` (`WireTurn`, `providers.WireMessage`),
+and the prompt-cache mark sits on the last row ABOVE them
 (`requests._mark_cache`) — marked among them, a hosted cache would
-match nothing from one turn to the next. A local engine re-reads from
-where the injection sat; a "system" one costs nothing.
+match nothing from one turn to the next. A "system" one costs nothing.
 
 ### Story settings
 
-What a user sees as the app's features are, below the frontends, a
-STORY's settings: each is one switch of a story, one class each in
-`backend.story`. A tool's (`StorySettingQuestions`,
-`StorySettingAssistantNotes`) lets the model use the tool and injects
-its prompt, read off the prompts under the tool's `prompt_name` and
-enclosed `((OOC: …))` in chat, bare in the system message; a
-reminder's injects the user's own text, enclosed the same way — it
-rides a message of the reader's, where bare text would read as the
-reader's line, and every text injected into the chat is out of
-character; only the system message takes one bare — two of them, each a
-switch of its own: the SHARED reminder (`StorySettingSharedReminder`),
-one text every story that switched it on is sent, and the STORY
-reminder (`StorySettingReminder`), whose text is the story's; and a
-flag (`StorySettingMode`, story mode, not built yet) injects nothing.
+What a user sees as features are, below the frontends, a STORY's
+settings: one switch each, one class each in `backend.story`. A tool's
+(`StorySettingQuestions`, `StorySettingAssistantNotes`) lets the model
+use the tool and injects its prompt; a reminder's injects the user's
+own text — the SHARED reminder (`StorySettingSharedReminder`, one text
+every story that switched it on is sent) and the STORY reminder
+(`StorySettingReminder`); a flag (`StorySettingMode`, not built yet)
+injects nothing. Every text injected into the chat is out of
+character, enclosed `((OOC: …))`; the system message takes it bare.
 
 Every setting answers the same questions, so a frontend draws them
-alike: `name` (what a story stores it under — `use_shared_reminder`,
+alike: `name` (the stored key — `use_shared_reminder`,
 `use_story_reminder`, `allow_assistant_notes`, `allow_questions`,
-`story_mode`; a rename orphans stored settings), `label`, `enabled`,
-`injection_position` (None for one that injects nothing),
-`allowed_positions` (EVERY position it may take, a closed list a
+`story_mode`; a rename orphans stored settings), `label`,
+`injection_label` (the TEXT it injects — lowercase, the backend's:
+`questions`, `assistant notes`, `story reminder`, `shared reminder`;
+None for a flag; the page capitalises it and keeps no name table),
+`enabled`, `injection_position`, `allowed_positions` (a closed list a
 frontend offers and decides nothing about: "system" and 1 … 8 for a
-tool, the numbers alone for a reminder — it exists because a model
-forgets its system message, which is the premise's; empty for a flag),
-`reminder_text` (the story reminder's own; None for every other
-setting) and `display_notes` (whether the reader is shown the notes;
-None for every setting but the notes tool's). A stored position off
-the list reads as the default (1 for a tool, 2 for a reminder). What a
-setting TAKES is the setting's: `to_db(enabled=, position=,
-reminder_text=, display_notes=)` is the row to store with the given
-laid over it, and raises `Refused` for what this setting does not
-take; `injection` is what a switched-on one sends, None while off or
-empty. `StorySettings(from_db, store, prompts_file)` is every setting
-of one story as it stands — it reads the prompts file and the shared
-reminder itself, so a caller hands over only the rows it holds —
-`injections` is what the switched-on ones send, in the order they
-share a place: the shared reminder, the story's, then the tools; and
-`tool_set` is the story's tools each on or off, for the wire.
+tool, the numbers alone for a reminder, empty for a flag; a stored
+position off the list reads as the default, 1 for a tool, 2 for a
+reminder), `reminder_text` (the story reminder's alone) and
+`display_notes` (the notes tool's alone). `to_db(…)` is the row to
+store, raising `Refused` for what the setting does not take;
+`injection` is what a switched-on one sends. `StorySettings(from_db,
+store, prompts_file)` is one story's settings as they stand — it reads
+the prompts file and the shared reminder itself — with `injections` in
+the order they share a place (the shared reminder, the story's, then
+the tools) and `tool_set` for the wire.
 
-What a story STORES is the store's: `schema.StorySettingDB` — a name,
-`enabled`, a position, `reminder_text`, `display_notes` (the last two
-written only when said: an emptied text leaves the column, and only a
-`false` flag is written) — with its column's JSON codec on it
-(`from_json`, `to_json`, as `Attachment` has its own), carried by the
-row (`Story.settings`) as `Message.attachments` is; the store hands
-out typed rows and merges a write into the column, keeping every key it
-does not know (a JSON key bumps no schema version). The operations are
-`backend.api.stories`': `get_settings` (a `StorySettings`),
+What a story STORES is `schema.StorySettingDB` (name, `enabled`,
+position, `reminder_text`, `display_notes` — the last two written only
+when said) with its JSON codec, carried by `Story.settings`; the store
+merges a write into the column and keeps every key it does not know.
+The operations are `backend.api.stories`' `get_settings`,
 `update_setting`, `get_shared_reminder`, `set_shared_reminder`; the
-page reaches them at `/api/stories/{story}/settings` (GET, and PATCH
-of one setting) and `/api/shared_reminder` — not a `/api/settings`
-knob, since every knob must be drawn on the settings slip. The
-terminal reaches them on the dossier's Tools tab (`screens.story`): one
-row per captioned setting — a `[x]` checkbox and the name; Space checks
-and unchecks it — with the setting's fields in the panel beside, at
-the margin, one blank line between: the notes' display, a reminder's
-text under its label, and last where its text rides. Enter or Tab
-moves the cursor into the panel, ↑/↓ walk the fields (the one under the cursor
-banded), Enter acts on one — a checkbox toggles, the depth opens the
-closed list of places as a dropdown under the field itself, nothing
-else moving (↑/↓, Enter — no dialog; the places named by
-`InjectionPosition.text`, "system", "2nd last" …), a text becomes the editor exactly where it
-is read, the fields
-above and below it standing (`base._preview_panel`'s `alternate` body:
-three windows around the one edit buffer) — and Esc returns to the
-list; the prompts are not edited there. `InjectionPosition` is
-re-exported by `backend` for it, a type alias being inert data.
-`Refused` lives in `backend.errors`, a leaf, so a class below the
-session can raise it; `backend.session` re-exports it. A tool's
-PROMPT is prompts.toml's, edited from the app in place — "prompt" on
-the backend and the wire, whatever a frontend calls it (the page's
-button says "Instructions"): `api.settings.get_tool_prompt`/`set_tool_prompt`
-(keyed by the tool's name, which a setting reports as `tool`; the
-page's `/api/prompts/{tool}`) write that one key with
-`settings.prompts.set_prompt` — no migration mechanism: a plain edit
-of one key, the pre-edit file kept as a dated backup by the write
-every settings edit rides (`settings.commit`, which names the backup
-after the file's stem) — then read the file back and refuse unless it
+page reaches them at `/api/stories/{story}/settings` and
+`/api/shared_reminder`, the terminal on the dossier's Tools tab
+(`screens.story`: a checkbox row per setting, its fields in the panel
+beside — the depth a dropdown in place, a text the editor in place,
+`base._preview_panel`'s `alternate` body). `Refused` lives in
+`backend.errors`, a leaf, and `backend.session` re-exports it;
+`backend` re-exports `InjectionPosition`. A tool's PROMPT is
+prompts.toml's, edited in place — "prompt" on the backend and the
+wire, whatever a frontend calls it (the page's button says
+"Instructions"): `api.settings.get_tool_prompt`/`set_tool_prompt`
+(`/api/prompts/{tool}`) write that one key with
+`settings.prompts.set_prompt`, backed up by the write every settings
+edit rides (`settings.commit`), read back and refused unless the file
 holds what was saved; an emptied text drops the key, so the shipped
 text stands again.
 
-Where a setting is kept. ONE STORY'S is the database's, always:
-`stories.settings`, one sealed JSON with a key per setting, because it
-must fork, export and die with its story; a new story starts with
-everything off, and until a first turn makes the story the session
-holds the rows, as it holds the premise. One that stories SHARE is the
-`settings` table's (key/value, sealed; an emptied value deletes its
-row — `SettingsOps.get_shared_reminder`/`set_shared_reminder` are its
-typed door) when it is a TEXT THAT MAY NEED SEALING — a config file is
-never sealed — and a config file's otherwise. `history` is the
-precedent: a convenience any other program keeps in a dotfile, sealed
-in the database because it holds what the user typed.
+Where a setting is kept: ONE STORY'S is the database's
+(`stories.settings`, sealed JSON) because it must fork, export and die
+with its story; a new story starts with everything off, the session
+holding the rows until a first turn makes the story. One that stories
+SHARE is the `settings` table's (key/value, sealed; an emptied value
+deletes its row) when it is a TEXT THAT MAY NEED SEALING — a config
+file is never sealed — and a config file's otherwise; `history` is the
+precedent.
 
 ### The data model
 
@@ -515,16 +403,18 @@ it there: omlx 0.6 gathers every picture in a request onto the latest
 prompt, so a model asked about the second turn's picture reads both,
 stacked. That is a QUIRK of one engine's wire, not a capability: it is
 written on that client alone as `OpenAICompletion.pictures_ride`
-("each" everywhere, "latest" on omlx), the session reads it off the
-completion half, and the assembler then sends the newest PICTURED row's
-pictures alone (a follow-up without one still carries the picture it
-is about), counting the rest as `pictures_held`; the `/context` summary says
-so, and each part's marker counts what rides it. Flip omlx back to
+("each" everywhere, "latest" on omlx), answered in one place as
+`providers.PicturesRide` (`client.pictures_ride(model)`: NONE for a
+model that cannot see, EACH, LATEST), and the assembler then sends
+the newest PICTURED row's pictures alone (a follow-up without one
+still carries the picture it is about), counting the rest as
+`pictures_held`; the `/context` summary says so, and each part's
+marker counts what rides it. Flip omlx back to
 "each" once a release keeps pictures on their messages. The lore pass
 sees them too: a summarized row loses its picture, so the pass is the
 one moment its content can be put into words that last — each is
 marked `(picture n)` at its line of the numbered scene, and while the
-model can see the first `_MAX_PICTURES` (8) of the scene ride the
+model can see every picture of the scene rides the
 extraction request in that order (`extraction._scene_pictures`); the
 extract prompt asks for what matters in them, and the changed shipped
 text is carried to existing files by a `refresh_template` step
@@ -788,10 +678,8 @@ mechanics live in the module docstrings:
   not a picture) come back as a Notice. A turn's row carries
   `attachments` ([] when none) and the session facts `vision`, which is
   what shows the attach button. The page stages a picture two ways, the
-  attach button's picker and a PASTE into the composer (`composer.js`:
-  the `paste` event on the textarea alone, so it fires only with the
-  focus in the box; only the clipboard's image items are taken, and a
-  paste without one stays the browser's text paste); both reach the
+  attach button's picker and a paste into the composer (`composer.js`,
+  the textarea's own `paste` event, image items only); both reach the
   same staged list, and the backend refuses either the same way.
 - **A ROW ID in a path is digits; a name is anything** (`server._NUMERIC`).
   So a page that lost its story cannot address `/api/stories/null/…` —

@@ -25,7 +25,7 @@ from otaku.context.tool_calls import (
     ReplyParser,
     ToolCall,
     ToolSet,
-    closing,
+    closing_tag,
     parse_reply,
     strip,
     to_wire,
@@ -180,7 +180,7 @@ class TestToWire:
 
 class TestClosing:
     def test_the_closing_tag_of_a_name(self) -> None:
-        assert closing("question") == "</otk-question>"
+        assert closing_tag("question") == "</otk-question>"
 
 
 class TestReplyParser:

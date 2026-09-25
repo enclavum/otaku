@@ -33,22 +33,10 @@ const _ABOUT = {
    the same reminder, read and written at its own endpoint. */
 const _SHARED_REMINDER = "use_shared_reminder";
 
-/* What the instructions dialog is titled, per tool — the page's own
-   words, as the captions are. */
-const _PROMPT_TITLE = {
-  question: "questions prompt",
-  note: "assistant notes prompt",
-};
-
-/* What the depth ruler calls each setting — the page's own words, as
-   the captions are: the setting shorn of its verb, since a row of the
-   ruler is a thing placed, not a switch. */
-const _RULER_NAME = {
-  allow_questions: "Questions",
-  allow_assistant_notes: "Assistant notes",
-  use_story_reminder: "Story reminder",
-  use_shared_reminder: "Shared reminder",
-};
+/* What a setting injects is named by the backend (`injection_label`,
+   lowercase): the ruler's row and the prompt dialog's title capitalise
+   it, as this medium wants a title. */
+const capitalised = (name) => name.charAt(0).toUpperCase() + name.slice(1);
 
 export async function buildTools(view, pane, tabNote) {
   /* Built once, like the other tabs. Every switch is the story's, so
@@ -174,7 +162,7 @@ function rulerRow(view, setting, numbered, features) {
      the marker drags too, snapping along the track and saving where it
      is let go — a refusal puts it back. An off setting keeps its place,
      drawn hollow. The depth on its row behind follows every move. */
-  const name = _RULER_NAME[setting.name] ?? setting.label;
+  const name = capitalised(setting.injection_label ?? setting.label);
   const row = element("div", "otk-ruler__row");
   row.dataset.on = String(setting.enabled);
   if (!setting.allowed_positions.includes("system")) row.classList.add("otk-ruler__row--nosys");
@@ -301,8 +289,9 @@ function instructionsButton(view, setting) {
     const { text } = await api.prompt(setting.tool);
     const dialog = $('dialog[data-dialog="instruction"]');
     const field = $("textarea", dialog);
+    pagingCaret(field);
     const choice = await ask("instruction", () => {
-      $("[data-title]", dialog).textContent = _PROMPT_TITLE[setting.tool] ?? `${setting.tool} prompt`;
+      $("[data-title]", dialog).textContent = capitalised(`${setting.injection_label} prompt`);
       field.value = text;
       // Read from the top, and nothing typed by accident: the text
       // starts at its first line and the focus rests on Cancel.
@@ -314,6 +303,41 @@ function instructionsButton(view, setting) {
     footnote(view.popup, answer.notice);
   });
   return button;
+}
+
+function pagingCaret(field) {
+  /* Page Up and Page Down MOVE THE CARET a page of lines, as an editor's
+     do — the browser's own scroll the field and leave the caret where it
+     was, so the next keystroke lands out of view. A page is the field's
+     height in lines; the field scrolls by what the caret moved, so the
+     caret keeps its place in the window. Shift extends the selection.
+     Wired once per field. */
+  if (field.dataset.paging) return;
+  field.dataset.paging = "true";
+  field.addEventListener("keydown", (event) => {
+    if (event.key !== "PageUp" && event.key !== "PageDown") return;
+    event.preventDefault();
+    const lineHeight = parseFloat(getComputedStyle(field).lineHeight) || 20;
+    const page = Math.max(1, Math.floor(field.clientHeight / lineHeight) - 1);
+    const lines = field.value.split("\n");
+    const backward = field.selectionDirection === "backward";
+    const head = backward ? field.selectionStart : field.selectionEnd;
+    const anchor = backward ? field.selectionEnd : field.selectionStart;
+    const before = field.value.slice(0, head);
+    const row = before.split("\n").length - 1;
+    const column = head - (before.lastIndexOf("\n") + 1);
+    const step = event.key === "PageDown" ? page : -page;
+    const target = Math.min(lines.length - 1, Math.max(0, row + step));
+    let at = 0;
+    for (let i = 0; i < target; i += 1) at += lines[i].length + 1;
+    at += Math.min(column, lines[target].length);
+    if (event.shiftKey) {
+      field.setSelectionRange(Math.min(anchor, at), Math.max(anchor, at), at < anchor ? "backward" : "forward");
+    } else {
+      field.setSelectionRange(at, at);
+    }
+    field.scrollTop += (target - row) * lineHeight;
+  });
 }
 
 /* A position's name is decided below both frontends (`InjectionPosition.text`,

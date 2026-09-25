@@ -9,6 +9,7 @@ from otaku import __version__
 from otaku.backend import InjectionPosition
 from otaku.backend.api import stories as api_stories
 from otaku.backend.session import Session
+from otaku.backend.story import InjectingSetting
 from otaku.formatting import format_context
 from otaku.web.api import transfer
 from otaku.web.api.lore import memory
@@ -120,6 +121,9 @@ def story_settings(session: Session, story_id: int) -> dict[str, Any]:
             {
                 "name": setting.name,
                 "label": setting.label,
+                "injection_label": (
+                    setting.injection_label if isinstance(setting, InjectingSetting) else None
+                ),
                 "tool": setting.tool.name if setting.tool else None,
                 "allowed_positions": [each.value for each in setting.allowed_positions],
                 "enabled": setting.enabled,

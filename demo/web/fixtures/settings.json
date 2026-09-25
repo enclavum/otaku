@@ -8,6 +8,7 @@
  "autocorrect": true,
  "notification": false,
  "max_context": 0,
+ "idle_seconds": 300.0,
  "model": "",
  "parameters": [
   {

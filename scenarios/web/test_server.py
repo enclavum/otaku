@@ -202,6 +202,11 @@ class TestReading:
         assert card("nanogpt")["key_source"] == "env"  # no section yet
         assert card("llamacpp")["key_source"] is None
 
+    def test_the_settings_read_says_how_long_the_pass_waits(self, page: Page) -> None:
+        # `[lore] idle_seconds`, as the session was opened with it: a fact
+        # the page's confirmation says, never a guess of its own.
+        assert page.get("/api/settings")["idle_seconds"] == 300.0
+
     def test_the_settings_read_carries_the_shared_effort_ladder(self, page: Page) -> None:
         # The order is declared ONCE, below both frontends — the page
         # draws it, never re-sorts it.
@@ -538,6 +543,7 @@ class TestStorySettings:
     FIELDS = (
         "name",
         "label",
+        "injection_label",
         "tool",
         "allowed_positions",
         "enabled",
@@ -559,6 +565,10 @@ class TestStorySettings:
         assert by_name["allow_questions"]["display_notes"] is None
         assert by_name["allow_assistant_notes"]["display_notes"] is True
         assert by_name["use_story_reminder"]["tool"] is None
+        # what each injects is named, lowercase; a flag injects nothing
+        assert by_name["allow_assistant_notes"]["injection_label"] == "assistant notes"
+        assert by_name["use_story_reminder"]["injection_label"] == "story reminder"
+        assert by_name["story_mode"]["injection_label"] is None
         assert by_name["use_story_reminder"]["reminder_text"] == ""
         assert by_name["use_story_reminder"]["allowed_positions"] == list(range(1, 9))
 
@@ -629,8 +639,8 @@ class TestStorySettings:
         )
         injections = page.get("/api/session/context")["injections"]
         assert [(i["label"], i["position"], i["position_text"]) for i in injections] == [
-            ("Set story reminder", 2, "3rd last"),
-            ("Allow questions", "system", "system"),
+            ("questions", "system", "system"),
+            ("story reminder", 2, "3rd last"),
         ]
         assert all(i["tokens"] > 0 for i in injections)
 

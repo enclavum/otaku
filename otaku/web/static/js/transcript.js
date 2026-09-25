@@ -28,8 +28,9 @@ import { complain, settle, tell, working } from "./status.js";
 import { isToken } from "./table.js";
 
 const transcript = $(".otk-transcript");
-// What the status row says while a tool call streams, whichever tool.
-const _CALLING = "calling a tool";
+// What the status row says while a tool call streams, the tool named by
+// its short name — `note`, `question` — as the event carries it.
+const _calling = (tool) => `calling the ${tool} tool`;
 // The tools whose calls the reader is shown (`displayTools`); every
 // other call draws as nothing.
 let shownTools = new Set();
@@ -143,9 +144,29 @@ export function takeBack(turns) {
 /** A question the model asked, posed under the reply it closed: the
     question, and the answers to pick from — none for a free-form one.
     Any earlier one goes; a typed line or a redraw takes it down too. */
-export function showAsk({ question, options }) {
+export function showAsk(call) {
   clearAsk();
+  // A reader at the end before the panel goes in is carried down to it:
+  // `following` alone would miss a fresh draw, whose own scroll to the
+  // end has not reported yet when the panel lands under it.
+  const carry = following || atTail();
+  const box = askBox(call, { armed: true });
+  /* Under the words of the reply that asked, inside its article — ahead
+     of the status row that reply keeps, so the question sits against
+     the answer's last line and not under the row's reserved height. */
+  const reply = $$(".otk-reply", transcript).at(-1);
+  if (!reply) transcript.append(box);
+  else reply.insertBefore(box, $(".otk-generating__status", reply));
+  if (carry) toBottom();
+}
+
+function askBox({ question, options }, { armed }) {
+  /* The live panel's box, the same whether the question is still
+     streaming or has landed — so the one turns into the other without a
+     move. `armed` is whether the options may be sent: not while the
+     reply is still arriving. */
   const box = element("div", "otk-ask otk-ask--live");
+  box._call = { question, options }; // what `retireAsk` keeps of it
   box.setAttribute("role", "group");
   box.setAttribute("aria-label", "The narrator is asking");
   box.append(span("otk-ask__label", "The narrator needs an answer"));
@@ -156,9 +177,11 @@ export function showAsk({ question, options }) {
       const line = element("div", "otk-ask__option");
       const pick = element("button", "otk-ask__pick", text);
       pick.type = "button";
+      pick.disabled = !armed;
       pick.dataset.askSend = text;
       const copy = element("button", "otk-ask__copy", "edit →");
       copy.type = "button";
+      copy.disabled = !armed;
       copy.dataset.askCopy = text;
       copy.setAttribute("aria-label", "Copy to the composer");
       line.append(span("otk-ask__n", String(i + 1)), pick, copy);
@@ -174,17 +197,55 @@ export function showAsk({ question, options }) {
         : "Write your answer below.",
     ),
   );
-  /* Under the words of the reply that asked, inside its article — ahead
-     of the status row that reply keeps, so the question sits against
-     the answer's last line and not under the row's reserved height. */
-  const reply = $$(".otk-reply", transcript).at(-1);
-  if (!reply) transcript.append(box);
-  else reply.insertBefore(box, $(".otk-generating__status", reply));
-  if (following) transcript.scrollTop = transcript.scrollHeight;
+  return box;
+}
+
+// An answer to pick from, as the tool reads one: `1.` `1)` `a.` `a)` at the
+// head of a line, then the answer. The RULE is `ToolQuestions._OPTION`'s
+// (`backend.tools`), copied for the page to read a question as it
+// streams — the language barrier being the one reason a rule exists twice.
+const _OPTION = /^\s*(?:\d{1,2}|[A-Za-z])[.)]\s+(\S.*)$/;
+// A line still arriving that may yet turn out an option: its head not
+// complete, or complete and followed by a space — held until its end tells.
+const _MAY_BE_OPTION = /^\s*(?:(?:\d{1,2}|[A-Za-z])?[.)]?|(?:\d{1,2}|[A-Za-z])[.)]\s.*)$/;
+const _MAX_OPTIONS = 9;
+
+function readAsk(text, closed) {
+  /* A question call's inside as the tool reads it, from what has arrived:
+     the question is the lines before the first option, the options the
+     numbered lines after — whatever follows them that is not one is
+     dropped. The last line is unfinished until the call closes: held
+     while it may still become an option, shown as the question's while
+     it cannot. */
+  const lines = text.split("\n");
+  const unfinished = closed ? null : lines.pop();
+  const question = [];
+  const options = [];
+  for (const line of lines) {
+    const found = _OPTION.exec(line);
+    if (found) {
+      if (options.length < _MAX_OPTIONS) options.push(found[1].trimEnd());
+    } else if (!options.length) {
+      question.push(line);
+    }
+  }
+  if (unfinished !== null && !options.length && !_MAY_BE_OPTION.test(unfinished)) {
+    question.push(unfinished);
+  }
+  return { question: question.join("\n").trim(), options };
 }
 
 export function clearAsk() {
   $(".otk-ask--live", transcript)?.remove();
+}
+
+function retireAsk() {
+  /* The question was answered — the line that landed is the answer,
+     whatever it says: the options go, the question stays, drawn as a
+     past one where the panel stood. The next full draw from the store
+     puts it in the same place among the reply's own nodes. */
+  const live = $(".otk-ask--live", transcript);
+  if (live) live.replaceWith(pastAsk(live._call));
 }
 
 export function clear() {
@@ -431,6 +492,17 @@ function replyNodes(segments, callNode) {
     out.push(drawn);
   });
   flush();
+  /* A block among the text stands the one gap from whatever is on either
+     side of it, and flush with the edge of the reply where nothing is:
+     said here, on the block, because the prose around it is text nodes,
+     which no `:first-child` or `:last-child` can see past — and said the
+     same way whether the reply is streaming or landed, so a block never
+     moves once drawn. */
+  out.forEach((node, i) => {
+    if (!(node instanceof Element)) return;
+    node.classList.toggle("otk-ask--first", i === 0);
+    node.classList.toggle("otk-ask--last", i === out.length - 1);
+  });
   return out;
 }
 
@@ -442,19 +514,13 @@ function notesBlock(text) {
   return box;
 }
 
-function pastAsk({ question, options }) {
+function pastAsk({ question }) {
+  /* A question the story has moved past: the question alone, as the
+     terminal shows one — its options were the moment's, and the line
+     that followed answered it. */
   const box = element("div", "otk-ask otk-ask--past");
   box.append(span("otk-ask__label", "The narrator asked"));
   if (question) box.append(element("p", "otk-ask__body", question));
-  if (options?.length) {
-    const list = element("div", "otk-ask__options");
-    options.forEach((text, i) => {
-      const line = element("div", "otk-ask__option");
-      line.append(span("otk-ask__n", String(i + 1)), span("otk-ask__pick", text));
-      list.append(line);
-    });
-    box.append(list);
-  }
   return box;
 }
 
@@ -609,19 +675,39 @@ function beginTurn(regenerate) {
   // `pieces`: what has arrived, in order — prose runs and tool calls, the
   // segments a stored turn carries, kept as they stream so each call
   // draws in its place
-  return { article, block, status, state, ticking, over, reasoning: null, pieces: [] };
+  return { article, block, status, state, ticking, over, reasoning: null, ask: null, pieces: [] };
+}
+
+function streamAsk(turn, call) {
+  /* The question as it arrives, posed where the landed one will be —
+     under the reply, ahead of its status row — and redrawn from what
+     has come each time: the same box `showAsk` builds, its options
+     unarmed until the reply lands. Read by the tool's own rule
+     (`readAsk`); a question the model then goes on past is retired when
+     the reply lands (`settle`). */
+  const fresh = askBox(readAsk(call.text, call.closed), { armed: false });
+  if (turn.ask) turn.ask.replaceWith(fresh);
+  else {
+    clearAsk();
+    turn.article.insertBefore(fresh, turn.status);
+  }
+  turn.ask = fresh;
 }
 
 function streamed(turn) {
   /* The reply as it stands so far, drawn by the landed reply's rule
      (`replyNodes`) from the pieces in the order they arrived. The caret
      rides the end of the prose that has arrived — the last character,
-     not the blank line a model leaves before a call, and not a call
-     being written under it. */
+     not the blank line a model leaves before a call — and only while
+     prose is what is arriving: a call being written has its own place
+     (the status row says so), and a caret left on the prose above it
+     would point at where nothing is happening. */
   const boxes = turn.pieces.map((piece) => piece.box).filter(Boolean);
   const nodes = replyNodes(turn.pieces, (piece) => piece.box);
-  const lastProse = nodes.findLastIndex((node) => !boxes.includes(node));
-  nodes.splice(lastProse + 1, 0, caret());
+  if (turn.pieces.at(-1)?.kind === "prose") {
+    const lastProse = nodes.findLastIndex((node) => !boxes.includes(node));
+    nodes.splice(lastProse + 1, 0, caret());
+  }
   turn.block.replaceChildren(...nodes);
 }
 
@@ -641,7 +727,7 @@ function draw(turn, happened) {
 const DRAW = {
   recorded(turn, happened) {
     ordinal += 1;
-    clearAsk(); // the line that landed is the answer, whatever it says
+    retireAsk(); // the line that landed is the answer: the options go, the question stays
     const drawn = drawTurn(happened.turn, ordinal);
     /* The record's own dim line — the dice a /roll rolled, verbatim.
        Drawn at record time the way the terminal prints its dim block:
@@ -657,7 +743,7 @@ const DRAW = {
   },
   reasoning(turn, happened) {
     if (!turn.reasoning) {
-      turn.reasoning = element("p", "otk-reasoning", "(reasoning) ");
+      turn.reasoning = element("p", "otk-reasoning");
       turn.article.prepend(turn.reasoning);
     }
     turn.reasoning.textContent += happened.text;
@@ -679,10 +765,12 @@ const DRAW = {
        doing, so the running line never reads as stalled. One the reader
        is shown — the notes, while the story says so — draws as it
        arrives, in its place among the prose, in the box the landed
-       reply draws it in; a question never draws raw, the panel poses
-       it when the reply lands. A call's pieces grow one piece of the
-       turn until the one that closed it; the next tag opens its own. */
-    turn.state.textContent = _CALLING;
+       reply draws it in; a question never draws raw — the live panel
+       grows as it streams (`streamAsk`), question first and each option
+       as its line completes, and the landed reply confirms or retires
+       it. A call's pieces grow one piece of the turn until the one that
+       closed it; the next tag opens its own. */
+    turn.state.textContent = _calling(happened.tool);
     let call = turn.pieces.at(-1);
     if (call?.kind !== "tool_call" || call.tool !== happened.tool || call.closed) {
       const box = shownTools.has(happened.tool) ? notesBlock("") : null;
@@ -692,6 +780,7 @@ const DRAW = {
     call.text += happened.text;
     call.closed = happened.closed;
     if (call.box) $(".otk-ask__body", call.box).textContent = call.text.trim();
+    if (happened.tool === "question") streamAsk(turn, call);
     streamed(turn);
   },
   declined(turn, happened) {
@@ -751,8 +840,12 @@ function endTurn(turn) {
   working(false);
   // what the page had to say about the attempt is over with it
   tell("");
-  // the question a reply ended on, drawn once the reply stands
+  // the question a reply ended on, drawn once the reply stands — over
+  // the streamed panel, which goes either way: a question the model went
+  // on past is a past one now, drawn in place by the reader
   if (turn.call) showAsk(turn.call);
+  else if (turn.ask) clearAsk();
+  turn.ask = null;
   // the status row STAYS, hidden, so nothing above it moves — until the
   // next line takes its place (`recorded`)
   turn.article.classList.add("otk-generating--idle");

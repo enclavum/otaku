@@ -61,13 +61,6 @@ export async function openStory({ story = null, tab = "messages", allStories } =
   const opened = subject.id === null ? null : await api.story(subject.id);
 
   $("[data-story-title]", popup).textContent = label(subject.label) || "(untitled)";
-  const read = opened?.read_through ?? 0;
-  $("[data-tabs-aside]", popup).textContent = [
-    read ? `read through ${read}` : "",
-    opened?.unread ? `${opened.unread} unread` : "",
-  ]
-    .filter(Boolean)
-    .join(" · ");
 
   const view = {
     popup,
@@ -481,7 +474,7 @@ function sceneIndex(view, rail, currentId, { onPick }) {
   if (view.memory?.unread) {
     const pending = element("div", "otk-index__item otk-index__item--pending");
     pending.append(
-      span("otk-index__title otk-absent", "not read yet"),
+      span("otk-index__title otk-absent", "not summarized yet"),
       span("otk-index__sub", `msg ${view.memory.unread_span}`),
     );
     list.append(pending);
@@ -509,7 +502,7 @@ function extractBlock(view) {
   const unread = view.memory?.unread ?? 0;
   line.append(
     element("span", unread ? "otk-dot otk-dot--off" : "otk-dot"),
-    span("otk-extract__state", unread ? `${unread} unread` : "all read"),
+    span("otk-extract__state", unread ? `${unread} not extracted` : "all extracted"),
   );
   // Two doors into the cast: a card read from a file, and the pass.
   const importing = element("button", "otk-btn", "Import card");
@@ -518,6 +511,9 @@ function extractBlock(view) {
   const button = element("button", "otk-btn", "Extract now");
   button.type = "button";
   button.dataset.command = "/extract";
+  // Nothing open, nothing to read: the verb is greyed rather than
+  // answered with a notice behind the dossier.
+  button.disabled = !unread;
   box.append(line, importing, button);
   return box;
 }

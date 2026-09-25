@@ -28,6 +28,7 @@ def settings(session: Session) -> dict[str, Any]:
         "notification": session.notification,
         # Tokens the prompt may use at most; 0 = the model's own max context.
         "max_context": session.max_context_setting,
+        "idle_seconds": api_settings.idle_seconds(session),
         "model": session.model,
         # Every parameter /set knows, in its order, each saying whether
         # it reaches the model in use (`api.settings.parameter_read`):

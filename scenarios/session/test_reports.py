@@ -98,13 +98,16 @@ class TestContextInjections:
         )
         report = reports.context(app.session)
         facts = [(i.label, i.position, i.position_text) for i in report.injections]
+        # named as the setting names what it injects, not as the switch —
+        # and in the request's order: the system message first, then the
+        # deepest first, not in the order sent (the reminder rides first)
         assert facts == [
-            ("Set story reminder", InjectionPosition(2), "3rd last"),
-            ("Allow questions", InjectionPosition(), "system"),
+            ("questions", InjectionPosition(), "system"),
+            ("story reminder", InjectionPosition(2), "3rd last"),
         ]
         assert all(i.tokens > 0 for i in report.injections)
         # a system injection's tokens are the system message's
-        assert report.prompt.system_tokens >= report.injections[1].tokens
+        assert report.prompt.system_tokens >= report.injections[0].tokens
 
     def test_the_terminal_lists_them_under_the_summary(self, app: App, capsys) -> None:
         app.play("I enter the hall.")
@@ -112,7 +115,7 @@ class TestContextInjections:
         capsys.readouterr()
         app.play("/context")
         out = capsys.readouterr().out
-        assert "  injected:\n  - allow questions (2nd last, ~" in out
+        assert "  injected:\n  - questions (2nd last, ~" in out
 
 
 class TestUsage:

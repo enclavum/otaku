@@ -91,8 +91,12 @@ class StorySetting:
 class InjectingSetting(StorySetting):
     """A setting that injects a text: where it rides is the story's to
     say, within the closed list a frontend offers — a stored position
-    off the list reads as the default."""
+    off the list reads as the default. `injection_label` names the TEXT
+    it injects, where `label` names the switch: the thing placed on a
+    depth ruler, listed by `/context` — lowercase, as the backend states
+    a name; a frontend capitalises where its medium wants."""
 
+    injection_label: ClassVar[str] = ""
     default_position: ClassVar[InjectionPosition] = InjectionPosition(1)
 
     injection_position: InjectionPosition
@@ -164,6 +168,7 @@ class ToolSetting(InjectingSetting):
 class StorySettingQuestions(ToolSetting):
     name = "allow_questions"
     label = "Allow questions"
+    injection_label = "questions"
     tool = ToolQuestions
 
 
@@ -173,6 +178,7 @@ class StorySettingAssistantNotes(ToolSetting):
 
     name = "allow_assistant_notes"
     label = "Allow assistant notes"
+    injection_label = "assistant notes"
     tool = ToolAssistantNotes
 
     display_notes: bool
@@ -202,6 +208,7 @@ class StorySettingReminder(InjectingSetting):
 
     name = "use_story_reminder"
     label = "Set story reminder"
+    injection_label = "story reminder"
     # Deeper than a tool's prompt — before the reader's previous message: a
     # reminder is to be kept in mind, not obeyed at once.
     default_position = InjectionPosition(2)
@@ -237,6 +244,7 @@ class StorySettingSharedReminder(InjectingSetting):
 
     name = "use_shared_reminder"
     label = "Use shared reminder"
+    injection_label = "shared reminder"
     default_position = InjectionPosition(2)
     allowed_positions = _REMINDER_POSITIONS
 

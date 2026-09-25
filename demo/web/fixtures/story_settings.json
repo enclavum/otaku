@@ -3,6 +3,7 @@
   {
    "name": "use_shared_reminder",
    "label": "Use shared reminder",
+   "injection_label": "shared reminder",
    "tool": null,
    "allowed_positions": [
     1,
@@ -22,6 +23,7 @@
   {
    "name": "use_story_reminder",
    "label": "Set story reminder",
+   "injection_label": "story reminder",
    "tool": null,
    "allowed_positions": [
     1,
@@ -41,6 +43,7 @@
   {
    "name": "allow_assistant_notes",
    "label": "Allow assistant notes",
+   "injection_label": "assistant notes",
    "tool": "note",
    "allowed_positions": [
     "system",
@@ -61,6 +64,7 @@
   {
    "name": "allow_questions",
    "label": "Allow questions",
+   "injection_label": "questions",
    "tool": "question",
    "allowed_positions": [
     "system",
@@ -81,6 +85,7 @@
   {
    "name": "story_mode",
    "label": "Story mode",
+   "injection_label": null,
    "tool": null,
    "allowed_positions": [],
    "enabled": false,
