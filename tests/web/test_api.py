@@ -63,7 +63,7 @@ class TestEvent:
     def test_done_carries_the_reply_as_stored_split_into_segments(self) -> None:
         # A question the reply ended on is in the segments, read: the
         # page poses it from there, and nothing else says so.
-        body = "Creak.<otk-question>Go in?\n1. Yes</otk-question>"
+        body = "Creak.\n```otk-question\nGo in?\n1. Yes\n```"
         done = api.event(
             Done(reply=Message(id=5, role="assistant", body=body), report=None, stats="")
         )

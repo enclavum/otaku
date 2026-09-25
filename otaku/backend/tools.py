@@ -4,9 +4,10 @@ reply — one class each, and the one registry.
 A class declares a tool: its name, who answers its call, and the key of
 its prompt in prompts.toml. An instance is one call of it, read at
 construction — what the play stream makes of a reply. WHAT a call is —
-`<otk-NAME>…</otk-NAME>`, whatever the name — is `context.tool_calls`'
-business, which knows no tool: a body keeps its tags for good, and a
-call must stay one in a build that never heard of its tool. Whether a
+a fenced block marked `otk-NAME`, whatever the name — is
+`context.tool_calls`' business, which knows no tool: a body keeps its
+fences for good, and a call must stay one in a build that never heard
+of its tool. Whether a
 story lets the model use a tool, and where its prompt rides, is the
 story's setting (`backend.story`).
 
@@ -30,7 +31,7 @@ class Tool:
     """One tool, declared by its class; an instance is one call of it,
     read at construction."""
 
-    name: ClassVar[str] = ""  # its name in the namespace: <otk-NAME>…</otk-NAME>
+    name: ClassVar[str] = ""  # its name in the namespace: a fenced block marked otk-NAME
     actor: ClassVar[Actor] = Actor.NOBODY
     # The prompts.toml key of its prompt — what tells the model how the
     # tool is used. The story's setting reads the text under it.
@@ -55,7 +56,7 @@ class Tool:
 
 
 class ToolAssistantNotes(Tool):
-    """`<otk-note>…</otk-note>` — the model's private aside before its reply:
+    """A block marked `otk-note` — the model's private aside before its reply:
     what the visible scene cannot show, kept for its own later turns."""
 
     name = "note"
@@ -63,7 +64,7 @@ class ToolAssistantNotes(Tool):
 
 
 class ToolQuestions(Tool):
-    """`<otk-question>…</otk-question>` — ONE question to the user, closing the reply:
+    """A block marked `otk-question` — ONE question to the user, closing the reply:
     the `question`, then the `options` to pick from — none when the
     question is free-form, `_MAX_OPTIONS` at most. Whatever follows the
     options that is not one is dropped: a picked option is sent as the

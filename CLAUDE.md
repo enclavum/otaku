@@ -131,30 +131,47 @@ the suite fails until all three exist.
 
 ### Tools: what the model writes
 
-A model uses a tool by writing a TOOL CALL in its reply — a tagged
-span, `<otk-question>…</otk-question>`, `<otk-note>…</otk-note>`:
+A model uses a tool by writing a TOOL CALL in its reply — a fenced code
+block whose info string names the tool, `otk-question`, `otk-note`:
+
+    ```otk-question
+    Go in?
+    1. Yes
+    2. No
+    ```
+
 otaku owns the convention, never the API's `tools` field, so it works
-on every engine. The body is stored verbatim, tags included. A reply is
-prose and tool calls; the model's reasoning is neither — it arrives on
-the wire's own field, streams beside them, and is never stored.
+on every engine (`docs/tools_design.md` is the decision and the engine
+facts behind it). The body is stored verbatim, fences included. A reply
+is prose and tool calls; the model's reasoning is neither — it arrives
+on the wire's own field, streams beside them, and is never stored.
 
 WHAT a tool call is, is the `otk-` namespace and nothing else
 (`context.tool_calls`: `ToolCall(name, text, closed)`, `Prose`, the
 `ReplyParser` over a stream and `parse_reply` over a body — pure, no
 list of tools consulted): a call stays one in a build that never heard
 of its tool, nothing outside the namespace is ever one, and the inside
-goes with the call. Calls never nest: an opening tag inside a call ends
-it, any closing tag ends the open one, a stray closing tag is dropped.
-A call is not story: the lore pass leaves it out, tags and all
-(`tool_calls.strip`). A stored reply goes back on the wire under the
-story's `ToolSet(on, off)` (`tool_calls.to_wire`): a call of a tool
-that is on goes as itself, one of a tool that is off becomes its
-`to_prose` (a question alone; nothing for a note), any other name
-leaves the wire — a white list. `tool_calls` lives in `context`
-because the worker and the assembler read it below the backend.
+— the lines between the fences, no trailing blank line — goes with the
+call. Three rules, one
+piece of state (the open call): a fence line marked `otk-NAME` opens a
+call, ending the one open, so calls never nest; a bare fence line ends
+the open call, and is prose when none is; any other line is prose
+outside a call and the call's own inside one, a fence with another
+info string included, as a markdown viewer reads it. A fence is one
+only at the start of its line, its line goes with the call, newline
+included, as do the blank lines before an opening fence (a call left
+out leaves no hole), and plain fences are never tracked — a forgotten
+one costs nothing. A call is not story: the lore pass leaves it out, fences and
+all (`tool_calls.strip`). A stored reply goes back on the wire under
+the story's `ToolSet(on, off)` (`tool_calls.to_wire`): a call of a
+tool that is on goes as its canonical self (the opening fence, the
+inside, the bare `FENCE`), one of a tool that is off becomes its `to_prose` (a
+question alone; nothing for a note), any other name leaves the wire —
+a white list. `tool_calls` lives in `context` because the worker and
+the assembler read it below the backend.
 
 WHICH tools there are is `backend.tools`: one class per tool, declaring
-its `name` (`question` for `<otk-question>`), who answers its call
+its `name` (`question` for `otk-question`), who answers its call
 (`Actor`: nobody for `note`, the user for `question`, `SYSTEM` not
 supported yet) and its prompt's key in prompts.toml (`prompt_name`);
 an instance is one call READ. The registry is `TOOLS`; a new tool is a
@@ -163,24 +180,31 @@ is the setting's to declare (`backend.story`), not the tool's.
 
 The play stream (`backend.api.play`) runs the deltas through a
 `ReplyParser`: prose as `Text`, a call's inside as `ToolCall` pieces
-(`closed` on the piece its closing tag ended), never a raw tag —
-neither frontend parses; everything that arrived is recorded, tags
-included. While a tool the user answers is on, its closing tag joins
-the request's stops after the reader's own, and the recorder puts back
-the tag the server kept (a reply cut at the length limit keeps its
-call open). A stored turn reaches a frontend split (`play.segments`:
-prose, and each call as its tool's `to_json()`, kind `tool_call`), so
-a frontend keeps no parser. Which question the story STANDS on is each
-frontend's own reading of the newest reply's segments — the page's
-`transcript.questionPosed`, the terminal's `render.asked`, each naming
-the other: a reply whose last call is a question, nothing after it but
-notes and whitespace — nothing is stored or reported for it, and
-answering is an ordinary line. A PAST question shows the question
-alone in both frontends. Whether notes are shown is the conjunction of
-two facts the setting reports — the tool on, its display switch on —
-read the same way in both (`transcript.displayTools`,
-`render.notes_displayed`); a one-line conjunction earns no backend
-property.
+(`closed` on the piece its closing fence ended), never a fence —
+neither frontend parses; everything that arrived is recorded, fences
+included. A call of a tool the user answers ENDS THE REPLY: nothing
+rides the request for it (no stop parameter — the rule is otaku's and
+the same on every engine): the parser is built with the `ending`
+tools, reads nothing past such a call and reports the `Cut` — where the
+reply runs to, and whether the model's own closing fence is within it;
+the stream is closed there, what the model went on to say is neither
+shown nor kept, and the recorder adds the fence where the model opened
+another block instead of closing this one. The usage arrives in the final chunk, which a cut never
+sees: such a turn files the stream's own account — the wait spent, no
+counts — as a Ctrl+C turn does. A reply cut at the length limit keeps
+its call open. A stored turn reaches a frontend split
+(`play.segments`: prose, and each call as its tool's `to_json()`, kind
+`tool_call`), so a frontend keeps no parser. Which question the story
+STANDS on is each frontend's own reading of the newest reply's
+segments — the page's `transcript.questionPosed`, the terminal's
+`render.asked`, each naming the other: a reply whose last call is a
+question, nothing after it but notes and whitespace — nothing is
+stored or reported for it, and answering is an ordinary line. A PAST
+question shows the question alone in both frontends. Whether notes are
+shown is the conjunction of two facts the setting reports — the tool
+on, its display switch on — read the same way in both
+(`transcript.displayTools`, `render.notes_displayed`); a one-line
+conjunction earns no backend property.
 
 The page draws a question as the ask panel, grown as it streams
 (`transcript.streamAsk`, `ToolQuestions._OPTION`'s rule copied as
@@ -188,7 +212,7 @@ The page draws a question as the ask panel, grown as it streams
 prose. The terminal draws every call as a BLOCK behind a bar
 (`render.BlockStream`; `QuestionStream` draws the question alone,
 parted from its options by `ToolQuestions.is_option`; a note is dim
-and a hidden one left out, tags and all; thinking is dim with no
+and a hidden one left out, fences and all; thinking is dim with no
 label; one blank line before and after, `render.spaced`), streamed and
 echoed through the same object so the two cannot differ. A question's
 answers are rows above the prompt line (`prompt.AnswerMenu`: ↑/↓
@@ -196,7 +220,7 @@ walk, Enter sends one, → takes it into the line, a typed character or
 Esc dismisses, the empty line brings them back; the blank line before
 that prompt is the menu's own row, `ledger.gap(deferred=)`), and the
 scrollback keeps the question alone. Every other call prints as it
-streamed until its look is decided.
+streamed, in the canonical form, until its look is decided.
 
 ### Injections
 

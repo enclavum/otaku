@@ -5,7 +5,7 @@ count), and a leftover under the minimums merges into the span before it.
 `numbered_chat`'s: the analysis model sees `[n]` numbering, an attributed
 line's speaker, composed template, and an `((OOC: …))` enclosure on every
 out-of-character row — added when the row has no stored template to show
-one — and never an `<otk-…>` block.
+one — and never an `otk-` block.
 """
 
 import pytest
@@ -79,14 +79,14 @@ class TestNumberedChat:
     def test_a_block_is_left_out_of_the_numbered_chat(self) -> None:
         # A block is the model's own aside, not the scene: the analysis
         # model never sees it, tags and all, and the numbering stays whole.
-        reply = Message(role="assistant", body="She nods.<otk-notes>the letter</otk-notes>")
+        reply = Message(role="assistant", body="She nods.\n```otk-notes\nthe letter\n```")
         text = numbered_chat([Message(role="user", body="I wait."), reply])
         assert text == "[1] I wait.\n[2] She nods."
 
     def test_a_row_that_is_only_a_block_keeps_its_number(self) -> None:
         # The speaker labels come back BY NUMBER: a row may empty, never vanish.
         span = [
-            Message(role="assistant", body="<otk-notes>later</otk-notes>", speaker="Keeper"),
+            Message(role="assistant", body="```otk-notes\nlater\n```", speaker="Keeper"),
             Message(role="user", body="Go."),
         ]
         assert numbered_chat(span) == "[1] \n[2] Go."

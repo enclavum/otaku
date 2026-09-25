@@ -443,7 +443,7 @@ function drawTurn(turn, position, { posed = false } = {}) {
 function replyReader(turn, { posed = false } = {}) {
   /* The reader view is drawn from the turn's SEGMENTS — the prose, and
      each tool call as the backend read it — while the editor holds the body
-     whole, tags and all: what is corrected is what was stored. A save
+     whole, fences and all: what is corrected is what was stored. A save
      reads the turn again for the same reason. */
   const parts = turn.segments ?? [];
   return correctable("otk-prose", turn.body, () => replyNodes(parts, storedCall(parts, posed)), {

@@ -37,8 +37,8 @@ template reads "out of character" off that shape, so unmarked it would
 be read as something that happened in the scene. Out-of-character rows
 are mined for decisions but never speaker-attributed and never part of
 the scene's story. A tool call in a body (`context.tool_calls`: any
-`<otk-NAME>…</otk-NAME>`) is the model's own aside, not the scene: it
-is left out, tags and all, before
+fenced block marked `otk-NAME`) is the model's own aside, not the
+scene: it is left out, fences and all, before
 a row is measured by the gate, packed into a span, or numbered for the
 analysis model. A picture the reader attached IS part of the scene, and
 the pass is the one moment its content can be put into words that last

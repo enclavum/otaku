@@ -155,7 +155,7 @@ def event(happened: PlayEvent) -> dict[str, Any]:
             return {"type": "text", "text": happened.text}
         case ToolCall():
             # A piece of a tool call, the tool's name and its inside;
-            # `closed` marks the piece the closing tag ended.
+            # `closed` marks the piece the closing fence ended.
             return {
                 "type": "tool_call",
                 "tool": happened.name,

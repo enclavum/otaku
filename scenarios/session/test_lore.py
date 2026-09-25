@@ -171,7 +171,7 @@ class TestExtract:
         # analysis model never sees it, tags and all, while the prose
         # around it and the numbering stay whole; the story keeps the
         # reply exactly as it streamed.
-        reply = "She nods.\n\n<otk-note>Reveal the letter next turn.</otk-note>"
+        reply = "She nods.\n\n```otk-note\nReveal the letter next turn.\n```"
         app.server.script = chat_script(reply)
         for i in range(3):
             app.play(f"Turn number {i}.")
@@ -324,7 +324,7 @@ class TestIdleScheduling:
             scene_min_messages=2,
             idle_seconds=0.1,
         )
-        server.script = chat_script("Fine.<otk-note>" + "x" * 400 + "</otk-note>")
+        server.script = chat_script("Fine.\n```otk-note\n" + "x" * 400 + "\n```")
         app = launch(tmp_path / "state", server)
         try:
             for i in range(3):

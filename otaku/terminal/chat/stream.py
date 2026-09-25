@@ -70,14 +70,14 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
     after_call = False  # a call's block was drawn last: prose going on is set apart
     # The block being streamed — the thinking, a question, a note — and
     # which, until its end: the thinking's is the first piece of anything
-    # else, a call's its closing tag.
+    # else, a call's its closing fence.
     block: BlockStream | None = None
     block_name = ""
     notes = chat.notes_displayed  # a story's switch, read once: it cannot move mid-stream
     start = time.monotonic()
 
     def close_block() -> None:
-        """The block ended after its last piece — its closing tag, the
+        """The block ended after its last piece — its closing fence, the
         first piece of what follows the thinking, or the stream's end
         inside it: the dim off, a last word or line placed, so what
         follows stands clear of it."""
@@ -163,12 +163,14 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                         if event.closed:
                             close_block()
                         continue
-                    # Every other call prints as it streamed, tags and all,
-                    # until its look is decided: the opening tag ahead of
-                    # its first piece, the closing tag after the piece that
-                    # closed it.
-                    opening = "" if call_open else f"<otk-{event.name}>"
-                    closing = f"</otk-{event.name}>" if event.closed else ""
+                    # Every other call prints as it streamed, fences and
+                    # all, until its look is decided: the opening fence
+                    # ahead of its first piece, the closing fence after the
+                    # piece that closed it — the language's canonical form
+                    # (`context.tool_calls`), which the terminal may not
+                    # import, so spelled here as `render.message` spells it.
+                    opening = "" if call_open else f"```otk-{event.name}\n"
+                    closing = "\n```" if event.closed else ""
                     call_open = not event.closed
                     streamer.feed(opening + event.text + closing)
                     fed += opening + event.text + closing

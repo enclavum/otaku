@@ -569,49 +569,65 @@ class TestCancelAndKeep:
 
 class TestToolCalls:
     """A tool call in a reply is not story: it streams apart from the
-    prose as `ToolCall` pieces, never as a raw tag, and is stored tags
+    prose as `ToolCall` pieces, never as a fence, and is stored fences
     and all. A tool the user answers ends the reply where its call
-    ends: its closing tag is a stop while the story has it on, put back
-    where the server kept it. The reply as stored carries the call for
-    a frontend to read (`segments`); a call of a tool the story has
-    switched off goes back on the wire as prose, one of a tool this
-    build does not know not at all."""
+    ends: nothing rides the request for it, the stream is cut at the
+    closing fence, and what the model went on to say is neither shown
+    nor kept. The reply as stored carries the call for a frontend to
+    read (`segments`); a call of a tool the story has switched off goes
+    back on the wire as prose, one of a tool this build does not know
+    not at all."""
 
-    ASKED = "The door creaks.\n\n<otk-question>Go in?\n1. Yes\n2. No</otk-question>"
+    ASKED = "The door creaks.\n\n```otk-question\nGo in?\n1. Yes\n2. No\n```"
 
     def test_a_call_streams_apart_from_the_prose_and_is_stored_whole(self, app: App) -> None:
-        app.server.script = lambda body: "<otk-note>a plan</otk-note>The hall glows."
+        app.server.script = lambda body: "```otk-note\na plan\n```\nThe hall glows."
         events = list(api_play.submit(app.session, "I enter the hall."))
         prose = "".join(event.text for event in events if isinstance(event, Text))
         calls = [event for event in events if isinstance(event, ToolCall)]
         assert (prose, "".join(call.text for call in calls)) == ("The hall glows.", "a plan")
-        assert all("<otk-" not in event.text for event in events if isinstance(event, Text))
+        assert all("```" not in event.text for event in events if isinstance(event, Text))
         assert {call.name for call in calls} == {"note"}
-        assert app.session.messages[-1].body == "<otk-note>a plan</otk-note>The hall glows."
+        assert app.session.messages[-1].body == "```otk-note\na plan\n```\nThe hall glows."
 
-    def test_a_closing_tag_is_a_stop_while_the_story_has_the_tool_on(self, app: App) -> None:
+    def test_nothing_of_a_tool_rides_the_request(self, app: App) -> None:
+        # otaku owns the convention: no `tools` field, and the stops are
+        # the reader's own, the tool on or off.
         app.play('/set parameter stop "The End"')
         api_stories.update_setting(app.session, "allow_questions", enabled=True)
         app.play("I enter the hall.")
-        assert app.server.requests[-1]["stop"] == ["The End", "</otk-question>"]
-        api_stories.update_setting(app.session, "allow_questions", enabled=False)
-        app.play("I look around.")
-        assert app.server.requests[-1]["stop"] == ["The End"]
+        request = app.server.requests[-1]
+        assert request["stop"] == ["The End"] and "tools" not in request
 
-    def test_the_tag_the_server_kept_is_put_back(self, app: App) -> None:
-        # A server strips the stop it stopped on: the reply arrives with
-        # its call open, and the history must teach closed calls.
+    def test_a_reply_ends_where_the_question_it_asks_does(self, app: App) -> None:
+        # The stream is cut at the closing fence: what the model went on
+        # to say never streams and is not kept — and the request is in
+        # /usage with the time it took, as a cut request is.
         api_stories.update_setting(app.session, "allow_questions", enabled=True)
-        app.server.script = lambda body: "The door creaks.\n\n<otk-question>Go in?\n1. Yes\n2. No"
-        app.play("I enter the hall.")
+        app.server.script = lambda body: self.ASKED + "\n\nShe goes in anyway."
+        app.server.chunk_delay = 0.03  # long enough to be a time the usage rounds to
+        events = list(api_play.submit(app.session, "I enter the hall."))
+        assert "anyway" not in "".join(e.text for e in events if isinstance(e, Text))
+        assert isinstance(events[-1], Done)
         assert app.session.messages[-1].body == self.ASKED
+        chat = next(
+            t for t in app.store.usage.get_totals(app.session.story_id) if t.purpose == "chat"
+        )
+        assert chat.requests == 1 and chat.seconds > 0
+
+    def test_the_cut_call_is_closed_where_the_model_opened_another(self, app: App) -> None:
+        api_stories.update_setting(app.session, "allow_questions", enabled=True)
+        app.server.script = lambda body: "```otk-question\nGo in?\n1. Yes\n```otk-note\nlater\n```"
+        app.server.chunk_size = 1000  # one delta for the whole reply: the cut is the parser's
+        app.play("I enter the hall.")
+        assert app.session.messages[-1].body == "```otk-question\nGo in?\n1. Yes\n```"
 
     def test_a_call_left_open_by_a_cut_reply_stays_open(self, app: App) -> None:
         api_stories.update_setting(app.session, "allow_questions", enabled=True)
-        app.server.script = lambda body: "<otk-question>Go in?"
+        app.server.script = lambda body: "```otk-question\nGo in?"
         app.server.finish = "length"
         app.play("I enter the hall.")
-        assert app.session.messages[-1].body == "<otk-question>Go in?"
+        assert app.session.messages[-1].body == "```otk-question\nGo in?"
 
     def test_the_stored_reply_carries_the_call_read(self, app: App) -> None:
         app.server.script = lambda body: self.ASKED
@@ -620,7 +636,7 @@ class TestToolCalls:
         ]
         assert done.reply is not None
         assert api_play.segments(done.reply.body) == [
-            {"kind": "prose", "text": "The door creaks.\n\n"},
+            {"kind": "prose", "text": "The door creaks."},
             {
                 "kind": "tool_call",
                 "tool": "question",
@@ -632,11 +648,11 @@ class TestToolCalls:
 
     def test_a_call_of_a_tool_that_is_on_goes_back_on_the_wire_as_written(self, app: App) -> None:
         api_stories.update_setting(app.session, "allow_assistant_notes", enabled=True)
-        app.server.script = lambda body: "The hall glows.\n\n<otk-note>a plan</otk-note>"
+        app.server.script = lambda body: "The hall glows.\n\n```otk-note\na plan\n```"
         app.play("I enter the hall.")
         app.play("I look around.")
         sent = app.server.requests[-1]["messages"]
-        assert sent[-2]["content"] == "The hall glows.\n\n<otk-note>a plan</otk-note>"
+        assert sent[-2]["content"] == "The hall glows.\n\n```otk-note\na plan\n```"
 
     def test_a_call_of_a_tool_that_is_off_goes_back_as_prose(self, app: App) -> None:
         # The question alone: the reader's answer that follows still has
@@ -649,13 +665,13 @@ class TestToolCalls:
         assert sent[-2]["content"] == "The door creaks.\n\nGo in?"
 
     def test_a_call_of_a_tool_this_build_does_not_know_leaves_the_wire(self, app: App) -> None:
-        app.server.script = lambda body: "The hall glows.\n\n<otk-plan>later</otk-plan>"
+        app.server.script = lambda body: "The hall glows.\n\n```otk-plan\nlater\n```"
         app.play("I enter the hall.")
         app.play("I look around.")
         sent = app.server.requests[-1]["messages"]
         assert sent[-2]["content"] == "The hall glows."
-        # only the wire: the stored body keeps the call, tags and all
-        assert app.session.messages[-3].body == "The hall glows.\n\n<otk-plan>later</otk-plan>"
+        # only the wire: the stored body keeps the call, fences and all
+        assert app.session.messages[-3].body == "The hall glows.\n\n```otk-plan\nlater\n```"
 
 
 class TestCallsOnScreen:
@@ -665,8 +681,8 @@ class TestCallsOnScreen:
     set apart from the prose by a blank line — and the stream draws what
     the echo draws, so a story resumed reads as it played."""
 
-    NOTED = "The door creaks.\n\n<otk-note>Keep the key in play.</otk-note>\n\nIt opens."
-    ASKED = "The door creaks.<otk-question>Go in?\n1. Yes\n2. No</otk-question>"
+    NOTED = "The door creaks.\n\n```otk-note\nKeep the key in play.\n```\n\nIt opens."
+    ASKED = "The door creaks.\n```otk-question\nGo in?\n1. Yes\n2. No\n```"
 
     def test_a_question_streams_as_the_question_alone(self, app: App, capsys) -> None:
         api_stories.update_setting(app.session, "allow_questions", enabled=True)
@@ -674,7 +690,7 @@ class TestCallsOnScreen:
         app.play("I enter the hall.")
         out = capsys.readouterr().out
         assert "The door creaks.\n\n│ Go in?" in out
-        assert "1. Yes" not in out and "otk-" not in out  # the answers are the prompt's menu
+        assert "1. Yes" not in out and "```" not in out  # the answers are the prompt's menu
 
     def test_a_note_is_dim_while_displayed_and_gone_otherwise(self, app: App, capsys) -> None:
         api_stories.update_setting(app.session, "allow_assistant_notes", enabled=True)
@@ -691,7 +707,7 @@ class TestCallsOnScreen:
     def test_the_stream_draws_what_the_echo_draws(self, app: App, capsys) -> None:
         api_stories.update_setting(app.session, "allow_assistant_notes", enabled=True)
         api_stories.update_setting(app.session, "allow_questions", enabled=True)
-        app.server.chunk_size = 2  # every tag split, every newline its own piece
+        app.server.chunk_size = 2  # every fence split, every newline its own piece
         for body in (self.NOTED, self.ASKED):
             app.server.script = lambda _line, body=body: body
             app.play("Next.")
@@ -710,7 +726,7 @@ class TestAnswerMenu:
     each key a beat apart — the rows arrive asynchronously, and a queue
     of keys would outrun them."""
 
-    ASKED = "The door creaks.<otk-question>Go in?\n1. Yes\n2. No\n3. Wait</otk-question>"
+    ASKED = "The door creaks.\n```otk-question\nGo in?\n1. Yes\n2. No\n3. Wait\n```"
 
     def test_enter_sends_the_answer_under_the_cursor(self, app: App) -> None:
         self.ask(app)

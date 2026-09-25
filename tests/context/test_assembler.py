@@ -494,7 +494,7 @@ class TestToolCalls:
 
     def test_a_call_of_a_tool_that_is_on_goes_as_written(self) -> None:
         prompt = assemble("", noted(), 8192, tool_set=ToolSet(on=frozenset({"note"})))
-        assert prompt.messages[1].body == "Two.\n\n<otk-note>the seal</otk-note>"
+        assert prompt.messages[1].body == "Two.\n\n```otk-note\nthe seal\n```"
 
     def test_a_call_of_a_tool_that_is_off_becomes_its_rule_text(self) -> None:
         tools = ToolSet(off={"note": lambda inside: f"({inside})"})
@@ -528,7 +528,7 @@ def exchange() -> list[Message]:
 
 def noted() -> list[Message]:
     """An exchange whose reply carries a note."""
-    return [user("One."), assistant("Two.\n\n<otk-note>the seal</otk-note>"), user("Three.")]
+    return [user("One."), assistant("Two.\n\n```otk-note\nthe seal\n```"), user("Three.")]
 
 
 def end(text: str, depth: int = 1) -> Injection:

@@ -5,9 +5,10 @@ The stream is the frontend's to drive: iterate to render, close to
 cancel. The event vocabulary lives here, `Text` and `Reasoning` included
 (re-exported from providers — members of this module's union) and
 `ToolCall` (`context.tool_calls`': a piece of a call, the tool's name
-and its inside, never a raw tag — the deltas are fed through a
+and its inside, never a fence — the deltas are fed through a
 `ReplyParser`, so neither frontend parses). What is RECORDED is
-everything that arrived, tags included. Closing
+everything that arrived, fences included; a call of a tool the user
+answers ends the reply, and nothing past it is read. Closing
 mid-stream keeps and records what arrived — Ctrl+C and Ctrl+R are the
 frontend closing the generator; a Ctrl+R then simply calls `regenerate`
 for the fresh take. Exactly one of Declined, Failed, or Done ends a
@@ -15,7 +16,7 @@ stream. A new reply arms the worker's idle-debounced extraction pass;
 every submission (submit, regenerate, undo) defers pending work first.
 """
 
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 
 from otaku.backend.api.cards import drop_unplayed_card
@@ -34,7 +35,7 @@ from otaku.backend.story import StorySettings, ToolSetting
 from otaku.backend.tools import TOOLS, Actor, read
 from otaku.context import syntax, tool_calls
 from otaku.context.assembler import ContextOverflowError
-from otaku.context.tool_calls import Prose, ReplyParser
+from otaku.context.tool_calls import FENCE, Prose, ReplyParser
 from otaku.context.tool_calls import ToolCall as ToolCall
 from otaku.formatting import format_context
 from otaku.providers import ProviderError, Stats
@@ -364,15 +365,15 @@ def _reply_events(
     held = ""  # a whitespace run the stream has not yet earned sending
     final: Stats | None = None
     error: str | None = None
-    # The tool calls told apart from the prose as they stream; the
-    # closing tag of each the user answers among the stops, so the reply
-    # ends where the question does.
-    parser = ReplyParser()
-    answered = _answered_switched_on(session)
+    # The tool calls told apart from the prose as they stream. A call of
+    # a tool the user answers ends the reply where its closing fence
+    # does: the stream is cut there, and nothing rides the request for
+    # it — the rule is otaku's, the same on every engine.
+    parser = ReplyParser(ending=_ending_switched_on(session))
     stream = client.completion.chat(
         session.model,
         wire,
-        _with_stops(session.params, answered),
+        dict(session.params),
         level=session.think,
         purpose="chat",
         # The thread this runs on belongs to the frontend between
@@ -400,9 +401,12 @@ def _reply_events(
                         continue
                     content.append(text)
                     yield from _pieces(parser.feed(text))
+                    if parser.cut is not None:
+                        break
                 elif isinstance(chunk, Stats):
                     final = chunk
-            yield from _pieces(parser.flush())
+            if parser.cut is None:
+                yield from _pieces(parser.flush())
         finally:
             close = getattr(stream, "close", None)
             if callable(close):
@@ -419,12 +423,14 @@ def _reply_events(
         # The provider package's own sentence: it names the provider and
         # carries the server's explanation where there was one.
         error = str(e)
-    # The server keeps the stop string it stopped on: a reply that ended
-    # on a closing tag ended INSIDE the call, and the history must teach
-    # the model closed calls, so the tag is put back.
-    name = parser.current_call
-    if name in answered and final is not None and final.finish_reason == "stop":
-        content.append(tool_calls.closing_tag(name))
+    if parser.cut is not None:
+        # Kept through the fence that ended the call, the recorder's own
+        # where the model opened another block instead; the usage is the
+        # stream's own account where the cut came before the final chunk.
+        body = "".join(content)[: parser.cut.at]
+        content = [body if parser.cut.fenced else body + "\n" + FENCE]
+        if final is None:
+            final = stream.stats
     reply = _land_reply(session, content, final, reply_kind, reply_speaker)
     if error is not None:
         yield Failed(error)
@@ -441,26 +447,15 @@ def _pieces(found: list[Prose | ToolCall]) -> Iterator[PlayEvent]:
         yield Text(piece.text) if isinstance(piece, Prose) else piece
 
 
-def _answered_switched_on(session: Session) -> frozenset[str]:
+def _ending_switched_on(session: Session) -> frozenset[str]:
     """The names of the tools the user answers that the story has
-    switched on — whose closing tag ends the reply."""
+    switched on — whose call ends the reply."""
     settings = StorySettings(session._settings_db, session._store, session._paths.prompts_file)
     return frozenset(
         setting.tool.name
         for setting in settings
         if isinstance(setting, ToolSetting) and setting.enabled and setting.tool.actor is Actor.USER
     )
-
-
-def _with_stops(params: Mapping[str, object], answered: frozenset[str]) -> dict[str, object]:
-    """The request's parameters with the closing tag of each tool the
-    user answers among the stops, after the reader's own."""
-    if not answered:
-        return dict(params)
-    own = params.get("stop")
-    stops = [str(stop) for stop in own] if isinstance(own, list) else []
-    stops += [tool_calls.closing_tag(name) for name in sorted(answered)]
-    return {**params, "stop": stops}
 
 
 def _land_reply(

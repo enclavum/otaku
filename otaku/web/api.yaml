@@ -1716,12 +1716,12 @@ components:
             type: { const: text }
             text: { type: string }
         - type: object
-          description: A piece of a tool call — the tool's name and its inside, never a raw tag; the deltas are parsed for the page, which parses nothing.
+          description: A piece of a tool call — the tool's name and its inside, never a fence; the deltas are parsed for the page, which parses nothing.
           properties:
             type: { const: tool_call }
             tool: { type: string, description: The tool's name — question, note; a name no tool owns is a call all the same. }
             text: { type: string }
-            closed: { type: boolean, description: This piece is the one the closing tag ended. }
+            closed: { type: boolean, description: This piece is the one the closing fence ended. }
         - type: object
           description: The stream declines mid-way; what already happened stands.
           properties:
@@ -1759,7 +1759,7 @@ components:
                 context_used: { type: integer, nullable: true, description: "Derived: percent of the context the prompt took." }
             reply:
               nullable: true
-              description: The reply as stored, the turn whole — split into segments, tags and all — for the page to land in place; null when nothing arrived.
+              description: The reply as stored, the turn whole — split into segments, fences and all — for the page to land in place; null when nothing arrived.
               allOf: [{ $ref: "#/components/schemas/Turn" }]
 
     PreparedCard:

@@ -356,12 +356,12 @@ class TestPlaying:
         # The page parses nothing: a call streams as `tool_call` pieces,
         # the stored turn arrives in segments with the call read — and
         # the play read carries the same, for a page opening on it.
-        server.script = lambda body: "The door creaks.<otk-question>Go in?\n1. Yes</otk-question>"
+        server.script = lambda body: "The door creaks.\n```otk-question\nGo in?\n1. Yes\n```"
         events = page.play("I enter the hall.")
         calls = [event for event in events if event["type"] == "tool_call"]
         assert calls and all(event["tool"] == "question" for event in calls)
         assert "".join(event["text"] for event in calls) == "Go in?\n1. Yes"
-        assert all("<otk-" not in e["text"] for e in events if e["type"] == "text")
+        assert all("```" not in e["text"] for e in events if e["type"] == "text")
         done = events[-1]
         assert done["reply"]["segments"] == [
             {"kind": "prose", "text": "The door creaks."},

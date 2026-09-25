@@ -148,26 +148,27 @@ Rules:
 # in chat — so neither carries an enclosure of its own.
 TOOL_QUESTIONS_DEFAULT = """\
 You may ask the reader ONE question when a choice is theirs to make rather than
-yours. Write it as the last thing in your reply, inside <otk-question> tags: the
-question on the first line, then the answers for the reader to pick from as
-numbered lines, at least two. Like this, from an unrelated story:
+yours. Write it as the last thing in your reply, in a fenced code block marked
+otk-question: the question on the first line, then the answers for the reader
+to pick from as numbered lines, at least two. Like this, from an unrelated
+story:
 
-<otk-question>
+```otk-question
 Does Mara confess tonight, or wait for the ball?
 1. She confesses tonight
 2. She waits for the ball
 3. She confesses, but to the wrong person
-</otk-question>
+```
 
 The reader's next message is the answer.
 
 Close the block before anything else follows, never put a block inside another,
-and stop after the closing tag. Never mention the tag's existence. Never emit or
-print it outside the question itself."""
+and stop after the closing fence. Never mention the block's marker. Never write
+it outside the block itself."""
 
 TOOL_ASSISTANT_NOTES_DEFAULT = """\
-You may end a reply with a <otk-note>...</otk-note> block: a note to yourself
-that the reader never sees.
+You may end a reply with a fenced code block marked otk-note: a note to
+yourself that the reader never sees.
 
 Write there only what your reply does not say and you will need, or find
 useful, in later turns: something you decided but did not state, why you
@@ -182,20 +183,20 @@ a list — and keep them brief: they cost the same context as everything else.
 Two examples, from unrelated exchanges. The form is free — these only show the
 range.
 
-<otk-note>
+```otk-note
 Toln recognized the seal. Saying nothing yet — he wants to see if she offers it
 first.
-</otk-note>
+```
 
-<otk-note>
+```otk-note
 Third time they've asked for the short version: one paragraph from now on
 unless asked for more. The figure they gave earlier was 40k, not 4k — a slip,
 not worth correcting unless it comes to matter.
-</otk-note>
+```
 
 Close the block before anything else follows, never put a block inside another,
-and stop after the closing tag. Never mention the tag's existence. Never emit or
-print it outside the note itself."""
+and stop after the closing fence. Never mention the block's marker. Never write
+it outside the block itself."""
 
 _DEFAULTS = {
     "me_framing": "((OOC: The user writes as {name}.))\n{body}",

@@ -207,13 +207,11 @@ class TestMessage:
     goes on; a note only while `notes`."""
 
     def test_a_question_is_its_question_alone_as_a_block(self) -> None:
-        out = message(
-            "The door creaks.<otk-question>Go in?\n1. Yes\n2. No</otk-question>", "assistant"
-        )
+        out = message("The door creaks.\n```otk-question\nGo in?\n1. Yes\n2. No\n```", "assistant")
         assert out == f"The door creaks.\n\n{BAR}Go in?"
 
     def test_a_note_is_dim_while_the_story_displays_notes_and_gone_otherwise(self) -> None:
-        body = "The door creaks.<otk-note>Keep the key.</otk-note>"
+        body = "The door creaks.\n```otk-note\nKeep the key.\n```"
         assert (
             message(body, "assistant", notes=True)
             == f"The door creaks.\n\n{DIM}{BAR}Keep the key.{NORMAL}"
@@ -221,13 +219,11 @@ class TestMessage:
         assert message(body, "assistant", notes=False) == "The door creaks."
 
     def test_prose_after_a_block_is_set_apart_by_one_blank_line(self) -> None:
-        body = "<otk-note>Key.</otk-note>\n\n\nThen prose."
+        body = "```otk-note\nKey.\n```\n\n\nThen prose."
         assert message(body, "assistant", notes=True) == f"{DIM}{BAR}Key.{NORMAL}\n\nThen prose."
 
     def test_a_block_wraps_at_the_width_given(self) -> None:
-        body = (
-            "<otk-question>Does Mara confess tonight, or wait for the ball?\n1. Yes</otk-question>"
-        )
+        body = "```otk-question\nDoes Mara confess tonight, or wait for the ball?\n1. Yes\n```"
         rows = message(body, "assistant", width=30).split("\n")
         assert len(rows) > 1 and all(row.startswith(BAR) and _columns(row) <= 30 for row in rows)
 
@@ -255,15 +251,15 @@ class TestAsked:
     notes and whitespace."""
 
     def test_a_reply_ending_on_a_question(self) -> None:
-        found = asked(reply("The door.<otk-question>Go in?\n1. Yes\n2. No</otk-question>"))
+        found = asked(reply("The door.\n```otk-question\nGo in?\n1. Yes\n2. No\n```"))
         assert found is not None and (found.question, found.options) == ("Go in?", ("Yes", "No"))
 
     def test_notes_and_whitespace_after_it_do_not_answer_it(self) -> None:
-        body = "<otk-question>Go in?\n1. Yes</otk-question>\n<otk-note>Key.</otk-note>\n\n"
+        body = "```otk-question\nGo in?\n1. Yes\n```\n```otk-note\nKey.\n```\n\n"
         assert asked(reply(body)) is not None
 
     def test_prose_after_it_means_the_model_went_on(self) -> None:
-        assert asked(reply("<otk-question>Go in?\n1. Yes</otk-question>It opens.")) is None
+        assert asked(reply("```otk-question\nGo in?\n1. Yes\n```\nIt opens.")) is None
 
     def test_a_line_of_the_readers_or_no_message_means_none(self) -> None:
         assert asked(Message(role="user", body="Yes")) is None

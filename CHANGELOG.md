@@ -35,7 +35,7 @@ Tentative roadmap: [ROADMAP.md](https://github.com/enclavum/otaku/blob/main/ROAD
   A picture is downsized, stripped of its metadata and kept sealed beside the database; it rides
   its message on every request, and the lore pass reads it too, so a summarized turn's picture is
   put into words before it leaves the context. `/context` counts what rides and what is held back.
-- Tools the model may use by writing a tagged block in its reply, each a per-story switch on the
+- Tools the model may use by writing a fenced block in its reply, each a per-story switch on the
   new Tools tab — the page's, and the terminal dossier's (Ctrl+L, then → to it): **questions** —
   the narrator may ask you one question, with numbered answers to pick from, and waits for your
   answer; in the terminal the answers stand above the prompt, ↑/↓ walk them, Enter sends one, →

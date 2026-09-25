@@ -18,8 +18,8 @@ stands on it (`asked`, the page's `transcript.questionPosed` rule
 copied), and are gone with the menu once answered; a note is dim, bar
 and all, and drawn only while the story displays notes
 (`notes_displayed`, the caller's to read off the story's settings and
-pass) — otherwise left out, tags and all. Every other call still prints
-as it streamed, tags and all, until its look is decided.
+pass) — otherwise left out, fences and all. Every other call still
+prints as it streamed, fences and all, until its look is decided.
 """
 
 import io
@@ -261,8 +261,10 @@ def message(
             piece = block.open(streamer, fed) + block.feed(piece) + block.close()
             after_call = True
         else:
-            # the calls with no look yet print as they streamed
-            piece = f"<otk-{segment['tool']}>{piece}</otk-{segment['tool']}>"
+            # the calls with no look yet print as they streamed, in the
+            # language's canonical form (`context.tool_calls`), which the
+            # terminal may not import — `chat.stream` spells it the same
+            piece = f"```otk-{segment['tool']}\n{piece}\n```"
             streamer.feed(piece)
         fed += piece
     streamer.flush()
