@@ -54,9 +54,12 @@ def run(session: Session) -> None:
 
     chat = Chat(session)
     # The launch's reports — created files, stale settings, keys that
-    # would not open — before anything else draws.
+    # would not open — before anything else draws, one blank line after
+    # the lot.
     for report in session.notices:
         print(report)
+    if session.notices:
+        print()
     session.notices.clear()
     # The launch-time pick, before the banner names the model: the picker
     # runs only when nothing is remembered — Esc is not a cancel, the
@@ -80,27 +83,26 @@ def run(session: Session) -> None:
     assembler = LineAssembler()
     prompt_session, answers = build_prompt(session, carry, assembler, shortcuts=bindings.SHORTCUTS)
 
+    if session.notice:
+        # The one bold hint, above the resumed story: a story that ends on
+        # a question runs straight on into its answers, with nothing
+        # between the two.
+        print(f"{BOLD}{session.notice}{RESET}")
+        print()
+        session.notice = ""
     if session.messages:
         # A resumed story starts mid-scene: name what was resumed and
         # show its last turns, so the scene is on screen before the
         # prompt — and hand them to the ledger, so /undo and /regen can
         # take them back. The blank before the prompt is the prompt's own
-        # when it opens on a question's answers (`AnswerMenu.top_row`) —
-        # unless a notice is to follow, which wants the plain blank.
+        # when it opens on a question's answers (`AnswerMenu.top_row`).
         print(api_stories.landed_line(session))
         print()
         print(last_turns(list(session.messages), RESUME_TURNS, notes=chat.notes_displayed))
-        answers.top_row = answers.posed and not session.notice
+        answers.top_row = answers.posed
         if not answers.top_row:
             print()
         chat.restore_tail(RESUME_TURNS)
-    if session.notice:
-        # The one bold hint, below the echoed turns — which are then no
-        # longer erasable.
-        print(f"{BOLD}{session.notice}{RESET}")
-        print()
-        session.notice = ""
-        chat.ledger.invalidate()
 
     # One status callback, two surfaces: the prompt's toolbar while the
     # prompt is up, the pinned bottom row while a reply streams. Each is

@@ -19,8 +19,8 @@ disclosure.
 Encryption is opt-in (`[encryption]` in `config.toml`; the default stores plain text). With a
 provider configured, the at-rest encryption is designed to protect your stories against:
 
-- someone reading the database or backup files — disk images, Time Machine, cloud-synced or
-  copied files;
+- someone reading the database, the pictures folder or backup files — disk images, Time
+  Machine, cloud-synced or copied files;
 - other applications or users on the machine reading your stories off disk.
 
 How well the key itself is protected depends on the provider you choose: `keychain` keeps it in
