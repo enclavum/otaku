@@ -8,7 +8,9 @@ regenerate is a `set_head` + `append` that diverges into a sibling.
 
 `fork` deep-copies a story through the cut — messages, surviving scenes,
 their journals, and the cast, ids remapped — so every story is fully
-self-contained.
+self-contained. A picture is the one thing not copied: the message names
+it and the files folder holds it once (`schema.Attachment`), so a fork
+shares it by reference, and `delete` sweeps the folder afterwards.
 """
 
 # Deferred annotations: the ops classes define `list` methods, which
@@ -17,12 +19,13 @@ from __future__ import annotations
 
 import builtins
 import re
-from collections.abc import Container
+from collections.abc import Callable, Container, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
 from otaku.store.database import Database
-from otaku.store.schema import Message, Story
+from otaku.store.files import FileStore
+from otaku.store.schema import Attachment, Message, Story, StorySettingDB
 
 # The numbered suffix a fork's title carries — every one it has collected,
 # so numbering works off the stem and the suffixes can never pile up
@@ -53,8 +56,11 @@ class StoryListing:
 
 
 class StoryOps:
-    def __init__(self, db: Database) -> None:
+    def __init__(self, db: Database, files: FileStore) -> None:
+        """Over the nucleus AND the files folder: a story's deletion is
+        the one operation that spans both stores."""
         self._db = db
+        self._files = files
 
     def add(self, title: str | None = None) -> int:
         """A new story. A title already taken is NUMBERED, the way a fork
@@ -77,7 +83,7 @@ class StoryOps:
     def get(self, story_id: int) -> Story | None:
         # fmt: off
         row = self._db.conn.execute(
-            "SELECT id, title, system, head_id, forked_from_id FROM stories WHERE id = ?",
+            "SELECT id, title, system, head_id, forked_from_id, settings FROM stories WHERE id = ?",
             (story_id,),
         ).fetchone()
         # fmt: on
@@ -89,6 +95,7 @@ class StoryOps:
             system=self._db.unseal(row[2]),
             head_id=row[3],
             forked_from_id=row[4],
+            settings=StorySettingDB.from_json(self._db.unseal(row[5])),
         )
 
     def list(self) -> builtins.list[StoryListing]:
@@ -151,11 +158,13 @@ class StoryOps:
 
     def delete(self, story_id: int) -> None:
         """The one destructive act, and it is the user's: drop a story and
-        everything it owns. The story row references its own head message,
-        so FK checks defer to commit."""
+        everything it owns, then sweep the files folder of what no message
+        names any more. The story row references its own head message, so
+        FK checks defer to commit."""
         self._db.conn.execute("PRAGMA defer_foreign_keys = ON")
         with self._db.conn as conn:
             conn.execute("DELETE FROM stories WHERE id = ?", (story_id,))
+        self.sweep_files()
 
     # ---------- getters and setters ----------
 
@@ -174,6 +183,33 @@ class StoryOps:
             # fmt: off
             conn.execute(
                 "UPDATE stories SET system = ? WHERE id = ?",
+                (self._db.seal(text), story_id),
+            )
+            # fmt: on
+
+    def get_settings(self, story_id: int) -> tuple[StorySettingDB, ...]:
+        """Every setting the story has stored, as the column records them
+        (`schema.StorySettingDB`); none for a story that stored none. Which
+        settings there ARE, and their defaults, is the caller's business."""
+        row = self._db.conn.execute(
+            "SELECT settings FROM stories WHERE id = ?", (story_id,)
+        ).fetchone()
+        return StorySettingDB.from_json(self._db.unseal(row[0]) if row else "")
+
+    def set_setting(self, story_id: int, setting_db: StorySettingDB) -> None:
+        """Store one setting, merged into what the story holds: every key
+        this build does not know is kept. Deliberately does not bump
+        updated_at, as a title does not: a switch flipped must not reorder
+        the story list."""
+        with self._db.conn as conn:
+            # fmt: off
+            row = conn.execute(
+                "SELECT settings FROM stories WHERE id = ?",
+                (story_id,),
+            ).fetchone()
+            text = StorySettingDB.to_json([setting_db], self._db.unseal(row[0]) if row else "")
+            conn.execute(
+                "UPDATE stories SET settings = ? WHERE id = ?",
                 (self._db.seal(text), story_id),
             )
             # fmt: on
@@ -206,8 +242,8 @@ class StoryOps:
             head = self.get_head(story_id)
             # fmt: off
             cur = conn.execute(
-                "INSERT INTO messages (story_id, parent_id, role, kind, speaker_id, speaker, body, template, provider, model, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (story_id, head, message.role, message.kind, message.speaker_id, self._db.seal_opt(message.speaker), self._db.seal(message.body), self._db.seal_opt(message.template), message.provider, message.model, now, now),
+                "INSERT INTO messages (story_id, parent_id, role, kind, speaker_id, speaker, body, template, provider, model, created_at, updated_at, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (story_id, head, message.role, message.kind, message.speaker_id, self._db.seal_opt(message.speaker), self._db.seal(message.body), self._db.seal_opt(message.template), message.provider, message.model, now, now, Attachment.to_json(message.attachments)),
             )
             message_id = int(cur.lastrowid or 0)
             conn.execute(
@@ -229,7 +265,7 @@ class StoryOps:
             "    SELECT id, parent_id, 0 FROM messages WHERE id = ?"
             "    UNION ALL"
             "    SELECT m.id, m.parent_id, chain.depth + 1 FROM messages m JOIN chain ON m.id = chain.parent_id) "
-            "SELECT m.id, m.role, m.kind, m.speaker_id, m.speaker, m.body, m.template, m.provider, m.model "
+            "SELECT m.id, m.role, m.kind, m.speaker_id, m.speaker, m.body, m.template, m.provider, m.model, m.attachments "
             "FROM chain JOIN messages m ON m.id = chain.id ORDER BY chain.depth DESC",
             (head,),
         ).fetchall()
@@ -245,8 +281,9 @@ class StoryOps:
                 template=self._db.unseal_opt(template),
                 provider=provider,
                 model=model,
+                attachments=Attachment.from_json(attachments),
             )
-            for mid, role, kind, speaker_id, speaker, body, template, provider, model in rows
+            for mid, role, kind, speaker_id, speaker, body, template, provider, model, attachments in rows
         ]
 
     def get_messages_ids(self, story_id: int) -> builtins.list[int]:
@@ -283,6 +320,7 @@ class StoryOps:
         title: str | None = None,
     ) -> int:
         """A new story branched off at `from_message_id` (default: the head).
+        A branch keeps its origin's premise and settings.
         An explicit `title` is used verbatim; otherwise the source's title
         gains a number ("<title> - N") — one that already carries a number
         is renumbered, never suffixed again — and an untitled source forks
@@ -315,8 +353,8 @@ class StoryOps:
         with self._db.conn as conn:
             # fmt: off
             cur = conn.execute(
-                "INSERT INTO stories (forked_from_id, title, system, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-                (story_id, self._db.seal_opt(title or None), self._db.seal_opt(source.system or None), now, now),
+                "INSERT INTO stories (forked_from_id, title, system, settings, created_at, updated_at) VALUES (?, ?, ?, (SELECT settings FROM stories WHERE id = ?), ?, ?)",
+                (story_id, self._db.seal_opt(title or None), self._db.seal_opt(source.system or None), story_id, now, now),
             )
             new_story = int(cur.lastrowid or 0)
 
@@ -335,14 +373,14 @@ class StoryOps:
             message_map: dict[int, int] = {}
             for mid in chain:
                 row = conn.execute(
-                    "SELECT parent_id, role, kind, speaker_id, speaker, body, template, provider, model, created_at FROM messages WHERE id = ?",
+                    "SELECT parent_id, role, kind, speaker_id, speaker, body, template, provider, model, created_at, attachments FROM messages WHERE id = ?",
                     (mid,),
                 ).fetchone()
                 parent, role, kind, speaker_id, speaker = row[:5]
-                body, template, provider, model, created = row[5:]
+                body, template, provider, model, created, attachments = row[5:]
                 cur = conn.execute(
-                    "INSERT INTO messages (story_id, parent_id, role, kind, speaker_id, speaker, body, template, provider, model, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (new_story, message_map.get(parent), role, kind, character_map.get(speaker_id), speaker, body, template, provider, model, created, now),
+                    "INSERT INTO messages (story_id, parent_id, role, kind, speaker_id, speaker, body, template, provider, model, created_at, updated_at, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (new_story, message_map.get(parent), role, kind, character_map.get(speaker_id), speaker, body, template, provider, model, created, now, attachments),
                 )
                 message_map[int(mid)] = int(cur.lastrowid or 0)
 
@@ -379,6 +417,22 @@ class StoryOps:
             )
             # fmt: on
         return new_story
+
+    # ---------- the files folder ----------
+
+    def sweep_files(self) -> int:
+        """Delete every file in the folder no message names; how many
+        went. Run after a story is deleted and once at launch, so a crash
+        between the rows and the files heals on the next run. What is
+        kept is every name some message carries, on any branch of
+        any story — abandoned siblings count: undo and regen delete
+        nothing, and their turns stay reachable."""
+        # fmt: off
+        rows = self._db.conn.execute(
+            "SELECT DISTINCT json_extract(a.value, '$.file') FROM messages m, json_each(m.attachments) a WHERE m.attachments IS NOT NULL",
+        ).fetchall()
+        # fmt: on
+        return self._files.sweep(str(row[0]) for row in rows if row[0] is not None)
 
     # ---------- internals ----------
 
@@ -492,6 +546,18 @@ class MessagesOps:
             )
             # fmt: on
 
+    def set_attachments(self, message_id: int, attachments: Sequence[Attachment]) -> None:
+        """The pictures on one message, replaced — the rows that name
+        files already in the folder (`store.files`); the column is plain,
+        as the rows carry none of the reader's words."""
+        with self._db.conn as conn:
+            # fmt: off
+            conn.execute(
+                "UPDATE messages SET attachments = ?, updated_at = ? WHERE id = ?",
+                (Attachment.to_json(attachments), self._db.now(), message_id),
+            )
+            # fmt: on
+
     def get_parent(self, message_id: int) -> int | None:
         """One message's parent in the tree. No feature reads this — it is
         the door the SUITE observes the sibling promise through ("nothing
@@ -502,10 +568,14 @@ class MessagesOps:
         ).fetchone()
         return row[0] if row else None
 
-    def count_body_chars(self, message_ids: list[int]) -> int:
+    def count_body_chars(
+        self, message_ids: list[int], strip: Callable[[str], str] | None = None
+    ) -> int:
         """Total characters of these messages' bodies — what the scene gate
-        measures. Decrypts only the rows asked for; it has to decrypt, since
-        a sealed blob's byte length is a bad proxy for character count."""
+        measures. Each body goes through `strip` first when one is given:
+        the caller says what counts, and the text never leaves here.
+        Decrypts only the rows asked for; it has to decrypt, since a sealed
+        blob's byte length is a bad proxy for character count."""
         if not message_ids:
             return 0
         placeholders = ",".join("?" * len(message_ids))
@@ -515,7 +585,8 @@ class MessagesOps:
             tuple(message_ids),
         ).fetchall()
         # fmt: on
-        return sum(len(self._db.unseal(row[0])) for row in rows)
+        bodies = (self._db.unseal(row[0]) for row in rows)
+        return sum(len(strip(body) if strip else body) for body in bodies)
 
 
 def unique_title(base: str, taken: Container[str]) -> str | None:

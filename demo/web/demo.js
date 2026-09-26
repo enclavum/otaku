@@ -22,14 +22,16 @@ let version = "";
 const ready = (async () => {
   const load = async (name) =>
     (await realFetch(new URL(`./fixtures/${name}.json`, import.meta.url))).json();
-  const [syntax, settings, river, tour] = await Promise.all([
+  const [syntax, settings, storySettings, prompts, river, tour] = await Promise.all([
     load("syntax"),
     load("settings"),
+    load("story_settings"),
+    load("prompts"),
     load("river"),
     load("tour"),
   ]);
   version = river.facts.version;
-  store.seed({ syntax, settings, river, tour });
+  store.seed({ syntax, settings, storySettings, prompts, river, tour });
 })();
 
 // ---------- the routes ----------
@@ -40,8 +42,17 @@ const ready = (async () => {
    literal segment is never eaten by a parameter. */
 const ROUTES = {
   // Playing
+  // The demo's model never asks a question, so no story stands on one.
   "GET /api/play": () => ({ messages: store.turns() }),
   "GET /api/play/syntax": () => store.syntax(),
+  // A turn's pictures: the sample's own, shipped with the fixtures
+  // (`capture_fixtures_web.py` copies them out of the throwaway state
+  // dir) and served as the product serves a stored file — a name nothing
+  // is stored under answers 404, as the product does. The demo's model
+  // cannot see, so no NEW picture is ever stored (`play` refuses `files`).
+  "GET /api/files/{file}": (p) => realFetch(new URL(`./fixtures/files/${p.file}`, import.meta.url)),
+  "GET /api/files/{file}/thumb": (p) =>
+    realFetch(new URL(`./fixtures/files/${p.file.replace(/\.[^.]+$/, "")}-thumb.jpg`, import.meta.url)),
   "GET /api/cast": () => store.cast(),
   "DELETE /api/play/last": () => store.undo(),
   "GET /api/history": () => ({ lines: store.history() }),
@@ -68,6 +79,13 @@ const ROUTES = {
   "GET /api/stories/{story}/export": (p) => store.exportDocument(num(p.story)),
   // Inside a story
   "PUT /api/stories/{story}/premise": (p, q, b) => store.setSystem(num(p.story), String(b.text)),
+  "GET /api/stories/{story}/settings": (p) => store.storySettings(num(p.story)),
+  "PATCH /api/stories/{story}/settings/{setting}": (p, q, b) =>
+    // A flag that is not a boolean is malformed, as the server answers it.
+    (b.enabled != null && typeof b.enabled !== "boolean") ||
+    (b.display_notes != null && typeof b.display_notes !== "boolean")
+      ? status(400)
+      : store.updateSetting(num(p.story), p.setting, b),
   "PATCH /api/stories/{story}/scenes/{scene}": (p, q, b) =>
     store.editLore(
       num(p.story),
@@ -132,6 +150,10 @@ const ROUTES = {
   // Settings
   "GET /api/settings": () => store.settings(),
   "PUT /api/settings/{setting}": (p, q, b) => store.setKnob(p.setting, b.value),
+  "GET /api/shared_reminder": () => store.sharedReminder(),
+  "PUT /api/shared_reminder": (p, q, b) => store.setSharedReminder(String(b.text)),
+  "GET /api/prompts/{tool}": (p) => store.prompt(p.tool),
+  "PUT /api/prompts/{tool}": (p, q, b) => store.setPrompt(p.tool, String(b.text)),
 };
 
 // The path parameters that are row ids, as `web/server.py` declares
@@ -459,6 +481,11 @@ function play(body, regenerate, signal) {
     return json({ notice: "Nothing to regenerate.", refused: true });
   }
   const line = String(body.line ?? "");
+  if (Array.isArray(body.files) && body.files.length) {
+    // The product's own sentence, refused eagerly as it is there (copied
+    // from `backend.files.CANNOT_SEE`: the demo cannot ask a backend).
+    return json({ notice: "This model cannot see pictures.", refused: true });
+  }
   const events = [];
   if (regenerate) {
     store.dropLastReply();
@@ -477,10 +504,11 @@ function play(body, regenerate, signal) {
   const land = () => {
     // Whatever ended the stream — the last chunk or a closed reader —
     // what arrived is recorded, exactly as the backend keeps a partial.
-    if (!streamed) return;
-    store.recordTurn("assistant", streamed);
+    if (!streamed) return null;
+    const reply = store.recordTurn("assistant", streamed);
     store.recordUsage(promptTokens, Math.ceil(streamed.length / 4), (Date.now() - started) / 1000);
     streamed = "";
+    return reply;
   };
 
   const encoder = new TextEncoder();
@@ -516,8 +544,9 @@ function play(body, regenerate, signal) {
           const stats = store.verbose()
             ? `[ total ${seconds.toFixed(1)}s, prompt ${promptTokens} tok, eval ${tokens} tok @ ${rate} tok/s ]`
             : "";
-          land();
-          // The product's shape: the report's facts beside the line, and
+          const reply = land();
+          // The product's shape: the report's facts beside the line, the
+          // reply as stored, no question (the demo's model asks none), and
           // a notice the page's own model never has — it finishes what
           // it starts.
           const report = {
@@ -532,7 +561,7 @@ function play(body, regenerate, signal) {
             rate: Number(rate),
             context_used: null,
           };
-          frame(controller, { type: "done", stats, report, notice: "" });
+          frame(controller, { type: "done", stats, report, notice: "", reply });
           over = true;
           controller.close();
           return;
@@ -583,6 +612,27 @@ window.fetch = async (input, init) => {
   if (payload === null) return status(404);
   return payload instanceof Response ? payload : json(payload);
 };
+
+/* A picture on a turn is loaded by the browser itself, as an <img>, never
+   through fetch — so the fake reaches it on the image element's `src`:
+   a stored file's URL, as the page spells it (`api.pictureUrl`,
+   `api.thumbnailUrl`), becomes the fixture's copy of it. The same two
+   answers as the `/api/files` routes, on the one door an <img> uses. */
+const realSrc = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, "src");
+Object.defineProperty(HTMLImageElement.prototype, "src", {
+  configurable: true,
+  get() {
+    return realSrc.get.call(this);
+  },
+  set(value) {
+    const found = /^\/api\/files\/([^/]+)(\/thumb)?$/.exec(String(value));
+    if (found) {
+      const name = found[2] ? `${found[1].replace(/\.[^.]+$/, "")}-thumb.jpg` : found[1];
+      value = new URL(`./fixtures/files/${name}`, import.meta.url).href;
+    }
+    realSrc.set.call(this, value);
+  },
+});
 
 // The watch stream ("/api/watch") never has news in the demo: the
 // deployed files change only with a deploy, and a deploy serves a new

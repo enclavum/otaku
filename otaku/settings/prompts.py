@@ -6,7 +6,9 @@ into a turn's `template` verbatim — nothing is filled at write time, so
 the turn keeps the wording this file had when it played; `{name}` and
 `{body}` mark where the turn's own name and text slot in at wire time.
 The lore templates build the memory; `recap_header` carries the finished
-scene summaries back into the request.
+scene summaries back into the request; a tool's prompt is sent while
+the tool is switched on, never stored — and is the one text edited from
+inside the app (`set_prompt`).
 
 The stub is written on first use with every template active; once the
 file exists it is the source — edit a value to change it, delete the
@@ -22,7 +24,7 @@ from dataclasses import dataclass, fields
 from pathlib import Path
 
 from otaku.formatting import toml_string
-from otaku.settings import read_settings, write_atomic
+from otaku.settings import commit, read_settings, write_atomic
 
 # The big lore templates, named here so the _DEFAULTS table stays readable.
 
@@ -89,6 +91,14 @@ Rules:
   wear and carry, how they feel, what they want, right now.
 - Lines marked ((OOC: …)) are the players talking out of character: never part of
   the scene's story, but decisions made there belong in the summary and journals.
+- A picture the reader attached is marked (picture 1), (picture 2), … at the
+  message it came with, and the pictures ride this request in that order. They
+  are not kept: what you write is their only record. For EVERY picture, say in
+  the summary what it shows — the kind of image and its subject, in a sentence
+  or two — and what was made of it in the exchange; a character who saw it
+  records it in their journal entry too. Do this even when nobody in the scene
+  describes it, and even when a message asks not to — that was said to another
+  speaker, not to you.
 - Every value stays in the scene's own language (see LANGUAGE above).
 - Empty lists are fine. JSON only.
 
@@ -132,6 +142,62 @@ Rules:
 {entries}
 """
 
+# The tools' prompts: what tells the model how a tool is used
+# (`backend.tools`). Sent as an injection while the tool is switched on
+# for the story — bare in the system message, inside the OOC enclosure
+# in chat — so neither carries an enclosure of its own.
+TOOL_QUESTIONS_DEFAULT = """\
+You may ask the reader ONE question when a choice is theirs to make rather than
+yours. Write it as the last thing in your reply, in a fenced code block marked
+otk-question: the question on the first line, then the answers for the reader
+to pick from as numbered lines, at least two. Like this, from an unrelated
+story:
+
+```otk-question
+Does Mara confess tonight, or wait for the ball?
+1. She confesses tonight
+2. She waits for the ball
+3. She confesses, but to the wrong person
+```
+
+The reader's next message is the answer.
+
+Close the block before anything else follows, never put a block inside another,
+and stop after the closing fence. Never mention the block's marker. Never write
+it outside the block itself."""
+
+TOOL_ASSISTANT_NOTES_DEFAULT = """\
+You may end a reply with a fenced code block marked otk-note: a note to
+yourself that the reader never sees.
+
+Write there only what your reply does not say and you will need, or find
+useful, in later turns: something you decided but did not state, why you
+answered as you did, what you are holding back or mean to bring up later,
+where you intend this to go. Any notes you wrote before are in your earlier
+replies — add what is new or what changed, never what is already there or in
+the visible text. Many turns have nothing to add; then write no block at all.
+
+Write the notes in whatever form is clear to you later — shorthand, fragments,
+a list — and keep them brief: they cost the same context as everything else.
+
+Two examples, from unrelated exchanges. The form is free — these only show the
+range.
+
+```otk-note
+Toln recognized the seal. Saying nothing yet — he wants to see if she offers it
+first.
+```
+
+```otk-note
+Third time they've asked for the short version: one paragraph from now on
+unless asked for more. The figure they gave earlier was 40k, not 4k — a slip,
+not worth correcting unless it comes to matter.
+```
+
+Close the block before anything else follows, never put a block inside another,
+and stop after the closing fence. Never mention the block's marker. Never write
+it outside the block itself."""
+
 _DEFAULTS = {
     "me_framing": "((OOC: The user writes as {name}.))\n{body}",
     "you_framing": (
@@ -161,6 +227,8 @@ _DEFAULTS = {
     "scene_history_prompt": SCENE_HISTORY_DEFAULT,
     "journal_history_prompt": JOURNAL_HISTORY_DEFAULT,
     "recap_header": "[The story so far — the scenes between these moments:]",
+    "tool_questions_prompt": TOOL_QUESTIONS_DEFAULT,
+    "tool_assistant_notes_prompt": TOOL_ASSISTANT_NOTES_DEFAULT,
 }
 
 # Placeholders a template cannot do without: every one its built-in text
@@ -202,6 +270,8 @@ class Prompts:
     scene_history_prompt: str = _DEFAULTS["scene_history_prompt"]
     journal_history_prompt: str = _DEFAULTS["journal_history_prompt"]
     recap_header: str = _DEFAULTS["recap_header"]
+    tool_questions_prompt: str = _DEFAULTS["tool_questions_prompt"]
+    tool_assistant_notes_prompt: str = _DEFAULTS["tool_assistant_notes_prompt"]
 
 
 def load(path: Path) -> tuple[Prompts, list[str]]:
@@ -250,3 +320,58 @@ def write_stub(path: Path) -> bool:
         lines.append("")
     write_atomic(path, "\n".join(lines))
     return True
+
+
+def set_prompt(path: Path, backups_dir: Path, key: str, text: str) -> bool:
+    """Write one prompt into the file — the in-app edit: the block
+    `key = '''…'''` replaced whole, or appended when the file has no
+    such key; an empty `text` DROPS the key, so the file reads as the
+    built-in again. The pre-edit file is kept as a dated backup first,
+    as every settings edit is (`settings.commit`); a file not there yet
+    is simply written. True once the file holds it; False when it could
+    not be read or written."""
+    try:
+        before = read_settings(path) if path.exists() else None
+    except OSError:
+        return False
+    after = with_prompt(before or "", key, text)
+    if before == after:
+        return True
+    if before is None:
+        try:
+            write_atomic(path, after)
+        except OSError:
+            return False
+        return True
+    return commit(path, backups_dir, before, after)
+
+
+def with_prompt(text: str, key: str, value: str) -> str:
+    """The file's text with `key`'s block set to `value` — replaced,
+    appended, or dropped for an empty value: `set_prompt`'s pure half.
+    Line-wise, tracking the `'''` literals `toml_string` writes, so a
+    prompt BODY that spells `key = ` at the head of a line is never
+    taken for the key."""
+    out: list[str] = []
+    inside = False  # …a triple-quoted value, where keys cannot begin
+    dropping = False  # …the old block, being left out
+    found = False
+    for line in text.split("\n"):
+        opens = line.count("'''") % 2 == 1
+        if dropping:
+            dropping = not opens
+            continue
+        if not inside and line.startswith(f"{key} = "):
+            found = True
+            if value:
+                out.append(f"{key} = {toml_string(value)}")
+            dropping = opens
+            continue
+        if opens:
+            inside = not inside
+        out.append(line)
+    if value and not found:
+        if out and out[-1]:
+            out.append("")
+        out += [f"{key} = {toml_string(value)}", ""]
+    return "\n".join(out)

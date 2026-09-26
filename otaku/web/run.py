@@ -19,7 +19,6 @@ looks, off the session rather than out of the file.
 """
 
 import contextlib
-import ipaddress
 import os
 import signal
 import ssl
@@ -38,7 +37,7 @@ from otaku.web.cert import CertError, get_context
 from otaku.web.server import Hooks, bind
 from otaku.web.thread import SessionRunner
 
-__all__ = ["ServeError", "address", "run", "serve", "settings"]
+__all__ = ["ServeError", "run", "serve", "settings"]
 
 # For working ON otaku, and deliberately unadvertised (`settings`).
 # There is no host variable to match — which interface a server answers
@@ -68,10 +67,9 @@ def run(
     caller's to replace: `otaku web`, never `/web`.
 
     FULL is a terminal this frontend opens: `otaku web`, with the launch
-    to report and a mark to draw. Without it the session came from
-    `/web`, into a chat already in progress — the reports were read when
-    it opened and the mark drawn then, so all this owes the reader is the
-    address.
+    to report. Without it the session came from `/web`, into a chat
+    already in progress — the reports were read when it opened, so all
+    this owes the reader is the address.
 
     `host` and `port` are a caller overriding where it listens for this
     run — the command line's own, laid over the configured address."""
@@ -86,20 +84,8 @@ def run(
         session.notices.clear()
     # Said before the socket is bound, because the address is the
     # configuration's and not the socket's answer: a reader can be
-    # opening the page while the first request is still arriving. The
-    # banner is the same mark a chat session opens with and answers to
-    # the same setting, which decides its STYLE rather than whether the
-    # address is said at all.
-    size: banner.WebBannerSize = (
-        ("full" if session.terminal.show_banner else "line") if full else "short"
-    )
-    print(
-        banner.render_web(
-            address(config),
-            address_notes(config),
-            size=size,
-        )
-    )
+    # opening the page while the first request is still arriving.
+    print(banner.render_web(config))
     # The last few requests, kept under the address and rewritten in
     # place: proof that the browser is reaching this server, in a
     # terminal that stays the height it started at. It owns the terminal
@@ -165,34 +151,6 @@ def settings(
     if port is not None:
         config = replace(config, port=port)
     return config
-
-
-def address(config: WebSettings) -> str:
-    """The URL the banner prints: the host as configured, `127.0.0.1`
-    read as `localhost`."""
-    scheme = "https" if config.https else "http"
-    reachable = "localhost" if config.host == "127.0.0.1" else config.host
-    if config.port == (443 if config.https else 80):
-        return f"{scheme}://{reachable}"
-    return f"{scheme}://{reachable}:{config.port}"
-
-
-def address_notes(config: WebSettings) -> str:
-    """What the banner says after the address: that a password is set,
-    and — on any host but `localhost` or `127.0.0.1` — that the address
-    is public, with what it is missing. `<b>…</b>` marks what is bold;
-    how bold looks is the banner's (`banner.render_web`)."""
-    notes = ""
-    if config.password:
-        notes = " (password set)"
-    if config.host in ("localhost", "127.0.0.1"):
-        return notes
-    missing = [
-        name for name, on in (("no TLS", config.https), ("no password", config.password)) if not on
-    ]
-    if missing:
-        return notes + f"<b> - public, yet with {' and '.join(missing)}</b> - set in config.toml"
-    return notes + "<b> - public</b>"
 
 
 def serve(
@@ -330,26 +288,6 @@ def serve(
         session.set_on_idle(was_idle)
         session.set_on_notice(was_notice)
     return asked.is_set()
-
-
-def _is_loopback(host: str) -> bool:
-    """Whether this address reaches THIS MACHINE ONLY.
-
-    Not `server.LOOPBACK`, which is the wider question that one asks —
-    every spelling that ARRIVES here, the wildcards among them, because
-    a wildcard bind does answer as localhost too. Here `0.0.0.0` is the
-    most exposed address there is, so it has to come out false, and a
-    set that contains it is the wrong set.
-
-    A name is never resolved: that is a DNS call at the launch, and the
-    only name worth the trouble is the one everybody means by it."""
-    name = host.strip("[]")
-    if name == "localhost":
-        return True
-    try:
-        return ipaddress.ip_address(name).is_loopback
-    except ValueError:
-        return False
 
 
 def _get_tls_context(

@@ -7,7 +7,7 @@ name = "otaku"
 dynamic = ["version"]
 description = "LLM frontend for roleplay"
 readme = "README.md"
-license = "MIT"
+license = "AGPL-3.0-only"
 license-files = ["LICENSE"]
 authors = [{ name = "enclavum", email = "feedback@otaku.sh" }]
 requires-python = ">=3.11"
@@ -47,6 +47,11 @@ dependencies = [
     "cryptography>=49,<51; sys_platform != 'darwin' or platform_machine == 'arm64'",
     "cryptography>=48,<49; sys_platform == 'darwin' and platform_machine == 'x86_64'",
     "httpx>=0.28,<1.0",
+    # Pictures on a turn: Pillow decodes, orients, downsizes and re-encodes
+    # them; pillow-heif adds HEIC, what an iPhone shoots, with libheif in
+    # its wheels.
+    "pillow>=12.3,<13.0",
+    "pillow-heif>=1.7,<2.0",
     "prompt_toolkit>=3.0.53,<4.0",
 ]
 
@@ -96,6 +101,9 @@ select = ["B", "E", "F", "I", "N", "RUF", "SIM", "UP", "W"]
 # The rendered config: one setting per source line, whatever the width
 # (see the `# fmt: off` block in to_toml).
 "otaku/settings/config.py" = ["E501"]
+# The dispatcher's `do_GET`, `do_POST`, …: http.server dispatches on the
+# method's name, spelled as the verb is.
+"otaku/web/server/__init__.py" = ["N802"]
 "tests/*" = ["RUF001"]
 "scenarios/*" = ["RUF001"]
 

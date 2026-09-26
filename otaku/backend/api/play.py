@@ -3,7 +3,12 @@ the takes over it (regenerate, undo).
 
 The stream is the frontend's to drive: iterate to render, close to
 cancel. The event vocabulary lives here, `Text` and `Reasoning` included
-(re-exported from providers — members of this module's union). Closing
+(re-exported from providers — members of this module's union) and
+`ToolCall` (`context.tool_calls`': a piece of a call, the tool's name
+and its inside, never a fence — the deltas are fed through a
+`ReplyParser`, so neither frontend parses). What is RECORDED is
+everything that arrived, fences included; a call of a tool the user
+answers ends the reply, and nothing past it is read. Closing
 mid-stream keeps and records what arrived — Ctrl+C and Ctrl+R are the
 frontend closing the generator; a Ctrl+R then simply calls `regenerate`
 for the fresh take. Exactly one of Declined, Failed, or Done ends a
@@ -11,14 +16,27 @@ stream. A new reply arms the worker's idle-debounced extraction pass;
 every submission (submit, regenerate, undo) defers pending work first.
 """
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 
 from otaku.backend.api.cards import drop_unplayed_card
 from otaku.backend.api.lore import build_job
+from otaku.backend.files import (
+    CANNOT_SEE,
+    MAX_PICTURES,
+    TOO_MANY,
+    Picture,
+    RawFile,
+    read_picture,
+    save,
+)
 from otaku.backend.session import NO_MODEL_HINT, Refused, Session
-from otaku.context import syntax
+from otaku.backend.story import StorySettings, ToolSetting
+from otaku.backend.tools import TOOLS, Actor, read
+from otaku.context import syntax, tool_calls
 from otaku.context.assembler import ContextOverflowError
+from otaku.context.tool_calls import FENCE, Prose, ReplyParser
+from otaku.context.tool_calls import ToolCall as ToolCall
 from otaku.formatting import format_context
 from otaku.providers import ProviderError, Stats
 from otaku.providers import Reasoning as Reasoning
@@ -126,23 +144,31 @@ class Done:
     """The turn's end: the recorded reply (None when nothing arrived),
     what it came to (None when the stream said nothing of itself), and
     the verbose stats line — the report's `text()`, "" unless /set
-    verbose, so a frontend prints it as it is."""
+    verbose, so a frontend prints it as it is. A reply that ended on a
+    question is in the reply's own segments, for a frontend to pose:
+    the next line played is the answer, and nothing more is built
+    around answering."""
 
     reply: Message | None
     report: ReplyReport | None
     stats: str
 
 
-PlayEvent = Recorded | Text | Reasoning | Declined | Failed | Done
+PlayEvent = Recorded | Text | Reasoning | ToolCall | Declined | Failed | Done
 
 
-def submit(session: Session, line: str) -> Iterator[PlayEvent]:
+def submit(session: Session, line: str, files: Sequence[RawFile] = ()) -> Iterator[PlayEvent]:
     """One submitted story line (prose or a direction — never a command;
-    the frontend routed those already). Validation is EAGER: invalid
-    syntax raises Refused (the usage line) before the iterator is
-    returned and before anything is recorded — the body is a plain
-    function that validates and returns the inner generator, never a
-    generator itself. Then: the typed name settles to the cast's
+    the frontend routed those already), with `files` the pictures the
+    reader attached to it — a line may be empty when it carries one.
+    Validation is EAGER: invalid syntax raises Refused (the usage line)
+    before the iterator is returned and before anything is recorded —
+    the body is a plain function that validates and returns the inner
+    generator, never a generator itself — and so does every picture:
+    made ready here, refused here (the model cannot see, too many, a
+    file that is no picture), stored only when the turn records, so a
+    refusal leaves the story and the folder untouched. Then: the typed
+    name settles to the cast's
     spelling, the turn records, Recorded is yielded, and the reply
     streams as Reasoning/Text deltas, Failed on a stream error, Done at
     the end. With no model selected the turn is still recorded — it is
@@ -155,7 +181,14 @@ def submit(session: Session, line: str) -> Iterator[PlayEvent]:
     error = frame.check()
     if error is not None:
         raise Refused(error)
-    return _submit_events(session, frame, line)
+    # Every picture read here, eagerly like the syntax: a refusal leaves
+    # the story and the folder untouched, and nothing is saved before
+    # the turn records.
+    if files and not session.vision:
+        raise Refused(CANNOT_SEE)
+    if len(files) > MAX_PICTURES:
+        raise Refused(TOO_MANY)
+    return _submit_events(session, frame, line, [read_picture(file) for file in files])
 
 
 def regenerate(session: Session) -> Iterator[PlayEvent]:
@@ -176,6 +209,22 @@ def regenerate(session: Session) -> Iterator[PlayEvent]:
     return _regenerate_events(session)
 
 
+def segments(body: str) -> list[dict[str, object]]:
+    """A stored body split for a frontend that parses nothing: prose
+    (`{"kind": "prose", "text"}`) and each tool call as its tool's facts
+    (`{"kind": "tool_call", …}` — a name no tool owns is a call all the
+    same, with its tool and text alone), in order."""
+    out: list[dict[str, object]] = []
+    for part in tool_calls.parse_reply(body):
+        if isinstance(part, Prose):
+            out.append({"kind": "prose", "text": part.text})
+        elif part.name in TOOLS:
+            out.append({"kind": "tool_call", **read(part.name, part.text).to_json()})
+        else:
+            out.append({"kind": "tool_call", "tool": part.name, "text": part.text})
+    return out
+
+
 def undo(session: Session) -> list[Message]:
     """Discard the trailing exchange; returns the popped messages (empty
     = nothing to undo). Nothing is deleted — the head moves back. An
@@ -188,10 +237,27 @@ def undo(session: Session) -> list[Message]:
     return popped
 
 
+# ---------- the pictures on a turn ----------
+
+
+def picture(session: Session, name: str) -> tuple[bytes, str] | None:
+    """A stored picture as the model saw it, with its media type, under
+    the name a turn's attachments carry — for a page that
+    draws the transcript. None when the folder has no such file."""
+    return session._store.files.get(name)
+
+
+def thumbnail(session: Session, name: str) -> bytes | None:
+    """Its thumbnail, a JPEG, under the same rule."""
+    return session._store.files.get_thumb(name)
+
+
 # ---------- the stream internals ----------
 
 
-def _submit_events(session: Session, frame: syntax.Line, line: str) -> Iterator[PlayEvent]:
+def _submit_events(
+    session: Session, frame: syntax.Line, line: str, pictures: Sequence[Picture]
+) -> Iterator[PlayEvent]:
     session.defer()
     # The named character, resolved once and used three ways: the
     # autocorrect rewrite, the request's speaker (/me — the line IS their
@@ -210,6 +276,13 @@ def _submit_events(session: Session, frame: syntax.Line, line: str) -> Iterator[
         # the wire all read one text — a played line never moves after.
         line = frame.update_name(known.name)
     request_speaker = known if frame.speaks == "request" else None
+    # The pictures go into the folder before the turn records, under
+    # the story's number — so a story that does not exist yet is made
+    # here, a step before the turn would have made it. Nothing was
+    # written before this point.
+    attachments = tuple(
+        save(session._store.files, picture, session._ensure_story()) for picture in pictures
+    )
     session._record_turn(
         Message(
             role="user",
@@ -224,6 +297,7 @@ def _submit_events(session: Session, frame: syntax.Line, line: str) -> Iterator[
             ),
             speaker=request_speaker.name if request_speaker else None,
             speaker_id=request_speaker.id if request_speaker else None,
+            attachments=attachments,
         )
     )
     yield Recorded(session._messages[-1], note=frame.note)
@@ -291,6 +365,11 @@ def _reply_events(
     held = ""  # a whitespace run the stream has not yet earned sending
     final: Stats | None = None
     error: str | None = None
+    # The tool calls told apart from the prose as they stream. A call of
+    # a tool the user answers ends the reply where its closing fence
+    # does: the stream is cut there, and nothing rides the request for
+    # it — the rule is otaku's, the same on every engine.
+    parser = ReplyParser(ending=_ending_switched_on(session))
     stream = client.completion.chat(
         session.model,
         wire,
@@ -321,9 +400,13 @@ def _reply_events(
                     if not text:
                         continue
                     content.append(text)
-                    yield Text(text)
+                    yield from _pieces(parser.feed(text))
+                    if parser.cut is not None:
+                        break
                 elif isinstance(chunk, Stats):
                     final = chunk
+            if parser.cut is None:
+                yield from _pieces(parser.flush())
         finally:
             close = getattr(stream, "close", None)
             if callable(close):
@@ -340,6 +423,14 @@ def _reply_events(
         # The provider package's own sentence: it names the provider and
         # carries the server's explanation where there was one.
         error = str(e)
+    if parser.cut is not None:
+        # Kept through the fence that ended the call, the recorder's own
+        # where the model opened another block instead; the usage is the
+        # stream's own account where the cut came before the final chunk.
+        body = "".join(content)[: parser.cut.at]
+        content = [body if parser.cut.fenced else body + "\n" + FENCE]
+        if final is None:
+            final = stream.stats
     reply = _land_reply(session, content, final, reply_kind, reply_speaker)
     if error is not None:
         yield Failed(error)
@@ -347,6 +438,24 @@ def _reply_events(
     report = ReplyReport(final, max_context) if final is not None else None
     stats = report.text() if session.verbose and report is not None else ""
     yield Done(reply=reply, report=report, stats=stats)
+
+
+def _pieces(found: list[Prose | ToolCall]) -> Iterator[PlayEvent]:
+    """What the parser decided, as events: prose as `Text`, a call's
+    piece as the `ToolCall` it is."""
+    for piece in found:
+        yield Text(piece.text) if isinstance(piece, Prose) else piece
+
+
+def _ending_switched_on(session: Session) -> frozenset[str]:
+    """The names of the tools the user answers that the story has
+    switched on — whose call ends the reply."""
+    settings = StorySettings(session._settings_db, session._store, session._paths.prompts_file)
+    return frozenset(
+        setting.tool.name
+        for setting in settings
+        if isinstance(setting, ToolSetting) and setting.enabled and setting.tool.actor is Actor.USER
+    )
 
 
 def _land_reply(

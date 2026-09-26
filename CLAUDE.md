@@ -51,7 +51,7 @@ review:
     console    → formatting
     worker     → context, providers, store, logging, formatting
     backend    → worker, context, providers, store, settings, encryption, logging, formatting
-    context    → store (reads only)
+    context    → store (reads only), providers (its wire vocabulary)
     providers  → settings (its ProviderConfig and sections live there), formatting
     store      → encryption
     settings   → formatting
@@ -129,13 +129,214 @@ written down rather than going quiet. A new command is a row in the
 shared table, a row in the terminal's, and a decision recorded there —
 the suite fails until all three exist.
 
+### Tools: what the model writes
+
+A model uses a tool by writing a TOOL CALL in its reply — a fenced code
+block whose info string names the tool, `otk-question`, `otk-note`:
+
+    ```otk-question
+    Go in?
+    1. Yes
+    2. No
+    ```
+
+otaku owns the convention, never the API's `tools` field, so it works
+on every engine (`docs/tools_design.md` is the decision and the engine
+facts behind it). The body is stored verbatim, fences included. A reply
+is prose and tool calls; the model's reasoning is neither — it arrives
+on the wire's own field, streams beside them, and is never stored.
+
+WHAT a tool call is, is the `otk-` namespace and nothing else
+(`context.tool_calls`: `ToolCall(name, text, closed)`, `Prose`, the
+`ReplyParser` over a stream and `parse_reply` over a body — pure, no
+list of tools consulted): a call stays one in a build that never heard
+of its tool, nothing outside the namespace is ever one, and the inside
+— the lines between the fences, no trailing blank line — goes with the
+call. Three rules, one
+piece of state (the open call): a fence line marked `otk-NAME` opens a
+call, ending the one open, so calls never nest; a bare fence line ends
+the open call, and is prose when none is; any other line is prose
+outside a call and the call's own inside one, a fence with another
+info string included, as a markdown viewer reads it. A fence is one
+only at the start of its line, its line goes with the call, newline
+included, as do the blank lines before an opening fence (a call left
+out leaves no hole), and plain fences are never tracked — a forgotten
+one costs nothing. A call is not story: the lore pass leaves it out, fences and
+all (`tool_calls.strip`). A stored reply goes back on the wire under
+the story's `ToolSet(on, off)` (`tool_calls.to_wire`): a call of a
+tool that is on goes as its canonical self (the opening fence, the
+inside, the bare `FENCE`), one of a tool that is off becomes its `to_prose` (a
+question alone; nothing for a note), any other name leaves the wire —
+a white list. `tool_calls` lives in `context` because the worker and
+the assembler read it below the backend.
+
+WHICH tools there are is `backend.tools`: one class per tool, declaring
+its `name` (`question` for `otk-question`), who answers its call
+(`Actor`: nobody for `note`, the user for `question`, `SYSTEM` not
+supported yet) and its prompt's key in prompts.toml (`prompt_name`);
+an instance is one call READ. The registry is `TOOLS`; a new tool is a
+subclass and its name there, and the story setting that switches it on
+is the setting's to declare (`backend.story`), not the tool's.
+
+The play stream (`backend.api.play`) runs the deltas through a
+`ReplyParser`: prose as `Text`, a call's inside as `ToolCall` pieces
+(`closed` on the piece its closing fence ended), never a fence —
+neither frontend parses; everything that arrived is recorded, fences
+included. A call of a tool the user answers ENDS THE REPLY: nothing
+rides the request for it (no stop parameter — the rule is otaku's and
+the same on every engine): the parser is built with the `ending`
+tools, reads nothing past such a call and reports the `Cut` — where the
+reply runs to, and whether the model's own closing fence is within it;
+the stream is closed there, what the model went on to say is neither
+shown nor kept, and the recorder adds the fence where the model opened
+another block instead of closing this one. The usage arrives in the final chunk, which a cut never
+sees: such a turn files the stream's own account — the wait spent, no
+counts — as a Ctrl+C turn does. A reply cut at the length limit keeps
+its call open. A stored turn reaches a frontend split
+(`play.segments`: prose, and each call as its tool's `to_json()`, kind
+`tool_call`), so a frontend keeps no parser. Which question the story
+STANDS on is each frontend's own reading of the newest reply's
+segments — the page's `transcript.questionPosed`, the terminal's
+`render.asked`, each naming the other: a reply whose last call is a
+question, nothing after it but notes and whitespace — nothing is
+stored or reported for it, and answering is an ordinary line. A PAST
+question shows the question alone in both frontends. Whether notes are
+shown is the conjunction of two facts the setting reports — the tool
+on, its display switch on — read the same way in both
+(`transcript.displayTools`, `render.notes_displayed`); a one-line
+conjunction earns no backend property.
+
+The page draws a question as the ask panel, grown as it streams
+(`transcript.streamAsk`, `ToolQuestions._OPTION`'s rule copied as
+`readAsk`), and a note as the notes block, each in its place among the
+prose. The terminal draws every call as a BLOCK behind a bar
+(`render.BlockStream`; `QuestionStream` draws the question alone,
+parted from its options by `ToolQuestions.is_option`; a note is dim
+and a hidden one left out, fences and all; thinking is dim with no
+label; one blank line before and after, `render.spaced`), streamed and
+echoed through the same object so the two cannot differ. A question's
+answers are rows above the prompt line (`prompt.AnswerMenu`: ↑/↓
+walk, Enter sends one, → takes it into the line, a typed character or
+Esc dismisses, the empty line brings them back; the blank line before
+that prompt is the menu's own row, `ledger.gap(deferred=)`), and the
+scrollback keeps the question alone. Every other call prints as it
+streamed, in the canonical form, until its look is decided.
+
+### Injections
+
+An `Injection` is text the context carries besides the story: never
+stored, never seen by the lore pass, on the wire and so shown and
+REPORTED by `/context` (`AssembledPrompt.injections` →
+`ContextReport.injections`, `ContextInjection(label, position,
+position_text, tokens)`, the label the setting's `injection_label`;
+bullets under `injected:` in the terminal, a list under the stages on
+the page). `context.injections` owns what one is — `owner`, text,
+`position` — and where it goes (`inject_into_system`,
+`inject_into_tail`); the assembler decides only WHEN, and counts the
+tokens. Who MAKES one is above the package (`StorySettings.injections`,
+later a lorebook): `assemble_story(store, story_id, *, system,
+messages, injections, prompts, shape, pictures_ride)` is handed them
+built, so a new source needs no assembler change, and reads from the
+store only what a caller cannot hold (scenes, card archives,
+pictures); the worker's `Job` carries the same fields in the same
+order. `prompts` is `assembler.PromptTexts`, which the settings'
+`Prompts` satisfies structurally (`context` may not import
+`settings`). `ContextShape` is the window: the config's two counts and
+ONE `max_context`, `context_in_force(model_window, cap)`; a Job's
+shape carries the cap alone and the warm-up finishes it once the model
+is loaded. `assemble_story` is ONE function, the store reads included,
+so its unit tests hand it a stand-in store; `_Assembly` is what every
+rung of the case-5 ladder composes from.
+
+Where a text rides is ONE value of one type, `InjectionPosition`
+(`store.schema`, frozen: a `depth` from 1, or none for the system
+message; `value` the plain form the column and the wire hold,
+`from_value` reads it back, `text` its name in every frontend —
+"system", "2nd last" for 1 … "9th last" for 8; the page keeps the
+rule copied in `tools.js placeName`). "system" appends it to the
+system message after the premise, the stored premise untouched. A
+number makes it a synthesized user row, wire-only as a recap row is
+and joined by the same merge, placed BEFORE that one of the reader's
+messages counted from the end — 1 the latest; a reply, a recap row or
+another injection is never counted; never after the newest row, never
+past the recap. It costs its tokens in the fit.
+
+A numbered injection MOVES with the end, so the turn it lands in and
+every turn after are `volatile` (`WireTurn`, `providers.WireMessage`),
+and the prompt-cache mark sits on the last row ABOVE them
+(`requests._mark_cache`) — marked among them, a hosted cache would
+match nothing from one turn to the next. A "system" one costs nothing.
+
+### Story settings
+
+What a user sees as features are, below the frontends, a STORY's
+settings: one switch each, one class each in `backend.story`. A tool's
+(`StorySettingQuestions`, `StorySettingAssistantNotes`) lets the model
+use the tool and injects its prompt; a reminder's injects the user's
+own text — the SHARED reminder (`StorySettingSharedReminder`, one text
+every story that switched it on is sent) and the STORY reminder
+(`StorySettingReminder`); a flag (`StorySettingMode`, not built yet)
+injects nothing. Every text injected into the chat is out of
+character, enclosed `((OOC: …))`; the system message takes it bare.
+
+Every setting answers the same questions, so a frontend draws them
+alike: `name` (the stored key — `use_shared_reminder`,
+`use_story_reminder`, `allow_assistant_notes`, `allow_questions`,
+`story_mode`; a rename orphans stored settings), `label`,
+`injection_label` (the TEXT it injects — lowercase, the backend's:
+`questions`, `assistant notes`, `story reminder`, `shared reminder`;
+None for a flag; the page capitalises it and keeps no name table),
+`enabled`, `injection_position`, `allowed_positions` (a closed list a
+frontend offers and decides nothing about: "system" and 1 … 8 for a
+tool, the numbers alone for a reminder, empty for a flag; a stored
+position off the list reads as the default, 1 for a tool, 2 for a
+reminder), `reminder_text` (the story reminder's alone) and
+`display_notes` (the notes tool's alone). `to_db(…)` is the row to
+store, raising `Refused` for what the setting does not take;
+`injection` is what a switched-on one sends. `StorySettings(from_db,
+store, prompts_file)` is one story's settings as they stand — it reads
+the prompts file and the shared reminder itself — with `injections` in
+the order they share a place (the shared reminder, the story's, then
+the tools) and `tool_set` for the wire.
+
+What a story STORES is `schema.StorySettingDB` (name, `enabled`,
+position, `reminder_text`, `display_notes` — the last two written only
+when said) with its JSON codec, carried by `Story.settings`; the store
+merges a write into the column and keeps every key it does not know.
+The operations are `backend.api.stories`' `get_settings`,
+`update_setting`, `get_shared_reminder`, `set_shared_reminder`; the
+page reaches them at `/api/stories/{story}/settings` and
+`/api/shared_reminder`, the terminal on the dossier's Tools tab
+(`screens.story`: a checkbox row per setting, its fields in the panel
+beside — the depth a dropdown in place, a text the editor in place,
+`base._preview_panel`'s `alternate` body). `Refused` lives in
+`backend.errors`, a leaf, and `backend.session` re-exports it;
+`backend` re-exports `InjectionPosition`. A tool's PROMPT is
+prompts.toml's, edited in place — "prompt" on the backend and the
+wire, whatever a frontend calls it (the page's button says
+"Instructions"): `api.settings.get_tool_prompt`/`set_tool_prompt`
+(`/api/prompts/{tool}`) write that one key with
+`settings.prompts.set_prompt`, backed up by the write every settings
+edit rides (`settings.commit`), read back and refused unless the file
+holds what was saved; an emptied text drops the key, so the shipped
+text stands again.
+
+Where a setting is kept: ONE STORY'S is the database's
+(`stories.settings`, sealed JSON) because it must fork, export and die
+with its story; a new story starts with everything off, the session
+holding the rows until a first turn makes the story. One that stories
+SHARE is the `settings` table's (key/value, sealed; an emptied value
+deletes its row) when it is a TEXT THAT MAY NEED SEALING — a config
+file is never sealed — and a config file's otherwise; `history` is the
+precedent.
+
 ### The data model
 
 The data model lives in `otaku/store/schema.py` (the DDL, its
 semantics, and the row types) — always the CURRENT shape: a fresh
 database is created from it directly, and `store/migrations` — a
 versioned ladder over `meta.schema_version` — brings old databases to
-it. Each step is a FROZEN module per version (`v2.py`, `v3.py`, `v4.py`):
+it. Each step is a FROZEN module per version (`v2.py` … `v6.py`):
 a step writes what its target version WAS, never what schema.py says now
 (backup-first, unharmed-on-failure, newer-refused). The invariant: a
 migrated database equals a fresh one, `sqlite_master` row for row.
@@ -143,6 +344,33 @@ migrated database equals a fresh one, `sqlite_master` row for row.
 `created_at` / `updated_at` columns are audit fields: no business logic
 may ever rely on them. UI display use (e.g. ordering the story list by
 recency, "extracted 4m ago") is allowed.
+
+A turn's pictures are the one thing the database only NAMES:
+`messages.attachments` is a plain JSON list (`schema.Attachment` — the
+app's facts, none of the reader's words, so unsealed on purpose), and
+the bytes live in `database/files/` beside the database, sealed with the
+session cipher, as `pic-<story, 4 digits>-<day>-<BLAKE2, 8 hex>.<ext>`
+with the thumbnail beside it as `…-thumb.jpg`: readable in a listing,
+sorted by story and day, the same bytes in one story on one day one
+file (a plain hash, so under encryption a holder of the folder can
+confirm a picture they already have — judged not worth a keyed hash);
+a fork's rows keep the origin's names and share the files. The row
+carries the file's NAME, extension included, and its measure. `store/files.py` owns the folder; deletion is a sweep against
+what the messages still reference (`stories.sweep_files`, after a story
+is deleted and once at launch), so a crash between rows and files heals
+on the next run. A story that does not exist yet is made before its
+first pictures are saved, since the name needs its number. The daily
+snapshot is of the database file alone: the folder is not backed up.
+
+A picture enters through ONE reader below both frontends,
+`backend.files.read_picture` then `save` (Pillow, HEIC via pillow-heif): the type sniffed
+from the bytes, the camera orientation applied, downsized to 1568 px and
+never upsized, every metadata block dropped but the colour profile, PNG
+kept as PNG and everything else made JPEG, a 512 px thumbnail cut from
+the same image, then into the folder. Its limits are its own module
+constants (10 MB a file, 40 megapixels, 8 pictures a turn); every refusal
+is a `Refused` sentence. A model without vision is never sent a picture,
+and the attach affordances exist only while the model in use has it.
 
 ### Providers
 
@@ -191,6 +419,33 @@ exception is a CAPABILITY (`ModelCapabilities.vision`, `text_completion`): those
 are the trade's own words, spelled as every engine spells them.
 Applied in `otaku/providers` so far; a new boolean anywhere follows it.
 
+### Pictures on the wire
+
+A picture rides the message it was attached to, on every verbatim row,
+`IMAGE_TOKENS` each in the budget — except where the ENGINE cannot keep
+it there: omlx 0.6 gathers every picture in a request onto the latest
+prompt, so a model asked about the second turn's picture reads both,
+stacked. That is a QUIRK of one engine's wire, not a capability: it is
+written on that client alone as `OpenAICompletion.pictures_ride`
+("each" everywhere, "latest" on omlx), answered in one place as
+`providers.PicturesRide` (`client.pictures_ride(model)`: NONE for a
+model that cannot see, EACH, LATEST), and the assembler then sends
+the newest PICTURED row's pictures alone (a follow-up without one
+still carries the picture it is about), counting the rest as
+`pictures_held`; the `/context` summary says so, and each part's
+marker counts what rides it. Flip omlx back to
+"each" once a release keeps pictures on their messages. The lore pass
+sees them too: a summarized row loses its picture, so the pass is the
+one moment its content can be put into words that last — each is
+marked `(picture n)` at its line of the numbered scene, and while the
+model can see every picture of the scene rides the
+extraction request in that order (`extraction._scene_pictures`); the
+extract prompt asks for what matters in them, and the changed shipped
+text is carried to existing files by a `refresh_template` step
+(`EXTRACT_0_5_0`). Engine sources are checked out under
+`~/repos` (llama.cpp, koboldcpp, ollama, omlx) — read the engine before
+guessing what it does with a request.
+
 ### Inside the terminal
 
 How a message LOOKS is decided once, in `terminal.tty.render` — the
@@ -222,11 +477,30 @@ job is a reply arriving token by token. So the queue is TWO: a write
 waits its turn, a READ is answered in the gaps. `docs/diagrams.md` draws
 the module graph and names the five moments the thread is called.
 
-Three secrets, one module each — `thread` (WHEN work runs), `api` (WHAT
+Three secrets, one home each — `thread` (WHEN work runs), `api` (WHAT
 may be asked, as data), `server` (HOW it arrives). `thread` imports only
 `Session` and has never heard of `api`; `api` knows no thread and no
-HTTP; `server` is the only one that knows both. The medium's own rules
-are under Web conventions below.
+HTTP; `server` is the only one that knows both. The two big ones are
+packages: `api` mirrors `backend.api` — one module per twin (`play`,
+`stories`, `lore`, `cards`, `providers`, `settings`, `reports`,
+`transfer`), each holding its own rows, merged into the one
+`ROUTES`/`FLOWS` in `api/__init__` (a path in two modules fails at
+import), and `request` for what every row is handed (`Ask`, `Pending`)
+and hands back (`Created`, `Blob`, `NotFound`, `landed_story`). A
+module CALLS its own twin and nothing else of `backend.api`; what it
+needs of another twin it takes from that twin's sibling (`stories.story`
+takes the lore half of its answer from `lore.memory`, the picker's
+model words come through `reports.model_words`, the document half of
+the new-story flow is `transfer.imported`) — so every translation of
+one twin is in one module. `tests/test_architecture.py` holds the rule;
+`request` is its one declared exception, importing two twins' TYPES
+for `Pending` and calling neither. `server` is the dispatcher
+(`server/__init__`: `bind`, the route table, `Handler`) over `base`
+(the hooks, the socket `Server`, `Wire` — the handler methods that
+read a request and write an answer), with the handler's two halves as
+mixins — `guards` (who may ask) and `streams` (the two answers that
+stream) — beside `assets` (the closed table) and `watch` (the poller).
+The medium's own rules are under Web conventions below.
 
 ## Configuration files
 
@@ -245,7 +519,17 @@ the day already has one, with every secret the edit replaced (an
 (`surgery.redacted`). Every setting changed from inside the app
 persists elsewhere and is rewritten wholesale: `configs/state.toml` for
 session-wide values (the resumed model and story, `/set` toggles) and
-`configs/models.toml` for per-model overrides.
+`configs/models.toml` for per-model overrides — read and written by
+the session alone (`_load_model_settings`, `_save_model_settings`;
+the api's `/set` operations set a value and ask it to persist). A
+model made current with no thinking level saved starts OFF where the
+provider says it thinks: at launch and on a switch the model is read
+first and its entry after, and an entry with no think key reads as the
+off word of the model's shape (`reasoning.off_level`), written back as
+`/set think off` would; `unset` is saved too and sends nothing. A
+model the provider cannot describe (a hosted catalog at launch, an
+engine that is down) gets no row until it can, at a later launch or
+switch.
 
 One state-dir DIRECTORY is the user's alone and the app never writes in
 it: `web/`, holding `custom.css` (loaded last by the web frontend, so
@@ -253,6 +537,17 @@ anything in it wins) and `fonts/` (typefaces of their own, asked for
 under `/web-fonts/`). The custom properties the stylesheet writes
 against are a public contract — `docs/web_tokens.md`, where a rename is
 a breaking change.
+
+A SAMPLE'S PICTURES ship beside its document in `otaku/samples/`,
+named `<stem>.<message>.<order>.<ext>` (`river.15.1.jpg`, the first
+picture of river.md's 15th message — `launch._sample_pictures` is the
+rule): the export format carries no picture, so the first launch's seed
+puts them on the message through the app's own intake
+(`launch._seed_pictures`: read, downsized, thumbnailed, saved under the
+story's number, `messages.set_attachments`), best effort per picture.
+The demo carries them as fixtures: `capture_fixtures_web.py` copies the
+stored file and its thumbnail into `demo/web/fixtures/files/` with the
+day in the name pinned, and `demo.js` serves them under `/api/files`.
 
 `cert/` holds the TLS pair the web frontend serves under (`web.cert`):
 the app writes it only into an empty directory, and a pair already there
@@ -331,19 +626,7 @@ which costs seconds per test where the in-process kind costs
 milliseconds. The fast offline suite is therefore
 `-m "not live and not cli"`.
 
-## Process rules
-
-- Never commit without the user's explicit approval.
-- A commit message is ONE line, under 150 characters — no body. Name what
-  changed, not every detail; the changelog and the code carry those.
-- Challenge design and implementation decisions and ask questions — the user
-  reviews every step. Functionality follows the product design.
-- Keep dependencies minimal; no optional extras.
-
 ## Documentation rules
-
-Everything under `docs/` is the user's own, hand-written: NEVER edit a file
-there unless asked to.
 
 1. Docs describe the final state only — never history or comparisons — and
    each doc has one owner topic.
@@ -351,17 +634,29 @@ there unless asked to.
 3. The code documents itself first: module docstrings say what a module owns;
    comments only for non-obvious whys. Docs cover what code can't: product
    intent, cross-module contracts, operational rules.
-4. The changelog diffs against the LAST RELEASE, not the working tree: no
-   entry for a fix or change to something this same version introduced —
-   that detail belongs inside the feature's own entry, or nowhere.
 
 ## Command conventions
+
+The directions (`/you`, `/me`, `/ooc`, `/cue`, `/roll`) are sugar for
+the player, never an obligation: a design works with none of them
+typed, the plain-text path exists and is the primary one, and a
+direction may only short-circuit a question it happens to answer.
 
 The `@` sigil in a command argument exists ONLY to trigger path
 autocompletion (the menu pops at `@` and filters while typing — see
 `otaku/terminal/prompt/completion.py`). Commands must ignore it: every handler
 that reads a path strips a leading `@` (`removeprefix("@")`) and never
 branches on it — it is a UI trigger, not part of any name or value.
+
+In a PLAYED line — prose, or a direction like `/me` — `@path` means one
+thing more: a token that names an existing picture file is an
+attachment. The terminal resolves it on ITS side (`terminal.prompt.pictures`,
+the way `/system FILE` is read there): the token leaves the line, one
+adjacent space with it, and the bytes ride `play.submit(files=)`; a token
+naming nothing stays prose ("@Mara"). The stored body never holds the
+token. The menu behind it lists directories and picture files, and pops
+only while the model in use can see (`session.vision`); the backend
+refuses a picture regardless when it cannot.
 
 ## Web conventions
 
@@ -370,13 +665,16 @@ ONLY module that prints, into the terminal it was launched from),
 `server` (HTTP alone), `api` (what the page may ask: `ROUTES` and
 `FLOWS`, keyed by method and path template; cross-request state in
 `Pending`), `thread` (the one that owns the session; see Architecture),
-`cert` (the TLS pair it serves under), `auth` (the sign-in token).
+`cert` (the TLS pair it serves under); the sign-in token is the
+server's own, `server.auth`, read by its guards alone.
 The rules that span them are below, held by `scenarios/web`; the
 mechanics live in the module docstrings:
 
 - **Nothing is cached, BY DESIGN**: what is on disk is what the browser
   has, always — `no-store`, no validator, read per request. The
-  versioned fonts are the one immutable exception. `/api/watch`
+  versioned fonts, and a turn's pictures (`/api/files/{file}` and its
+  `/thumb`, a `Blob` answer: a file never changes once written), are the
+  immutable exceptions. `/api/watch`
   finishes the rule rather than a dev mode: the page reloads itself when
   a file it is made of changes.
 - **Three guards in front of every request**: the `Host` must name this
@@ -385,7 +683,7 @@ mechanics live in the module docstrings:
   a good credential (else 401). Which headers count, and why a request
   carrying neither of the first two is left to the bind, are in
   `_from_this_machine` and `_from_our_page`; what is answered without a
-  credential is `server._OPEN` — a change to any of them is a change to
+  credential is `server.guards.OPEN` — a change to any of them is a change to
   what a LAN can do to this server.
 - **The METHOD is the lane** (why: Architecture — inside the web): a GET
   only reads and is answered in the gaps of a streaming reply; every
@@ -403,6 +701,16 @@ mechanics live in the module docstrings:
 - **An entity made answers 201** and names where it now lives in
   `Location` (`Created`). A refusal stays 200: nothing was made, so
   there is nowhere to point.
+- **A picture reaches the API inside the play body**: `files`, each
+  `{name, media_type, data}` with the bytes as base64, decoded on the
+  handler's thread so a body that is not what it claims is a 400 before
+  the session is asked; the backend's refusals (cannot see, too many,
+  not a picture) come back as a Notice. A turn's row carries
+  `attachments` ([] when none) and the session facts `vision`, which is
+  what shows the attach button. The page stages a picture two ways, the
+  attach button's picker and a paste into the composer (`composer.js`,
+  the textarea's own `paste` event, image items only); both reach the
+  same staged list, and the backend refuses either the same way.
 - **A ROW ID in a path is digits; a name is anything** (`server._NUMERIC`).
   So a page that lost its story cannot address `/api/stories/null/…` —
   no route matches, the answer is a plain 404, and no handler is ever
@@ -444,11 +752,12 @@ mechanics live in the module docstrings:
   their own go beside it in `web/fonts/` and are asked for under
   `/web-fonts/`, a prefix of its own so a name of theirs can never
   shadow a packaged one.
-- **What may be served is a CLOSED table** in `web/server.py`: a request
-  path is looked up in it and never joined onto a directory, so nothing
-  composes its way to `configs/providers.toml`. That is a property of
-  the LOOKUP, not of who wrote the list — so the two families that grow
-  are read from their directories at import (`server._packaged`) and
+- **What may be served is a CLOSED table** in `web/server/assets.py`: a
+  request path is looked up in it and never joined onto a directory, so
+  nothing composes its way to `configs/providers.toml`. That is a
+  property of the LOOKUP, not of who wrote the list — so the two
+  families that grow are read from their directories at import
+  (`assets._packaged`) and
   adding a script or a font is one file and no row. A file added while
   otaku is running needs a restart; editing one does not. The reader's
   own typefaces are looked up the same way: their directory is listed,
@@ -503,25 +812,26 @@ mechanics live in the module docstrings:
 
 SENTENCES COME FROM THE BACKEND, verbatim. A frontend never rewords a
 refusal, a notice or a report — it decides only WHERE the text appears.
-Wording about the medium itself ("close · esc", "ctrl+c to stop", a key
-caption, a fault the reader can do nothing about) is the frontend's
-alone. `/help` is the case in point: the tokens, argument shapes,
-descriptions, group names (`commands.GROUP_LABELS`) and the prose row
-(`PROSE_*`) are the shared table's; each frontend lays them out for its
-own medium — columns and a keys section in the terminal, a definition
-list per group on the page — and neither keeps a second copy of the
-words. Where a sentence cannot be asked for (the page has no story, so
-no endpoint to ask), it is COPIED with a comment naming its home.
+Wording about the medium itself ("close · esc", "Press CTRL+C to quit",
+a key caption, a fault the reader can do nothing about) is the
+frontend's alone. `/help` is the case in point: the tokens, argument
+shapes, descriptions, group names (`commands.GROUP_LABELS`) and the
+prose row (`PROSE_*`) are the shared table's; each frontend lays them
+out for its own medium — columns and a keys section in the terminal, a
+definition list per group on the page — and neither keeps a second copy
+of the words. Where a sentence cannot be asked for (the page has no
+story, so no endpoint to ask), it is COPIED with a comment naming its
+home.
 
 User-facing printed messages start with a capital letter. Deliberately
 lowercase: the `otaku: …` stderr warnings (the Unix `program: message`
 convention), system-log lines, the transient status-line fragments a
-worker updates in place, the dim `[ … ]` report blocks beside a turn
-(the stats line's family), and the banner family — the launch banner's
-rows and the one-line address that stands in for it when the banner is
-off.
+worker updates in place, and the dim `[ … ]` report blocks beside a
+turn (the stats line's family).
 
 ## Module conventions
+
+Dependencies stay minimal; no optional extras.
 
 Order within a module: constants, then classes, then functions — public
 before protected. Logical grouping wins over the order: a private helper

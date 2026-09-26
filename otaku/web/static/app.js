@@ -16,13 +16,13 @@
 
 import * as api from "./js/api.js";
 import { closeAll } from "./js/browser.js";
-import { editTurn, keepsScreen, openMessages, run as runCommand } from "./js/commands.js";
+import { editTurn, keepsScreen, openTab, run as runCommand } from "./js/commands.js";
 import { showSignOut, signIn, signOut } from "./js/login.js";
-import { focusComposer, primeHistory, wire as wireComposer } from "./js/composer.js";
+import { draft, focusComposer, primeHistory, submit, wire as wireComposer } from "./js/composer.js";
 import { $, $$, watchTextareas } from "./js/dom.js";
-import { disconnected, showFacts, watchServer, wireFullscreen, wireTheme } from "./js/shell.js";
+import { disconnected, drawPlayed, showFacts, watchServer, wireFullscreen, wireTheme } from "./js/shell.js";
 import { load as loadTable } from "./js/table.js";
-import { showTurns, whenEdited } from "./js/transcript.js";
+import { whenEdited } from "./js/transcript.js";
 import { watchForChanges } from "./js/watch.js";
 
 async function boot() {
@@ -38,15 +38,14 @@ async function boot() {
     const signingIn = login.required && !login.signed_in ? signIn() : null;
     shown();
     if (signingIn) await signingIn;
-    const [facts, language, turns, history] = await Promise.all([
+    const [facts, language, history] = await Promise.all([
       api.facts(),
       api.syntax(),
-      api.turns(),
       api.history(),
     ]);
     loadTable(language);
     showFacts(facts);
-    showTurns(turns);
+    await drawPlayed(facts.story_id);
     primeHistory(history);
     disconnected(false);
   } catch {
@@ -107,14 +106,28 @@ function start() {
       signOut();
       return;
     }
-    // The contents row that is not a command: the open story's messages.
-    if (event.target.closest("button[data-goto]")) {
-      openMessages();
+    // The contents rows that are no command: a tab of the open story's
+    // dossier — its messages, its tools.
+    const goto = event.target.closest("button[data-goto]");
+    if (goto) {
+      openTab(goto.dataset.goto);
       foldRail();
       return;
     }
     if (event.target.closest("#otk-rail-toggle")) {
       toggleRail();
+      return;
+    }
+    // The model's question: an option picked is the line, sent; copied,
+    // it lands in the box to be edited first.
+    const pick = event.target.closest("[data-ask-send]");
+    if (pick) {
+      submit(pick.dataset.askSend);
+      return;
+    }
+    const copy = event.target.closest("[data-ask-copy]");
+    if (copy) {
+      draft(copy.dataset.askCopy);
       return;
     }
     // The two verbs beside the composer, and the "try again" a failure

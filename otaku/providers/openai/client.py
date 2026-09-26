@@ -18,7 +18,12 @@ from typing import ClassVar
 from otaku.formatting import Money
 from otaku.providers.http import ASK_TIMEOUT, ErrorSink, Http
 from otaku.providers.openai.auth import KeySource, OpenAIAuth
-from otaku.providers.openai.completion import Bounds, OpenAICompletion, RequestSink
+from otaku.providers.openai.completion import (
+    Bounds,
+    OpenAICompletion,
+    PicturesRide,
+    RequestSink,
+)
 from otaku.providers.openai.models import Locality, OpenAIModels
 from otaku.settings.providers import ProviderConfig
 
@@ -87,6 +92,16 @@ class OpenAIClient:
         if found is not None and found.locality is not None:
             return found.locality
         return self.locality
+
+    def pictures_ride(self, model: str) -> PicturesRide:
+        """Where `model`'s pictures ride in a request: nowhere unless its
+        row says it can see, else as this engine's wire has it
+        (`completion.pictures_ride`). Off the cache, as `locality_of` —
+        a turn asks after `models.ready`, which refreshes it."""
+        found = self.models.cached(model)
+        if found is None or found.capabilities is None or found.capabilities.vision is not True:
+            return PicturesRide.NONE
+        return self.completion.pictures_ride
 
     @property
     def capabilities(self) -> ProviderCapabilities:

@@ -1,11 +1,13 @@
-"""Bookkeeping records: token accounting and the terminal's input
-history.
+"""The tables that belong to no story: token accounting, the terminal's
+input history, and the settings stories share.
 
-Neither is story content. `token_usage` holds numbers and labels only,
-one row per completed model request, kept on story deletion. `history`
-is the terminal's Up/Down line history — shell-style, global on purpose,
-capped; the one store surface that belongs to a single frontend, exposed
-through backend all the same.
+`token_usage` holds numbers and labels only, one row per completed
+model request, kept on story deletion. `history` is the terminal's
+Up/Down line history — shell-style, global on purpose, capped; the one
+store surface that belongs to a single frontend, exposed through
+backend all the same. `settings` holds what stories SHARE, sealed key by
+key. A setting is this table's when it is a text that may need sealing
+(a config file is never sealed), and a config file's otherwise.
 """
 
 # Deferred annotations: `list` appears in annotations near methods that
@@ -17,6 +19,8 @@ from dataclasses import dataclass
 from otaku.store.database import Database
 
 _HISTORY_LIMIT = 20  # the one retention number both history methods share
+# The `settings` row the shared reminder's text is kept under.
+_SHARED_REMINDER_KEY = "shared_reminder"
 
 
 @dataclass(frozen=True)
@@ -128,3 +132,38 @@ class HistoryOps:
         ).fetchall()
         # fmt: on
         return [text for (body,) in rows if (text := self._db.unseal(body))]
+
+
+class SettingsOps:
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def get(self, key: str) -> str:
+        """The value under `key`; "" when there is none."""
+        row = self._db.conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        return self._db.unseal(row[0]) if row else ""
+
+    def set(self, key: str, value: str) -> None:
+        """Write the value under `key`. An emptied value DELETES its row:
+        nothing sealed and empty pretends to be absent."""
+        now = self._db.now()
+        with self._db.conn as conn:
+            # fmt: off
+            if value:
+                conn.execute(
+                    "INSERT INTO settings (key, value, created_at, updated_at) VALUES (?, ?, ?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+                    (key, self._db.seal(value), now, now),
+                )
+            else:
+                conn.execute("DELETE FROM settings WHERE key = ?", (key,))
+            # fmt: on
+
+    def get_shared_reminder(self) -> str:
+        """The reminder stories share — one text, which every story that
+        switched it on is sent; "" when none."""
+        return self.get(_SHARED_REMINDER_KEY)
+
+    def set_shared_reminder(self, text: str) -> None:
+        """The shared reminder's text; "" clears it."""
+        self.set(_SHARED_REMINDER_KEY, text)

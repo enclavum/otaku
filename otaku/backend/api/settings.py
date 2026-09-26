@@ -24,11 +24,13 @@ from otaku.backend.session import (
     Refused,
     Session,
 )
+from otaku.backend.tools import TOOLS
 from otaku.providers import reasoning
-from otaku.settings import models as models_file
 from otaku.settings import row
 from otaku.settings.migrations import surgery
-from otaku.settings.models import THINK_KEY, THINK_UNSET
+from otaku.settings.models import THINK_UNSET
+from otaku.settings.prompts import Prompts, set_prompt
+from otaku.settings.prompts import load as load_prompts
 
 _ON = ("on", "true", "yes")
 _OFF = ("off", "false", "no")
@@ -71,6 +73,13 @@ def think_choices(session: Session) -> ThinkChoices:
     elif caps.reasoning_switch:
         levels += SWITCH_LEVELS
     return ThinkChoices(tuple(levels), bool(caps.reasoning_budget))
+
+
+def idle_seconds(session: Session) -> float:
+    """How long the prompt stands idle before the lore pass runs on its
+    own (`[lore] idle_seconds`) — a fact for a frontend that says when,
+    read off the config the session was opened with."""
+    return session._config.idle_seconds
 
 
 def parameter_names(session: Session) -> tuple[str, ...]:
@@ -146,8 +155,9 @@ def parse_stops(raw: str) -> list[str]:
 
 def set_think(session: Session, raw: str) -> str:
     """A thinking level — a rung, off or on, or a budget in tokens —
-    saved for the model in use, or "unset", which forgets it: the level
-    follows the model, as its parameters do. "" reports where it stands
+    saved for the model in use, or "unset", saved too: nothing is sent,
+    and the model is not started off again. The level follows the
+    model, as its parameters do. "" reports where it stands
     and what the model takes (`think_choices`). Raises Refused for a
     word outside the vocabulary, a level the model does not take, or no
     model — never for the provider: a level goes out on whatever knobs
@@ -174,7 +184,7 @@ def set_think(session: Session, raw: str) -> str:
             f"{session.model} does not take {value}. Levels for this model: {choices.listed}."
         )
     session._think = value
-    return f"Think: {_think_word(value)}{_save_model_settings(session)}"
+    return f"Think: {_think_word(value)}{session._save_model_settings()}"
 
 
 def _think_word(level: str) -> str:
@@ -263,6 +273,40 @@ def set_max_context(session: Session, raw: str) -> str:
     return f"Max context: {_stands(session.max_context_setting)}."
 
 
+def get_tool_prompt(session: Session, tool: str) -> str:
+    """A tool's prompt as prompts.toml holds it now — the file read
+    fresh, as an assembly reads it (`backend.story`), so a hand edit
+    shows too. Raises Refused for a name no tool owns."""
+    prompts, _ = load_prompts(session._paths.prompts_file)
+    return str(getattr(prompts, _tool_prompt_name(tool)))
+
+
+def set_tool_prompt(session: Session, tool: str, text: str) -> str:
+    """Write a tool's prompt into prompts.toml — that key alone, the
+    pre-edit file backed up (`prompts.set_prompt`) — and read the file
+    back: what the next assembly injects is what was saved, or the
+    write is refused. An empty text drops the key, and the built-in
+    stands again. Returns the confirmation."""
+    key = _tool_prompt_name(tool)
+    text = text.strip()
+    paths = session._paths
+    set_prompt(paths.prompts_file, paths.config_backups_dir, key, text)
+    prompts, _ = load_prompts(paths.prompts_file)
+    if str(getattr(prompts, key)) != (text or str(getattr(Prompts(), key))):
+        raise Refused("Prompt not saved — prompts.toml could not be edited.")
+    session._prompts = prompts  # the lore prompts follow the same file
+    return "Prompt saved." if text else "Prompt restored to the built-in."
+
+
+def _tool_prompt_name(tool: str) -> str:
+    """The prompts.toml key of the tool's prompt. Raises Refused for a
+    name no tool owns."""
+    found = TOOLS.get(tool)
+    if found is None:
+        raise Refused(f"Unknown tool {tool!r}. Tools: {', '.join(TOOLS)}.")
+    return found.prompt_name
+
+
 def _stands(tokens: int) -> str:
     if tokens == 0:
         return "0 (the model's own max context)"
@@ -313,7 +357,7 @@ def set_parameter_value(session: Session, name: str, value_raw: str) -> str:
         if name not in session.params:
             return f"Parameter {name} is not set."
         session._params.pop(name)
-        saved = _save_model_settings(session)
+        saved = session._save_model_settings()
         return f"Parameter {name} unset: the engine's own default applies{saved}"
     parameter = PARAMETERS[name]
     value: object
@@ -334,7 +378,7 @@ def set_parameter_value(session: Session, name: str, value_raw: str) -> str:
                 bounds = f"between {low} and {high}"
             raise Refused(f"{name} must be {bounds}.")
     session._params[name] = value
-    said = f"{name} = {parameter_text(value)}{_save_model_settings(session)}"
+    said = f"{name} = {parameter_text(value)}{session._save_model_settings()}"
     if not parameter_read(session, name):
         said += (
             f" Not read by {session.provider}: kept for the model, sent where a provider reads it."
@@ -348,18 +392,3 @@ def _unsupported(session: Session, name: str) -> Refused:
     return Refused(
         f"Unsupported parameter {name!r}. Supported: {', '.join(parameter_names(session))}."
     )
-
-
-def _save_model_settings(session: Session) -> str:
-    """Persist the model's entry — its parameters, and its thinking
-    level when one is set (unset is the row's absence); the sentence
-    tail says when the save did not land (the session still took the
-    value)."""
-    entry: dict[str, object] = dict(session.params)
-    if session._think != THINK_UNSET:
-        entry[THINK_KEY] = session._think
-    try:
-        models_file.save(session._paths.models_file, session.model, entry)
-    except (OSError, ValueError) as e:
-        return f" (this session only — could not save: {e})."
-    return "."

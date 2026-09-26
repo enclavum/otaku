@@ -19,12 +19,21 @@ import time
 from collections.abc import Iterator
 from typing import Any, Self
 
-from otaku.backend.api.play import Declined, Done, Failed, PlayEvent, Reasoning, Recorded, Text
+from otaku.backend.api.play import (
+    Declined,
+    Done,
+    Failed,
+    PlayEvent,
+    Reasoning,
+    Recorded,
+    Text,
+    ToolCall,
+)
 from otaku.console.sound import ring
-from otaku.formatting import printable
 from otaku.terminal.chat.chat import Chat
 from otaku.terminal.tty import DIM, RESET, error_line
-from otaku.terminal.tty.render import message
+from otaku.terminal.tty.cursor import terminal_width
+from otaku.terminal.tty.render import BlockStream, QuestionStream, message, spaced
 from otaku.terminal.tty.spinner import Spinner
 from otaku.terminal.tty.typography import Streamer
 
@@ -53,12 +62,33 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
     status row erase themselves and stay outside)."""
     out = chat.ledger.reply
     session = chat.session
-    in_thinking = False
-    thinking_nl = 0  # trailing newlines the thinking text itself printed
-    streamed = False  # any prose shown yet (the error line's lead blank)
+    streamed = False  # anything shown yet (the error line's lead blank, the line to end)
     chars = 0
     interrupted = False
+    call_open = False  # inside a tool call, its opening tag already printed
+    fed = ""  # all drawn so far, for the blank lines around a call's block
+    after_call = False  # a call's block was drawn last: prose going on is set apart
+    # The block being streamed — the thinking, a question, a note — and
+    # which, until its end: the thinking's is the first piece of anything
+    # else, a call's its closing fence.
+    block: BlockStream | None = None
+    block_name = ""
+    notes = chat.notes_displayed  # a story's switch, read once: it cannot move mid-stream
     start = time.monotonic()
+
+    def close_block() -> None:
+        """The block ended after its last piece — its closing fence, the
+        first piece of what follows the thinking, or the stream's end
+        inside it: the dim off, a last word or line placed, so what
+        follows stands clear of it."""
+        nonlocal fed, after_call, block, block_name, streamed
+        if block is None:
+            return
+        written = block.close()
+        fed += written
+        streamed = streamed or bool(written)
+        block, block_name = None, ""
+        after_call = True
 
     spinner = Spinner()
     spinner.start()
@@ -77,51 +107,87 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                     # comes back until the first delta. The record's own
                     # note (a /roll's dice) prints dim under the block —
                     # the card import's report line is the family.
-                    chat.ledger.echo_block(message(event.message.body, "user"))
+                    chat.ledger.echo_block(
+                        message(event.message.body, "user", pictures=len(event.message.attachments))
+                    )
                     if event.note:
                         out.write(f"{DIM}[ {event.note} ]{RESET}\n\n")
                     spinner.start()
                 elif isinstance(event, Reasoning):
-                    if not in_thinking:
-                        out.write(DIM + "(thinking) ")
-                        in_thinking = True
-                        thinking_nl = 0
-                    shown = printable(event.text)
-                    if shown:
-                        tail = len(shown) - len(shown.rstrip("\n"))
-                        # A chunk of only newlines extends the run; any
-                        # other chunk restarts it at its own tail.
-                        thinking_nl = thinking_nl + tail if tail == len(shown) else tail
-                    out.write(shown)
-                    out.flush()
+                    # The thinking streams as a dim block behind the bar
+                    # (`render`), as a note does.
+                    if block is None or block_name != "thinking":
+                        close_block()
+                        block = BlockStream(out, terminal_width(), dim=True)
+                        block_name = "thinking"
+                        fed += block.open(streamer, fed)
+                    written = block.feed(event.text)
+                    fed += written
+                    streamed = streamed or bool(written)
                 elif isinstance(event, Text):
-                    if in_thinking:
-                        # Exactly one blank line between thinking and the
-                        # prose, whatever the model's own trailing
-                        # newlines: write only what is missing — models
-                        # differ (none, one, two), and the screen must not.
-                        out.write(RESET + "\n" * max(0, 2 - thinking_nl))
-                        in_thinking = False
-                    streamer.feed(event.text)
+                    if block_name == "thinking":
+                        close_block()  # one blank line to the prose, as after any block
+                    text = event.text
+                    if after_call:
+                        if not text.strip():
+                            continue  # the model's newlines after a block: drawn once, below
+                        text = spaced(fed) + text.lstrip("\n")
+                        after_call = False
+                    streamer.feed(text)
+                    fed += text
                     streamed = True
                     chars += len(event.text)
+                elif isinstance(event, ToolCall):
+                    if block_name == "thinking":
+                        close_block()
+                    if event.name in ("question", "note"):
+                        if event.name == "note" and not notes:
+                            # Written for the wire alone — and the prose goes on
+                            # as after any block, so no hole marks the place.
+                            after_call = True
+                            continue
+                        # Streamed as it arrives, a block behind the bar
+                        # (`render`): the question alone of a question, its
+                        # options parting from it line by line; a note dim.
+                        if block is None:
+                            width = terminal_width()
+                            if event.name == "question":
+                                block = QuestionStream(out, width)
+                            else:
+                                block = BlockStream(out, width, dim=True)
+                            block_name = event.name
+                            fed += block.open(streamer, fed)
+                        written = block.feed(event.text)
+                        fed += written
+                        streamed = streamed or bool(written)
+                        if event.closed:
+                            close_block()
+                        continue
+                    # Every other call prints as it streamed, fences and
+                    # all, until its look is decided: the opening fence
+                    # ahead of its first piece, the closing fence after the
+                    # piece that closed it — the language's canonical form
+                    # (`context.tool_calls`), which the terminal may not
+                    # import, so spelled here as `render.message` spells it.
+                    opening = "" if call_open else f"```otk-{event.name}\n"
+                    closing = "\n```" if event.closed else ""
+                    call_open = not event.closed
+                    streamer.feed(opening + event.text + closing)
+                    fed += opening + event.text + closing
+                    streamed = True
                 elif isinstance(event, Declined):
                     out.write(event.reason + "\n")
                 elif isinstance(event, Failed):
+                    close_block()
                     streamer.flush()
-                    if in_thinking:
-                        out.write(RESET)
-                        in_thinking = False
                     # What streamed is already on the screen, so the story
                     # keeps it — exactly as a Ctrl+C does. A failure before
                     # any output starts at the margin — no stray blank.
                     lead = "\n" if streamed else ""
                     out.write(lead + error_line(f"[ error: {event.reason} ]") + "\n")
                 elif isinstance(event, Done):
+                    close_block()  # a reply cut inside its call still shows it
                     streamer.flush()
-                    if in_thinking:
-                        out.write(RESET)
-                        in_thinking = False
                     if streamed:
                         out.write("\n")
                     if event.stats:
@@ -130,6 +196,7 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
             interrupted = True
         finally:
             spinner.stop()
+            close_block()  # a ^C inside a block: its end drawn before the prompt
             streamer.flush()
             # Cancel-and-keep: closing the generator makes the backend
             # record the partial; a plain iterator has nothing to close.
@@ -138,15 +205,11 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                 close()
 
     if interrupted:
-        # The cut line is ended — the prose or the thinking stopped
-        # mid-line. A wait cut before anything showed has no line to end:
-        # the echo's blank stands as the gap, and a newline here would be
-        # a second blank, with the loop's gap making a third.
-        cut_midline = streamed or in_thinking
-        if in_thinking:
-            out.write(RESET)
-            in_thinking = False
-        if cut_midline:
+        # The cut line is ended — the prose, a block or the thinking
+        # stopped mid-line. A wait cut before anything showed has no line
+        # to end: the echo's blank stands as the gap, and a newline here
+        # would be a second blank, with the loop's gap making a third.
+        if streamed:
             out.write("\n")
         if session.verbose:
             elapsed = time.monotonic() - start

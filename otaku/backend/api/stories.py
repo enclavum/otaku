@@ -11,9 +11,10 @@ from dataclasses import replace
 from typing import Literal
 
 from otaku.backend.session import Refused, Session
+from otaku.backend.story import StorySettings
 from otaku.formatting import flatten, truncate_label
 from otaku.store.ops.stories import StoryListing
-from otaku.store.schema import Message
+from otaku.store.schema import InjectionPosition, Message
 
 # What picking an earlier turn settles to: continue in a copy (the
 # default), rewind the head (later turns stay as siblings), or stay.
@@ -196,6 +197,75 @@ def report_system(session: Session) -> str:
     """What the bare `/system` answers: the open story's premise, or
     that there is none. A report, so nothing changes."""
     return f'System: "{session.system}"' if session.system else "System: (none)"
+
+
+def get_settings(session: Session, story_id: int | None = None) -> StorySettings:
+    """Every setting of a story as it stands — the open story's, or the
+    one `story_id` names: what it stored laid over the defaults, each with
+    its label and, where it injects, the positions it may take."""
+    if story_id is not None and story_id != session.story_id:
+        from_db = session._store.stories.get_settings(story_id)
+    else:
+        from_db = session._settings_db
+    return StorySettings(from_db, session._store, session._paths.prompts_file)
+
+
+def update_setting(
+    session: Session,
+    name: str,
+    *,
+    story_id: int | None = None,
+    enabled: bool | None = None,
+    position: InjectionPosition | None = None,
+    reminder_text: str | None = None,
+    display_notes: bool | None = None,
+) -> str:
+    """Change one setting of a story — the open one, or the one
+    `story_id` names; what is not given stays. Returns the confirmation.
+    Raises Refused for a setting that does not exist, and for what the
+    setting does not take (`StorySetting.to_db`)."""
+    settings = get_settings(session, story_id)
+    setting = settings.get(name)
+    if setting is None:
+        known = ", ".join(each.name for each in settings)
+        raise Refused(f"Unknown setting {name!r}. Settings: {known}.")
+    row = setting.to_db(
+        enabled=enabled,
+        position=position,
+        reminder_text=reminder_text,
+        display_notes=display_notes,
+    )
+    if story_id is not None and story_id != session.story_id:
+        session._store.stories.set_setting(story_id, row)
+    else:
+        session._set_setting(row)
+    # Where it now stands, in words.
+    if not row.enabled:
+        return f"{setting.label}: off."
+    if row.position is None:
+        return f"{setting.label}: on."
+    if row.position.depth is None:
+        return f"{setting.label}: on, in the system message."
+    # before which of the reader's messages, counted from the end
+    depth = row.position.depth
+    if depth == 1:
+        return f"{setting.label}: on, before your latest message."
+    if depth == 2:
+        return f"{setting.label}: on, before your previous message."
+    suffix = "rd" if depth == 3 else "th"
+    return f"{setting.label}: on, before your {depth}{suffix}-last message."
+
+
+def get_shared_reminder(session: Session) -> str:
+    """The shared reminder's text — one text, which every story that
+    switched `use_shared_reminder` on is sent."""
+    return session._store.settings.get_shared_reminder()
+
+
+def set_shared_reminder(session: Session, text: str) -> str:
+    """The shared reminder's text; "" clears it. Returns the confirmation."""
+    session._store.settings.set_shared_reminder(text.strip())
+    return "Shared reminder saved." if text.strip() else "Shared reminder cleared."
 
 
 def delete(session: Session, story_id: int) -> None:

@@ -15,6 +15,9 @@ import { count } from "./format.js";
 
 // ---------- context: the request as a document ----------
 
+// A row's name is the backend's lowercase name of the text placed, capitalised for a row.
+const capitalised = (name) => name.charAt(0).toUpperCase() + name.slice(1);
+
 export async function openContext() {
   const popup = popups.get("/context");
   const body = $("[data-context]", popup);
@@ -51,12 +54,43 @@ export async function openContext() {
 
   const head = element("div", "otk-v otk-v--lg");
   head.append(summary, stages(shape));
+  if (preview.injections.length) {
+    /* What rides besides the story, as the design lists it under the
+       stages: a section head with the total, then a row per injection —
+       the name of the text placed (the backend's, capitalised for a
+       row), a dotted leader, where it rides, what it costs — in the
+       request's order, as the backend lists them. The texts themselves
+       are in the wire below. */
+    const injected = element("div", "otk-context__injected");
+    const total = preview.injections.reduce((sum, injection) => sum + injection.tokens, 0);
+    const heading = element("div", "otk-section otk-context__injrow otk-context__injhead");
+    // the total, where there is something to total: one row says its own
+    const summed = preview.injections.length > 1 ? `~${count(total)} tokens` : "";
+    heading.append(span("", "Injected"), span(""), span(""), span("otk-context__injtok", summed));
+    injected.append(heading);
+    for (const injection of preview.injections) {
+      const row = element("div", "otk-context__injrow");
+      row.append(
+        span("otk-context__injname", capitalised(injection.label)),
+        span("otk-context__injdots"),
+        span("otk-context__injat", injection.position_text),
+        span("otk-context__injtok", `~${count(injection.tokens)} tokens`),
+      );
+      injected.append(row);
+    }
+    head.append(injected);
+  }
 
   const wire = element("div", "otk-context__wire");
   for (const part of preview.parts) {
     const passage = element("div", "otk-passage");
+    // The pictures riding the part, beside the role — the report's own
+    // count, drawn where the terminal draws it.
+    const riding = part.pictures
+      ? ` · ${part.pictures} picture${part.pictures === 1 ? "" : "s"} attached`
+      : "";
     passage.append(
-      span("otk-passage__rubric", part.role),
+      span("otk-passage__rubric", part.role + riding),
       element(
         "p",
         part.role === "user" ? "otk-prose otk-prose--said" : "otk-prose otk-prose--wire",

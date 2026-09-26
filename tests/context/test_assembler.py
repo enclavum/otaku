@@ -8,13 +8,31 @@ summarized away. Case 4: over the limit — the smaller of the window and
 through the last replaced scene. Case 5: still over, the tail target
 steps down to its floor; past the floor the assembly refuses. Across all
 of them the wire promise holds: the model sees the stored messages and
-nothing the code invented but the recap.
+nothing the code invented but the recap — and the injections it was
+handed, each where it was told to go, a stored reply's tool calls as the
+story's tool set has them.
 """
+
+from dataclasses import dataclass, replace
 
 import pytest
 
-from otaku.context.assembler import ContextOverflowError, ContextShape, _assemble
-from otaku.store.schema import Message, Scene
+from otaku.context.assembler import (
+    IMAGE_TOKENS,
+    ContextOverflowError,
+    ContextShape,
+    WirePicture,
+    assemble_story,
+    context_in_force,
+)
+from otaku.context.injections import Injection
+from otaku.context.tool_calls import ToolSet
+from otaku.providers import PicturesRide
+from otaku.store.schema import Attachment, InjectionPosition, Message, Scene
+
+CAT = Attachment(file="pic-0001-20260918-a3f9c1e2.jpg", width=2, height=2, size=3)
+CAT_PICTURE = WirePicture(b"cat", "image/jpeg")
+NO_TOOLS = ToolSet()  # every call leaves the wire
 
 
 def assemble(
@@ -27,17 +45,35 @@ def assemble(
     head_messages: int = 20,
     min_tail_messages: int = 150,
     max_context_setting: int = 0,
+    files=None,
+    newest_pictures_only: bool = False,
+    injections: tuple[Injection, ...] = (),
+    tool_set: ToolSet = NO_TOOLS,
 ):
-    """The doc's vocabulary over the `shape` argument, so every case
-    below reads like its section."""
+    """The doc's vocabulary over the door's arguments, so every case
+    below reads like its section, with a stand-in store answering the
+    reads the door makes. `files` is the folder the pictures are read
+    from; None, the default, is a model that cannot see."""
     shape = ContextShape(
         head_messages=head_messages,
         min_tail_messages=min_tail_messages,
-        max_context_setting=max_context_setting,
-        recap_header=recap_header,
-        card_framing="",
+        max_context=context_in_force(max_context, max_context_setting),
     )
-    return _assemble(system, messages, max_context, scenes=scenes, shape=shape)
+    if files is None:
+        pictures_ride = PicturesRide.NONE
+    else:
+        pictures_ride = PicturesRide.LATEST if newest_pictures_only else PicturesRide.EACH
+    return assemble_story(
+        _Store(scenes, files),
+        1,
+        system=system,
+        messages=messages,
+        injections=injections,
+        tool_set=tool_set,
+        prompts=_Prompts(recap_header),
+        shape=shape,
+        pictures_ride=pictures_ride,
+    )
 
 
 class TestShortStory:
@@ -70,7 +106,7 @@ class TestNoSummaries:
 
     def test_everything_is_sent_verbatim(self) -> None:
         prompt = assemble("", turns(40), 8192, head_messages=5, min_tail_messages=10)
-        assert prompt.transcript_kept == 40
+        assert prompt.head + prompt.tail == 40
         assert prompt.scenes_summarized == 0
 
     def test_a_scene_ending_in_head_or_tail_does_not_count(self) -> None:
@@ -83,7 +119,7 @@ class TestNoSummaries:
             min_tail_messages=10,
         )
         assert prompt.scenes_summarized == 0
-        assert prompt.transcript_kept == 40
+        assert prompt.head + prompt.tail == 40
 
 
 class TestScenesCoverTheMiddle:
@@ -108,7 +144,7 @@ class TestScenesCoverTheMiddle:
         assert "turn 65." in sent  # the tail starts right after scene 3
         assert "turn 64." not in sent  # summarized away
         assert "turn 20." in sent and "turn 21." not in sent  # the head's edge
-        assert prompt.head_count == 20
+        assert prompt.head == 20
 
     def test_option_b_fewer_scenes_move_the_boundary_earlier(self) -> None:
         scenes = (scene(25, "sum one"), scene(42, "sum two"))
@@ -136,7 +172,7 @@ class TestScenesCoverTheMiddle:
         # verbatim and the tail grows past the minimum.
         at_boundary = assemble("", turns(220), 65536, scenes=(scene(70, "sum"),))
         assert at_boundary.scenes_summarized == 0
-        assert at_boundary.transcript_kept == 220
+        assert at_boundary.head + at_boundary.tail == 220
         before_boundary = assemble("", turns(220), 65536, scenes=(scene(69, "sum"),))
         sent = "\n".join(m.body for m in before_boundary.messages)
         assert before_boundary.scenes_summarized == 1
@@ -145,8 +181,8 @@ class TestScenesCoverTheMiddle:
 
     def test_no_history_and_the_full_tail_in_the_plain_case(self) -> None:
         prompt = assemble("", turns(220), 65536, scenes=(scene(64, "sum"),))
-        assert prompt.history == ""
-        assert prompt.tail_target == prompt.tail_setting == 150
+        assert not prompt.history
+        assert prompt.tail_target == 150
 
 
 class TestCharacterCards:
@@ -199,7 +235,7 @@ class TestRecapDegrades:
             min_tail_messages=10,
         )
         sent = "\n".join(m.body for m in prompt.messages)
-        assert prompt.history == "Arc through two."
+        assert prompt.history and "Arc through two." in sent
         assert prompt.scenes_rolled_up == 2
         assert prompt.scenes_summarized == 1
         assert "delta delta" in sent  # the kept summary
@@ -210,13 +246,13 @@ class TestRecapDegrades:
         one, two, three = self._scenes()
         scenes = (one, replace_history(two, ""), three)
         prompt = assemble("", turns(40), 2524, scenes=scenes, head_messages=5, min_tail_messages=10)
-        assert prompt.history == "Arc through one."
+        assert prompt.history and "Arc through one." in prompt.recap
         assert prompt.scenes_rolled_up == 1
 
     def test_without_any_rung_the_dropped_scenes_go_uncovered(self) -> None:
         scenes = tuple(replace_history(s, "") for s in self._scenes())
         prompt = assemble("", turns(40), 2524, scenes=scenes, head_messages=5, min_tail_messages=10)
-        assert prompt.history == ""
+        assert not prompt.history
         assert prompt.scenes_rolled_up == 0
         assert prompt.scenes_summarized == 1
 
@@ -241,9 +277,8 @@ class TestRecapDegrades:
             min_tail_messages=10,
             max_context_setting=2524,
         )
-        assert prompt.history == "Arc through two."
+        assert prompt.history and "Arc through two." in prompt.recap
         assert prompt.limit == 1500  # the cap minus the reserve
-        assert prompt.max_context == 131072
 
     def test_max_context_zero_means_the_whole_window(self) -> None:
         prompt = assemble(
@@ -255,7 +290,7 @@ class TestRecapDegrades:
             min_tail_messages=10,
             max_context_setting=0,
         )
-        assert prompt.history == ""  # everything fits — case 4 never fires
+        assert not prompt.history  # everything fits — case 4 never fires
         assert prompt.scenes_summarized == 3
         assert prompt.limit == 65536 - 1024  # the window minus the reserve (no replies yet)
 
@@ -278,9 +313,8 @@ class TestTailDegrades:
             scene(320, "sum four", history="Arc through four."),
         )
         prompt = assemble("", rows, 3024, scenes=scenes, head_messages=5, min_tail_messages=150)
-        assert prompt.tail_setting == 150
         assert prompt.tail_target == 50
-        assert prompt.transcript_kept - prompt.head_count == 80  # messages 321-400
+        assert prompt.tail == 80  # messages 321-400
         assert prompt.transcript_tokens <= 3024 - 1024
 
 
@@ -334,6 +368,144 @@ class TestWirePromise:
         assert [m.role for m in prompt.messages] == ["assistant", "user"]
 
 
+class TestInjections:
+    """Text the context carries besides the story. At "system" it is
+    appended to the system message, after the premise; at a number it
+    is a user row of its own, placed before that one of the reader's
+    messages counted from the end — 1 the newest, which so keeps the
+    last word — that never climbs past the recap, and rejoins its
+    same-role neighbour like any row. An empty one is not sent. It
+    costs its tokens, and the turn a numbered one lands in, with every
+    turn after, is `volatile`: next request it reads differently."""
+
+    def test_one_rides_before_the_newest_message(self) -> None:
+        prompt = assemble("", exchange(), 8192, injections=(end("Remember."),))
+        assert [(m.role, m.body) for m in prompt.messages] == [
+            ("user", "One."),
+            ("assistant", "Two."),
+            ("user", "Remember.\n\nThree."),
+        ]
+
+    def test_a_position_counts_the_readers_messages_from_the_end(self) -> None:
+        # A reply is never counted: 2 is the reader's previous message.
+        rows = [user("One."), assistant("Two."), user("Three."), assistant("Four."), user("Five.")]
+        previous = assemble("", rows, 8192, injections=(end("Remember.", 2),))
+        assert [m.body for m in previous.messages] == [
+            "One.",
+            "Two.",
+            "Remember.\n\nThree.",
+            "Four.",
+            "Five.",
+        ]
+        third = assemble("", rows, 8192, injections=(end("Remember.", 3),))
+        assert third.messages[0].body == "Remember.\n\nOne."
+
+    def test_the_newest_message_always_keeps_the_last_word(self) -> None:
+        # The nearest place is before the newest message: no position
+        # names one after it.
+        prompt = assemble("", exchange(), 8192, injections=(end("Remember.", 1),))
+        assert prompt.messages[-1].body == "Remember.\n\nThree."
+
+    def test_a_position_past_the_top_stops_at_the_top(self) -> None:
+        prompt = assemble("", exchange(), 8192, injections=(end("Remember.", 99),))
+        assert prompt.messages[0].body == "Remember.\n\nOne."
+
+    def test_the_recap_is_a_wall(self) -> None:
+        # The recap stands where the middle was; an injection stays in the
+        # tail under it, however deep it was asked to go.
+        prompt = assemble(
+            "",
+            turns(40),
+            8192,
+            scenes=(scene(20, "The heist unfolded."),),
+            head_messages=5,
+            min_tail_messages=10,
+            injections=(end("Remember.", 99),),
+        )
+        sent = "\n\n".join(m.body for m in prompt.messages)
+        recap, injected, tail = (
+            sent.index("The heist unfolded."),
+            sent.index("Remember."),
+            sent.index("turn 21."),
+        )
+        assert recap < injected < tail
+
+    def test_the_same_place_keeps_the_order_given(self) -> None:
+        both = (end("First."), end("Second."))
+        prompt = assemble("", exchange(), 8192, injections=both)
+        assert prompt.messages[-1].body == "First.\n\nSecond.\n\nThree."
+
+    def test_a_system_injection_follows_the_premise(self) -> None:
+        prompt = assemble("Be terse.", exchange(), 8192, injections=(system("Ask rarely."),))
+        assert (prompt.messages[0].role, prompt.messages[0].body) == (
+            "system",
+            "Be terse.\n\nAsk rarely.",
+        )
+        assert [m.body for m in prompt.messages[1:]] == ["One.", "Two.", "Three."]
+
+    def test_without_a_premise_the_system_message_is_the_injection(self) -> None:
+        prompt = assemble("", exchange(), 8192, injections=(system("Ask rarely."),))
+        assert (prompt.messages[0].role, prompt.messages[0].body) == ("system", "Ask rarely.")
+
+    def test_an_empty_injection_is_not_sent(self) -> None:
+        plain = assemble("", exchange(), 8192)
+        prompt = assemble("", exchange(), 8192, injections=(end(""), system("")))
+        assert prompt.messages == plain.messages
+
+    def test_an_injection_costs_its_tokens(self) -> None:
+        text = "x" * 400
+        plain = assemble("", exchange(), 8192)
+        at_end = assemble("", exchange(), 8192, injections=(end(text),))
+        assert at_end.transcript_tokens == plain.transcript_tokens + 100
+        in_system = assemble("", exchange(), 8192, injections=(system(text),))
+        assert in_system.system_tokens == 100
+        assert in_system.transcript_tokens == plain.transcript_tokens
+
+    def test_an_injection_that_does_not_fit_refuses_like_the_story(self) -> None:
+        with pytest.raises(ContextOverflowError):
+            assemble("", exchange(), 2048, injections=(end("x" * 40_000),))
+
+    def test_the_newest_cue_stays_live_under_an_injection(self) -> None:
+        rows = [user("One."), assistant("Two."), user("I go. /cue hurry")]
+        prompt = assemble("", rows, 8192, injections=(end("Remember."),))
+        assert prompt.messages[-1].body == "Remember.\n\nI go. ((OOC: hurry))"
+
+    def test_a_picture_still_rides_its_own_message(self) -> None:
+        rows = [user("One."), assistant("Two."), replace(user("Look."), attachments=(CAT,))]
+        prompt = assemble("", rows, 8192, files=_CatFolder(), injections=(end("Remember.", 2),))
+        assert [m.images for m in prompt.messages] == [(), (), (CAT_PICTURE,)]
+
+    def test_the_turn_it_lands_in_and_every_turn_after_are_volatile(self) -> None:
+        newest = assemble("Be terse.", exchange(), 8192, injections=(end("Remember."),))
+        assert [m.volatile for m in newest.messages] == [False, False, False, True]
+        deeper = assemble("Be terse.", exchange(), 8192, injections=(end("Remember.", 2),))
+        assert [m.volatile for m in deeper.messages] == [False, True, True, True]
+
+    def test_a_system_injection_makes_nothing_volatile(self) -> None:
+        prompt = assemble("", exchange(), 8192, injections=(system("Ask rarely."),))
+        assert not any(m.volatile for m in prompt.messages)
+
+
+class TestToolCalls:
+    """A stored reply's tool calls go on the wire as the story's tool set
+    has them: a call of a tool that is on as written, one of a tool that
+    is off as what its rule makes of it, one of any other tool gone —
+    the reader's rows untouched."""
+
+    def test_a_call_of_a_tool_that_is_on_goes_as_written(self) -> None:
+        prompt = assemble("", noted(), 8192, tool_set=ToolSet(on=frozenset({"note"})))
+        assert prompt.messages[1].body == "Two.\n\n```otk-note\nthe seal\n```"
+
+    def test_a_call_of_a_tool_that_is_off_becomes_its_rule_text(self) -> None:
+        tools = ToolSet(off={"note": lambda inside: f"({inside})"})
+        prompt = assemble("", noted(), 8192, tool_set=tools)
+        assert prompt.messages[1].body == "Two.\n\n(the seal)"
+
+    def test_a_call_of_any_other_tool_leaves_the_wire(self) -> None:
+        prompt = assemble("", noted(), 8192, tool_set=NO_TOOLS)
+        assert [m.body for m in prompt.messages] == ["One.", "Two.", "Three."]
+
+
 # ---------- fixtures ----------
 
 
@@ -347,6 +519,25 @@ def assistant(body: str) -> Message:
 
 def card(message_id: int, body: str) -> Message:
     return Message(id=message_id, role="user", body=body, kind="card")
+
+
+def exchange() -> list[Message]:
+    """A played exchange awaiting its reply: the newest message is the user's."""
+    return [user("One."), assistant("Two."), user("Three.")]
+
+
+def noted() -> list[Message]:
+    """An exchange whose reply carries a note."""
+    return [user("One."), assistant("Two.\n\n```otk-note\nthe seal\n```"), user("Three.")]
+
+
+def end(text: str, depth: int = 1) -> Injection:
+    """An injection before one of the reader's messages, counted from the end."""
+    return Injection(owner="reminder", text=text, position=InjectionPosition(depth))
+
+
+def system(text: str) -> Injection:
+    return Injection(owner="ask", text=text, position=InjectionPosition())
 
 
 def turns(n: int) -> list[Message]:
@@ -367,3 +558,136 @@ def replace_history(s: Scene, history: str) -> Scene:
         summary=s.summary,
         history=history,
     )
+
+
+class TestPictures:
+    """A picture rides the verbatim row it was attached to, and costs
+    the estimate there; a summarized row's is neither sent nor missed;
+    a loader that answers nothing — no vision, a file gone — sends none
+    and counts the omission on the verbatim rows alone."""
+
+    def test_a_picture_rides_its_verbatim_row(self) -> None:
+        messages = [Message("user", "look", attachments=(CAT,)), Message("assistant", "a cat")]
+        prompt = assemble("", messages, None, files=CAT_FOLDER)
+        assert prompt.messages[0].images == (CAT_PICTURE,)
+        assert prompt.messages[1].images == ()
+        assert (prompt.pictures_sent, prompt.pictures_omitted) == (1, 0)
+
+    def test_a_picture_costs_its_estimate(self) -> None:
+        with_it = assemble(
+            "", [Message("user", "look", attachments=(CAT,))], None, files=CAT_FOLDER
+        )
+        without = assemble("", [Message("user", "look")], None)
+        assert with_it.transcript_tokens - without.transcript_tokens == IMAGE_TOKENS
+
+    def test_without_a_loader_nothing_rides_and_the_omission_is_counted(self) -> None:
+        prompt = assemble("", [Message("user", "look", attachments=(CAT,))], None)
+        assert prompt.messages[0].images == ()
+        assert (prompt.pictures_sent, prompt.pictures_omitted) == (0, 1)
+        assert (
+            prompt.transcript_tokens
+            == assemble("", [Message("user", "look")], None).transcript_tokens
+        )
+
+    def test_a_file_the_folder_cannot_answer_for_is_an_omission(self) -> None:
+        gone = Attachment(file="pic-0001-20260918-7b02d4ee.png", width=1, height=1, size=1)
+        messages = [Message("user", "look", attachments=(CAT, gone))]
+        prompt = assemble("", messages, None, files=CAT_FOLDER)
+        assert prompt.messages[0].images == (CAT_PICTURE,)
+        assert (prompt.pictures_sent, prompt.pictures_omitted) == (1, 1)
+
+    def test_a_summarized_row_loses_its_picture_and_a_tail_row_keeps_it(self) -> None:
+        # Option A's story: 220 turns, scenes 1-3 summarized, the tail
+        # from turn 65. A picture on turn 30 rides the summary away —
+        # neither sent nor counted as missed; one on turn 200 rides.
+        story = turns(220)
+        story[29] = replace(story[29], attachments=(CAT,))
+        story[199] = replace(story[199], attachments=(CAT,))
+        scenes = (scene(25, "sum one"), scene(42, "sum two"), scene(64, "sum three"))
+        prompt = assemble("", story, 65536, scenes=scenes, min_tail_messages=150, files=CAT_FOLDER)
+        assert prompt.scenes_summarized == 3
+        (with_it,) = [turn for turn in prompt.messages if turn.images]
+        assert "turn 200." in with_it.body and "turn 30." not in with_it.body
+        assert (prompt.pictures_sent, prompt.pictures_omitted) == (1, 0)
+
+    def test_with_newest_pictures_only_earlier_rows_pictures_are_held_back(self) -> None:
+        # An engine that gathers every picture onto the latest prompt
+        # gets the newest row's alone; the earlier row's is held, not
+        # omitted, and costs nothing.
+        messages = [
+            Message("user", "one", attachments=(CAT,)),
+            Message("assistant", "a cat"),
+            Message("user", "two", attachments=(CAT,)),
+        ]
+        prompt = assemble("", messages, None, files=CAT_FOLDER, newest_pictures_only=True)
+        assert [turn.images for turn in prompt.messages] == [(), (), (CAT_PICTURE,)]
+        assert (prompt.pictures_sent, prompt.pictures_held, prompt.pictures_omitted) == (1, 1, 0)
+        plain = assemble("", [replace(m, attachments=()) for m in messages], None)
+        assert prompt.transcript_tokens - plain.transcript_tokens == IMAGE_TOKENS
+
+    def test_with_newest_pictures_only_the_newest_pictured_row_rides(self) -> None:
+        # A follow-up without a picture still reaches the model with the
+        # picture it is about: the newest row that carries any rides,
+        # however many rows after it carry none.
+        messages = [
+            Message("user", "one", attachments=(CAT,)),
+            Message("assistant", "a cat"),
+            Message("user", "and the left corner?"),
+        ]
+        prompt = assemble("", messages, None, files=CAT_FOLDER, newest_pictures_only=True)
+        assert [turn.images for turn in prompt.messages] == [(CAT_PICTURE,), (), ()]
+        assert (prompt.pictures_sent, prompt.pictures_held) == (1, 0)
+
+    def test_same_role_rows_rejoin_with_their_pictures(self) -> None:
+        messages = [
+            Message("user", "one", attachments=(CAT,)),
+            Message("user", "two", attachments=(CAT,)),
+        ]
+        prompt = assemble("", messages, None, files=CAT_FOLDER)
+        (turn,) = prompt.messages
+        assert turn.images == (CAT_PICTURE, CAT_PICTURE)
+        assert prompt.pictures_sent == 2
+
+
+class _CatFolder:
+    """A files folder holding the cat and nothing else: the store's own
+    `get`, answered in memory."""
+
+    def get(self, name: str) -> tuple[bytes, str] | None:
+        return (b"cat", "image/jpeg") if name == CAT.file else None
+
+
+CAT_FOLDER = _CatFolder()
+
+
+class _Store:
+    """The store as the door reads it — the story's current scenes, its
+    cast's archives (none: a card row sends its body as it stands) and
+    the files folder — answered in memory, nothing on disk."""
+
+    def __init__(self, scenes: tuple, files: object) -> None:
+        self.scenes = _Scenes(scenes)
+        self.characters = _Characters()
+        self.files = files if files is not None else _CatFolder()
+
+
+class _Scenes:
+    def __init__(self, scenes: tuple) -> None:
+        self._scenes = list(scenes)
+
+    def get_current(self, story_id: int, message_ids: list[int]) -> list[Scene]:
+        return self._scenes
+
+
+class _Characters:
+    def list(self, story_id: int) -> list:
+        return []
+
+
+@dataclass(frozen=True)
+class _Prompts:
+    """What the door reads of the prompts: the recap header and the card
+    template (empty: no archive to compose from anyway)."""
+
+    recap_header: str
+    card_framing: str = ""

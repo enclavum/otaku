@@ -133,3 +133,18 @@ You stand in the dark with your map case on your back, and the water parts aroun
 From inside the culvert, conversational, a voice:
 
 "You're late, mapmaker."
+
+### 15 · user · Maren
+I hold the lantern over my map, then over the chamber floor, and look from one to the other.
+
+### 16 · assistant
+The lantern shows what the dark would not. On the map, the red line you drew runs on past the lock and up the hill, into country you have never surveyed. On the floor, the water runs the same way.
+
+"Well?" says the voice from the culvert. "Are you coming?"
+
+```otk-question
+Do you follow the water into the culvert?
+1. I go in, lantern first
+2. I ask the voice its name before I move
+3. I climb out and go back for Tallis
+```

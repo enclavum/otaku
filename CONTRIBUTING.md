@@ -66,4 +66,4 @@ security issues, see [SECURITY.md](SECURITY.md) instead of the public tracker.
 ## License
 
 By contributing, you agree that your contributions are licensed under the project's
-[MIT License](LICENSE).
+[AGPL-3.0-only license](LICENSE).

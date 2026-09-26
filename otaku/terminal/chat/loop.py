@@ -12,16 +12,16 @@ does not, so a picker cancelled without a word leaves the screen exactly
 as it was.
 """
 
+import functools
 import sys
 
 from otaku.backend.api import play as api_play
 from otaku.backend.api import stories as api_stories
 from otaku.backend.session import Refused, Session
 from otaku.console import banner
-from otaku.formatting import truncate_label
 from otaku.terminal.chat import bindings, stream
 from otaku.terminal.chat.chat import RESUME_TURNS, Chat
-from otaku.terminal.prompt import PLACEHOLDER, Carry, LineAssembler, build_prompt
+from otaku.terminal.prompt import PLACEHOLDER, Carry, LineAssembler, build_prompt, pictures
 from otaku.terminal.screens import models as screen_models
 from otaku.terminal.tty import (
     BOLD,
@@ -54,9 +54,12 @@ def run(session: Session) -> None:
 
     chat = Chat(session)
     # The launch's reports — created files, stale settings, keys that
-    # would not open — before anything else draws.
+    # would not open — before anything else draws, one blank line after
+    # the lot.
     for report in session.notices:
         print(report)
+    if session.notices:
+        print()
     session.notices.clear()
     # The launch-time pick, before the banner names the model: the picker
     # runs only when nothing is remembered — Esc is not a cancel, the
@@ -66,39 +69,40 @@ def run(session: Session) -> None:
         screen_models.pick(session)
     if session.terminal.show_banner:
         # Each field a public read; the no-model fallback is this
-        # frontend's own wording, and the story is cut to the same width
-        # as the landed line printed under it.
+        # frontend's own wording.
         print(
             banner.render_terminal(
                 banner.SessionFacts(
                     model=session.model or "(no model)",
                     provider=session.provider,
                     max_context=session.max_context(),
-                    story=truncate_label(api_stories.headline(session), api_stories.LABEL_WIDTH),
                 )
             )
         )
+    carry = Carry()
+    assembler = LineAssembler()
+    prompt_session, answers = build_prompt(session, carry, assembler, shortcuts=bindings.SHORTCUTS)
+
+    if session.notice:
+        # The one bold hint, above the resumed story: a story that ends on
+        # a question runs straight on into its answers, with nothing
+        # between the two.
+        print(f"{BOLD}{session.notice}{RESET}")
+        print()
+        session.notice = ""
     if session.messages:
         # A resumed story starts mid-scene: name what was resumed and
         # show its last turns, so the scene is on screen before the
         # prompt — and hand them to the ledger, so /undo and /regen can
-        # take them back.
+        # take them back. The blank before the prompt is the prompt's own
+        # when it opens on a question's answers (`AnswerMenu.top_row`).
         print(api_stories.landed_line(session))
         print()
-        print(last_turns(list(session.messages), RESUME_TURNS))
-        print()
+        print(last_turns(list(session.messages), RESUME_TURNS, notes=chat.notes_displayed))
+        answers.top_row = answers.posed
+        if not answers.top_row:
+            print()
         chat.restore_tail(RESUME_TURNS)
-    if session.notice:
-        # The one bold hint, below the echoed turns — which are then no
-        # longer erasable.
-        print(f"{BOLD}{session.notice}{RESET}")
-        print()
-        session.notice = ""
-        chat.ledger.invalidate()
-
-    carry = Carry()
-    assembler = LineAssembler()
-    prompt_session = build_prompt(session, carry, assembler, shortcuts=bindings.SHORTCUTS)
 
     # One status callback, two surfaces: the prompt's toolbar while the
     # prompt is up, the pinned bottom row while a reply streams. Each is
@@ -130,18 +134,35 @@ def run(session: Session) -> None:
             prefix = PROMPT_PREFIX
         placeholder = None if assembler.in_block else PLACEHOLDER
         try:
-            line = prompt_session.prompt(prefix, placeholder=placeholder, default=carry.take_text())
+            # the answers to a pending question, as rows over the prefix
+            message = functools.partial(answers.message, prefix)
+            line = prompt_session.prompt(
+                message, placeholder=placeholder, default=carry.take_text(), pre_run=answers.open
+            )
         except EOFError:
             break
         except KeyboardInterrupt:
             # ^C clears the line; inside a """ block it also drops the
             # buffer. The aborted prompt line stays on screen as a row
             # the ledger cannot measure, so erasing is off until the
-            # next play.
+            # next play — except while the story stands on a question,
+            # where the abort erased the prompt, answers and all
+            # (`prompt._answer_abort`), so the next prompt draws them in
+            # place and the ledger has nothing new to count; a block's
+            # collected lines above still stand. The prompt's own blank
+            # (`top_row`) stays owed after an erased abort — the erase
+            # took it too — and is on screen otherwise.
+            erased = prompt_session.app.erase_when_done
+            prompt_session.app.erase_when_done = False
+            if assembler.in_block or not erased:
+                chat.ledger.invalidate()
+                answers.top_row = False
             assembler.reset()
             chat.ledger.typed_gone()
-            chat.ledger.invalidate()
             continue
+        # The prompt drew its blank, if it owed one; whatever follows
+        # stands under the line it read.
+        answers.top_row = False
 
         if carry.take_shortcut():
             # A shortcut key exited the prompt with its command as the
@@ -179,7 +200,10 @@ def run(session: Session) -> None:
             # What it left mid-row is not the ledger's to count.
             print()
             chat.ledger.invalidate()
-        chat.ledger.gap()  # the systematic blank before the next prompt
+        # The systematic blank before the next prompt — the prompt's own
+        # to draw when it opens on a question's answers, so the question's
+        # block runs on into them.
+        answers.top_row = chat.ledger.gap(deferred=answers.posed)
 
 
 def submit(chat: Chat, line: str) -> None:
@@ -198,8 +222,12 @@ def submit(chat: Chat, line: str) -> None:
     try:
         if bindings.dispatch(chat, line):
             return
+        # The terminal's own affordance, resolved on its side: an `@path`
+        # naming a picture leaves the line and rides the turn as bytes.
+        # Whether the model can see is the backend's to refuse.
+        line, files = pictures.extract_pictures(line)
         try:
-            events = api_play.submit(session, line)
+            events = api_play.submit(session, line, files)
         except Refused as e:
             # Checked before it plays: invalid syntax leaves the story
             # untouched rather than half-playing a line nobody can read.

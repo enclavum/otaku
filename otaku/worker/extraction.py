@@ -36,7 +36,15 @@ template, while a reply has no template at all — and the extract
 template reads "out of character" off that shape, so unmarked it would
 be read as something that happened in the scene. Out-of-character rows
 are mined for decisions but never speaker-attributed and never part of
-the scene's story.
+the scene's story. A tool call in a body (`context.tool_calls`: any
+fenced block marked `otk-NAME`) is the model's own aside, not the
+scene: it is left out, fences and all, before
+a row is measured by the gate, packed into a span, or numbered for the
+analysis model. A picture the reader attached IS part of the scene, and
+the pass is the one moment its content can be put into words that last
+— a summarized row loses its picture — so each is marked `(picture n)`
+at its line and, while the model can see, every one rides the request
+in that order; the template asks for what matters in them.
 """
 
 import builtins
@@ -45,14 +53,16 @@ import json
 import threading
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Self
 
-from otaku.context.assembler import WireTurn
+from otaku.context import tool_calls
+from otaku.context.assembler import WirePicture, WireTurn
 from otaku.context.syntax import OOC_FRAME, to_wire
 from otaku.formatting import format_duration, render
 from otaku.providers import (
     OpenAIClient,
+    PicturesRide,
     ProviderError,
     Stats,
     StatusError,
@@ -241,7 +251,7 @@ class Extractor:
         tail_ids = ids if last_end is None else [i for i in ids if i > last_end]
         if not force and settings.settle > 0:
             tail_ids = tail_ids[: max(0, len(tail_ids) - settings.settle)]
-        chars = self._store.messages.count_body_chars(tail_ids)
+        chars = self._store.messages.count_body_chars(tail_ids, tool_calls.strip)
         too_short = chars < settings.min_chars or len(tail_ids) < settings.min_messages
         if not tail_ids or (not force and too_short):
             self._log(
@@ -325,7 +335,7 @@ class Extractor:
             self._log(f"extraction declined (story {self._story_id}): the story changed mid-pass")
             return PassResult.CANCELLED
         tail = [by_id[i] for i in tail_ids]
-        sizes = [len(m.body) for m in tail]
+        sizes = [len(tool_calls.strip(m.body)) for m in tail]
         spans = [
             tail[a:b]
             for a, b in pack(
@@ -429,7 +439,8 @@ class Extractor:
             journals=_journals_block(current, cast),
             chunk=numbered_chat(span),
         )
-        raw = self.complete(prompt, purpose)
+        request = WireTurn(role="user", body=prompt, images=self._scene_pictures(span))
+        raw = self.complete([request], purpose)
         if not raw:
             if self._cancel.is_set():
                 return False  # cancelled mid-stream
@@ -643,6 +654,17 @@ class Extractor:
                     f"({format_duration(time.monotonic() - rollup_started)})"
                 )
 
+    def _scene_pictures(self, span: Sequence[Message]) -> tuple[WirePicture, ...]:
+        """The scene's pictures as the request carries them, every one, in
+        the order `numbered_chat` numbers them — read from the folder while
+        the model can see. None for a model that cannot: the markers alone
+        say a picture was shown. A file that is gone is skipped."""
+        if self._client.pictures_ride(self._model) is PicturesRide.NONE:
+            return ()
+        named = [a for item in span for a in item.attachments]
+        found = (self._store.files.get(a.file) for a in named)
+        return tuple(WirePicture(*f) for f in found if f is not None)
+
     def _stream_once(
         self,
         messages: Sequence[WireMessage],
@@ -723,22 +745,34 @@ def pack(sizes: list[int], *, min_chars: int, min_messages: int) -> list[tuple[i
 
 def numbered_chat(span: Sequence[Message]) -> str:
     """The numbered scene block for the extract template — the one owner
-    of the `[n] Speaker: …` format.
+    of the `[n] Speaker: …` format. A tool call is left out first; a
+    row that empties keeps its number, since the speaker labels come
+    back by number.
 
-    A row is composed for the wire FIRST and decorated after, with the two
-    things the analysis model needs and the wire must never carry: the
-    speaker on an attributed line, and the `((OOC: …))` enclosure on a
-    reply to an /ooc line. The order matters — decorating first would hide
-    the body's own syntax from the composer, which reads it to strip a
-    direction and fill its template."""
+    A row is composed for the wire FIRST and decorated after, with the
+    things the analysis model needs and the wire must never carry: a
+    `(picture n)` mark for each picture the row carried, numbered through
+    the scene in the order the request attaches them; the speaker on an
+    attributed line; and the `((OOC: …))` enclosure on a reply to an /ooc
+    line. The order matters — decorating first would hide the body's own
+    syntax from the composer, which reads it to strip a direction and
+    fill its template."""
     lines: list[str] = []
+    pictures = 0
     for n, item in enumerate(span, 1):
         # is_last=False always: a cue steers one reply, it is not something
         # that happened in the scene.
-        text = to_wire(item, is_last=False)
+        body = tool_calls.strip(item.body)
+        text = to_wire(replace(item, body=body), is_last=False)
+        if item.attachments:
+            marks = " ".join(
+                f"(picture {pictures + i})" for i in range(1, len(item.attachments) + 1)
+            )
+            pictures += len(item.attachments)
+            text = f"{marks} {text}".rstrip()
         if item.kind == "ooc" and item.role == "assistant":
             text = OOC_FRAME.replace("{body}", text)
-        elif item.speaker and item.body:
+        elif item.speaker and text:
             text = f"{item.speaker}: {text}"
         lines.append(f"[{n}] {text}")
     return "\n".join(lines)

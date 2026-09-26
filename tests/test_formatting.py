@@ -7,6 +7,7 @@ from otaku.formatting import (
     decode_text,
     flatten,
     format_context,
+    format_megabytes,
     format_seconds,
     format_size,
     pretty_path,
@@ -257,3 +258,10 @@ class TestTruncateLabel:
 
     def test_newlines_flatten_before_the_cut(self) -> None:
         assert truncate_label("one\ntwo", 50) == "one two"
+
+
+class TestFormatMegabytes:
+    def test_one_decimal_and_a_bare_whole_number(self) -> None:
+        assert format_megabytes(3_200_000) == "3.2 MB"
+        assert format_megabytes(10_000_000) == "10 MB"
+        assert format_megabytes(312_044) == "0.3 MB"

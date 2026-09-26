@@ -334,11 +334,15 @@ class ListScreen:
         header_filter: FilterOrBool,
         editing: Filter,
         edit_window: Window,
+        alternate: tuple[AnyContainer, Filter] | None = None,
     ) -> AnyContainer:
         """ONE box for the preview: a fixed header above a body that is the
         preview text — or, while editing, the live buffer in the same spot.
         The header never moves, so editing starts exactly where the text
-        already is."""
+        already is. `alternate` is another body shown in place of both
+        while its filter holds — a screen whose panel is more than one
+        text (the dossier's tools tab) brings its own, built the same
+        way."""
         panel_header = ConditionalContainer(
             Window(
                 FormattedTextControl(text=self._panel_header_text, show_cursor=False),
@@ -355,13 +359,20 @@ class ListScreen:
             always_hide_cursor=True,
             style="class:preview.body",
         )
-        panel_body = HSplit(
-            [
-                panel_header,
+        rows: list[AnyContainer] = [panel_header]
+        if alternate is None:
+            rows += [
                 ConditionalContainer(self._preview_window, filter=~editing),
                 ConditionalContainer(edit_window, filter=editing),
             ]
-        )
+        else:
+            other, shown = alternate
+            rows += [
+                ConditionalContainer(self._preview_window, filter=~editing & ~shown),
+                ConditionalContainer(edit_window, filter=editing & ~shown),
+                ConditionalContainer(other, filter=shown),
+            ]
+        panel_body = HSplit(rows)
         return bordered_box(
             panel_body,
             width=D(weight=1),

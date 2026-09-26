@@ -1,0 +1,97 @@
+{
+ "settings": [
+  {
+   "name": "use_shared_reminder",
+   "label": "Use shared reminder",
+   "injection_label": "shared reminder",
+   "tool": null,
+   "allowed_positions": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
+   ],
+   "enabled": false,
+   "position": 2,
+   "reminder_text": null,
+   "display_notes": null
+  },
+  {
+   "name": "use_story_reminder",
+   "label": "Set story reminder",
+   "injection_label": "story reminder",
+   "tool": null,
+   "allowed_positions": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
+   ],
+   "enabled": false,
+   "position": 2,
+   "reminder_text": "",
+   "display_notes": null
+  },
+  {
+   "name": "allow_assistant_notes",
+   "label": "Allow assistant notes",
+   "injection_label": "assistant notes",
+   "tool": "note",
+   "allowed_positions": [
+    "system",
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
+   ],
+   "enabled": false,
+   "position": 1,
+   "reminder_text": null,
+   "display_notes": true
+  },
+  {
+   "name": "allow_questions",
+   "label": "Allow questions",
+   "injection_label": "questions",
+   "tool": "question",
+   "allowed_positions": [
+    "system",
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
+   ],
+   "enabled": false,
+   "position": 1,
+   "reminder_text": null,
+   "display_notes": null
+  },
+  {
+   "name": "story_mode",
+   "label": "Story mode",
+   "injection_label": null,
+   "tool": null,
+   "allowed_positions": [],
+   "enabled": false,
+   "position": null,
+   "reminder_text": null,
+   "display_notes": null
+  }
+ ]
+}

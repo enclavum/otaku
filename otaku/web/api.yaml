@@ -103,7 +103,7 @@ openapi: 3.1.0
 
 info:
   title: otaku web API
-  version: 0.5.0
+  version: 0.6.0
   contact:
     name: otaku
     url: https://otaku.sh
@@ -180,6 +180,8 @@ tags:
     description: What otaku is reading, what it will send next, and what it has spent.
   - name: Settings
     description: The knobs, one door each.
+  - name: Signing in
+    description: The password, where one is set — neither lane, and the one door that is slow on purpose.
   - name: Server
     description: Neither lane — the server, not the session.
 
@@ -206,6 +208,7 @@ paths:
                 properties:
                   messages:
                     type: array
+                    description: The turns, each split into segments; a page that opens on a reply whose last call is a question poses it again.
                     items: { $ref: "#/components/schemas/Turn" }
     post:
       operationId: postPlay
@@ -230,6 +233,22 @@ paths:
               required: [line]
               properties:
                 line: { type: string }
+                files:
+                  type: array
+                  description: |
+                    The pictures the reader attached, as picked — the backend
+                    normalises them (`backend.files`): downsized to the wire
+                    edge, metadata stripped, PNG kept, everything else made
+                    JPEG. Refused eagerly, as a Notice, when the model cannot
+                    see, when there are more than eight, or when one is no
+                    picture; a `data` that is not base64 is a 400.
+                  items:
+                    type: object
+                    required: [data]
+                    properties:
+                      name: { type: string, description: "What the reader called it; for the refusal sentences alone, never kept." }
+                      media_type: { type: string, description: "As the browser reported it; the bytes decide." }
+                      data: { type: string, format: byte, description: "The file, base64." }
       responses:
         "200":
           description: Play one line.
@@ -293,6 +312,41 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Syntax" }
+
+  /api/files/{file}:
+    parameters:
+      - { name: file, in: path, required: true, schema: { type: string }, description: "The picture's file name in the store, extension included, as a turn's attachments carry it." }
+    get:
+      operationId: getFile
+      tags: [Playing]
+      summary: A picture on a turn, as the model saw it
+      description: |
+        The bytes, under their media type. A file never changes once
+        written, so the answer is `immutable` for a year — the one
+        exception beside the fonts to "nothing is cached". A name
+        nothing is stored under is a plain 404.
+      responses:
+        "200":
+          description: The picture.
+          content:
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/png: { schema: { type: string, format: binary } }
+        "404": { description: No such picture. }
+
+  /api/files/{file}/thumb:
+    parameters:
+      - { name: file, in: path, required: true, schema: { type: string }, description: "The picture's file name in the store, extension included." }
+    get:
+      operationId: getThumbnail
+      tags: [Playing]
+      summary: Its thumbnail
+      description: A JPEG, 512 px on the long edge, for the transcript; cached like the picture.
+      responses:
+        "200":
+          description: The thumbnail.
+          content:
+            image/jpeg: { schema: { type: string, format: binary } }
+        "404": { description: No such picture. }
 
   /api/cast:
     get:
@@ -423,7 +477,7 @@ paths:
               schema: { type: string, example: /api/stories/7 }
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/StoryMade" }
+              schema: { $ref: "#/components/schemas/StoryCreated" }
         "200":
           description: >
             No story was made, and the sentence says why — a document that
@@ -719,6 +773,70 @@ paths:
         "200": { $ref: "#/components/responses/Answered" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "403": { $ref: "#/components/responses/CrossOrigin" }
+
+  # A story's settings: what a story may switch — under the story, as its premise is.
+
+  /api/stories/{story}/settings:
+    parameters:
+      - { name: story, in: path, required: true, schema: { type: integer } }
+    get:
+      operationId: getStorySettings
+      tags: [Dossier]
+      summary: The story's settings as they stand
+      description: |
+        Every setting of the story, in the order their injections are
+        sent: a tool's switch (questions, assistant notes), the two
+        reminders, and a flag. Read whole, written one at a time. A
+        story stores only what was set; the rest reads at its default.
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: The story's settings.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StorySettings" }
+        "404": { description: No story with that id. }
+
+  /api/stories/{story}/settings/{setting}:
+    parameters:
+      - { name: story, in: path, required: true, schema: { type: integer } }
+      - name: setting
+        in: path
+        required: true
+        schema:
+          type: string
+          enum: [use_shared_reminder, use_story_reminder, allow_assistant_notes, allow_questions, story_mode]
+    patch:
+      operationId: patchStorySetting
+      tags: [Dossier]
+      summary: Change one setting of the story
+      description: |
+        What is not sent stays. `position` must be one of the setting's
+        `allowed_positions` ("system", or which of the reader's messages,
+        counted from the end, the text goes before — 1 the latest)
+        and is refused for a setting that injects nothing;
+        `reminder_text` is taken by the story reminder alone — the shared
+        reminder's text is /api/shared_reminder's; `display_notes` by the
+        notes tool alone. A flag that is not a boolean is malformed. The
+        answer's notice says where the setting now stands.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled: { type: boolean }
+                position:
+                  oneOf:
+                    - { type: string, enum: [system] }
+                    - { type: integer, minimum: 1 }
+                reminder_text: { type: string, description: The story's own reminder; "" clears it. }
+                display_notes: { type: boolean, description: Whether the reader is shown the notes the model writes; refused for a setting with nothing to display. }
+      responses:
+        "200": { $ref: "#/components/responses/Answered" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+        "404": { description: No story with that id. }
 
   # ---------- Extraction — the pass that reads played turns into scenes and cast ----------
 
@@ -1182,6 +1300,142 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "403": { $ref: "#/components/responses/CrossOrigin" }
 
+  /api/shared_reminder:
+    get:
+      operationId: getSharedReminder
+      tags: [Settings]
+      summary: The reminder stories share
+      description: |
+        One text, sent to every story that switched `use_shared_reminder`
+        on (a story setting, under the story). Not a knob of the /set
+        family: it is the database's, sealed with the rest, not a file's.
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: The text; "" when none.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SharedReminder" }
+    put:
+      operationId: putSharedReminder
+      tags: [Settings]
+      summary: Set the reminder stories share
+      description: Paragraphs, so a body and not a line; "" clears it.
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SharedReminder" }
+      responses:
+        "200": { $ref: "#/components/responses/Answered" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+
+  /api/prompts/{tool}:
+    parameters:
+      - name: tool
+        in: path
+        required: true
+        schema: { type: string, enum: [question, note] }
+    get:
+      operationId: getPrompt
+      tags: [Settings]
+      summary: A tool's prompt
+      description: |
+        What the model is told about the tool — prompts.toml's text, read
+        fresh, which every story with the tool switched on is sent.
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: The prompt.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Prompt" }
+    put:
+      operationId: putPrompt
+      tags: [Settings]
+      summary: Set a tool's prompt
+      description: |
+        Written into prompts.toml, that key alone, the pre-edit file
+        backed up; "" drops the key and the shipped text stands again.
+        Refused, with the sentence, when the file could not be edited.
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Prompt" }
+      responses:
+        "200": { $ref: "#/components/responses/Answered" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+
+  # ---------- Signing in ----------
+
+  /api/login:
+    get:
+      operationId: getLogin
+      tags: [Signing in]
+      summary: Whether a password is asked for, and whether this browser is through it
+      description: |
+        Answered without a credential, by the handler thread itself. The
+        page asks before it draws anything: the cookie is `HttpOnly`, so
+        whether it holds a good one is the server's to say.
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: Whether a password is asked for, and whether this browser is through it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginState" }
+    post:
+      operationId: postLogin
+      tags: [Signing in]
+      summary: Sign in
+      description: |
+        The password in the body, answered without a credential and in
+        neither lane. A good one answers `{}` with the token in an
+        `HttpOnly`, `SameSite=Strict` cookie named for the port — `Secure`
+        under TLS, kept 30 days when `remember` is true and 4 hours when
+        it is not. A wrong one answers 401 with a
+        Notice. With no password configured, every attempt is a refusal.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password: { type: string }
+                remember: { type: boolean }
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: "Signed in (`{}` and the cookie), or refused because no password is set (a Notice)."
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                  - $ref: "#/components/schemas/Notice"
+        "401":
+          description: Not the password. No cookie is set, and no `WWW-Authenticate` is sent.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Notice" }
+    delete:
+      operationId: deleteLogin
+      tags: [Signing in]
+      summary: Sign out
+      description: |
+        Answers `{}` and clears the cookie — the page cannot, since it is
+        not allowed to see it. The token itself is stateless: a copy kept
+        elsewhere stays good until it runs out.
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: Signed out.
+          content:
+            application/json:
+              schema: { type: object }
+
   # ---------- Neither lane: the server, not the session ----------
 
   /api/status:
@@ -1224,73 +1478,6 @@ paths:
           content:
             text/event-stream: {}
 
-  /api/login:
-    get:
-      operationId: getLogin
-      tags: [Server]
-      summary: Whether a password is asked for, and whether this browser is through it
-      description: |
-        Answered without a credential, by the handler thread itself. The
-        page asks before it draws anything: the cookie is `HttpOnly`, so
-        whether it holds a good one is the server's to say.
-      responses:
-        default: { $ref: "#/components/responses/Failed" }
-        "200":
-          description: Whether a password is asked for, and whether this browser is through it.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/LoginState" }
-    post:
-      operationId: postLogin
-      tags: [Server]
-      summary: Sign in
-      description: |
-        The password in the body, answered without a credential and in
-        neither lane. A good one answers `{}` with the token in an
-        `HttpOnly`, `SameSite=Strict` cookie named for the port — `Secure`
-        under TLS, kept 30 days when `remember` is true and 4 hours when
-        it is not. A wrong one answers 401 with a
-        Notice. With no password configured, every attempt is a refusal.
-      requestBody:
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [password]
-              properties:
-                password: { type: string }
-                remember: { type: boolean }
-      responses:
-        default: { $ref: "#/components/responses/Failed" }
-        "200":
-          description: "Signed in (`{}` and the cookie), or refused because no password is set (a Notice)."
-          content:
-            application/json:
-              schema:
-                oneOf:
-                  - type: object
-                  - $ref: "#/components/schemas/Notice"
-        "401":
-          description: Not the password. No cookie is set, and no `WWW-Authenticate` is sent.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Notice" }
-    delete:
-      operationId: deleteLogin
-      tags: [Server]
-      summary: Sign out
-      description: |
-        Answers `{}` and clears the cookie — the page cannot, since it is
-        not allowed to see it. The token itself is stateless: a copy kept
-        elsewhere stays good until it runs out.
-      responses:
-        default: { $ref: "#/components/responses/Failed" }
-        "200":
-          description: Signed out.
-          content:
-            application/json:
-              schema: { type: object }
-
 components:
   responses:
     Answered:
@@ -1317,16 +1504,18 @@ components:
 
   # Alphabetical.
   schemas:
-    Status:
+    Attachment:
       type: object
+      description: |
+        One picture on a turn, the row's own facts: the file name the
+        routes take (`/api/files/{file}`, `…/thumb`), whose extension
+        says the type, and its measure as the model sees it. The
+        reader's file name is not kept.
       properties:
-        status:
-          type: string
-          description: The backend's one-line account of what it is doing; "" when idle.
-        notices:
-          type: array
-          items: { type: string }
-          description: What the backend has said since the page last asked.
+        file: { type: string, description: "The file's name in the store: pic-<story>-<day>-<8 hex>.jpg or .png." }
+        width: { type: integer }
+        height: { type: integer }
+        size: { type: integer, description: "Bytes, as stored." }
 
     Balance:
       type: object
@@ -1401,11 +1590,26 @@ components:
             system_tokens: { type: integer }
             transcript_tokens: { type: integer }
             limit: { type: integer, description: "What the prompt measured against — the smaller of the context a request gets (the loaded size, or the model's own on a catalog) and max_context, minus the reply reserve." }
+            pictures_sent: { type: integer, description: "Pictures riding the verbatim messages, counted at the assembler's estimate each inside transcript_tokens." }
+            pictures_held: { type: integer, description: "On earlier verbatim messages but held back: the engine puts every picture on the latest message, so only the latest turn's ride." }
+            pictures_omitted: { type: integer, description: "On verbatim messages but not sent: the model cannot see, or the file is gone." }
             kept: { type: integer, description: "Derived: head + tail." }
             total_tokens: { type: integer, description: "Derived: system + transcript." }
             used: { type: integer, description: "Derived: percent of the limit." }
         lede: { type: string, description: "The summary said in words." }
         note: { type: string, description: "What the preview could not know, as a sentence — the model is not loaded, so the window is the assembler's substitute until a turn loads it; \"\" when it knew everything." }
+        injections:
+          type: array
+          description: What the request carries besides the story — each switched-on setting's text, in the order sent; the texts themselves are in the parts, being the wire.
+          items:
+            type: object
+            properties:
+              label: { type: string, description: "The name of the text, as its setting names what it injects (injection_label)." }
+              position:
+                description: Where the setting put it — "system", or before the Nth of the reader's messages counted from the end.
+                oneOf: [{ type: string, enum: [system] }, { type: integer, minimum: 1 }]
+              position_text: { type: string, description: "The position named as the depth ruler names it: \"system\", \"2nd last\" …" }
+              tokens: { type: integer, description: "The assembler's estimate of its cost — inside system_tokens at \"system\", inside transcript_tokens otherwise." }
         parts:
           type: array
           description: One part per message, exactly as the wire will carry it.
@@ -1414,6 +1618,7 @@ components:
             properties:
               role: { type: string }
               body: { type: string }
+              pictures: { type: integer, description: "Pictures riding this part; 0 for most." }
 
     Export:
       type: object
@@ -1457,6 +1662,17 @@ components:
         state: { type: string, description: 'Where it left them; "" when the pass wrote none.' }
         updated_at: { type: string, format: date-time, description: "When the extractor last wrote the record — display alone." }
 
+    LoginState:
+      type: object
+      required: [required, signed_in]
+      properties:
+        required:
+          type: boolean
+          description: Whether `[web] password` is set, so the page asks for it.
+        signed_in:
+          type: boolean
+          description: Whether this request carried a good credential; always false when `required` is false.
+
     Money:
       type: object
       description: |
@@ -1468,17 +1684,6 @@ components:
         amount: { type: string, example: "4.82" }
         currency: { type: string, example: "USD" }
         text: { type: string, example: "$4.82" }
-
-    LoginState:
-      type: object
-      required: [required, signed_in]
-      properties:
-        required:
-          type: boolean
-          description: Whether `[web] password` is set, so the page asks for it.
-        signed_in:
-          type: boolean
-          description: Whether this request carried a good credential; always false when `required` is false.
 
     Notice:
       type: object
@@ -1510,6 +1715,13 @@ components:
           properties:
             type: { const: text }
             text: { type: string }
+        - type: object
+          description: A piece of a tool call — the tool's name and its inside, never a fence; the deltas are parsed for the page, which parses nothing.
+          properties:
+            type: { const: tool_call }
+            tool: { type: string, description: The tool's name — question, note; a name no tool owns is a call all the same. }
+            text: { type: string }
+            closed: { type: boolean, description: This piece is the one the closing fence ended. }
         - type: object
           description: The stream declines mid-way; what already happened stands.
           properties:
@@ -1545,6 +1757,10 @@ components:
                 truncated: { type: boolean, description: "Derived: the reply was cut at the reply limit." }
                 rate: { type: number, nullable: true, description: "Derived: tokens per second over the generation alone." }
                 context_used: { type: integer, nullable: true, description: "Derived: percent of the context the prompt took." }
+            reply:
+              nullable: true
+              description: The reply as stored, the turn whole — split into segments, fences and all — for the page to land in place; null when nothing arrived.
+              allOf: [{ $ref: "#/components/schemas/Turn" }]
 
     PreparedCard:
       type: object
@@ -1561,6 +1777,12 @@ components:
             tokens: { type: integer, description: "The composed block's cost estimate." }
             large: { type: boolean, description: "Worth warning — it rides every request." }
             persona: { type: string, description: "The remembered {{user}} name; \"\" when none." }
+
+    Prompt:
+      type: object
+      required: [text]
+      properties:
+        text: { type: string }
 
     Providers:
       type: object
@@ -1702,6 +1924,7 @@ components:
         story: { type: string, description: "The open story's name; \"\" when none." }
         story_id: { type: [integer, "null"] }
         turns: { type: integer, description: "How many, so the runhead needs no chain." }
+        vision: { type: boolean, description: "Whether the model in use takes pictures — what shows the attach button; a picture is refused regardless." }
 
     Settings:
       type: object
@@ -1720,6 +1943,7 @@ components:
         autocorrect: { type: boolean }
         notification: { type: boolean }
         max_context: { type: integer, description: "Tokens the prompt may use at most; 0 = the model's own max context." }
+        idle_seconds: { type: number, description: "How long the prompt stands idle before the lore pass runs on its own ([lore] idle_seconds) — a fact, not a knob." }
         model: { type: string, description: "Whose parameters these are — the read is a snapshot, and a switch mid-slip would silently retitle it." }
         parameters:
           type: array
@@ -1737,6 +1961,23 @@ components:
               type: { type: string, description: "float / int / str — how a typed value parses; the stop list is a str field, read by the setter." }
               min: { type: number, nullable: true, description: "The least the setter takes — the provider's own bound where it states one (backend.api.settings.parameter_bounds); null for no floor." }
               max: { type: number, nullable: true, description: "The most the setter takes; null for no ceiling." }
+
+    SharedReminder:
+      type: object
+      required: [text]
+      properties:
+        text: { type: string }
+
+    Status:
+      type: object
+      properties:
+        status:
+          type: string
+          description: The backend's one-line account of what it is doing; "" when idle.
+        notices:
+          type: array
+          items: { type: string }
+          description: What the backend has said since the page last asked.
 
     Story:
       type: object
@@ -1768,7 +2009,7 @@ components:
           type: string
           description: 'Those messages as "N-M"; "" when none are open.'
 
-    StoryMade:
+    StoryCreated:
       allOf:
         - $ref: "#/components/schemas/Watched"
         - type: object
@@ -1792,6 +2033,36 @@ components:
         updated_at: { type: string, format: date-time }
         turns: { type: integer, description: "How many — a count is `turns`, the chain itself is `messages`." }
         open: { type: boolean, description: "Whether this is the session's open story." }
+
+    StorySettings:
+      type: object
+      properties:
+        settings:
+          type: array
+          description: Every setting, in the order their injections are sent where they share a place.
+          items:
+            type: object
+            properties:
+              name: { type: string, description: What the story stores it under — the path segment a PATCH takes. }
+              label: { type: string, description: "The switch's label, as the Tools tab shows it." }
+              injection_label: { type: string, nullable: true, description: "The name of the TEXT the setting injects — what a depth ruler places and /context lists — lowercase (questions, assistant notes, story reminder, shared reminder); null for a setting that injects nothing." }
+              tool: { type: string, nullable: true, description: "The name of the tool this setting switches (question, note) — its prompt is /api/prompts/{tool}'s; null for a setting that is no tool's." }
+              allowed_positions:
+                type: array
+                description: Every position it may take, as a menu offers them; empty for a setting that injects nothing.
+                items:
+                  oneOf:
+                    - { type: string, enum: [system] }
+                    - { type: integer, minimum: 1 }
+              enabled: { type: boolean }
+              position:
+                nullable: true
+                description: Where its injection rides — "system" appends it to the system message; a number puts it before that one of the reader's messages counted from the end, 1 the latest; null for a setting that injects nothing.
+                oneOf:
+                  - { type: string, enum: [system] }
+                  - { type: integer, minimum: 1 }
+              reminder_text: { type: string, nullable: true, description: "The story's own reminder; null for a setting that has none (every one but the story reminder's)." }
+              display_notes: { type: boolean, nullable: true, description: "Whether the reader is shown the notes the model writes; null for a setting with nothing to display." }
 
     Syntax:
       type: object
@@ -1833,6 +2104,30 @@ components:
         template:
           type: [string, "null"]
           description: "The template the turn was played with, filled at wire time."
+        attachments:
+          type: array
+          description: "The turn's pictures; [] when none."
+          items: { $ref: "#/components/schemas/Attachment" }
+        segments:
+          type: array
+          description: The body split in order — prose, and each tool call as its tool's facts — so the page draws a turn without parsing it. The body itself stays whole above, for the editor.
+          items:
+            oneOf:
+              - type: object
+                properties:
+                  kind: { const: prose }
+                  text: { type: string }
+              - type: object
+                description: A tool call; a tool's carries what it read (backend.tools.Tool.to_json), one of a name no tool owns its text alone.
+                properties:
+                  kind: { const: tool_call }
+                  tool: { type: string, description: The tool's name — question, note; any other is one no tool owns. }
+                  text: { type: string, description: The call's inside, as written. }
+                  question: { type: string, description: "A question's: the question itself." }
+                  options:
+                    type: array
+                    description: "A question's: the answers to pick from; [] for a free-form one."
+                    items: { type: string }
 
     Usage:
       type: object

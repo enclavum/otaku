@@ -41,8 +41,8 @@ def switch_model(session: Session, provider: str, model: str) -> str:
     if f"{provider}/{model}" == session.full_model_name:
         raise Refused(f"Already using {session.full_model_name}.")
     session._update_state(model=f"{provider}/{model}")
-    session._reload_model_settings()
     session._read_model()
+    session._load_model_settings()
     return f"Switched to {session.full_model_name}."
 
 

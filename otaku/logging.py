@@ -143,12 +143,13 @@ class RequestLog(DailyLog):
 
     def record_request(self, provider: str, purpose: str, body: dict[str, object]) -> str:
         """Append one request, BEFORE it is sent — a crash mid-stream
-        must not unrecord what left the machine. Returns the request id
-        the answer is later filed under. Best-effort; never fails the
-        request."""
+        must not unrecord what left the machine, its pictures elided to
+        their size (`elide_pictures`). Returns the request id the answer
+        is later filed under. Best-effort; never fails the request."""
         request_id = secrets.token_hex(4)
         self._append_entry(
-            {"provider": provider, "purpose": purpose, "request_id": request_id}, body
+            {"provider": provider, "purpose": purpose, "request_id": request_id},
+            elide_pictures(body),
         )
         return request_id
 
@@ -307,13 +308,10 @@ def render_requests(log: RequestLog, stamp: str) -> Iterator[str]:
                 if isinstance(message, dict):
                     content = message.get("content")
                     if isinstance(content, list):
-                        # Parts-form content (prompt-cache markers): the
-                        # text is what a reader audits; the markers show
-                        # in the meta row's own request, not per part.
-                        content = " ".join(
-                            str(part.get("text", "")) for part in content if isinstance(part, dict)
-                        )
-                    yield f"  [{message.get('role')}] {printable(str(content))}\n"
+                        content = parts_text(content)
+                    # A blank before each turn: the record is the JSON
+                    # as sent; this is only how it reads.
+                    yield f"\n  [{message.get('role')}] {printable(str(content))}\n"
         yield "\n"
     yield from _summary_lines(asked, answered, spent)
 
@@ -386,3 +384,56 @@ def dashed(stamp: str) -> str:
 def day_rows(days: list[tuple[str, int]]) -> list[str]:
     """The `--list` rows: one dashed day and its size per line."""
     return [f"{dashed(name)}  {size:>10,} B" for name, size in days]
+
+
+def parts_text(content: list[object]) -> str:
+    """A parts-form message as one audit line: its text parts as they
+    are, and a picture as a mark naming its type and how much rode —
+    from the elided note a logged request carries, or the data itself in
+    a line written before pictures were elided. The prompt-cache markers
+    are not per part; they show in the meta row's own request."""
+    out: list[str] = []
+    for part in content:
+        if not isinstance(part, dict):
+            continue
+        if part.get("type") == "image_url":
+            url = str(part.get("image_url", {}).get("url", ""))
+            head, _, data = url.partition(",")
+            media_type = head.removeprefix("data:").partition(";")[0] or "picture"
+            size = (
+                data.strip("<>").removesuffix(" chars elided")
+                if data.startswith("<")
+                else f"{len(data):,}"
+            )
+            out.append(f"[picture {media_type}, {size} chars]")
+        else:
+            out.append(str(part.get("text", "")))
+    return " ".join(piece for piece in out if piece)
+
+
+def elide_pictures(body: dict[str, object]) -> dict[str, object]:
+    """The request with each picture's bytes replaced by a note of their
+    size, the rest untouched: the log keeps what the model was TOLD, and
+    a picture is half a megabyte of base64 per turn it rides — a day of
+    them would be a day of megabytes nobody reads. Pure; a body without
+    messages, or with plain-string ones, comes back as it is."""
+    messages = body.get("messages")
+    if not isinstance(messages, list):
+        return body
+    kept: list[object] = []
+    for message in messages:
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, list):
+            kept.append(message)
+            continue
+        parts: list[object] = []
+        for part in content:
+            url = part.get("image_url", {}).get("url") if isinstance(part, dict) else None
+            if isinstance(url, str) and url.startswith("data:"):
+                head, _, data = url.partition(",")
+                note = f"{head},<{len(data):,} chars elided>"
+                parts.append({**part, "image_url": {**part["image_url"], "url": note}})
+            else:
+                parts.append(part)
+        kept.append({**message, "content": parts})
+    return {**body, "messages": kept}

@@ -38,13 +38,14 @@ from otaku.providers import (
 from otaku.settings.config import ConfigError, TerminalSettings, WebSettings
 from otaku.store import DatabaseError
 from otaku.store.ops.stories import StoryListing
-from otaku.store.schema import Character, Journal, Message, Scene
+from otaku.store.schema import Character, InjectionPosition, Journal, Message, Scene
 
 __all__ = [
     "Character",
     "ConfigError",
     "DatabaseError",
     "EncryptionError",
+    "InjectionPosition",
     "Journal",
     "KeySource",
     "Locality",

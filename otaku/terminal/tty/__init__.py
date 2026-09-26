@@ -5,7 +5,7 @@ fixed ones, `str.format` templates for those parameterized by a row
 number) and the input-side helpers — `latin_key`, the confirm answers,
 and `ask`, the raw-tty question posture the real-terminal reads share;
 the siblings own the theme, the typesetter, row math (and the cursor's
-one real ask), the pinned row, the spinner, and the clipboard. The mark
+one real ask), the pinned row, the spinner, and the clipboard. The banner
 a session opens with and the notification sound are not here: both
 frontends draw and ring them, so they live below (`otaku.console`). `render`
 is the one member that knows the story's types (how a turn looks),

@@ -21,13 +21,15 @@ import contextlib
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from otaku.context import assembler
-from otaku.context.assembler import ContextShape
+from otaku.context.assembler import ContextShape, PromptTexts
+from otaku.context.injections import Injection
+from otaku.context.tool_calls import ToolSet
 from otaku.formatting import format_duration
 from otaku.logging import ErrorLog, SystemLog
-from otaku.providers import Locality, OpenAIClient, ProviderError, Registry
+from otaku.providers import Locality, ModelInfo, OpenAIClient, ProviderError, Registry
 from otaku.store import Store
 from otaku.store.schema import Message
 from otaku.worker.extraction import ExtractionSettings, Extractor, PassResult, Report
@@ -42,17 +44,26 @@ _MIN_STATUS_DWELL = 5.0
 class Job:
     """One scheduled pass: the story to extract from, its extraction
     settings, and everything the warm-up needs to rebuild the next
-    request — template strings and a ContextShape ride the snapshot, so
+    request — the prompts and the window settings ride the snapshot, so
     the worker reads no settings files."""
 
+    # The pass: which model, how.
     provider: str
-    model: str
-    story_id: int
-    system: str  # the story's system prompt — the warm-up's assemble needs it
-    messages: list[Message]
-    shape: ContextShape
+    model: str  # its name; the engine's row is asked for once it is loaded
     extraction_settings: ExtractionSettings
-    force: bool = False  # the manual close: gate and settle margin dropped
+    force: bool  # the manual close: gate and settle margin dropped
+
+    # The next request, as `assemble_story` takes it, in its order.
+    story_id: int
+    system: str
+    messages: list[Message]
+    injections: tuple[Injection, ...]  # what the story's settings inject, built
+    tool_set: ToolSet  # how the story's tool calls go on the wire
+    prompts: PromptTexts  # the prompts object, whole
+    # Its `max_context` is the config's cap alone: the warm-up finishes
+    # it with the model's window once the model is loaded.
+    shape: ContextShape
+
     # Fires once the pass returns — whatever the outcome, before the
     # warm-up — so a foreground wait can report without the worker printing.
     on_done: Callable[[PassResult, Report], None] | None = field(default=None, compare=False)
@@ -298,6 +309,7 @@ class Worker:
         started = time.monotonic()
         self._log.record(f"warm-up started (story {job.story_id})")
         self._set_status("warming the prompt cache")
+        found: ModelInfo | None = None
         try:
             # Loaded first where cold, as the turn loads it: what is
             # warmed must be the prefix the turn sends, cut to the same
@@ -313,8 +325,16 @@ class Worker:
                 job.story_id,
                 system=job.system,
                 messages=job.messages,
-                shape=job.shape,
-                max_context=max_context,
+                injections=job.injections,
+                tool_set=job.tool_set,
+                prompts=job.prompts,
+                shape=replace(
+                    job.shape,
+                    max_context=assembler.context_in_force(max_context, job.shape.max_context),
+                ),
+                # The turn's own prefix, pictures included where the model
+                # sees them — a warm-up without them warms nothing.
+                pictures_ride=client.pictures_ride(job.model),
             ).messages
         except assembler.ContextOverflowError:
             # Nothing sendable to warm with — the next turn will say so.

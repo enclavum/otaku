@@ -68,6 +68,8 @@ DEAD = "http://127.0.0.1:9/v1"
 class Turn:
     role: str
     body: str
+    images: tuple[Image, ...] = ()
+    volatile: bool = False
 
 
 @dataclass
@@ -237,11 +239,11 @@ class TestChatCompletion:
             list(stream)
         assert len(server.requests) == 1
 
-    def test_images_ride_on_the_last_message(self, server: ModelServer) -> None:
+    def test_pictures_ride_their_own_message(self, server: ModelServer) -> None:
         image = Image(b"\x89PNG", "image/png")
         _drain(
             GenericClient(_config(server, "generic")).completion.chat(
-                "m", [Turn("user", "before"), Turn("user", "look")], {}, images=[image]
+                "m", [Turn("user", "before"), Turn("user", "look", (image,))], {}
             )
         )
         messages = server.requests[-1]["messages"]
@@ -1122,9 +1124,9 @@ class TestTokenCounts:
         ]
         assert "stream" not in counted
         # Counted as the turn would send it: the knobs beside the body,
-        # the images on the last message — what the template renders.
+        # the pictures on their message — what the template renders.
         client.completion.count_chat_tokens(
-            "m", [Turn("user", "u")], level="none", images=[Image(b"x", "image/png")]
+            "m", [Turn("user", "u", (Image(b"x", "image/png"),))], level="none"
         )
         counted = server.requests[-1]
         assert counted["chat_template_kwargs"] == {

@@ -1,12 +1,13 @@
 {
  "facts": {
-  "version": "0.5.0",
+  "version": "0.6.0",
   "model": "",
   "provider": "",
   "max_context": "",
   "story": "The River That Forgot Its Name",
   "story_id": 1,
-  "turns": 14
+  "turns": 16,
+  "vision": false
  },
  "story": {
   "id": 1,
@@ -16,7 +17,7 @@
   "first_user": "I follow the post road down into the Meade valley, checking the hills against my survey as I go.",
   "model": "",
   "updated_at": "2026-01-01T00:00:00+00:00",
-  "turns": 14,
+  "turns": 16,
   "open": true
  },
  "opened": {
@@ -34,7 +35,14 @@
     "speaker": "Maren",
     "provider": null,
     "model": null,
-    "template": null
+    "template": null,
+    "attachments": [],
+    "segments": [
+     {
+      "kind": "prose",
+      "text": "I follow the post road down into the Meade valley, checking the hills against my survey as I go."
+     }
+    ]
    },
    {
     "id": 2,
@@ -44,7 +52,14 @@
     "speaker": null,
     "provider": null,
     "model": null,
-    "template": null
+    "template": null,
+    "attachments": [],
+    "segments": [
+     {
+      "kind": "prose",
+      "text": "The road knows the way better than the map does. You crest the last rise as the afternoon goes amber, and the valley opens below you: hedgerows, a scatter of roofs, the gray sag of the ferry house — and a wrongness you feel a full breath before you can name it.\n\nThe river is not there.\n\nNot low. Not narrowed by drought. Gone. A long channel of pale stones curves through the valley like a shed skin, and where your survey shows a confident blue line labeled MEADE, there is only dust hanging in the light. Down by the far landing, a flat-bottomed ferry sits on wooden chocks, tilted, its guide-rope still strung taut across the empty air."
+     }
+    ]
    },
    {
     "id": 3,
@@ -54,7 +69,14 @@
     "speaker": "Maren",
     "provider": null,
     "model": null,
-    "template": "((OOC: The user writes as Maren.))\n{body}"
+    "template": "((OOC: The user writes as Maren.))\n{body}",
+    "attachments": [],
+    "segments": [
+     {
+      "kind": "prose",
+      "text": "I kneel at the bank and press my palm to the riverbed."
+     }
+    ]
    },
    {
     "id": 4,
@@ -64,7 +86,14 @@
     "speaker": null,
     "provider": null,
     "model": null,
-    "template": null
+    "template": null,
+    "attachments": [],
+    "segments": [
+     {
+      "kind": "prose",
+      "text": "The stones are dry the way a hearth is dry — warmed through, settled, as if no water has touched them in years rather than days. Fish bones lie wedged in the cracks, bleached brittle and clean. Three days dead, they should stink. They don't. They look like relics from someone else's century.\n\nUp by the beached ferry, something moves: a figure straightens out of the hull's shadow, a coil of rope over one shoulder, and goes very still — watching you the way people watch weather coming over a ridge."
+     }
+    ]
    },
    {
     "id": 5,
@@ -74,7 +103,14 @@
     "speaker": "Maren",
     "provider": null,
     "model": null,
-    "template": null
+    "template": null,
+    "attachments": [],
+    "segments": [
+     {
+      "kind": "prose",
+      "text": "I raise a hand in greeting and call out: \"I'm a mapmaker. I think my map is wrong — I'd be glad to be told how.\""
+     }
+    ]
    },
    {
     "id": 6,
@@ -84,7 +120,14 @@
     "speaker": null,
     "provider": null,
     "model": null,
-    "template": null
+    "template": null,
+    "attachments": [],
+    "segments": [
+     {
+      "kind": "prose",
+      "text": "\"Wrong.\" The figure turns the word over like a coin he suspects is clipped. He comes down the landing steps stiff-kneed — an old man, river-tanned to the elbows, with a ferryman's way of standing that keeps his weight ready for a deck that is no longer there.\n\n\"Tallis,\" he says. \"Ferryman. Was.\" He looks at your hand until you lower it, then nods once, which seems to settle something. \"Your map's not wrong, mapmaker. It's out of date by three nights. The river left.\"\n\nHe says it the way a man reports a death in the family — and then, quieter, with a glance up the valley as if the words might be overheard:\n\n\"It went uphill.\""
+     }
+    ]
    },
    {
     "id": 7,
@@ -94,7 +137,14 @@
     "speaker": "Maren",
     "provider": null,
     "model": null,
-    "template": null
+    "template": null,
+    "attachments": [],
+    "segments": [
+     {
+      "kind": "prose",
+      "text": "\"Uphill,\" I repeat, and I write it in my notebook where he can watch me do it. \"I take you at your word, Tallis. Show me.\""
+     }
+    ]
    },
    {
     "id": 8,
@@ -104,7 +154,14 @@
     "speaker": null,
     "provider": null,
     "model": null,
-    "template": null
+    "template": null,
+    "attachments": [],
+    "segments": [
+     {
+      "kind": "prose",
+      "text": "Something eases in the old man's shoulders — the particular relief of a person believed. He takes you up the old channel at a ferryman's pace, reading the banks the way you read contour lines.\n\nAnd the banks agree with him. The scour marks — the long grooves a river drags into its own bed — run against the slope. Grass along the margins lies combed uphill, stiff with dried silt. A waterline stain climbs from stone to stone like a stair. Everything a river leaves behind is here, and all of it is facing the wrong way.\n\n\"Three nights ago I heard it go,\" Tallis says. \"Not a flood-sound. A walking-sound.\""
+     }
+    ]
    },
    {
     "id": 9,
@@ -114,7 +171,14 @@
     "speaker": "Maren",
     "provider": null,
     "model": null,
-    "template": "((OOC: The user writes as Maren.))\n{body}"
+    "template": "((OOC: The user writes as Maren.))\n{body}",
+    "attachments": [],
+    "segments": [
+     {
+      "kind": "prose",
+      "text": "Back at the ferry, I unroll my survey on the deck and weight its corners with stones. \"Point,\" I say. \"Where did it bend wrong?\""
+     }
+    ]
    },
    {
     "id": 10,
@@ -124,7 +188,14 @@
     "speaker": null,
     "provider": null,
     "model": null,
-    "template": null
+    "template": null,
+    "attachments": [],
+    "segments": [
+     {
+      "kind": "prose",
+      "text": "Tallis dries his hands on his coat with old habit before he touches the map — a riverman's courtesy to paper. His finger circles the valley once, hesitating, and comes down hard on a narrow throat of the river two leagues upstream, where your fine black linework marks the weir at Harrow Lock.\n\n\"There,\" he says. \"It always fought the weir. This time—\"\n\nHe stops, because you have both seen it: under his fingertip, the inked river moves. A hair's width, no more — the blue line leaning toward his hand the way a compass needle leans, and then holding its new course as if it had always run that way.\n\nMaps record. Maps do not move. Yours just did."
+     }
+    ]
    },
    {
     "id": 11,
@@ -134,7 +205,14 @@
     "speaker": "Maren",
     "provider": null,
     "model": null,
-    "template": null
+    "template": null,
+    "attachments": [],
+    "segments": [
+     {
+      "kind": "prose",
+      "text": "I mark the river's true course in red ink, roll the map, and take the towpath toward Harrow Lock while there's still light."
+     }
+    ]
    },
    {
     "id": 12,
@@ -144,7 +222,14 @@
     "speaker": null,
     "provider": null,
     "model": null,
-    "template": null
+    "template": null,
+    "attachments": [],
+    "segments": [
+     {
+      "kind": "prose",
+      "text": "Tallis gives you the way — towpath to the milestone, then the cut through the alder wood — and does not offer to come. He stands by his beached ferry with his coil of rope, and you leave him there in the failing light, ashamed and alone and glad of you, all three at once.\n\nThe towpath climbs with the old channel beside it, dry stones going blue in the dusk. By the time the lock rises ahead of you — twin gates standing open on their chamber like a door left ajar — the first stars are out. And you hear it before you see anything: somewhere below the weir, faint and steady, the sound of running water in a valley that has none."
+     }
+    ]
    },
    {
     "id": 13,
@@ -154,7 +239,14 @@
     "speaker": "Maren",
     "provider": null,
     "model": null,
-    "template": "((OOC: The user writes as Maren.))\n{body}"
+    "template": "((OOC: The user writes as Maren.))\n{body}",
+    "attachments": [],
+    "segments": [
+     {
+      "kind": "prose",
+      "text": "I climb down the ladder into the lock chamber and stand very still, listening."
+     }
+    ]
    },
    {
     "id": 14,
@@ -164,12 +256,77 @@
     "speaker": null,
     "provider": null,
     "model": null,
-    "template": null
+    "template": null,
+    "attachments": [],
+    "segments": [
+     {
+      "kind": "prose",
+      "text": "The chamber swallows the last of the light. Ladder rungs cold under your hands, the smell of wet stone in a dry country — and there, along the chamber floor, you find it: a sheet of water no deeper than a coin, sliding smooth and purposeful UP the slope, threading between the stones, carrying dead alder leaves against gravity toward the black mouth of the culvert.\n\nYou stand in the dark with your map case on your back, and the water parts around your boots without hurry, as if it has somewhere to be.\n\nFrom inside the culvert, conversational, a voice:\n\n\"You're late, mapmaker.\""
+     }
+    ]
+   },
+   {
+    "id": 15,
+    "role": "user",
+    "body": "I hold the lantern over my map, then over the chamber floor, and look from one to the other.",
+    "kind": "dialogue",
+    "speaker": "Maren",
+    "provider": null,
+    "model": null,
+    "template": null,
+    "attachments": [
+     {
+      "file": "pic-0001-20260101-8b678a87.jpg",
+      "width": 384,
+      "height": 672,
+      "size": 72208
+     },
+     {
+      "file": "pic-0001-20260101-dd701403.jpg",
+      "width": 1200,
+      "height": 900,
+      "size": 317287
+     }
+    ],
+    "segments": [
+     {
+      "kind": "prose",
+      "text": "I hold the lantern over my map, then over the chamber floor, and look from one to the other."
+     }
+    ]
+   },
+   {
+    "id": 16,
+    "role": "assistant",
+    "body": "The lantern shows what the dark would not. On the map, the red line you drew runs on past the lock and up the hill, into country you have never surveyed. On the floor, the water runs the same way.\n\n\"Well?\" says the voice from the culvert. \"Are you coming?\"\n\n```otk-question\nDo you follow the water into the culvert?\n1. I go in, lantern first\n2. I ask the voice its name before I move\n3. I climb out and go back for Tallis\n```",
+    "kind": "dialogue",
+    "speaker": null,
+    "provider": null,
+    "model": null,
+    "template": null,
+    "attachments": [],
+    "segments": [
+     {
+      "kind": "prose",
+      "text": "The lantern shows what the dark would not. On the map, the red line you drew runs on past the lock and up the hill, into country you have never surveyed. On the floor, the water runs the same way.\n\n\"Well?\" says the voice from the culvert. \"Are you coming?\""
+     },
+     {
+      "kind": "tool_call",
+      "tool": "question",
+      "text": "Do you follow the water into the culvert?\n1. I go in, lantern first\n2. I ask the voice its name before I move\n3. I climb out and go back for Tallis",
+      "question": "Do you follow the water into the culvert?",
+      "options": [
+       "I go in, lantern first",
+       "I ask the voice its name before I move",
+       "I climb out and go back for Tallis"
+      ]
+     }
+    ]
    }
   ],
   "read_through": 10,
-  "unread": 4,
-  "unread_span": "11-14",
+  "unread": 6,
+  "unread_span": "11-16",
   "scenes": [
    {
     "id": 1,
@@ -295,7 +452,7 @@
  },
  "context": {
   "shape": {
-   "head": 14,
+   "head": 16,
    "middle": 0,
    "history": false,
    "rolled_up": 0,
@@ -304,74 +461,103 @@
    "tail_target": 150,
    "tail_setting": 150,
    "system_tokens": 73,
-   "transcript_tokens": 1259,
+   "transcript_tokens": 1356,
    "limit": 32574,
-   "kept": 14,
-   "total_tokens": 1332,
+   "pictures_sent": 0,
+   "pictures_omitted": 2,
+   "pictures_held": 0,
+   "kept": 16,
+   "total_tokens": 1429,
    "used": 4
   },
-  "lede": "Context preview — the exact request to be sent. Context summary:\n\n  ~1,332 tokens · 4% of the 32,574 limit\n  system 73 · transcript 1,259\n  14 messages verbatim",
+  "lede": "Context preview — the exact request to be sent. Context summary:\n\n  ~1,429 tokens · 4% of the 32,574 limit\n  system 73 · transcript 1,356\n  16 messages verbatim\n  2 pictures on the verbatim messages not sent: the model cannot see, or the file is gone",
   "note": "",
+  "injections": [],
   "parts": [
    {
     "role": "system",
-    "body": "You are the narrator of a quiet fantasy mystery. Write in second person, present tense, unhurried and concrete. Maren, a traveling cartographer, is played by the user — never speak, act, or decide for her. Keep replies to a few short paragraphs and end each one on something Maren can act on."
+    "body": "You are the narrator of a quiet fantasy mystery. Write in second person, present tense, unhurried and concrete. Maren, a traveling cartographer, is played by the user — never speak, act, or decide for her. Keep replies to a few short paragraphs and end each one on something Maren can act on.",
+    "pictures": 0
    },
    {
     "role": "user",
-    "body": "I follow the post road down into the Meade valley, checking the hills against my survey as I go."
+    "body": "I follow the post road down into the Meade valley, checking the hills against my survey as I go.",
+    "pictures": 0
    },
    {
     "role": "assistant",
-    "body": "The road knows the way better than the map does. You crest the last rise as the afternoon goes amber, and the valley opens below you: hedgerows, a scatter of roofs, the gray sag of the ferry house — and a wrongness you feel a full breath before you can name it.\nThe river is not there.\nNot low. Not narrowed by drought. Gone. A long channel of pale stones curves through the valley like a shed skin, and where your survey shows a confident blue line labeled MEADE, there is only dust hanging in the light. Down by the far landing, a flat-bottomed ferry sits on wooden chocks, tilted, its guide-rope still strung taut across the empty air."
+    "body": "The road knows the way better than the map does. You crest the last rise as the afternoon goes amber, and the valley opens below you: hedgerows, a scatter of roofs, the gray sag of the ferry house — and a wrongness you feel a full breath before you can name it.\nThe river is not there.\nNot low. Not narrowed by drought. Gone. A long channel of pale stones curves through the valley like a shed skin, and where your survey shows a confident blue line labeled MEADE, there is only dust hanging in the light. Down by the far landing, a flat-bottomed ferry sits on wooden chocks, tilted, its guide-rope still strung taut across the empty air.",
+    "pictures": 0
    },
    {
     "role": "user",
-    "body": "((OOC: The user writes as Maren.))\nI kneel at the bank and press my palm to the riverbed."
+    "body": "((OOC: The user writes as Maren.))\nI kneel at the bank and press my palm to the riverbed.",
+    "pictures": 0
    },
    {
     "role": "assistant",
-    "body": "The stones are dry the way a hearth is dry — warmed through, settled, as if no water has touched them in years rather than days. Fish bones lie wedged in the cracks, bleached brittle and clean. Three days dead, they should stink. They don't. They look like relics from someone else's century.\nUp by the beached ferry, something moves: a figure straightens out of the hull's shadow, a coil of rope over one shoulder, and goes very still — watching you the way people watch weather coming over a ridge."
+    "body": "The stones are dry the way a hearth is dry — warmed through, settled, as if no water has touched them in years rather than days. Fish bones lie wedged in the cracks, bleached brittle and clean. Three days dead, they should stink. They don't. They look like relics from someone else's century.\nUp by the beached ferry, something moves: a figure straightens out of the hull's shadow, a coil of rope over one shoulder, and goes very still — watching you the way people watch weather coming over a ridge.",
+    "pictures": 0
    },
    {
     "role": "user",
-    "body": "I raise a hand in greeting and call out: \"I'm a mapmaker. I think my map is wrong — I'd be glad to be told how.\""
+    "body": "I raise a hand in greeting and call out: \"I'm a mapmaker. I think my map is wrong — I'd be glad to be told how.\"",
+    "pictures": 0
    },
    {
     "role": "assistant",
-    "body": "\"Wrong.\" The figure turns the word over like a coin he suspects is clipped. He comes down the landing steps stiff-kneed — an old man, river-tanned to the elbows, with a ferryman's way of standing that keeps his weight ready for a deck that is no longer there.\n\"Tallis,\" he says. \"Ferryman. Was.\" He looks at your hand until you lower it, then nods once, which seems to settle something. \"Your map's not wrong, mapmaker. It's out of date by three nights. The river left.\"\nHe says it the way a man reports a death in the family — and then, quieter, with a glance up the valley as if the words might be overheard:\n\"It went uphill.\""
+    "body": "\"Wrong.\" The figure turns the word over like a coin he suspects is clipped. He comes down the landing steps stiff-kneed — an old man, river-tanned to the elbows, with a ferryman's way of standing that keeps his weight ready for a deck that is no longer there.\n\"Tallis,\" he says. \"Ferryman. Was.\" He looks at your hand until you lower it, then nods once, which seems to settle something. \"Your map's not wrong, mapmaker. It's out of date by three nights. The river left.\"\nHe says it the way a man reports a death in the family — and then, quieter, with a glance up the valley as if the words might be overheard:\n\"It went uphill.\"",
+    "pictures": 0
    },
    {
     "role": "user",
-    "body": "\"Uphill,\" I repeat, and I write it in my notebook where he can watch me do it. \"I take you at your word, Tallis. Show me.\""
+    "body": "\"Uphill,\" I repeat, and I write it in my notebook where he can watch me do it. \"I take you at your word, Tallis. Show me.\"",
+    "pictures": 0
    },
    {
     "role": "assistant",
-    "body": "Something eases in the old man's shoulders — the particular relief of a person believed. He takes you up the old channel at a ferryman's pace, reading the banks the way you read contour lines.\nAnd the banks agree with him. The scour marks — the long grooves a river drags into its own bed — run against the slope. Grass along the margins lies combed uphill, stiff with dried silt. A waterline stain climbs from stone to stone like a stair. Everything a river leaves behind is here, and all of it is facing the wrong way.\n\"Three nights ago I heard it go,\" Tallis says. \"Not a flood-sound. A walking-sound.\""
+    "body": "Something eases in the old man's shoulders — the particular relief of a person believed. He takes you up the old channel at a ferryman's pace, reading the banks the way you read contour lines.\nAnd the banks agree with him. The scour marks — the long grooves a river drags into its own bed — run against the slope. Grass along the margins lies combed uphill, stiff with dried silt. A waterline stain climbs from stone to stone like a stair. Everything a river leaves behind is here, and all of it is facing the wrong way.\n\"Three nights ago I heard it go,\" Tallis says. \"Not a flood-sound. A walking-sound.\"",
+    "pictures": 0
    },
    {
     "role": "user",
-    "body": "((OOC: The user writes as Maren.))\nBack at the ferry, I unroll my survey on the deck and weight its corners with stones. \"Point,\" I say. \"Where did it bend wrong?\""
+    "body": "((OOC: The user writes as Maren.))\nBack at the ferry, I unroll my survey on the deck and weight its corners with stones. \"Point,\" I say. \"Where did it bend wrong?\"",
+    "pictures": 0
    },
    {
     "role": "assistant",
-    "body": "Tallis dries his hands on his coat with old habit before he touches the map — a riverman's courtesy to paper. His finger circles the valley once, hesitating, and comes down hard on a narrow throat of the river two leagues upstream, where your fine black linework marks the weir at Harrow Lock.\n\"There,\" he says. \"It always fought the weir. This time—\"\nHe stops, because you have both seen it: under his fingertip, the inked river moves. A hair's width, no more — the blue line leaning toward his hand the way a compass needle leans, and then holding its new course as if it had always run that way.\nMaps record. Maps do not move. Yours just did."
+    "body": "Tallis dries his hands on his coat with old habit before he touches the map — a riverman's courtesy to paper. His finger circles the valley once, hesitating, and comes down hard on a narrow throat of the river two leagues upstream, where your fine black linework marks the weir at Harrow Lock.\n\"There,\" he says. \"It always fought the weir. This time—\"\nHe stops, because you have both seen it: under his fingertip, the inked river moves. A hair's width, no more — the blue line leaning toward his hand the way a compass needle leans, and then holding its new course as if it had always run that way.\nMaps record. Maps do not move. Yours just did.",
+    "pictures": 0
    },
    {
     "role": "user",
-    "body": "I mark the river's true course in red ink, roll the map, and take the towpath toward Harrow Lock while there's still light."
+    "body": "I mark the river's true course in red ink, roll the map, and take the towpath toward Harrow Lock while there's still light.",
+    "pictures": 0
    },
    {
     "role": "assistant",
-    "body": "Tallis gives you the way — towpath to the milestone, then the cut through the alder wood — and does not offer to come. He stands by his beached ferry with his coil of rope, and you leave him there in the failing light, ashamed and alone and glad of you, all three at once.\nThe towpath climbs with the old channel beside it, dry stones going blue in the dusk. By the time the lock rises ahead of you — twin gates standing open on their chamber like a door left ajar — the first stars are out. And you hear it before you see anything: somewhere below the weir, faint and steady, the sound of running water in a valley that has none."
+    "body": "Tallis gives you the way — towpath to the milestone, then the cut through the alder wood — and does not offer to come. He stands by his beached ferry with his coil of rope, and you leave him there in the failing light, ashamed and alone and glad of you, all three at once.\nThe towpath climbs with the old channel beside it, dry stones going blue in the dusk. By the time the lock rises ahead of you — twin gates standing open on their chamber like a door left ajar — the first stars are out. And you hear it before you see anything: somewhere below the weir, faint and steady, the sound of running water in a valley that has none.",
+    "pictures": 0
    },
    {
     "role": "user",
-    "body": "((OOC: The user writes as Maren.))\nI climb down the ladder into the lock chamber and stand very still, listening."
+    "body": "((OOC: The user writes as Maren.))\nI climb down the ladder into the lock chamber and stand very still, listening.",
+    "pictures": 0
    },
    {
     "role": "assistant",
-    "body": "The chamber swallows the last of the light. Ladder rungs cold under your hands, the smell of wet stone in a dry country — and there, along the chamber floor, you find it: a sheet of water no deeper than a coin, sliding smooth and purposeful UP the slope, threading between the stones, carrying dead alder leaves against gravity toward the black mouth of the culvert.\nYou stand in the dark with your map case on your back, and the water parts around your boots without hurry, as if it has somewhere to be.\nFrom inside the culvert, conversational, a voice:\n\"You're late, mapmaker.\""
+    "body": "The chamber swallows the last of the light. Ladder rungs cold under your hands, the smell of wet stone in a dry country — and there, along the chamber floor, you find it: a sheet of water no deeper than a coin, sliding smooth and purposeful UP the slope, threading between the stones, carrying dead alder leaves against gravity toward the black mouth of the culvert.\nYou stand in the dark with your map case on your back, and the water parts around your boots without hurry, as if it has somewhere to be.\nFrom inside the culvert, conversational, a voice:\n\"You're late, mapmaker.\"",
+    "pictures": 0
+   },
+   {
+    "role": "user",
+    "body": "I hold the lantern over my map, then over the chamber floor, and look from one to the other.",
+    "pictures": 0
+   },
+   {
+    "role": "assistant",
+    "body": "The lantern shows what the dark would not. On the map, the red line you drew runs on past the lock and up the hill, into country you have never surveyed. On the floor, the water runs the same way.\n\"Well?\" says the voice from the culvert. \"Are you coming?\"\nDo you follow the water into the culvert?",
+    "pictures": 0
    }
   ]
  }

@@ -3,7 +3,9 @@ counts the tokens spent, /info dumps what otaku knows."""
 
 import re
 
+from otaku.backend import InjectionPosition
 from otaku.backend.api import reports
+from otaku.backend.api import stories as api_stories
 from otaku.formatting import format_context
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch, set_config, set_config_provider
@@ -78,6 +80,42 @@ class TestContext:
             assert "A guest came in and met the Keeper." in out
         finally:
             app.close()
+
+
+class TestContextInjections:
+    """What the request carries besides the story is reported as facts —
+    each switched-on setting, where it rides, what it costs — and said
+    as a bullet each in the terminal's summary."""
+
+    def test_the_report_names_each_injection_its_place_and_its_cost(self, app: App) -> None:
+        app.play("I enter the hall.")
+        assert reports.context(app.session).injections == ()
+        api_stories.update_setting(
+            app.session, "allow_questions", enabled=True, position=InjectionPosition()
+        )
+        api_stories.update_setting(
+            app.session, "use_story_reminder", enabled=True, reminder_text="Rain all night."
+        )
+        report = reports.context(app.session)
+        facts = [(i.label, i.position, i.position_text) for i in report.injections]
+        # named as the setting names what it injects, not as the switch —
+        # and in the request's order: the system message first, then the
+        # deepest first, not in the order sent (the reminder rides first)
+        assert facts == [
+            ("questions", InjectionPosition(), "system"),
+            ("story reminder", InjectionPosition(2), "3rd last"),
+        ]
+        assert all(i.tokens > 0 for i in report.injections)
+        # a system injection's tokens are the system message's
+        assert report.prompt.system_tokens >= report.injections[0].tokens
+
+    def test_the_terminal_lists_them_under_the_summary(self, app: App, capsys) -> None:
+        app.play("I enter the hall.")
+        api_stories.update_setting(app.session, "allow_questions", enabled=True)
+        capsys.readouterr()
+        app.play("/context")
+        out = capsys.readouterr().out
+        assert "  injected:\n  - questions (2nd last, ~" in out
 
 
 class TestUsage:

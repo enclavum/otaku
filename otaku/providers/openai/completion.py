@@ -15,6 +15,7 @@ through the transport it is handed; it knows nothing of the model half.
 """
 
 import contextlib
+import enum
 import json
 import time
 from collections.abc import Callable, Generator, Iterator, Sequence
@@ -26,7 +27,7 @@ from otaku.providers.errors import DeclinedError, ProviderError, StatusError, Un
 from otaku.providers.http import ASK_TIMEOUT, REPLY_TIMEOUT, Cut, Http, StreamCut
 from otaku.providers.openai import frames, reasoning, requests
 from otaku.providers.openai.models import OpenAIModels
-from otaku.providers.openai.requests import Image, WireMessage
+from otaku.providers.openai.requests import WireMessage
 from otaku.settings.providers import ProviderConfig
 
 # What a stream reads off each frame: (reasoning, text) deltas.
@@ -136,6 +137,18 @@ _SAMPLER_WORDS: frozenset[str] = SAMPLER_PARAMS | {"repeat_penalty"}
 Bounds = tuple[float | None, float | None]
 
 
+class PicturesRide(enum.Enum):
+    """Where a turn's pictures ride in a request: nowhere (the model
+    cannot see), each on the message it was sent on, or gathered with
+    every other picture in the request onto the latest prompt — an
+    engine's quirk (`OpenAICompletion.pictures_ride`), which the
+    assembler works around by sending such an engine the latest turn's alone."""
+
+    NONE = "none"
+    EACH = "each"
+    LATEST = "latest"
+
+
 class OpenAICompletion:
     # ---------- class knowledge: what is true of the engine's wire ----------
 
@@ -169,6 +182,13 @@ class OpenAICompletion:
     # Whether `count_chat_tokens` and `count_text_tokens` answer — the
     # engine's fact, not a model's.
     can_count_tokens: ClassVar[bool] = False
+    # Where a picture ends up on this engine's wire: on the message it
+    # was sent on, or gathered with every other picture in the request
+    # onto the latest prompt — omlx's VLM prompt building at 0.6, which
+    # cannot keep two turns' pictures apart and shows the model one
+    # stacked image. Not a capability: a quirk of one engine's wire,
+    # written on that client. Never NONE here: that is the model's.
+    pictures_ride: ClassVar[PicturesRide] = PicturesRide.EACH
 
     def __init__(
         self,
@@ -198,7 +218,6 @@ class OpenAICompletion:
         params: dict[str, object],
         *,
         level: str | None = None,
-        images: Sequence[Image] = (),
         timeout: float = REPLY_TIMEOUT,
         purpose: str = "chat",
         watched: bool = True,
@@ -207,8 +226,7 @@ class OpenAICompletion:
         """Stream one chat completion: Reasoning and Text deltas, then a
         final Stats. `level` is a thinking level in `reasoning`'s
         vocabulary — a rung, off or on, a budget — sent on every knob
-        the engine reads; `images` ride on the last
-        message; `watched=False` skips the pacing for a call nobody
+        the engine reads; `watched=False` skips the pacing for a call nobody
         watches, so its cancel is not delayed. `on_idle` is ticked
         while the reply is waited on — before the first token above all
         — and may answer False to say nobody reads any more: the stream
@@ -216,7 +234,7 @@ class OpenAICompletion:
         whether the reply is paced or not; without it, and without the
         pacing, the caller's own thread is in the read and nothing
         ticks."""
-        body, knobs = self._chat_request(model, messages, params, level=level, images=images)
+        body, knobs = self._chat_request(model, messages, params, level=level)
         url = f"{self._config.url}/chat/completions"
         return self._relayed(
             url, body, knobs, purpose, timeout, frames.chat_delta, watched, on_idle
@@ -278,12 +296,11 @@ class OpenAICompletion:
         messages: Sequence[WireMessage],
         *,
         level: str | None = None,
-        images: Sequence[Image] = (),
         timeout: float = ASK_TIMEOUT,
     ) -> int | None:
         """How many tokens the chat wire would spend on `messages`, as
         the engine itself counts them, of the request a turn would send:
-        `level` on the knobs and `images` on the last message, where
+        `level` on the knobs and each message's pictures on it, where
         the engine's count renders them. None where it cannot say, which
         the base cannot. Best level: a caller keeps its estimate for
         None."""
@@ -321,7 +338,6 @@ class OpenAICompletion:
         params: dict[str, object],
         *,
         level: str | None,
-        images: Sequence[Image],
     ) -> tuple[dict[str, object], dict[str, object]]:
         """The chat request as the wire gets it: the body, and the
         reasoning knobs beside it — apart, since a 400 to the knobs
@@ -331,7 +347,6 @@ class OpenAICompletion:
             model,
             messages,
             self._wire_params(params, model),
-            images=images,
             cache_ttl=self._cache_ttl(),
         )
         return body, reasoning.fields(level, self.chat_reasoning_knobs)

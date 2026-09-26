@@ -340,16 +340,19 @@ _ASK_DEADLINE = 1.0  # xterm.js answers both queries; the deadline is for a host
 
 def _demo_ask(query: str, response: "re.Pattern[bytes]") -> "re.Match[bytes] | None":
     """The product's `tty.ask` over the bridge: write the query, read the
-    queue until the answer matches. Bytes typed while a query is in
-    flight are dropped with the match, exactly as the termios original
-    drops them."""
+    queue until the answer matches. Everything read goes with the match,
+    exactly as the termios original drops what it read: the answer's own
+    tail included — xterm.js ends its colour report with ESC \\ where
+    the probe matches through the triplet, and a tail left in the queue
+    would open the first prompt as Escape and a typed backslash — and
+    the bytes typed while the query was in flight."""
     _flush_out()
     termbridge.write(query)
     deadline = time.monotonic() + _ASK_DEADLINE
     while True:
         match = response.search(bytes(_queue))
         if match is not None:
-            del _queue[: match.end()]
+            _queue.clear()
             return match
         left = deadline - time.monotonic()
         if left <= 0 or not _pump(left):

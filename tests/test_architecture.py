@@ -16,6 +16,8 @@ import ast
 import dataclasses
 import enum
 import re
+import types
+import typing
 from pathlib import Path
 
 import otaku.backend
@@ -55,7 +57,7 @@ _ALLOWED = {
         "logging",
         "formatting",
     },
-    "context": {"store"},
+    "context": {"store", "providers"},
     # `formatting` for `Money`: what a provider reports a balance IN is a
     # value type, and value types live in the leaf everyone may reach.
     "providers": {"settings", "formatting"},
@@ -182,7 +184,10 @@ def _absolute(node: ast.ImportFrom, path: Path) -> str:
 
 def _is_inert(obj: object) -> bool:
     """Data, not behavior: a frozen dataclass, an enum (a closed set of
-    constants) or an exception type."""
+    constants), an exception type — or a type alias, a name for a shape
+    with nothing behind it (`InjectionPosition`)."""
+    if isinstance(obj, types.UnionType) or typing.get_origin(obj) is not None:
+        return True
     if not isinstance(obj, type):
         return False
     if issubclass(obj, BaseException | enum.Enum):
@@ -343,7 +348,9 @@ class TestPageModules:
 
     def test_every_module_is_served(self) -> None:
         # A module the server does not list is a 404 at the first import.
-        served = {name.removeprefix("js/").removesuffix(".js") for name in web_server._SCRIPTS}
+        served = {
+            name.removeprefix("js/").removesuffix(".js") for name in web_server.assets.SCRIPTS
+        }
         assert set(_PAGE) <= served
 
 
@@ -361,9 +368,12 @@ _PAGE = {
     "status": {"dom"},
     "watch": {"dom"},
     "prose": {"dom"},
+    # A turn's pictures: the tiles and the lightbox, drawn by the
+    # transcript and by the dossier's reader alike, so below both.
+    "pictures": {"api", "dom"},
     # `browser` for the kit's editor: a stored turn is corrected where it
     # is read, as the dossier corrects one. The kit is below the frame.
-    "transcript": {"api", "browser", "dom", "prose", "status", "table"},
+    "transcript": {"api", "browser", "dom", "pictures", "prose", "status", "table"},
     "browser": {"dom", "status"},
     # `format` for the runhead's story name: a title is cut the same way
     # wherever the page writes one.
@@ -374,7 +384,11 @@ _PAGE = {
     "help": {"browser", "dom", "table"},
     # `story` is the dossier under the browser: the browser reaches into
     # it (Open story), never the other way — its route back is a command.
-    "story": {"api", "browser", "dom", "format", "prose", "shell"},
+    "story": {"api", "browser", "dom", "format", "pictures", "prose", "shell", "tools"},
+    # The dossier's fifth tab in a module of its own, built from `story`
+    # and handed the dossier's footnote helper — so it reaches nothing
+    # of the tabs beside it.
+    "tools": {"api", "browser", "dom", "shell"},
     "stories": {"api", "browser", "dom", "format", "shell", "story", "transfer"},
     "models": {"api", "browser", "dom", "shell"},
     "settings": {"api", "browser", "dom", "table"},
@@ -445,11 +459,12 @@ class TestPageCaptions:
 
     def test_every_knob_is_drawn_and_captioned_on_the_slip(self) -> None:
         source = _page_source("settings.js")
-        for knob in web_api._KNOBS:
+        for knob in web_api.settings._KNOBS:
             assert f'"{knob}"' in source, f"the settings slip never draws {knob}"
         # `think` explains itself with its ladder; every other knob
         # carries a caption under its leader.
-        assert set(web_api._KNOBS) - {"think"} - _js_keys("settings.js", "_ABOUT") == set()
+        knobs = set(web_api.settings._KNOBS)
+        assert knobs - {"think"} - _js_keys("settings.js", "_ABOUT") == set()
 
 
 def _syntax_rows() -> list[CommandSpec]:
@@ -519,6 +534,48 @@ class TestDemo:
         router = (_ROOT / "demo" / "web" / "demo.js").read_text()
         missing = [path for path in _spec_paths() if path not in router]
         assert not missing, f"paths the demo does not route: {missing}"
+
+
+class TestWebApiTwins:
+    """`otaku/web/api` mirrors `backend.api`, one module per twin
+    (CLAUDE.md, Inside the web): a module CALLS its own twin and nothing
+    else of `backend.api`, taking what it needs of another twin from
+    that twin's sibling here — so every translation of one twin is in
+    one module. `request` is the declared exception: it imports two
+    twins' TYPES for `Pending` and calls neither. Read off the source,
+    as the layer table is."""
+
+    _EXCEPTIONS = frozenset({"request", "__init__"})
+
+    def test_each_module_imports_its_own_twin_alone(self) -> None:
+        for path in sorted((_ROOT / "otaku" / "web" / "api").glob("*.py")):
+            if path.stem in self._EXCEPTIONS:
+                continue
+            twins = _backend_api_imports(path)
+            assert twins <= {path.stem}, f"web.api.{path.stem} reaches into backend.api.{twins}"
+
+    def test_every_twin_module_has_one(self) -> None:
+        # A module of the mirror named after nothing in `backend.api`
+        # is a module with no twin to call.
+        siblings = {path.stem for path in (_ROOT / "otaku" / "web" / "api").glob("*.py")}
+        twins = {path.stem for path in (_ROOT / "otaku" / "backend" / "api").glob("*.py")}
+        assert siblings - self._EXCEPTIONS <= twins
+
+
+def _backend_api_imports(path: Path) -> set[str]:
+    """The `backend.api` modules one file imports, by name — `from
+    otaku.backend.api import lore as api_lore` and `from
+    otaku.backend.api.lore import FieldKind` both count as `lore`."""
+    found: set[str] = set()
+    for node in ast.walk(ast.parse(path.read_text())):
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        module = _absolute(node, path)
+        if module == f"{PACKAGE}.backend.api":
+            found.update(alias.name for alias in node.names)
+        elif module.startswith(f"{PACKAGE}.backend.api."):
+            found.add(module.removeprefix(f"{PACKAGE}.backend.api."))
+    return found
 
 
 class TestWebApiSpec:

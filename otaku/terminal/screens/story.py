@@ -1,9 +1,9 @@
-"""Inside one story: the dossier — premise, messages, scenes and cast as
-four tabs of one full-screen surface, for ANY story, editing included.
+"""Inside one story: the dossier — premise, messages, scenes, cast and
+tools as five tabs of one full-screen surface, for ANY story, editing
+included.
 
-←/→ cycle the tabs (wrapping) from anywhere outside an edit — Tab and
-Shift+Tab do the same, unadvertised; each tab keeps its cursor and its
-filter, while an open detail closes with the switch, so coming back
+←/→ cycle the tabs (wrapping) from anywhere outside an edit; each tab
+keeps its cursor and its filter, while an open detail closes with the switch, so coming back
 lands on the tab's list, cursor on the row that was drilled into. The
 premise tab is the one full-width view — a premise is one text, so
 there is no list beside it; Enter edits it in place. The messages tab
@@ -15,7 +15,21 @@ as a FIELD LIST — one row per text (`LoreView.scene_fields` /
 `char_fields`; the view composes, this screen renders) — and Enter on a
 field edits it IN PLACE (Ctrl+S saves, Esc cancels). A journal row is
 the intersection of a scene and a character, so `o` pivots to the same
-entry through the other tab.
+entry through the other tab. The tools tab is the story's settings
+(`backend.story`), one row each — a checkbox and the name; Space
+checks and unchecks it — with the setting's fields in the panel beside:
+the notes' display, a reminder's text, a tool's instructions (its
+prompt, `backend.api.settings`), and last where its text rides. Enter
+or Tab moves into the panel, where ↑/↓ walk the fields and Enter acts
+on the one under the cursor — a checkbox toggles, the depth opens the
+closed list of places in the same panel (↑/↓ pick, Enter sets — a
+dropdown, no dialog), a reminder's text edits in place like any field,
+the instructions row opens the prompt over the whole panel (Ctrl+S
+saves, Esc cancels, the fields return) — and Esc returns to the list.
+Every change is written at once through
+`backend.api`; a setting's confirmation is not shown here — the row
+itself shows where the setting now stands — only a refusal is, and the
+texts' own sentences (a reminder or a prompt saved).
 
 Editable fields are the write-once primitives; the extractor's own —
 states, and every history, the scene's own included — are shown dim
@@ -52,11 +66,13 @@ from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import D
 from prompt_toolkit.styles import Style
 
-from otaku.backend import Character, Message, Scene
+from otaku.backend import Character, InjectionPosition, Message, Scene
 from otaku.backend.api import lore as api_lore
+from otaku.backend.api import settings as api_settings
 from otaku.backend.api import stories as api_stories
 from otaku.backend.api.lore import Field, LoreView
 from otaku.backend.session import Refused, Session
+from otaku.backend.story import StorySetting
 from otaku.formatting import flatten, truncate
 from otaku.terminal.screens.base import (
     ListScreen,
@@ -69,18 +85,43 @@ from otaku.terminal.screens.base import (
 )
 from otaku.terminal.tty import latin_key
 from otaku.terminal.tty.render import message as render_message
+from otaku.terminal.tty.render import notes_displayed, pictures_note
 from otaku.terminal.tty.theme import theme
 from otaku.terminal.tty.typography import highlight_toml
 
-Tab = Literal["premise", "messages", "scenes", "cast"]
+Tab = Literal["premise", "messages", "scenes", "cast", "tools"]
 
-_TABS: tuple[Tab, ...] = ("premise", "messages", "scenes", "cast")
+_TABS: tuple[Tab, ...] = ("premise", "messages", "scenes", "cast", "tools")
 _TAB_LABELS: dict[Tab, str] = {
     "premise": "Premise",
     "messages": "Messages",
     "scenes": "Scenes",
     "cast": "Cast",
+    "tools": "Tools",
 }
+
+# What each story setting does, in the order the tab draws them. A
+# caption is the frontend's own: the backend names the setting and says
+# where it stands, and this says what switching it does — the page keeps
+# the same table (`web/static/js/tools.js`). A setting without a caption
+# is not drawn: nothing here could say what it is for.
+_ABOUT: dict[str, str] = {
+    "allow_questions": (
+        "The narrator may ask you something directly and wait for an answer before going on."
+    ),
+    "allow_assistant_notes": (
+        "The narrator may keep a short note to itself between turns, never played into the story."
+    ),
+    "use_story_reminder": "Sent with every reply in this story, wherever you place it.",
+    "use_shared_reminder": "Sent with every reply in every story.",
+}
+
+# The one setting whose text is not the story's: every story is sent the
+# same reminder, read and written through its own operations.
+_SHARED_REMINDER = "use_shared_reminder"
+
+# A checkbox, as a row draws it.
+_CHECKED, _UNCHECKED = "[x]", "[ ]"
 
 # List-to-preview split, list:preview. The message rows carry the content
 # and the preview only echoes one, so the list gets twice the width; the
@@ -120,6 +161,25 @@ def _style() -> Style:
             "notice": f"dim fg:{colors.muted.style} {panel}",
         }
     )
+
+
+ToolFieldKind = Literal["display", "reminder", "prompt", "position"]
+# The kinds that are a text to edit: a reminder where it is read, a
+# prompt over the whole panel.
+_TEXT_KINDS: frozenset[ToolFieldKind] = frozenset({"reminder", "prompt"})
+
+
+@dataclass(frozen=True)
+class _ToolField:
+    """One field of a setting, as the panel walks them: the notes'
+    display, a reminder's text, a tool's instructions (its prompt),
+    where its text rides. `text` is the field as read; a reminder edits
+    in place, the instructions open the prompt over the whole panel —
+    the rest toggle or choose."""
+
+    kind: ToolFieldKind
+    label: str
+    text: str
 
 
 @dataclass
@@ -168,11 +228,30 @@ class Dossier(ListScreen):
         self._list_pos: int = 0
         self._premise_rows: int = 1
 
+        # The tools tab: the story's settings that have a caption, in the
+        # caption table's order, and the shared reminder's text; whether
+        # the story displays the model's notes rides along, for the
+        # messages tab's rows and preview. `in_panel` is the cursor having
+        # moved into the panel, `field` which of the setting's fields it
+        # is on; `choosing` is the depth dropdown, `choice` where ↑/↓ have
+        # walked it over the allowed places.
+        self.settings: list[StorySetting] = []
+        self.shared_text: str = ""
+        self.prompts: dict[str, str] = {}  # each tool's prompt, by the tool's name
+        self.notes_displayed: bool = False
+        self.in_panel: bool = False
+        self.field: int = 0
+        self.choosing: bool = False
+        self.choice: int = 0
+
         # The resume dialog (Enter on an earlier message): up or not, and
         # which _RESUME_OPTIONS row is highlighted (fork is the default).
         self.confirming_resume: bool = False
         self.resume_choice: int = 0
 
+        # A prompt open for editing: the tools panel is the editor alone
+        # until Ctrl+S or Esc (`_start_edit` sets it, `_finish_edit` clears).
+        self.prompt_editing: bool = False
         # Inline editing: while True the text under the cursor — the
         # premise, a message, a field — is the edit buffer and every
         # navigation binding is suspended.
@@ -208,6 +287,7 @@ class Dossier(ListScreen):
         self.tabs["messages"].cursor = max(0, len(self.turn_filtered) - 1)
         self.detail = None
         self.fields = []
+        self._reload_settings()
         self.tab = tab
         state = self.tabs[tab]
         self.cursor, self.in_filter, self.query = state.cursor, False, ""
@@ -221,6 +301,21 @@ class Dossier(ListScreen):
         an open filter would otherwise take it away as it is saved."""
         self.view = api_lore.view(self.session, self.story_id)
         self._rebuild_fields()
+
+    def _reload_settings(self) -> None:
+        """The story's settings again — after every write, since the
+        backend lays what was stored over the defaults — and with them
+        the shared reminder's text and each tool's prompt, read once here
+        rather than per redraw."""
+        held = api_stories.get_settings(self.session, self.story_id)
+        self.settings = [setting for name in _ABOUT if (setting := held.get(name)) is not None]
+        self.shared_text = api_stories.get_shared_reminder(self.session)
+        self.prompts = {
+            setting.tool.name: api_settings.get_tool_prompt(self.session, setting.tool.name)
+            for setting in self.settings
+            if setting.tool is not None
+        }
+        self.notes_displayed = notes_displayed(held)
 
     # ---------- view lookups ----------
 
@@ -264,6 +359,33 @@ class Dossier(ListScreen):
         if self.cursor >= len(self.fields):
             self.cursor = max(0, len(self.fields) - 1)
 
+    def _tool_fields(self, setting: StorySetting) -> list[_ToolField]:
+        """A setting's fields as the panel walks them: the notes' display,
+        for the one with something to display; the reminder's text, for
+        the story's own and the shared one; a tool's instructions, a
+        row that opens the prompt; and last, for one that injects, where
+        its text rides — each reading as the setting stands now."""
+        rows: list[_ToolField] = []
+        if setting.display_notes is not None:
+            rows.append(_ToolField("display", "display notes", _checkbox(setting.display_notes)))
+        if setting.name == _SHARED_REMINDER:
+            rows.append(_ToolField("reminder", "shared text", self.shared_text))
+        elif setting.reminder_text is not None:
+            rows.append(_ToolField("reminder", "reminder text", setting.reminder_text))
+        if setting.tool is not None:
+            rows.append(_ToolField("prompt", "instructions", self.prompts[setting.tool.name]))
+        if setting.injection_position is not None:
+            rows.append(_ToolField("position", "depth", setting.injection_position.text))
+        return rows
+
+    def _tool_field(self) -> _ToolField | None:
+        """The field the panel's cursor is on; None off the tab or with
+        nothing to walk."""
+        if self.tab != "tools" or not self.settings:
+            return None
+        rows = self._tool_fields(self.settings[self.cursor])
+        return rows[min(self.field, len(rows) - 1)] if rows else None
+
     # ---------- the tabs ----------
 
     def _tabstrip_text(self) -> StyleAndTextTuples:
@@ -278,6 +400,7 @@ class Dossier(ListScreen):
 
     def _switch_tab(self, step: int) -> None:
         self.notice = ""
+        self.in_panel = False
         self._stash_tab()
         self.tab = _TABS[(_TABS.index(self.tab) + step) % len(_TABS)]
         self._restore_tab()
@@ -353,6 +476,8 @@ class Dossier(ListScreen):
             return self._premise_text()
         if self.tab == "messages":
             return self._turn_rows()
+        if self.tab == "tools":
+            return self._tool_rows()
         if self.detail is not None:
             return self._field_rows()
         return self._scene_rows() if self.tab == "scenes" else self._cast_rows()
@@ -387,11 +512,23 @@ class Dossier(ListScreen):
             # that, syntax included, so nothing is composed here. Slice
             # first: this renders per keystroke, and avail chars never
             # need more than a slice of a huge message.
-            head = truncate(flatten(m.body[: 4 * avail]), avail) or "(empty)"
+            # A turn's pictures are noted after the line by `render`, the
+            # way the played block notes them; the note's width comes off
+            # the cut, so the row still fits.
+            pictures = len(m.attachments)
+            note_w = len(pictures_note(pictures)) + 1 if pictures else 0
+            head = truncate(flatten(m.body[: 4 * avail]), max(4, avail - note_w))
+            if not head and not pictures:
+                head = "(empty)"
             # Styled AFTER the cut, so no escape can be sliced in half —
             # and on every row, selected or not: what a line says it is
-            # does not depend on where the cursor happens to be.
-            head = self._render(head, m.role)
+            # does not depend on where the cursor happens to be. Then one
+            # line again: a reply's calls are drawn as blocks, on rows of
+            # their own, and a row has no rows. Never longer than the cut:
+            # the tags the drawing drops outweigh the bar it adds.
+            head = flatten(
+                self._render(head, m.role, pictures=pictures, notes=self.notes_displayed)
+            )
             # The original message number, so a filtered row still reads
             # as its true position in the story.
             row = f"{orig + 1:>4} · {m.role:<{role_w}} · {head}"
@@ -451,6 +588,19 @@ class Dossier(ListScreen):
             self._emit_row(out, row_i == self.cursor, row)
         return out
 
+    def _tool_rows(self) -> StyleAndTextTuples:
+        """One row per setting: its checkbox and its name. The band stays
+        on the list's row while the cursor is in the panel, dimmed so
+        the panel reads as the place the cursor went."""
+        out: StyleAndTextTuples = []
+        if not self.settings:
+            out.append(("class:muted", "  (no settings in this build)"))
+            return out
+        for row_i, setting in enumerate(self.settings):
+            row = f"{_checkbox(setting.enabled)} {setting.label}"
+            self._emit_row(out, row_i == self.cursor, row, dim=self.in_panel)
+        return out
+
     def _panel_header_text(self) -> StyleAndTextTuples:
         """The fixed header above the panel's text. It lives in its own
         window so it stays put when the text below it becomes the edit
@@ -460,6 +610,16 @@ class Dossier(ListScreen):
                 return [("", "")]
             orig = self.turn_filtered[self.cursor]
             return [("class:preview.title", f"{orig + 1}. {self.msgs[orig].role}\n")]
+        if self.tab == "tools":
+            # The setting's name is the panel's header, so the text under
+            # it can become the edit buffer with the header standing; the
+            # prompt open over the panel says so in the header.
+            if self.settings:
+                label = self.settings[self.cursor].label
+                if self.prompt_editing:
+                    label += " prompt"
+                return [("class:preview.title", label + "\n")]
+            return [("", "")]
         if self.detail is not None and self.fields:
             return [("class:preview.title", self.fields[self.cursor].label + "\n")]
         return [("", "")]
@@ -479,12 +639,18 @@ class Dossier(ListScreen):
             return [("class:preview.muted", "nothing to preview")]
         m = self.msgs[self.turn_filtered[self.cursor]]
         out: StyleAndTextTuples = []
-        if m.body:
+        if m.body or m.attachments:
             # Whatever `render` makes of it, parsed into fragments so
             # the window's own wrapping carries styles across wrapped
             # rows. Editing swaps this window out, so the buffer stays
             # raw text.
-            body = self._render(m.body, m.role)
+            body = self._render(
+                m.body,
+                m.role,
+                pictures=len(m.attachments),
+                notes=self.notes_displayed,
+                width=max(10, self._preview_inner_width()),
+            )
             if not body.endswith("\n"):
                 body += "\n"
             out.extend(ansi_fragments(body, "class:preview.body"))
@@ -575,6 +741,85 @@ class Dossier(ListScreen):
             out.append(("class:preview.muted", "(no journal yet)\n"))
         return out
 
+    def _tool_parts(self) -> tuple[list[_ToolField], list[_ToolField], _ToolField | None]:
+        """The setting's fields around its text — a reminder's: those
+        above it, those below, and the text itself — None for a setting
+        with none, whose fields are all above."""
+        fields = self._tool_fields(self.settings[self.cursor]) if self.settings else []
+        text = next((f for f in fields if f.kind == "reminder"), None)
+        if text is None:
+            return fields, [], None
+        at = fields.index(text)
+        return fields[:at], fields[at + 1 :], text
+
+    def _tool_focused(self, f: _ToolField) -> bool:
+        return self.in_panel and self._tool_field() == f
+
+    def _tool_lines(self, f: _ToolField) -> list[tuple[str, str]]:
+        """One field as lines at the margin — a checkbox and its label,
+        the depth and its place, a text's label, the instructions' name
+        alone — banded while the panel's
+        cursor is on it. The depth with its dropdown open is its label
+        over the closed list of places, the one under the cursor banded:
+        the list opens where the field is, and nothing else moves. No
+        trailing newline: the three windows join their lines themselves,
+        and a trailing one would render as a blank row between two."""
+        style = "class:row.selected" if self._tool_focused(f) else "class:preview.body"
+        if f.kind == "display":
+            return [(style, f"{f.text} {f.label}")]
+        if f.kind == "prompt":
+            return [(style, f.label)]  # a row to press: its text is shown only to edit
+        if f.kind != "position":
+            return [(style, f"{f.label}:")]
+        if not self.choosing:
+            return [(style, f"{f.label}: {f.text}")]
+        setting = self.settings[self.cursor]
+        return [
+            ("class:preview.body", f"{f.label}:"),
+            *(
+                (
+                    "class:row.selected" if i == self.choice else "class:preview.body",
+                    f"  {p.text}",
+                )
+                for i, p in enumerate(setting.allowed_positions)
+            ),
+        ]
+
+    def _tool_above(self) -> StyleAndTextTuples:
+        """What the panel opens with: the setting's caption, then every
+        field above its text and the text's label, one blank line
+        between."""
+        if not self.settings:
+            return [("class:preview.muted", "nothing to preview")]
+        setting = self.settings[self.cursor]
+        width = max(10, self._preview_inner_width())
+        lines = [("class:preview.body", line) for line in wrap_text(_ABOUT[setting.name], width)]
+        above, _, text = self._tool_parts()
+        for f in [*above, *([text] if text is not None else [])]:
+            lines += [("class:preview.body", ""), *self._tool_lines(f)]
+        return _joined(lines)
+
+    def _tool_text(self) -> StyleAndTextTuples:
+        """The reminder's text as read, where the editor opens over it."""
+        _, _, text = self._tool_parts()
+        if text is None:
+            return []
+        width = max(10, self._preview_inner_width())
+        body = wrap_text(text.text or "(nothing yet)", width)
+        return _joined([("class:preview.body", line) for line in body])
+
+    def _tool_below(self) -> StyleAndTextTuples:
+        """The fields under the text — the depth, last — each after one
+        blank line."""
+        _, below, _ = self._tool_parts()
+        lines: list[tuple[str, str]] = []
+        for f in below:
+            lines += [("class:preview.body", ""), *self._tool_lines(f)]
+        return _joined(lines)
+
+    def _tool_has_text(self) -> bool:
+        return self.tab == "tools" and self._tool_parts()[2] is not None
+
     def _resume_text(self) -> StyleAndTextTuples:
         picked = self.turn_filtered[self.cursor] + 1 if self.turn_filtered else 0
         out: StyleAndTextTuples = [
@@ -592,6 +837,8 @@ class Dossier(ListScreen):
     def _help_text(self) -> StyleAndTextTuples:
         if self.editing:
             return [("class:help", " editing — ctrl+s save · esc cancel")]
+        if self.choosing:
+            return [("class:help", " ↑/↓ choose · enter set · esc cancel")]
         if self.in_filter:
             action = "enter resume" if self.tab == "messages" else "enter open"
             return [
@@ -601,6 +848,17 @@ class Dossier(ListScreen):
                 )
             ]
         back = self._esc_label()
+        if self.tab == "tools":
+            if self.in_panel:
+                f = self._tool_field()
+                verb = {"display": "toggle", "position": "choose"}.get(f.kind if f else "", "edit")
+                return [("class:help", f" ↑/↓ fields · enter {verb} · ←/→ tabs · esc back to list")]
+            return [
+                (
+                    "class:help",
+                    f" ↑/↓ navigate · space check · enter/tab fields · ←/→ tabs · esc {back}",
+                )
+            ]
         if self.detail is not None:
             other = "character" if self.detail[0] == "scene" else "scene"
             return [
@@ -641,6 +899,8 @@ class Dossier(ListScreen):
             return self._premise_rows
         if self.tab == "messages":
             return len(self.turn_filtered)
+        if self.tab == "tools":
+            return len(self.settings)
         if self.detail is not None:
             return len(self.fields)
         return len(self.scenes_f) if self.tab == "scenes" else len(self.cast_f)
@@ -690,8 +950,8 @@ class Dossier(ListScreen):
     def _filterable(self) -> bool:
         """Where `/` opens the filter: the three list tabs, at their top
         level — a detail has nothing to filter, and neither does one
-        text."""
-        return self.tab != "premise" and self.detail is None
+        text or a handful of settings."""
+        return self.tab not in ("premise", "tools") and self.detail is None
 
     def _type(self, data: str) -> None:
         if self.in_filter:
@@ -710,6 +970,8 @@ class Dossier(ListScreen):
             self._start_edit()
         elif key == "o" and self.dossier_on and self.detail is not None:
             self._pivot()
+        elif data == " " and self.dossier_on and self.tab == "tools":
+            self._toggle_checkbox()
 
     def _open_detail(self) -> None:
         assert self.view is not None
@@ -742,6 +1004,12 @@ class Dossier(ListScreen):
                 self.confirming_resume = True
                 self.resume_choice = 0
             return
+        if self.tab == "tools":
+            if self.in_panel:
+                self._act_on_tool_field()
+            else:
+                self._enter_panel()
+            return
         if self.detail is not None:
             self._start_edit()
         else:
@@ -751,12 +1019,98 @@ class Dossier(ListScreen):
         self.notice = ""
         if self._clear_filter():
             return
+        if self.in_panel:
+            self.in_panel = False
+            return
         if self.detail is not None:
             self.detail = None
             self.fields = []
             self.cursor = min(self._list_pos, max(0, self._rows_count() - 1))
             return
         self._leave_dossier()
+
+    # ---------- the tools tab's writes ----------
+
+    def _enter_panel(self) -> None:
+        """Into the panel — Enter or Tab on the list: the cursor moves to
+        the setting's fields, the list's row stays banded behind it, and
+        only Esc brings it back."""
+        if self.settings and self._tool_fields(self.settings[self.cursor]):
+            self.in_panel = True
+            self.field = 0
+
+    def _toggle_checkbox(self) -> None:
+        """Space: on the list, the setting's own switch; in the panel, the
+        checkbox under the cursor, where there is one."""
+        if not self.settings:
+            return
+        setting = self.settings[self.cursor]
+        if not self.in_panel:
+            self._write_setting(setting, enabled=not setting.enabled)
+            return
+        f = self._tool_field()
+        if f is not None and f.kind == "display":
+            self._write_setting(setting, display_notes=not setting.display_notes)
+
+    def _move_field(self, delta: int) -> None:
+        fields = self._tool_fields(self.settings[self.cursor]) if self.settings else []
+        if fields:
+            self.field = max(0, min(len(fields) - 1, self.field + delta))
+
+    def _act_on_tool_field(self) -> None:
+        """Enter on a field: a checkbox toggles, the depth opens its
+        dropdown, a reminder edits in place, the instructions open the
+        prompt over the panel."""
+        f = self._tool_field()
+        if f is None:
+            return
+        setting = self.settings[self.cursor]
+        if f.kind == "display":
+            self._write_setting(setting, display_notes=not setting.display_notes)
+        elif f.kind == "position":
+            places = setting.allowed_positions
+            at = setting.injection_position
+            self.choice = places.index(at) if at in places else 0
+            self.choosing = True
+        else:
+            self._start_edit()
+
+    def _choose_place(self, *, confirm: bool) -> None:
+        """The dropdown closes: Enter writes the place under the cursor,
+        Esc leaves the setting where it was."""
+        self.choosing = False
+        if not confirm:
+            return
+        setting = self.settings[self.cursor]
+        self._write_setting(setting, position=setting.allowed_positions[self.choice])
+
+    def _write_setting(
+        self,
+        setting: StorySetting,
+        *,
+        enabled: bool | None = None,
+        position: InjectionPosition | None = None,
+        display_notes: bool | None = None,
+        reminder_text: str | None = None,
+    ) -> None:
+        """One field of one setting through `backend.api.stories`. Its
+        confirmation is not shown — the row shows where the setting now
+        stands, once the tab has read the story again — only a refusal
+        is."""
+        try:
+            api_stories.update_setting(
+                self.session,
+                setting.name,
+                story_id=self.story_id,
+                enabled=enabled,
+                position=position,
+                display_notes=display_notes,
+                reminder_text=reminder_text,
+            )
+        except Refused as e:
+            self.notice = str(e)
+            return
+        self._reload_settings()
 
     def _leave_dossier(self) -> None:
         """Esc at the dossier's top level. Standalone the dossier is the
@@ -798,6 +1152,11 @@ class Dossier(ListScreen):
             return None
         if self.tab == "messages":
             return None if self.turn_filtered else "nothing to edit"
+        if self.tab == "tools":
+            focused = self._tool_field() if self.in_panel else None
+            if focused is None:
+                return "nothing to edit"
+            return None if focused.kind in _TEXT_KINDS else "not a text"
         if self.detail is None or not self.fields:
             return "nothing to edit"
         f = self.fields[self.cursor]
@@ -818,6 +1177,9 @@ class Dossier(ListScreen):
             return self.premise
         if self.tab == "messages":
             return self.msgs[self.turn_filtered[self.cursor]].body
+        if self.tab == "tools":
+            focused = self._tool_field()
+            return focused.text if focused is not None else ""
         return self.fields[self.cursor].text
 
     def _start_edit(self) -> None:
@@ -832,13 +1194,19 @@ class Dossier(ListScreen):
         # Cursor at the START: an edit begins by reading, and a long text
         # opened at its end shows only its tail.
         self.edit_buffer.document = Document(self._edit_text(), 0)
-        self.app.layout.focus(
-            self._premise_edit_control if self.tab == "premise" else self._edit_control
-        )
+        control = self._edit_control
+        if self.tab == "premise":
+            control = self._premise_edit_control
+        elif self.tab == "tools":
+            focused = self._tool_field()
+            self.prompt_editing = focused is not None and focused.kind == "prompt"
+            control = self._prompt_edit_control if self.prompt_editing else self._tool_edit_control
+        self.app.layout.focus(control)
 
     def _finish_edit(self, *, save: bool) -> None:
         """Ctrl+S applies the buffer through `backend.api`; Esc discards."""
         self.editing = False
+        prompt_edited, self.prompt_editing = self.prompt_editing, False
         self.app.layout.focus(self._items_control)
         if not save:
             self.notice = "(cancelled)"
@@ -859,6 +1227,17 @@ class Dossier(ListScreen):
                 self.msgs[orig] = replace(m, body=new)
                 self.notice = "saved"
                 return
+            if self.tab == "tools":
+                setting = self.settings[self.cursor]
+                if prompt_edited and setting.tool is not None:
+                    self.notice = api_settings.set_tool_prompt(self.session, setting.tool.name, new)
+                    self._reload_settings()
+                elif setting.name == _SHARED_REMINDER:
+                    self.notice = api_stories.set_shared_reminder(self.session, new)
+                    self._reload_settings()
+                else:
+                    self._write_setting(setting, reminder_text=new)
+                return
             f = self.fields[self.cursor]
             api_lore.edit(self.session, f.kind, f.target, new, self.story_id)
         except Refused as e:
@@ -874,7 +1253,11 @@ class Dossier(ListScreen):
         """The visible edit window's rendered width — the wrap width the
         display actually uses; the layout math is the fallback before a
         render."""
-        window = self._premise_edit_window if self.tab == "premise" else self._edit_window
+        window = self._edit_window
+        if self.tab == "premise":
+            window = self._premise_edit_window
+        elif self.tab == "tools":
+            window = self._prompt_edit_window if self.prompt_editing else self._tool_edit_window
         info = window.render_info
         if info is not None and info.window_width > 0:
             return info.window_width
@@ -961,22 +1344,74 @@ class Dossier(ListScreen):
         def _resume_enter(event: Any) -> None:
             self._do_resume()
 
-        idle = ~resuming & self._extra_idle()
-        self._standard_keys(kb, when=idle)
+        # While the depth dropdown is up: arrows walk the places, Enter
+        # sets the one under the cursor, Esc leaves the setting as it was.
+        choosing = Condition(lambda: self.choosing)
+
+        @kb.add("escape", eager=True, filter=choosing)
+        def _choose_esc(event: Any) -> None:
+            self._choose_place(confirm=False)
+
+        @kb.add("up", filter=choosing)
+        def _choose_up(event: Any) -> None:
+            self.choice = (self.choice - 1) % len(self.settings[self.cursor].allowed_positions)
+
+        @kb.add("down", filter=choosing)
+        def _choose_down(event: Any) -> None:
+            self.choice = (self.choice + 1) % len(self.settings[self.cursor].allowed_positions)
+
+        @kb.add("enter", filter=choosing)
+        def _choose_enter(event: Any) -> None:
+            self._choose_place(confirm=True)
+
+        # In the tools panel the arrows walk the setting's fields, not the
+        # list; Enter, Space and Esc are the standard keys' and read
+        # `in_panel` themselves.
+        in_panel = Condition(lambda: self.in_panel)
+
+        @kb.add("up", filter=~choosing & in_panel)
+        def _field_up(event: Any) -> None:
+            self._move_field(-1)
+
+        @kb.add("down", filter=~choosing & in_panel)
+        def _field_down(event: Any) -> None:
+            self._move_field(1)
+
+        idle = ~resuming & ~choosing & self._extra_idle()
+        self._standard_keys(kb, when=idle & ~in_panel)
+
+        # What the panel keeps of the standard keys: Enter acts on the
+        # field, Space toggles a checkbox, Esc returns to the list.
+        @kb.add("enter", filter=idle & in_panel)
+        def _panel_enter(event: Any) -> None:
+            self._on_enter()
+
+        @kb.add("escape", eager=True, filter=idle & in_panel)
+        def _panel_esc(event: Any) -> None:
+            self._on_escape()
+
+        @kb.add(" ", filter=idle & in_panel)
+        def _panel_space(event: Any) -> None:
+            self._toggle_checkbox()
 
         in_dossier = Condition(lambda: self.dossier_on)
 
-        # ←/→ are the advertised way between tabs; Tab and Shift+Tab do
-        # the same, unadvertised, for the hands that reach for them.
+        # ←/→ are the way between tabs.
         @kb.add("right", filter=idle & in_dossier)
-        @kb.add("tab", filter=idle & in_dossier)
         def _tab_key(event: Any) -> None:
             self._switch_tab(1)
 
         @kb.add("left", filter=idle & in_dossier)
-        @kb.add("s-tab", filter=idle & in_dossier)
         def _stab_key(event: Any) -> None:
             self._switch_tab(-1)
+
+        # Tab on the tools list moves into the panel as Enter does; the
+        # way back is Esc alone.
+        on_tools_list = Condition(lambda: self.tab == "tools" and not self.in_panel)
+
+        @kb.add("tab", filter=idle & in_dossier & on_tools_list)
+        def _into_panel(event: Any) -> None:
+            self._enter_panel()
 
         self._extra_keys(kb, idle)
 
@@ -1048,6 +1483,71 @@ class Dossier(ListScreen):
             self._premise_edit_control, wrap_lines=True, style="class:preview.body"
         )
 
+        # The tools panel: a text between the fields above and below it,
+        # edited where it stands — the third window over the one buffer.
+        self._tool_edit_control = BufferControl(
+            buffer=self.edit_buffer, focusable=True, key_bindings=edit_motion
+        )
+        # Sized to the text, as the read window is: the editor grows only
+        # as the text does, and the fields below stay where they were.
+        self._tool_edit_window = Window(
+            self._tool_edit_control,
+            wrap_lines=True,
+            dont_extend_height=True,
+            style="class:preview.body",
+        )
+        # A tool's prompt is edited over the WHOLE panel: the fields give
+        # way to one editor, the panel's height, until it is saved or
+        # cancelled — a prompt is paragraphs, and a row's seat is not.
+        self._prompt_edit_control = BufferControl(
+            buffer=self.edit_buffer, focusable=True, key_bindings=edit_motion
+        )
+        self._prompt_edit_window = Window(
+            self._prompt_edit_control, wrap_lines=True, style="class:preview.body"
+        )
+        tools_shown = Condition(lambda: self.dossier_on and self.tab == "tools")
+        tools_text = Condition(self._tool_has_text)
+        prompt_editing = Condition(lambda: self.prompt_editing)
+        tools_panel = HSplit(
+            [
+                ConditionalContainer(
+                    Window(
+                        FormattedTextControl(text=self._tool_above, show_cursor=False),
+                        wrap_lines=True,
+                        dont_extend_height=True,
+                        always_hide_cursor=True,
+                        style="class:preview.body",
+                    ),
+                    filter=~prompt_editing,
+                ),
+                ConditionalContainer(
+                    Window(
+                        FormattedTextControl(text=self._tool_text, show_cursor=False),
+                        wrap_lines=True,
+                        dont_extend_height=True,
+                        always_hide_cursor=True,
+                        style="class:preview.body",
+                    ),
+                    filter=tools_text & ~editing,
+                ),
+                ConditionalContainer(
+                    self._tool_edit_window, filter=tools_text & editing & ~prompt_editing
+                ),
+                ConditionalContainer(
+                    Window(
+                        FormattedTextControl(text=self._tool_below, show_cursor=False),
+                        wrap_lines=True,
+                        dont_extend_height=True,
+                        always_hide_cursor=True,
+                        style="class:preview.body",
+                    ),
+                    filter=tools_text & ~prompt_editing,
+                ),
+                ConditionalContainer(self._prompt_edit_window, filter=prompt_editing),
+                Window(char=" ", always_hide_cursor=True),  # the rest of the box
+            ]
+        )
+
         premise_shown = Condition(lambda: self.dossier_on and self.tab == "premise")
         premise_editing = Condition(
             lambda: self.editing and self.dossier_on and self.tab == "premise"
@@ -1091,12 +1591,14 @@ class Dossier(ListScreen):
                     self.dossier_on
                     and (
                         (self.tab == "messages" and bool(self.turn_filtered))
+                        or (self.tab == "tools" and bool(self.settings))
                         or (self.detail is not None and bool(self.fields))
                     )
                 )
             ),
             editing=panel_editing,
             edit_window=self._edit_window,
+            alternate=(tools_panel, tools_shown),
         )
         # The premise is one text at full measure — no list beside it, so
         # no preview either; the pane folds away and the text takes the
@@ -1119,6 +1621,19 @@ class Dossier(ListScreen):
         root = VSplit([left_pane, preview_side])
         floats: list[AnyContainer] = [resume_dialog, *self._extra_floats()]
         return self._finish_app(root, bindings, _style(), floats=floats)
+
+
+def _checkbox(on: bool) -> str:
+    return _CHECKED if on else _UNCHECKED
+
+
+def _joined(lines: list[tuple[str, str]]) -> StyleAndTextTuples:
+    """Styled lines as one text, a newline BETWEEN them and none after:
+    a window sized to its content counts a trailing newline as a row."""
+    out: StyleAndTextTuples = []
+    for i, (style, text) in enumerate(lines):
+        out.append((style, text if i == len(lines) - 1 else text + "\n"))
+    return out
 
 
 def browse(session: Session, tab: Tab = "scenes") -> str | None:

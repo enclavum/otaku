@@ -1,8 +1,9 @@
 """Completion at the prompt — the whole of it: the two slash menus
-(commands at a line's start, inliners mid-line), and filesystem paths
-behind an explicit `@` (only the last segment completes, hidden entries
-only when asked, directories with a trailing `/`; `split` and `matches`
-are the pure core).
+(commands at a line's start, inliners mid-line), the picture menu behind
+an `@` in a played line (only while the model can see), and filesystem
+paths behind an explicit `@` (only the last segment completes, hidden
+entries only when asked, directories with a trailing `/`; `split` and
+`matches` are the pure core).
 
 A line that STARTS with a slash walks the command tree (specs and
 descriptions from `backend.commands`, the terminal's completion shapes —
@@ -24,8 +25,9 @@ from typing import Any, Self
 from prompt_toolkit.completion import CompleteEvent, Completer, Completion
 from prompt_toolkit.document import Document
 
-from otaku.backend.commands import COMMANDS, CommandSpec
+from otaku.backend.commands import COMMANDS, CommandKind, CommandSpec
 from otaku.backend.session import PARAMETERS, THINK_MENU
+from otaku.terminal.prompt import pictures
 from otaku.terminal.tty import latin_key
 
 # The story's characters for the menus: (name, one-line description).
@@ -35,6 +37,14 @@ Cast = Sequence[tuple[str, str]]
 # here" (behind an `@`). Paths may contain spaces — handlers read them
 # from the raw text, never from split tokens, and strip the leading `@`.
 PATH_LEAF = "<path>"
+
+# The story's directions (/me, /you, …): slash lines that are STORY, so a
+# picture may ride them the way it rides prose.
+_DIRECTIONS = frozenset(
+    spec.token
+    for spec in COMMANDS
+    if spec.kind is CommandKind.SYNTAX and not spec.token.startswith("…")
+)
 
 # A leaf may instead be NAME_LEAF: "a character name goes here" — the
 # completer offers the story's cast, shaped per command (`_cast_rows`).
@@ -73,10 +83,14 @@ class MenuRow(Completion):
 
 
 class _Surface(Completer):
-    """One of the two menus. Beyond the completer protocol each answers
+    """One of the three menus. Beyond the completer protocol each answers
     two questions about the line alone: whether it is the surface in
     play, and which token is being completed on it — empty when a menu
-    belongs here with nothing typed into it yet."""
+    belongs here with nothing typed into it yet — and one about the
+    session: whether it may open at all right now."""
+
+    def is_open(self) -> bool:
+        return True
 
     @staticmethod
     def applies(text_before_cursor: str) -> bool:
@@ -210,10 +224,44 @@ class InlinerCompleter(_Surface):
         yield from _rows(self.menu, self.partial(document.text_before_cursor), ("…",), {})
 
 
+class PictureCompleter(_Surface):
+    """The picture menu: a path behind an `@` inside a PLAYED line —
+    prose, or a direction like /me — offered only while a picture would
+    be taken (`pictures_accepted`, asked live: the model in use changes
+    under a built completer): directories, and files with a
+    picture's extension, a space in a name escaped on insertion. A
+    command line is never its place: there `@` is the command
+    completer's own trigger. Asked first, since a direction line is a
+    slash line too."""
+
+    def __init__(self, pictures_accepted: Callable[[], bool]) -> None:
+        self.pictures_accepted = pictures_accepted
+
+    def is_open(self) -> bool:
+        return self.pictures_accepted()
+
+    @staticmethod
+    def applies(text_before_cursor: str) -> bool:
+        return _picture_token(text_before_cursor) is not None
+
+    @staticmethod
+    def partial(text_before_cursor: str) -> str:
+        """The whole `@` token, so the menu anchors where it opens."""
+        token = _picture_token(text_before_cursor)
+        return "" if token is None else "@" + token
+
+    def get_completions(
+        self, document: Document, complete_event: CompleteEvent
+    ) -> Iterator[Completion]:
+        token = _picture_token(document.text_before_cursor)
+        if token is not None:
+            yield from completions(pictures.unescape(token), keep=_picture_name, escaped=True)
+
+
 class SlashCompleter(Completer):
     """The one completer the prompt registers; prompt_toolkit takes
-    exactly one, so the choice between the two menus is made here rather
-    than by either of them."""
+    exactly one, so the choice between the menus is made here rather
+    than by any of them."""
 
     def __init__(self, surfaces: tuple[_Surface, ...], prefix: Callable[[], str]) -> None:
         self.surfaces = surfaces
@@ -227,43 +275,43 @@ class SlashCompleter(Completer):
         shortcuts: dict[str, str] | None = None,
         levels: Callable[[], Sequence[str]] | None = None,
         parameters: Callable[[], Sequence[str]] | None = None,
+        pictures_accepted: Callable[[], bool] | None = None,
     ) -> Self:
         """A completer over the shared command table. `prefix` supplies an
         open block's collected text — the line being typed is read in the
         context of the message it belongs to, or every continuation line
         would look like the start of one. `cast` answers with the story's
         characters, looked up live; `levels` and `parameters` with what
-        /set think and /set parameter take on the model in use, likewise.
-        `shortcuts` (token → caption, from `chat.bindings.SHORTCUTS` as
-        data) fills the menu's key column."""
+        /set think and /set parameter take on the model in use, likewise;
+        `pictures_accepted` whether a picture would be taken, which is when the picture
+        menu may open (never, by default). `shortcuts` (token → caption,
+        from `chat.bindings.SHORTCUTS` as data) fills the menu's key
+        column."""
         command = CommandCompleter(_completion_tree(), cast, levels, parameters)
         command.shortcuts = shortcuts or {}
-        return cls((command, InlinerCompleter(_inliner_menu())), prefix)
+        picture = PictureCompleter(pictures_accepted or (lambda: False))
+        return cls((picture, command, InlinerCompleter(_inliner_menu())), prefix)
 
     def get_completions(
         self, document: Document, complete_event: CompleteEvent
     ) -> Iterator[Completion]:
         whole = Document(self.prefix() + document.text_before_cursor)
         for surface in self.surfaces:
-            if surface.applies(whole.text_before_cursor):
+            if surface.is_open() and surface.applies(whole.text_before_cursor):
                 yield from surface.get_completions(whole, complete_event)
                 return
 
     def partial(self, text_before_cursor: str) -> str | None:
         """The token being completed at the cursor, on whichever surface
-        owns it; None when neither does and no menu belongs here. Empty
+        owns it; None when none does and no menu belongs here. Empty
         means a menu belongs with nothing typed into it yet — the prompt
-        anchors on the length, so empty anchors at the cursor."""
+        anchors on the length, so empty anchors at the cursor. The
+        surfaces are asked in order, and at most one answers."""
         whole = self.prefix() + text_before_cursor
-        for surface in _SURFACES:
-            if surface.applies(whole):
+        for surface in self.surfaces:
+            if surface.is_open() and surface.applies(whole):
                 return surface.partial(whole)
         return None
-
-
-# The surfaces as line-level questions, which need no tree — asked in
-# this order, and at most one answers.
-_SURFACES: tuple[type[_Surface], ...] = (CommandCompleter, InlinerCompleter)
 
 
 # ---------- the menus off the shared table ----------
@@ -436,6 +484,22 @@ def _opens_the_submission(text_before_cursor: str) -> bool:
     return "\n" not in text_before_cursor and text_before_cursor.lstrip().startswith("/")
 
 
+def _picture_token(text_before_cursor: str) -> str | None:
+    """The path part of the `@` token at the cursor on a PLAYED line, or
+    None. A command line keeps `@` for the command completer; a
+    direction (/me, /you, …) is story, and takes it."""
+    if _opens_the_submission(text_before_cursor):
+        opener = text_before_cursor.split()[0]
+        if opener not in _DIRECTIONS:
+            return None
+    return pictures.token_at(text_before_cursor)
+
+
+def _picture_name(name: str) -> bool:
+    """Whether a file's name is a picture's, for the menu's filter."""
+    return Path(name).suffix.lower() in pictures.SUFFIXES
+
+
 def _inliner_token(text_before_cursor: str) -> str | None:
     """The inliner token being typed at the cursor, its `/` included:
     `she looks up /c` → `"/c"`. None when the cursor is not in one."""
@@ -452,20 +516,27 @@ def _inliner_token(text_before_cursor: str) -> str | None:
 # ---------- filesystem paths behind `@` ----------
 
 
-def completions(prefix: str) -> Iterator[Completion]:
+def completions(
+    prefix: str, *, keep: Callable[[str], bool] | None = None, escaped: bool = False
+) -> Iterator[Completion]:
     """The menu rows for a partly typed path: `matches` over the entries
     of the directory `prefix` sits in (`~` expanded for the listing only;
-    an unreadable directory offers nothing)."""
+    an unreadable directory offers nothing). `keep` narrows the files
+    offered (directories always are); `escaped` inserts a name with its
+    spaces escaped, replacing the fragment as escaped — the `@` token's
+    own spelling."""
     base, fragment = split(prefix)
     directory = Path(base).expanduser() if base else Path(".")
     try:
         entries = [(entry.name, entry.is_dir()) for entry in directory.iterdir()]
     except OSError:
         return
-    names = matches(entries, fragment)
+    names = matches(entries, fragment, keep=keep)
     width = max((len(name) for name in names), default=0)
+    typed = pictures.escape(fragment) if escaped else fragment
     for name in names:
-        yield Completion(name, start_position=-len(fragment), display=name.ljust(width))
+        text = pictures.escape(name) if escaped else name
+        yield Completion(text, start_position=-len(typed), display=name.ljust(width))
 
 
 def split(prefix: str) -> tuple[str, str]:
@@ -479,14 +550,19 @@ def split(prefix: str) -> tuple[str, str]:
     return prefix[: at + 1], prefix[at + 1 :]
 
 
-def matches(entries: Iterable[tuple[str, bool]], fragment: str) -> list[str]:
+def matches(
+    entries: Iterable[tuple[str, bool]], fragment: str, *, keep: Callable[[str], bool] | None = None
+) -> list[str]:
     """Display names among `entries` — (name, is_dir) pairs — completing
     `fragment`: prefix-matched, hidden entries only when the fragment
     itself starts with a dot, directories with a trailing `/`, ordered by
-    casefolded name."""
+    casefolded name. With `keep`, a file is offered only when it answers
+    for the name; a directory always is."""
     hidden_wanted = fragment.startswith(".")
     return [
         name + ("/" if is_dir else "")
         for name, is_dir in sorted(entries, key=lambda entry: entry[0].casefold())
-        if name.startswith(fragment) and (hidden_wanted or not name.startswith("."))
+        if name.startswith(fragment)
+        and (hidden_wanted or not name.startswith("."))
+        and (is_dir or keep is None or keep(name))
     ]

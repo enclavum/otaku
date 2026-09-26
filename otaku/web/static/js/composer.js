@@ -7,17 +7,34 @@
    Everything submitted here is STORY. The menu offers the story's own
    framing — the openers where a line begins, the inline words where the
    caret is mid-sentence — and nothing else: a command is a button, and
-   the box has never been a place to type one. */
+   the box has never been a place to type one.
+
+   Pictures are staged beside the box and ride the line when it is sent —
+   picked with the attach button, or pasted into the box from the
+   clipboard. Nothing reaches otaku before Send: the tiles are the
+   browser's own previews of the files, and the bytes go in the play
+   body. The attach hint shows only while the model can see
+   (`shell.showFacts`); whether a picture is taken is the backend's to
+   refuse. */
 
 import * as api from "./api.js";
 import { midReply, playLine, run } from "./commands.js";
-import { $, element, setValue, span } from "./dom.js";
+import { $, $$, element, encodeFile, pickFiles, setValue, span } from "./dom.js";
 import { rows as syntaxRows } from "./table.js";
-import { tell } from "./status.js";
+import { settle, tell } from "./status.js";
 import { stopPlaying } from "./transcript.js";
 
 const composer = $(".otk-composer__input textarea");
 const menu = $(".otk-prefixes");
+const attach = $(".otk-attach");
+
+// HEIC named outright, or Safari converts an iPhone's picture to a JPEG
+// twice the size on the way; the bytes decide at the far end.
+const _PICTURES = "image/*,image/heic,image/heif,.heic,.heif";
+
+/* The pictures staged for the next line: the file, and the object URL
+   its tile shows — revoked when the tile goes, whichever way. */
+const staged = [];
 
 // A finger for a pointer means an on-screen keyboard — the test `app.js`
 // makes before it focuses the box.
@@ -59,6 +76,14 @@ let at = null;
 /** Put the caret back in the box. The page's resting state is a reader
     about to write, so every screen that closes hands the keys back to
     it — and a disabled box (otaku gone) is left alone. */
+/** A line put in the box to be edited before it is sent — an option
+    of the model's question, copied rather than picked. */
+export function draft(line) {
+  setValue(composer, line);
+  typed = composer.value;
+  focusComposer();
+}
+
 export function focusComposer() {
   if (!composer.disabled) composer.focus();
 }
@@ -71,35 +96,62 @@ export function primeHistory(lines) {
   at = null;
 }
 
-/** One submitted line, wherever it came from. */
-export function submit(line) {
+/** One submitted line, wherever it came from — with the pictures staged
+    beside it, which is what lets a line be nothing but pictures. */
+export async function submit(line) {
   const said = line.trim();
   // A line typed during a reply is refused the way every other door
   // refuses it — silence here trains the reader to press Enter twice.
-  if (!said || midReply()) return;
-  if (history.at(-1) !== said) history.push(said);
+  if ((!said && !staged.length) || midReply()) return;
+  if (said && history.at(-1) !== said) history.push(said);
   // Into the store's history too (blanks and immediate repeats are the
   // session's to skip) — fire-and-forget: the submission itself is the
   // event, and a lost record must not delay or fail it.
-  api.recordHistory(said).catch(() => {});
+  if (said) api.recordHistory(said).catch(() => {});
   at = null;
   setValue(composer, "");
+  typed = "";
   hideMenu();
+  // The tiles go the moment the line does, as the text does: a refusal
+  // comes back as a sentence, and the reader starts over.
+  const files = await Promise.all(takeStaged().map(encodeFile));
   // Everything typed here is STORY: the framing words ride inside the
   // line and `context.syntax` reads them at the far end. A line opening
   // with an unknown slash word is prose that starts with a slash.
-  playLine(said);
+  playLine(said, files);
 }
+
+// What the box held at the last input event: a refusal above the box
+// stands until the WORDS change — iOS Safari fires input events for
+// more than typing, and an event that changed nothing must not take a
+// refusal down before it was read.
+let typed = "";
 
 export function wire() {
   composer.addEventListener("input", () => {
     // A line about the last attempt is over the moment the next one is
-    // being typed.
+    // being typed. The model's question stays until the line is SENT:
+    // whatever is typed answers it, and it is read while being answered.
     tell("");
+    if (composer.value !== typed) settle();
+    typed = composer.value;
     updateMenu();
   });
   composer.addEventListener("blur", hideMenu);
   composer.addEventListener("keydown", onKey);
+  // A picture on the clipboard, pasted while the box has the focus (a
+  // paste lands where the focus is, so no other paste is touched), is
+  // staged as if picked; only the image items are taken, and a paste
+  // that holds none stays the browser's own text paste.
+  composer.addEventListener("paste", (event) => {
+    const pictures = [...(event.clipboardData?.items ?? [])]
+      .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+      .map((item) => item.getAsFile())
+      .filter(Boolean);
+    if (!pictures.length) return;
+    event.preventDefault();
+    stage(pictures);
+  });
   // Sent by the button, the caret comes back to the box: the next line
   // is typed, not clicked for.
   $(".otk-composer [data-send]")?.addEventListener("click", () => {
@@ -119,6 +171,59 @@ export function wire() {
       hideMenu();
     }
   });
+  // The machine's own picker, several at once; the caret comes back to
+  // the box, where the words to go with them are typed. Two doors to it,
+  // the hint and the touch screen's verb, one listener each.
+  for (const button of $$(".otk-composer [data-attach]")) {
+    button.addEventListener("click", async () => {
+      stage(await pickFiles(_PICTURES));
+      focusComposer();
+    });
+  }
+}
+
+// ---------- the pictures staged beside the box ----------
+
+function stage(files) {
+  for (const file of files) staged.push({ file, url: URL.createObjectURL(file) });
+  paintStaged();
+}
+
+function takeStaged() {
+  /* The files, and the tiles gone: their previews are revoked, the row
+     folds away. */
+  const taken = staged.splice(0);
+  for (const { url } of taken) URL.revokeObjectURL(url);
+  paintStaged();
+  return taken.map(({ file }) => file);
+}
+
+function paintStaged() {
+  attach.hidden = staged.length === 0;
+  const plural = staged.length === 1 ? "" : "s";
+  const rows = [span("otk-attach__label", `${staged.length} picture${plural}`)];
+  staged.forEach((picture, i) => {
+    /* A tile is paper ground until the preview lands in it — and stays
+       so for a picture the browser cannot draw (a HEIC anywhere but
+       Safari): the count says it is there, the cross takes it away. */
+    const tile = span("otk-thumb otk-thumb--sm");
+    const image = element("img");
+    image.alt = "";
+    image.src = picture.url;
+    image.onerror = () => image.remove();
+    const drop = element("button", "otk-thumb__drop", "×");
+    drop.type = "button";
+    drop.setAttribute("aria-label", "Remove this picture");
+    drop.onclick = () => {
+      URL.revokeObjectURL(picture.url);
+      staged.splice(i, 1);
+      paintStaged();
+      focusComposer();
+    };
+    tile.append(image, drop);
+    rows.push(tile);
+  });
+  attach.replaceChildren(...rows);
 }
 
 function onKey(event) {
@@ -161,7 +266,9 @@ function onKey(event) {
     }
   }
   if (event.key === "Escape") {
+    // Clear is the whole line: the words, and the pictures staged with them.
     setValue(composer, "");
+    takeStaged();
     at = null;
     return;
   }

@@ -17,13 +17,17 @@ Run from the repo root:  conda run -n otaku python demo/capture_fixtures_web.py
 """
 
 import json
+import re
+import shutil
 import sys
 import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from otaku.backend.api import settings as api_settings
 from otaku.backend.api import stories as api_stories
+from otaku.backend.tools import TOOLS
 from otaku.web import api as web_api
 from scenarios.support.harness import launch, set_config, set_config_provider
 from scenarios.support.server import ModelServer
@@ -39,6 +43,16 @@ WINDOW = 32768
 # an unchanged tree writes the same bytes: the samples are seeded at launch,
 # and their clock would otherwise move with every capture.
 PINNED_AT = "2026-01-01T00:00:00+00:00"
+# A picture's file name carries the day it was stored (`store.files`);
+# pinned to PINNED_AT's day in the payloads and on the copied files alike,
+# so the fixture's names never move with the capture's date.
+_PICTURE_NAME = re.compile(r"(pic-\d{4}-)\d{8}(-[0-9a-f]+(?:-thumb)?\.[a-z0-9]+)")
+_PINNED_DAY = PINNED_AT[:10].replace("-", "")
+
+
+def pin_picture_names(text: str) -> str:
+    """`text` with every picture file name's day set to PINNED_AT's."""
+    return _PICTURE_NAME.sub(rf"\g<1>{_PINNED_DAY}\g<2>", text)
 
 
 def pin_timestamps(payload):
@@ -68,7 +82,7 @@ def main() -> None:
             app = launch(root, server, spec="ollama/test-model")
             try:
                 session = app.session
-                rows = web_api.stories(session)
+                rows = web_api.stories.stories(session)
                 river_id = next(r["id"] for r in rows if r["open"])
                 tour_id = next(r["id"] for r in rows if not r["open"])
 
@@ -90,15 +104,22 @@ def main() -> None:
                 # The harness provider is scaffolding, not content; the
                 # demo names its own model (`demo/web/store.js`).
                 facts.update(model="", provider="", max_context="")
-                settings = web_api.settings(session)
+                settings = web_api.settings.settings(session)
                 settings["model"] = ""
-                rows = web_api.stories(session)  # after both landings: river open
+                rows = web_api.stories.stories(session)  # after both landings: river open
                 for row in rows:
                     row["model"] = ""
 
                 fixtures = {
                     "syntax": web_api.syntax(),
                     "settings": settings,
+                    # What every story's settings read as until it changes
+                    # one: the defaults, which the demo copies per story.
+                    "story_settings": web_api.story_settings(session, river_id),
+                    # Every tool's prompt as shipped, by name.
+                    "prompts": {
+                        name: api_settings.get_tool_prompt(session, name) for name in TOOLS
+                    },
                     "river": {
                         "facts": facts,
                         "story": next(r for r in rows if r["id"] == river_id),
@@ -123,9 +144,24 @@ def main() -> None:
                 # The throwaway root must not reach a committed file — nor
                 # would any real path belong in a payload the page seeds from.
                 scrubbed = text.replace(root_str, "~/.otaku").replace(str(Path.home()), "~")
+                scrubbed = pin_picture_names(scrubbed)
                 path = FIXTURES / f"{name}.json"
                 path.write_text(scrubbed + "\n", encoding="utf-8")
                 print(f"wrote {path} ({len(scrubbed):,} chars)")
+            # The sample's pictures, as the store holds them — the file and
+            # its thumbnail, their day pinned — for the demo's `/api/files`.
+            # The folder is rebuilt whole, so a picture the sample dropped
+            # does not linger.
+            files = FIXTURES / "files"
+            shutil.rmtree(files, ignore_errors=True)
+            files.mkdir()
+            store_files = root / "database" / "files"
+            for turn in fixtures["river"]["opened"]["messages"]:
+                for picture in turn.get("attachments") or []:
+                    stem = Path(picture["file"]).stem
+                    for stored in (picture["file"], f"{stem}-thumb.jpg"):
+                        shutil.copyfile(store_files / stored, files / pin_picture_names(stored))
+            print(f"wrote {files} ({len(list(files.iterdir()))} files)")
     finally:
         server.close()
 

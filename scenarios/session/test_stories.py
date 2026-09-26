@@ -1,4 +1,5 @@
-"""Managing stories: browsing and resuming, forking, /title, /system, /new.
+"""Managing stories: browsing and resuming, forking, /title, /system, /new, and a
+story's settings.
 
 The browser itself is a full-screen surface driven headless below; for
 the routing stories it is a stubbed `screens.stories.pick` — patched at
@@ -7,13 +8,30 @@ its module seam — that EXECUTES the settled selection through
 ownership rule). These stories are about what a settled selection
 MEANS — resume, fork, truncate — and about the story commands' effects
 on the store, the session, and the remembered state.
+
+A story's settings on the wire and in the store: a tool switched on
+sends its instruction from prompts.toml where the story says — enclosed
+above the newest line, or bare after the premise; a reminder sends the
+user's own words from the end — the shared one's, written once, and the
+story's own, each a switch; none of it is ever stored as a message; the
+switches are the story's — kept across a launch, carried by a fork, off
+in a new story.
 """
 
+import contextlib
 from collections.abc import Callable
 
+import pytest
+
+from otaku.backend import InjectionPosition
+from otaku.backend.api import settings as api_settings
 from otaku.backend.api import stories as api_stories
-from otaku.backend.session import Session
+from otaku.backend.paths import Paths
+from otaku.backend.session import Refused, Session
+from otaku.backend.story import StorySetting
+from otaku.settings.prompts import Prompts
 from otaku.terminal.screens import stories as screen_stories
+from otaku.terminal.screens import story as screen_story
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch
 from scenarios.support.screens import (
@@ -23,12 +41,16 @@ from scenarios.support.screens import (
     DOWN,
     ENTER,
     ESC,
-    SHIFT_TAB,
+    LEFT,
+    RIGHT,
+    SPACE,
     TAB,
     run_screen,
 )
 
 Picker = Callable[[Session], "str | None"]
+# The ask instruction the settings stories put into prompts.toml.
+HOW_TO_ASK = "ASK LIKE THIS"
 
 
 class TestBrowsing:
@@ -141,7 +163,7 @@ class TestStoryBrowser:
         # row under the cursor — not the open one — the premise tab's
         # save lands on that story, and the open story keeps its own.
         first, _second = two_stories(app)
-        assert self.pick(app, DOWN + ENTER + SHIFT_TAB + ENTER + "!" + CTRL_S + ESC + ESC) is None
+        assert self.pick(app, DOWN + ENTER + LEFT + ENTER + "!" + CTRL_S + ESC + ESC) is None
         assert app.store.stories.get_system(first) == "!"
         assert app.session.system == ""  # the open story's premise is untouched
 
@@ -150,9 +172,9 @@ class TestStoryBrowser:
         # reported — the trap this covers is "" falling through to the
         # report and the clear silently not landing.
         first, _second = two_stories(app)
-        assert self.pick(app, DOWN + ENTER + SHIFT_TAB + ENTER + "!" + CTRL_S + ESC + ESC) is None
+        assert self.pick(app, DOWN + ENTER + LEFT + ENTER + "!" + CTRL_S + ESC + ESC) is None
         assert app.store.stories.get_system(first) == "!"
-        keys = DOWN + ENTER + SHIFT_TAB + ENTER + DELETE + CTRL_S + ESC + ESC
+        keys = DOWN + ENTER + LEFT + ENTER + DELETE + CTRL_S + ESC + ESC
         assert self.pick(app, keys) is None
         assert app.store.stories.get_system(first) == ""
 
@@ -170,7 +192,7 @@ class TestStoryBrowser:
         first = app.session.story_id
         app.play("/new")
         app.play("The second story begins.")
-        keys = DOWN + ENTER + TAB + ENTER + DOWN + ENTER + "!" + CTRL_S + ESC * 3
+        keys = DOWN + ENTER + RIGHT + ENTER + DOWN + ENTER + "!" + CTRL_S + ESC * 3
         assert self.pick(app, keys) is None
         ids = app.store.stories.get_messages_ids(first)
         scene = app.store.scenes.get_current(first, ids)[0]
@@ -404,6 +426,360 @@ class TestNew:
         assert app.store.stories.list()[0].label == "The Second Tale"
 
 
+class TestSettingsOfTools:
+    def test_a_tool_switched_on_sends_its_prompt_before_the_newest_line(
+        self, server, tmp_path
+    ) -> None:
+        # The prompt comes FROM prompts.toml, so the file is edited:
+        # asserting the built-in wording would pass with the load path gone.
+        app = with_prompt(tmp_path / "state", server)
+        try:
+            api_stories.update_setting(app.session, "allow_questions", enabled=True)
+            app.play("I push the door.")
+            assert messages(app, "I push the door.") == [
+                ("user", f"((OOC: {HOW_TO_ASK}))\n\nI push the door.")
+            ]
+            # Sent, never stored: the story holds the line as typed.
+            (line, _reply) = app.store.stories.get_messages(app.session.story_id)
+            assert line.body == "I push the door."
+        finally:
+            app.close()
+
+    def test_switched_off_it_is_gone(self, server, tmp_path) -> None:
+        app = with_prompt(tmp_path / "state", server)
+        try:
+            api_stories.update_setting(app.session, "allow_questions", enabled=True)
+            app.play("I push the door.")
+            api_stories.update_setting(app.session, "allow_questions", enabled=False)
+            app.play("I step inside.")
+            sent = messages(app, "I step inside.")
+            assert not any(HOW_TO_ASK in body for _, body in sent)
+        finally:
+            app.close()
+
+    def test_in_the_system_message_it_follows_the_premise_bare(self, server, tmp_path) -> None:
+        app = with_prompt(tmp_path / "state", server)
+        try:
+            app.play("/system Be terse.")
+            api_stories.update_setting(
+                app.session, "allow_questions", enabled=True, position=InjectionPosition()
+            )
+            app.play("I push the door.")
+            assert messages(app, "I push the door.") == [
+                ("system", f"Be terse.\n\n{HOW_TO_ASK}"),
+                ("user", "I push the door."),
+            ]
+            # The premise itself is the user's text, untouched.
+            assert app.store.stories.get_system(app.session.story_id) == "Be terse."
+        finally:
+            app.close()
+
+    def test_a_position_counts_the_readers_messages_from_the_end(self, server, tmp_path) -> None:
+        # 2 is before the reader's previous line: the replies between are
+        # not counted.
+        app = with_prompt(tmp_path / "state", server)
+        try:
+            app.play("One.")
+            app.play("Two.")
+            api_stories.update_setting(
+                app.session, "allow_questions", enabled=True, position=InjectionPosition(2)
+            )
+            app.play("Three.")
+            bodies = [body for _, body in messages(app, "Three.")]
+            assert bodies[2] == f"((OOC: {HOW_TO_ASK}))\n\nTwo."
+            assert bodies[4] == "Three."
+        finally:
+            app.close()
+
+
+class TestSettingsOfReminders:
+    def test_both_go_out_of_character_the_shared_one_leading(self, app: App) -> None:
+        # A reminder rides a message of the reader's, where bare text
+        # would read as the reader's line.
+        api_stories.set_shared_reminder(app.session, "Stay grim.")
+        api_stories.update_setting(
+            app.session, "use_shared_reminder", enabled=True, position=InjectionPosition(1)
+        )
+        api_stories.update_setting(
+            app.session,
+            "use_story_reminder",
+            enabled=True,
+            position=InjectionPosition(1),
+            reminder_text="[Here: rain]",
+        )
+        app.play("I push the door.")
+        assert messages(app, "I push the door.") == [
+            ("user", "((OOC: Stay grim.))\n\n((OOC: [Here: rain]))\n\nI push the door.")
+        ]
+
+    def test_each_is_a_switch_of_its_own(self, app: App) -> None:
+        api_stories.set_shared_reminder(app.session, "Stay grim.")
+        api_stories.update_setting(
+            app.session,
+            "use_story_reminder",
+            enabled=True,
+            position=InjectionPosition(1),
+            reminder_text="[Here: rain]",
+        )
+        app.play("I push the door.")
+        assert messages(app, "I push the door.") == [
+            ("user", "((OOC: [Here: rain]))\n\nI push the door.")
+        ]
+
+    def test_each_rides_at_its_own_position(self, app: App) -> None:
+        api_stories.set_shared_reminder(app.session, "Stay grim.")
+        app.play("One.")
+        api_stories.update_setting(
+            app.session, "use_shared_reminder", enabled=True, position=InjectionPosition(2)
+        )
+        api_stories.update_setting(
+            app.session,
+            "use_story_reminder",
+            enabled=True,
+            position=InjectionPosition(1),
+            reminder_text="[Here: rain]",
+        )
+        app.play("Two.")
+        bodies = [body for _, body in messages(app, "Two.")]
+        assert bodies[0] == "((OOC: Stay grim.))\n\nOne."
+        assert bodies[2] == "((OOC: [Here: rain]))\n\nTwo."
+
+    def test_the_text_is_shared_and_the_switch_is_each_story_s(self, app: App) -> None:
+        api_stories.set_shared_reminder(app.session, "Stay grim.")
+        api_stories.update_setting(
+            app.session, "use_shared_reminder", enabled=True, position=InjectionPosition(1)
+        )
+        app.play("I push the door.")
+        app.play("/new")
+        app.play("A second story.")  # a new story has it off
+        assert messages(app, "A second story.") == [("user", "A second story.")]
+        api_stories.update_setting(
+            app.session, "use_shared_reminder", enabled=True, position=InjectionPosition(1)
+        )
+        app.play("And on.")
+        assert messages(app, "And on.")[-1] == ("user", "((OOC: Stay grim.))\n\nAnd on.")
+
+    def test_a_reminder_with_nothing_written_sends_nothing(self, app: App) -> None:
+        api_stories.update_setting(
+            app.session, "use_story_reminder", enabled=True, position=InjectionPosition(1)
+        )
+        app.play("I push the door.")
+        assert messages(app, "I push the door.") == [("user", "I push the door.")]
+
+    def test_cleared_it_is_gone_from_the_store(self, app: App) -> None:
+        api_stories.set_shared_reminder(app.session, "Stay grim.")
+        assert app.store.settings.get("shared_reminder") == "Stay grim."
+        assert api_stories.get_shared_reminder(app.session) == "Stay grim."
+        api_stories.set_shared_reminder(app.session, "")
+        assert app.store.settings.get("shared_reminder") == ""
+        assert api_stories.get_shared_reminder(app.session) == ""
+
+
+class TestToolsTab:
+    """The dossier's Tools tab: one row per captioned setting — Space
+    checks and unchecks it — with the setting's fields in the panel
+    beside: Enter or Tab moves in, ↑/↓ walk the fields, Enter acts on
+    one (a checkbox toggles, the depth opens its dropdown, a reminder's
+    text edits in place, the instructions open the prompt over the
+    panel), Esc returns to the list. Every change lands through
+    `backend.api`, so the store is what the keys are held against."""
+
+    def test_space_checks_and_unchecks_a_setting(self, app: App) -> None:
+        app.play("I push the door.")
+        self.tools(app, SPACE + ESC)
+        assert self.setting(app, "allow_questions").enabled
+        self.tools(app, SPACE + ESC)
+        assert not self.setting(app, "allow_questions").enabled
+
+    def test_the_depth_is_picked_from_the_dropdown(self, app: App) -> None:
+        app.play("I push the door.")
+        # questions: Enter into the panel lands on the instructions; ↓ to
+        # the depth; Enter opens the closed list, ↓ picks the next place,
+        # Enter sets it; Esc back to the list, Esc quits.
+        self.tools(app, ENTER + DOWN + ENTER + DOWN + ENTER + ESC + ESC)
+        assert self.setting(app, "allow_questions").injection_position == InjectionPosition(2)
+        # Tab is the other way in, and never a way back
+        self.tools(app, TAB + DOWN + ENTER + DOWN + ENTER + ESC + ESC)
+        assert self.setting(app, "allow_questions").injection_position == InjectionPosition(3)
+
+    def test_the_story_reminder_edits_in_place(self, app: App) -> None:
+        app.play("I push the door.")
+        # third row; its first field is the text: Enter edits, Ctrl+S saves
+        self.tools(app, DOWN + DOWN + ENTER + ENTER + "Rain." + CTRL_S + ESC + ESC)
+        assert self.setting(app, "use_story_reminder").reminder_text == "Rain."
+
+    def test_the_shared_reminder_is_every_storys(self, app: App) -> None:
+        app.play("I push the door.")
+        self.tools(app, DOWN * 3 + ENTER + ENTER + "Stay grim." + CTRL_S + ESC + ESC)
+        assert api_stories.get_shared_reminder(app.session) == "Stay grim."
+
+    def test_the_notes_display_is_a_checkbox_in_the_panel(self, app: App) -> None:
+        app.play("I push the door.")
+        # second row: Space in the panel toggles the display; Space on the
+        # list, after Esc, checks the tool itself
+        self.tools(app, DOWN + ENTER + SPACE + ESC + SPACE + ESC)
+        notes = self.setting(app, "allow_assistant_notes")
+        assert (notes.enabled, notes.display_notes) == (True, False)
+
+    def test_the_instructions_row_edits_the_tools_prompt(self, app: App) -> None:
+        app.play("I push the door.")
+        shipped = api_settings.get_tool_prompt(app.session, "question")
+        # the row opens the prompt over the panel; typed at its start
+        self.tools(app, ENTER + ENTER + "Be brief. " + CTRL_S + ESC + ESC)
+        assert api_settings.get_tool_prompt(app.session, "question") == "Be brief. " + shipped
+        # Esc in the editor writes nothing
+        self.tools(app, ENTER + ENTER + "Dropped. " + ESC + ESC + ESC)
+        assert api_settings.get_tool_prompt(app.session, "question") == "Be brief. " + shipped
+        # the notes tool's instructions are its own
+        self.tools(app, DOWN + ENTER + DOWN + ENTER + "Short. " + CTRL_S + ESC + ESC)
+        assert api_settings.get_tool_prompt(app.session, "note").startswith("Short. ")
+
+    def test_the_prompts_file_holds_what_was_saved(self, app: App) -> None:
+        app.play("I push the door.")
+        self.tools(app, ENTER + ENTER + "Be brief. " + CTRL_S + ESC + ESC)
+        text = app.paths.prompts_file.read_text()
+        assert "Be brief. " in text
+
+    def tools(self, app: App, keys: str) -> None:
+        # the dossier opens on the scenes; two tabs to the right sit the tools
+        with contextlib.suppress(EOFError):
+            run_screen(RIGHT + RIGHT + keys, lambda: screen_story.browse(app.session, "scenes"))
+
+    def setting(self, app: App, name: str) -> StorySetting:
+        found = api_stories.get_settings(app.session).get(name)
+        assert found is not None
+        return found
+
+
+class TestSettingsAreTheStorys:
+    def test_a_switch_flipped_before_the_first_turn_is_kept(self, server, tmp_path) -> None:
+        app = with_prompt(tmp_path / "state", server)
+        try:
+            assert app.session.story_id is None
+            api_stories.update_setting(app.session, "allow_questions", enabled=True)
+            app.play("I push the door.")
+            assert HOW_TO_ASK in messages(app, "I push the door.")[-1][1]
+            stored = app.store.stories.get_settings(app.session.story_id)
+            assert [(s.name, s.enabled) for s in stored] == [("allow_questions", True)]
+        finally:
+            app.close()
+
+    def test_the_switches_survive_a_launch(self, server, tmp_path) -> None:
+        app = with_prompt(tmp_path / "state", server)
+        api_stories.update_setting(
+            app.session, "allow_questions", enabled=True, position=InjectionPosition(2)
+        )
+        api_stories.update_setting(app.session, "allow_assistant_notes", display_notes=False)
+        app.play("I push the door.")
+        app.close()
+        app = launch(tmp_path / "state", server)
+        try:
+            ask = setting(app, "allow_questions")
+            assert (ask.enabled, ask.injection_position) == (True, InjectionPosition(2))
+            assert setting(app, "allow_assistant_notes").display_notes is False
+        finally:
+            app.close()
+
+    def test_a_new_story_starts_with_every_setting_off(self, app: App) -> None:
+        api_stories.update_setting(app.session, "allow_questions", enabled=True)
+        app.play("I push the door.")
+        app.play("/new")
+        assert not any(each.enabled for each in api_stories.get_settings(app.session))
+
+    def test_a_fork_plays_the_way_its_origin_does(self, app: App) -> None:
+        api_stories.update_setting(
+            app.session, "allow_assistant_notes", enabled=True, position=InjectionPosition()
+        )
+        app.play("I push the door.")
+        origin = app.session.story_id
+        app.play("/fork")
+        assert app.session.story_id != origin
+        assert app.store.stories.get_settings(app.session.story_id) == (
+            app.store.stories.get_settings(origin)
+        )
+        notes = setting(app, "allow_assistant_notes")
+        assert (notes.enabled, notes.injection_position) == (True, InjectionPosition())
+
+    def test_a_story_that_is_not_open_is_reached_by_its_id(self, app: App) -> None:
+        first, second = two_stories(app)
+        said = api_stories.update_setting(
+            app.session, "allow_questions", enabled=True, story_id=first
+        )
+        assert said
+        # The open story is left as it was; the named one took the switch.
+        assert not setting(app, "allow_questions").enabled
+        elsewhere = api_stories.get_settings(app.session, first).get("allow_questions")
+        assert elsewhere is not None and elsewhere.enabled
+        assert app.session.story_id == second
+
+
+class TestToolPrompts:
+    """A tool's prompt is prompts.toml's, edited in place from the app:
+    the one key rewritten, the pre-edit file kept as a dated backup named
+    after the file, and the next request carrying what was saved."""
+
+    def test_a_saved_prompt_lands_in_the_file_and_on_the_wire(self, server, tmp_path) -> None:
+        app = with_prompt(tmp_path / "state", server)
+        try:
+            api_stories.update_setting(app.session, "allow_questions", enabled=True)
+            said = api_settings.set_tool_prompt(app.session, "question", "ASK ANEW")
+            assert said
+            text = app.paths.prompts_file.read_text()
+            assert text.count("tool_questions_prompt = ") == 1 and "ASK ANEW" in text
+            assert HOW_TO_ASK not in text
+            kept = list(app.paths.config_backups_dir.iterdir())  # the pre-edit file waits
+            assert [path.name[: len("prompts-")] for path in kept] == ["prompts-"]
+            assert HOW_TO_ASK in kept[0].read_text()
+            assert api_settings.get_tool_prompt(app.session, "question") == "ASK ANEW"
+            app.play("I push the door.")
+            assert messages(app, "I push the door.") == [
+                ("user", "((OOC: ASK ANEW))\n\nI push the door.")
+            ]
+        finally:
+            app.close()
+
+    def test_an_emptied_prompt_restores_the_built_in(self, server, tmp_path) -> None:
+        app = with_prompt(tmp_path / "state", server)
+        try:
+            api_settings.set_tool_prompt(app.session, "question", "  ")
+            assert "tool_questions_prompt" not in app.paths.prompts_file.read_text()
+            shipped = Prompts().tool_questions_prompt
+            assert api_settings.get_tool_prompt(app.session, "question") == shipped
+        finally:
+            app.close()
+
+    def test_a_name_no_tool_owns_is_refused(self, app: App) -> None:
+        with pytest.raises(Refused):
+            api_settings.get_tool_prompt(app.session, "plan")
+        with pytest.raises(Refused):
+            api_settings.set_tool_prompt(app.session, "plan", "x")
+
+
+class TestSettingsRefused:
+    def test_what_a_setting_cannot_take_is_refused(self, app: App) -> None:
+        for asked in (
+            {"name": "plan", "enabled": True},
+            # Past the deepest place. (What is not a position at all —
+            # "end", 0, "2" — never becomes one: `InjectionPosition.from_value`
+            # reads None at the wire.)
+            {"name": "allow_questions", "position": InjectionPosition(9)},
+            {"name": "allow_questions", "reminder_text": "Ask about the weather."},
+            # Only the notes tool has something to display.
+            {"name": "allow_questions", "display_notes": False},
+            # A reminder is never the system message's: that is the premise's.
+            {"name": "use_story_reminder", "position": InjectionPosition()},
+            {"name": "use_shared_reminder", "position": InjectionPosition()},
+            # The shared reminder's text is no one story's.
+            {"name": "use_shared_reminder", "reminder_text": "Stay grim."},
+            # A flag injects nothing, so it rides nowhere.
+            {"name": "story_mode", "position": InjectionPosition(1)},
+        ):
+            with pytest.raises(Refused):
+                api_stories.update_setting(app.session, **asked)  # type: ignore[arg-type]
+        # Nothing was written by a refusal.
+        assert not any(each.enabled for each in api_stories.get_settings(app.session))
+
+
 def picks(story_id: int, upto: int | None = None, action: str = "resume") -> Picker:
     """A browser stub: the user picked `story_id` — at its last turn, or
     at message `upto` of it with the resume dialog settling `action` —
@@ -428,3 +804,25 @@ def two_stories(app: App) -> tuple[int, int]:
     app.play("/new")
     app.play("The second story begins.")
     return first, app.session.story_id
+
+
+def with_prompt(root, server) -> App:
+    """The app over a prompts.toml whose questions prompt is `HOW_TO_ASK`."""
+    paths = Paths.resolve(root)
+    paths.ensure_tree()
+    paths.prompts_file.write_text(f'tool_questions_prompt = "{HOW_TO_ASK}"\n')
+    return launch(root, server)
+
+
+def messages(app: App, last_line: str) -> list[tuple[str, str]]:
+    """The turn's request as (role, text) pairs — picked by its newest
+    line, since a background request may have landed after it."""
+    request = scripted.chat_request(app.server, last_line)
+    return [(m["role"], scripted.content_text(m)) for m in request["messages"]]
+
+
+def setting(app: App, name: str) -> StorySetting:
+    """One setting of the open story, as it stands."""
+    found = api_stories.get_settings(app.session).get(name)
+    assert found is not None
+    return found

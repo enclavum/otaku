@@ -10,13 +10,15 @@ The module also carries the launch pieces cli needs alone (`otaku logs
 requests` unlocks the way the app does).
 """
 
-from collections.abc import Callable
+import re
+from collections.abc import Callable, Iterable
 from dataclasses import replace
 from pathlib import Path
 
 from otaku import encryption
 from otaku.backend import passwords
 from otaku.backend.api import transfer
+from otaku.backend.files import RawFile, read_picture, save
 from otaku.backend.paths import Paths
 from otaku.backend.session import NO_MODEL_HINT, Refused, Session
 from otaku.encryption import AskSecret, Cipher, EncryptionError, SealedError
@@ -30,8 +32,15 @@ from otaku.settings import providers as providers_file
 from otaku.settings import state as state_file
 from otaku.settings.config import Config
 from otaku.store import Store, is_encrypted
+from otaku.store.schema import Attachment
 from otaku.worker import Worker
 
+# A sample's pictures ship beside its document, named for the message
+# they belong to: `river.15.1.jpg` is the first picture of river.md's
+# 15th message. The document itself carries no picture — the export
+# format never does — so the first launch puts them on the message
+# through the app's own intake, as a reader's attachment would land.
+_SAMPLE_PICTURE = re.compile(r"^(?P<stem>.+)\.(?P<message>\d+)\.(?P<order>\d+)\.[A-Za-z0-9]+$")
 _SAMPLES_NOTICE = (
     "Sample stories were imported so you can look around — type to play on, "
     "/stories switches between them, or see every command with /help · "
@@ -108,6 +117,11 @@ def open_session(root: str | Path | None = None, *, ask_secret: AskSecret | None
         system_log.record(note.text)
         if note.show:
             notices.append(note.show)
+    # The files folder, swept against what the rows still name — what a
+    # crash between a delete's rows and its files left behind.
+    swept = store.stories.sweep_files()
+    if swept:
+        system_log.record(f"files folder swept: {swept} unreferenced file(s) removed")
     # The worker's own store connection (WAL makes the concurrent write
     # safe), opened lazily on its thread; keep=0 — the session's open
     # above owns the daily snapshot. It exists whatever [lore_extraction]
@@ -135,7 +149,7 @@ def open_session(root: str | Path | None = None, *, ask_secret: AskSecret | None
         raise
     session.notices = notices + session.notices
     if fresh and config.seed_sample:
-        _seed_sample(session)
+        _seed_samples(session)
     return session
 
 
@@ -269,7 +283,10 @@ def _resolve_api_keys(
     return resolved, warnings
 
 
-def _seed_sample(session: Session) -> None:
+# ---------- the sample stories ----------
+
+
+def _seed_samples(session: Session) -> None:
     """A database created from scratch is seeded with the shipped sample
     stories, through the import operation's own machinery — native
     imports, so no pass runs and no model is called — and remembered, so
@@ -290,8 +307,45 @@ def _seed_sample(session: Session) -> None:
         else:
             if session.story_id is not None:
                 landed.append(session.story_id)
+                _seed_pictures(session, session.story_id, file)
     if not landed:
         return
     session._switch_to(landed[0])
     session._update_state()
     session.notice = _SAMPLES_NOTICE
+
+
+def _seed_pictures(session: Session, story_id: int, document: Path) -> None:
+    """The sample's pictures, shipped beside its document
+    (`_sample_pictures`), into the story the way a reader's land: read
+    through the one intake — sniffed, oriented, downsized, thumbnailed
+    — saved under the story's number, and put on the message each
+    belongs to. Best effort per picture: one that cannot be read, or
+    names a message the document lacks, says so and the rest land."""
+    names = sorted(p.name for p in document.parent.iterdir()) if document.parent.is_dir() else []
+    ids = session._store.stories.get_messages_ids(story_id)
+    by_message: dict[int, list[Attachment]] = {}
+    for number, name in _sample_pictures(names, document.stem):
+        path = document.parent / name
+        try:
+            if not 1 <= number <= len(ids):
+                raise Refused(f"{document.name} has no message {number}")
+            picture = read_picture(RawFile(path.read_bytes(), name))
+        except (Refused, OSError) as e:
+            session.notices.append(f"The sample picture {name} could not be added ({e}).")
+            continue
+        by_message.setdefault(number, []).append(save(session._store.files, picture, story_id))
+    for number, attachments in by_message.items():
+        session._store.messages.set_attachments(ids[number - 1], attachments)
+
+
+def _sample_pictures(names: Iterable[str], stem: str) -> list[tuple[int, str]]:
+    """The pictures shipped for the sample `stem` among `names`, each
+    with the number of the message it belongs to, in message and then
+    picture order (`_SAMPLE_PICTURE`): the shipped layout's one rule."""
+    found: list[tuple[int, int, str]] = []
+    for name in names:
+        match = _SAMPLE_PICTURE.match(name)
+        if match is not None and match.group("stem") == stem:
+            found.append((int(match.group("message")), int(match.group("order")), name))
+    return [(message, name) for message, _order, name in sorted(found)]

@@ -41,7 +41,7 @@ from otaku.providers.openai.models import (
     ModelState,
     OpenAIModels,
 )
-from otaku.providers.openai.requests import Image, WireMessage
+from otaku.providers.openai.requests import WireMessage
 from otaku.settings.providers import ProviderConfig
 
 # How a model's thinking is set, as its template told it: (the rungs
@@ -461,13 +461,12 @@ class LlamaCppCompletion(OpenAICompletion):
         messages: Sequence[WireMessage],
         *,
         level: str | None = None,
-        images: Sequence[Image] = (),
         timeout: float = ASK_TIMEOUT,
     ) -> int | None:
         # The same body a turn would send, knobs included and streaming
         # fields aside, so the count is of what the template renders for
         # it. A router must not load the model for a count.
-        body, knobs = self._chat_request(model, messages, {}, level=level, images=images)
+        body, knobs = self._chat_request(model, messages, {}, level=level)
         request = {
             k: v for k, v in {**body, **knobs}.items() if k not in ("stream", "stream_options")
         }

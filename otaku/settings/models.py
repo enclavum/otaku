@@ -12,17 +12,18 @@ from otaku.settings import read_settings, write_atomic
 # The thinking level is the engine's own word for an effort, and which
 # words exist is the provider layer's (`providers.reasoning.EFFORT_LEVELS`),
 # read back against it by the session: this file only holds one. "unset"
-# is not a level: no level is saved, nothing is sent, and the engine
-# decides — what a model with no think row runs at, so an entry carries
-# the key only for a level.
+# is not a level but is saved like one: nothing is sent, and the engine
+# decides. A model with no think row starts OFF where the provider says
+# it thinks (`api.settings.default_think` writes the row as the model
+# becomes current), and has no row otherwise.
 THINK_UNSET = "unset"
 # The entry's one key that is not an inference parameter.
 THINK_KEY = "think"
 
 _HEADER = [
     "# Per-model settings, written by /set parameter and /set think.",
-    "# Keyed by bare model name. A model without a think row runs unset:",
-    "# nothing sent, the engine decides.",
+    "# Keyed by bare model name. A model with no think row starts with its",
+    "# thinking off where the provider says it thinks; unset sends nothing.",
     "",
 ]
 

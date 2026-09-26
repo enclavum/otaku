@@ -3,7 +3,7 @@ the composition root. Everything below backend takes plain Path values
 derived here; nothing else knows the tree.
 
 Layout: configs/ holds what the user edits and what the app remembers,
-database/ the story store and its backups, logs/ the append-only logs.
+database/ the story store, its backups and its files folder, logs/ the append-only logs.
 """
 
 from dataclasses import dataclass

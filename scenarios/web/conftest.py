@@ -32,8 +32,9 @@ from otaku.backend import launch as backend_launch
 from otaku.backend.api import providers as api_providers
 from otaku.backend.paths import Paths
 from otaku.backend.session import Refused
+from otaku.console.banner import address
 from otaku.store import Store
-from otaku.web import address, serve
+from otaku.web import serve
 from scenarios.support.harness import MODEL, PROVIDER, read_store, set_config_provider
 from scenarios.support.server import ModelServer
 

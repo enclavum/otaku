@@ -4,13 +4,21 @@ Always the CURRENT shape: a fresh database is created from it directly,
 and `store.migrations` brings old databases to it. The semantics ride in
 from the old module unchanged with the DDL text: stories/messages are
 source, scenes/characters/journals derivatives, sibling trees via
-parent_id, the two-level rollup pattern, per-field sealing, audit-only
-timestamps.
+parent_id, the two-level rollup pattern, per-field sealing (the `attachments`
+column plain on purpose: the app's facts about files the folder beside
+the database holds sealed), audit-only timestamps. A story's settings
+are one sealed JSON on its row (`StorySettingDB`); the `settings` table
+holds the ones stories SHARE. A setting is that table's when it is a
+text that may need sealing — a config file is never sealed — and a
+config file's otherwise.
 """
 
+import json
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Self
 
-SCHEMA_VERSION = "4"
+SCHEMA_VERSION = "6"
 
 SCHEMA_DDL = """
 -- ---------- source: what was actually said ----------
@@ -23,6 +31,7 @@ CREATE TABLE stories (
     system         BLOB,                 -- the story's system prompt
     created_at     TEXT NOT NULL,
     updated_at     TEXT NOT NULL,
+    settings       BLOB,                 -- the story's settings as JSON, sealed; NULL when none
     FOREIGN KEY (id, head_id) REFERENCES messages(story_id, id)
 );
 
@@ -43,6 +52,7 @@ CREATE TABLE messages (
     model       TEXT,
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL,
+    attachments TEXT,                    -- the turn's pictures as a JSON list, see Attachment; NULL when none
     UNIQUE (story_id, id),               -- composite-FK target: same-story references only
     FOREIGN KEY (story_id, parent_id) REFERENCES messages(story_id, id),
     CHECK (parent_id IS NULL OR parent_id < id)
@@ -113,6 +123,13 @@ CREATE TABLE history (                   -- the REPL's Up/Down input history, ca
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE settings (                  -- settings that stories share; the texts that may need sealing
+    key        TEXT PRIMARY KEY,         -- 'shared_reminder'
+    value      BLOB NOT NULL,            -- sealed; an emptied value deletes its row
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);   -- schema_version, check
 
 CREATE INDEX idx_messages_story    ON messages (story_id);
@@ -133,6 +150,61 @@ class Story:
     system: str
     head_id: int | None
     forked_from_id: int | None
+    settings: tuple["StorySettingDB", ...] = ()  # what the story has stored, see StorySettingDB
+
+
+@dataclass(frozen=True)
+class Attachment:
+    """One picture on a turn, as the `attachments` column records it: the
+    app's facts about a file in the folder beside the database, none of
+    the reader's words — which is why the column is plain where the file
+    is sealed. `file` is the file's name in the folder, extension
+    included (`store.files` draws it; the extension says the type), the
+    rest their measure as the model sees them — recorded here so that no
+    reader has to open a sealed file to describe a picture. The reader's
+    original file name is not kept: nothing needs it once the picture
+    is in."""
+
+    file: str
+    width: int
+    height: int
+    size: int
+
+    @classmethod
+    def from_json(cls, text: str | None) -> tuple[Self, ...]:
+        """The column read back; NULL → no pictures, which is also what a
+        row written before the column existed reads as."""
+        if not text:
+            return ()
+        return tuple(
+            cls(
+                file=str(item["file"]),
+                width=int(item["width"]),
+                height=int(item["height"]),
+                size=int(item["size"]),
+            )
+            for item in json.loads(text)
+        )
+
+    @classmethod
+    def to_json(cls, attachments: Sequence[Self]) -> str | None:
+        """The column's text for these pictures: a JSON list, or NULL (None)
+        for a turn without any — the column never holds an empty list
+        pretending to be absent. The keys are a contract with the SQL that
+        reads the column back (`$.file` is what the sweep extracts)."""
+        if not attachments:
+            return None
+        return json.dumps(
+            [
+                {
+                    "file": a.file,
+                    "width": a.width,
+                    "height": a.height,
+                    "size": a.size,
+                }
+                for a in attachments
+            ]
+        )
 
 
 @dataclass(frozen=True)
@@ -150,6 +222,9 @@ class Message:
     speaker_id: int | None = None
     provider: str | None = None  # set on assistant turns ('card' on a card greeting)
     model: str | None = None
+    attachments: tuple[
+        Attachment, ...
+    ] = ()  # the turn's pictures; the files folder holds the bytes
     id: int = 0
 
 
@@ -185,3 +260,107 @@ class Journal:
     state: str
     history: str = ""
     updated_at: str = ""  # audit column, surfaced for display alone
+
+
+@dataclass(frozen=True)
+class StorySettingDB:
+    """One setting of a story, as the `settings` column records it: a
+    switch, where what it injects rides, the story's own reminder, and
+    whether the reader is shown the notes the model writes — the last two
+    each one setting's, the others every injecting setting's.
+    WHICH settings there are, and what each may take, is no business of
+    the column's (`backend.story`)."""
+
+    name: str
+    enabled: bool = False
+    position: "InjectionPosition | None" = None  # None: unsaid, the setting's default applies
+    reminder_text: str = ""
+    display_notes: bool = True
+
+    @classmethod
+    def from_json(cls, text: str) -> tuple[Self, ...]:
+        """The column read back: every setting it holds, in its order.
+        What makes no sense reads as unsaid — `enabled` that is not `true`
+        is False, a position that is not "system" or a count from 1 is
+        None — and a text that is no JSON object of objects holds none."""
+        out = []
+        for name, state in cls._parse(text).items():
+            if not isinstance(state, dict):
+                continue
+            reminder_text = state.get("reminder_text")
+            out.append(
+                cls(
+                    name=name,
+                    enabled=state.get("enabled") is True,
+                    position=InjectionPosition.from_value(state.get("position")),
+                    reminder_text=reminder_text if isinstance(reminder_text, str) else "",
+                    display_notes=state.get("display_notes") is not False,
+                )
+            )
+        return tuple(out)
+
+    @classmethod
+    def to_json(cls, settings: Sequence[Self], current: str = "") -> str:
+        """The column's text with these settings in it — a MERGE over
+        `current`, never a rewrite: a JSON key bumps no schema version, so
+        an older build can meet a newer one's keys and must hand them back
+        whole. Only what is said is written; an emptied reminder leaves
+        the column."""
+        column = cls._parse(current)
+        for setting in settings:
+            state = column.get(setting.name)
+            state = dict(state) if isinstance(state, dict) else {}
+            state["enabled"] = setting.enabled
+            if setting.position is not None:
+                state["position"] = setting.position.value
+            if setting.reminder_text:
+                state["reminder_text"] = setting.reminder_text
+            else:
+                state.pop("reminder_text", None)
+            if setting.display_notes:
+                state.pop("display_notes", None)  # the default; only the exception is said
+            else:
+                state["display_notes"] = False
+            column[setting.name] = state
+        return json.dumps(column, ensure_ascii=False)
+
+    @staticmethod
+    def _parse(text: str) -> dict[str, object]:
+        """The column's text parsed: the JSON object it holds, or an empty
+        dict for anything else — nothing, garbage, a list."""
+        try:
+            parsed = json.loads(text) if text else {}
+        except ValueError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
+
+@dataclass(frozen=True)
+class InjectionPosition:
+    """Where an injected text rides: before the reader's `depth`-th
+    message from the end (1 the newest), or, with no depth, in the
+    system message. `value` is the plain form the column and the wire
+    hold — "system" or the number — and `from_value` reads one back;
+    `text` names it as every frontend does ("system", "2nd last" for 1:
+    the reader's newest message is the last; the page copies the rule
+    in `tools.js placeName`)."""
+
+    depth: int | None = None
+
+    @property
+    def value(self) -> str | int:
+        return "system" if self.depth is None else self.depth
+
+    @property
+    def text(self) -> str:
+        if self.depth is None:
+            return "system"
+        nth = self.depth + 1
+        return f"{nth}{'nd' if nth == 2 else 'rd' if nth == 3 else 'th'} last"
+
+    @classmethod
+    def from_value(cls, value: object) -> Self | None:
+        """ "system" or an int from 1 (by type: True is not one); else None."""
+        if value == "system":
+            return cls()
+        return cls(value) if type(value) is int and value >= 1 else None

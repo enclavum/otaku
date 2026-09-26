@@ -21,7 +21,7 @@ from urllib.parse import urlsplit
 import pytest
 
 from otaku.backend.paths import Paths
-from otaku.web import auth
+from otaku.web.server import auth
 from scenarios.support.server import ModelServer
 from scenarios.web.conftest import Page, serving
 

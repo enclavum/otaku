@@ -1,5 +1,5 @@
-"""How a request is written: the two streaming bodies, images on the last
-message, and the prompt-cache marks."""
+"""How a request is written: the two streaming bodies, pictures on their
+own messages, and the prompt-cache marks."""
 
 import base64
 from dataclasses import dataclass
@@ -13,6 +13,8 @@ from otaku.providers.openai.requests import chat_completion_body, text_completio
 class _Turn:
     role: str
     body: str
+    images: tuple[Image, ...] = ()
+    volatile: bool = False
 
 
 def _turns(*pairs: tuple[str, str]) -> list[_Turn]:
@@ -42,24 +44,26 @@ class TestChatBody:
 
 
 class TestImages:
-    def test_images_ride_the_last_message_as_parts_after_its_text(self) -> None:
+    def test_pictures_ride_their_own_message_as_parts_after_its_text(self) -> None:
         png = Image(data=b"\x89PNG", media_type="image/png")
-        turns = _turns(("user", "first"), ("user", "look"))
-        messages = _messages(chat_completion_body("m", turns, {}, images=[png]))
-        assert messages[0] == {"role": "user", "content": "first"}
+        turns = [_Turn("user", "first", (png,)), _Turn("assistant", "seen"), _Turn("user", "look")]
+        messages = _messages(chat_completion_body("m", turns, {}))
         encoded = base64.b64encode(b"\x89PNG").decode("ascii")
-        assert messages[1] == {
+        assert messages[0] == {
             "role": "user",
             "content": [
-                {"type": "text", "text": "look"},
+                {"type": "text", "text": "first"},
                 {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{encoded}"}},
             ],
         }
+        # The rows without pictures stay plain strings, later ones included.
+        assert messages[1] == {"role": "assistant", "content": "seen"}
+        assert messages[2] == {"role": "user", "content": "look"}
 
     def test_an_empty_text_gets_no_empty_part(self) -> None:
         # The catalogs refuse an empty text part.
         jpeg = Image(data=b"\xff\xd8", media_type="image/jpeg")
-        messages = _messages(chat_completion_body("m", _turns(("user", "")), {}, images=[jpeg]))
+        messages = _messages(chat_completion_body("m", [_Turn("user", "", (jpeg,))], {}))
         assert [p["type"] for p in messages[0]["content"]] == ["image_url"]
 
 
@@ -75,6 +79,27 @@ class TestCacheMarks:
             {"type": "text", "text": "u2", "cache_control": {"type": "ephemeral"}}
         ]
 
+    def test_the_trailing_mark_sits_above_the_first_volatile_row(self) -> None:
+        # A volatile row reads differently next request: a mark on it, or
+        # after it, would cache a prefix no later request can match.
+        turns = [_Turn("system", "s"), _Turn("user", "u1"), _Turn("assistant", "a1")]
+        turns += [_Turn("user", "u2", volatile=True), _Turn("assistant", "a2", volatile=True)]
+        messages = _messages(chat_completion_body("m", turns, {}, cache_ttl="5m"))
+        assert messages[2]["content"] == [
+            {"type": "text", "text": "a1", "cache_control": {"type": "ephemeral"}}
+        ]
+        assert [m["content"] for m in messages[3:]] == ["u2", "a2"]
+
+    def test_with_every_row_volatile_the_system_row_alone_is_marked(self) -> None:
+        turns = [_Turn("system", "s"), _Turn("user", "u", volatile=True)]
+        messages = _messages(chat_completion_body("m", turns, {}, cache_ttl="5m"))
+        assert "cache_control" in messages[0]["content"][0]
+        assert messages[1]["content"] == "u"
+        alone = [_Turn("user", "u", volatile=True)]
+        assert _messages(chat_completion_body("m", alone, {}, cache_ttl="5m")) == [
+            {"role": "user", "content": "u"}
+        ]
+
     def test_an_hour_is_spelled_five_minutes_is_the_default_and_is_not(self) -> None:
         messages = _messages(chat_completion_body("m", _turns(("user", "u")), {}, cache_ttl="1h"))
         assert messages[0]["content"][0]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
@@ -86,13 +111,15 @@ class TestCacheMarks:
             {"role": "user", "content": "u"},
         ]
 
-    def test_a_marked_last_row_still_takes_its_images(self) -> None:
+    def test_a_marked_row_with_pictures_is_marked_on_its_last_part(self) -> None:
+        # So the pictures sit inside the cached prefix, not after it.
         png = Image(data=b"\x89PNG", media_type="image/png")
-        turns = _turns(("user", "look"))
-        messages = _messages(chat_completion_body("m", turns, {}, images=[png], cache_ttl="5m"))
+        turns = [_Turn("user", "look", (png,))]
+        messages = _messages(chat_completion_body("m", turns, {}, cache_ttl="5m"))
         parts = messages[0]["content"]
         assert [p["type"] for p in parts] == ["text", "image_url"]
-        assert any("cache_control" in p for p in parts)
+        assert "cache_control" not in parts[0]
+        assert parts[1]["cache_control"] == {"type": "ephemeral"}
 
 
 class TestTextBody:

@@ -1,208 +1,166 @@
-"""The banner: pixel-art mark beside three lines of the session's own.
-
-Two vertical pixels per character cell, so a 16x12 sprite fits in 6
-terminal rows next to six lines of text. In colour each cell is a `▀`
-with a background behind it; without colour it is the SAME sprite as ink
-and paper — a half block per lit pixel — so the mark is one drawing at
-one size wherever it appears, and a piped or NO_COLOR session gets the
-picture rather than a substitute for it.
+"""The banner: what a session opens with in the shell that started it —
+the mark beside three lines for a chat, where the page is for a served
+session. Each ends on a blank row, which is what separates it from
+whatever is printed under it. The mark is the one thing in colour; the
+lines are the terminal's own text, dimmed but for what a reader looks
+for — the name, the address, a warning.
 """
 
+import ipaddress
 import os
-import shutil
 import sys
 from dataclasses import dataclass
-from typing import Literal
+from typing import Protocol
 
 from otaku import __version__
-from otaku.console import BOLD, DEFAULT_BG, DIM, MARGIN, RESET
-from otaku.formatting import drawn_width, format_context
+from otaku.console import BOLD, DIM, RESET
+from otaku.formatting import format_context
 
-
-def _fg(color: int) -> str:
-    """SGR 256-color foreground. The sprite is the one thing that paints by
-    palette INDEX rather than by a theme role: it is a fixed picture, not
-    part of the interface, so its colors are its own."""
-    return f"\x1b[38;5;{color}m"
-
-
-def _bg(color: int) -> str:
-    """SGR 256-color background — the lower half of a sprite cell."""
-    return f"\x1b[48;5;{color}m"
-
-
-# A girl with long violet hair — the face reads at 16x12 because the eyes
-# get two cells each (dark iris + a white shine pixel).
-_SPRITE = [
-    "....hhhhhhhh....",
-    "..hhhhhhhhhhhh..",
-    ".hhhhhhhhhhhhhh.",
-    ".hhhsssssssshhh.",
-    ".hhssssssssssbh.",
-    ".hhseessseesshh.",
-    ".hhsewsssewsshh.",
-    ".hhssssmssssshh.",
-    "..hhsssssssshh..",
-    "...hhhhhhhhhh...",
-    "....cccccccc....",
-    "...cccccccccc...",
-]
-# 256-colour: h violet hair, s skin, e iris, w shine, m mouth, b blush,
-# c collar.
-_PALETTE = {"h": 140, "s": 223, "e": 236, "w": 231, "m": 167, "b": 217, "c": 60, ".": None}
-
-# The same sprite with one colour to spend. The DARK half of the palette
-# is ink (hair, iris, mouth, collar) and the light half is paper (skin,
-# shine, blush): a silhouette of the whole head would be a blob, and it
-# is the face that has to survive.
-_INK = frozenset("hemc")
-
-# A cell is two pixels, and with no colour each is only lit or not.
-_BLOCKS = {(True, True): "█", (True, False): "▀", (False, True): "▄", (False, False): " "}
+# The mark: a house — お宅, "your house", is what the name means — three
+# rows for the three lines beside it. Quadrant blocks — four pixels a
+# cell — in one colour, so it is the same drawing with colour off. Drawn
+# as it looks: a row's leading spaces count, its trailing ones are not
+# needed — the rows are padded to the widest where they are printed.
+_MARK = """
+ ▄██▄
+▀████▀
+ █▌▐█
+"""
 
 
 @dataclass(frozen=True)
 class SessionFacts:
     """What a chat banner states, as its caller reads them off the
     session it is opening — arriving ready to print: the banner draws
-    them and nothing else, asks no store and no provider anything, and
-    cuts nothing (a display width is the frontend's decision, made
-    where the facts are read)."""
+    them and nothing else, and asks no store and no provider anything."""
 
     model: str  # "(no model)" when none
     provider: str  # the provider serving it; "" when none
     max_context: int | None  # the context the model gets, when a LOCAL provider answers
-    story: str  # the story's name, cut by the caller; "" when it has none
+
+
+class WebFacts(Protocol):
+    """Where a served session listens and what it asks of whoever
+    reaches it — the `[web]` settings slice, as its caller hands it
+    over. A protocol rather than the type: `console` imports nothing
+    above it, so it names the fields it reads and no more."""
+
+    @property
+    def host(self) -> str: ...
+    @property
+    def port(self) -> int: ...
+    @property
+    def https(self) -> bool: ...
+    @property
+    def password(self) -> str: ...  # a hash; "" is no password at all
 
 
 @dataclass(frozen=True)
 class _Style:
     """The banner's escape codes — or empty strings when colour is off."""
 
-    accent: str = ""
+    mark: str = ""
     bold: str = ""
     dim: str = ""
-    gray: str = ""
-    rule: str = ""
     reset: str = ""
 
 
 _COLOUR = _Style(
-    accent=_fg(180),
+    # The page's favicon (#b06636, `web/static/index.html`), for the
+    # favicon's reason: neither can ask what background it is on, and
+    # this shade holds on either — 4.4:1 on white, 4.8:1 on black.
+    mark="\x1b[38;2;176;102;54m",
     bold=BOLD,
     dim=DIM,
-    gray=_fg(242),
-    # Dimmed, not a grey: a fixed near-black read at 9.7:1 on a white
-    # terminal and 2.2:1 on a black one, where the rule all but vanished.
-    # Reduced intensity is derived from the text color, so it holds on
-    # either — the same reason the pickers dim instead of recoloring.
-    rule=DIM,
     reset=RESET,
 )
 _PLAIN = _Style()
 
 
-# How much of the web banner a launch wants.
-WebBannerSize = Literal["full", "short", "line"]
-
-
 def render_terminal(facts: SessionFacts) -> str:
-    """The banner a chat session opens with. Its three lines are what
-    that session IS: the story being played, on what model, through what
-    provider."""
+    """The banner a chat session opens with: the mark, and beside it the
+    name, the model with the context it gets, and the provider serving
+    it — then where the commands are, which the prompt does not say."""
     style = _style()
-    details = [f"{style.gray}{facts.provider}{style.reset}" if facts.provider else ""]
+    model = facts.model
     if facts.max_context:
-        details.append(f"{style.gray}{format_context(facts.max_context)} context{style.reset}")
-    return _render(
-        [
-            f"{style.gray}{facts.story}{style.reset}"
-            if facts.story
-            else f"{style.dim}/help for commands{style.reset}",
-            f"{style.accent}{facts.model}{style.reset}",
-            f"{style.dim} · {style.reset}".join(part for part in details if part),
-        ],
-    )
-
-
-def render_web(url: str, url_notes: str = "", *, size: WebBannerSize = "full") -> str:
-    """What a served session opens with: where the page is, how to open
-    it, how to stop serving. The model and the story are on the page
-    itself, so the chat banner's lines would only be said twice."""
-    style = _style()
-    notes = url_notes.replace("<b>", style.bold).replace("</b>", style.reset)
-
-    if size == "line":
-        return f"web ui is available on: {url}{notes} (ctrl+c to stop)"
-
-    # Most terminals want a modifier with the click, and which one is
-    # the platform's business — ⌘ on a Mac, ctrl everywhere else.
-    click = "⌘" if sys.platform == "darwin" else "ctrl"
-    lines = [
-        f"{style.dim}web ui is available on:{style.reset} "
-        f"{style.accent}{style.bold}{url}{style.reset}{notes}",
-        f"{style.dim}{click}-click to open / paste it in your browser{style.reset}",
-        f"{style.dim}ctrl+c to stop{style.reset}",
+        model += f" · {format_context(facts.max_context)} context"
+    last = " · ".join(part for part in (facts.provider, "/help for commands") if part)
+    said = [
+        _name(style),
+        f"{style.dim}{model}{style.reset}",
+        f"{style.dim}{last}{style.reset}",
     ]
-    if size == "full":
-        return _render(lines)
-
-    width = max(drawn_width(line) for line in lines)
-    rule = f"{style.rule}{'─' * width}{style.reset}"
-    return "\n".join(f"{' ' * MARGIN}{line}" for line in [*lines, rule])
-
-
-def _render(lines: list[str]) -> str:
-    """One banner: the mark, the two lines every banner opens with, a
-    blank, and the three its caller filled in — closed by the rule that
-    separates it from whatever is printed under it. A line past the
-    bottom of the mark keeps its column rather than being dropped: a
-    banner that says one thing less in a pipe than on a screen is a
-    banner nobody can trust."""
-    style = _style()
-    rows = _sprite_rows()
-    beside = " " * len(_SPRITE[0])
-    beginning = [
-        f"{style.accent}{style.bold}otaku{style.reset} {style.dim}v{__version__}{style.reset}",
-        f"{style.dim}a roleplay client{style.reset}",
-        "",
+    marks = _MARK.strip("\n").split("\n")
+    width = max(len(mark) for mark in marks)
+    rows = [
+        f"{style.mark}{mark.ljust(width)}{style.reset}  {text}"
+        for mark, text in zip(marks, said, strict=True)
     ]
-    said = beginning + lines
-    out = [""]
-    for i in range(max(len(rows), len(said))):
-        sprite_row = rows[i] if i < len(rows) else beside
-        text = said[i] if i < len(said) else ""
-        out.append(f"{' ' * MARGIN}{sprite_row}   {text}".rstrip())
-    # The rule stops short of a wide terminal: it closes the banner, it
-    # does not underline the screen.
-    width = min(shutil.get_terminal_size((80, 24)).columns, 72)
-    out.append(f"{' ' * MARGIN}{style.rule}{'─' * width}{style.reset}")
-    return "\n".join(out)
+    return "\n".join([*rows, ""])
 
 
-def _sprite_rows() -> list[str]:
-    """The sprite as terminal rows — each row packs two sprite lines into
-    one cell using a half-block glyph, painted where there is colour to
-    paint with and cut out of ink and paper where there is not."""
-    plain = not _colour()
-    rows: list[str] = []
-    for y in range(0, len(_SPRITE), 2):
-        top = _SPRITE[y]
-        bottom = _SPRITE[y + 1] if y + 1 < len(_SPRITE) else "." * len(top)
-        row = ""
-        for x in range(len(top)):
-            if plain:
-                row += _BLOCKS[(top[x] in _INK, bottom[x] in _INK)]
-                continue
-            upper, lower = _PALETTE.get(top[x]), _PALETTE.get(bottom[x])
-            if upper is None:
-                row += RESET + " " if lower is None else f"{_fg(lower)}{DEFAULT_BG}▄"
-            elif lower is None:
-                row += f"{_fg(upper)}{DEFAULT_BG}▀"
-            else:
-                row += f"{_fg(upper)}{_bg(lower)}▀"
-        rows.append(row if plain else row + RESET)
-    return rows
+def render_web(where: WebFacts) -> str:
+    """What a served session opens with, said the way a server says it:
+    the name, where the page is and how to quit — no mark, and the model
+    and the story are on the page itself. After the address, that a
+    password is set; under it, on a host that reaches past this machine
+    WITHOUT both TLS and a password, that the address is public and what
+    it is missing — the one row of words that is not dimmed. Public with
+    both on is the configuration the file recommends, and warrants no
+    warning."""
+    style = _style()
+    note = f"{style.dim} (password set){style.reset}" if where.password else ""
+    rows = [_name(style), f"{style.dim}Running on{style.reset} {address(where)}{note}"]
+    if _is_public(where.host):
+        missing = [
+            name
+            for name, on in (("no TLS", where.https), ("no password", where.password))
+            if not on
+        ]
+        if missing:
+            rows.append(f"Warning: public, yet with {' and '.join(missing)} - set in config.toml")
+    rows.append(f"{style.dim}Press CTRL+C to quit{style.reset}")
+    return "\n".join([*rows, ""])
+
+
+def _is_public(host: str) -> bool:
+    """Whether this address reaches PAST this machine: every one but a
+    loopback address.
+
+    Not the complement of `web.server.LOOPBACK`, which is the wider
+    question that one asks — every spelling that ARRIVES here, the
+    wildcards among them, because a wildcard bind does answer as
+    localhost too. Here `0.0.0.0` is the most exposed address there is,
+    so it has to come out true, and a set that excuses it is the wrong
+    set. Nor `is_private`, which is true of a wildcard and of every
+    address on the LAN.
+
+    A name is never resolved: that is a DNS call at the launch, and the
+    only name taken on trust is the one everybody means by it."""
+    name = host.strip("[]")
+    if name == "localhost":
+        return False
+    try:
+        return not ipaddress.ip_address(name).is_loopback
+    except ValueError:
+        return True
+
+
+def address(where: WebFacts) -> str:
+    """The URL the banner prints and a reader pastes: the host as
+    configured, `127.0.0.1` read as `localhost`, the scheme's own port
+    left unsaid."""
+    scheme = "https" if where.https else "http"
+    reachable = "localhost" if where.host == "127.0.0.1" else where.host
+    if where.port == (443 if where.https else 80):
+        return f"{scheme}://{reachable}"
+    return f"{scheme}://{reachable}:{where.port}"
+
+
+def _name(style: _Style) -> str:
+    """What every banner opens with: the name and the version."""
+    return f"{style.bold}otaku{style.reset} {style.dim}v{__version__}{style.reset}"
 
 
 def _style() -> _Style:

@@ -1,7 +1,7 @@
 """The refreshed-template move: a superseded shipped default follows the
-built-in; anything the user touched stays theirs. Pure text in, text out —
-the promise is convergence, so the cases parse the result back and compare
-values, never the spelling."""
+built-in; anything the user touched stays theirs. Pure text in, text
+out — the promise is convergence, so the cases parse the result back and
+compare values, never the spelling."""
 
 import tomllib
 

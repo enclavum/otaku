@@ -9,6 +9,7 @@ import json
 import signal
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -16,13 +17,16 @@ from typing import Any
 import pytest
 
 from otaku.backend.api import lore as api_lore
+from otaku.backend.api import providers as api_providers
+from otaku.backend.api import stories as api_stories
 from otaku.backend.formats import exports, imports
 from otaku.backend.paths import Paths
 from otaku.backend.session import Refused
 from otaku.terminal.screens import story as screen_story
+from scenarios.session import test_play
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch, set_config, set_config_provider
-from scenarios.support.screens import CTRL_S, DOWN, ENTER, ESC, SHIFT_TAB, TAB, run_screen
+from scenarios.support.screens import CTRL_S, DOWN, ENTER, ESC, LEFT, RIGHT, run_screen
 from scenarios.support.server import numbered_script
 
 CHAPEL = Path(__file__).parent.parent / "fixtures" / "chapel.md"
@@ -52,7 +56,7 @@ class TestLoreBrowser:
 
     def test_the_cast_lens_edits_a_description(self, app: App) -> None:
         story_id = remembered(app)
-        browse(app, story_id, TAB + ENTER + ENTER + "!" + CTRL_S + ESC * 3)
+        browse(app, story_id, RIGHT + ENTER + ENTER + "!" + CTRL_S + ESC * 3)
         keeper = app.store.characters.list(story_id)[0]
         assert (
             keeper.description == "!warden of the gate"
@@ -102,11 +106,11 @@ class TestLoreBrowser:
         assert app.store.journals.list(story_id)[-1].state == before
 
     def test_the_premise_tab_writes_the_system_prompt(self, app: App) -> None:
-        # Two tabs back from the scenes sits the premise, edited in
+        # Two tabs to the left of the scenes sits the premise, edited in
         # place. It is the same field /system sets, and this is the open
         # story — so the session follows the store.
         story_id = remembered(app)
-        browse(app, story_id, SHIFT_TAB * 2 + ENTER + "!" + CTRL_S + ESC * 2)
+        browse(app, story_id, LEFT * 2 + ENTER + "!" + CTRL_S + ESC * 2)
         assert app.store.stories.get_system(story_id) == "!"
         assert app.session.system == "!"
 
@@ -115,7 +119,7 @@ class TestLoreBrowser:
         # and the landing line rides back for the caller to echo — the
         # dossier lands exactly the way the story browser does.
         story_id = remembered(app)
-        assert browse(app, story_id, SHIFT_TAB + ENTER)
+        assert browse(app, story_id, LEFT + ENTER)
 
 
 class TestEditAddressing:
@@ -162,6 +166,22 @@ class TestExtract:
         assert memory.history == "I saw the guest."
         assert len(lore_calls(app)) == 1  # the extraction; no rollup calls
 
+    def test_a_tool_call_in_a_reply_is_invisible_to_the_pass(self, app: App) -> None:
+        # A reply may carry a tool call — the model's own aside. The
+        # analysis model never sees it, tags and all, while the prose
+        # around it and the numbering stay whole; the story keeps the
+        # reply exactly as it streamed.
+        reply = "She nods.\n\n```otk-note\nReveal the letter next turn.\n```"
+        app.server.script = chat_script(reply)
+        for i in range(3):
+            app.play(f"Turn number {i}.")
+        app.play("/extract")
+        analyst = next(p for p in lore_calls(app) if "You are a story analyst" in p)
+        assert "otk-note" not in analyst
+        assert "Reveal the letter" not in analyst
+        assert "[6] She nods." in analyst
+        assert app.store.stories.get_messages(app.session.story_id)[-1].body == reply
+
     def test_an_edited_template_with_literal_json_still_extracts(self, server, tmp_path) -> None:
         # The prompts file's promise: what you edit is exactly what the
         # model sees. A template holding a literal JSON example — braces
@@ -192,6 +212,51 @@ class TestExtract:
             assert "{this} stays literal" in analyst
         finally:
             app.close()
+
+
+class TestExtractSeesPictures:
+    """The lore pass is the one moment a summarized row's picture can be
+    put into words that last: each is marked `(picture n)` at its line
+    of the numbered scene, and while the model can see, the pictures
+    ride the extraction request in that order."""
+
+    def test_the_pictures_ride_the_extraction_request_marked_by_number(self, tmp_path) -> None:
+        with test_play._seeing(tmp_path) as app:
+            test_play._play(app, "Look at this door.", [test_play._cat()])
+            app.play("And the hall beyond.")
+            app.play("/extract")
+            analyst = analyst_prompt(app)
+            # the prompt is text and then the picture, as a turn's are
+            assert analyst[0]["type"] == "text" and analyst[1]["type"] == "image_url"
+            assert "[1] (picture 1) Look at this door." in analyst[0]["text"]
+            assert analyst[1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+
+    def test_every_picture_of_the_scene_rides_in_its_order(self, tmp_path) -> None:
+        # No cap: a scene's pictures all reach the analyst, each marked at
+        # its line and riding in the order of the lines.
+        with test_play._seeing(tmp_path) as app:
+            for n in range(1, 4):
+                test_play._play(app, f"Picture number {n}.", [test_play._cat()])
+            app.play("/extract")
+            analyst = analyst_prompt(app)
+            assert [part["type"] for part in analyst] == [
+                "text",
+                "image_url",
+                "image_url",
+                "image_url",
+            ]
+            for n in range(1, 4):  # the reader's lines are the odd ones; the replies between
+                assert f"[{2 * n - 1}] (picture {n}) Picture number {n}." in analyst[0]["text"]
+
+    def test_a_model_that_cannot_see_gets_the_marks_alone(self, tmp_path) -> None:
+        with test_play._seeing(tmp_path) as app:
+            test_play._play(app, "Look at this door.", [test_play._cat()])
+            app.play("And the hall beyond.")
+            # the pass runs on a model that cannot see: the generic provider's
+            api_providers.switch_model(app.session, "generic", "test-model")
+            app.play("/extract")
+            analyst = analyst_prompt(app)
+            assert isinstance(analyst, str) and "(picture 1)" in analyst
 
 
 class TestIdleScheduling:
@@ -244,6 +309,39 @@ class TestIdleScheduling:
                 time.sleep(0.1)
             assert ends, "the idle pass never closed a scene"
             assert ids.index(ends[-1]) == 3  # the newest two messages stayed open
+        finally:
+            app.close()
+
+    def test_tool_calls_do_not_count_toward_the_scene_gate(self, server, tmp_path) -> None:
+        # The gate measures story text. Three exchanges whose replies are
+        # padded with a block far past scene_min_chars still hold too
+        # little play (19 characters an exchange), so the pass declines;
+        # three more carry the story itself over the line, and it closes.
+        set_config(
+            tmp_path / "state",
+            settle_messages=0,
+            scene_min_chars=100,
+            scene_min_messages=2,
+            idle_seconds=0.1,
+        )
+        server.script = chat_script("Fine.\n```otk-note\n" + "x" * 400 + "\n```")
+        app = launch(tmp_path / "state", server)
+        try:
+            for i in range(3):
+                app.play(f"Turn number {i}.")
+            time.sleep(0.6)  # several idle windows — nothing may close
+            story_id = app.session.story_id
+            ids = app.store.stories.get_messages_ids(story_id)
+            assert app.store.scenes.get_current_ends(story_id, ids) == []
+            for i in range(3, 6):
+                app.play(f"Turn number {i}.")
+            deadline = time.time() + 10
+            closed = False
+            while time.time() < deadline and not closed:
+                ids = app.store.stories.get_messages_ids(story_id)
+                closed = bool(app.store.scenes.get_current_ends(story_id, ids))
+                time.sleep(0.1)
+            assert closed, "the story itself never carried the gate"
         finally:
             app.close()
 
@@ -870,6 +968,30 @@ class TestWarmUp:
         finally:
             app.close()
 
+    def test_the_warm_up_carries_what_the_turn_carries(
+        self, server: scripted.ModelServer, tmp_path: Path
+    ) -> None:
+        # The Job snapshots the story's injections built, and the warm-up
+        # cuts the prompt as the turn does: what a switched-on setting
+        # puts in a turn's request is in the prefill's, at the same place.
+        root = tmp_path / "state"
+        set_config_provider(root, server, name="llamacpp")
+        app = launch(root, server, spec="llamacpp/test-model")
+        try:
+            api_stories.update_setting(
+                app.session, "use_story_reminder", enabled=True, reminder_text="Rain."
+            )
+            remembered(app)
+            assert _warm_requests(app.server, within=5.0) == 1
+            warmed = next(r for r in app.server.requests if r.get("max_tokens") == 1)
+            texts = [scripted.content_text(m) for m in warmed["messages"]]
+            # 2 is the reminder's default: before the reader's previous
+            # message, enclosed out of character — never the newest row.
+            assert any("((OOC: Rain.))" in t for t in texts)
+            assert "Rain." not in texts[-1]
+        finally:
+            app.close()
+
     def test_the_generic_provider_never_warms(
         self, server: scripted.ModelServer, tmp_path: Path
     ) -> None:
@@ -948,6 +1070,30 @@ def browse(app: App, story_id: int, keys: str) -> str | None:
     with contextlib.suppress(EOFError):
         return run_screen(keys, lambda: screen_story.browse(app.session, "scenes"))
     return None
+
+
+def chat_script(reply: str) -> Callable[[dict[str, Any]], str]:
+    """A script answering every chat turn with `reply` and every lore
+    prompt the default way — the canned extraction and rollups."""
+
+    def script(body: dict[str, Any]) -> str:
+        prompt = scripted.content_text(body.get("messages", [{}])[-1])
+        if "You are a story analyst" in prompt or prompt.startswith(("Combine", "Write ")):
+            return scripted.default_script(body)
+        return reply
+
+    return script
+
+
+def analyst_prompt(app: App) -> Any:
+    """The extraction request's prompt as sent — a string, or the parts a
+    pictured one is made of. A managed engine's other requests (the
+    listing, a model's card) carry no messages and are passed over."""
+    return next(
+        r["messages"][-1]["content"]
+        for r in app.server.requests
+        if "messages" in r and "You are a story analyst" in str(r["messages"][-1]["content"])
+    )
 
 
 def lore_calls(app: App) -> list[str]:

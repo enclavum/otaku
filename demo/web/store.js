@@ -58,6 +58,11 @@ const state = {
   nextMessage: 1,
   model: "demo-model",
   settings: null, // seeded from the settings fixture; values live here
+  storySettingDefaults: null, // every story's settings as a fresh story reads them
+  storySettings: new Map(), // id → the settings a story changed, in the read's shape
+  sharedReminder: "", // the text every story with use_shared_reminder on is sent
+  shipped: null, // every tool's prompt as shipped, by name — what an emptied one restores
+  prompts: null, // every tool's prompt as it stands, by name
   history: [], // the composer's ↑/↓ lines, most recent first
   usage: [], // one row per completed reply: {story, prompt, completion, seconds}
   syntax: null, // the story's typed language, for the menu and the sheet
@@ -66,9 +71,12 @@ const state = {
 };
 
 export function seed(fixtures) {
-  const { river, tour, settings, syntax } = fixtures;
+  const { river, tour, settings, storySettings, prompts, syntax } = fixtures;
   state.syntax = syntax;
   state.settings = structuredClone(settings);
+  state.storySettingDefaults = storySettings.settings;
+  state.shipped = prompts;
+  state.prompts = structuredClone(prompts);
   // Both shipped samples, the way a fresh install seeds them; the row's
   // own `open` flag says which one the demo lands in.
   for (const sample of [river, tour].filter(Boolean)) {
@@ -102,6 +110,8 @@ export function facts(version) {
     story: story ? label(story) : "",
     story_id: state.open,
     turns: story ? story.turns.length : 0,
+    // The demo's model cannot see: no attach button, no pictures anywhere.
+    vision: false,
   };
 }
 
@@ -246,6 +256,7 @@ export function settings() {
     autocorrect: s.autocorrect,
     notification: s.notification,
     max_context: s.max_context ?? 65536,
+    idle_seconds: s.idle_seconds ?? 300,
     model: state.model,
     parameters: s.parameters.map((p) => ({ ...p })),
   };
@@ -287,6 +298,9 @@ export function context() {
     },
     lede,
     note: "",
+    // The recompute assembles no injections — a switched-on setting's text
+    // is not in these parts either — so it reports none, honestly.
+    injections: [],
     parts: [
       ...(system ? [{ role: "system", body: system }] : []),
       ...bodies.map((t) => ({ role: t.role, body: t.body })),
@@ -456,6 +470,91 @@ export function setSystem(storyId, text) {
     touch(storyId);
   }
   return say(`System prompt set (${text.length} chars).`);
+}
+
+export function storySettings(storyId) {
+  /* A story's settings as they stand — what it changed, over the
+     defaults every story starts from. Null for a story that is not
+     there: the product's 404. */
+  if (!state.stories.has(storyId)) return null;
+  return { settings: structuredClone(_settingsOf(storyId)) };
+}
+
+export function updateSetting(storyId, name, body) {
+  /* One setting, the fields given laid over it. The refusals and the
+     confirmation are the product's sentences, copied: what a setting
+     takes is decided in `backend.story` and said in
+     `backend.api.stories.update_setting`, which the demo cannot ask. */
+  if (!state.stories.has(storyId)) return null;
+  const settings = _settingsOf(storyId);
+  const setting = settings.find((s) => s.name === name);
+  if (!setting) {
+    const known = settings.map((s) => s.name).join(", ");
+    return refuse(`Unknown setting '${name}'. Settings: ${known}.`);
+  }
+  if (body.position != null) {
+    if (!setting.allowed_positions.length) {
+      return refuse(`${setting.label} has no position: it injects nothing.`);
+    }
+    if (!setting.allowed_positions.includes(body.position)) {
+      return refuse(
+        `${setting.label} takes one of these positions: ${setting.allowed_positions.join(", ")}.`,
+      );
+    }
+  }
+  if (body.reminder_text != null && setting.reminder_text === null) {
+    return refuse(`${setting.label} has no reminder of its own.`);
+  }
+  if (body.display_notes != null && setting.display_notes === null) {
+    return refuse(`${setting.label} has nothing to display.`);
+  }
+  if (body.display_notes != null) setting.display_notes = body.display_notes;
+  if (body.enabled != null) setting.enabled = body.enabled;
+  if (body.position != null) setting.position = body.position;
+  if (body.reminder_text != null) setting.reminder_text = String(body.reminder_text);
+  if (!setting.enabled) return say(`${setting.label}: off.`);
+  if (setting.position === null) return say(`${setting.label}: on.`);
+  if (setting.position === "system") return say(`${setting.label}: on, in the system message.`);
+  const back = -setting.position;
+  return say(`${setting.label}: on, ${back} message${back === 1 ? "" : "s"} from the end.`);
+}
+
+export function sharedReminder() {
+  return { text: state.sharedReminder };
+}
+
+export function setSharedReminder(text) {
+  // The sentences are `backend.api.stories.set_shared_reminder`'s.
+  state.sharedReminder = text.trim();
+  return say(text.trim() ? "Shared reminder saved." : "Shared reminder cleared.");
+}
+
+export function prompt(tool) {
+  // The refusal is `backend.api.settings._tool_prompt_name`'s sentence, copied.
+  if (!(tool in state.prompts)) return _unknownTool(tool);
+  return { text: state.prompts[tool] };
+}
+
+export function setPrompt(tool, text) {
+  // The sentences are `backend.api.settings.set_tool_prompt`'s.
+  if (!(tool in state.prompts)) return _unknownTool(tool);
+  const typed = text.trim();
+  state.prompts[tool] = typed || state.shipped[tool];
+  return say(typed ? "Prompt saved." : "Prompt restored to the built-in.");
+}
+
+function _unknownTool(tool) {
+  return refuse(`Unknown tool '${tool}'. Tools: ${Object.keys(state.prompts).join(", ")}.`);
+}
+
+function _settingsOf(storyId) {
+  // Held once a story changes one; the defaults, copied, until then.
+  let held = state.storySettings.get(storyId);
+  if (!held) {
+    held = structuredClone(state.storySettingDefaults);
+    state.storySettings.set(storyId, held);
+  }
+  return held;
 }
 
 export function renameStory(storyId, title) {
@@ -710,6 +809,10 @@ export function recordTurn(role, body) {
     provider: role === "assistant" ? PROVIDER : null,
     model: role === "assistant" ? state.model : null,
     template: null,
+    attachments: [],
+    // The demo's model writes prose and no tagged block, so a turn it
+    // records is one prose segment (`backend.api.play.segments`).
+    segments: [{ kind: "prose", text: body }],
   };
   story.turns.push(turn);
   touch(state.open);
@@ -739,6 +842,8 @@ export function importCard(landed) {
     provider: null,
     model: null,
     template: null,
+    attachments: [],
+    segments: [{ kind: "prose", text: landed.line }],
   });
   const memory = memoryOf(state.open);
   const characterId = memory.characters.reduce((top, c) => Math.max(top, c.id), 0) + 1;
@@ -763,6 +868,9 @@ export function importCard(landed) {
       provider: "card",
       model: landed.fileName,
       template: null,
+      attachments: [],
+      segments: [{ kind: "prose", text: landed.greeting }],
+    attachments: [],
     });
   }
   touch(state.open);

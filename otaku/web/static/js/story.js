@@ -1,5 +1,6 @@
-/* Inside one story: the level-2 dossier — premise, messages, scenes and
-   cast as four tabs of one panel, the way a case file is read.
+/* Inside one story: the level-2 dossier — premise, messages, scenes,
+   cast and tools as five tabs of one panel, the way a case file is
+   read. The Tools tab is `tools.js`, built from here.
 
    Scenes and cast are the same pane with the fields transposed: an
    index of one kind, a reading column at full measure, and the
@@ -31,13 +32,16 @@ import {
 } from "./browser.js";
 import { $, $$, actionButton, element, pickFile, row, span } from "./dom.js";
 import { ago, excerpt, label } from "./format.js";
+import { thumbs } from "./pictures.js";
 import { typeset } from "./prose.js";
 import { landed } from "./shell.js";
+import { buildTools } from "./tools.js";
 
 /* What a premise may be read from: the two shapes a person keeps prose
    in, and nothing else. A file picker offers anything, and a `.png` read
    as text is a screenful of noise where the premise was. */
 const _PREMISE_FILES = ".txt,.md,.markdown,text/plain,text/markdown";
+
 
 /** Open the dossier — on the open story by default, or on `story` (a
     row of the browser's). `tab` is where it opens; `allStories` is where
@@ -57,13 +61,6 @@ export async function openStory({ story = null, tab = "messages", allStories } =
   const opened = subject.id === null ? null : await api.story(subject.id);
 
   $("[data-story-title]", popup).textContent = label(subject.label) || "(untitled)";
-  const read = opened?.read_through ?? 0;
-  $("[data-tabs-aside]", popup).textContent = [
-    read ? `read through ${read}` : "",
-    opened?.unread ? `${opened.unread} unread` : "",
-  ]
-    .filter(Boolean)
-    .join(" · ");
 
   const view = {
     popup,
@@ -145,6 +142,7 @@ function show(view, tab, targetId = null) {
     if (tab === "messages") buildMessages(view, pane);
     else if (tab === "scenes") buildScenes(view, pane);
     else if (tab === "cast") buildCast(view, pane, targetId);
+    else if (tab === "tools") buildTools(view, pane, tabNote);
     else buildPremise(view, pane);
     return;
   }
@@ -199,10 +197,18 @@ function buildMessages(view, pane) {
     rows,
     drawRow: (message) => {
       const who = message.role === "user" ? "you" : message.speaker || "—";
+      /* The words, and right after them the turn's pictures counted, as
+         the terminal's list sets its note (`terminal.screens.story`): the
+         count reads with the line, and stays in view when the line is
+         cut. The kind keeps the row's end. */
+      const title = element("span", "otk-row__title otk-row__title--noted");
+      title.append(span("otk-row__text", excerpt(message.body, 300)));
+      const pictures = message.attachments?.length ?? 0;
+      if (pictures) title.append(span("otk-tag", `${pictures} picture${pictures === 1 ? "" : "s"}`));
       const drawn = row(
         span("otk-row__id", String(message.position)),
         span(message.role === "user" ? "otk-row__who otk-row__who--you" : "otk-row__who", who),
-        span("otk-row__title", excerpt(message.body, 300)),
+        title,
       );
       if (message.kind && message.kind !== "dialogue") drawn.append(span("otk-tag", message.kind));
       // what a save finds its row by: the cursor may be elsewhere by then
@@ -263,6 +269,10 @@ function drawReader(view, pane, message, edit) {
 
   const out = [head, body];
 
+  // The pictures that rode the turn, as the transcript shows them: tiles
+  // that open the picture at full size.
+  if (message.attachments?.length) out.push(sectionOf("Attachments", [thumbs(message.attachments)]));
+
   /* What the session recorded WITH the turn. The model rides a fact row;
      the template is the TEXT the direction filled, and prose wraps
      rather than running under its own label. */
@@ -312,7 +322,7 @@ async function saveMessage(view, message, text) {
     () => {
       message.body = text;
       message.haystack = `${text} ${message.speaker ?? ""}`.toLowerCase();
-      const line = $(`[data-pane="messages"] .otk-row[data-id="${message.id}"] .otk-row__title`, view.popup);
+      const line = $(`[data-pane="messages"] .otk-row[data-id="${message.id}"] .otk-row__text`, view.popup);
       if (line) line.textContent = excerpt(text, 300);
     },
   );
@@ -464,7 +474,7 @@ function sceneIndex(view, rail, currentId, { onPick }) {
   if (view.memory?.unread) {
     const pending = element("div", "otk-index__item otk-index__item--pending");
     pending.append(
-      span("otk-index__title otk-absent", "not read yet"),
+      span("otk-index__title otk-absent", "not summarized yet"),
       span("otk-index__sub", `msg ${view.memory.unread_span}`),
     );
     list.append(pending);
@@ -492,12 +502,19 @@ function extractBlock(view) {
   const unread = view.memory?.unread ?? 0;
   line.append(
     element("span", unread ? "otk-dot otk-dot--off" : "otk-dot"),
-    span("otk-extract__state", unread ? `${unread} unread` : "all read"),
+    span("otk-extract__state", unread ? `${unread} not extracted` : "all extracted"),
   );
+  // Two doors into the cast: a card read from a file, and the pass.
+  const importing = element("button", "otk-btn", "Import card");
+  importing.type = "button";
+  importing.dataset.command = "/card";
   const button = element("button", "otk-btn", "Extract now");
   button.type = "button";
   button.dataset.command = "/extract";
-  box.append(line, button);
+  // Nothing open, nothing to read: the verb is greyed rather than
+  // answered with a notice behind the dossier.
+  button.disabled = !unread;
+  box.append(line, importing, button);
   return box;
 }
 

@@ -25,19 +25,28 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Self
 
+from otaku.backend.errors import Refused as Refused  # every caller's door to it
 from otaku.backend.paths import Paths
+from otaku.backend.story import StorySettings
 from otaku.context import assembler
 from otaku.context.assembler import AssembledPrompt, ContextShape
 from otaku.formatting import pretty_path
 from otaku.logging import ErrorLog
-from otaku.providers import Locality, OpenAIClient, ProviderConfig, Registry, reasoning
+from otaku.providers import (
+    Locality,
+    OpenAIClient,
+    PicturesRide,
+    ProviderConfig,
+    Registry,
+    reasoning,
+)
 from otaku.settings import models as models_file
 from otaku.settings import state as state_file
 from otaku.settings.config import Config, TerminalSettings, WebSettings
 from otaku.settings.prompts import Prompts
 from otaku.settings.state import State
 from otaku.store import Store
-from otaku.store.schema import Message
+from otaku.store.schema import Message, StorySettingDB
 from otaku.worker import Worker
 
 # The /set think menu for a model nobody has described: unset first
@@ -92,14 +101,6 @@ NO_MODEL_HINT = "No model selected — pick one with /model."
 NO_STORY_HINT = "No story yet — send a message first."
 
 
-class Refused(Exception):  # noqa: N818 — a refusal is an expected answer, not an error
-    """An operation declined for an expected reason; str(e) is the exact
-    sentence to show. The backend's one refusal channel — frontends catch
-    it at every call site and print, so no operation needs a `| str`
-    return. Always raised EAGERLY — never mid-stream (that is the
-    `Declined` event's job)."""
-
-
 class Session:
     """One user's live session over one state dir — the object the
     frontends hold and every backend operation takes first. A plain
@@ -126,9 +127,12 @@ class Session:
     # app works in are its own to split.
     _story_id: int | None
     _system: str
+    _settings_db: tuple[StorySettingDB, ...]  # what the story has stored, handed to every assembly
     _messages: list[Message]
     _params: dict[str, object]
-    _think: str  # the model's thinking level (`reasoning.is_level`), or THINK_UNSET
+    _think: (
+        str | None
+    )  # the model's saved level (`reasoning.is_level`) or THINK_UNSET; None: no row
     # The stories content index behind `api.stories.search` — built on
     # the first search, invalidated by the write primitives below.
     _search_index: dict[int, str] | None
@@ -172,9 +176,10 @@ class Session:
         session._on_idle = None
         session._story_id = None
         session._system = ""
+        session._settings_db = ()
         session._messages = []
         session._params = {}
-        session._think = models_file.THINK_UNSET
+        session._think = None
         session._search_index = None
         session._config = config
         session._prompts = prompts
@@ -184,8 +189,8 @@ class Session:
         session._providers_registry = registry
         session._worker = worker
         session._closed = False
-        session._reload_model_settings()
         session._read_model()
+        session._load_model_settings()
         # Reattach the story the previous session was on, so bare `otaku`
         # reopens it mid-scene; one deleted since simply starts fresh.
         if state.story and store.stories.exists(state.story):
@@ -244,9 +249,12 @@ class Session:
     @property
     def think(self) -> str | None:
         """The model's thinking level — a rung of `reasoning.EFFORT_LEVELS`,
-        off or on, or a budget in tokens as digits; None = defer to the
-        model. Saved per model, beside its parameters."""
-        return None if self._think == THINK_UNSET else self._think
+        off or on, or a budget in tokens as digits; None = nothing sent,
+        the model decides — saved as "unset", or no row yet. Saved per
+        model, beside its parameters; a model made current with no row
+        starts off where the provider says it thinks
+        (`api.settings.default_think`)."""
+        return None if self._think in (None, THINK_UNSET) else self._think
 
     @property
     def verbose(self) -> bool:
@@ -416,19 +424,45 @@ class Session:
         with contextlib.suppress(Exception):
             self._store.history.add(text)
 
+    @property
+    def vision(self) -> bool:
+        """Whether the model in use takes pictures on a message: its
+        engine said so (`ModelCapabilities.vision`), and unknown reads as
+        no, the capability's own rule. Read off the cached row, never a
+        probe — the prompt's `@` menu asks this per keystroke."""
+        client = self._client()
+        if client is None:
+            return False
+        row = client.models.cached(self.model)
+        return row is not None and row.capabilities is not None and row.capabilities.vision is True
+
     def assemble(self, max_context: int | None) -> AssembledPrompt:
         """The next request — the one binding of the session's fields to
         `assembler.assemble_story`, so the turn, the preview, and every
-        other call site can never disagree on what is sent. Raises
-        `ContextOverflowError` when the story cannot fit the limit even
-        fully degraded."""
+        other call site can never disagree on what is sent. The pictures
+        ride only while the model can see them, and only the latest
+        turn's where the engine would gather every turn's onto it.
+        Raises `ContextOverflowError` when the story cannot fit the
+        limit even fully degraded."""
+        client = self._client()
+        settings = StorySettings(self._settings_db, self._store, self._paths.prompts_file)
+        shape = ContextShape(
+            head_messages=self._config.head_messages,
+            min_tail_messages=self._config.min_tail_messages,
+            max_context=assembler.context_in_force(max_context, self._config.max_context),
+        )
         return assembler.assemble_story(
             self._store,
             self._story_id,
             system=self._system,
             messages=list(self._messages),
-            shape=self._shape(),
-            max_context=max_context,
+            injections=settings.injections,
+            tool_set=settings.tool_set,
+            prompts=self._prompts,
+            shape=shape,
+            pictures_ride=(
+                client.pictures_ride(self.model) if client is not None else PicturesRide.NONE
+            ),
         )
 
     # ---------- state primitives (backend package internal) ----------
@@ -446,17 +480,6 @@ class Session:
             return None
         return self._providers_registry.get(self.provider)
 
-    def _shape(self) -> ContextShape:
-        """The assembly shape: config's window settings + the prompts'
-        recap header and card template, read fresh each call."""
-        return ContextShape(
-            head_messages=self._config.head_messages,
-            min_tail_messages=self._config.min_tail_messages,
-            max_context_setting=self.max_context_setting,
-            recap_header=self._prompts.recap_header,
-            card_framing=self._prompts.card_framing,
-        )
-
     def _switch_to(self, story_id: int, messages: list[Message] | None = None) -> None:
         """Attach to a story — system, messages (or the given truncated
         list), remembered state. The ONE way a session changes stories,
@@ -464,6 +487,7 @@ class Session:
         forget a piece."""
         self._story_id = story_id
         self._system = self._store.stories.get_system(story_id)
+        self._settings_db = self._store.stories.get_settings(story_id)
         self._messages = (
             self._store.stories.get_messages(story_id) if messages is None else messages
         )
@@ -483,6 +507,8 @@ class Session:
             self._story_id = self._store.stories.add()
             if self._system:
                 self._store.stories.set_system(self._story_id, self._system)
+            for setting_db in self._settings_db:
+                self._store.stories.set_setting(self._story_id, setting_db)
             self._update_state()
         return self._story_id
 
@@ -532,6 +558,15 @@ class Session:
         if self._story_id is not None:
             self._store.stories.set_system(self._story_id, text)
 
+    def _set_setting(self, setting_db: StorySettingDB) -> None:
+        """One setting of the story — persisted with the story when one
+        exists; a story created later picks up what is held here at its
+        creation, as it does the premise."""
+        kept = (s for s in self._settings_db if s.name != setting_db.name)
+        self._settings_db = (*kept, setting_db)
+        if self._story_id is not None:
+            self._store.stories.set_setting(self._story_id, setting_db)
+
     def _read_model(self) -> None:
         """Read the model's row once the model is current — at launch and
         on a switch — so what the menus read off the cache, how the
@@ -563,13 +598,21 @@ class Session:
 
         threading.Thread(target=read, name="otaku-model-read", daemon=True).start()
 
-    def _reload_model_settings(self) -> None:
+    def _load_model_settings(self) -> None:
         """Replace the live parameters and thinking level with the
         current model's saved ones — they follow the model, at startup
-        and on a switch. A saved value the vocabulary no longer makes
-        sense of lands in `notices` and is skipped."""
+        and on a switch, read once `_read_model` has cached the model's
+        row. A saved value the vocabulary no longer makes sense of lands
+        in `notices` and is skipped. An entry with no think key reads as
+        OFF where the provider says the model thinks — the off word of
+        its shape (`reasoning.off_level`), written back as `/set think off`
+        would write it, so from then on the model has a row and every
+        word means what it always did — and as nothing where the provider
+        cannot describe the model or says it does not think: no row,
+        unset until the provider can say, at a later launch or switch.
+        `_save_model_settings` is the mirror write."""
         self._params = {}
-        self._think = models_file.THINK_UNSET
+        self._think = None
         saved = models_file.load(self._paths.models_file).get(self.model, {})
         for name, value in saved.items():
             if name == models_file.THINK_KEY:
@@ -591,6 +634,31 @@ class Session:
                 self._params[name] = self._saved_parameter(known, value)
             except (TypeError, ValueError):
                 self._note(f"Ignoring invalid {name} value {value!r} saved for {self.model}.")
+        if self._think is None:
+            client = self._client()
+            found = client.models.cached(self.model) if client is not None else None
+            word = reasoning.off_level(found.capabilities if found is not None else None)
+            if word is not None:
+                self._think = word
+                tail = self._save_model_settings()
+                if tail != ".":
+                    self._note(f"Think: {word} for {self.model}{tail}")
+
+    def _save_model_settings(self) -> str:
+        """Persist the model's entry — its parameters, and its thinking
+        level when one was set, "unset" included (no row is never
+        written: a parameter saved for a model nobody described must not
+        stand in for a level). Returns the sentence tail that says when
+        the save did not land (the session still took the value): "."
+        when it did."""
+        entry: dict[str, object] = dict(self._params)
+        if self._think is not None:
+            entry[models_file.THINK_KEY] = self._think
+        try:
+            models_file.save(self._paths.models_file, self.model, entry)
+        except (OSError, ValueError) as e:
+            return f" (this session only — could not save: {e})."
+        return "."
 
     @staticmethod
     def _saved_parameter(parameter: Parameter, value: object) -> object:

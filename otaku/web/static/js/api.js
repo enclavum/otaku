@@ -136,6 +136,13 @@ export const status = () => get("/api/status");
 // ---------- playing ----------
 
 export const turns = () => get("/api/play").then((it) => it.messages);
+// The same read whole: the turns, and the question the story stands on.
+export const played = () => get("/api/play");
+/** Where a turn's picture and its thumbnail are served from, by the
+    fingerprint the turn's attachments name it under — an address, not a
+    request: an `img` asks for it, and the answer is immutable. */
+export const pictureUrl = (fingerprint) => `/api/files/${fingerprint}`;
+export const thumbnailUrl = (fingerprint) => `/api/files/${fingerprint}/thumb`;
 export const syntax = () => get("/api/play/syntax");
 export const cast = () => get("/api/cast");
 export const undo = () => remove("/api/play/last");
@@ -170,6 +177,9 @@ export const editJournal = (story, record, fields) =>
   patch(`/api/stories/${story}/journals/${record}`, fields);
 export const mergeCharacter = (story, character, into) =>
   put(`/api/stories/${story}/characters/${character}/merge`, { into });
+export const storySettings = (story) => get(`/api/stories/${story}/settings`);
+export const updateSetting = (story, name, fields) =>
+  patch(`/api/stories/${story}/settings/${name}`, fields);
 
 // ---------- extraction ----------
 
@@ -220,6 +230,12 @@ export const usage = (scope = "") => get(`/api/usage${query({ scope })}`);
 // ---------- settings ----------
 
 export const settings = () => get("/api/settings");
+// The reminder stories share: a text, not a knob of the /set family.
+export const sharedReminder = () => get("/api/shared_reminder");
+export const setSharedReminder = (text) => put("/api/shared_reminder", { text });
+// A tool's prompt: prompts.toml's text, edited in place.
+export const prompt = (tool) => get(`/api/prompts/${tool}`);
+export const setPrompt = (tool, text) => put(`/api/prompts/${tool}`, { text });
 export const setSetting = (name, value) => put(`/api/settings/${name}`, { value });
 export const setParameter = (name, value) =>
   put(`/api/session/model/parameters/${encodeURIComponent(name)}`, { value });
@@ -230,14 +246,15 @@ export const resetParameter = (name) =>
 
 /** Play a line, or regenerate the standing reply. Returns either the
     refusal — checked before anything is recorded — or the event stream. */
-export async function play(line, { regenerate = false, signal } = {}) {
+export async function play(line, { regenerate = false, signal, files = [] } = {}) {
   /* A POST like any other; what differs is the body, read frame by
-     frame below. `signal` is how a reader gives up: aborting takes the
+     frame below. `files` are the line's pictures, each as `encodeFile`
+     makes it. `signal` is how a reader gives up: aborting takes the
      socket away, which is the backend's cancel-and-keep door. */
   const response = await ask(regenerate ? "/api/play/last" : "/api/play", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(regenerate ? {} : { line }),
+    body: JSON.stringify(regenerate ? {} : { line, files }),
     signal,
   });
   if (response.headers.get("Content-Type")?.startsWith("application/json")) {

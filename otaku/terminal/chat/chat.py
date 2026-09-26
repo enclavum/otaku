@@ -9,9 +9,10 @@ the bindings — whoever routes cannot live beside this class.
 import sys
 
 from otaku.backend import Message
+from otaku.backend.api import stories as api_stories
 from otaku.backend.session import Session
 from otaku.terminal.chat.ledger import ScreenLedger
-from otaku.terminal.tty.render import turn
+from otaku.terminal.tty.render import notes_displayed, turn
 from otaku.terminal.tty.statusline import StatusLine
 
 # Turns echoed when a story (re)opens (the launch, a browser pick, an
@@ -39,6 +40,13 @@ class Chat:
         # reading the same channel, so the line never twitches at the
         # streaming handoff.
         self.status_line = StatusLine(session.status)
+
+    @property
+    def notes_displayed(self) -> bool:
+        """Whether the open story displays the model's notes
+        (`render.notes_displayed` over its settings) — read as each echo
+        draws, so an echo and the ledger's measure of it agree."""
+        return notes_displayed(api_stories.get_settings(self.session))
 
     def say(self, text: str) -> None:
         """Print command output below the typed line: the lead blank on
@@ -71,10 +79,11 @@ class Chat:
             if reply is None and prompt is None:
                 break  # an unexpected role — better unerasable than wrong
             groups.append((prompt, reply))
+        notes = self.notes_displayed
         for prompt, reply in reversed(groups):
             self.ledger.restore_exchange(
                 turn(prompt) if prompt else None,
-                turn(reply) if reply is not None else None,
+                turn(reply, notes=notes) if reply is not None else None,
                 above=above,
             )
             above = ""  # the report belongs to the oldest exchange only

@@ -1,11 +1,11 @@
 # otaku — an LLM frontend for roleplay
 
 [![PyPI](https://img.shields.io/pypi/v/otaku.svg)](https://pypi.org/project/otaku/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/enclavum/otaku/blob/main/LICENSE)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](https://github.com/enclavum/otaku/blob/main/LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://github.com/enclavum/otaku/blob/main/pyproject.toml)
 [![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)](https://github.com/enclavum/otaku#requirements)
 
-![otaku web](https://raw.githubusercontent.com/enclavum/otaku/main/images/capture-web.png?v=0.4.0)
+![otaku web](https://raw.githubusercontent.com/enclavum/otaku/main/images/capture-web.png?v=0.6.0)
 
 Otaku is an LLM frontend for roleplay (similar to SillyTavern, Janitor AI, etc.).
 
@@ -36,7 +36,10 @@ Main features:
   each character keeps their own journal of what they've seen and experienced;
 - **no fixed persona**: you are free to play any character during the story and hint to the LLM
   who is playing whom (the `/me` and `/you` commands);
-- **transparent context**: you can see what will be sent to the LLM with the `/context` command.
+- **transparent context**: you can see what will be sent to the LLM with the `/context` command;
+- **story tools**: the model can ask you a question with answers to pick from, keep private notes
+  between turns, and carry a reminder of yours at a depth you choose (the story dossier's Tools
+  tab).
 
 Import your content:
 
@@ -245,12 +248,13 @@ The web interface can be password-protected — set the password in the same con
 ## Storage and privacy
 
 Stories live in a local SQLite database; the database is snapshotted daily into the state dir,
-the last seven kept (configurable).
+the last seven kept (configurable). Pictures attached to a turn are kept beside the database,
+downsized and stripped of their metadata; they are not part of the daily snapshot.
 
 Encryption at rest is disabled by default but is one config switch away (AES-256-GCM, sealed
 client-side): the key can live in your OS keychain, come from a command of your choice (a
 password manager, a hardware token), derive from a passphrase, or sit on disk. The request log
-is sealed with the same cipher.
+and the pictures are sealed with the same cipher.
 
 Provider API keys are always stored sealed, their key in the OS keychain.
 
@@ -263,4 +267,4 @@ focused project; contributions that keep it sharp are very welcome.
 
 ## License
 
-[MIT](https://github.com/enclavum/otaku/blob/main/LICENSE).
+[AGPL-3.0-only](https://github.com/enclavum/otaku/blob/main/LICENSE).

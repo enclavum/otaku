@@ -2,14 +2,34 @@
 roleplay commands /me, /you, /ooc, and the inline pair typed inside a
 line."""
 
+import contextlib
+import threading
+import time
+from collections.abc import Iterator
 from pathlib import Path
 
+import pytest
+from prompt_toolkit.application import create_app_session
+from prompt_toolkit.formatted_text import StyleAndTextTuples
+from prompt_toolkit.input import create_pipe_input
+from prompt_toolkit.output import DummyOutput
+from prompt_toolkit.shortcuts import PromptSession
+
 from otaku.backend.api import play as api_play
-from otaku.backend.api.play import Done
+from otaku.backend.api import providers as api_providers
+from otaku.backend.api import reports
+from otaku.backend.api import stories as api_stories
+from otaku.backend.api.play import Done, Text, ToolCall
+from otaku.backend.files import RawFile
 from otaku.backend.formats import EXPORT_MARKER
 from otaku.backend.paths import Paths
+from otaku.backend.session import Refused
+from otaku.terminal.chat.bindings import SHORTCUTS
+from otaku.terminal.prompt import Carry, LineAssembler, build_prompt
+from otaku.terminal.tty import render
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch, set_config, set_config_provider
+from scenarios.support.screens import BACKSPACE, CTRL_C, DOWN, ENTER, ESC, RIGHT
 
 
 class TestTurns:
@@ -547,6 +567,382 @@ class TestCancelAndKeep:
             app.close()
 
 
+class TestToolCalls:
+    """A tool call in a reply is not story: it streams apart from the
+    prose as `ToolCall` pieces, never as a fence, and is stored fences
+    and all. A tool the user answers ends the reply where its call
+    ends: nothing rides the request for it, the stream is cut at the
+    closing fence, and what the model went on to say is neither shown
+    nor kept. The reply as stored carries the call for a frontend to
+    read (`segments`); a call of a tool the story has switched off goes
+    back on the wire as prose, one of a tool this build does not know
+    not at all."""
+
+    ASKED = "The door creaks.\n\n```otk-question\nGo in?\n1. Yes\n2. No\n```"
+
+    def test_a_call_streams_apart_from_the_prose_and_is_stored_whole(self, app: App) -> None:
+        app.server.script = lambda body: "```otk-note\na plan\n```\nThe hall glows."
+        events = list(api_play.submit(app.session, "I enter the hall."))
+        prose = "".join(event.text for event in events if isinstance(event, Text))
+        calls = [event for event in events if isinstance(event, ToolCall)]
+        assert (prose, "".join(call.text for call in calls)) == ("The hall glows.", "a plan")
+        assert all("```" not in event.text for event in events if isinstance(event, Text))
+        assert {call.name for call in calls} == {"note"}
+        assert app.session.messages[-1].body == "```otk-note\na plan\n```\nThe hall glows."
+
+    def test_nothing_of_a_tool_rides_the_request(self, app: App) -> None:
+        # otaku owns the convention: no `tools` field, and the stops are
+        # the reader's own, the tool on or off.
+        app.play('/set parameter stop "The End"')
+        api_stories.update_setting(app.session, "allow_questions", enabled=True)
+        app.play("I enter the hall.")
+        request = app.server.requests[-1]
+        assert request["stop"] == ["The End"] and "tools" not in request
+
+    def test_a_reply_ends_where_the_question_it_asks_does(self, app: App) -> None:
+        # The stream is cut at the closing fence: what the model went on
+        # to say never streams and is not kept — and the request is in
+        # /usage with the time it took, as a cut request is.
+        api_stories.update_setting(app.session, "allow_questions", enabled=True)
+        app.server.script = lambda body: self.ASKED + "\n\nShe goes in anyway."
+        app.server.chunk_delay = 0.03  # long enough to be a time the usage rounds to
+        events = list(api_play.submit(app.session, "I enter the hall."))
+        assert "anyway" not in "".join(e.text for e in events if isinstance(e, Text))
+        assert isinstance(events[-1], Done)
+        assert app.session.messages[-1].body == self.ASKED
+        chat = next(
+            t for t in app.store.usage.get_totals(app.session.story_id) if t.purpose == "chat"
+        )
+        assert chat.requests == 1 and chat.seconds > 0
+
+    def test_the_cut_call_is_closed_where_the_model_opened_another(self, app: App) -> None:
+        api_stories.update_setting(app.session, "allow_questions", enabled=True)
+        app.server.script = lambda body: "```otk-question\nGo in?\n1. Yes\n```otk-note\nlater\n```"
+        app.server.chunk_size = 1000  # one delta for the whole reply: the cut is the parser's
+        app.play("I enter the hall.")
+        assert app.session.messages[-1].body == "```otk-question\nGo in?\n1. Yes\n```"
+
+    def test_a_call_left_open_by_a_cut_reply_stays_open(self, app: App) -> None:
+        api_stories.update_setting(app.session, "allow_questions", enabled=True)
+        app.server.script = lambda body: "```otk-question\nGo in?"
+        app.server.finish = "length"
+        app.play("I enter the hall.")
+        assert app.session.messages[-1].body == "```otk-question\nGo in?"
+
+    def test_the_stored_reply_carries_the_call_read(self, app: App) -> None:
+        app.server.script = lambda body: self.ASKED
+        (done,) = [
+            e for e in api_play.submit(app.session, "I enter the hall.") if isinstance(e, Done)
+        ]
+        assert done.reply is not None
+        assert api_play.segments(done.reply.body) == [
+            {"kind": "prose", "text": "The door creaks."},
+            {
+                "kind": "tool_call",
+                "tool": "question",
+                "text": "Go in?\n1. Yes\n2. No",
+                "question": "Go in?",
+                "options": ["Yes", "No"],
+            },
+        ]
+
+    def test_a_call_of_a_tool_that_is_on_goes_back_on_the_wire_as_written(self, app: App) -> None:
+        api_stories.update_setting(app.session, "allow_assistant_notes", enabled=True)
+        app.server.script = lambda body: "The hall glows.\n\n```otk-note\na plan\n```"
+        app.play("I enter the hall.")
+        app.play("I look around.")
+        sent = app.server.requests[-1]["messages"]
+        assert sent[-2]["content"] == "The hall glows.\n\n```otk-note\na plan\n```"
+
+    def test_a_call_of_a_tool_that_is_off_goes_back_as_prose(self, app: App) -> None:
+        # The question alone: the reader's answer that follows still has
+        # something to answer, and the menu is what the model must not
+        # learn from a tool it is no longer told about.
+        app.server.script = lambda body: self.ASKED
+        app.play("I enter the hall.")
+        app.play("Yes")
+        sent = app.server.requests[-1]["messages"]
+        assert sent[-2]["content"] == "The door creaks.\n\nGo in?"
+
+    def test_a_call_of_a_tool_this_build_does_not_know_leaves_the_wire(self, app: App) -> None:
+        app.server.script = lambda body: "The hall glows.\n\n```otk-plan\nlater\n```"
+        app.play("I enter the hall.")
+        app.play("I look around.")
+        sent = app.server.requests[-1]["messages"]
+        assert sent[-2]["content"] == "The hall glows."
+        # only the wire: the stored body keeps the call, fences and all
+        assert app.session.messages[-3].body == "The hall glows.\n\n```otk-plan\nlater\n```"
+
+
+class TestCallsOnScreen:
+    """What the terminal shows of a reply's calls, streamed and echoed
+    alike: a question as the question alone, a note dim while the story
+    displays notes and not at all otherwise, each a block behind the bar
+    set apart from the prose by a blank line — and the stream draws what
+    the echo draws, so a story resumed reads as it played."""
+
+    NOTED = "The door creaks.\n\n```otk-note\nKeep the key in play.\n```\n\nIt opens."
+    ASKED = "The door creaks.\n```otk-question\nGo in?\n1. Yes\n2. No\n```"
+
+    def test_a_question_streams_as_the_question_alone(self, app: App, capsys) -> None:
+        api_stories.update_setting(app.session, "allow_questions", enabled=True)
+        app.server.script = lambda body: self.ASKED
+        app.play("I enter the hall.")
+        out = capsys.readouterr().out
+        assert "The door creaks.\n\n│ Go in?" in out
+        assert "1. Yes" not in out and "```" not in out  # the answers are the prompt's menu
+
+    def test_a_note_is_dim_while_displayed_and_gone_otherwise(self, app: App, capsys) -> None:
+        api_stories.update_setting(app.session, "allow_assistant_notes", enabled=True)
+        app.server.script = lambda body: self.NOTED
+        app.play("I enter the hall.")
+        out = capsys.readouterr().out
+        assert "The door creaks.\n\n\x1b[2m│ Keep the key in play.\x1b[22m\n\nIt opens." in out
+        api_stories.update_setting(app.session, "allow_assistant_notes", display_notes=False)
+        app.play("Again.")
+        out = capsys.readouterr().out
+        # gone, and no hole left where it was
+        assert "Keep the key" not in out and "The door creaks.\n\nIt opens." in out
+
+    def test_the_stream_draws_what_the_echo_draws(self, app: App, capsys) -> None:
+        api_stories.update_setting(app.session, "allow_assistant_notes", enabled=True)
+        api_stories.update_setting(app.session, "allow_questions", enabled=True)
+        app.server.chunk_size = 2  # every fence split, every newline its own piece
+        for body in (self.NOTED, self.ASKED):
+            app.server.script = lambda _line, body=body: body
+            app.play("Next.")
+            streamed = capsys.readouterr().out.split("> Next.", 1)[1]
+            echoed = render.message(body, "assistant", notes=True)
+            assert echoed in streamed, body
+
+
+class TestAnswerMenu:
+    """The answers to the question the story stands on, as the prompt
+    offers them: rows above the line behind the question's bar while the
+    line is empty; Enter sends the one under the cursor, → takes it into
+    the line to edit, a typed character is the reader's own answer and
+    the rows go, Esc dismisses them; Ctrl+C erases the prompt whole so
+    the rows return in place. Driven through the real prompt over a pipe,
+    each key a beat apart — the rows arrive asynchronously, and a queue
+    of keys would outrun them."""
+
+    ASKED = "The door creaks.\n```otk-question\nGo in?\n1. Yes\n2. No\n3. Wait\n```"
+
+    def test_enter_sends_the_answer_under_the_cursor(self, app: App) -> None:
+        self.ask(app)
+        assert typed(app, ENTER) == "Yes"
+        assert typed(app, DOWN, ENTER) == "No"
+        assert typed(app, DOWN, DOWN, DOWN, ENTER) == "Yes"  # ↓ wraps
+
+    def test_right_takes_the_answer_into_the_line_to_edit(self, app: App) -> None:
+        self.ask(app)
+        assert typed(app, DOWN, DOWN, RIGHT, ", but quietly", ENTER) == "Wait, but quietly"
+        # once the line has text, → is the cursor's own: no second copy
+        assert typed(app, RIGHT, RIGHT, ENTER) == "Yes"
+
+    def test_a_typed_character_is_the_readers_own_answer(self, app: App) -> None:
+        self.ask(app)
+        assert typed(app, "I knock.", ENTER) == "I knock."
+        # taken back, the empty line brings the rows back
+        assert typed(app, "I", BACKSPACE, DOWN, ENTER) == "No"
+
+    def test_escape_dismisses_the_rows_for_this_prompt(self, app: App) -> None:
+        self.ask(app)
+        assert typed(app, ESC, ENTER) == ""
+
+    def test_the_rows_are_drawn_behind_the_bar_with_the_blank_before_the_prompt(
+        self, app: App
+    ) -> None:
+        self.ask(app)
+        # the loop leaves the blank before the prompt to the menu (`top_row`)
+        drawn = frames(app, DOWN, ENTER, top_row=True)
+        first = next(frame for frame in drawn if "1. Yes" in frame)
+        assert first.split("\n") == ["│", "│ * 1. Yes", "│   2. No", "│   3. Wait", "", "> "]
+        moved = next(frame for frame in drawn if "* 2." in frame)
+        assert "│   1. Yes" in moved
+        # the final render is the blank and the prefix alone: the rows leave with the menu
+        assert drawn[-1] == "\n> "
+
+    def test_ctrl_c_erases_the_prompt_whole_while_a_question_is_posed(self, app: App) -> None:
+        self.ask(app)
+        run = Prompting(app)
+        with pytest.raises(KeyboardInterrupt):
+            run.drive(RIGHT, CTRL_C)
+        assert run.session.app.erase_when_done  # the rows and the line go together
+        # once answered, a ^C leaves the line, as a shell does
+        app.server.script = lambda body: "You step in."
+        app.play("Yes")
+        run = Prompting(app)
+        with pytest.raises(KeyboardInterrupt):
+            run.drive("x", CTRL_C)
+        assert not run.session.app.erase_when_done
+
+    def test_no_menu_once_the_question_is_answered(self, app: App) -> None:
+        self.ask(app)
+        app.server.script = lambda body: "You step in."
+        app.play("Yes")
+        assert typed(app, ENTER) == ""
+
+    def ask(self, app: App) -> None:
+        api_stories.update_setting(app.session, "allow_questions", enabled=True)
+        app.server.script = lambda body: self.ASKED
+        app.play("I enter the hall.")
+
+
+class TestPictures:
+    """A turn with pictures: what the model gets, what the store keeps,
+    and the refusals — a picture rides only while the model can see."""
+
+    def test_a_picture_rides_its_turn_as_a_part_after_the_text(self, tmp_path) -> None:
+        with _seeing(tmp_path) as app:
+            _play(app, "What is this?", [_cat()])
+            content = app.server.requests[-1]["messages"][-1]["content"]
+            assert content[0] == {"type": "text", "text": "What is this?"}
+            assert content[1]["image_url"]["url"].startswith("data:image/jpeg;base64,")
+
+    def test_the_turn_records_its_picture_and_the_folder_holds_it(self, tmp_path) -> None:
+        with _seeing(tmp_path) as app:
+            _play(app, "What is this?", [_cat()])
+            turn, _reply = app.store.stories.get_messages(app.session.story_id)
+            (picture,) = turn.attachments
+            assert turn.body == "What is this?"
+            assert picture.file.endswith(".jpg")
+            assert max(picture.width, picture.height) <= 1568
+            assert app.store.files.get(picture.file) is not None
+            assert app.store.files.get_thumb(picture.file) is not None
+
+    def test_every_verbatim_turn_keeps_its_picture_on_the_wire(self, tmp_path) -> None:
+        with _seeing(tmp_path) as app:
+            _play(app, "What is this?", [_cat()])
+            app.play("And now?")
+            messages = app.server.requests[-1]["messages"]
+            assert [part["type"] for part in messages[0]["content"]] == ["text", "image_url"]
+            assert messages[-1]["content"] == "And now?"
+
+    def test_regenerate_sends_the_picture_again(self, tmp_path) -> None:
+        with _seeing(tmp_path) as app:
+            _play(app, "What is this?", [_cat()])
+            list(api_play.regenerate(app.session))
+            content = app.server.requests[-1]["messages"][-1]["content"]
+            assert content[1]["type"] == "image_url"
+
+    def test_a_line_may_be_pictures_alone(self, tmp_path) -> None:
+        with _seeing(tmp_path) as app:
+            _play(app, "", [_cat()])
+            content = app.server.requests[-1]["messages"][-1]["content"]
+            assert [part["type"] for part in content] == ["image_url"]
+            turn, _reply = app.store.stories.get_messages(app.session.story_id)
+            assert turn.body == "" and len(turn.attachments) == 1
+
+    def test_the_terminal_resolves_an_at_path_and_keeps_it_out_of_the_body(self, tmp_path) -> None:
+        with _seeing(tmp_path) as app:
+            app.play(f"What is this? @{CAT}")
+            turn, _reply = app.store.stories.get_messages(app.session.story_id)
+            assert turn.body == "What is this?"
+            assert len(turn.attachments) == 1
+            content = app.server.requests[-1]["messages"][-1]["content"]
+            assert content[0] == {"type": "text", "text": "What is this?"}
+
+    def test_a_model_that_cannot_see_is_refused_and_nothing_lands(self, app: App) -> None:
+        with pytest.raises(Refused, match="cannot see"):
+            api_play.submit(app.session, "look", [_cat()])
+        assert app.session.messages == []
+        assert not (app.paths.database_dir / "files").exists()
+
+    def test_too_many_pictures_are_refused(self, tmp_path) -> None:
+        with _seeing(tmp_path) as app:
+            with pytest.raises(Refused, match="At most 8"):
+                api_play.submit(app.session, "look", [_cat() for _ in range(9)])
+            assert app.session.messages == []
+
+    def test_a_file_that_is_no_picture_is_refused_before_anything_lands(self, tmp_path) -> None:
+        with _seeing(tmp_path) as app:
+            with pytest.raises(Refused, match="cannot accept"):
+                api_play.submit(app.session, "look", [_cat(), RawFile(b"not one", "x.jpg")])
+            assert app.session.messages == []
+            assert not (app.paths.database_dir / "files").exists()
+
+    def test_the_context_preview_counts_the_pictures_riding_each_message(self, tmp_path) -> None:
+        with _seeing(tmp_path) as app:
+            _play(app, "What is this?", [_cat()])
+            report = reports.context(app.session)
+            assert [part.pictures for part in report.parts] == [1, 0]
+            # The preview IS the wire: the marker beside the role is the
+            # count the request carries, so asserting it is asserting
+            # the payload.
+            assert "[user · 1 picture attached]" in report.text()
+            assert "1 picture riding" in report.summary
+
+    def test_an_engine_that_gathers_pictures_gets_the_latest_turns_alone(self, tmp_path) -> None:
+        # omlx puts every picture in a request on the latest prompt, so
+        # a second turn's picture would arrive stacked with the first's:
+        # the earlier one is held back, and the preview says so.
+        with _seeing_omlx(tmp_path) as app:
+            _play(app, "What is this?", [_cat()])
+            _play(app, "And this?", [_cat()])
+            messages = app.server.requests[-1]["messages"]
+            assert messages[0]["content"] == "What is this?"
+            assert [part["type"] for part in messages[-1]["content"]] == ["text", "image_url"]
+            report = reports.context(app.session)
+            assert "held back" in report.summary
+            assert [part.pictures for part in report.parts][-1] == 0  # the reply is newest now
+
+    def test_a_model_that_cannot_see_gets_none_of_the_storys_pictures(self, tmp_path) -> None:
+        with _seeing(tmp_path) as app:
+            _play(app, "What is this?", [_cat()])
+            api_providers.switch_model(app.session, "generic", "test-model")
+            app.play("And now?")
+            messages = app.server.requests[-1]["messages"]
+            assert all(isinstance(message["content"], str) for message in messages)
+            assert "not sent" in reports.context(app.session).summary
+
+
+CAT = Path(__file__).parent.parent / "fixtures" / "cat.jpg"
+
+
+def _cat() -> RawFile:
+    return RawFile(CAT.read_bytes(), "cat.jpg")
+
+
+@contextlib.contextmanager
+def _seeing(tmp_path: Path) -> Iterator[App]:
+    """A session on a model whose engine says it sees — Ollama's card,
+    as a managed scripted server plays it; the generic provider stands
+    beside it for a switch to a model that cannot."""
+    server = scripted.ModelServer(managed=True)
+    server.capabilities["test-model"] = ["completion", "vision"]
+    try:
+        set_config_provider(tmp_path / "state", server, name="ollama")
+        app = launch(tmp_path / "state", server, spec="ollama/test-model")
+        try:
+            yield app
+        finally:
+            app.close()
+    finally:
+        server.close()
+
+
+@contextlib.contextmanager
+def _seeing_omlx(tmp_path: Path) -> Iterator[App]:
+    """The same on omlx's status, which types the model "vlm"."""
+    server = scripted.ModelServer()
+    server.status = True
+    server.types["test-model"] = "vlm"
+    try:
+        set_config_provider(tmp_path / "state", server, name="omlx")
+        app = launch(tmp_path / "state", server, spec="omlx/test-model")
+        try:
+            yield app
+        finally:
+            app.close()
+    finally:
+        server.close()
+
+
+def _play(app: App, line: str, files: list[RawFile]) -> None:
+    list(api_play.submit(app.session, line, files))
+
+
 def _cloud(server: scripted.ModelServer, tmp_path: Path, *, prompt_cache: str = "") -> App:
     """The app over a provider the registry builds as the marking cloud
     client — the section's NAME picks the class."""
@@ -652,3 +1048,48 @@ def sent_headers(app: App) -> dict[str, str]:
     """The last request's headers, keyed lowercase — a header name is
     case-insensitive on the wire, and the assertion should not care."""
     return {name.lower(): value for name, value in app.server.request_headers[-1].items()}
+
+
+def typed(app: App, *strokes: str) -> str:
+    """The line the prompt returns for `strokes`, sent a beat apart."""
+    return Prompting(app).drive(*strokes)
+
+
+def frames(app: App, *strokes: str, top_row: bool = False) -> list[str]:
+    """Every rendering of the prompt's message, as text, over `strokes`;
+    `top_row` as the loop sets it when it leaves the blank before the
+    prompt to the menu."""
+    run = Prompting(app)
+    run.drive(*strokes, top_row=top_row)
+    return run.drawn
+
+
+class Prompting:
+    """One prompt over a pipe: the real `build_prompt`, its session built
+    INSIDE the pipe's app session (prompt_toolkit binds an application to
+    the input it is created under), the keys fed a beat apart."""
+
+    def __init__(self, app: App) -> None:
+        self.app = app
+        self.drawn: list[str] = []
+        self.session: PromptSession[str]
+
+    def drive(self, *strokes: str, top_row: bool = False) -> str:
+        with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
+            self.session, answers = build_prompt(
+                self.app.session, Carry(), LineAssembler(), shortcuts=SHORTCUTS
+            )
+            answers.top_row = top_row
+
+            def feed() -> None:
+                for stroke in strokes:
+                    time.sleep(0.15)
+                    pipe.send_text(stroke)
+
+            def message() -> StyleAndTextTuples:
+                fragments = answers.message("> ")
+                self.drawn.append("".join(text for _, text in fragments))
+                return fragments
+
+            threading.Thread(target=feed, daemon=True).start()
+            return self.session.prompt(message, pre_run=answers.open)

@@ -12,10 +12,15 @@ import socket
 import threading
 import time
 import tomllib
+import urllib.error
+import urllib.request
 from http.client import HTTPConnection
 from pathlib import Path
 from urllib.parse import urlsplit
 
+import pytest
+
+from otaku.backend.paths import Paths
 from otaku.backend.session import PARAMETERS, THINK_MENU
 from scenarios.support.harness import set_config, set_config_provider
 from scenarios.support.server import ModelServer
@@ -197,6 +202,11 @@ class TestReading:
         assert card("nanogpt")["key_source"] == "env"  # no section yet
         assert card("llamacpp")["key_source"] is None
 
+    def test_the_settings_read_says_how_long_the_pass_waits(self, page: Page) -> None:
+        # `[lore] idle_seconds`, as the session was opened with it: a fact
+        # the page's confirmation says, never a guess of its own.
+        assert page.get("/api/settings")["idle_seconds"] == 300.0
+
     def test_the_settings_read_carries_the_shared_effort_ladder(self, page: Page) -> None:
         # The order is declared ONCE, below both frontends — the page
         # draws it, never re-sorts it.
@@ -339,6 +349,33 @@ class TestPlaying:
         stored = page.store.stories.get_messages(story)
         assert stored[-2].body == "I unroll the county survey."
         assert stored[-1].role == "assistant"
+
+    def test_a_tool_call_reaches_the_page_split_and_read(
+        self, page: Page, server: ModelServer
+    ) -> None:
+        # The page parses nothing: a call streams as `tool_call` pieces,
+        # the stored turn arrives in segments with the call read — and
+        # the play read carries the same, for a page opening on it.
+        server.script = lambda body: "The door creaks.\n```otk-question\nGo in?\n1. Yes\n```"
+        events = page.play("I enter the hall.")
+        calls = [event for event in events if event["type"] == "tool_call"]
+        assert calls and all(event["tool"] == "question" for event in calls)
+        assert "".join(event["text"] for event in calls) == "Go in?\n1. Yes"
+        assert all("```" not in e["text"] for e in events if e["type"] == "text")
+        done = events[-1]
+        assert done["reply"]["segments"] == [
+            {"kind": "prose", "text": "The door creaks."},
+            {
+                "kind": "tool_call",
+                "tool": "question",
+                "text": "Go in?\n1. Yes",
+                "question": "Go in?",
+                "options": ["Yes"],
+            },
+        ]
+        played = page.get("/api/play")
+        assert set(played) == {"messages"}
+        assert played["messages"][-1]["segments"] == done["reply"]["segments"]
 
     def test_the_wire_carries_what_the_page_typed(self, page: Page, server: ModelServer) -> None:
         page.play("I mark the river's true course.")
@@ -495,6 +532,136 @@ class TestWrites:
         cut = f'{{"story": {played}, "discard": true}}'.encode()
         assert page.status("/api/session/head", method="PUT", data=cut) == 400
         assert page.get("/api/session")["story_id"] == blank
+
+
+class TestStorySettings:
+    """The story's settings over HTTP: every setting with the same
+    fields, a PATCH of one field with the backend's refusals as answers
+    and a malformed flag as a bad request, the shared reminder and a
+    tool's prompt at their own paths."""
+
+    FIELDS = (
+        "name",
+        "label",
+        "injection_label",
+        "tool",
+        "allowed_positions",
+        "enabled",
+        "position",
+        "reminder_text",
+        "display_notes",
+    )
+
+    def test_every_setting_answers_the_same_questions(self, page: Page) -> None:
+        page.play("I listen at the culvert mouth.")
+        story = page.get("/api/session")["story_id"]
+        settings = page.get(f"/api/stories/{story}/settings")["settings"]
+        assert settings and all(tuple(row) == self.FIELDS for row in settings)
+        by_name = {row["name"]: row for row in settings}
+        # What a setting has none of is null: the questions tool no
+        # reminder and nothing to display, a reminder no tool.
+        assert by_name["allow_questions"]["tool"] == "question"
+        assert by_name["allow_questions"]["reminder_text"] is None
+        assert by_name["allow_questions"]["display_notes"] is None
+        assert by_name["allow_assistant_notes"]["display_notes"] is True
+        assert by_name["use_story_reminder"]["tool"] is None
+        # what each injects is named, lowercase; a flag injects nothing
+        assert by_name["allow_assistant_notes"]["injection_label"] == "assistant notes"
+        assert by_name["use_story_reminder"]["injection_label"] == "story reminder"
+        assert by_name["story_mode"]["injection_label"] is None
+        assert by_name["use_story_reminder"]["reminder_text"] == ""
+        assert by_name["use_story_reminder"]["allowed_positions"] == list(range(1, 9))
+
+    def test_a_patch_moves_one_field_and_the_store_follows(self, page: Page) -> None:
+        page.play("I listen at the culvert mouth.")
+        story = page.get("/api/session")["story_id"]
+        path = f"/api/stories/{story}/settings/use_story_reminder"
+        answer = page.patch(path, {"enabled": True, "position": 3, "reminder_text": "Rain."})
+        assert answer["notice"] and "refused" not in answer
+        row = next(
+            s
+            for s in page.get(f"/api/stories/{story}/settings")["settings"]
+            if s["name"] == "use_story_reminder"
+        )
+        assert (row["enabled"], row["position"], row["reminder_text"]) == (True, 3, "Rain.")
+        stored = {s.name: s for s in page.store.stories.get_settings(story)}
+        assert stored["use_story_reminder"].reminder_text == "Rain."
+        answer = page.patch(
+            f"/api/stories/{story}/settings/allow_assistant_notes", {"display_notes": False}
+        )
+        assert "refused" not in answer
+        assert page.store.stories.get_settings(story)[-1].display_notes is False
+
+    def test_what_a_setting_does_not_take_is_a_refusal_not_a_fault(self, page: Page) -> None:
+        page.play("I listen at the culvert mouth.")
+        story = page.get("/api/session")["story_id"]
+        answer = page.patch(f"/api/stories/{story}/settings/allow_questions", {"position": 9})
+        assert answer["refused"] is True
+        answer = page.patch(
+            f"/api/stories/{story}/settings/allow_questions", {"display_notes": False}
+        )
+        assert answer["refused"] is True
+        answer = page.patch(f"/api/stories/{story}/settings/plan", {"enabled": True})
+        assert answer["refused"] is True
+
+    def test_a_flag_that_is_not_a_boolean_is_a_bad_request(self, page: Page) -> None:
+        page.play("I listen at the culvert mouth.")
+        story = page.get("/api/session")["story_id"]
+        path = f"/api/stories/{story}/settings/allow_assistant_notes"
+        assert page.status(path, method="PATCH", data=b'{"display_notes": "yes"}') == 400
+        assert page.status(path, method="PATCH", data=b'{"enabled": 1}') == 400
+
+    def test_what_is_not_a_position_is_a_bad_request(self, page: Page) -> None:
+        # "system" or a count from 1 is a position (which the setting may
+        # still refuse); anything else is a malformed request.
+        page.play("I listen at the culvert mouth.")
+        story = page.get("/api/session")["story_id"]
+        path = f"/api/stories/{story}/settings/allow_questions"
+        for body in (
+            b'{"position": "end"}',
+            b'{"position": 0}',
+            b'{"position": true}',
+            b'{"position": "2"}',
+        ):
+            assert page.status(path, method="PATCH", data=body) == 400, body
+
+    def test_the_context_preview_carries_the_injections(self, page: Page) -> None:
+        page.play("I listen at the culvert mouth.")
+        story = page.get("/api/session")["story_id"]
+        assert page.get("/api/session/context")["injections"] == []
+        page.patch(
+            f"/api/stories/{story}/settings/allow_questions",
+            {"enabled": True, "position": "system"},
+        )
+        page.patch(
+            f"/api/stories/{story}/settings/use_story_reminder",
+            {"enabled": True, "position": 2, "reminder_text": "Rain."},
+        )
+        injections = page.get("/api/session/context")["injections"]
+        assert [(i["label"], i["position"], i["position_text"]) for i in injections] == [
+            ("questions", "system", "system"),
+            ("story reminder", 2, "3rd last"),
+        ]
+        assert all(i["tokens"] > 0 for i in injections)
+
+    def test_the_shared_reminder_has_a_path_of_its_own(self, page: Page) -> None:
+        assert page.get("/api/shared_reminder") == {"text": ""}
+        answer = page.put("/api/shared_reminder", {"text": "Stay grim."})
+        assert answer["notice"] and "refused" not in answer
+        assert page.get("/api/shared_reminder") == {"text": "Stay grim."}
+        assert page.store.settings.get_shared_reminder() == "Stay grim."
+
+    def test_a_tools_prompt_is_read_and_written_at_its_path(self, page: Page) -> None:
+        shipped = page.get("/api/prompts/question")["text"]
+        assert shipped
+        answer = page.put("/api/prompts/question", {"text": "ASK ANEW"})
+        assert answer["notice"] and "refused" not in answer
+        assert page.get("/api/prompts/question") == {"text": "ASK ANEW"}
+        assert "ASK ANEW" in Paths.resolve(page.root).prompts_file.read_text()
+        answer = page.put("/api/prompts/question", {"text": ""})
+        assert "refused" not in answer
+        assert page.get("/api/prompts/question") == {"text": shipped}
+        assert page.get("/api/prompts/plan")["refused"] is True
 
 
 class TestTheFlows:
@@ -775,3 +942,53 @@ def _watchers() -> int:
     """The serving threads this process is holding — one per request in
     flight, which for a held-open stream means one per open tab."""
     return sum(1 for thread in threading.enumerate() if "process_request" in thread.name)
+
+
+class TestPictures:
+    """The page's side of a picture: the play body's files, the two file
+    routes, and what a row and the session say. The fixture's model
+    cannot see, which is what makes the refusal the sentence; the files
+    themselves are put in the folder through the scenario's own store."""
+
+    def test_the_session_says_whether_the_model_has_vision(self, page: Page) -> None:
+        assert page.get("/api/session")["vision"] is False
+
+    def test_a_turn_without_pictures_carries_an_empty_list(self, page: Page) -> None:
+        page.play("I listen.")
+        assert [turn["attachments"] for turn in page.get("/api/play")["messages"]] == [[], []]
+
+    def test_files_for_a_model_that_cannot_see_are_refused_eagerly(self, page: Page) -> None:
+        answer = page.post("/api/play", {"line": "look", "files": [_file(b"x")]})
+        assert answer == {"notice": "This model cannot see pictures.", "refused": True}
+        assert page.get("/api/play")["messages"] == []
+
+    def test_a_file_that_is_not_base64_is_a_400(self, page: Page) -> None:
+        with pytest.raises(urllib.error.HTTPError) as caught:
+            page.post("/api/play", {"line": "look", "files": [{"name": "x", "data": "@@@"}]})
+        assert caught.value.code == 400
+
+    def test_a_stored_picture_and_its_thumbnail_are_served_immutable(self, page: Page) -> None:
+        name = page.store.files.add(1, CAT.read_bytes(), "image/jpeg", thumb=b"thumb")
+        status, headers, body = _fetch(page, f"/api/files/{name}")
+        assert (status, body) == (200, CAT.read_bytes())
+        assert headers["Content-Type"] == "image/jpeg"
+        assert "immutable" in headers["Cache-Control"]
+        status, headers, body = _fetch(page, f"/api/files/{name}/thumb")
+        assert (status, headers["Content-Type"], body) == (200, "image/jpeg", b"thumb")
+
+    def test_a_name_nothing_is_stored_under_is_404(self, page: Page) -> None:
+        assert page.status("/api/files/pic-0001-20260101-deadbeef.jpg") == 404
+        assert page.status("/api/files/pic-0001-20260101-deadbeef.jpg/thumb") == 404
+
+
+CAT = Path(__file__).parent.parent / "fixtures" / "cat.jpg"
+
+
+def _file(data: bytes) -> dict[str, str]:
+    return {"name": "cat.jpg", "media_type": "image/jpeg", "data": base64.b64encode(data).decode()}
+
+
+def _fetch(page: Page, path: str) -> tuple[int, dict[str, str], bytes]:
+    """A raw GET: the status, the headers, the bytes."""
+    with urllib.request.urlopen(page.url + path, timeout=10, context=page.context) as reply:
+        return reply.status, dict(reply.headers), reply.read()
