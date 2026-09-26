@@ -4,6 +4,7 @@ a level is spelled on each knob an engine reads."""
 import pytest
 
 from otaku.providers import reasoning
+from otaku.providers.openai.models import ModelCapabilities
 from otaku.providers.openai.reasoning import (
     ALL_EFFORT_LEVELS,
     BUDGET_KNOB,
@@ -18,6 +19,7 @@ from otaku.providers.openai.reasoning import (
     fields,
     from_wire,
     is_level,
+    off_level,
 )
 
 EVERY_KNOB = frozenset(
@@ -135,6 +137,45 @@ class TestFields:
             "reasoning_effort": "medium",
             "chat_template_kwargs": {"enable_thinking": True, "reasoning_effort": "medium"},
         }
+
+
+class TestOffFor:
+    """The word that switches a model of a shape off — what a model with
+    nothing saved runs at — always one the model takes, or None where
+    nothing reaches it or the provider could not say."""
+
+    def test_a_graded_model_is_switched_off_by_its_none_rung(self) -> None:
+        caps = ModelCapabilities(reasoning_efforts=frozenset({"none", "low", "high"}))
+        assert off_level(caps) == "none"
+
+    def test_a_graded_model_without_the_rung_takes_a_budget_of_zero_or_nothing(self) -> None:
+        graded = frozenset({"low", "medium", "high"})
+        assert off_level(ModelCapabilities(reasoning_efforts=graded, reasoning_budget=True)) == "0"
+        assert (
+            off_level(ModelCapabilities(reasoning_efforts=graded, reasoning_budget=False)) is None
+        )
+        # the switch does not count beside rungs: the menu offers the rungs alone
+        assert off_level(ModelCapabilities(reasoning_efforts=graded, reasoning_switch=True)) is None
+
+    def test_a_switched_model_is_switched_off(self) -> None:
+        caps = ModelCapabilities(reasoning_efforts=frozenset(), reasoning_switch=True)
+        assert off_level(caps) == "off"
+        assert off_level(ModelCapabilities(reasoning_switch=True, reasoning_budget=True)) == "off"
+
+    def test_a_budget_alone_is_a_budget_of_zero(self) -> None:
+        assert off_level(ModelCapabilities(reasoning_budget=True)) == "0"
+
+    def test_a_model_nothing_reaches_runs_unset(self) -> None:
+        assert (
+            off_level(ModelCapabilities(reasoning_efforts=frozenset(), reasoning_switch=False))
+            is None
+        )
+        assert off_level(ModelCapabilities(reasoning_switch=False, reasoning_budget=False)) is None
+
+    def test_a_model_the_provider_could_not_describe_runs_unset(self) -> None:
+        # A knob sent blind is a 400 on an engine that refuses it.
+        assert off_level(None) is None
+        assert off_level(ModelCapabilities()) is None
 
 
 class TestFromWire:

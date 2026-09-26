@@ -911,7 +911,17 @@ class TestFirstLaunch:
             assert story_id is not None
             story = app.store.stories.get(story_id)
             assert story.title == "The River That Forgot Its Name"
-            assert len(app.session.messages) == 14
+            assert len(app.session.messages) == 16
+            # The sample's pictures, shipped beside its document, landed
+            # on the message they are named for, through the app's own
+            # intake: the files and their thumbnails are in the folder.
+            pictured = app.session.messages[14]
+            assert pictured.role == "user" and len(pictured.attachments) == 2
+            for picture in pictured.attachments:
+                assert app.store.files.get(picture.file) is not None
+                assert app.store.files.get_thumb(picture.file) is not None
+                assert picture.width <= 1568 and picture.height <= 1568
+            assert all(not m.attachments for i, m in enumerate(app.session.messages) if i != 14)
             ids = app.store.stories.get_messages_ids(story_id)
             assert len(app.store.scenes.get_current(story_id, ids)) == 2
             assert [c.name for c in app.store.characters.list(story_id)] == ["Maren", "Tallis"]
@@ -960,7 +970,7 @@ class TestFirstLaunch:
             app.play("Hello? Is someone there?")
             assert "No model selected" in capsys.readouterr().out
             assert app.server.requests == []
-            assert len(app.session.messages) == 15  # the turn is story, kept
+            assert len(app.session.messages) == 17  # the turn is story, kept
         finally:
             app.close()
 

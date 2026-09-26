@@ -8,6 +8,8 @@ the switch (`SWITCH_LEVELS`), or a budget in tokens — digits, 0 = off.
 
 from collections.abc import Iterable
 
+from otaku.providers.openai.models import ModelCapabilities
+
 # The ladder, the wire's own words: "none" and then weakest to
 # strongest. "none" asks the engine not to reason; no level at all
 # (None) sends nothing and leaves the engine its default.
@@ -79,6 +81,28 @@ def fields(level: str | None, knobs: frozenset[str]) -> dict[str, object]:
             assert isinstance(nested, dict)
             nested[rest] = value
     return out
+
+
+def off_level(caps: ModelCapabilities | None) -> str | None:
+    """The word that switches a model of this shape off — what a model
+    with no saved level runs at: "none" where its rungs include it,
+    "off" where it switches and grades nothing, a budget of 0 where
+    only a budget reaches it; None where nothing does, or the provider
+    could not say — a knob sent blind is a 400 on Ollama and on a
+    hosted model without reasoning — and then nothing is sent. The
+    same precedence as the menu's (`api.settings.think_choices`), so
+    the word is always one the model takes."""
+    if caps is None:
+        return None
+    if caps.reasoning_efforts:
+        word = "none" if "none" in caps.reasoning_efforts else None
+    elif caps.reasoning_switch:
+        word = "off"
+    else:
+        word = None
+    if word is None and caps.reasoning_budget:
+        word = "0"
+    return word
 
 
 def budget_of(level: str) -> int | None:

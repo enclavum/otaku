@@ -130,7 +130,9 @@ class Session:
     _settings_db: tuple[StorySettingDB, ...]  # what the story has stored, handed to every assembly
     _messages: list[Message]
     _params: dict[str, object]
-    _think: str  # the model's thinking level (`reasoning.is_level`), or THINK_UNSET
+    _think: (
+        str | None
+    )  # the model's saved level (`reasoning.is_level`) or THINK_UNSET; None: no row
     # The stories content index behind `api.stories.search` — built on
     # the first search, invalidated by the write primitives below.
     _search_index: dict[int, str] | None
@@ -177,7 +179,7 @@ class Session:
         session._settings_db = ()
         session._messages = []
         session._params = {}
-        session._think = models_file.THINK_UNSET
+        session._think = None
         session._search_index = None
         session._config = config
         session._prompts = prompts
@@ -187,8 +189,8 @@ class Session:
         session._providers_registry = registry
         session._worker = worker
         session._closed = False
-        session._reload_model_settings()
         session._read_model()
+        session._load_model_settings()
         # Reattach the story the previous session was on, so bare `otaku`
         # reopens it mid-scene; one deleted since simply starts fresh.
         if state.story and store.stories.exists(state.story):
@@ -247,9 +249,12 @@ class Session:
     @property
     def think(self) -> str | None:
         """The model's thinking level — a rung of `reasoning.EFFORT_LEVELS`,
-        off or on, or a budget in tokens as digits; None = defer to the
-        model. Saved per model, beside its parameters."""
-        return None if self._think == THINK_UNSET else self._think
+        off or on, or a budget in tokens as digits; None = nothing sent,
+        the model decides — saved as "unset", or no row yet. Saved per
+        model, beside its parameters; a model made current with no row
+        starts off where the provider says it thinks
+        (`api.settings.default_think`)."""
+        return None if self._think in (None, THINK_UNSET) else self._think
 
     @property
     def verbose(self) -> bool:
@@ -593,13 +598,21 @@ class Session:
 
         threading.Thread(target=read, name="otaku-model-read", daemon=True).start()
 
-    def _reload_model_settings(self) -> None:
+    def _load_model_settings(self) -> None:
         """Replace the live parameters and thinking level with the
         current model's saved ones — they follow the model, at startup
-        and on a switch. A saved value the vocabulary no longer makes
-        sense of lands in `notices` and is skipped."""
+        and on a switch, read once `_read_model` has cached the model's
+        row. A saved value the vocabulary no longer makes sense of lands
+        in `notices` and is skipped. An entry with no think key reads as
+        OFF where the provider says the model thinks — the off word of
+        its shape (`reasoning.off_level`), written back as `/set think off`
+        would write it, so from then on the model has a row and every
+        word means what it always did — and as nothing where the provider
+        cannot describe the model or says it does not think: no row,
+        unset until the provider can say, at a later launch or switch.
+        `_save_model_settings` is the mirror write."""
         self._params = {}
-        self._think = models_file.THINK_UNSET
+        self._think = None
         saved = models_file.load(self._paths.models_file).get(self.model, {})
         for name, value in saved.items():
             if name == models_file.THINK_KEY:
@@ -621,6 +634,31 @@ class Session:
                 self._params[name] = self._saved_parameter(known, value)
             except (TypeError, ValueError):
                 self._note(f"Ignoring invalid {name} value {value!r} saved for {self.model}.")
+        if self._think is None:
+            client = self._client()
+            found = client.models.cached(self.model) if client is not None else None
+            word = reasoning.off_level(found.capabilities if found is not None else None)
+            if word is not None:
+                self._think = word
+                tail = self._save_model_settings()
+                if tail != ".":
+                    self._note(f"Think: {word} for {self.model}{tail}")
+
+    def _save_model_settings(self) -> str:
+        """Persist the model's entry — its parameters, and its thinking
+        level when one was set, "unset" included (no row is never
+        written: a parameter saved for a model nobody described must not
+        stand in for a level). Returns the sentence tail that says when
+        the save did not land (the session still took the value): "."
+        when it did."""
+        entry: dict[str, object] = dict(self._params)
+        if self._think is not None:
+            entry[models_file.THINK_KEY] = self._think
+        try:
+            models_file.save(self._paths.models_file, self.model, entry)
+        except (OSError, ValueError) as e:
+            return f" (this session only — could not save: {e})."
+        return "."
 
     @staticmethod
     def _saved_parameter(parameter: Parameter, value: object) -> object:

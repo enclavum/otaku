@@ -148,9 +148,9 @@ class TestThink:
         relaunched.close()
 
     def test_the_level_follows_the_model(self, app: App) -> None:
-        # Saved per model beside its parameters: a model with none saved
-        # runs unset, and unset is the row's absence — setting it forgets
-        # the row, where a level, "none" included, is written.
+        # Saved per model beside its parameters: a model nobody described
+        # runs unset with no row, and "unset" set by hand is written like
+        # a level, "none" included, so it is remembered.
         app.play("/set think high")
         app.play("/model generic/other-model")
         assert app.session.think is None
@@ -159,7 +159,7 @@ class TestThink:
         assert app.session.think == "high"
         saved = tomllib.loads(app.paths.models_file.read_text())
         assert saved["test-model"]["think"] == "high"
-        assert "think" not in saved.get("other-model", {})
+        assert saved["other-model"]["think"] == "unset"
         app.play("/set think none")
         assert tomllib.loads(app.paths.models_file.read_text())["test-model"]["think"] == "none"
 
@@ -256,7 +256,7 @@ class TestThink:
                     api_settings.set_think(app.session, "high")
                 with pytest.raises(Refused, match="does not take a thinking budget"):
                     api_settings.set_think(app.session, "2000")
-                assert app.session.think is None  # still unset
+                assert app.session.think is None  # still unset: the launch could not ask
                 app.play("/model ollama/plain-model")  # the switch reads the card
                 assert api_settings.think_choices(app.session).levels == ("unset",)
                 with pytest.raises(Refused, match="does not take none"):
@@ -267,6 +267,54 @@ class TestThink:
                 assert app.session.think is None
             finally:
                 app.close()
+        finally:
+            server.close()
+
+    def test_a_model_the_engine_says_thinks_starts_off(self, tmp_path) -> None:
+        # A model made current with no think row starts with its thinking
+        # off where the provider says it thinks: the off word of its shape,
+        # written to its entry as /set think off would write it, on the
+        # wire from the first turn. "unset" is written too, so it is
+        # remembered across a relaunch; a model that does not think gets
+        # no row and sends nothing, a parameter saved for it inventing none.
+        server = scripted.ModelServer(models=("test-model", "plain-model"), managed=True)
+        server.capabilities = {
+            "test-model": ["completion", "thinking"],
+            "plain-model": ["completion"],
+        }
+        try:
+            set_config_provider(tmp_path / "state", server, name="ollama")
+            app = launch(tmp_path / "state", server, spec="ollama/test-model")
+            try:
+                assert app.session.think == "off"
+                assert (
+                    tomllib.loads(app.paths.models_file.read_text())["test-model"]["think"] == "off"
+                )
+                app.play("Hello.")
+                assert app.server.requests[-1]["reasoning_effort"] == "none"
+                app.play("/set think unset")
+                assert app.session.think is None
+                app.play("Again.")
+                assert "reasoning_effort" not in app.server.requests[-1]
+                saved = tomllib.loads(app.paths.models_file.read_text())
+                assert saved["test-model"]["think"] == "unset"
+                app.play("/model ollama/plain-model")
+                assert app.session.think is None
+                app.play("/set parameter temperature 0.5")
+                saved = tomllib.loads(app.paths.models_file.read_text())
+                assert "think" not in saved["plain-model"]
+                app.play("Hello.")
+                assert "reasoning_effort" not in app.server.requests[-1]
+            finally:
+                app.close()
+            relaunched = launch(tmp_path / "state", server)
+            try:
+                assert relaunched.session.model == "plain-model"
+                app_play = relaunched.play
+                app_play("/model ollama/test-model")
+                assert relaunched.session.think is None  # unset, remembered
+            finally:
+                relaunched.close()
         finally:
             server.close()
 

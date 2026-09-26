@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import builtins
 import re
-from collections.abc import Callable, Container
+from collections.abc import Callable, Container, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -543,6 +543,18 @@ class MessagesOps:
             conn.execute(
                 "UPDATE messages SET speaker_id = ?, speaker = ?, updated_at = ? WHERE id = ? AND speaker IS NULL",
                 (character_id, self._db.seal(name), self._db.now(), message_id),
+            )
+            # fmt: on
+
+    def set_attachments(self, message_id: int, attachments: Sequence[Attachment]) -> None:
+        """The pictures on one message, replaced — the rows that name
+        files already in the folder (`store.files`); the column is plain,
+        as the rows carry none of the reader's words."""
+        with self._db.conn as conn:
+            # fmt: off
+            conn.execute(
+                "UPDATE messages SET attachments = ?, updated_at = ? WHERE id = ?",
+                (Attachment.to_json(attachments), self._db.now(), message_id),
             )
             # fmt: on
 

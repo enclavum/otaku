@@ -59,6 +59,13 @@ Tentative roadmap: [ROADMAP.md](https://github.com/enclavum/otaku/blob/main/ROAD
 
 ### Changed
 
+- The page's providers list says connected or not connected, and its rows stand level: the lamp on
+  the name's line, the caption centred, a provider without a url showing (missing).
+- The short sample story goes on for two turns: one with two pictures on it, and the narrator's
+  question with three answers to pick from, so a fresh install shows both.
+- Thinking is off by default: a model with no saved level starts with its thinking off where
+  otaku knows it thinks, written to `models.toml` as the model becomes current; `/set think unset`
+  still sends nothing, and is remembered.
 - The model's thinking draws as a block like a note in both frontends — dimmed behind a bar in the
   terminal, dimmed behind a rule of its own on the page — without the `(thinking)` label.
 - The launch banner is a house mark beside three dimmed lines — the name, the model with its

@@ -284,10 +284,10 @@ function providerHeading(provider) {
 function buildProviders(state, notice) {
   const { popup, panel } = state;
   const pane = $('[data-pane="providers"]', popup);
-  const answering = panel.providers.filter((provider) => provider.connected);
+  const connected = panel.providers.filter((provider) => provider.connected);
   $("[data-tabs-aside]", popup).textContent =
-    `${answering.length} of ${panel.providers.length} answering`;
-  footnote(popup, notice || `${answering.length} ${answering.length === 1 ? "provider" : "providers"} answering`);
+    `${connected.length} of ${panel.providers.length} connected`;
+  footnote(popup, notice || `${connected.length} ${connected.length === 1 ? "provider" : "providers"} connected`);
 
   /* In the registry's order (`providers.registry.ALL_CLIENTS`), which is the
      terminal's picker's: a frontend that re-sorted them would invent an
@@ -300,16 +300,23 @@ function buildProviders(state, notice) {
     root: pane,
     rows,
     drawRow: (entry) => {
+      // A two-line row (`otk-row--stack`): the dot centres on the name's
+      // line, the caption on the whole row; a provider without a url still
+      // gets its second line, so every row stands as tall.
+      const lamp = element("span", "otk-row__lamp");
+      lamp.append(element("span", entry.provider.connected ? "otk-dot" : "otk-dot otk-dot--off"));
       const stack = element("span", "otk-stack");
       stack.append(
         span("otk-choice__name", entry.provider.label),
-        span("otk-index__sub", entry.provider.url),
+        span("otk-index__sub", entry.provider.url || "(missing)"),
       );
-      return row(
-        element("span", entry.provider.connected ? "otk-dot" : "otk-dot otk-dot--off"),
+      const item = row(
+        lamp,
         stack,
-        span("otk-row__num", entry.provider.connected ? "answering" : "not answering"),
+        span("otk-row__num", entry.provider.connected ? "connected" : "not connected"),
       );
+      item.classList.add("otk-row--stack");
+      return item;
     },
     drawPreview: (entry) => providerDetail(state, pane, entry.provider),
     onOpen: () => $("[data-detail] input", pane)?.focus(),
@@ -324,7 +331,7 @@ function providerDetail(state, pane, provider) {
   const models = provider.models.length;
   const head = span(
     "otk-label",
-    provider.connected ? `answering · ${models} ${models === 1 ? "model" : "models"}` : "not answering",
+    provider.connected ? `connected · ${models} ${models === 1 ? "model" : "models"}` : "not connected",
   );
 
   const fields = element("div", "otk-detail__section");

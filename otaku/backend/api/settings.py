@@ -26,10 +26,9 @@ from otaku.backend.session import (
 )
 from otaku.backend.tools import TOOLS
 from otaku.providers import reasoning
-from otaku.settings import models as models_file
 from otaku.settings import row
 from otaku.settings.migrations import surgery
-from otaku.settings.models import THINK_KEY, THINK_UNSET
+from otaku.settings.models import THINK_UNSET
 from otaku.settings.prompts import Prompts, set_prompt
 from otaku.settings.prompts import load as load_prompts
 
@@ -156,8 +155,9 @@ def parse_stops(raw: str) -> list[str]:
 
 def set_think(session: Session, raw: str) -> str:
     """A thinking level — a rung, off or on, or a budget in tokens —
-    saved for the model in use, or "unset", which forgets it: the level
-    follows the model, as its parameters do. "" reports where it stands
+    saved for the model in use, or "unset", saved too: nothing is sent,
+    and the model is not started off again. The level follows the
+    model, as its parameters do. "" reports where it stands
     and what the model takes (`think_choices`). Raises Refused for a
     word outside the vocabulary, a level the model does not take, or no
     model — never for the provider: a level goes out on whatever knobs
@@ -184,7 +184,7 @@ def set_think(session: Session, raw: str) -> str:
             f"{session.model} does not take {value}. Levels for this model: {choices.listed}."
         )
     session._think = value
-    return f"Think: {_think_word(value)}{_save_model_settings(session)}"
+    return f"Think: {_think_word(value)}{session._save_model_settings()}"
 
 
 def _think_word(level: str) -> str:
@@ -357,7 +357,7 @@ def set_parameter_value(session: Session, name: str, value_raw: str) -> str:
         if name not in session.params:
             return f"Parameter {name} is not set."
         session._params.pop(name)
-        saved = _save_model_settings(session)
+        saved = session._save_model_settings()
         return f"Parameter {name} unset: the engine's own default applies{saved}"
     parameter = PARAMETERS[name]
     value: object
@@ -378,7 +378,7 @@ def set_parameter_value(session: Session, name: str, value_raw: str) -> str:
                 bounds = f"between {low} and {high}"
             raise Refused(f"{name} must be {bounds}.")
     session._params[name] = value
-    said = f"{name} = {parameter_text(value)}{_save_model_settings(session)}"
+    said = f"{name} = {parameter_text(value)}{session._save_model_settings()}"
     if not parameter_read(session, name):
         said += (
             f" Not read by {session.provider}: kept for the model, sent where a provider reads it."
@@ -392,18 +392,3 @@ def _unsupported(session: Session, name: str) -> Refused:
     return Refused(
         f"Unsupported parameter {name!r}. Supported: {', '.join(parameter_names(session))}."
     )
-
-
-def _save_model_settings(session: Session) -> str:
-    """Persist the model's entry — its parameters, and its thinking
-    level when one is set (unset is the row's absence); the sentence
-    tail says when the save did not land (the session still took the
-    value)."""
-    entry: dict[str, object] = dict(session.params)
-    if session._think != THINK_UNSET:
-        entry[THINK_KEY] = session._think
-    try:
-        models_file.save(session._paths.models_file, session.model, entry)
-    except (OSError, ValueError) as e:
-        return f" (this session only — could not save: {e})."
-    return "."

@@ -19,3 +19,6 @@ notes/
 demo/terminal/node_modules/
 demo/terminal/package.json
 demo/terminal/package-lock.json
+
+# The assistant's private working rules, never public
+CLAUDE.local.md

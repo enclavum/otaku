@@ -6,7 +6,7 @@
   "max_context": "",
   "story": "The River That Forgot Its Name",
   "story_id": 1,
-  "turns": 14,
+  "turns": 16,
   "vision": false
  },
  "story": {
@@ -17,7 +17,7 @@
   "first_user": "I follow the post road down into the Meade valley, checking the hills against my survey as I go.",
   "model": "",
   "updated_at": "2026-01-01T00:00:00+00:00",
-  "turns": 14,
+  "turns": 16,
   "open": true
  },
  "opened": {
@@ -264,11 +264,69 @@
       "text": "The chamber swallows the last of the light. Ladder rungs cold under your hands, the smell of wet stone in a dry country — and there, along the chamber floor, you find it: a sheet of water no deeper than a coin, sliding smooth and purposeful UP the slope, threading between the stones, carrying dead alder leaves against gravity toward the black mouth of the culvert.\n\nYou stand in the dark with your map case on your back, and the water parts around your boots without hurry, as if it has somewhere to be.\n\nFrom inside the culvert, conversational, a voice:\n\n\"You're late, mapmaker.\""
      }
     ]
+   },
+   {
+    "id": 15,
+    "role": "user",
+    "body": "I hold the lantern over my map, then over the chamber floor, and look from one to the other.",
+    "kind": "dialogue",
+    "speaker": "Maren",
+    "provider": null,
+    "model": null,
+    "template": null,
+    "attachments": [
+     {
+      "file": "pic-0001-20260101-8b678a87.jpg",
+      "width": 384,
+      "height": 672,
+      "size": 72208
+     },
+     {
+      "file": "pic-0001-20260101-dd701403.jpg",
+      "width": 1200,
+      "height": 900,
+      "size": 317287
+     }
+    ],
+    "segments": [
+     {
+      "kind": "prose",
+      "text": "I hold the lantern over my map, then over the chamber floor, and look from one to the other."
+     }
+    ]
+   },
+   {
+    "id": 16,
+    "role": "assistant",
+    "body": "The lantern shows what the dark would not. On the map, the red line you drew runs on past the lock and up the hill, into country you have never surveyed. On the floor, the water runs the same way.\n\n\"Well?\" says the voice from the culvert. \"Are you coming?\"\n\n```otk-question\nDo you follow the water into the culvert?\n1. I go in, lantern first\n2. I ask the voice its name before I move\n3. I climb out and go back for Tallis\n```",
+    "kind": "dialogue",
+    "speaker": null,
+    "provider": null,
+    "model": null,
+    "template": null,
+    "attachments": [],
+    "segments": [
+     {
+      "kind": "prose",
+      "text": "The lantern shows what the dark would not. On the map, the red line you drew runs on past the lock and up the hill, into country you have never surveyed. On the floor, the water runs the same way.\n\n\"Well?\" says the voice from the culvert. \"Are you coming?\""
+     },
+     {
+      "kind": "tool_call",
+      "tool": "question",
+      "text": "Do you follow the water into the culvert?\n1. I go in, lantern first\n2. I ask the voice its name before I move\n3. I climb out and go back for Tallis",
+      "question": "Do you follow the water into the culvert?",
+      "options": [
+       "I go in, lantern first",
+       "I ask the voice its name before I move",
+       "I climb out and go back for Tallis"
+      ]
+     }
+    ]
    }
   ],
   "read_through": 10,
-  "unread": 4,
-  "unread_span": "11-14",
+  "unread": 6,
+  "unread_span": "11-16",
   "scenes": [
    {
     "id": 1,
@@ -394,7 +452,7 @@
  },
  "context": {
   "shape": {
-   "head": 14,
+   "head": 16,
    "middle": 0,
    "history": false,
    "rolled_up": 0,
@@ -403,16 +461,16 @@
    "tail_target": 150,
    "tail_setting": 150,
    "system_tokens": 73,
-   "transcript_tokens": 1259,
+   "transcript_tokens": 1356,
    "limit": 32574,
    "pictures_sent": 0,
-   "pictures_omitted": 0,
+   "pictures_omitted": 2,
    "pictures_held": 0,
-   "kept": 14,
-   "total_tokens": 1332,
+   "kept": 16,
+   "total_tokens": 1429,
    "used": 4
   },
-  "lede": "Context preview — the exact request to be sent. Context summary:\n\n  ~1,332 tokens · 4% of the 32,574 limit\n  system 73 · transcript 1,259\n  14 messages verbatim",
+  "lede": "Context preview — the exact request to be sent. Context summary:\n\n  ~1,429 tokens · 4% of the 32,574 limit\n  system 73 · transcript 1,356\n  16 messages verbatim\n  2 pictures on the verbatim messages not sent: the model cannot see, or the file is gone",
   "note": "",
   "injections": [],
   "parts": [
@@ -489,6 +547,16 @@
    {
     "role": "assistant",
     "body": "The chamber swallows the last of the light. Ladder rungs cold under your hands, the smell of wet stone in a dry country — and there, along the chamber floor, you find it: a sheet of water no deeper than a coin, sliding smooth and purposeful UP the slope, threading between the stones, carrying dead alder leaves against gravity toward the black mouth of the culvert.\nYou stand in the dark with your map case on your back, and the water parts around your boots without hurry, as if it has somewhere to be.\nFrom inside the culvert, conversational, a voice:\n\"You're late, mapmaker.\"",
+    "pictures": 0
+   },
+   {
+    "role": "user",
+    "body": "I hold the lantern over my map, then over the chamber floor, and look from one to the other.",
+    "pictures": 0
+   },
+   {
+    "role": "assistant",
+    "body": "The lantern shows what the dark would not. On the map, the red line you drew runs on past the lock and up the hill, into country you have never surveyed. On the floor, the water runs the same way.\n\"Well?\" says the voice from the culvert. \"Are you coming?\"\nDo you follow the water into the culvert?",
     "pictures": 0
    }
   ]

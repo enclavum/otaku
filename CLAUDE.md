@@ -519,7 +519,17 @@ the day already has one, with every secret the edit replaced (an
 (`surgery.redacted`). Every setting changed from inside the app
 persists elsewhere and is rewritten wholesale: `configs/state.toml` for
 session-wide values (the resumed model and story, `/set` toggles) and
-`configs/models.toml` for per-model overrides.
+`configs/models.toml` for per-model overrides — read and written by
+the session alone (`_load_model_settings`, `_save_model_settings`;
+the api's `/set` operations set a value and ask it to persist). A
+model made current with no thinking level saved starts OFF where the
+provider says it thinks: at launch and on a switch the model is read
+first and its entry after, and an entry with no think key reads as the
+off word of the model's shape (`reasoning.off_level`), written back as
+`/set think off` would; `unset` is saved too and sends nothing. A
+model the provider cannot describe (a hosted catalog at launch, an
+engine that is down) gets no row until it can, at a later launch or
+switch.
 
 One state-dir DIRECTORY is the user's alone and the app never writes in
 it: `web/`, holding `custom.css` (loaded last by the web frontend, so
@@ -527,6 +537,17 @@ anything in it wins) and `fonts/` (typefaces of their own, asked for
 under `/web-fonts/`). The custom properties the stylesheet writes
 against are a public contract — `docs/web_tokens.md`, where a rename is
 a breaking change.
+
+A SAMPLE'S PICTURES ship beside its document in `otaku/samples/`,
+named `<stem>.<message>.<order>.<ext>` (`river.15.1.jpg`, the first
+picture of river.md's 15th message — `launch._sample_pictures` is the
+rule): the export format carries no picture, so the first launch's seed
+puts them on the message through the app's own intake
+(`launch._seed_pictures`: read, downsized, thumbnailed, saved under the
+story's number, `messages.set_attachments`), best effort per picture.
+The demo carries them as fixtures: `capture_fixtures_web.py` copies the
+stored file and its thumbnail into `demo/web/fixtures/files/` with the
+day in the name pinned, and `demo.js` serves them under `/api/files`.
 
 `cert/` holds the TLS pair the web frontend serves under (`web.cert`):
 the app writes it only into an empty directory, and a pair already there
@@ -605,24 +626,7 @@ which costs seconds per test where the in-process kind costs
 milliseconds. The fast offline suite is therefore
 `-m "not live and not cli"`.
 
-## Process rules
-
-- Never commit without the user's explicit approval.
-- Every change to a frontend's LOOK or WORDING — a caption, a menu's
-  entries, a layout, a sentence the page or the terminal shows — is made
-  on an explicit request naming it, never as a side effect of a backend
-  change or on the assistant's own judgement. A backend change passes
-  its data through and leaves the drawing as it was.
-- A commit message is ONE line, under 150 characters — no body. Name what
-  changed, not every detail; the changelog and the code carry those.
-- Challenge design and implementation decisions and ask questions — the user
-  reviews every step. Functionality follows the product design.
-- Keep dependencies minimal; no optional extras.
-
 ## Documentation rules
-
-Everything under `docs/` is the user's own, hand-written: NEVER edit a file
-there unless asked to.
 
 1. Docs describe the final state only — never history or comparisons — and
    each doc has one owner topic.
@@ -635,6 +639,11 @@ there unless asked to.
    that detail belongs inside the feature's own entry, or nowhere.
 
 ## Command conventions
+
+The directions (`/you`, `/me`, `/ooc`, `/cue`, `/roll`) are sugar for
+the player, never an obligation: a design works with none of them
+typed, the plain-text path exists and is the primary one, and a
+direction may only short-circuit a question it happens to answer.
 
 The `@` sigil in a command argument exists ONLY to trigger path
 autocompletion (the menu pops at `@` and filters while typing — see
@@ -824,6 +833,8 @@ worker updates in place, and the dim `[ … ]` report blocks beside a
 turn (the stats line's family).
 
 ## Module conventions
+
+Dependencies stay minimal; no optional extras.
 
 Order within a module: constants, then classes, then functions — public
 before protected. Logical grouping wins over the order: a private helper

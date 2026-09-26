@@ -63,7 +63,7 @@
   --otk-em:          inherit;                 /* the model's *emphasis*: italic, no colour of its own */
   --otk-strong:      inherit;                 /* its **weight** mark, likewise */
   --otk-strong-weight: 600;                   /* a real cut, not a synthesised 700 */
-  --otk-ok:          oklch(0.58 0.11 150);    /* answering, resident         */
+  --otk-ok:          oklch(0.58 0.11 150);    /* connected, resident         */
   --otk-danger:      oklch(0.5 0.14 30);      /* delete, stop, and failures  */
 
   /* -- three voices, one job each ----------------------------------------- */
@@ -121,7 +121,7 @@
   --otk-scrollbar-track: oklch(0.945 0.006 165); /* the channel it runs in   */
 
   /* -- panel ladder ------------------------------------------------------- */
-  --otk-col-lamp:     10px;    /* the resident/answering lamp gutter      */
+  --otk-col-lamp:     10px;    /* the resident/connected lamp gutter      */
   --otk-col-size:     66px;    /* a model's size column                   */
   --otk-col-count:    46px;    /* a count column                          */
   --otk-col-ago:      30px;    /* a "2h ago" column                       */
@@ -437,7 +437,7 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 .otk-leader > :last-child { order: 2; color: var(--otk-body); font-variant-numeric: tabular-nums; }
 
 .otk-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--otk-ok); flex: none; }
-.otk-dot--off { background: none; border: var(--otk-hair) solid var(--otk-line); border-radius: 0; }
+.otk-dot--off { background: none; border: var(--otk-hair) solid var(--otk-line); }
 .otk-dot--sm { width: 6px; height: 6px; }
 
 .otk-tag {
@@ -882,6 +882,14 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
 .otk-row.is-loaded .otk-row__title { font-weight: 600; color: var(--otk-ink); }
 .otk-row.is-dim .otk-row__title { color: var(--otk-muted); }
 .otk-row__lamp { width: var(--otk-col-lamp); flex: none; display: flex; align-items: center; }
+/* a two-line row, a name over a sub-line: even padding, so the row's centre
+   is its content's; the lamp as tall as the name's line and set at the top,
+   so the dot centres on the name rather than hanging off the baseline; the
+   caption centred on the whole row */
+.otk-row--stack { padding-top: 3px; padding-bottom: 3px; }
+.otk-row--stack .otk-row__lamp { align-self: flex-start; height: calc(var(--otk-size-note) * var(--otk-leading-row)); }
+.otk-row--stack .otk-row__num { align-self: center; }
+.otk-stack > .otk-choice__name { line-height: var(--otk-leading-row); }
 .otk-row__num--size  { width: var(--otk-col-size); }
 .otk-row__num--count { width: var(--otk-col-count); }
 .otk-row__num--ago   { width: var(--otk-col-ago); }

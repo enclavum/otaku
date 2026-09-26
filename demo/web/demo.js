@@ -45,11 +45,14 @@ const ROUTES = {
   // The demo's model never asks a question, so no story stands on one.
   "GET /api/play": () => ({ messages: store.turns() }),
   "GET /api/play/syntax": () => store.syntax(),
-  // A turn's pictures: the demo's model cannot see, so no turn carries
-  // one and no file is stored — a fingerprint nothing is stored under
-  // answers 404, as the product does.
-  "GET /api/files/{file}": () => null,
-  "GET /api/files/{file}/thumb": () => null,
+  // A turn's pictures: the sample's own, shipped with the fixtures
+  // (`capture_fixtures_web.py` copies them out of the throwaway state
+  // dir) and served as the product serves a stored file — a name nothing
+  // is stored under answers 404, as the product does. The demo's model
+  // cannot see, so no NEW picture is ever stored (`play` refuses `files`).
+  "GET /api/files/{file}": (p) => realFetch(new URL(`./fixtures/files/${p.file}`, import.meta.url)),
+  "GET /api/files/{file}/thumb": (p) =>
+    realFetch(new URL(`./fixtures/files/${p.file.replace(/\.[^.]+$/, "")}-thumb.jpg`, import.meta.url)),
   "GET /api/cast": () => store.cast(),
   "DELETE /api/play/last": () => store.undo(),
   "GET /api/history": () => ({ lines: store.history() }),
@@ -609,6 +612,27 @@ window.fetch = async (input, init) => {
   if (payload === null) return status(404);
   return payload instanceof Response ? payload : json(payload);
 };
+
+/* A picture on a turn is loaded by the browser itself, as an <img>, never
+   through fetch — so the fake reaches it on the image element's `src`:
+   a stored file's URL, as the page spells it (`api.pictureUrl`,
+   `api.thumbnailUrl`), becomes the fixture's copy of it. The same two
+   answers as the `/api/files` routes, on the one door an <img> uses. */
+const realSrc = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, "src");
+Object.defineProperty(HTMLImageElement.prototype, "src", {
+  configurable: true,
+  get() {
+    return realSrc.get.call(this);
+  },
+  set(value) {
+    const found = /^\/api\/files\/([^/]+)(\/thumb)?$/.exec(String(value));
+    if (found) {
+      const name = found[2] ? `${found[1].replace(/\.[^.]+$/, "")}-thumb.jpg` : found[1];
+      value = new URL(`./fixtures/files/${name}`, import.meta.url).href;
+    }
+    realSrc.set.call(this, value);
+  },
+});
 
 // The watch stream ("/api/watch") never has news in the demo: the
 // deployed files change only with a deploy, and a deploy serves a new
