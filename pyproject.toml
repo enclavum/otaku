@@ -7,7 +7,7 @@ name = "otaku"
 dynamic = ["version"]
 description = "LLM frontend for roleplay"
 readme = "README.md"
-license = "MIT"
+license = "AGPL-3.0-only"
 license-files = ["LICENSE"]
 authors = [{ name = "enclavum", email = "feedback@otaku.sh" }]
 requires-python = ">=3.11"

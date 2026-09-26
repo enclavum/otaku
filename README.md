@@ -1,7 +1,7 @@
 # otaku — an LLM frontend for roleplay
 
 [![PyPI](https://img.shields.io/pypi/v/otaku.svg)](https://pypi.org/project/otaku/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/enclavum/otaku/blob/main/LICENSE)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](https://github.com/enclavum/otaku/blob/main/LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://github.com/enclavum/otaku/blob/main/pyproject.toml)
 [![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)](https://github.com/enclavum/otaku#requirements)
 
@@ -263,4 +263,4 @@ focused project; contributions that keep it sharp are very welcome.
 
 ## License
 
-[MIT](https://github.com/enclavum/otaku/blob/main/LICENSE).
+[AGPL-3.0-only](https://github.com/enclavum/otaku/blob/main/LICENSE).
