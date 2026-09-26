@@ -634,9 +634,6 @@ milliseconds. The fast offline suite is therefore
 3. The code documents itself first: module docstrings say what a module owns;
    comments only for non-obvious whys. Docs cover what code can't: product
    intent, cross-module contracts, operational rules.
-4. The changelog diffs against the LAST RELEASE, not the working tree: no
-   entry for a fix or change to something this same version introduced —
-   that detail belongs inside the feature's own entry, or nowhere.
 
 ## Command conventions
 
