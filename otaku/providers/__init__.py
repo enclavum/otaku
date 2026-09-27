@@ -23,7 +23,7 @@ from otaku.providers.errors import (
     UnauthorizedError,
     UnreachableError,
 )
-from otaku.providers.openai import reasoning
+from otaku.providers.openai import reasoning, templates
 from otaku.providers.openai.auth import KeySource, OpenAIAuth
 from otaku.providers.openai.client import OpenAIClient, ProviderCapabilities
 from otaku.providers.openai.completion import (
@@ -93,4 +93,5 @@ __all__ = [
     "autoconfigure",
     "probe",
     "reasoning",
+    "templates",
 ]

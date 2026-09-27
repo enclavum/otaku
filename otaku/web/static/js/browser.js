@@ -333,15 +333,26 @@ export function editable(
     });
   }
 
+  /* A FRAME around the value: text before and after the field's own,
+     shown in the field but not its to change — a paragraph edited as
+     one text, the other rows' parts standing (`transcript.correctable`).
+     What the field holds is its value less the frame (`_typed`); the
+     frame is put on and taken off by whoever opens the editor. */
+  field._frame = null;
+  const framed = (own) => (field._frame ? field._frame.prefix + own + field._frame.suffix : own);
+  field._typed = () =>
+    field._frame
+      ? field.value.slice(field._frame.prefix.length, field.value.length - field._frame.suffix.length)
+      : field.value;
   field._restore = () => {
-    field.value = text ?? "";
+    field.value = framed(text ?? "");
   };
   /* What the store holds now, when a write settled on other words than
      were typed — a number normalised, a cleared value's default: the
      field shows them, and they are what Esc puts back from here on. */
   field._settle = (stored) => {
     text = stored ?? "";
-    field.value = text;
+    field.value = framed(text);
   };
   // what the store holds, as far as this field knows
   field._stored = () => text;
@@ -361,9 +372,10 @@ export function editable(
     return pending;
   };
   const commit = async () => {
-    if (field.value === text) return true;
+    const typed = field._typed();
+    if (typed === text) return true;
     try {
-      const answer = await write(field.value);
+      const answer = await write(typed);
       if (answer?.refused) {
         report(answer.notice, "");
         return false;
@@ -372,7 +384,7 @@ export function editable(
          finishing a field blurs it and puts back what it held before —
          the old value standing on screen until the screen the write
          asked for arrives to replace it. */
-      text = field.value;
+      text = typed;
       return true;
     } catch (e) {
       failed(e);
@@ -436,7 +448,11 @@ export function editable(
     that cannot be edited at all — then it takes the label line and no
     verbs, which is how a name only the extractor writes keeps the same
     box as the title beside it. */
-export function edited(field, name, extra = "") {
+export function edited(field, name, extra = "", { opening = null, closing = null } = {}) {
+  /* `opening` runs as the editor opens, before the field is sized and
+     focused — where a frame is put on the value (`editable`'s `_frame`);
+     `closing` as it closes, before the reading is painted again — where
+     the frame comes off. */
   const box = element("div", `otk-edit ${extra}`.trim());
   const input = field.matches("textarea") ? field : $("textarea.otk-editable", field);
   if (!input) {
@@ -476,6 +492,7 @@ export function edited(field, name, extra = "") {
 
   box._close = () => {
     delete box.dataset.editing;
+    closing?.();
     input.readOnly = true;
     input.tabIndex = -1;
     input.blur();
@@ -483,13 +500,16 @@ export function edited(field, name, extra = "") {
   };
   open.addEventListener("click", () => {
     box.dataset.editing = "true";
+    opening?.();
     input.readOnly = false;
     input.tabIndex = 0;
     // shown only now, so a browser without `field-sizing` sizes it now
     autosize(input);
     input.focus();
-    // Opened to be continued, not retyped: the caret lands at the end.
-    input.setSelectionRange(input.value.length, input.value.length);
+    // Opened to be continued, not retyped: the caret lands at the end —
+    // of the field's own text, where a frame follows it.
+    const end = input.value.length - (input._frame?.suffix.length ?? 0);
+    input.setSelectionRange(end, end);
   });
   save.addEventListener(
     "click",
@@ -513,10 +533,13 @@ export function edited(field, name, extra = "") {
   });
   read.addEventListener("dblclick", (event) => {
     const at = drawnOffset(read, event.clientX, event.clientY);
+    // measured against the stored text before the editor opens on it —
+    // opening may frame the value
+    const caret = at === null ? null : storedOffset(input._stored(), read.textContent, at);
     open.click();
-    if (at === null) return;
-    const caret = storedOffset(input.value, read.textContent, at);
-    input.setSelectionRange(caret, caret);
+    if (caret === null) return;
+    const framed = caret + (input._frame?.prefix.length ?? 0);
+    input.setSelectionRange(framed, framed);
   });
 
   const verbs = element("span", "otk-edit__verbs");

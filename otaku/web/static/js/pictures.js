@@ -41,6 +41,11 @@ export function openPicture(attachments, at) {
   const show = (index) => {
     at = index;
     const picture = attachments[at];
+    // The row knows the picture's measure, so the frame takes its size
+    // before a byte arrives — on a slow machine the dialog would otherwise
+    // open as tall as its arrows and grow when the picture lands.
+    image.width = picture.width;
+    image.height = picture.height;
     image.src = api.pictureUrl(picture.file);
     $(".otk-lightbox__meta", dialog).textContent = `${picture.width} × ${picture.height} · ${sized(picture.size)}`;
     $(".otk-lightbox__count", dialog).textContent = several ? `${at + 1} of ${attachments.length}` : "";

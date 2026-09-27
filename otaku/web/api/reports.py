@@ -49,7 +49,7 @@ def context(session: Session) -> dict[str, Any]:
             "pictures_omitted": prompt.pictures_omitted,
             "pictures_held": prompt.pictures_held,
             "kept": report.kept,
-            "total_tokens": prompt.total_tokens,
+            "total_tokens": report.total_tokens,
             "used": report.used,
         },
         "lede": report.summary,

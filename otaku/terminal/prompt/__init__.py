@@ -55,7 +55,10 @@ from otaku.terminal.tty.theme import theme
 # they show: the bar alone, the question's block running on into the rows.
 _BARRED = BAR.rstrip()
 
-PLACEHOLDER = FormattedText([("class:placeholder", "Send a message")])
+CHAT_PLACEHOLDER = FormattedText([("class:placeholder", "Send a message")])
+# The same hint in story mode (`session.story_mode`), where a line continues
+# the story rather than being sent to it.
+STORY_PLACEHOLDER = FormattedText([("class:placeholder", "Continue the story")])
 
 # Ctrl+D submits /bye only on an empty line — the terminal convention.
 # With a draft on the line it falls through to delete-forward, so readline
@@ -281,7 +284,7 @@ def build_prompt(
     completer = SlashCompleter.build(
         lambda: assembler.prefix,
         cast=lambda: _cast(session),
-        pictures_accepted=lambda: session.vision,
+        pictures_accepted=lambda: session.can_attach,
         shortcuts={token: caption for token, (_key, caption) in shortcuts.items()},
         levels=lambda: api_settings.think_choices(session).levels,
         parameters=lambda: api_settings.parameter_names(session),

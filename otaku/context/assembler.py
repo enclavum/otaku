@@ -51,12 +51,14 @@ both cost their tokens in the fit.
 from bisect import bisect_left
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
+from enum import Enum
 from typing import Protocol
 
 from otaku.context import syntax, tool_calls
 from otaku.context.cards import card_to_wire
 from otaku.context.injections import ROW_KIND, Injection, inject_into_system, inject_into_tail
 from otaku.providers import PicturesRide
+from otaku.providers.openai.templates import TextTemplate
 from otaku.store import Store
 from otaku.store.files import FileStore
 from otaku.store.schema import InjectionPosition, Message, Scene
@@ -95,6 +97,8 @@ class PromptTexts(Protocol):
     def recap_header(self) -> str: ...
     @property
     def card_framing(self) -> str: ...  # the card block template, for composing card rows
+    @property
+    def story_framing(self) -> str: ...  # the text wire's instruction around the premise
 
 
 @dataclass(frozen=True)
@@ -117,6 +121,15 @@ class WirePicture:
     media_type: str
 
 
+class Join(Enum):
+    """How a row joins the text before it — the ONE seam vocabulary, on
+    the wire turn and on the wire to a frontend (`value`): INLINE, as it
+    stands; PARAGRAPH, a blank line before it. `join_of` decides."""
+
+    INLINE = "inline"
+    PARAGRAPH = "paragraph"
+
+
 @dataclass(frozen=True)
 class WireTurn:
     """One turn as SENT — composed wire text and the pictures riding on
@@ -132,6 +145,8 @@ class WireTurn:
     # Reads differently next request: an injection that moves with the
     # end landed in it, or above it. A prompt-cache mark belongs before.
     volatile: bool = False
+    # How it joins the text before it: its first row's seam (`join_of`).
+    join: Join = Join.PARAGRAPH
 
 
 @dataclass(frozen=True)
@@ -150,6 +165,16 @@ class InjectionSent:
 class AssembledPrompt:
     """The wire-ready request plus the numbers behind it."""
 
+    # The system message's text — the premise and what was injected after
+    # it — "" when the request carries none: the chat wire then sends no
+    # system row, and the text wire frames the story with its standing
+    # instruction alone.
+    system: str
+    # The same for the TEXT wire: prompts.toml's `story_framing` around the
+    # premise, `{premise}` filled — the standing instruction a model turn
+    # needs before it (a model turn with no turn before it degenerates,
+    # and a new story's premise is empty). Never "": the framing stands.
+    story_system: str
     messages: list[WireTurn]  # [system?] + the wire turns
 
     # The budget.
@@ -182,6 +207,48 @@ class AssembledPrompt:
     @property
     def total_tokens(self) -> int:
         return self.system_tokens + self.transcript_tokens
+
+    def as_text(self, template: TextTemplate, opener: str = "") -> str:
+        """The request as the TEXT wire sends it: `story_system` and the
+        story (`as_story_text`, `opener` appended — a retry's paragraph
+        break) rendered in `template`'s turn markers, the story as the
+        model's own turn in progress. The one rendering: the turn sends
+        it and `/context` previews it."""
+        return template.render(self.story_system, self.as_story_text() + opener)
+
+    def as_story_text(self) -> str:
+        """The story as ONE TEXT, for the text wire: the turns' bodies in
+        order, the system's aside; no roles, no labels. The seam between
+        two turns is `join_of`'s: a turn a text completion made joins as
+        it stands — recorded verbatim, it carries its own space or break
+        — and every other turn is a paragraph, a blank line before it,
+        as a typed line is. The pictures do not ride it (the caller holds
+        them: `pictures_held`)."""
+        out = ""
+        for turn in self.messages:
+            if turn.role == "system":
+                continue
+            if out and turn.join is Join.PARAGRAPH:
+                out += "\n\n"
+            out += turn.body
+        return out
+
+
+def join_of(message: Message) -> Join:
+    """How a row joins the text before it — the ONE seam rule, the wire's
+    and the canvas's: INLINE, as it stands, for a row a text completion
+    made (recorded verbatim, its leading whitespace is the seam: a space,
+    a blank line, or nothing where it completed a word), and for a line
+    the reader OPENED with whitespace — typed so in story mode to go on
+    with the model's own sentence, the whitespace its seam (a typed line
+    is otherwise trimmed); PARAGRAPH, a blank line before it, for every
+    other row — a chat completion's (stripped when recorded), an imported
+    one, the reader's plain line."""
+    if message.completion == "text":
+        return Join.INLINE
+    if message.role == "user" and message.body[:1].isspace():
+        return Join.INLINE
+    return Join.PARAGRAPH
 
 
 def estimate_tokens(text: str) -> int:
@@ -226,6 +293,7 @@ def assemble_story(
         injections=injections,
         tool_set=tool_set,
         recap_header=prompts.recap_header,
+        story_framing=prompts.story_framing,
         shape=shape,
         files=store.files,
         pictures_ride=pictures_ride,
@@ -285,6 +353,7 @@ class _Assembly:
     injections: Sequence[Injection]
     tool_set: tool_calls.ToolSet  # how a row's tool calls go on the wire
     recap_header: str
+    story_framing: str  # the text wire's instruction, `{premise}` to fill
     shape: ContextShape
     files: FileStore  # where a row's pictures are read from
     pictures_ride: PicturesRide
@@ -358,6 +427,8 @@ class _Assembly:
         pictures_sent = sum(len(pictures) for pictures in pictures_of.values())
         return AssembledPrompt(
             messages=wire,
+            system=self.system,
+            story_system=self.story_framing.replace("{premise}", self.system).strip(),
             limit=limit,
             system_tokens=system_tokens,
             transcript_tokens=head_tokens + recap.tokens + tail_tokens + injected_tokens,
@@ -505,6 +576,11 @@ class _Assembly:
         if message.kind in (_RECAP_KIND, ROW_KIND):
             return message.body
         body = tool_calls.to_wire(message.body, self.tool_set)
+        if message.completion == "text":
+            # A text completion's row is not a typed line — no direction
+            # to read off it — and goes as it stands: its lead is its
+            # seam (`join_of`), recorded verbatim for this.
+            return body
         return syntax.to_wire(replace(message, body=body), is_last=is_last)
 
     def _wire_tokens(
@@ -522,7 +598,9 @@ class _Assembly:
         and nothing else (a recap or injected row has none to look up).
         Consecutive same-role rows rejoin into one turn, pictures and all —
         storage granularity is otaku's bookkeeping; the model sees one
-        prompt per exchange."""
+        prompt per exchange. The seam between two rows is `join_of`'s, as
+        `as_story_text` joins turns: a row a text completion made joins as
+        it stands, every other one after a blank line."""
         out: list[WireTurn] = []
         volatile = False  # from the first injected row on: it moves with the end
         for position, message in enumerate(rows):
@@ -532,15 +610,21 @@ class _Assembly:
             text = self._wire_text(message, is_last=position == len(rows) - 1)
             images = pictures_of.get(message, ())
             volatile = volatile or message.kind == ROW_KIND
+            join = join_of(message)
             if out and out[-1].role == message.role:
                 out[-1] = WireTurn(
                     role=message.role,
-                    body=out[-1].body + "\n\n" + text,
+                    body=out[-1].body + ("\n\n" if join is Join.PARAGRAPH else "") + text,
                     images=out[-1].images + images,
                     volatile=volatile,
+                    join=out[-1].join,
                 )
             else:
-                out.append(WireTurn(role=message.role, body=text, images=images, volatile=volatile))
+                out.append(
+                    WireTurn(
+                        role=message.role, body=text, images=images, volatile=volatile, join=join
+                    )
+                )
         return out
 
 

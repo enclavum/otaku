@@ -305,7 +305,12 @@ def to_wire(message: Message, *, is_last: bool, card_block: str | None = None) -
     # decided the lifetime of.
     if frame.tail and (frame.inliner == "/ooc" or (frame.inliner == "/cue" and is_last)):
         parts.append(OOC_FRAME.replace("{body}", frame.tail))
-    return " ".join(part for part in parts if part)
+    # A line's leading whitespace is its seam (`assembler.join_of`): typed
+    # to go on with the text before it, it rides the wire as it stands —
+    # the reader trims it off the line's text, so it is put back here. A
+    # direction never opens with whitespace, so this is prose alone.
+    lead = body[: len(body) - len(body.lstrip())]
+    return lead + " ".join(part for part in parts if part)
 
 
 # ---------- dice ----------

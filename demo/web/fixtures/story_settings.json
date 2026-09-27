@@ -18,7 +18,8 @@
    "enabled": false,
    "position": 2,
    "reminder_text": null,
-   "display_notes": null
+   "display_notes": null,
+   "layout": null
   },
   {
    "name": "use_story_reminder",
@@ -38,7 +39,8 @@
    "enabled": false,
    "position": 2,
    "reminder_text": "",
-   "display_notes": null
+   "display_notes": null,
+   "layout": null
   },
   {
    "name": "allow_assistant_notes",
@@ -59,7 +61,8 @@
    "enabled": false,
    "position": 1,
    "reminder_text": null,
-   "display_notes": true
+   "display_notes": true,
+   "layout": null
   },
   {
    "name": "allow_questions",
@@ -80,18 +83,20 @@
    "enabled": false,
    "position": 1,
    "reminder_text": null,
-   "display_notes": null
+   "display_notes": null,
+   "layout": null
   },
   {
-   "name": "story_mode",
-   "label": "Story mode",
+   "name": "layout",
+   "label": "Layout",
    "injection_label": null,
    "tool": null,
    "allowed_positions": [],
-   "enabled": false,
+   "enabled": true,
    "position": null,
    "reminder_text": null,
-   "display_notes": null
+   "display_notes": null,
+   "layout": "manuscript"
   }
  ]
 }

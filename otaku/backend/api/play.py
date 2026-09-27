@@ -17,7 +17,7 @@ every submission (submit, regenerate, undo) defers pending work first.
 """
 
 from collections.abc import Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from otaku.backend.api.cards import drop_unplayed_card
 from otaku.backend.api.lore import build_job
@@ -31,17 +31,23 @@ from otaku.backend.files import (
     save,
 )
 from otaku.backend.session import NO_MODEL_HINT, Refused, Session
-from otaku.backend.story import StorySettings, ToolSetting
+from otaku.backend.story import StoryMode, StorySettings, ToolSetting
 from otaku.backend.tools import TOOLS, Actor, read
 from otaku.context import syntax, tool_calls
-from otaku.context.assembler import ContextOverflowError
+from otaku.context.assembler import AssembledPrompt, ContextOverflowError, join_of
 from otaku.context.tool_calls import FENCE, Prose, ReplyParser
 from otaku.context.tool_calls import ToolCall as ToolCall
 from otaku.formatting import format_context
-from otaku.providers import ProviderError, Stats
+from otaku.providers import OpenAIClient, ProviderError, Reply, Stats, templates
 from otaku.providers import Reasoning as Reasoning
 from otaku.providers import Text as Text
 from otaku.store.schema import Character, Message
+
+# A picture is refused in story mode though the model sees: the request
+# is one text, which has no room for one (`Session.can_attach`).
+NO_PICTURE_IN_STORY_MODE = "In story mode the request is one text: no picture can ride it."
+# An empty line outside story mode: the chat wire has no continue.
+NOTHING_TO_SEND = "Nothing to send: type a line."
 
 
 @dataclass(frozen=True)
@@ -154,6 +160,19 @@ class Done:
     stats: str
 
 
+@dataclass
+class _Attempt:
+    """One request's take, as it streams: what arrived, as the reply
+    will be recorded (`content`), the usage the final chunk carried, the
+    parser that told the tool calls apart, and the sentence a failed
+    stream left. Mutable: a close mid-stream lands what is here."""
+
+    parser: ReplyParser
+    content: list[str] = field(default_factory=list)
+    final: Stats | None = None
+    error: str | None = None
+
+
 PlayEvent = Recorded | Text | Reasoning | ToolCall | Declined | Failed | Done
 
 
@@ -186,8 +205,16 @@ def submit(session: Session, line: str, files: Sequence[RawFile] = ()) -> Iterat
     # the turn records.
     if files and not session.vision:
         raise Refused(CANNOT_SEE)
+    if files and not session.can_attach:
+        raise Refused(NO_PICTURE_IN_STORY_MODE)
     if len(files) > MAX_PICTURES:
         raise Refused(TOO_MANY)
+    # An empty line is a CONTINUE in story mode — the story goes on where
+    # it stands, no turn recorded (`_submit_events`) — and nothing at all
+    # in chat mode, whose wire wants a message: refused, never an empty
+    # row.
+    if not line.strip() and not files and session.story_mode is not StoryMode.STORY:
+        raise Refused(NOTHING_TO_SEND)
     return _submit_events(session, frame, line, [read_picture(file) for file in files])
 
 
@@ -207,6 +234,13 @@ def regenerate(session: Session) -> Iterator[PlayEvent]:
     if not session.messages:
         raise Refused("Nothing to regenerate.")
     return _regenerate_events(session)
+
+
+def join_kind(message: Message) -> str:
+    """How a stored turn joins the one before it, for a frontend that
+    draws the canvas: "inline" or "paragraph" (`context.assembler.join_of`,
+    the wire's own seam rule, its word)."""
+    return join_of(message).value
 
 
 def segments(body: str) -> list[dict[str, object]]:
@@ -259,6 +293,13 @@ def _submit_events(
     session: Session, frame: syntax.Line, line: str, pictures: Sequence[Picture]
 ) -> Iterator[PlayEvent]:
     session.defer()
+    if not line.strip() and not pictures:
+        # A continue: the reply follows the story as it stands — another
+        # of the model's rows, joined to the last by the seam rule
+        # (`AssembledPrompt.as_story_text`) — and no user row is made, so
+        # nothing is echoed and undo takes the continuation alone.
+        yield from _reply_events(session, reply_kind=frame.reply_kind, reply_speaker=None)
+        return
     # The named character, resolved once and used three ways: the
     # autocorrect rewrite, the request's speaker (/me — the line IS their
     # words), and the reply's (/you — it asks them to answer). Safe to
@@ -309,8 +350,11 @@ def _regenerate_events(session: Session) -> Iterator[PlayEvent]:
     session.defer()
     popped = session._drop_last_reply()
     # The prompt the take re-runs — absent when the story is a promptless
-    # reply, which regenerates on its own.
+    # reply, or the take was a CONTINUE after the model's own row, which
+    # regenerates on its own.
     prompt = session._messages[-1] if session._messages else None
+    if prompt is not None and prompt.role != "user":
+        prompt = None
     # The prompt decides what its answer is, exactly as when it first
     # played — the kind AND the speaker — and it decides even for a
     # replaced reply, so an edit is honoured. Only a promptless reply has
@@ -350,7 +394,7 @@ def _reply_events(
         # to is the runner's and not a substitute (`OpenAIModels.ready`).
         found = client.models.ready(session.model, on_idle=session._on_idle)
         max_context = found.max_context if found else None
-        wire = session.assemble(max_context).messages
+        assembled = session.assemble(max_context)
     except ProviderError as e:
         # The load the turn needed did not happen: the turn is recorded
         # and plays once the engine can, on a regenerate.
@@ -361,83 +405,143 @@ def _reply_events(
         # is raised or more scenes close. The sentence is the assembler's.
         yield Declined(str(e))
         return
-    content: list[str] = []
-    held = ""  # a whitespace run the stream has not yet earned sending
-    final: Stats | None = None
-    error: str | None = None
-    # The tool calls told apart from the prose as they stream. A call of
-    # a tool the user answers ends the reply where its closing fence
-    # does: the stream is cut there, and nothing rides the request for
-    # it — the rule is otaku's, the same on every engine.
-    parser = ReplyParser(ending=_ending_switched_on(session))
-    stream = client.completion.chat(
-        session.model,
-        wire,
-        dict(session.params),
-        level=session.think,
-        purpose="chat",
-        # The thread this runs on belongs to the frontend between
-        # tokens, if the frontend said what to do with it.
-        on_idle=session._on_idle,
-    )
-    try:
+    # The wire is the mode's (`_request`). A continuation over the text
+    # wire is recorded VERBATIM, its leading space or break included:
+    # that is the seam the text is rendered with next time
+    # (`AssembledPrompt.as_story_text`), and the row says which
+    # completion made it (`completion`).
+    resolved = session.text_template if session.story_mode is StoryMode.STORY else None
+    completion = "text" if resolved is not None else "chat"
+    # A text completion that comes back EMPTY, its stream ending clean —
+    # an instruct model at the end of a closed paragraph ends its turn at
+    # once, every time (Gemma 4, measured) — is asked ONCE more with a
+    # paragraph break appended, and the break is recorded as the reply's
+    # own seam, so the story renders again exactly as it was continued.
+    openers = ("", "\n\n") if resolved is not None else ("",)
+    attempt = _Attempt(ReplyParser(ending=_ending_switched_on(session)))
+    for opener in openers:
+        # The tool calls told apart from the prose as they stream. A call
+        # of a tool the user answers ends the reply where its closing
+        # fence does: the stream is cut there, and nothing rides the
+        # request for it — the rule is otaku's, the same on every engine.
+        attempt = _Attempt(ReplyParser(ending=_ending_switched_on(session)))
+        stream = _request(session, client, assembled, resolved, opener)
         try:
-            for chunk in stream:
-                if isinstance(chunk, Reasoning):
-                    yield chunk
-                elif isinstance(chunk, Text):
-                    # Some models pad the reply with blank lines. The text
-                    # starts at its first real character, and a trailing
-                    # whitespace run is held back — sent only when more
-                    # text follows it, dropped at the stream's end. What
-                    # is recorded is exactly what was yielded.
-                    text = held + chunk.text
-                    held = ""
-                    if not content:
-                        text = text.lstrip()
-                    stripped = text.rstrip()
-                    held, text = text[len(stripped) :], stripped
-                    if not text:
-                        continue
-                    content.append(text)
-                    yield from _pieces(parser.feed(text))
-                    if parser.cut is not None:
-                        break
-                elif isinstance(chunk, Stats):
-                    final = chunk
-            if parser.cut is None:
-                yield from _pieces(parser.flush())
-        finally:
-            close = getattr(stream, "close", None)
-            if callable(close):
-                close()
-    except (GeneratorExit, KeyboardInterrupt):
-        # The frontend closed the stream mid-way, or the terminal's
-        # Ctrl+C landed in the wait itself, inside this frame — the same
-        # cancel-and-keep. No more yields are possible: record and
-        # re-raise. What the stream came to so far is filed too — the
-        # prefill was spent and billed, whatever the reader saw.
-        _land_reply(session, content, stream.stats, reply_kind, reply_speaker)
-        raise
-    except Exception as e:  # the stream failed; what streamed is kept
-        # The provider package's own sentence: it names the provider and
-        # carries the server's explanation where there was one.
-        error = str(e)
-    if parser.cut is not None:
+            yield from _drain(stream, attempt, opener, verbatim=resolved is not None)
+        except (GeneratorExit, KeyboardInterrupt):
+            # The frontend closed the stream mid-way, or the terminal's
+            # Ctrl+C landed in the wait itself, inside this frame — the same
+            # cancel-and-keep. No more yields are possible: record and
+            # re-raise. What the stream came to so far is filed too — the
+            # prefill was spent and billed, whatever the reader saw.
+            _land_reply(
+                session, attempt.content, stream.stats, reply_kind, reply_speaker, completion
+            )
+            raise
+        except Exception as e:  # the stream failed; what streamed is kept
+            # The provider package's own sentence: it names the provider and
+            # carries the server's explanation where there was one.
+            attempt.error = str(e)
+        if attempt.content or attempt.error is not None:
+            break
+    content, final = attempt.content, attempt.final
+    if attempt.parser.cut is not None:
         # Kept through the fence that ended the call, the recorder's own
         # where the model opened another block instead; the usage is the
         # stream's own account where the cut came before the final chunk.
-        body = "".join(content)[: parser.cut.at]
-        content = [body if parser.cut.fenced else body + "\n" + FENCE]
+        body = "".join(content)[: attempt.parser.cut.at]
+        content = [body if attempt.parser.cut.fenced else body + "\n" + FENCE]
         if final is None:
             final = stream.stats
-    reply = _land_reply(session, content, final, reply_kind, reply_speaker)
-    if error is not None:
-        yield Failed(error)
+    reply = _land_reply(session, content, final, reply_kind, reply_speaker, completion)
+    if attempt.error is not None:
+        yield Failed(attempt.error)
         return
     report = ReplyReport(final, max_context) if final is not None else None
     stats = report.text() if session.verbose and report is not None else ""
     yield Done(reply=reply, report=report, stats=stats)
+
+
+def _request(
+    session: Session,
+    client: OpenAIClient,
+    assembled: AssembledPrompt,
+    resolved: templates.TextTemplate | None,
+    opener: str,
+) -> Reply:
+    """The request the mode sends (`story.StoryMode`), the same stream
+    coming back either way. In story mode (`resolved`, the model's text
+    template) it is ONE TEXT the model continues over the engine's text
+    wire — the assembly's own rendering (`AssembledPrompt.as_text`, the
+    one `/context` previews), `opener` appended (a retry's paragraph
+    break) — with the template's turn markers ending it beside the
+    reader's own stop strings. Every other story goes as the chat, with
+    the messages. The thread this runs on belongs to the frontend between
+    tokens, if the frontend said what to do with it (`on_idle`)."""
+    params = dict(session.params)
+    if resolved is None:
+        return client.completion.chat(
+            session.model,
+            assembled.messages,
+            params,
+            level=session.think,
+            purpose="chat",
+            on_idle=session._on_idle,
+        )
+    stops = params.get("stop")
+    params["stop"] = [*(stops if isinstance(stops, list) else []), *resolved.stops]
+    return client.completion.text(
+        session.model,
+        assembled.as_text(resolved, opener),
+        params,
+        # No thinking knob rides story mode: the rendered turn has no
+        # thinking channel to budget, and omlx's engine handed a budget of
+        # 0 on a raw prompt returns nothing more often than not (Gemma 4,
+        # measured).
+        level=None,
+        purpose="chat",
+        on_idle=session._on_idle,
+    )
+
+
+def _drain(stream: Reply, attempt: _Attempt, opener: str, *, verbatim: bool) -> Iterator[PlayEvent]:
+    """One attempt's chunks as events — reasoning as it comes, prose and
+    a call's pieces as the parser tells them apart — filed in `attempt`
+    as they go, so what is recorded is exactly what was yielded. The
+    stream is closed when the attempt ends, however it ends."""
+    held = ""  # a whitespace run the stream has not yet earned sending
+    try:
+        for chunk in stream:
+            if isinstance(chunk, Reasoning):
+                yield chunk
+            elif isinstance(chunk, Text):
+                # Some models pad the reply with blank lines. The text
+                # starts at its first real character — kept where the reply
+                # is `verbatim`, a continuation whose lead is its seam — and
+                # a trailing whitespace run is held back, sent only when
+                # more text follows it, dropped at the stream's end.
+                text = held + chunk.text
+                held = ""
+                if not attempt.content and not verbatim:
+                    text = text.lstrip()
+                stripped = text.rstrip()
+                held, text = text[len(stripped) :], stripped
+                if not text:
+                    continue
+                if not attempt.content:
+                    text = opener + text  # the break a retry opened: the reply's seam
+                attempt.content.append(text)
+                yield from _pieces(attempt.parser.feed(text))
+                if attempt.parser.cut is not None:
+                    break
+            elif isinstance(chunk, Stats):
+                attempt.final = chunk
+        if attempt.parser.cut is None:
+            yield from _pieces(attempt.parser.flush())
+    finally:
+        close = getattr(stream, "close", None)
+        if callable(close):
+            close()
 
 
 def _pieces(found: list[Prose | ToolCall]) -> Iterator[PlayEvent]:
@@ -464,10 +568,12 @@ def _land_reply(
     final: Stats | None,
     reply_kind: str,
     reply_speaker: Character | None,
+    completion: str,
 ) -> Message | None:
     """Record what arrived — the reply row (when any text did), the
     usage — and arm the idle extraction pass. The one landing site for
-    clean ends, failures, and mid-stream closes."""
+    clean ends, failures, and mid-stream closes. `completion` is the
+    wire the reply came over, 'chat' or 'text', kept on the row."""
     reply: Message | None = None
     if content:
         # The speaker is the character the prompt asked to answer, when
@@ -482,6 +588,7 @@ def _land_reply(
                 speaker_id=reply_speaker.id if reply_speaker else None,
                 provider=session.provider,
                 model=session.model,
+                completion=completion,
             )
         )
         reply = session._messages[-1]

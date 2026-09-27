@@ -201,12 +201,21 @@ def serving(
     https: bool = False,
     password: str = "",
     prepare: Callable[[Path], None] | None = None,
+    provider: str = PROVIDER,
 ) -> Iterator[Page]:
     """A served session a story opens for itself, for the ones the
     fixtures cannot cover: what is in the state dir BEFORE the launch is
-    what the story is about, or the server asks for a password."""
+    what the story is about, the server asks for a password, or the
+    model must be served by a named engine (`provider` picks the client
+    the registry builds, as the harness's `set_config_provider` does)."""
     yield from _serving(
-        server, tmp_path, host=host, https=https, password=password, prepare=prepare
+        server,
+        tmp_path,
+        host=host,
+        https=https,
+        password=password,
+        prepare=prepare,
+        provider=provider,
     )
 
 
@@ -218,9 +227,10 @@ def _serving(
     https: bool = False,
     password: str = "",
     prepare: Callable[[Path], None] | None = None,
+    provider: str = PROVIDER,
 ) -> Iterator[Page]:
     root = tmp_path / "state"
-    set_config_provider(root, server)
+    set_config_provider(root, server, name=provider)
     if password:
         type_password(root, password)
     if prepare is not None:
@@ -243,7 +253,7 @@ def _serving(
             # A story that launches twice over one state dir finds the
             # model already remembered, which is a refusal and not a fault.
             with contextlib.suppress(Refused):
-                api_providers.switch_model(session, PROVIDER, MODEL)
+                api_providers.switch_model(session, provider, MODEL)
             try:
                 serving.put(address(where))
                 serve(

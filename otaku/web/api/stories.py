@@ -6,7 +6,7 @@ title or an uploaded document."""
 from typing import Any
 
 from otaku import __version__
-from otaku.backend import InjectionPosition
+from otaku.backend import InjectionPosition, TranscriptLayout
 from otaku.backend.api import stories as api_stories
 from otaku.backend.session import Session
 from otaku.backend.story import InjectingSetting
@@ -35,9 +35,16 @@ def facts(session: Session) -> dict[str, Any]:
         "story_id": session.story_id,
         # How many, so the runhead needs no chain.
         "turns": len(session.messages),
-        # Whether the model in use takes pictures — what shows the attach
-        # button; the backend refuses a picture regardless.
-        "vision": session.vision,
+        # Whether a picture may ride the next request — the model sees,
+        # and the mode's wire carries one — what shows the attach button;
+        # the backend refuses a picture regardless.
+        "can_attach": session.can_attach,
+        # The mode the story is played in (`backend.story.StoryMode`): what the send
+        # button is captioned — and whether the model can play story mode
+        # at all, which words the canvas glyph: with it, canvas is the
+        # story mode.
+        "story_mode": session.story_mode.value,
+        "is_story_mode_ready": session.is_story_mode_ready,
     }
 
 
@@ -112,8 +119,10 @@ def _head(session: Session, ask: Ask) -> str:
 def story_settings(session: Session, story_id: int) -> dict[str, Any]:
     """A story's settings as they stand, in the order they are sent: the
     switch, where it injects (null for one that injects nothing) and the
-    positions it may take, and the story's own text (null for one with
-    none). Any story's; a story that is not there is the spec's 404."""
+    positions it may take, the story's own text (null for one with
+    none), and the layout the story is read in (null for every setting
+    but the layout's). Any story's; a story that is not there is the
+    spec's 404."""
     if all(row.id != story_id for row in api_stories.listing(session)):
         raise NotFound(f"no story {story_id}")
     return {
@@ -134,6 +143,7 @@ def story_settings(session: Session, story_id: int) -> dict[str, Any]:
                 ),
                 "reminder_text": setting.reminder_text,
                 "display_notes": setting.display_notes,
+                "layout": setting.layout.value if setting.layout is not None else None,
             }
             for setting in api_stories.get_settings(session, story_id)
         ]
@@ -160,6 +170,13 @@ def _update_setting(session: Session, ask: Ask) -> str:
         position = InjectionPosition.from_value(raw)
         if position is None:
             raise TypeError('position is not "system" or a count from 1')
+    # One of the three names is a layout (which the setting may still
+    # refuse); anything else is not one, a malformed request.
+    layout = None
+    if (raw := ask.body.get("layout")) is not None:
+        layout = TranscriptLayout.from_value(raw)
+        if layout is None:
+            raise TypeError("layout is not one of canvas, manuscript, chat")
     return api_stories.update_setting(
         session,
         ask.params["setting"],
@@ -168,6 +185,7 @@ def _update_setting(session: Session, ask: Ask) -> str:
         position=position,
         reminder_text=reminder_text,
         display_notes=flags["display_notes"],
+        layout=layout,
     )
 
 

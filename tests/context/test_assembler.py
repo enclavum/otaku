@@ -21,13 +21,16 @@ from otaku.context.assembler import (
     IMAGE_TOKENS,
     ContextOverflowError,
     ContextShape,
+    Join,
     WirePicture,
     assemble_story,
     context_in_force,
+    join_of,
 )
 from otaku.context.injections import Injection
 from otaku.context.tool_calls import ToolSet
 from otaku.providers import PicturesRide
+from otaku.providers.openai.templates import PLAIN, TEXT_TEMPLATES
 from otaku.store.schema import Attachment, InjectionPosition, Message, Scene
 
 CAT = Attachment(file="pic-0001-20260918-a3f9c1e2.jpg", width=2, height=2, size=3)
@@ -486,6 +489,100 @@ class TestInjections:
         assert not any(m.volatile for m in prompt.messages)
 
 
+class TestTheSeam:
+    """`join_of`, the one seam rule for the text wire and the canvas."""
+
+    def test_a_text_completions_row_joins_as_it_stands(self) -> None:
+        for body in (" the bus.", "\n\nThe rain.", "ing on."):
+            assert join_of(continued(body)) is Join.INLINE, body
+
+    def test_a_line_the_reader_opened_with_whitespace_joins_as_it_stands(self) -> None:
+        assert join_of(user(" and the door")) is Join.INLINE
+        assert join_of(user("\nAnd the door")) is Join.INLINE
+
+    def test_every_other_row_is_a_paragraph(self) -> None:
+        assert join_of(user("And the door")) is Join.PARAGRAPH
+        # a chat completion's reply, whatever its lead: never verbatim
+        assert join_of(assistant(" Two.")) is Join.PARAGRAPH
+        assert join_of(replied("Two.")) is Join.PARAGRAPH
+        assert join_of(card(1, "Greetings.")) is Join.PARAGRAPH
+
+    def test_the_wire_joins_consecutive_rows_by_it(self) -> None:
+        prompt = assemble(
+            "",
+            [
+                user("I was waiting"),
+                continued(" for the bus."),
+                continued("\n\nIt rained."),
+                user(" and the door"),
+                continued(" swung open."),
+                user("Then?"),
+            ],
+            None,
+        )
+        assert [(t.role, t.body, t.join) for t in prompt.messages] == [
+            ("user", "I was waiting", Join.PARAGRAPH),
+            ("assistant", " for the bus.\n\nIt rained.", Join.INLINE),
+            ("user", " and the door", Join.INLINE),
+            ("assistant", " swung open.", Join.INLINE),
+            ("user", "Then?", Join.PARAGRAPH),
+        ]
+
+    def test_a_paragraphs_rows_join_after_a_blank_line(self) -> None:
+        rows = [user("One."), assistant("Two."), assistant("Three."), user("Four.")]
+        prompt = assemble("", rows, None)
+        assert [(t.body, t.join) for t in prompt.messages] == [
+            ("One.", Join.PARAGRAPH),
+            ("Two.\n\nThree.", Join.PARAGRAPH),
+            ("Four.", Join.PARAGRAPH),
+        ]
+
+
+class TestTheStoryAsOneText:
+    def test_the_turns_read_as_one_text_with_their_seams(self) -> None:
+        prompt = assemble(
+            "Be brief.",
+            [
+                user("I was waiting"),
+                continued(" for the bus."),
+                user("Then?"),
+                assistant("Nothing came."),
+                user(" said no one"),
+            ],
+            None,
+        )
+        assert prompt.as_story_text() == (
+            "I was waiting for the bus.\n\nThen?\n\nNothing came. said no one"
+        )
+
+    def test_the_system_text_is_the_premise_and_what_was_injected_after_it(self) -> None:
+        prompt = assemble("Be brief.", exchange(), None, injections=(system("ASK HOW"),))
+        assert prompt.system == "Be brief.\n\nASK HOW"
+        assert prompt.system == next(t.body for t in prompt.messages if t.role == "system")
+        assert "Be brief." not in prompt.as_story_text()
+
+    def test_without_a_premise_there_is_no_system_turn_and_the_text_is_empty(self) -> None:
+        prompt = assemble("", exchange(), None)
+        assert prompt.system == ""
+        assert all(t.role != "system" for t in prompt.messages)
+
+    def test_the_text_wires_system_is_the_framing_around_the_premise(self) -> None:
+        # the standing instruction stands even where the premise is empty:
+        # a model turn needs a turn before it
+        assert assemble("Be brief.", exchange(), None).story_system == "<<frame Be brief.>>"
+        assert assemble("", exchange(), None).story_system == "<<frame >>"
+        injected = assemble("Be brief.", exchange(), None, injections=(system("ASK HOW"),))
+        assert injected.story_system == "<<frame Be brief.\n\nASK HOW>>"
+
+    def test_as_text_renders_the_framed_premise_and_the_story_in_the_template(self) -> None:
+        prompt = assemble("Be brief.", [user("I was waiting"), continued(" for the bus.")], None)
+        assert prompt.as_text(PLAIN) == "<<frame Be brief.>>\n\nI was waiting for the bus."
+        assert prompt.as_text(TEXT_TEMPLATES["gemma4"], "\n\n") == (
+            "<bos><|turn>system\n<<frame Be brief.>><turn|>\n"
+            "<|turn>model\nI was waiting for the bus.\n\n"
+        )
+
+
 class TestToolCalls:
     """A stored reply's tool calls go on the wire as the story's tool set
     has them: a call of a tool that is on as written, one of a tool that
@@ -515,6 +612,16 @@ def user(body: str, message_id: int = 0) -> Message:
 
 def assistant(body: str) -> Message:
     return Message(role="assistant", body=body)
+
+
+def replied(body: str) -> Message:
+    """A reply a chat completion made."""
+    return Message(role="assistant", body=body, completion="chat")
+
+
+def continued(body: str) -> Message:
+    """A reply a text completion made: recorded verbatim, its lead the seam."""
+    return Message(role="assistant", body=body, completion="text")
 
 
 def card(message_id: int, body: str) -> Message:
@@ -691,3 +798,4 @@ class _Prompts:
 
     recap_header: str
     card_framing: str = ""
+    story_framing: str = "<<frame {premise}>>"

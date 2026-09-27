@@ -55,6 +55,8 @@ stylesheet that reaches past the contract accepts the breakage itself.
 | `--otk-accent-tint` | the ground of a selected row |
 | `--otk-ok` | answering, resident, loaded |
 | `--otk-danger` | delete, stop, and failures — nothing else |
+| `--otk-chat-story` | the rule on the story's side in the chat layout |
+| `--otk-chat-you` | the rule on the reader's side in the chat layout |
 
 The tab icon is the one accent a stylesheet cannot reach: a favicon is
 markup, so `index.html` carries the square as a hard-coded copy of the
@@ -246,15 +248,26 @@ in classes, so a stylesheet can name it the same way the scripts do.
 |---|---|---|
 | `aria-selected="true"` | `.otk-row`, `.otk-tab`, `.otk-index__item`, `.otk-prefix` | the current one |
 | `aria-checked="true"` | `.otk-choice`, `.otk-step`, `.otk-toggle` | the one in force |
-| `aria-disabled="true"` | `.otk-btn` | out of reach for now |
+| `aria-pressed="true"` | `.otk-mode`, `.otk-ruler__cell` | the layout in force; the depth a tool's text goes in at |
+| `aria-disabled="true"` | `.otk-btn`, `.otk-mode` | out of reach for now |
 | `hidden` | any pane or menu | not mounted |
 | `data-popup="/model"` | a `<dialog>` | which command opens it |
 | `data-theme="dark"` / `"light"` | `<html>` | the token set pinned; absent, the OS decides |
+| `data-booting` | `<html>` | the shell unseen until the page knows whether a sign-in comes first |
+| `data-transcript="canvas"` / `"manuscript"` / `"chat"` | `.otk-transcript` | which of the three layouts the same turns are read in |
+| `data-story-mode="story"` / `"chat"` | `.otk-app` | the mode the open story is played in; in story mode the flow shows no picture tiles |
+| `data-playing` | `.otk-app` | a reply is arriving; the layout glyphs are inert meanwhile |
 | `data-open="true"` | `.otk-rail` | the contents, on a narrow window |
 | `data-editing` | `.otk-edit` | the field editor is open |
+| `data-framing` / `data-framed` | `.otk-edit` / a turn in the canvas | a paragraph of several rows is open as one field: the editor holding it, and the rows standing aside for it |
+| `data-join="inline"` / `"paragraph"` | a turn in the transcript | how it joins the turn before it: as it stands, or after a blank line — what the canvas layout draws by |
+| `data-on="false"` | `.otk-ruler__row` | the setting the depth ruler belongs to is off |
+| `data-dragging` | `.otk-ruler__row` | the depth mark is being dragged |
 | `.is-offline` | `.otk-app` | the server stopped answering |
 | `.is-loaded` / `.is-dim` | `.otk-row` | a model resident in memory, or not |
 | `.is-dragover` / `.is-filled` | `.otk-dropzone` | a file over the drop zone, and one dropped |
+| `.is-out` | `.otk-editable` | a value outside its bounds, while typed |
+| `.is-waiting` | `.otk-docket` | a report's slip with nothing to show yet |
 | `.otk-generating--idle` | the generating block | the reply landed; the slot keeps its height |
 | `.otk-status--working` / `--offline` / `--idle` | `.otk-status` | which of the three the one status line shows |
 | `.otk-status--said` / `--error` | `.otk-status` | the sentence on it is news, or a failure |

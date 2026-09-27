@@ -275,33 +275,176 @@ settings: one switch each, one class each in `backend.story`. A tool's
 use the tool and injects its prompt; a reminder's injects the user's
 own text — the SHARED reminder (`StorySettingSharedReminder`, one text
 every story that switched it on is sent) and the STORY reminder
-(`StorySettingReminder`); a flag (`StorySettingMode`, not built yet)
-injects nothing. Every text injected into the chat is out of
+(`StorySettingReminder`). Every text injected into the chat is out of
 character, enclosed `((OOC: …))`; the system message takes it bare.
+One setting is a VALUE rather than a switch: the LAYOUT the story is
+read in (`StorySettingLayout`, a `schema.TranscriptLayout` — canvas,
+manuscript, chat — MANUSCRIPT until the story says otherwise;
+`enabled` is always true and refused as a write). The names are the
+backend's, so the choice is the story's; each frontend draws the one
+it names in its own medium — the page's `layout.js`, off the
+`data-transcript` attribute; the terminal has its one look and does
+not read it yet — and both Tools tabs leave it out, no caption naming
+it there.
+
+The MODE a story is played in is DERIVED, never stored (`backend.story`:
+`StoryMode.STORY`, `StoryMode.CHAT`, `story_mode_of(layout, is_story_mode_ready)`;
+`backend` re-exports `StoryMode`): the canvas
+layout on a model otaku knows how to CONTINUE is STORY mode — one text
+the model continues, over the engine's text wire — and every other
+case CHAT mode, which has nothing to do with the chat layout. A model
+can be continued (`Session.is_story_mode_ready`) when its engine reports
+`ModelCapabilities.text_completion` AND a chat TEMPLATE is known for
+it — TEXT templates, the text wire's alone; chat mode never touches
+them: an instruct model fed a bare text repeats itself or answers as an
+assistant (proven on omlx's Gemma 4 tunes), so the story is rendered
+in the model's own turn markers, the way SillyTavern's instruct
+presets do — `providers.openai.templates`: one frozen `TextTemplate` per
+family (`gemma4`, `gemma`, `mistral-tekken`, `chatml`, `llama3`, and
+`plain` for a base model, chosen on purpose), `render(premise, story)`
+putting the premise in the system turn where the family has one and
+in a user turn otherwise, then the MODEL TURN OPENED and the story
+inside it, unclosed, so the model continues where the story ends. The
+premise goes in FRAMED by prompts.toml's `story_framing` (`{premise}`
+required): the assembly's `story_system`, rendered with the
+story by `AssembledPrompt.as_text` — the ONE rendering, which the turn
+sends (`play._request`) and `/context` previews; a model turn with no turn before it degenerates, and a new
+story's premise is empty, so the standing instruction is what precedes
+the story then. No thinking knob rides the request (`level=None`):
+the turn has no thinking channel, and omlx handed `thinking_budget: 0`
+on a raw prompt answers nothing, most times. A text completion that
+comes back EMPTY with its stream ending clean — an instruct model at
+the end of a closed paragraph ends its turn at once, every time
+(measured on Gemma 4 with a real story) — is asked ONCE more with a
+paragraph break appended to the story, and the break is recorded as
+the reply's own seam (`_reply_events`' `openers`), so the story
+renders again exactly as it was continued; the chat wire is never
+retried. Its
+`stops` (the turn markers) ride the request beside the reader's own.
+BOS is spelled in the text (`TextTemplate.bos`) because omlx adds none on
+a raw prompt — Gemma degenerates without it. WHICH template a model
+gets is `providers.templates.resolve` (a `TextTemplate` with its
+`source` set): the model's `text_template` line in models.toml
+(`settings.models.TEMPLATE_KEY`, written by hand, no command; an
+unknown word is a launch notice), else the engine's word
+(`ModelInfo.text_template`: omlx's `config_model_type` through
+`family_of_config_type`, llama.cpp's own chat template through
+`family_of_chat_template`; "mistral" and "llama" cover more than one
+family and say nothing), else the model's name (`family_of_name`,
+the community's tunes carrying their base: g4-, mn-), else NONE — and
+then there is no story mode for the model, canvas is a layout alone,
+rather than a bare text. `/info` says so as a "Text template" row
+(`reports._text_template_words`), the model listing carries `text_template` per
+model, and the facts carry `is_story_mode_ready`, which words the canvas
+glyph's hint. `Session.story_mode` reads the open story's layout row and
+the cached model row; the page gets `facts.story_mode`; each frontend says
+it in its own words — the send button "Continue", the prompt
+placeholder "Continue the story". The play path
+(`api.play._reply_events`) picks the wire: `completion.text` with the
+rendered text, or `completion.chat` with the messages. The text is
+`AssembledPrompt.system` (the system turn's text) and `as_story_text()` (the
+turns' bodies, no roles), whose SEAM RULE is `assembler.join_of`, ONE
+rule for the wire and the canvas: a row a text completion made joins
+the text before it "inline", as it stands — recorded VERBATIM in story
+mode, its leading space, break or nothing is the seam — and so does a
+line the READER opened with whitespace, typed so in story mode to go
+on with the model's own sentence (the composer keeps a leading space
+in story mode, `composer.submit`, and trims every line otherwise);
+every other row (a chat completion's, an imported one, the reader's
+plain line) is a "paragraph", a blank line before it; `_wire_turns` joins consecutive
+same-role rows by it and `WireTurn.join` carries it (`assembler.Join`).
+The seam RIDES the wire: `syntax.to_wire` puts a prose line's leading
+whitespace back after the line reader trimmed it, and a text
+completion's row skips the reader altogether (`_wire_text`), since it
+is not a typed line. WHICH completion
+made a row is the row's: `messages.completion`, 'chat' or 'text', set
+on a reply as it lands (`_land_reply`), NULL on the reader's rows and
+on rows no completion made; migration v7 adds the column and fills
+'chat' on the replies a provider generated before it (every one came
+over the chat wire), not on a card's greeting or an imported row. The
+export format does not carry it: an imported story joins as
+paragraphs. A turn on the wire carries `join_kind` (`api.play.join_kind`), which
+the CANVAS draws by: the transcript is block flow there and every turn
+INLINE in it, a paragraph join a blank line drawn before the turn
+(`::before`), an inline one nothing, so a continuation runs on in the
+same paragraph — the page draws an inline-joined row's leading
+whitespace as its own `.otk-seam` span (`replyNodes(verbatim)`,
+`withSeam` for the reader's line), since that whitespace IS the seam,
+shown in the canvas and hidden by every other layout, where a turn is
+a block of its own; a reply that lands without its `done` (stopped,
+failed) keeps the join it streamed with, and a STOPPED reply is read
+back from the store once the backend has landed it
+(`transcript.settleFromStore`, retried briefly: the landing happens
+when the backend's next write to the closed stream fails, a moment
+after the page let go) — the backend records all it read, which runs
+past what reached the page, and the page's edit guard compares the
+text it drew with the store's; the reply arriving is inline too, its waiting caret right
+after the text it continues, and its status row and stats line stand
+under the text with no pull-up, the idle row gone. The gap before a
+paragraph is a BLOCK one prose line tall (`::before`), never line
+breaks — a block measures its height wherever it lands — and the
+canvas's articles take the prose's face and leading, so every line box
+is a prose line. EDITING keeps the textarea editor and the paragraph's
+size: in the canvas a paragraph of several rows opens as ONE field
+holding all their text (`transcript.frame`, on `edited`'s `opening`
+hook; `editable`'s `_frame` = prefix and suffix, `_typed()` the field's
+own text, which `_commit` writes), at the paragraph's place and in its
+metrics, so nothing moves — verified in Playwright, the paragraph after
+it unmoved; the other rows step out of the flow (`data-framed`, their
+first keeping the gap before the paragraph), the field's text is
+transparent and the reading stays behind it as a MIRROR of the raw
+text (`data-framing`), the edited row's part in ink and the others'
+dimmed (`.otk-framed`), typing held to the edited row's span
+(`holdToSpan`, `beforeinput`), and the save writes that row alone. A
+one-row paragraph opens as the plain field in the same place. An EMPTY line is
+the CONTINUE in story mode (`api.play.submit`): no user row is
+recorded, no Recorded event, the reply is another of the model's rows,
+and undo takes it alone (the page puts the reply's waiting block into
+the flow at once on a continue, `beginTurn(continues)`, since no
+Recorded will bring it in before the first word); both frontends let the empty line through in
+story mode (the composer's guard, the terminal loop's bare Enter) and
+the backend refuses it in chat mode, whose wire has no continue. The
+assembler is otherwise untouched: the recap, the injected rows and the framing
+templates ride the text as they ride the chat; pictures never ride one
+text (`Session.assemble` passes `PicturesRide.NONE` in story mode, so
+they count as held; the attach affordances go with `Session.can_attach`;
+the page carries the mode as `data-story-mode` on the app root and hides the
+transcript's tiles). `/context` in story mode previews the TEXT as the wire sends it —
+`ContextReport.wire`, `AssembledPrompt.as_text`'s rendering, one part
+`[prompt]` with its paragraph breaks kept — and counts its tokens at the
+text's estimate, markers and framing included. A layout write's confirmation is
+the setting's `standing` ("Layout: canvas", no full stop) except when the canvas is
+written on a model that can play story mode (`Session.is_story_mode_ready`,
+the canvas glyph's own condition): then it is
+`api.stories.CANVAS_IN_STORY_MODE`, "Canvas, in story mode" — the
+status line's width is the measure, 23 characters at most.
 
 Every setting answers the same questions, so a frontend draws them
 alike: `name` (the stored key — `use_shared_reminder`,
 `use_story_reminder`, `allow_assistant_notes`, `allow_questions`,
-`story_mode`; a rename orphans stored settings), `label`,
+`layout`; a rename orphans stored settings), `label`,
 `injection_label` (the TEXT it injects — lowercase, the backend's:
 `questions`, `assistant notes`, `story reminder`, `shared reminder`;
-None for a flag; the page capitalises it and keeps no name table),
+None for the layout setting; the page capitalises it and keeps no name table),
 `enabled`, `injection_position`, `allowed_positions` (a closed list a
 frontend offers and decides nothing about: "system" and 1 … 8 for a
-tool, the numbers alone for a reminder, empty for a flag; a stored
+tool, the numbers alone for a reminder, empty for the layout setting; a stored
 position off the list reads as the default, 1 for a tool, 2 for a
-reminder), `reminder_text` (the story reminder's alone) and
-`display_notes` (the notes tool's alone). `to_db(…)` is the row to
+reminder), `reminder_text` (the story reminder's alone),
+`display_notes` (the notes tool's alone) and `layout` (the layout
+setting's alone). `to_db(…)` is the row to
 store, raising `Refused` for what the setting does not take;
-`injection` is what a switched-on one sends. `StorySettings(from_db,
+`standing(row)` the confirmation a write answers with; `injection`
+is what a switched-on one sends. `StorySettings(from_db,
 store, prompts_file)` is one story's settings as they stand — it reads
 the prompts file and the shared reminder itself — with `injections` in
 the order they share a place (the shared reminder, the story's, then
 the tools) and `tool_set` for the wire.
 
 What a story STORES is `schema.StorySettingDB` (name, `enabled`,
-position, `reminder_text`, `display_notes` — the last two written only
-when said) with its JSON codec, carried by `Story.settings`; the store
+position, `reminder_text`, `display_notes`, `layout` — the last three
+written only when said) with its JSON codec, carried by
+`Story.settings`; the store
 merges a write into the column and keeps every key it does not know.
 The operations are `backend.api.stories`' `get_settings`,
 `update_setting`, `get_shared_reminder`, `set_shared_reminder`; the
@@ -311,7 +454,8 @@ page reaches them at `/api/stories/{story}/settings` and
 beside — the depth a dropdown in place, a text the editor in place,
 `base._preview_panel`'s `alternate` body). `Refused` lives in
 `backend.errors`, a leaf, and `backend.session` re-exports it;
-`backend` re-exports `InjectionPosition`. A tool's PROMPT is
+`backend` re-exports `InjectionPosition` and `TranscriptLayout`. A
+tool's PROMPT is
 prompts.toml's, edited in place — "prompt" on the backend and the
 wire, whatever a frontend calls it (the page's button says
 "Instructions"): `api.settings.get_tool_prompt`/`set_tool_prompt`
@@ -370,7 +514,9 @@ kept as PNG and everything else made JPEG, a 512 px thumbnail cut from
 the same image, then into the folder. Its limits are its own module
 constants (10 MB a file, 40 megapixels, 8 pictures a turn); every refusal
 is a `Refused` sentence. A model without vision is never sent a picture,
-and the attach affordances exist only while the model in use has it.
+and the attach affordances exist only while one may ride the next
+request (`Session.can_attach`: the model in use sees, and the mode's
+wire carries one — story mode's text never does).
 
 ### Providers
 
@@ -655,7 +801,7 @@ the way `/system FILE` is read there): the token leaves the line, one
 adjacent space with it, and the bytes ride `play.submit(files=)`; a token
 naming nothing stays prose ("@Mara"). The stored body never holds the
 token. The menu behind it lists directories and picture files, and pops
-only while the model in use can see (`session.vision`); the backend
+only while a picture may ride (`session.can_attach`); the backend
 refuses a picture regardless when it cannot.
 
 ## Web conventions
@@ -706,7 +852,7 @@ mechanics live in the module docstrings:
   handler's thread so a body that is not what it claims is a 400 before
   the session is asked; the backend's refusals (cannot see, too many,
   not a picture) come back as a Notice. A turn's row carries
-  `attachments` ([] when none) and the session facts `vision`, which is
+  `attachments` ([] when none) and the session facts `can_attach`, which is
   what shows the attach button. The page stages a picture two ways, the
   attach button's picker and a paste into the composer (`composer.js`,
   the textarea's own `paste` event, image items only); both reach the

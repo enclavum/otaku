@@ -27,18 +27,20 @@ from typing import Any, Self
 
 from otaku.backend.errors import Refused as Refused  # every caller's door to it
 from otaku.backend.paths import Paths
-from otaku.backend.story import StorySettings
+from otaku.backend.story import StoryMode, StorySettingLayout, StorySettings, story_mode_of
 from otaku.context import assembler
 from otaku.context.assembler import AssembledPrompt, ContextShape
 from otaku.formatting import pretty_path
 from otaku.logging import ErrorLog
 from otaku.providers import (
     Locality,
+    ModelInfo,
     OpenAIClient,
     PicturesRide,
     ProviderConfig,
     Registry,
     reasoning,
+    templates,
 )
 from otaku.settings import models as models_file
 from otaku.settings import state as state_file
@@ -128,6 +130,7 @@ class Session:
     _story_id: int | None
     _system: str
     _settings_db: tuple[StorySettingDB, ...]  # what the story has stored, handed to every assembly
+    _text_template_override: str | None  # the model's models.toml text_template line, when written
     _messages: list[Message]
     _params: dict[str, object]
     _think: (
@@ -436,14 +439,76 @@ class Session:
         row = client.models.cached(self.model)
         return row is not None and row.capabilities is not None and row.capabilities.vision is True
 
+    @property
+    def text_completion(self) -> bool:
+        """Whether the model in use has the raw text wire: its engine said
+        so (`ModelCapabilities.text_completion`), and unknown reads as no,
+        the capability's own rule. Read off the cached row, as `vision`
+        is. One of the two facts of `is_story_mode_ready`."""
+        client = self._client()
+        if client is None:
+            return False
+        row = client.models.cached(self.model)
+        return (
+            row is not None
+            and row.capabilities is not None
+            and row.capabilities.text_completion is True
+        )
+
+    @property
+    def text_template(self) -> templates.TextTemplate | None:
+        """The text template the model in use plays story mode with
+        (`templates.resolve`): its models.toml line, else the engine's
+        word off the cached row, else its name; None, and it has no
+        story mode."""
+        if not self.model:
+            return None
+        client = self._client()
+        row = client.models.cached(self.model) if client is not None else None
+        return templates.resolve(
+            self._text_template_override, row.text_template if row else None, self.model
+        )
+
+    def text_template_for(self, info: ModelInfo) -> templates.TextTemplate | None:
+        """The text template any listed model would play story mode with — the
+        report's word on a model that is not in use, its models.toml line
+        read for it."""
+        saved = models_file.load(self._paths.models_file).get(info.name, {})
+        return templates.resolve(saved.get(models_file.TEMPLATE_KEY), info.text_template, info.name)
+
+    @property
+    def is_story_mode_ready(self) -> bool:
+        """Whether the model in use can play story mode: the text wire,
+        and a text template to render around the story. With it, the canvas
+        layout is story mode (`story_mode`)."""
+        return self.text_completion and self.text_template is not None
+
+    @property
+    def can_attach(self) -> bool:
+        """Whether a picture may ride the next request: the model in use
+        sees (`vision`), and the mode's wire has room for one — story
+        mode's is one text, which has none. What shows the attach
+        affordances in both frontends; a picture is refused regardless."""
+        return self.vision and self.story_mode is StoryMode.CHAT
+
+    @property
+    def story_mode(self) -> StoryMode:
+        """The mode the open story is played in (`story.StoryMode`): its
+        layout setting, on the model in use (`is_story_mode_ready`)."""
+        stored = next(
+            (row for row in self._settings_db if row.name == StorySettingLayout.name), None
+        )
+        return story_mode_of(StorySettingLayout(stored).layout, self.is_story_mode_ready)
+
     def assemble(self, max_context: int | None) -> AssembledPrompt:
         """The next request — the one binding of the session's fields to
         `assembler.assemble_story`, so the turn, the preview, and every
         other call site can never disagree on what is sent. The pictures
         ride only while the model can see them, and only the latest
-        turn's where the engine would gather every turn's onto it.
-        Raises `ContextOverflowError` when the story cannot fit the
-        limit even fully degraded."""
+        turn's where the engine would gather every turn's onto it — and
+        never in story mode, whose wire is one text (`as_text`): held,
+        and counted as held. Raises `ContextOverflowError` when the story
+        cannot fit the limit even fully degraded."""
         client = self._client()
         settings = StorySettings(self._settings_db, self._store, self._paths.prompts_file)
         shape = ContextShape(
@@ -461,7 +526,9 @@ class Session:
             prompts=self._prompts,
             shape=shape,
             pictures_ride=(
-                client.pictures_ride(self.model) if client is not None else PicturesRide.NONE
+                client.pictures_ride(self.model)
+                if client is not None and self.story_mode is StoryMode.CHAT
+                else PicturesRide.NONE
             ),
         )
 
@@ -613,8 +680,21 @@ class Session:
         `_save_model_settings` is the mirror write."""
         self._params = {}
         self._think = None
+        self._text_template_override = None
         saved = models_file.load(self._paths.models_file).get(self.model, {})
         for name, value in saved.items():
+            if name == models_file.TEMPLATE_KEY:
+                # The user's own word, by hand: one of the templates
+                # otaku renders, or a line it cannot honour.
+                if isinstance(value, str) and value in templates.TEXT_TEMPLATES:
+                    self._text_template_override = value
+                else:
+                    names = ", ".join(templates.TEXT_TEMPLATES)
+                    self._note(
+                        f"Ignoring unknown text_template {value!r} saved for {self.model}; "
+                        f"text templates: {names}."
+                    )
+                continue
             if name == models_file.THINK_KEY:
                 # A level the wire spells, or the way out — anything else
                 # is a hand edit the engine would refuse. A budget is
@@ -654,6 +734,8 @@ class Session:
         entry: dict[str, object] = dict(self._params)
         if self._think is not None:
             entry[models_file.THINK_KEY] = self._think
+        if self._text_template_override is not None:
+            entry[models_file.TEMPLATE_KEY] = self._text_template_override
         try:
             models_file.save(self._paths.models_file, self.model, entry)
         except (OSError, ValueError) as e:

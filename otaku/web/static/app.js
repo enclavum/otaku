@@ -20,7 +20,16 @@ import { editTurn, keepsScreen, openTab, run as runCommand } from "./js/commands
 import { showSignOut, signIn, signOut } from "./js/login.js";
 import { draft, focusComposer, primeHistory, submit, wire as wireComposer } from "./js/composer.js";
 import { $, $$, watchTextareas } from "./js/dom.js";
-import { disconnected, drawPlayed, showFacts, watchServer, wireFullscreen, wireTheme } from "./js/shell.js";
+import { wireLayout } from "./js/layout.js";
+import {
+  disconnected,
+  drawPlayed,
+  landed,
+  showFacts,
+  watchServer,
+  wireFullscreen,
+  wireTheme,
+} from "./js/shell.js";
 import { load as loadTable } from "./js/table.js";
 import { whenEdited } from "./js/transcript.js";
 import { watchForChanges } from "./js/watch.js";
@@ -65,6 +74,9 @@ function start() {
   whenEdited(editTurn);
   wireComposer();
   wireTheme();
+  // a layout written lands like every other write: the facts again,
+  // the mode among them
+  wireLayout(landed);
   wireFullscreen();
   watchTextareas();
   /* The page opens with the caret where the story is written, so the

@@ -24,7 +24,7 @@ from typing import Any, ClassVar
 from otaku.providers.clients import launched_port
 from otaku.providers.errors import ProviderError, StatusError, UnreachableError
 from otaku.providers.http import ASK_TIMEOUT, PROBE_TIMEOUT, Cut, Http, StreamCut, positive_int
-from otaku.providers.openai import reasoning
+from otaku.providers.openai import reasoning, templates
 from otaku.providers.openai.auth import OpenAIAuth
 from otaku.providers.openai.client import OpenAIClient
 from otaku.providers.openai.completion import (
@@ -232,6 +232,11 @@ class LlamaCppSingleModels(LlamaCppModels):
                     max_context_loaded=max_context_loaded,
                     capabilities=self._capabilities_of(modalities, thinking),
                     state=ModelState.LOADED,
+                    # the model's own template names its family, where a
+                    # build serves /props
+                    text_template=templates.family_of_chat_template(
+                        props.get("chat_template") if answered else None
+                    ),
                 )
                 for name in names
             ),

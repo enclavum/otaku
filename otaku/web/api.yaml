@@ -103,7 +103,7 @@ openapi: 3.1.0
 
 info:
   title: otaku web API
-  version: 0.6.0
+  version: 0.6.1
   contact:
     name: otaku
     url: https://otaku.sh
@@ -786,8 +786,9 @@ paths:
       description: |
         Every setting of the story, in the order their injections are
         sent: a tool's switch (questions, assistant notes), the two
-        reminders, and a flag. Read whole, written one at a time. A
-        story stores only what was set; the rest reads at its default.
+        reminders, a flag, and the layout the story is read in. Read
+        whole, written one at a time. A story stores only what was set;
+        the rest reads at its default.
       responses:
         default: { $ref: "#/components/responses/Failed" }
         "200":
@@ -805,7 +806,7 @@ paths:
         required: true
         schema:
           type: string
-          enum: [use_shared_reminder, use_story_reminder, allow_assistant_notes, allow_questions, story_mode]
+          enum: [use_shared_reminder, use_story_reminder, allow_assistant_notes, allow_questions, layout]
     patch:
       operationId: patchStorySetting
       tags: [Dossier]
@@ -817,8 +818,11 @@ paths:
         and is refused for a setting that injects nothing;
         `reminder_text` is taken by the story reminder alone — the shared
         reminder's text is /api/shared_reminder's; `display_notes` by the
-        notes tool alone. A flag that is not a boolean is malformed. The
-        answer's notice says where the setting now stands.
+        notes tool alone; `layout` by the layout setting alone, which has
+        no switch — `enabled` is refused for it. A flag that is not a
+        boolean is malformed, and so is a layout that is none of the
+        three names. The answer's notice says where the setting now
+        stands.
       requestBody:
         content:
           application/json:
@@ -832,6 +836,7 @@ paths:
                     - { type: integer, minimum: 1 }
                 reminder_text: { type: string, description: The story's own reminder; "" clears it. }
                 display_notes: { type: boolean, description: Whether the reader is shown the notes the model writes; refused for a setting with nothing to display. }
+                layout: { type: string, enum: [canvas, manuscript, chat], description: "The layout the story is read in; taken by the layout setting alone." }
       responses:
         "200": { $ref: "#/components/responses/Answered" }
         "400": { $ref: "#/components/responses/BadRequest" }
@@ -1594,7 +1599,7 @@ components:
             pictures_held: { type: integer, description: "On earlier verbatim messages but held back: the engine puts every picture on the latest message, so only the latest turn's ride." }
             pictures_omitted: { type: integer, description: "On verbatim messages but not sent: the model cannot see, or the file is gone." }
             kept: { type: integer, description: "Derived: head + tail." }
-            total_tokens: { type: integer, description: "Derived: system + transcript." }
+            total_tokens: { type: integer, description: "Derived: system + transcript — or, in story mode, the estimate of the one text as sent, its markers and framing counted." }
             used: { type: integer, description: "Derived: percent of the limit." }
         lede: { type: string, description: "The summary said in words." }
         note: { type: string, description: "What the preview could not know, as a sentence — the model is not loaded, so the window is the assembler's substitute until a turn loads it; \"\" when it knew everything." }
@@ -1612,11 +1617,11 @@ components:
               tokens: { type: integer, description: "The assembler's estimate of its cost — inside system_tokens at \"system\", inside transcript_tokens otherwise." }
         parts:
           type: array
-          description: One part per message, exactly as the wire will carry it.
+          description: One part per message, exactly as the wire will carry it — or, in story mode, ONE part, the text as the text wire sends it (role "prompt"), rendered in the model's template.
           items:
             type: object
             properties:
-              role: { type: string }
+              role: { type: string, description: "The message's role — \"prompt\" for the text wire's one part." }
               body: { type: string }
               pictures: { type: integer, description: "Pictures riding this part; 0 for most." }
 
@@ -1857,6 +1862,7 @@ components:
                       description: "Where the model is served: its own where it differs from its provider's (Ollama's ollama.com models are remote), the provider's otherwise. What a caption on the model reads."
                     max_context_catalogue: { type: string, description: "The model's own maximum context, formatted; \"\" when the provider states none." }
                     max_context_loaded: { type: string, description: "What the running instance serves, formatted; \"\" while none runs or the engine does not say." }
+                    text_template: { type: string, nullable: true, description: "The text template story mode wraps the story in for this model, as otaku resolves it — its models.toml `text_template` line, else the engine's word, else its name (gemma4, gemma, mistral-tekken, chatml, llama3, plain); on it the canvas layout is story mode. Null where none is known: the model plays chat mode whatever the layout. Chat mode never uses it." }
                     capabilities:
                       type: object
                       nullable: true
@@ -1924,7 +1930,9 @@ components:
         story: { type: string, description: "The open story's name; \"\" when none." }
         story_id: { type: [integer, "null"] }
         turns: { type: integer, description: "How many, so the runhead needs no chain." }
-        vision: { type: boolean, description: "Whether the model in use takes pictures — what shows the attach button; a picture is refused regardless." }
+        can_attach: { type: boolean, description: "Whether a picture may ride the next request — the model in use sees, and the mode's wire carries one, which story mode's text does not; what shows the attach button. A picture is refused regardless." }
+        story_mode: { type: string, enum: [story, chat], description: "The mode the story is played in (backend.story.StoryMode): story — the canvas layout on a model whose engine serves the raw text wire, the send button reads Continue; chat otherwise." }
+        is_story_mode_ready: { type: boolean, description: "Whether the model in use can play story mode: its engine serves the raw text wire, and a text template is known for it (the model listing's `text_template`); with it, the canvas layout is the story mode, which words the canvas glyph's hint." }
 
     Settings:
       type: object
@@ -2054,7 +2062,7 @@ components:
                   oneOf:
                     - { type: string, enum: [system] }
                     - { type: integer, minimum: 1 }
-              enabled: { type: boolean }
+              enabled: { type: boolean, description: "Whether it is on; always true for the layout setting, which has no switch." }
               position:
                 nullable: true
                 description: Where its injection rides — "system" appends it to the system message; a number puts it before that one of the reader's messages counted from the end, 1 the latest; null for a setting that injects nothing.
@@ -2063,6 +2071,7 @@ components:
                   - { type: integer, minimum: 1 }
               reminder_text: { type: string, nullable: true, description: "The story's own reminder; null for a setting that has none (every one but the story reminder's)." }
               display_notes: { type: boolean, nullable: true, description: "Whether the reader is shown the notes the model writes; null for a setting with nothing to display." }
+              layout: { type: string, nullable: true, enum: [canvas, manuscript, chat, null], description: "The layout the story is read in — canvas (one continuous text), manuscript (played lines as interjections), chat (alternating blocks); manuscript until the story says otherwise. Null for every setting but the layout's." }
 
     Syntax:
       type: object
@@ -2108,6 +2117,10 @@ components:
           type: array
           description: "The turn's pictures; [] when none."
           items: { $ref: "#/components/schemas/Attachment" }
+        join_kind:
+          type: string
+          enum: [inline, paragraph]
+          description: "How the turn joins the one before it, the wire's own seam rule (context.assembler.join_of): inline — as it stands, a text completion's row recorded verbatim, or a line the reader opened with whitespace to go on with the model's sentence, the leading whitespace the seam either way; paragraph — a blank line before it, every other row. What the canvas layout draws by."
         segments:
           type: array
           description: The body split in order — prose, and each tool call as its tool's facts — so the page draws a turn without parsing it. The body itself stays whole above, for the editor.

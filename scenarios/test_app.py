@@ -250,7 +250,7 @@ class TestSchemaMigration:
         paths = _v1_database(tmp_path / "state")
         store = _open(paths)
         try:
-            assert any("Database migrated (v1 → v6)" in note.show for note in store.notes)
+            assert any("Database migrated (v1 → v7)" in note.show for note in store.notes)
             (message,) = store.stories.get_messages(1)
             # The v1 `framing` column reads back through the renamed one.
             assert (message.body, message.template) == ("I enter.", "TPL")
@@ -280,9 +280,21 @@ class TestSchemaMigration:
             # The row carries them, as a message carries its attachments.
             assert store.stories.get(1).settings == (asking,)
             assert store.settings.get("shared_reminder") == ""
+            # The v7 `completion` column trails the row: a v1 row reads
+            # NULL there, a turn no completion made.
+            assert message.completion is None
         finally:
             store.close()
-        assert _meta_version(paths) == "6"
+        # Step 7 filled the column on the rows it found: the reply a
+        # provider generated came over the chat wire, the only one there
+        # was; the reader's row and the card's greeting were made by none.
+        conn = sqlite3.connect(paths.database_file)
+        try:
+            filled = conn.execute("SELECT id, completion FROM messages ORDER BY id").fetchall()
+        finally:
+            conn.close()
+        assert filled == [(1, None), (2, "chat"), (3, None)]
+        assert _meta_version(paths) == "7"
 
     def test_a_migration_that_ran_is_reported_at_launch(
         self, server: ModelServer, tmp_path
@@ -363,7 +375,7 @@ class TestSchemaMigration:
             _open(paths)
         assert _meta_version(paths) == "1"
         conn = sqlite3.connect(paths.database_file)
-        assert conn.execute("SELECT count(*) FROM messages").fetchone()[0] == 1
+        assert conn.execute("SELECT count(*) FROM messages").fetchone()[0] == 3
         conn.close()
 
     def test_the_frozen_v1_is_what_the_release_shipped(self) -> None:
@@ -420,10 +432,10 @@ class TestSchemaMigration:
         monkeypatch.setitem(store_migrations._STEPS, 3, store_v3.to_3)
         resumed = _open(paths)
         try:
-            assert any("Database migrated (v2 → v6)" in note.show for note in resumed.notes)
+            assert any("Database migrated (v2 → v7)" in note.show for note in resumed.notes)
         finally:
             resumed.close()
-        assert _meta_version(paths) == "6"
+        assert _meta_version(paths) == "7"
 
 
 class TestFilesFolder:
@@ -1083,6 +1095,14 @@ def _v1_database(root) -> Paths:
     )
     # fmt: on
     conn.execute("UPDATE stories SET head_id = 1 WHERE id = 1")
+    # Two replies beside the chain, for step 7's fill: one a provider
+    # generated, one a card's greeting (its provider 'card').
+    conn.execute(
+        "INSERT INTO messages (id, story_id, role, kind, body, provider, created_at, updated_at)"
+        " VALUES (2, 1, 'assistant', 'dialogue', ?, 'scenario', ?, ?),"
+        " (3, 1, 'assistant', 'dialogue', ?, 'card', ?, ?)",
+        (b"The reply.", now, now, b"Greeting.", now, now),
+    )
     # A character at the v1 row shape: the added `card` column must land
     # BEHIND these values, or this row's timestamps would shift into it.
     # fmt: off

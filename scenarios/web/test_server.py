@@ -20,9 +20,10 @@ from urllib.parse import urlsplit
 
 import pytest
 
+from otaku.backend import TranscriptLayout
 from otaku.backend.paths import Paths
 from otaku.backend.session import PARAMETERS, THINK_MENU
-from scenarios.support.harness import set_config, set_config_provider
+from scenarios.support.harness import MODEL, set_config, set_config_provider
 from scenarios.support.server import ModelServer
 from scenarios.web.conftest import Page, serving
 
@@ -550,6 +551,7 @@ class TestStorySettings:
         "position",
         "reminder_text",
         "display_notes",
+        "layout",
     )
 
     def test_every_setting_answers_the_same_questions(self, page: Page) -> None:
@@ -565,12 +567,32 @@ class TestStorySettings:
         assert by_name["allow_questions"]["display_notes"] is None
         assert by_name["allow_assistant_notes"]["display_notes"] is True
         assert by_name["use_story_reminder"]["tool"] is None
-        # what each injects is named, lowercase; a flag injects nothing
+        # what each injects is named, lowercase
         assert by_name["allow_assistant_notes"]["injection_label"] == "assistant notes"
         assert by_name["use_story_reminder"]["injection_label"] == "story reminder"
-        assert by_name["story_mode"]["injection_label"] is None
         assert by_name["use_story_reminder"]["reminder_text"] == ""
         assert by_name["use_story_reminder"]["allowed_positions"] == list(range(1, 9))
+        # the layout is a value, not a switch: always on, no position,
+        # the manuscript until the story says otherwise; a switch has none
+        assert by_name["layout"]["enabled"] is True
+        assert by_name["layout"]["allowed_positions"] == []
+        assert by_name["layout"]["layout"] == "manuscript"
+        assert by_name["allow_questions"]["layout"] is None
+
+    def test_the_layout_is_patched_as_a_value_and_the_store_follows(self, page: Page) -> None:
+        page.play("I listen at the culvert mouth.")
+        story = page.get("/api/session")["story_id"]
+        answer = page.patch(f"/api/stories/{story}/settings/layout", {"layout": "canvas"})
+        assert answer["notice"] and "refused" not in answer
+        row = next(s for s in page.store.stories.get_settings(story) if s.name == "layout")
+        assert row.layout is TranscriptLayout.CANVAS
+        # it has no switch to move
+        answer = page.patch(f"/api/stories/{story}/settings/layout", {"enabled": False})
+        assert answer["refused"] is True
+        # the page's facts carry the mode the story is played in: canvas on
+        # a model that cannot be continued is chat mode, as any layout
+        facts = page.get("/api/session")
+        assert (facts["story_mode"], facts["is_story_mode_ready"]) == ("chat", False)
 
     def test_a_patch_moves_one_field_and_the_store_follows(self, page: Page) -> None:
         page.play("I listen at the culvert mouth.")
@@ -950,12 +972,60 @@ class TestPictures:
     cannot see, which is what makes the refusal the sentence; the files
     themselves are put in the folder through the scenario's own store."""
 
-    def test_the_session_says_whether_the_model_has_vision(self, page: Page) -> None:
-        assert page.get("/api/session")["vision"] is False
+    def test_the_session_says_whether_a_picture_may_ride(self, page: Page) -> None:
+        assert page.get("/api/session")["can_attach"] is False
 
     def test_a_turn_without_pictures_carries_an_empty_list(self, page: Page) -> None:
         page.play("I listen.")
         assert [turn["attachments"] for turn in page.get("/api/play")["messages"]] == [[], []]
+
+    def test_a_turn_carries_how_it_joins_the_one_before(self, page: Page) -> None:
+        # a typed line and a chat completion's reply: paragraphs both
+        page.play("I listen.")
+        turns = page.get("/api/play")["messages"]
+        assert [turn["join_kind"] for turn in turns] == ["paragraph"] * 2
+
+
+class TestStoryModeOverTheWire:
+    """The page's half of story mode, over a served omlx whose model can
+    be continued: the facts that caption the send button and word the
+    canvas glyph, the listing's template, the preview as one text, and a
+    continuation's join."""
+
+    def test_the_facts_the_listing_and_the_preview_say_story_mode(
+        self, server: ModelServer, tmp_path: Path
+    ) -> None:
+        server.status = True
+        server.types[MODEL] = "vlm"
+        server.config_types[MODEL] = "gemma4"
+        with serving(server, tmp_path, provider="omlx") as page:
+            facts = page.get("/api/session")
+            # the model can be continued, and sees; the manuscript is chat mode
+            assert (facts["story_mode"], facts["is_story_mode_ready"], facts["can_attach"]) == (
+                "chat",
+                True,
+                True,
+            )
+            panel = page.get("/api/providers")
+            mine = next(p for p in panel["providers"] if p["id"] == "omlx")
+            assert mine["models"][0]["text_template"] == "gemma4"
+            page.play("I was waiting for")
+            story = page.get("/api/session")["story_id"]
+            answer = page.patch(f"/api/stories/{story}/settings/layout", {"layout": "canvas"})
+            assert answer["notice"] and "refused" not in answer
+            # the canvas is story mode: no picture rides its wire
+            facts = page.get("/api/session")
+            assert (facts["story_mode"], facts["can_attach"]) == ("story", False)
+            # the preview is the one text the wire sends, in the template's markers
+            preview = page.get("/api/session/context")
+            assert [part["role"] for part in preview["parts"]] == ["prompt"]
+            assert "<|turn>model\n" in preview["parts"][0]["body"]
+            assert preview["shape"]["total_tokens"] > 0
+            # an empty line is the continue: a reply joined as it stands, no turn of the reader's
+            page.play("")
+            turns = page.get("/api/play")["messages"]
+            assert [turn["role"] for turn in turns] == ["user", "assistant", "assistant"]
+            assert turns[-1]["join_kind"] == "inline"
 
     def test_files_for_a_model_that_cannot_see_are_refused_eagerly(self, page: Page) -> None:
         answer = page.post("/api/play", {"line": "look", "files": [_file(b"x")]})

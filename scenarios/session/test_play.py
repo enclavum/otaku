@@ -5,7 +5,7 @@ line."""
 import contextlib
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -15,6 +15,7 @@ from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import DummyOutput
 from prompt_toolkit.shortcuts import PromptSession
 
+from otaku.backend import TranscriptLayout
 from otaku.backend.api import play as api_play
 from otaku.backend.api import providers as api_providers
 from otaku.backend.api import reports
@@ -24,6 +25,9 @@ from otaku.backend.files import RawFile
 from otaku.backend.formats import EXPORT_MARKER
 from otaku.backend.paths import Paths
 from otaku.backend.session import Refused
+from otaku.backend.story import StoryMode
+from otaku.context.assembler import estimate_tokens
+from otaku.settings import models as models_file
 from otaku.terminal.chat.bindings import SHORTCUTS
 from otaku.terminal.prompt import Carry, LineAssembler, build_prompt
 from otaku.terminal.tty import render
@@ -943,12 +947,215 @@ def _play(app: App, line: str, files: list[RawFile]) -> None:
     list(api_play.submit(app.session, line, files))
 
 
+@contextlib.contextmanager
+def _continuing_omlx(
+    tmp_path: Path,
+    *,
+    config_type: str | None = "gemma4",
+    framing: str | None = None,
+    template_line: str | None = None,
+) -> Iterator[App]:
+    """The app on omlx's status, the model typed "vlm" and its config's
+    model type named — Gemma 4's, so a text template is known and the
+    canvas is story mode. `framing` replaces prompts.toml's
+    `story_framing`; `template_line` is the model's own `text_template`
+    line in models.toml."""
+    server = scripted.ModelServer()
+    server.status = True
+    server.types["test-model"] = "vlm"
+    if config_type is not None:
+        server.config_types["test-model"] = config_type
+    root = tmp_path / "state"
+    try:
+        set_config_provider(root, server, name="omlx")
+        paths = Paths.resolve(root)
+        if framing is not None:
+            paths.prompts_file.write_text(f'story_framing = "{framing}"\n')
+        if template_line is not None:
+            entry = {models_file.TEMPLATE_KEY: template_line}
+            models_file.save(paths.models_file, "test-model", entry)
+        app = launch(root, server, spec="omlx/test-model")
+        try:
+            yield app
+        finally:
+            app.close()
+    finally:
+        server.close()
+
+
+def _continuing(*texts: str) -> Callable[[dict], str]:
+    """A scripted model that continues with `texts` in turn over the text
+    wire — the last one again after — and answers the chat as ever."""
+    given = iter(texts)
+
+    def script(body: dict) -> str:
+        if "prompt" not in body:
+            return scripted.default_script(body)
+        return next(given, texts[-1])
+
+    return script
+
+
 def _cloud(server: scripted.ModelServer, tmp_path: Path, *, prompt_cache: str = "") -> App:
     """The app over a provider the registry builds as the marking cloud
     client — the section's NAME picks the class."""
     root = tmp_path / "state"
     set_config_provider(root, server, name="openrouter", prompt_cache=prompt_cache)
     return launch(root, server, spec="openrouter/test-model")
+
+
+class TestStoryMode:
+    """The canvas layout on a model otaku knows how to continue: the
+    story goes over the engine's text wire as ONE TEXT the model
+    continues, rendered in its own turn markers, and what comes back is
+    recorded as it stands."""
+
+    def test_the_canvas_on_a_model_with_a_known_template_is_story_mode(self, tmp_path) -> None:
+        with _continuing_omlx(tmp_path) as app:
+            assert app.session.is_story_mode_ready
+            found = app.session.text_template
+            assert found is not None and (found.name, found.source) == ("gemma4", "engine")
+            assert app.session.story_mode is StoryMode.CHAT
+            api_stories.update_setting(app.session, "layout", layout=TranscriptLayout.CANVAS)
+            assert app.session.story_mode is StoryMode.STORY
+
+    def test_the_story_goes_as_one_text_in_the_models_own_turn_markers(self, tmp_path) -> None:
+        with _continuing_omlx(tmp_path, framing="<<frame {premise}>>") as app:
+            app.server.script = _continuing(" the bus.")
+            api_stories.update_setting(app.session, "layout", layout=TranscriptLayout.CANVAS)
+            app.play("/system Be brief.")
+            app.play("I was waiting for")
+            sent = app.server.requests[-1]
+            assert "messages" not in sent
+            assert sent["prompt"] == (
+                "<bos><|turn>system\n<<frame Be brief.>><turn|>\n<|turn>model\nI was waiting for"
+            )
+            # the template's turn markers end the continuation, and no
+            # thinking knob rides a rendered turn
+            assert sent["stop"] == ["<turn|>", "<|turn>user", "<|turn>system"]
+            assert not any(key.startswith(("thinking", "reasoning")) for key in sent)
+
+    def test_the_reply_is_recorded_verbatim_and_joins_as_it_stands(self, tmp_path) -> None:
+        with _continuing_omlx(tmp_path, framing="<<frame {premise}>>") as app:
+            app.server.script = _continuing(" the bus.")
+            api_stories.update_setting(app.session, "layout", layout=TranscriptLayout.CANVAS)
+            app.play("I was waiting for")
+            reply = app.store.stories.get_messages(app.session.story_id)[-1]
+            assert (reply.role, reply.body, reply.completion) == ("assistant", " the bus.", "text")
+            # the next request reads the story with that seam, and a typed
+            # line after it as a paragraph of its own
+            app.play("Then?")
+            assert app.server.requests[-1]["prompt"].endswith(
+                "<|turn>model\nI was waiting for the bus.\n\nThen?"
+            )
+
+    def test_a_line_opened_with_whitespace_goes_on_with_the_models_sentence(self, tmp_path) -> None:
+        with _continuing_omlx(tmp_path, framing="<<frame {premise}>>") as app:
+            app.server.script = _continuing(" the bus", " swung open.")
+            api_stories.update_setting(app.session, "layout", layout=TranscriptLayout.CANVAS)
+            app.play("I was waiting for")
+            list(api_play.submit(app.session, " and the door"))
+            assert app.server.requests[-1]["prompt"].endswith(
+                "<|turn>model\nI was waiting for the bus and the door"
+            )
+            typed = app.store.stories.get_messages(app.session.story_id)[-2]
+            assert (typed.role, typed.body) == ("user", " and the door")
+
+    def test_an_empty_line_continues_the_story_and_records_no_turn(self, tmp_path) -> None:
+        with _continuing_omlx(tmp_path, framing="<<frame {premise}>>") as app:
+            app.server.script = _continuing(" the bus.", " It was late.")
+            api_stories.update_setting(app.session, "layout", layout=TranscriptLayout.CANVAS)
+            app.play("I was waiting for")
+            app.play("")
+            chain = app.store.stories.get_messages(app.session.story_id)
+            assert [(m.role, m.body) for m in chain] == [
+                ("user", "I was waiting for"),
+                ("assistant", " the bus."),
+                ("assistant", " It was late."),
+            ]
+            assert app.server.requests[-1]["prompt"].endswith(
+                "<|turn>model\nI was waiting for the bus."
+            )
+
+    def test_an_empty_line_is_nothing_to_send_in_chat_mode(self, app: App) -> None:
+        with pytest.raises(Refused) as caught:
+            api_play.submit(app.session, "")
+        assert str(caught.value) == api_play.NOTHING_TO_SEND
+        assert app.session.messages == []
+
+    def test_an_empty_continuation_is_asked_again_after_a_paragraph_break(self, tmp_path) -> None:
+        with _continuing_omlx(tmp_path, framing="<<frame {premise}>>") as app:
+            app.server.script = _continuing("", "The rain fell.")
+            api_stories.update_setting(app.session, "layout", layout=TranscriptLayout.CANVAS)
+            app.play("It was late.")
+            first, second = app.server.requests[-2:]
+            assert second["prompt"] == first["prompt"] + "\n\n"
+            # the break is the reply's own seam, so the story renders again
+            # exactly as it was continued
+            reply = app.store.stories.get_messages(app.session.story_id)[-1]
+            assert reply.body == "\n\nThe rain fell."
+            assert app.server.requests[-1]["prompt"] == second["prompt"]
+
+    def test_no_picture_rides_story_mode(self, tmp_path) -> None:
+        with _continuing_omlx(tmp_path) as app:
+            assert app.session.can_attach  # the model sees, and the chat wire carries one
+            api_stories.update_setting(app.session, "layout", layout=TranscriptLayout.CANVAS)
+            assert not app.session.can_attach
+            with pytest.raises(Refused) as caught:
+                api_play.submit(app.session, "look", [RawFile(b"x", "x.png")])
+            assert str(caught.value) == api_play.NO_PICTURE_IN_STORY_MODE
+            assert app.session.messages == []
+
+    def test_without_a_known_template_the_canvas_is_a_layout_alone(self, tmp_path) -> None:
+        # "mistral" covers more than one family, and the name spells none
+        with _continuing_omlx(tmp_path, config_type="mistral") as app:
+            assert not app.session.is_story_mode_ready
+            assert app.session.text_template is None
+            api_stories.update_setting(app.session, "layout", layout=TranscriptLayout.CANVAS)
+            assert app.session.story_mode is StoryMode.CHAT
+            app.play("I was waiting for")
+            assert "messages" in app.server.requests[-1]
+            reply = app.store.stories.get_messages(app.session.story_id)[-1]
+            assert reply.completion == "chat"
+
+    def test_the_users_own_template_line_in_models_toml_stands(self, tmp_path) -> None:
+        with _continuing_omlx(
+            tmp_path, config_type="mistral", framing="<<frame {premise}>>", template_line="plain"
+        ) as app:
+            found = app.session.text_template
+            assert found is not None and (found.name, found.source) == ("plain", "override")
+            api_stories.update_setting(app.session, "layout", layout=TranscriptLayout.CANVAS)
+            app.server.script = _continuing(" the bus.")
+            app.play("I was waiting for")
+            assert app.server.requests[-1]["prompt"] == "<<frame >>\n\nI was waiting for"
+
+    def test_the_context_preview_is_the_text_the_wire_sends(self, tmp_path, capsys) -> None:
+        with _continuing_omlx(tmp_path, framing="<<frame {premise}>>") as app:
+            app.server.script = _continuing(" the bus.")
+            api_stories.update_setting(app.session, "layout", layout=TranscriptLayout.CANVAS)
+            app.play("/system Be brief.")
+            app.play("I was waiting for")
+            report = reports.context(app.session)
+            # one part, the text as sent, its tokens the text's estimate
+            assert [part.role for part in report.parts] == ["prompt"]
+            assert report.template == "gemma4"
+            assert report.total_tokens == estimate_tokens(report.wire)
+            # the next request IS the preview, the typed line after it
+            app.play("Then?")
+            assert app.server.requests[-1]["prompt"] == report.wire + "\n\nThen?"
+            # and the terminal prints the text as sent, its paragraph seam
+            # a blank line, under the one marker that stands for the field
+            report = reports.context(app.session)
+            capsys.readouterr()
+            app.play("/context")
+            printed = capsys.readouterr().out
+            assert "[prompt]" in printed and printed.endswith(report.wire + "\n")
+            assert "\n\nThen?" in report.wire
+
+    def test_a_chat_completions_reply_says_so(self, app: App) -> None:
+        app.play("I open the door.")
+        reply = app.store.stories.get_messages(app.session.story_id)[-1]
+        assert reply.completion == "chat"
 
 
 class TestLegacyTurns:

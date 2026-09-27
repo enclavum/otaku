@@ -16,9 +16,10 @@ config file's otherwise.
 import json
 from collections.abc import Sequence
 from dataclasses import dataclass
+from enum import Enum
 from typing import Self
 
-SCHEMA_VERSION = "6"
+SCHEMA_VERSION = "7"
 
 SCHEMA_DDL = """
 -- ---------- source: what was actually said ----------
@@ -53,6 +54,7 @@ CREATE TABLE messages (
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL,
     attachments TEXT,                    -- the turn's pictures as a JSON list, see Attachment; NULL when none
+    completion  TEXT,                    -- 'chat' or 'text': the completion that made an assistant turn; NULL on the reader's rows and on rows no completion made
     UNIQUE (story_id, id),               -- composite-FK target: same-story references only
     FOREIGN KEY (story_id, parent_id) REFERENCES messages(story_id, id),
     CHECK (parent_id IS NULL OR parent_id < id)
@@ -225,6 +227,12 @@ class Message:
     attachments: tuple[
         Attachment, ...
     ] = ()  # the turn's pictures; the files folder holds the bytes
+    # The completion that made an assistant turn — 'chat' or 'text', the
+    # wire it came over; None on the reader's rows and on rows no
+    # completion made (imported, a card's). A text completion's body is
+    # verbatim, its leading whitespace the seam with the text before it
+    # (`context.assembler.join_of`).
+    completion: str | None = None
     id: int = 0
 
 
@@ -265,9 +273,10 @@ class Journal:
 @dataclass(frozen=True)
 class StorySettingDB:
     """One setting of a story, as the `settings` column records it: a
-    switch, where what it injects rides, the story's own reminder, and
-    whether the reader is shown the notes the model writes — the last two
-    each one setting's, the others every injecting setting's.
+    switch, where what it injects rides, the story's own reminder,
+    whether the reader is shown the notes the model writes, and the
+    layout the story is read in — the last three each one setting's, the
+    others every injecting setting's.
     WHICH settings there are, and what each may take, is no business of
     the column's (`backend.story`)."""
 
@@ -276,13 +285,15 @@ class StorySettingDB:
     position: "InjectionPosition | None" = None  # None: unsaid, the setting's default applies
     reminder_text: str = ""
     display_notes: bool = True
+    layout: "TranscriptLayout | None" = None  # None: unsaid, the setting's default applies
 
     @classmethod
     def from_json(cls, text: str) -> tuple[Self, ...]:
         """The column read back: every setting it holds, in its order.
         What makes no sense reads as unsaid — `enabled` that is not `true`
         is False, a position that is not "system" or a count from 1 is
-        None — and a text that is no JSON object of objects holds none."""
+        None, a layout that is none of the three names is None — and a
+        text that is no JSON object of objects holds none."""
         out = []
         for name, state in cls._parse(text).items():
             if not isinstance(state, dict):
@@ -295,6 +306,7 @@ class StorySettingDB:
                     position=InjectionPosition.from_value(state.get("position")),
                     reminder_text=reminder_text if isinstance(reminder_text, str) else "",
                     display_notes=state.get("display_notes") is not False,
+                    layout=TranscriptLayout.from_value(state.get("layout")),
                 )
             )
         return tuple(out)
@@ -321,6 +333,8 @@ class StorySettingDB:
                 state.pop("display_notes", None)  # the default; only the exception is said
             else:
                 state["display_notes"] = False
+            if setting.layout is not None:
+                state["layout"] = setting.layout.value
             column[setting.name] = state
         return json.dumps(column, ensure_ascii=False)
 
@@ -364,3 +378,21 @@ class InjectionPosition:
         if value == "system":
             return cls()
         return cls(value) if type(value) is int and value >= 1 else None
+
+
+class TranscriptLayout(Enum):
+    """How a story's turns are laid out to be read — the same turns three
+    ways, named here so the choice is the story's and each frontend draws
+    it in its own medium: CANVAS one continuous text, nothing marking who
+    wrote what; MANUSCRIPT the played lines as interjections among the
+    prose; CHAT the turns as alternating blocks. `value` is the plain form
+    the column and the wire hold, and `from_value` reads one back."""
+
+    CANVAS = "canvas"
+    MANUSCRIPT = "manuscript"
+    CHAT = "chat"
+
+    @classmethod
+    def from_value(cls, value: object) -> Self | None:
+        """One of the three names; else None."""
+        return next((each for each in cls if each.value == value), None)

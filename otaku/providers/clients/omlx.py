@@ -13,7 +13,7 @@ from urllib.parse import quote
 from otaku.providers.clients import read_home_json
 from otaku.providers.errors import StatusError
 from otaku.providers.http import ASK_TIMEOUT, PROBE_TIMEOUT, Cut, Http, positive_int
-from otaku.providers.openai import reasoning
+from otaku.providers.openai import reasoning, templates
 from otaku.providers.openai.client import OpenAIClient
 from otaku.providers.openai.completion import (
     PROTOCOL_PARAMS,
@@ -86,6 +86,7 @@ class OmlxModels(OpenAIModels):
                     max_context_loaded=max_context_loaded,
                     capabilities=self._capabilities_of(entry),
                     state=state,
+                    text_template=templates.family_of_config_type(entry.get("config_model_type")),
                 )
             )
         return sorted(models, key=lambda model: model.name)

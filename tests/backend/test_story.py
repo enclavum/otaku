@@ -19,15 +19,17 @@ import pytest
 
 from otaku.backend.errors import Refused
 from otaku.backend.story import (
+    StoryMode,
     StorySetting,
     StorySettingAssistantNotes,
-    StorySettingMode,
+    StorySettingLayout,
     StorySettingQuestions,
     StorySettingReminder,
     StorySettingSharedReminder,
+    story_mode_of,
 )
 from otaku.settings.prompts import Prompts
-from otaku.store.schema import InjectionPosition, StorySettingDB
+from otaku.store.schema import InjectionPosition, StorySettingDB, TranscriptLayout
 
 PROMPTS = replace(
     Prompts(), tool_questions_prompt="ASK HOW", tool_assistant_notes_prompt="NOTE HOW"
@@ -66,14 +68,6 @@ class TestAsItStands:
         assert StorySettingReminder.allowed_positions == FROM_THE_END
         assert StorySettingSharedReminder.allowed_positions == FROM_THE_END
 
-    def test_a_flag_injects_nothing_and_has_no_reminder(self) -> None:
-        flag = StorySettingMode(StorySettingDB("story_mode", enabled=True))
-        assert flag.enabled
-        assert flag.allowed_positions == ()
-        assert flag.injection_position is None
-        assert flag.reminder_text is None
-        assert flag.display_notes is None
-
     def test_only_the_story_reminder_has_a_reminder_of_its_own(self) -> None:
         assert questions().reminder_text is None
         assert shared("Stay grim.").reminder_text is None
@@ -108,7 +102,6 @@ class TestToDb:
         assert notes().to_db() == StorySettingDB(
             "allow_assistant_notes", position=InjectionPosition(1), display_notes=True
         )
-        assert StorySettingMode().to_db() == StorySettingDB("story_mode")
 
     def test_what_is_given_is_laid_over_it(self) -> None:
         row = questions(StorySettingDB("allow_questions", position=InjectionPosition(2))).to_db(
@@ -133,25 +126,76 @@ class TestToDb:
         with pytest.raises(Refused):
             reminder().to_db(position=SYSTEM)
 
-    def test_a_flag_takes_no_position(self) -> None:
-        with pytest.raises(Refused):
-            StorySettingMode().to_db(position=InjectionPosition(1))
-
     def test_only_the_story_reminder_takes_a_reminder(self) -> None:
         with pytest.raises(Refused):
             questions().to_db(reminder_text="Ask about the weather.")
         with pytest.raises(Refused):
             shared("Stay grim.").to_db(reminder_text="Stay grimmer.")
-        with pytest.raises(Refused):
-            StorySettingMode().to_db(reminder_text="x")
 
     def test_only_the_notes_tool_takes_display_notes(self) -> None:
         with pytest.raises(Refused):
             questions().to_db(display_notes=False)
         with pytest.raises(Refused):
             reminder().to_db(display_notes=True)
-        with pytest.raises(Refused):
-            StorySettingMode().to_db(display_notes=False)
+
+
+class TestLayoutSetting:
+    def test_a_story_that_stored_nothing_is_read_in_the_manuscript(self) -> None:
+        found = StorySettingLayout()
+        assert (found.enabled, found.layout) == (True, TranscriptLayout.MANUSCRIPT)
+        # a value, not a switch: it injects nothing and displays nothing
+        assert found.allowed_positions == ()
+        assert (found.injection_position, found.reminder_text, found.display_notes) == (
+            None,
+            None,
+            None,
+        )
+
+    def test_what_the_story_stored_stands_and_is_always_in_force(self) -> None:
+        stored = StorySettingDB("layout", enabled=False, layout=TranscriptLayout.CHAT)
+        found = StorySettingLayout(stored)
+        assert (found.enabled, found.layout) == (True, TranscriptLayout.CHAT)
+        # a row that names no layout reads as the default
+        assert StorySettingLayout(StorySettingDB("layout")).layout is TranscriptLayout.MANUSCRIPT
+
+    def test_the_row_to_store_carries_the_layout_given_or_standing(self) -> None:
+        assert StorySettingLayout().to_db() == StorySettingDB(
+            "layout", enabled=True, layout=TranscriptLayout.MANUSCRIPT
+        )
+        stored = StorySettingDB("layout", layout=TranscriptLayout.CHAT)
+        assert StorySettingLayout(stored).to_db(layout=TranscriptLayout.CANVAS) == StorySettingDB(
+            "layout", enabled=True, layout=TranscriptLayout.CANVAS
+        )
+
+    def test_it_has_no_switch_and_takes_nothing_else(self) -> None:
+        for asked in (
+            {"enabled": True},
+            {"enabled": False},
+            {"position": InjectionPosition(1)},
+            {"reminder_text": "Rain."},
+            {"display_notes": False},
+        ):
+            with pytest.raises(Refused):
+                StorySettingLayout().to_db(**asked)  # type: ignore[arg-type]
+
+    def test_a_switch_takes_no_layout(self) -> None:
+        for setting in (questions(), reminder(), notes(), shared("Stay grim.")):
+            with pytest.raises(Refused):
+                setting.to_db(layout=TranscriptLayout.CANVAS)
+
+
+class TestStoryMode:
+    def test_the_canvas_on_a_model_that_can_be_continued_is_story_mode(self) -> None:
+        assert story_mode_of(TranscriptLayout.CANVAS, True) is StoryMode.STORY
+
+    def test_every_other_case_is_chat_mode(self) -> None:
+        assert story_mode_of(TranscriptLayout.CANVAS, False) is StoryMode.CHAT
+        for layout in (TranscriptLayout.MANUSCRIPT, TranscriptLayout.CHAT):
+            assert story_mode_of(layout, True) is StoryMode.CHAT
+            assert story_mode_of(layout, False) is StoryMode.CHAT
+
+    def test_the_modes_spell_the_wires_words(self) -> None:
+        assert {mode.value for mode in StoryMode} == {"story", "chat"}
 
 
 class TestInjection:

@@ -1,20 +1,25 @@
 """A story's settings: one class per switch, and the set a story has.
 
 What a story STORES is the store's (`schema.StorySettingDB`: a name,
-a flag, a position, a reminder, a display flag). What a
+a flag, a position, a reminder, a display flag, a layout). What a
 setting IS is declared here, one class each: a tool's, which lets the
 model use it and injects its prompt; a reminder's, which injects
 the user's own text — the SHARED one, written once and switched on by
-each story that wants it, and the STORY's own; later a plain flag.
+each story that wants it, and the STORY's own; and the LAYOUT the
+story is read in, a value rather than a switch.
 `StorySettings` is every setting of one story as it stands, built from
 the rows the story holds, the prompts file and the store, and what the
 switched-on ones inject. The operations are `backend.api.stories`'.
 
 A new setting is a subclass and a row in `StorySettings`.
+
+The MODE a story is played in (`StoryMode`, `story_mode_of`) is derived here too,
+never stored: it hangs off the layout setting, on the model in use.
 """
 
 from collections.abc import Iterator, Sequence
 from dataclasses import replace
+from enum import Enum
 from pathlib import Path
 from typing import ClassVar
 
@@ -26,7 +31,7 @@ from otaku.context.tool_calls import ToolSet
 from otaku.settings.prompts import Prompts
 from otaku.settings.prompts import load as load_prompts
 from otaku.store import Store
-from otaku.store.schema import InjectionPosition, StorySettingDB
+from otaku.store.schema import InjectionPosition, StorySettingDB, TranscriptLayout
 
 # The deepest a story may place what a setting injects — before which of
 # the reader's messages, counted from the end: deep enough for a reminder
@@ -42,6 +47,22 @@ _REMINDER_POSITIONS: tuple[InjectionPosition, ...] = tuple(
 _TOOL_POSITIONS: tuple[InjectionPosition, ...] = (InjectionPosition(), *_REMINDER_POSITIONS)
 
 
+class StoryMode(Enum):
+    """The mode a story is played in — STORY or CHAT — derived, never
+    stored. A story read in the canvas layout, on a model otaku knows
+    how to continue — its engine serves the raw text wire
+    (`ModelCapabilities.text_completion`) AND a text template is known
+    for it (`providers.templates.resolve`) — is in STORY mode: one text
+    the model continues, rendered in the model's own turn markers. Every
+    other case is CHAT mode, the chat wire; the chat LAYOUT has nothing
+    to do with it, the names merely coincide. `Session.story_mode` answers it
+    for the open story, and a frontend says it in its own words (the
+    page's send button, the terminal's placeholder)."""
+
+    STORY = "story"
+    CHAT = "chat"
+
+
 class StorySetting:
     """One switch of a story, declared by its class; an instance is how
     one story has it — from the row it stored, or off where it stored
@@ -52,20 +73,21 @@ class StorySetting:
     name: ClassVar[str] = ""  # what a story stores it under: a rename orphans stored settings
     label: ClassVar[str] = ""
     tool: ClassVar[type[Tool] | None] = None  # the tool it switches, if one
-    # Every position it may take, as a frontend offers them; none here:
-    # a flag injects nothing.
+    # Every position it may take, as a frontend offers them; none here.
     allowed_positions: ClassVar[tuple[InjectionPosition, ...]] = ()
 
     enabled: bool
     injection_position: InjectionPosition | None  # None: it injects nothing
     reminder_text: str | None  # the story's own reminder; None: the setting has none
     display_notes: bool | None  # whether the reader sees the notes; None: nothing to display
+    layout: TranscriptLayout | None  # how the story is read; None: not this setting's to say
 
     def __init__(self, from_db: StorySettingDB | None = None) -> None:
         self.enabled = from_db is not None and from_db.enabled
         self.injection_position = None
         self.reminder_text = None
         self.display_notes = None
+        self.layout = None
 
     def to_db(
         self,
@@ -74,18 +96,40 @@ class StorySetting:
         position: InjectionPosition | None = None,
         reminder_text: str | None = None,
         display_notes: bool | None = None,
+        layout: TranscriptLayout | None = None,
     ) -> StorySettingDB:
         """The row to store: the setting as it stands, what is given laid
         over it. Raises Refused for what the setting does not take — here
-        a position, a `reminder_text` and `display_notes`; a subclass that
-        takes one says so, and the shared reminder is `set_shared_reminder`'s."""
+        a position, a `reminder_text`, `display_notes` and a `layout`; a
+        subclass that takes one says so, and the shared reminder is
+        `set_shared_reminder`'s."""
         if position is not None:
             raise Refused(f"{self.label} has no position: it injects nothing.")
         if reminder_text is not None:
             raise Refused(f"{self.label} has no reminder of its own.")
         if display_notes is not None:
             raise Refused(f"{self.label} has nothing to display.")
+        if layout is not None:
+            raise Refused(f"{self.label} has no layout.")
         return StorySettingDB(self.name, enabled=self.enabled if enabled is None else enabled)
+
+    def standing(self, row: StorySettingDB) -> str:
+        """Where the setting stands once `row` is stored, in words — the
+        confirmation a write answers with."""
+        if not row.enabled:
+            return f"{self.label}: off."
+        if row.position is None:
+            return f"{self.label}: on."
+        if row.position.depth is None:
+            return f"{self.label}: on, in the system message."
+        # before which of the reader's messages, counted from the end
+        depth = row.position.depth
+        if depth == 1:
+            return f"{self.label}: on, before your latest message."
+        if depth == 2:
+            return f"{self.label}: on, before your previous message."
+        suffix = "rd" if depth == 3 else "th"
+        return f"{self.label}: on, before your {depth}{suffix}-last message."
 
 
 class InjectingSetting(StorySetting):
@@ -129,12 +173,13 @@ class InjectingSetting(StorySetting):
         position: InjectionPosition | None = None,
         reminder_text: str | None = None,
         display_notes: bool | None = None,
+        layout: TranscriptLayout | None = None,
     ) -> StorySettingDB:
         if position is not None and position not in self.allowed_positions:
             allowed = ", ".join(str(each.value) for each in self.allowed_positions)
             raise Refused(f"{self.label} takes one of these positions: {allowed}.")
         row = super().to_db(
-            enabled=enabled, reminder_text=reminder_text, display_notes=display_notes
+            enabled=enabled, reminder_text=reminder_text, display_notes=display_notes, layout=layout
         )
         return replace(row, position=self.injection_position if position is None else position)
 
@@ -194,8 +239,11 @@ class StorySettingAssistantNotes(ToolSetting):
         position: InjectionPosition | None = None,
         reminder_text: str | None = None,
         display_notes: bool | None = None,
+        layout: TranscriptLayout | None = None,
     ) -> StorySettingDB:
-        row = super().to_db(enabled=enabled, position=position, reminder_text=reminder_text)
+        row = super().to_db(
+            enabled=enabled, position=position, reminder_text=reminder_text, layout=layout
+        )
         return replace(
             row, display_notes=self.display_notes if display_notes is None else display_notes
         )
@@ -227,8 +275,11 @@ class StorySettingReminder(InjectingSetting):
         position: InjectionPosition | None = None,
         reminder_text: str | None = None,
         display_notes: bool | None = None,
+        layout: TranscriptLayout | None = None,
     ) -> StorySettingDB:
-        row = super().to_db(enabled=enabled, position=position, display_notes=display_notes)
+        row = super().to_db(
+            enabled=enabled, position=position, display_notes=display_notes, layout=layout
+        )
         return replace(
             row, reminder_text=self.reminder_text if reminder_text is None else reminder_text
         )
@@ -258,13 +309,46 @@ class StorySettingSharedReminder(InjectingSetting):
         return self.shared_reminder_text
 
 
-class StorySettingMode(StorySetting):
-    """Story mode: the story sent as one text for the model to continue,
-    over a text-completion wire — a flag, injecting nothing. Not built
-    yet: nothing reads it."""
+class StorySettingLayout(StorySetting):
+    """The layout the story is read in — a value, not a switch: a story
+    is always read in one, MANUSCRIPT until it says otherwise, and each
+    frontend draws the one it names in its own medium (the page's
+    `layout.js`; the terminal has one look and does not read it yet).
+    Off the Tools tabs: no caption there names it."""
 
-    name = "story_mode"
-    label = "Story mode"
+    name = "layout"
+    label = "Layout"
+    default_layout: ClassVar[TranscriptLayout] = TranscriptLayout.MANUSCRIPT
+
+    layout: TranscriptLayout
+
+    def __init__(self, from_db: StorySettingDB | None = None) -> None:
+        super().__init__(from_db)
+        self.enabled = True  # always in force: there is no reading in no layout
+        stored = from_db.layout if from_db is not None else None
+        # the codec reads only the three names; anything else is unsaid
+        self.layout = stored if stored is not None else self.default_layout
+
+    def to_db(
+        self,
+        *,
+        enabled: bool | None = None,
+        position: InjectionPosition | None = None,
+        reminder_text: str | None = None,
+        display_notes: bool | None = None,
+        layout: TranscriptLayout | None = None,
+    ) -> StorySettingDB:
+        if enabled is not None:
+            raise Refused(f"{self.label} has no switch: a story is always read in one.")
+        row = super().to_db(
+            position=position, reminder_text=reminder_text, display_notes=display_notes
+        )
+        return replace(row, enabled=True, layout=self.layout if layout is None else layout)
+
+    def standing(self, row: StorySettingDB) -> str:
+        # a caption, not a sentence: the switches' confirmations end in a
+        # full stop, this one does not
+        return f"{self.label}: {(row.layout or self.layout).value}"
 
 
 class StorySettings:
@@ -285,7 +369,7 @@ class StorySettings:
             StorySettingReminder(by_name.get(StorySettingReminder.name)),
             StorySettingAssistantNotes(by_name.get(StorySettingAssistantNotes.name), prompts),
             StorySettingQuestions(by_name.get(StorySettingQuestions.name), prompts),
-            StorySettingMode(by_name.get(StorySettingMode.name)),
+            StorySettingLayout(by_name.get(StorySettingLayout.name)),
         ]
         self._by_name = {setting.name: setting for setting in settings}
 
@@ -319,3 +403,11 @@ class StorySettings:
             if isinstance(setting, InjectingSetting)
             and (injection := setting.injection) is not None
         )
+
+
+def story_mode_of(layout: TranscriptLayout, is_story_mode_ready: bool) -> StoryMode:
+    """The mode of a story read in `layout` on a model that can, or
+    cannot, play story mode (`Session.is_story_mode_ready`)."""
+    if layout is TranscriptLayout.CANVAS and is_story_mode_ready:
+        return StoryMode.STORY
+    return StoryMode.CHAT

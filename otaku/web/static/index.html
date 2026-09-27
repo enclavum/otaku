@@ -83,6 +83,19 @@
       <button type="button" class="otk-toc__row" data-sign-out hidden><span>Sign out</span></button>
     </div>
 
+    <!-- HOW THE TRANSCRIPT IS READ. The same turns, three layouts: a
+         continuous text, a manuscript, or a chat. The choice is the
+         story's; `layout.js` shows it and answers the glyphs. -->
+    <div class="otk-modes" role="group" aria-label="Transcript layout">
+      <span class="otk-modes__mark" aria-hidden="true">&#8942;</span>
+      <span class="otk-modes__label">Layout</span>
+      <span class="otk-modes__group">
+        <button type="button" class="otk-mode" data-transcript-mode="canvas" aria-pressed="false" title="Canvas" aria-label="Canvas"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><g stroke="currentColor" stroke-width="1.5" stroke-linecap="square"><line x1="1.5" y1="4" x2="14.5" y2="4"></line><line x1="1.5" y1="8" x2="14.5" y2="8"></line><line x1="1.5" y1="12" x2="11" y2="12"></line></g></svg></button>
+        <button type="button" class="otk-mode" data-transcript-mode="manuscript" aria-pressed="true" title="Manuscript" aria-label="Manuscript"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><g stroke="currentColor" stroke-width="1.5" stroke-linecap="square"><line x1="1.5" y1="3.5" x2="14.5" y2="3.5"></line><line x1="5" y1="8" x2="11" y2="8"></line><line x1="1.5" y1="12.5" x2="14.5" y2="12.5"></line></g></svg></button>
+        <button type="button" class="otk-mode" data-transcript-mode="chat" aria-pressed="false" title="Chat" aria-label="Chat"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><g stroke="currentColor" stroke-width="1.5" stroke-linecap="square"><line x1="1.5" y1="3.5" x2="9.5" y2="3.5"></line><line x1="6.5" y1="8" x2="14.5" y2="8"></line><line x1="1.5" y1="12.5" x2="9.5" y2="12.5"></line></g></svg></button>
+      </span>
+    </div>
+
     <!-- STATUS. One reserved line: it holds its height when empty, so nothing
          jumps. The lamp says what the session is doing — answering, working,
          gone — and the text is whatever otaku last had to say. -->
@@ -113,7 +126,7 @@
            it; a played line is a .otk-turn interjection; a failure an
            .otk-error block; and .otk-gap is the space the flow holds open
            after an undo, so the page does not move under the reader. -->
-      <div class="otk-transcript" role="log" aria-live="polite">
+      <div class="otk-transcript" data-transcript="manuscript" role="log" aria-live="polite">
       </div>
 
       <footer class="otk-composer">

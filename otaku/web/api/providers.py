@@ -92,6 +92,13 @@ def _providers(session: Session, scope: str = "") -> dict[str, Any]:
                 # its provider's (Ollama's ollama.com rows), the provider's
                 # otherwise — what a caption on the model reads.
                 "locality": (model.locality or row.locality).value,
+                # The text template story mode wraps the story in, as the
+                # session resolves it; null, and it has no story mode.
+                "text_template": (
+                    resolved.name
+                    if (resolved := session.text_template_for(model)) is not None
+                    else None
+                ),
                 # The info report's two rows on the model, in its words:
                 # the page draws them under the picker as it draws /info.
                 **model_words(model),

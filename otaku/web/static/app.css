@@ -65,6 +65,8 @@
   --otk-strong-weight: 600;                   /* a real cut, not a synthesised 700 */
   --otk-ok:          oklch(0.58 0.11 150);    /* connected, resident         */
   --otk-danger:      oklch(0.5 0.14 30);      /* delete, stop, and failures  */
+  --otk-chat-story:  var(--otk-ok);           /* the story's rule, chat layout */
+  --otk-chat-you:    var(--otk-accent);       /* the reader's rule, chat layout */
 
   /* -- three voices, one job each ----------------------------------------- */
   --otk-font-prose:   'Newsreader', 'Literata', Georgia, serif;
@@ -536,6 +538,9 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
    else. The stylesheet's own variable, not a token: it is derived. */
 .otk-reply, .otk-typeset { --otk-block-gap: calc(var(--otk-size-page) * var(--otk-leading-page)); }
 .otk-reply { display: flex; flex-direction: column; gap: var(--otk-block-gap); }
+/* who wrote a reply, above its words: on every reply, read in the chat
+   layout alone (below) */
+.otk-reply__rubric { display: none; }
 
 /* a played turn reads as an interjection, not a speech bubble */
 .otk-turn { display: flex; flex-direction: column; align-items: center; gap: 8px; }
@@ -561,6 +566,169 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 /* a played line keeps its own centred measure, block and field alike; its
    verbs hang off the turn, as a reply's do, so they stand in one place */
 .otk-turn .otk-edit--turn { width: 100%; max-width: 430px; }
+
+/* =============================================================================
+   TRANSCRIPT LAYOUTS — the same turns, read three ways. Only the flow's
+   `data-transcript` changes (`layout.js`); no markup moves, and every turn
+   keeps its rubric whether or not the layout shows it. The manuscript is
+   the rules above; the two below are laid over them. The question, notes
+   and thinking blocks keep their one look in all three until each layout's
+   own is decided.
+   ========================================================================== */
+
+/* -- CANVAS. A text being completed, not a conversation: nothing marks who
+      wrote what, because in this mode nothing should. One face, one size, one
+      ink, one measure, one alignment — the caret is the only thing that moves.
+      The transcript IS the text: block flow rather than a column of blocks,
+      every turn INLINE in it, so a turn that continues the one before runs
+      on in the same paragraph. The seam between two turns is data
+      (`data-join`, the backend's `join_of`): a paragraph join stands a blank
+      line before the turn, an inline one nothing — the turn's own text
+      carries its space or its break. */
+.otk-transcript[data-transcript="canvas"] { display: block; }
+/* The flow's own line boxes are the prose's: the articles take its face
+   and leading, so a line the text does not fill — the gap before a
+   paragraph, a blank line a row carries — measures one prose line, and
+   a field standing in for a paragraph (below) measures the same lines. */
+.otk-transcript[data-transcript="canvas"] > .otk-turn,
+.otk-transcript[data-transcript="canvas"] > .otk-reply {
+  font-family: var(--otk-font-prose); font-size: var(--otk-size-page); line-height: var(--otk-leading-page);
+  --otk-block-gap: calc(var(--otk-size-page) * var(--otk-leading-page));
+}
+/* Inline while READ; an open editor is a block again (its base rules), so
+   the field spans the paragraph and the verbs hang off a block box — an
+   absolute child of an inline box lands elsewhere in every browser. */
+.otk-transcript[data-transcript="canvas"] > .otk-turn,
+.otk-transcript[data-transcript="canvas"] > .otk-reply,
+.otk-transcript[data-transcript="canvas"] .otk-turn > .otk-edit:not([data-editing]),
+.otk-transcript[data-transcript="canvas"] .otk-reply > .otk-edit:not([data-editing]),
+.otk-transcript[data-transcript="canvas"] .otk-edit:not([data-editing]) > .otk-reader,
+.otk-transcript[data-transcript="canvas"] .otk-edit:not([data-editing]) > .otk-reader > .otk-typeset { display: inline; }
+.otk-transcript[data-transcript="canvas"] .otk-turn__rubric { display: none; }
+/* A text-wire row's own seam — the space or break it opens with, drawn as
+   `.otk-seam` — reads only here, where turns flow as one text; the other
+   layouts draw each turn as a block of its own and hide it. */
+.otk-transcript:not([data-transcript="canvas"]) .otk-seam { display: none; }
+/* The seam: one prose line's gap before a paragraph join, a BLOCK rather
+   than line breaks — a block measures its height wherever it lands, after
+   a line of text or after the field a paragraph became, where two breaks
+   would make two blank lines. The first turn opens the text. */
+.otk-transcript[data-transcript="canvas"] > [data-join="paragraph"]:not(:first-child)::before { content: ""; display: block; height: var(--otk-block-gap); }
+/* the played line reads as the prose does */
+.otk-transcript[data-transcript="canvas"] .otk-turn__body {
+  max-width: none; text-align: start;
+  font-style: normal; font-weight: 400;
+  line-height: var(--otk-leading-page); color: var(--otk-body);
+}
+/* The reply arriving is part of the text too: its block inline, so it
+   joins the line it continues from the first word and nothing moves when
+   it lands. Its status row and the stats line stand under the text with
+   no pull-up — the column's negative margins have no gap to eat here —
+   the row the 10px under the text it stands in the other layouts, so the
+   room it takes is the same 28px its slot holds (below) and the landing
+   moves nothing; and the row a landed reply keeps goes altogether: kept,
+   it would split the paragraph the next continuation joins. */
+.otk-transcript[data-transcript="canvas"] .otk-generating > .otk-typeset { display: inline; }
+.otk-transcript[data-transcript="canvas"] .otk-generating__status { margin-top: 10px; }
+.otk-transcript[data-transcript="canvas"] .otk-generating--idle .otk-generating__status { display: none; }
+/* The room that row keeps in the other layouts is held all the same, so the
+   flow ends where it does there and a layout switch at the end moves
+   nothing: by the article itself, as a block after its text, for as long
+   as it is the last — an article that follows takes it away, so a
+   continuation runs on in the paragraph unsplit. The room is the row's
+   18px under its 10px pull-up (`.otk-generating__status`). */
+.otk-transcript[data-transcript="canvas"] .otk-generating--idle:last-of-type::after { content: ""; display: block; height: calc(10px + 18px); }
+/* the live question is a block of the reply's, spaced by the article's gap in
+   the other layouts; the canvas has no flex gap, so the block's own margin
+   stands the one gap off the text it follows */
+.otk-transcript[data-transcript="canvas"] .otk-ask--live { margin-top: var(--otk-block-gap); }
+/* A block that OPENS a reply (`.otk-ask--first`) leaves the spacing to what
+   stands before the reply: the transcript's gap in the other layouts, the
+   paragraph gap (`::before`) here. A reply joined inline has neither, so its
+   opening block stands its own gap off the text — as the live question does. */
+.otk-transcript[data-transcript="canvas"] [data-join="inline"] .otk-typeset > .otk-ask--first { margin-top: var(--otk-block-gap); }
+.otk-transcript[data-transcript="canvas"] .otk-verbose { margin: 4px 0 0; }
+/* Editing in the canvas: the field takes the paragraph's place, the same
+   text in the same metrics as the reading it stands in for, so the
+   paragraph keeps its size and nothing moves. A paragraph of several
+   rows opens as ONE field holding all their text (`transcript.frame`):
+   the other rows step out of the flow — the first keeping the blank line
+   that stands before the paragraph — the field's own text is transparent
+   and the reading stays behind it as a mirror, the edited row's text in
+   ink and the other rows' dimmed, the open field's ground on the mirror. */
+/* weighted as the inline rule above is, so this one wins by standing later */
+.otk-transcript[data-transcript="canvas"] .otk-turn[data-framed] > .otk-edit,
+.otk-transcript[data-transcript="canvas"] .otk-reply[data-framed] > .otk-edit { display: none; }
+.otk-transcript[data-transcript="canvas"] .otk-edit[data-editing] { position: relative; }
+.otk-transcript[data-transcript="canvas"] .otk-edit[data-editing] > .otk-reader { position: relative; }
+.otk-transcript[data-transcript="canvas"] .otk-edit[data-framing] > .otk-reader > .otk-typeset {
+  display: block; position: absolute; inset: 0; pointer-events: none;
+  background: var(--otk-edit-bg); box-shadow: 0 0 0 4px var(--otk-edit-bg);
+}
+.otk-transcript[data-transcript="canvas"] .otk-edit[data-framing] > .otk-reader > textarea { position: relative; color: transparent; caret-color: var(--otk-ink); background: none; box-shadow: none; }
+.otk-transcript[data-transcript="canvas"] .otk-framed { color: var(--otk-faint); }
+.otk-transcript[data-transcript="canvas"] .otk-edit--turn { max-width: none; }
+.otk-transcript[data-transcript="canvas"] .otk-thumbs { justify-content: flex-start; padding-top: 8px; }
+
+/* -- CHAT. Alternating sides, aligned like a messenger, without bubbles: a
+      filled, bordered box would be the only one in the design. The story sits
+      on the left behind a 1px rule in the story's colour on its outer edge;
+      the reader's turn shrinks to its text, sits against the right edge and
+      carries a 1px accent rule on its outer edge. Text inside both is always
+      left-aligned, so a long turn keeps a clean left edge. */
+/* The rule runs 2px past the text at either end, and is DRAWN rather than a
+   border: a border would carry those 2px into the box, the flow would end
+   2px under the last line here and flush with it in the other layouts, and
+   the page would sit 2px off at the end when the layout switches. So the box
+   is the text's, the rule overshoots on its own, and the gap is the 26px the
+   text keeps from text (22 between the rules). */
+.otk-transcript[data-transcript="chat"] { gap: 26px; }
+.otk-transcript[data-transcript="chat"] .otk-reply { max-width: 75%; margin-right: auto; padding-left: 17px; }
+.otk-transcript[data-transcript="chat"] .otk-turn {
+  width: fit-content; max-width: 75%; margin-left: auto; align-items: stretch; gap: 7px;
+  padding-right: 17px;
+}
+.otk-transcript[data-transcript="chat"] .otk-reply::before,
+.otk-transcript[data-transcript="chat"] .otk-turn::before { content: ""; position: absolute; top: -2px; bottom: -2px; width: 1px; }
+.otk-transcript[data-transcript="chat"] .otk-reply::before { left: 0; background: var(--otk-chat-story); }
+.otk-transcript[data-transcript="chat"] .otk-turn::before { right: 0; background: var(--otk-chat-you); }
+/* who spoke, quietly, above the words, left-aligned on both sides. The
+   reply's rubric stands 7px off its first block, as the turn's does, without
+   touching the reply's own rhythm: its blocks keep the one gap
+   (`--otk-block-gap`). */
+.otk-transcript[data-transcript="chat"] .otk-reply__rubric { display: block; margin-bottom: calc(7px - var(--otk-block-gap)); text-align: start; letter-spacing: 0.14em; color: var(--otk-muted); }
+.otk-transcript[data-transcript="chat"] .otk-turn > .otk-turn__rubric { text-align: start; letter-spacing: 0.14em; }
+/* one measure, one alignment: the reader's turn is ink and the story is body
+   ink — the distinction the manuscript draws, without italic or centring */
+.otk-transcript[data-transcript="chat"] .otk-turn__body {
+  max-width: none; text-align: start;
+  font-style: normal; font-weight: 400;
+  line-height: var(--otk-leading-page); color: var(--otk-ink);
+}
+/* The text's box is the text's own width, against the rule: a short line
+   stands at the right whatever else the turn holds, and a long one fills
+   the turn and keeps its clean left edge. */
+.otk-transcript[data-transcript="chat"] .otk-turn .otk-edit--turn { width: fit-content; max-width: 100%; align-self: flex-end; }
+/* The tiles are the manuscript's size and centred under the line. Sized
+   outright: a turn shrinks to its content here, and a tile cut as a share of
+   the row would be sized off its own picture, wide as the turn allows. */
+.otk-transcript[data-transcript="chat"] .otk-thumbs { width: auto; max-width: none; justify-content: center; }
+.otk-transcript[data-transcript="chat"] .otk-thumbs .otk-thumb { width: 138px; }
+/* the verbs keep to the right edge of the text, as in every layout: the
+   turn's padding lies between the text and its rule */
+.otk-transcript[data-transcript="chat"] .otk-turn .otk-edit--turn .otk-edit__hint { right: 17px; }
+/* the blocks a reply holds — a failure, a question, the notes — drop their
+   own rule here: the reply's is the one mark on the story's side. They keep
+   a small inset, so they still read as set apart from the prose. */
+.otk-transcript[data-transcript="chat"] .otk-error,
+.otk-transcript[data-transcript="chat"] .otk-ask { border-left: 0; padding-left: 7px; }
+/* A landed reply keeps its status row's slot so nothing moves (below); here
+   the slot would show as the rule running on under the text. So the row goes
+   and the article keeps the same room as a margin, outside the rule, for as
+   long as the row would have stood: until the next line takes its place. The
+   room is the row's 18px under its 10px pull-up (`.otk-generating__status`). */
+.otk-transcript[data-transcript="chat"] .otk-generating--idle .otk-generating__status { display: none; }
+.otk-transcript[data-transcript="chat"] .otk-generating--idle:has(.otk-generating__status) { margin-bottom: calc(10px + 18px); }
 
 /* =============================================================================
    GENERATING, AND THE OTHER TWO KINDS OF LINE
@@ -634,9 +802,10 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
-/* an error is not a turn: it never reads as the story */
+/* an error is not a turn: it never reads as the story. Its leading is its
+   own (see `.otk-ask`), so its rows measure the same wherever it stands. */
 .otk-error {
-  display: flex; flex-direction: column; gap: 6px;
+  display: flex; flex-direction: column; gap: 6px; line-height: normal;
   border-left: var(--otk-mark) solid var(--otk-danger); padding: 2px 0 2px 22px;
 }
 .otk-error__label {
@@ -648,6 +817,28 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 
 /* the space the flow holds open so the page does not move under the reader */
 .otk-gap { flex: none; width: 100%; }
+
+/* which layout the transcript is read in — three glyphs above the status
+   line, the one in force pressed (`layout.js`) */
+.otk-modes {
+  flex: none; display: flex; align-items: center; gap: 4px;
+  margin: 0 30px; padding: 10px 0 8px;
+  border-top: var(--otk-hair) solid var(--otk-line);
+}
+.otk-modes__mark { flex: none; width: 7px; margin-right: 5px; font-family: var(--otk-font-mono); font-size: 13px; font-weight: 600; line-height: 1; color: var(--otk-muted); }
+.otk-modes__label { flex: none; font-family: var(--otk-font-mono); font-size: var(--otk-size-label); letter-spacing: 0.06em; color: var(--otk-muted); }
+.otk-modes__group { flex: 1; display: flex; align-items: center; justify-content: center; gap: 4px; }
+.otk-mode {
+  display: flex; align-items: center; justify-content: center;
+  width: 30px; height: 26px; padding: 0; line-height: 0;
+  color: var(--otk-faint);
+}
+.otk-mode:hover { color: var(--otk-muted); }
+.otk-mode[aria-pressed="true"] { color: var(--otk-ink); }
+/* with no story there is nothing to keep a choice for, and while a reply is
+   arriving the flow is not reflowed under it: the glyphs are inert */
+.otk-mode[aria-disabled="true"],
+.otk-app[data-playing] .otk-mode { pointer-events: none; }
 
 /* =============================================================================
    STATUS — one reserved line at the foot of the contents, never a bar across
@@ -693,8 +884,10 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 .otk-composer__input textarea::placeholder { color: var(--otk-faint); }
 /* The pictures door: a clip at Send's left, among the verbs, in Send's own
    ink — the two are one gesture — and the accent when pointed at. `hidden`
-   — no vision — wins over it, so the rule is written for the shown state. */
-.otk-attach-btn:not([hidden]) { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0; color: var(--otk-ink); cursor: pointer; }
+   — no vision — wins over it, so the rule is written for the shown state. It
+   takes the row's height rather than one of its own: it comes and goes with
+   the mode, and the composer must not grow when it does. */
+.otk-attach-btn:not([hidden]) { flex: none; align-self: stretch; display: inline-flex; align-items: center; justify-content: center; width: 36px; padding: 0; color: var(--otk-ink); cursor: pointer; }
 .otk-attach-btn:hover, .otk-attach-btn:focus-visible { color: var(--otk-accent); }
 .otk-composer__verbs { flex: 0 1 auto; margin-left: auto; display: flex; align-items: center; gap: 7px; }
 .otk-hints { margin: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 16px; font-family: var(--otk-font-mono); font-size: var(--otk-size-tag); letter-spacing: var(--otk-track-foot); text-transform: uppercase; color: var(--otk-faint); }
@@ -731,6 +924,9 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 .otk-thumbs { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; width: 100%; max-width: 430px; padding-top: 2px; }
 .otk-thumbs .otk-thumb { width: calc((100% - 16px) / 3); height: auto; aspect-ratio: 1; cursor: zoom-in; }
 .otk-thumbs .otk-thumb:hover, .otk-thumbs .otk-thumb:focus-visible { border-color: var(--otk-accent); }
+/* in story mode no picture rides the request, so the flow shows none —
+   the tiles alone; the dossier still lists what the story holds */
+.otk-app[data-story-mode="story"] .otk-transcript .otk-thumbs { display: none; }
 /* the same tiles in the dossier's reader, set flush with its text */
 .otk-detail__section > .otk-thumbs { justify-content: flex-start; }
 /* full size: the picture on the desk, held to the window, its measure beneath */
@@ -744,9 +940,14 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 .otk-lightbox__arrow:hover, .otk-lightbox__arrow:focus-visible { border-color: var(--otk-ink); }
 .otk-lightbox__arrow[aria-disabled="true"] { opacity: 0.35; cursor: default; }
 .otk-lightbox__count { color: var(--otk-body); font-variant-numeric: tabular-nums; }
-/* at its own size on the well, downsized to the frame when it is too big,
-   never upsized to fill it */
-.otk-lightbox img { display: block; width: auto; height: auto; max-width: 100%; max-height: calc(100dvh - 160px); object-fit: contain; }
+/* At its own size on the well, downsized to the frame when it is too big,
+   never upsized to fill it. Its own size is the row's measure, written on
+   the element as `width` and `height` before the bytes are asked for
+   (`pictures.openPicture`): the width holds as written — no `width` rule
+   here, so the attribute stands — the height follows the ratio the two
+   declare, and the box is right from the first frame; a picture too tall
+   is contained in it. */
+.otk-lightbox img { display: block; height: auto; max-width: 100%; max-height: calc(100dvh - 160px); object-fit: contain; }
 .otk-lightbox__foot { flex: none; display: flex; align-items: center; gap: 16px; padding: 12px var(--otk-panel-pad); border-top: var(--otk-hair) solid var(--otk-line-soft); background: var(--otk-band); font-family: var(--otk-font-mono); font-size: var(--otk-size-mono-sm); color: var(--otk-body); }
 .otk-lightbox__meta { color: var(--otk-faint); }
 .otk-lightbox__foot .otk-btn { margin-left: auto; }
@@ -926,7 +1127,11 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
    warned. Clicking an option IS the answer and sends it; each option can
    instead be copied to the composer to edit first; and any typed line
    answers it too, so typing takes the panel down. */
-.otk-ask { display: flex; flex-direction: column; gap: 12px; border-left: var(--otk-mark) solid var(--otk-accent); padding: 2px 0 2px 22px; }
+/* The block's leading is its own, never the place's: it stands among the
+   prose (a past question, the notes), beside it (the live one) and in the
+   canvas's articles, which each carry a leading of their own, and its label,
+   numbers and foot must measure the same rows in every one of them. */
+.otk-ask { display: flex; flex-direction: column; gap: 12px; line-height: normal; border-left: var(--otk-mark) solid var(--otk-accent); padding: 2px 0 2px 22px; }
 .otk-ask__label { font-family: var(--otk-font-mono); font-size: var(--otk-size-label); letter-spacing: var(--otk-track-label); text-transform: uppercase; color: var(--otk-accent-ink); }
 .otk-ask__body { margin: 0; font-family: var(--otk-font-prose); font-size: var(--otk-size-page); line-height: var(--otk-leading-page); color: var(--otk-ink); text-wrap: pretty; }
 .otk-ask__options { display: flex; flex-direction: column; }

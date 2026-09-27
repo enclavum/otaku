@@ -223,6 +223,13 @@ _DEFAULTS = {
         "Example dialogue (voice reference only, never story events): {examples}\n"
         "Standing note: {depth_note}))"
     ),
+    # Story mode's standing instruction, before the premise in the turn
+    # that precedes the story: the model turn must follow SOME turn — alone
+    # it degenerates — and a premise may be empty.
+    "story_framing": (
+        "Continue the story below exactly where the text ends, in its voice and "
+        "tense. Write only the story.\n\n{premise}"
+    ),
     "extract_prompt": EXTRACT_DEFAULT,
     "scene_history_prompt": SCENE_HISTORY_DEFAULT,
     "journal_history_prompt": JOURNAL_HISTORY_DEFAULT,
@@ -249,6 +256,9 @@ _REQUIRED = {
     "extract_prompt": ("cast", "journals", "chunk"),
     "scene_history_prompt": ("summaries",),
     "journal_history_prompt": ("name", "entries"),
+    # {premise} is the story's own text — without it the premise never
+    # reaches the model in story mode.
+    "story_framing": ("premise",),
 }
 
 _HEADER = [
@@ -272,6 +282,7 @@ class Prompts:
     recap_header: str = _DEFAULTS["recap_header"]
     tool_questions_prompt: str = _DEFAULTS["tool_questions_prompt"]
     tool_assistant_notes_prompt: str = _DEFAULTS["tool_assistant_notes_prompt"]
+    story_framing: str = _DEFAULTS["story_framing"]
 
 
 def load(path: Path) -> tuple[Prompts, list[str]]:

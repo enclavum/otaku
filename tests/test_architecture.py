@@ -374,13 +374,16 @@ _PAGE = {
     # `browser` for the kit's editor: a stored turn is corrected where it
     # is read, as the dossier corrects one. The kit is below the frame.
     "transcript": {"api", "browser", "dom", "pictures", "prose", "status", "table"},
+    # The layout switch: the story's `layout` setting written and the flow
+    # re-read in place, with the reader's place kept (`transcript`).
+    "layout": {"api", "browser", "dom", "status", "transcript"},
     "browser": {"dom", "status"},
     # `format` for the runhead's story name: a title is cut the same way
     # wherever the page writes one.
     # `browser` for `guard` alone — the kit's one barricade, which every
     # floating promise on this page goes through, the extraction Stop
     # included. The kit is below the frame, so this is not a cycle.
-    "shell": {"api", "browser", "dom", "format", "status", "transcript"},
+    "shell": {"api", "browser", "dom", "format", "layout", "status", "transcript"},
     "help": {"browser", "dom", "table"},
     # `story` is the dossier under the browser: the browser reaches into
     # it (Open story), never the other way — its route back is a command.
@@ -421,6 +424,7 @@ _PAGE = {
         "commands",
         "composer",
         "dom",
+        "layout",
         "login",
         "shell",
         "table",

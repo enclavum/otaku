@@ -92,6 +92,7 @@ class TestEvent:
             "model": None,
             "template": None,
             "attachments": [],
+            "join_kind": "paragraph",
             "segments": [{"kind": "prose", "text": "I listen."}],
         }
 

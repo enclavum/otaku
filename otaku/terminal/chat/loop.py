@@ -15,13 +15,21 @@ as it was.
 import functools
 import sys
 
+from otaku.backend import StoryMode
 from otaku.backend.api import play as api_play
 from otaku.backend.api import stories as api_stories
 from otaku.backend.session import Refused, Session
 from otaku.console import banner
 from otaku.terminal.chat import bindings, stream
 from otaku.terminal.chat.chat import RESUME_TURNS, Chat
-from otaku.terminal.prompt import PLACEHOLDER, Carry, LineAssembler, build_prompt, pictures
+from otaku.terminal.prompt import (
+    CHAT_PLACEHOLDER,
+    STORY_PLACEHOLDER,
+    Carry,
+    LineAssembler,
+    build_prompt,
+    pictures,
+)
 from otaku.terminal.screens import models as screen_models
 from otaku.terminal.tty import (
     BOLD,
@@ -132,7 +140,13 @@ def run(session: Session) -> None:
             prefix = CLOUD_PROMPT_PREFIX
         else:
             prefix = PROMPT_PREFIX
-        placeholder = None if assembler.in_block else PLACEHOLDER
+        # the hint is the mode's: a story in story mode is continued
+        if assembler.in_block:
+            placeholder = None
+        elif session.story_mode is StoryMode.STORY:
+            placeholder = STORY_PLACEHOLDER
+        else:
+            placeholder = CHAT_PLACEHOLDER
         try:
             # the answers to a pending question, as rows over the prefix
             message = functools.partial(answers.message, prefix)
@@ -187,10 +201,10 @@ def run(session: Session) -> None:
             if result is None:
                 continue  # inside an open """ block — keep collecting lines
             submission = result
-            if not submission:
+            if not submission and session.story_mode is not StoryMode.STORY:
                 # A bare Enter leaves its prompt row on screen; its rows
                 # stay counted so the next submission's erase takes it
-                # too.
+                # too. In story mode it is the continue: it plays.
                 continue
 
         try:

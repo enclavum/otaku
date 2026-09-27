@@ -211,6 +211,9 @@ def turn(message: Message) -> dict[str, Any]:
         # page draws from these and parses nothing. A block of a tag no
         # tool owns is a block all the same, with its text alone.
         "segments": api_play.segments(message.body),
+        # How it joins the turn before it, for the canvas: "inline", as it
+        # stands, or "paragraph", a blank line before it.
+        "join_kind": api_play.join_kind(message),
     }
 
 

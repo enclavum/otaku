@@ -26,8 +26,8 @@ const MODEL_CAPABILITIES = {
 };
 const MODEL_WORDS = { locality: "local", reasoning_words: "not supported", capability_words: "none" };
 const MODELS = [
-  { name: "demo-model", loaded: true, size: "4.7 GB", max_context_catalogue: "32K", max_context_loaded: "", capabilities: { ...MODEL_CAPABILITIES }, ...MODEL_WORDS },
-  { name: "demo-model-mini", loaded: false, size: "1.9 GB", max_context_catalogue: "8K", max_context_loaded: "", capabilities: { ...MODEL_CAPABILITIES }, ...MODEL_WORDS },
+  { name: "demo-model", loaded: true, size: "4.7 GB", max_context_catalogue: "32K", max_context_loaded: "", capabilities: { ...MODEL_CAPABILITIES }, text_template: null, ...MODEL_WORDS },
+  { name: "demo-model-mini", loaded: false, size: "1.9 GB", max_context_catalogue: "8K", max_context_loaded: "", capabilities: { ...MODEL_CAPABILITIES }, text_template: null, ...MODEL_WORDS },
 ];
 // What the demo's provider can do: it manages models, counts nothing
 // exactly, marks no cache, and reads the protocol's own parameters and
@@ -111,7 +111,19 @@ export function facts(version) {
     story_id: state.open,
     turns: story ? story.turns.length : 0,
     // The demo's model cannot see: no attach button, no pictures anywhere.
-    vision: false,
+    can_attach: false,
+    // The mode the story is played in, derived as the backend derives it
+    // (`backend.story.StoryMode`): the canvas layout on a model with the text wire.
+    story_mode:
+      story &&
+      _settingsOf(state.open).find((s) => s.name === "layout")?.layout === "canvas" &&
+      model?.capabilities.text_completion &&
+      model?.text_template
+        ? "story"
+        : "chat",
+    // story mode needs the text wire and a known template: the demo's
+    // model has neither, so canvas stays a layout here
+    is_story_mode_ready: Boolean(model?.capabilities.text_completion && model?.text_template),
   };
 }
 
@@ -508,6 +520,18 @@ export function updateSetting(storyId, name, body) {
   if (body.display_notes != null && setting.display_notes === null) {
     return refuse(`${setting.label} has nothing to display.`);
   }
+  // the layout setting is the one that holds a layout: a value, not a switch
+  const holdsLayout = setting.layout != null;
+  if (body.layout != null && !holdsLayout) {
+    return refuse(`${setting.label} has no layout.`);
+  }
+  if (holdsLayout) {
+    if (body.enabled != null) {
+      return refuse(`${setting.label} has no switch: a story is always read in one.`);
+    }
+    if (body.layout != null) setting.layout = body.layout;
+    return say(`${setting.label}: ${setting.layout}`); // `StorySettingLayout.standing`, no full stop
+  }
   if (body.display_notes != null) setting.display_notes = body.display_notes;
   if (body.enabled != null) setting.enabled = body.enabled;
   if (body.position != null) setting.position = body.position;
@@ -813,6 +837,8 @@ export function recordTurn(role, body) {
     // The demo's model writes prose and no tagged block, so a turn it
     // records is one prose segment (`backend.api.play.segments`).
     segments: [{ kind: "prose", text: body }],
+    // the demo's model completes chat, so a turn joins as a paragraph (`web.api.play.turn`)
+    join_kind: "paragraph",
   };
   story.turns.push(turn);
   touch(state.open);
@@ -844,6 +870,7 @@ export function importCard(landed) {
     template: null,
     attachments: [],
     segments: [{ kind: "prose", text: landed.line }],
+    join_kind: "paragraph",
   });
   const memory = memoryOf(state.open);
   const characterId = memory.characters.reduce((top, c) => Math.max(top, c.id), 0) + 1;
@@ -870,6 +897,7 @@ export function importCard(landed) {
       template: null,
       attachments: [],
       segments: [{ kind: "prose", text: landed.greeting }],
+      join_kind: "paragraph",
     attachments: [],
     });
   }

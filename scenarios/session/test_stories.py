@@ -23,13 +23,14 @@ from collections.abc import Callable
 
 import pytest
 
-from otaku.backend import InjectionPosition
+from otaku.backend import InjectionPosition, TranscriptLayout
 from otaku.backend.api import settings as api_settings
 from otaku.backend.api import stories as api_stories
 from otaku.backend.paths import Paths
 from otaku.backend.session import Refused, Session
-from otaku.backend.story import StorySetting
+from otaku.backend.story import StorySetting, StorySettingLayout
 from otaku.settings.prompts import Prompts
+from otaku.store.schema import StorySettingDB
 from otaku.terminal.screens import stories as screen_stories
 from otaku.terminal.screens import story as screen_story
 from scenarios.support import server as scripted
@@ -684,7 +685,20 @@ class TestSettingsAreTheStorys:
         api_stories.update_setting(app.session, "allow_questions", enabled=True)
         app.play("I push the door.")
         app.play("/new")
-        assert not any(each.enabled for each in api_stories.get_settings(app.session))
+        assert not any(each.enabled for each in switches(app))
+        # the one value among them starts at its default: a story is
+        # always read in a layout
+        assert setting(app, "layout").layout is TranscriptLayout.MANUSCRIPT
+
+    def test_the_layout_is_the_storys_and_reads_back(self, app: App) -> None:
+        api_stories.update_setting(app.session, "layout", layout=TranscriptLayout.CANVAS)
+        app.play("I push the door.")
+        assert app.store.stories.get_settings(app.session.story_id) == (
+            StorySettingDB("layout", enabled=True, layout=TranscriptLayout.CANVAS),
+        )
+        assert setting(app, "layout").layout is TranscriptLayout.CANVAS
+        app.play("/new")
+        assert setting(app, "layout").layout is TranscriptLayout.MANUSCRIPT
 
     def test_a_fork_plays_the_way_its_origin_does(self, app: App) -> None:
         api_stories.update_setting(
@@ -771,13 +785,24 @@ class TestSettingsRefused:
             {"name": "use_shared_reminder", "position": InjectionPosition()},
             # The shared reminder's text is no one story's.
             {"name": "use_shared_reminder", "reminder_text": "Stay grim."},
-            # A flag injects nothing, so it rides nowhere.
-            {"name": "story_mode", "position": InjectionPosition(1)},
+            # The layout has no switch, and a switch has no layout.
+            {"name": "layout", "enabled": True},
+            {"name": "allow_questions", "layout": TranscriptLayout.CANVAS},
         ):
             with pytest.raises(Refused):
                 api_stories.update_setting(app.session, **asked)  # type: ignore[arg-type]
         # Nothing was written by a refusal.
-        assert not any(each.enabled for each in api_stories.get_settings(app.session))
+        assert not any(each.enabled for each in switches(app))
+
+
+def switches(app: App) -> list[StorySetting]:
+    """The story's settings that are switches — every one but the layout,
+    which is a value and always in force."""
+    return [
+        each
+        for each in api_stories.get_settings(app.session)
+        if not isinstance(each, StorySettingLayout)
+    ]
 
 
 def picks(story_id: int, upto: int | None = None, action: str = "resume") -> Picker:

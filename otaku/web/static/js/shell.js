@@ -10,6 +10,7 @@ import * as api from "./api.js";
 import { guard } from "./browser.js";
 import { $, $$ } from "./dom.js";
 import { label } from "./format.js";
+import { hintCanvas, showLayout } from "./layout.js";
 import { offline, reached, tell, told, working } from "./status.js";
 import { displayTools, isPlaying, showCorrected, showPlayed } from "./transcript.js";
 
@@ -45,9 +46,20 @@ export function showFacts(facts) {
   // to be somewhere: hovering the name is where.
   const named = $('[data-fact="model"]');
   if (named) named.title = fields.model;
-  // The attach hint is a fact of the model in use: there while it can
-  // see, gone otherwise. The backend refuses a picture regardless.
-  for (const button of $$("[data-attach]")) button.hidden = !facts.vision;
+  // The attach hint is there while a picture may ride the next request
+  // (`facts.can_attach`: the model sees, and the mode's wire carries one),
+  // gone otherwise. The backend refuses a picture regardless.
+  for (const button of $$("[data-attach]")) button.hidden = !facts.can_attach;
+  // The verb on the send button is the mode's (`facts.story_mode`): a story in
+  // story mode is continued, not sent to. The words are this medium's.
+  const send = $("[data-send]");
+  if (send) send.textContent = facts.story_mode === "story" ? "Continue" : "Send";
+  // The mode on the app root, for the stylesheet: in story mode no
+  // picture rides the request, so the flow shows none (docs/web_tokens.md).
+  if (app) app.dataset.storyMode = facts.story_mode;
+  // on a model that can play story mode, the canvas layout IS it: the
+  // glyph's hint says so
+  hintCanvas(facts.is_story_mode_ready);
   drawn = facts.story_id;
 }
 
@@ -60,13 +72,14 @@ export async function refresh() {
 
 /** The transcript from the store: the turns, and — off the story's
     settings, which a story that does not exist yet has none of — which
-    tools' calls the reader is shown. */
+    tools' calls the reader is shown, and which layout it is read in. */
 export async function drawPlayed(storyId) {
   const [played, held] = await Promise.all([
     api.played(),
     storyId === null ? null : api.storySettings(storyId),
   ]);
   displayTools(held?.settings ?? []);
+  showLayout(storyId, held?.settings ?? []);
   showPlayed(played);
 }
 
@@ -275,12 +288,12 @@ export function disconnected(gone = true) {
     offline(false);
   }
   /* Every door that reaches the session is shut while there is none:
-     the contents, the model in the rail's foot, the box and the verbs
+     the contents and the layout glyphs, the model in the rail's foot, the box and the verbs
      beside it — Send, Regen, Undo — and the prefix menu, which has
      nothing to insert into. Stop is not one of them: it gives up a
      reply THIS page is holding, which is this side of the connection. */
   for (const control of $$(
-    ".otk-toc button, .otk-rail__foot, .otk-composer textarea, [data-send], [data-turn], [data-prefixes]",
+    ".otk-toc button, .otk-modes button, .otk-rail__foot, .otk-composer textarea, [data-send], [data-turn], [data-prefixes]",
   )) {
     control.disabled = gone;
   }

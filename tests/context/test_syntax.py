@@ -143,6 +143,11 @@ class TestPromptToWire:
     def test_prose_goes_out_as_it_is(self) -> None:
         assert wire("She looks up.", None, is_last=True) == "She looks up."
 
+    def test_a_lines_leading_whitespace_is_its_seam_and_rides_the_wire(self) -> None:
+        # typed so to go on with the text before it (`assembler.join_of`)
+        assert wire(" and the door", None, is_last=True) == " and the door"
+        assert wire("\n\nAnd the door", None, is_last=True) == "\n\nAnd the door"
+
     def test_a_command_prefix_never_reaches_the_model(self) -> None:
         got = wire("/me Elara: I step in.", ME, is_last=True)
         assert got == "<<Elara speaks>>\nI step in."
