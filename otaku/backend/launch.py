@@ -14,6 +14,7 @@ import re
 from collections.abc import Callable, Iterable
 from dataclasses import replace
 from pathlib import Path
+from typing import TypeVar
 
 from otaku import encryption
 from otaku.backend import passwords
@@ -23,14 +24,17 @@ from otaku.backend.paths import Paths
 from otaku.backend.session import NO_MODEL_HINT, Refused, Session
 from otaku.encryption import AskSecret, Cipher, EncryptionError, SealedError
 from otaku.formatting import pretty_path
+from otaku.integrations import Integrations, default_sections
 from otaku.logging import ErrorLog, RequestLog, SystemLog
 from otaku.providers import ProviderConfig, Registry, autoconfigure
 from otaku.settings import Secrets, migrations, write_atomic
 from otaku.settings import config as config_file
+from otaku.settings import integrations as integrations_file
 from otaku.settings import prompts as prompts_file
 from otaku.settings import providers as providers_file
 from otaku.settings import state as state_file
 from otaku.settings.config import Config
+from otaku.settings.integrations import IntegrationConfig, IntegrationSettings
 from otaku.store import Store, is_encrypted
 from otaku.store.schema import Attachment
 from otaku.worker import Worker
@@ -70,7 +74,7 @@ def open_session(root: str | Path | None = None, *, ask_secret: AskSecret | None
     EncryptionError, or DatabaseError when a piece refuses; the caller ends
     with `session.close()`."""
     paths = Paths.resolve(root)
-    config, providers, notices = _load_config(paths)
+    config, providers, integration_settings, notices = _load_config(paths)
     prompts_file.write_stub(paths.prompts_file)
     prompts, prompt_warnings = prompts_file.load(paths.prompts_file)
     notices += prompt_warnings
@@ -95,6 +99,19 @@ def open_session(root: str | Path | None = None, *, ask_secret: AskSecret | None
         f"Ignoring provider section [{name}]: no supported provider is named so."
         for name in registry.ignored
     ]
+    # The integrations the same way: the package binds the settings and
+    # reports what it could not — a section no integration answers to,
+    # a web search choice naming no search engine — and the launch says so.
+    integrations = Integrations.from_settings(integration_settings)
+    notices += [
+        f"Ignoring integration section [{name}]: no supported integration is named so."
+        for name in integrations.ignored
+    ]
+    if integrations.unknown_web_search_engine:
+        notices.append(
+            f"Ignoring web search engine {integrations.unknown_web_search_engine!r}: "
+            "no search engine is named so."
+        )
     # A remembered model whose provider is still configured resumes; a
     # stale one is reported and skipped — the session opens modelless
     # and every model-facing door says so until a pick.
@@ -140,7 +157,8 @@ def open_session(root: str | Path | None = None, *, ask_secret: AskSecret | None
             prompts=prompts,
             paths=paths,
             store=store,
-            registry=registry,
+            providers=registry,
+            integrations=integrations,
             worker=worker,
             state=state,
         )
@@ -161,7 +179,7 @@ def request_log(
     exactly as at launch: a sealed log stays readable to whoever can
     open the store. Raises ConfigError/EncryptionError."""
     paths = Paths.resolve(root)
-    config, _, _ = _load_config(paths)
+    config, _, _, _ = _load_config(paths)
     return RequestLog(paths.logs_dir, _unlock_cipher(config, paths, ask_secret=ask_secret))
 
 
@@ -176,21 +194,30 @@ def error_log(root: str | Path | None = None) -> ErrorLog:
 # ---------- launch internals ----------
 
 
-def _load_config(paths: Paths) -> tuple[Config, dict[str, ProviderConfig], list[str]]:
-    """The config, the providers (typed by `settings.providers` — no
-    conversion anywhere), and the notices to show: the files written at
-    first run, migrated to the current shape always — first run
-    included, so an autoconfigured plain api key (omlx's, say) is sealed
-    by the very launch that wrote it, and a typed web password replaced
-    by its hash — and sealed api keys resolved for the session (one
-    that will not open is warned about and its provider runs keyless).
-    Raises ConfigError when a file does not parse."""
+def _load_config(
+    paths: Paths,
+) -> tuple[Config, dict[str, ProviderConfig], IntegrationSettings, list[str]]:
+    """The config, the providers and the integrations (typed by
+    `settings.providers` and `settings.integrations` — no conversion
+    anywhere), and the notices to show: the files written at first run,
+    migrated to the current shape always — first run included, so an
+    autoconfigured plain api key (omlx's, say) is sealed by the very
+    launch that wrote it, and a typed web password replaced by its hash
+    — and sealed api keys resolved for the session, the providers' and
+    the integrations' alike (one that will not open is warned about and
+    its section runs keyless). Raises ConfigError when a file does not
+    parse."""
     paths.ensure_tree()
     notices: list[str] = []
     if not paths.config_file.exists():
         write_atomic(paths.config_file, Config().to_toml())
         if not paths.providers_file.exists():
             write_atomic(paths.providers_file, providers_file.render(autoconfigure()))
+        if not paths.integrations_file.exists():
+            write_atomic(
+                paths.integrations_file,
+                integrations_file.render(default_sections()),
+            )
         notices.append(f"Created {pretty_path(paths.config_file)}")
     secrets = Secrets(
         seal=_sealer(paths),
@@ -198,7 +225,7 @@ def _load_config(paths: Paths) -> tuple[Config, dict[str, ProviderConfig], list[
         hash=passwords.hash,
         is_hashed=passwords.is_hashed,
     )
-    migrations.migrate(paths.settings_files, secrets, autoconfigure())
+    migrations.migrate(paths.settings_files, secrets, autoconfigure(), default_sections())
     config = config_file.load(paths.config_file)
     if config.web_password and not passwords.is_hashed(config.web_password):
         # The migration left it plain — the file could not be written, or
@@ -206,9 +233,11 @@ def _load_config(paths: Paths) -> tuple[Config, dict[str, ProviderConfig], list[
         # in the file by the next launch that can. Nothing past this line
         # sees it typed.
         config = replace(config, web_password=passwords.hash(config.web_password))
-    providers = providers_file.load(paths.providers_file)
-    resolved, key_warnings = _resolve_api_keys(paths, providers)
-    return config, resolved, notices + key_warnings
+    providers, key_warnings = _resolve_api_keys(paths, providers_file.load(paths.providers_file))
+    integration_settings = integrations_file.load(paths.integrations_file)
+    integrations, more_warnings = _resolve_api_keys(paths, integration_settings.integrations)
+    integration_settings = replace(integration_settings, integrations=integrations)
+    return config, providers, integration_settings, notices + key_warnings + more_warnings
 
 
 def _unlock_cipher(config: Config, paths: Paths, *, ask_secret: AskSecret | None = None) -> Cipher:
@@ -258,15 +287,19 @@ def _sealer(paths: Paths) -> Callable[[str], str]:
     return best_effort
 
 
+# The two settings types that carry a sealed api key, resolved alike.
+_Keyed = TypeVar("_Keyed", ProviderConfig, IntegrationConfig)
+
+
 def _resolve_api_keys(
-    paths: Paths, providers: dict[str, ProviderConfig]
-) -> tuple[dict[str, ProviderConfig], list[str]]:
+    paths: Paths, providers: dict[str, _Keyed]
+) -> tuple[dict[str, _Keyed], list[str]]:
     """The providers with sealed api keys opened for the session, plus a
     warning line per key that would not open — its provider keeps an
     empty key, so requests go out unauthenticated rather than with a
     dead token. The sealing key is fetched once for the whole pass — a
     launch never asks the OS keychain per provider."""
-    resolved: dict[str, ProviderConfig] = {}
+    resolved: dict[str, _Keyed] = {}
     warnings: list[str] = []
     unseal = encryption.opener(key_file=paths.config_key_file, service=paths.keychain_service)
     for name, config in providers.items():

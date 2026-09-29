@@ -334,7 +334,8 @@ class Extractor:
             # one sees the new chain.
             self._log(f"extraction declined (story {self._story_id}): the story changed mid-pass")
             return PassResult.CANCELLED
-        tail = [by_id[i] for i in tail_ids]
+        # A tool's turn is not the scene: left out, as the calls are.
+        tail = [by_id[i] for i in tail_ids if by_id[i].role != "tool"]
         sizes = [len(tool_calls.strip(m.body)) for m in tail]
         spans = [
             tail[a:b]

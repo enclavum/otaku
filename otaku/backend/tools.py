@@ -1,7 +1,7 @@
 """The model's language: the tools it may use by writing a call in its
 reply — one class each, and the one registry.
 
-A class declares a tool: its name, who answers its call, and the key of
+A class declares a tool: its name, who acts on its call, and the key of
 its prompt in prompts.toml. An instance is one call of it, read at
 construction — what the play stream makes of a reply. WHAT a call is —
 a fenced block marked `otk-NAME`, whatever the name — is
@@ -11,20 +11,30 @@ of its tool. Whether a
 story lets the model use a tool, and where its prompt rides, is the
 story's setting (`backend.story`).
 
+A tool otaku RUNS (`Actor.SYSTEM`) ends the reply as a question does,
+and its `run` yields the RESULT otaku records as the TOOL turn the
+model reads next — the reply stream's loop (`api.play._reply_events`)
+hands it the integrations as bound, records the result, and asks the
+model again.
+
 A new tool is a subclass and its name in `TOOLS`.
 """
 
 import enum
+import os
 import re
+from datetime import datetime
 from typing import ClassVar
+
+from otaku.integrations import IntegrationError, Integrations, SearchResult
 
 
 class Actor(enum.Enum):
-    """Who answers a tool's call."""
+    """Who acts on a tool's call."""
 
     NOBODY = "nobody"  # an aside: the reply goes on after the call
     USER = "user"  # the reply ends there, the user's next line answers
-    SYSTEM = "system"  # otaku answers by itself — not supported yet
+    SYSTEM = "system"  # the reply ends there, otaku runs the tool, the model goes on
 
 
 class Tool:
@@ -32,6 +42,7 @@ class Tool:
     read at construction."""
 
     name: ClassVar[str] = ""  # its name in the namespace: a fenced block marked otk-NAME
+    label: ClassVar[str] = ""  # what a frontend calls it, where one names it
     actor: ClassVar[Actor] = Actor.NOBODY
     # The prompts.toml key of its prompt — what tells the model how the
     # tool is used. The story's setting reads the text under it.
@@ -43,9 +54,22 @@ class Tool:
         self.text = text
 
     def to_json(self) -> dict[str, object]:
-        """The call as a frontend draws it — the tool and its text, and
-        whatever the tool read out of it. Plain data; the page keys on it."""
-        return {"tool": self.name, "text": self.text}
+        """The call as a frontend draws it — the tool, its label and who
+        acts on it, its text, and whatever the tool read out of it. Plain
+        data; the page keys on it."""
+        return {
+            "tool": self.name,
+            "label": self.label,
+            "actor": self.actor.value,
+            "text": self.text,
+        }
+
+    def run(self, integrations: Integrations) -> str:
+        """The RESULT of a call of this tool — the TOOL turn's text, the
+        model's to read next — given the integrations as bound, of which
+        a tool takes the one it runs on, or none. A tool the SYSTEM acts
+        on has a result; every other has none to give."""
+        raise NotImplementedError(f"the {self.name} tool is not otaku's to run")
 
     @classmethod
     def to_prose(cls, text: str) -> str:
@@ -53,14 +77,6 @@ class Tool:
         OFF — story text, or nothing. Nothing by default: a call the
         model is no longer told about teaches it nothing."""
         return ""
-
-
-class ToolAssistantNotes(Tool):
-    """A block marked `otk-note` — the model's private aside before its reply:
-    what the visible scene cannot show, kept for its own later turns."""
-
-    name = "note"
-    prompt_name = "tool_assistant_notes_prompt"
 
 
 class ToolQuestions(Tool):
@@ -113,11 +129,96 @@ class ToolQuestions(Tool):
         return cls(text).question
 
 
+class ToolAssistantNotes(Tool):
+    """A block marked `otk-note` — the model's private aside before its reply:
+    what the visible scene cannot show, kept for its own later turns."""
+
+    name = "note"
+    label = "Notes"
+    prompt_name = "tool_assistant_notes_prompt"
+
+
+class ToolSystem(Tool):
+    """A block marked `otk-system`, empty — the model asks the machine:
+    the time now, and the load it is under. A fixture for the tools
+    otaku runs, and the one result that needs no key."""
+
+    name = "system"
+    label = "System"
+    actor = Actor.SYSTEM
+    prompt_name = "tool_system_prompt"
+
+    def run(self, integrations: Integrations) -> str:
+        now = datetime.now().astimezone().isoformat(timespec="seconds")
+        try:
+            one, five, fifteen = os.getloadavg()
+            load = f"{one:.2f} {five:.2f} {fifteen:.2f}"
+        except (AttributeError, OSError):
+            load = "unknown"
+        return f"Time: {now}\nLoad average (1, 5, 15 min): {load}"
+
+
+class ToolWebSearch(Tool):
+    """A block marked `otk-search` — the model looks something up: the
+    inside is the query, and the result is the top results' snippets as
+    "title: snippet" paragraphs, cut to a character budget so the
+    result's cost is bounded whatever comes back — or the sentence for
+    why there are none. The engine asked is the one the web search key
+    chose (`Integrations.web_search_engine`)."""
+
+    name = "search"
+    label = "Web search"
+    actor = Actor.SYSTEM
+    prompt_name = "tool_web_search_prompt"
+    MAX_RESULTS: ClassVar[int] = 4
+    CHAR_BUDGET: ClassVar[int] = 1500  # characters of snippets at most
+
+    def run(self, integrations: Integrations) -> str:
+        query = " ".join(self.text.split())
+        if not query:
+            return "No query was given."
+        engine = integrations.web_search_engine
+        if engine is None or not engine.api_key:
+            return "Web search is not set up: no API key."
+        try:
+            results = engine.search(query, max_results=self.MAX_RESULTS)
+        except IntegrationError as e:
+            return f"Web search failed: {engine.label} — {e}."
+        return self._render(results)
+
+    def _render(self, results: list[SearchResult]) -> str:
+        parts: list[str] = []
+        used = 0
+        for result in results:
+            snippet = result.snippet.strip()
+            if not snippet:
+                continue
+            remaining = self.CHAR_BUDGET - used
+            if remaining <= 0:
+                break
+            snippet = snippet[:remaining]
+            parts.append(f"{result.title}: {snippet}")
+            used += len(snippet)
+        return "\n\n".join(parts) if parts else "No results found."
+
+
 # Every tool, keyed by its name — the one registry.
-TOOLS: dict[str, type[Tool]] = {cls.name: cls for cls in (ToolAssistantNotes, ToolQuestions)}
+TOOLS: dict[str, type[Tool]] = {
+    cls.name: cls for cls in (ToolQuestions, ToolAssistantNotes, ToolSystem, ToolWebSearch)
+}
 
 
-def read(name: str, text: str) -> Tool:
+def read_call(name: str, text: str) -> Tool:
     """The call, read as the tool its name says, in any case. Raises
     KeyError for a name no tool owns."""
     return TOOLS[name.lower()](text)
+
+
+def get_tool_label(name: str | None) -> str:
+    """What a frontend calls the tool a tool turn's `provider` names —
+    the registry's label; the name itself for one this build does not
+    have, "" for none."""
+    if not name:
+        return ""
+    found = TOOLS.get(name)
+    return found.label if found is not None else name

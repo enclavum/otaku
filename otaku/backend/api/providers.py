@@ -36,7 +36,7 @@ def switch_model(session: Session, provider: str, model: str) -> str:
     models on one prompt: switch, then regenerate). Parameters follow the
     model; the switch is remembered. Returns the confirmation; raises
     Refused for an unknown provider or a no-op."""
-    if provider not in session._providers_registry.list():
+    if provider not in session._providers.list():
         raise Refused(f"Unknown provider {provider!r}.")
     if f"{provider}/{model}" == session.full_model_name:
         raise Refused(f"Already using {session.full_model_name}.")
@@ -52,7 +52,7 @@ def switch_spec(session: Session, raw: str) -> str:
     lists the known providers, then wraps `switch_model`. Both frontends'
     chat boxes route here; the picker and the web PUT use the structured
     form."""
-    known = session._providers_registry.list()
+    known = session._providers.list()
     head, _, rest = raw.strip().partition("/")
     if head not in known or not rest:
         names = ", ".join(known)
@@ -91,7 +91,7 @@ def get_providers(session: Session, skip: set[str] | None = None) -> Panel:
     """Every reachable provider with its models, and why the others are
     not — the picker's one query; `skip` lets it fetch cloud catalogs
     after its screen is up."""
-    registry = session._providers_registry
+    registry = session._providers
     asked = [name for name in registry.list() if name not in (skip or ())]
     answers = registry.map(registry.info, asked)
     rows = [answer for answer in answers if isinstance(answer, ProviderInfo)]
@@ -125,7 +125,7 @@ def configured(session: Session) -> set[str]:
     """The configured providers' names — what the panel's one-provider
     refresh skips everything but, and nothing more: the sections
     themselves come one at a time through `section`."""
-    return set(session._providers_registry.list())
+    return set(session._providers.list())
 
 
 def loaded_models(session: Session, provider: str) -> set[str]:
@@ -135,7 +135,7 @@ def loaded_models(session: Session, provider: str) -> set[str]:
     slowest it ever is). Raises Refused when it cannot be reached: a
     refresh that failed quietly would leave the panel claiming the
     opposite of what just happened."""
-    client = session._providers_registry.get(provider)
+    client = session._providers.get(provider)
     if client is None:
         raise Refused(f"Unknown provider {provider!r}.")
     try:
@@ -149,7 +149,7 @@ def section(session: Session, provider: str) -> ProviderConfig:
     default otherwise — what the panel shows either way. Raises Refused
     for a name no supported provider answers to: a section is its
     provider's name."""
-    known = session._providers_registry.configs.get(provider)
+    known = session._providers.configs.get(provider)
     if known is not None:
         return known
     if provider not in ALL_CLIENTS:
@@ -208,7 +208,7 @@ def save_field(session: Session, provider: str, attr: ProviderField, value: str)
         session._paths.config_backups_dir,
         [surgery.ensure_section(provider, block), surgery.set_key(provider, attr, line)],
     )
-    session._providers_registry.update(updated)
+    session._providers.update(updated)
     if not written:
         # The registry took the value, the file did not — say so, or the
         # next launch silently forgets what the panel confirmed.
@@ -235,7 +235,7 @@ def clear_field(session: Session, provider: str, attr: ProviderField) -> str:
         # value stays — in the session too, so the panel stays honest.
         return "Not forgotten — providers.toml could not be written."
     cleared = replace(config, url="") if attr == "url" else replace(config, api_key="")
-    session._providers_registry.update(cleared)
+    session._providers.update(cleared)
     return ""
 
 
@@ -265,7 +265,7 @@ def unload(session: Session, provider: str, model: str) -> None:
 
 
 def _managed(session: Session, provider: str) -> OpenAIClient:
-    client = session._providers_registry.get(provider)
+    client = session._providers.get(provider)
     if client is None:
         raise Refused(f"Unknown provider {provider!r}.")
     if not client.capabilities.model_management:

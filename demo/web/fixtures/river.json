@@ -39,6 +39,7 @@
     "model": null,
     "template": null,
     "attachments": [],
+    "tool_label": null,
     "segments": [
      {
       "kind": "prose",
@@ -57,6 +58,7 @@
     "model": null,
     "template": null,
     "attachments": [],
+    "tool_label": null,
     "segments": [
      {
       "kind": "prose",
@@ -75,6 +77,7 @@
     "model": null,
     "template": "((OOC: The user writes as Maren.))\n{body}",
     "attachments": [],
+    "tool_label": null,
     "segments": [
      {
       "kind": "prose",
@@ -93,6 +96,7 @@
     "model": null,
     "template": null,
     "attachments": [],
+    "tool_label": null,
     "segments": [
      {
       "kind": "prose",
@@ -111,6 +115,7 @@
     "model": null,
     "template": null,
     "attachments": [],
+    "tool_label": null,
     "segments": [
      {
       "kind": "prose",
@@ -129,6 +134,7 @@
     "model": null,
     "template": null,
     "attachments": [],
+    "tool_label": null,
     "segments": [
      {
       "kind": "prose",
@@ -147,6 +153,7 @@
     "model": null,
     "template": null,
     "attachments": [],
+    "tool_label": null,
     "segments": [
      {
       "kind": "prose",
@@ -165,6 +172,7 @@
     "model": null,
     "template": null,
     "attachments": [],
+    "tool_label": null,
     "segments": [
      {
       "kind": "prose",
@@ -183,6 +191,7 @@
     "model": null,
     "template": "((OOC: The user writes as Maren.))\n{body}",
     "attachments": [],
+    "tool_label": null,
     "segments": [
      {
       "kind": "prose",
@@ -201,6 +210,7 @@
     "model": null,
     "template": null,
     "attachments": [],
+    "tool_label": null,
     "segments": [
      {
       "kind": "prose",
@@ -219,6 +229,7 @@
     "model": null,
     "template": null,
     "attachments": [],
+    "tool_label": null,
     "segments": [
      {
       "kind": "prose",
@@ -237,6 +248,7 @@
     "model": null,
     "template": null,
     "attachments": [],
+    "tool_label": null,
     "segments": [
      {
       "kind": "prose",
@@ -255,6 +267,7 @@
     "model": null,
     "template": "((OOC: The user writes as Maren.))\n{body}",
     "attachments": [],
+    "tool_label": null,
     "segments": [
      {
       "kind": "prose",
@@ -273,6 +286,7 @@
     "model": null,
     "template": null,
     "attachments": [],
+    "tool_label": null,
     "segments": [
      {
       "kind": "prose",
@@ -304,6 +318,7 @@
       "size": 317287
      }
     ],
+    "tool_label": null,
     "segments": [
      {
       "kind": "prose",
@@ -322,6 +337,7 @@
     "model": null,
     "template": null,
     "attachments": [],
+    "tool_label": null,
     "segments": [
      {
       "kind": "prose",
@@ -330,6 +346,8 @@
      {
       "kind": "tool_call",
       "tool": "question",
+      "label": "",
+      "actor": "user",
       "text": "Do you follow the water into the culvert?\n1. I go in, lantern first\n2. I ask the voice its name before I move\n3. I climb out and go back for Tallis",
       "question": "Do you follow the water into the culvert?",
       "options": [

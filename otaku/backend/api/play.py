@@ -2,18 +2,22 @@
 the takes over it (regenerate, undo).
 
 The stream is the frontend's to drive: iterate to render, close to
-cancel. The event vocabulary lives here, `Text` and `Reasoning` included
-(re-exported from providers — members of this module's union) and
-`ToolCall` (`context.tool_calls`': a piece of a call, the tool's name
-and its inside, never a fence — the deltas are fed through a
-`ReplyParser`, so neither frontend parses). What is RECORDED is
+cancel. The event vocabulary lives here and is this module's own, in
+the order a turn happens: a row that landed is a `*Turn` — `UserTurn`,
+`AssistantTurn`, `ToolTurn` — named by the row's role and carrying the
+row as recorded; a piece of the reply as it streams is
+`AssistantText`, `AssistantReasoning` or `AssistantToolCall` (a piece
+of a call, the tool's name and its inside, never a fence — the deltas
+are fed through a `ReplyParser`, so neither frontend parses; the
+provider's own chunks never leave this module); and exactly one of
+`Declined`, `Failed` and `Done` ends the stream. What is RECORDED is
 everything that arrived, fences included; a call of a tool the user
-answers ends the reply, and nothing past it is read. Closing
+answers or otaku runs ends the reply, and nothing past it is read. Closing
 mid-stream keeps and records what arrived — Ctrl+C and Ctrl+R are the
 frontend closing the generator; a Ctrl+R then simply calls `regenerate`
-for the fresh take. Exactly one of Declined, Failed, or Done ends a
-stream. A new reply arms the worker's idle-debounced extraction pass;
-every submission (submit, regenerate, undo) defers pending work first.
+for the fresh take. A new reply arms the worker's idle-debounced
+extraction pass; every submission (submit, regenerate, undo) defers
+pending work first.
 """
 
 from collections.abc import Iterator, Sequence
@@ -32,15 +36,12 @@ from otaku.backend.files import (
 )
 from otaku.backend.session import NO_MODEL_HINT, Refused, Session
 from otaku.backend.story import StoryMode, StorySettings, ToolSetting
-from otaku.backend.tools import TOOLS, Actor, read
+from otaku.backend.tools import TOOLS, Actor, Tool, read_call
 from otaku.context import syntax, tool_calls
 from otaku.context.assembler import AssembledPrompt, ContextOverflowError, join_of
-from otaku.context.tool_calls import FENCE, Prose, ReplyParser
-from otaku.context.tool_calls import ToolCall as ToolCall
+from otaku.context.tool_calls import FENCE, Prose, ReplyParser, ToolCall, parse_reply
 from otaku.formatting import format_context
-from otaku.providers import OpenAIClient, ProviderError, Reply, Stats, templates
-from otaku.providers import Reasoning as Reasoning
-from otaku.providers import Text as Text
+from otaku.providers import OpenAIClient, ProviderError, Reasoning, Reply, Stats, Text, templates
 from otaku.store.schema import Character, Message
 
 # A picture is refused in story mode though the model sees: the request
@@ -51,19 +52,65 @@ NOTHING_TO_SEND = "Nothing to send: type a line."
 
 
 @dataclass(frozen=True)
-class Recorded:
-    """The user's turn landed (autocorrect settled first) — echo it.
+class UserTurn:
+    """The user's row landed (autocorrect settled first) — echo it.
     `note` is the record's own line to show dim beside the echo — the
-    dice a /roll rolled; "" for every other turn."""
+    dice a /roll rolled; "" for every other row."""
 
     message: Message
     note: str = ""
 
 
 @dataclass(frozen=True)
+class AssistantText:
+    """A piece of the reply's prose, as it streams."""
+
+    text: str
+
+
+@dataclass(frozen=True)
+class AssistantReasoning:
+    """A piece of the model's thinking, as it streams — shown, never
+    recorded."""
+
+    text: str
+
+
+@dataclass(frozen=True)
+class AssistantToolCall:
+    """A piece of a tool call's inside, as it streams: the tool's name
+    and the text, never a fence; `closed` on the piece the closing
+    fence ended."""
+
+    name: str
+    text: str
+    closed: bool
+
+
+@dataclass(frozen=True)
+class AssistantTurn:
+    """The model's row landed, as recorded, once its pieces streamed:
+    it ends where the stream ended — at a call of a tool the user
+    answers or otaku runs, the closing fence there whether or not the
+    model wrote one, or at the reply's own end — and it is told before
+    a tool runs, at the end, and when the stream failed alike."""
+
+    message: Message
+
+
+@dataclass(frozen=True)
+class ToolTurn:
+    """A tool ran and its row landed: the result its body, the tool's
+    name its `provider` (`tools.get_tool_label` names it for a reader). The reply
+    that continues from it streams next."""
+
+    message: Message
+
+
+@dataclass(frozen=True)
 class Declined:
     """The stream declines mid-way — it ends here; what already happened
-    (a Recorded turn) stands. `reason` is the sentence to show. Named
+    (a row landed) stands. `reason` is the sentence to show. Named
     apart from the `Refused` exception on purpose: an exception is
     raised eagerly BEFORE the iterator exists, this event arrives inside
     one."""
@@ -77,6 +124,20 @@ class Failed:
     `reason` is the sentence to show."""
 
     reason: str
+
+
+@dataclass(frozen=True)
+class Done:
+    """The turn's end: what the reply came to (None when the stream
+    said nothing of itself) and the verbose stats line — the report's
+    `text()`, "" unless /set verbose, so a frontend prints it as it is.
+    Every row landed before it, each told by its own event. A reply
+    that ended on a question is in the reply's own segments, for a
+    frontend to pose: the next line played is the answer, and nothing
+    more is built around answering."""
+
+    report: "ReplyReport | None"
+    stats: str
 
 
 @dataclass(frozen=True)
@@ -145,21 +206,6 @@ class ReplyReport:
         return f"[ {', '.join(parts)} ]"
 
 
-@dataclass(frozen=True)
-class Done:
-    """The turn's end: the recorded reply (None when nothing arrived),
-    what it came to (None when the stream said nothing of itself), and
-    the verbose stats line — the report's `text()`, "" unless /set
-    verbose, so a frontend prints it as it is. A reply that ended on a
-    question is in the reply's own segments, for a frontend to pose:
-    the next line played is the answer, and nothing more is built
-    around answering."""
-
-    reply: Message | None
-    report: ReplyReport | None
-    stats: str
-
-
 @dataclass
 class _Attempt:
     """One request's take, as it streams: what arrived, as the reply
@@ -173,7 +219,22 @@ class _Attempt:
     error: str | None = None
 
 
-PlayEvent = Recorded | Text | Reasoning | ToolCall | Declined | Failed | Done
+PlayEvent = (
+    UserTurn
+    | AssistantText
+    | AssistantReasoning
+    | AssistantToolCall
+    | AssistantTurn
+    | ToolTurn
+    | Declined
+    | Failed
+    | Done
+)
+
+# How many times one turn may call a tool otaku runs before the reply
+# stands as it is: a model that calls in a loop gets this many results
+# and no more.
+_MAX_TOOL_ROUNDS = 3
 
 
 def submit(session: Session, line: str, files: Sequence[RawFile] = ()) -> Iterator[PlayEvent]:
@@ -188,10 +249,11 @@ def submit(session: Session, line: str, files: Sequence[RawFile] = ()) -> Iterat
     file that is no picture), stored only when the turn records, so a
     refusal leaves the story and the folder untouched. Then: the typed
     name settles to the cast's
-    spelling, the turn records, Recorded is yielded, and the reply
-    streams as Reasoning/Text deltas, Failed on a stream error, Done at
-    the end. With no model selected the turn is still recorded — it is
-    story — and Declined(NO_MODEL_HINT) ends the stream after Recorded.
+    spelling, the turn records, UserTurn is yielded, and the reply
+    streams as AssistantReasoning/AssistantText pieces and lands as
+    AssistantTurn, Failed on a stream error, Done at the end. With no
+    model selected the turn is still recorded — it is story — and
+    Declined(NO_MODEL_HINT) ends the stream after UserTurn.
     Closing the generator mid-stream records the partial reply and its
     usage. A new reply arms the worker's idle extraction pass —
     [lore_extraction].enabled gates ONLY this automatic arming; the
@@ -220,8 +282,9 @@ def submit(session: Session, line: str, files: Sequence[RawFile] = ()) -> Iterat
 
 def regenerate(session: Session) -> Iterator[PlayEvent]:
     """Re-run the last prompt: the standing reply becomes a sibling and
-    the fresh take streams (Text/Reasoning/Failed/Done — no Recorded; the
-    prompt is already on screen or in `session.messages`). The dropped
+    the fresh take streams (the reply's pieces and its AssistantTurn,
+    Failed/Done — no UserTurn; the prompt is already on screen or in
+    `session.messages`). The dropped
     reply's kind and speaker are re-derived from the prompt, exactly as
     when it first played. Raises Refused when there is no model or
     nothing to regenerate — EAGERLY, before the iterator is returned and
@@ -253,7 +316,7 @@ def segments(body: str) -> list[dict[str, object]]:
         if isinstance(part, Prose):
             out.append({"kind": "prose", "text": part.text})
         elif part.name in TOOLS:
-            out.append({"kind": "tool_call", **read(part.name, part.text).to_json()})
+            out.append({"kind": "tool_call", **read_call(part.name, part.text).to_json()})
         else:
             out.append({"kind": "tool_call", "tool": part.name, "text": part.text})
     return out
@@ -341,14 +404,14 @@ def _submit_events(
             attachments=attachments,
         )
     )
-    yield Recorded(session._messages[-1], note=frame.note)
+    yield UserTurn(session._messages[-1], note=frame.note)
     reply_speaker = known if frame.speaks == "reply" else None
     yield from _reply_events(session, reply_kind=frame.reply_kind, reply_speaker=reply_speaker)
 
 
 def _regenerate_events(session: Session) -> Iterator[PlayEvent]:
     session.defer()
-    popped = session._drop_last_reply()
+    popped = session._regen_pop()
     # The prompt the take re-runs — absent when the story is a promptless
     # reply, or the take was a CONTINUE after the model's own row, which
     # regenerates on its own.
@@ -418,48 +481,70 @@ def _reply_events(
     # paragraph break appended, and the break is recorded as the reply's
     # own seam, so the story renders again exactly as it was continued.
     openers = ("", "\n\n") if resolved is not None else ("",)
+    # A reply that ends on a call of a tool otaku runs is landed as it
+    # stands, the tool's result is recorded as a turn of its own and
+    # told, and the model is asked again over the story as it now
+    # stands — `_MAX_TOOL_ROUNDS` times at most, the last result
+    # recorded but not asked about.
     attempt = _Attempt(ReplyParser(ending=_ending_switched_on(session)))
-    for opener in openers:
-        # The tool calls told apart from the prose as they stream. A call
-        # of a tool the user answers ends the reply where its closing
-        # fence does: the stream is cut there, and nothing rides the
-        # request for it — the rule is otaku's, the same on every engine.
-        attempt = _Attempt(ReplyParser(ending=_ending_switched_on(session)))
-        stream = _request(session, client, assembled, resolved, opener)
-        try:
-            yield from _drain(stream, attempt, opener, verbatim=resolved is not None)
-        except (GeneratorExit, KeyboardInterrupt):
-            # The frontend closed the stream mid-way, or the terminal's
-            # Ctrl+C landed in the wait itself, inside this frame — the same
-            # cancel-and-keep. No more yields are possible: record and
-            # re-raise. What the stream came to so far is filed too — the
-            # prefill was spent and billed, whatever the reader saw.
-            _land_reply(
-                session, attempt.content, stream.stats, reply_kind, reply_speaker, completion
-            )
-            raise
-        except Exception as e:  # the stream failed; what streamed is kept
-            # The provider package's own sentence: it names the provider and
-            # carries the server's explanation where there was one.
-            attempt.error = str(e)
-        if attempt.content or attempt.error is not None:
+    for round_ in range(_MAX_TOOL_ROUNDS + 1):
+        if round_:
+            try:
+                assembled = session.assemble(max_context)
+            except ContextOverflowError as e:
+                yield Declined(str(e))
+                return
+        for opener in openers:
+            # The tool calls told apart from the prose as they stream. A
+            # call of a tool the user answers or otaku runs ends the reply where
+            # its closing fence does: the stream is cut there, and nothing
+            # rides the request for it — the rule is otaku's, the same on
+            # every engine.
+            attempt = _Attempt(ReplyParser(ending=_ending_switched_on(session)))
+            stream = _request(session, client, assembled, resolved, opener)
+            try:
+                yield from _drain(stream, attempt, opener, verbatim=resolved is not None)
+            except (GeneratorExit, KeyboardInterrupt):
+                # The frontend closed the stream mid-way, or the terminal's
+                # Ctrl+C landed in the wait itself, inside this frame — the
+                # same cancel-and-keep. No more yields are possible: record
+                # and re-raise. What the stream came to so far is filed too
+                # — the prefill was spent and billed, whatever the reader
+                # saw.
+                _land_reply(
+                    session, attempt.content, stream.stats, reply_kind, reply_speaker, completion
+                )
+                raise
+            except Exception as e:  # the stream failed; what streamed is kept
+                # The provider package's own sentence: it names the provider
+                # and carries the server's explanation where there was one.
+                attempt.error = str(e)
+            if attempt.content or attempt.error is not None:
+                break
+        content, final = attempt.content, attempt.final
+        tool_call: Tool | None = None
+        if attempt.parser.cut is not None:
+            # Kept through the fence that ended the call, the recorder's own
+            # where the model opened another block instead; the usage is
+            # the stream's own account where the cut came before the final
+            # chunk.
+            body = "".join(content)[: attempt.parser.cut.at]
+            content = [body if attempt.parser.cut.fenced else body + "\n" + FENCE]
+            if final is None:
+                final = stream.stats
+            tool_call = _last_tool_call(content[0])
+        reply = _land_reply(session, content, final, reply_kind, reply_speaker, completion)
+        if reply is not None:
+            yield AssistantTurn(reply)
+        if attempt.error is not None:
+            yield Failed(attempt.error)
+            return
+        if tool_call is None or tool_call.actor is not Actor.SYSTEM or reply is None:
             break
-    content, final = attempt.content, attempt.final
-    if attempt.parser.cut is not None:
-        # Kept through the fence that ended the call, the recorder's own
-        # where the model opened another block instead; the usage is the
-        # stream's own account where the cut came before the final chunk.
-        body = "".join(content)[: attempt.parser.cut.at]
-        content = [body if attempt.parser.cut.fenced else body + "\n" + FENCE]
-        if final is None:
-            final = stream.stats
-    reply = _land_reply(session, content, final, reply_kind, reply_speaker, completion)
-    if attempt.error is not None:
-        yield Failed(attempt.error)
-        return
+        yield ToolTurn(_land_tool_turn(session, tool_call))
     report = ReplyReport(final, max_context) if final is not None else None
     stats = report.text() if session.verbose and report is not None else ""
-    yield Done(reply=reply, report=report, stats=stats)
+    yield Done(report=report, stats=stats)
 
 
 def _request(
@@ -513,7 +598,7 @@ def _drain(stream: Reply, attempt: _Attempt, opener: str, *, verbatim: bool) -> 
     try:
         for chunk in stream:
             if isinstance(chunk, Reasoning):
-                yield chunk
+                yield AssistantReasoning(chunk.text)
             elif isinstance(chunk, Text):
                 # Some models pad the reply with blank lines. The text
                 # starts at its first real character — kept where the reply
@@ -545,21 +630,49 @@ def _drain(stream: Reply, attempt: _Attempt, opener: str, *, verbatim: bool) -> 
 
 
 def _pieces(found: list[Prose | ToolCall]) -> Iterator[PlayEvent]:
-    """What the parser decided, as events: prose as `Text`, a call's
-    piece as the `ToolCall` it is."""
+    """What the parser decided, as events: prose as `AssistantText`, a
+    call's piece as `AssistantToolCall`."""
     for piece in found:
-        yield Text(piece.text) if isinstance(piece, Prose) else piece
+        if isinstance(piece, Prose):
+            yield AssistantText(piece.text)
+        else:
+            yield AssistantToolCall(piece.name, piece.text, piece.closed)
 
 
 def _ending_switched_on(session: Session) -> frozenset[str]:
-    """The names of the tools the user answers that the story has
-    switched on — whose call ends the reply."""
+    """The names of the tools the user answers or otaku runs that the
+    story has switched on — whose call ends the reply."""
     settings = StorySettings(session._settings_db, session._store, session._paths.prompts_file)
     return frozenset(
         setting.tool.name
         for setting in settings
-        if isinstance(setting, ToolSetting) and setting.enabled and setting.tool.actor is Actor.USER
+        if isinstance(setting, ToolSetting)
+        and setting.enabled
+        and setting.tool.actor in (Actor.USER, Actor.SYSTEM)
     )
+
+
+def _last_tool_call(body: str) -> Tool | None:
+    """The reply's last tool call, read as its tool — the one that ended
+    it; None where the body ends on none or on a tool this build does
+    not have."""
+    calls = [piece for piece in parse_reply(body) if isinstance(piece, ToolCall)]
+    if not calls:
+        return None
+    try:
+        return read_call(calls[-1].name, calls[-1].text)
+    except KeyError:
+        return None
+
+
+def _land_tool_turn(session: Session, tool_call: Tool) -> Message:
+    """Run the tool and record its result as a TOOL turn — nobody's
+    line, the tool's name its `provider` — and hand the row back for
+    the frontends to draw."""
+    # the tool is handed the integrations as bound and nothing else of the session
+    result = tool_call.run(session.integrations)
+    session._record_turn(Message(role="tool", kind="tool", body=result, provider=tool_call.name))
+    return session._messages[-1]
 
 
 def _land_reply(

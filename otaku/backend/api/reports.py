@@ -460,7 +460,7 @@ def balances(session: Session, *, probe: bool = True) -> BalanceReport:
     rather than "would not answer": the page paints the whole slip from
     it and fills the figures from one probed report. The terminal asks
     plainly and gets everything in one wait."""
-    registry = session._providers_registry
+    registry = session._providers
     configured = set(registry.list())
 
     def account(provider: str) -> Balance | None:

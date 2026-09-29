@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Self
 
-SCHEMA_VERSION = "7"
+SCHEMA_VERSION = "8"
 
 SCHEMA_DDL = """
 -- ---------- source: what was actually said ----------
@@ -42,14 +42,14 @@ CREATE TABLE messages (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     story_id    INTEGER NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
     parent_id   INTEGER,
-    role        TEXT NOT NULL CHECK (role IN ('user','assistant')),
+    role        TEXT NOT NULL CHECK (role IN ('user','assistant','tool')),
     kind        TEXT NOT NULL DEFAULT 'dialogue'
-                  CHECK (kind IN ('dialogue','narration','ooc','card')),
+                  CHECK (kind IN ('dialogue','narration','ooc','card','tool')),
     speaker_id  INTEGER REFERENCES characters(id) ON DELETE SET NULL,  -- extracted automatically
     speaker     BLOB,                    -- extracted automatically; name-at-the-time snapshot
     body        BLOB NOT NULL,           -- exactly what was typed/generated
     template    BLOB,                    -- the template the turn was played with, filled at wire time
-    provider    TEXT,                    -- who generated an assistant turn
+    provider    TEXT,                    -- who generated it: an engine, 'card', or a tool's name
     model       TEXT,
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL,
@@ -213,16 +213,22 @@ class Attachment:
 class Message:
     """One turn of a story. `id` is 0 on a turn not yet stored; `append`
     assigns the real one. `kind` is 'dialogue' | 'narration' | 'ooc' |
-    'card' — every kind is a STORED kind; what only exists on the wire
-    is `context.assembler.WireTurn`, a different type."""
+    'card' | 'tool' — every kind is a STORED kind; what only exists on
+    the wire is `context.assembler.WireTurn`, a different type. A TOOL
+    turn (role and kind 'tool') is a tool's result, a tool otaku ran —
+    nobody's line, and no reply: it goes on the wire as the reader's
+    turn, framed out of character, and counts as neither; `provider`
+    names the tool."""
 
-    role: str  # 'user' | 'assistant'
+    role: str  # 'user' | 'assistant' | 'tool'
     body: str
     kind: str = "dialogue"
     template: str | None = None  # filled at wire time, never mixed into the body
     speaker: str | None = None
     speaker_id: int | None = None
-    provider: str | None = None  # set on assistant turns ('card' on a card greeting)
+    # Who generated the row: a reply's engine, 'card' on a greeting, a tool's
+    # name on a tool turn; None on the reader's own.
+    provider: str | None = None
     model: str | None = None
     attachments: tuple[
         Attachment, ...

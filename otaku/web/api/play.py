@@ -15,18 +15,21 @@ from otaku.backend import (
 )
 from otaku.backend.api import play as api_play
 from otaku.backend.api.play import (
+    AssistantReasoning,
+    AssistantText,
+    AssistantToolCall,
+    AssistantTurn,
     Declined,
     Done,
     Failed,
     PlayEvent,
-    Reasoning,
-    Recorded,
-    Text,
-    ToolCall,
+    ToolTurn,
+    UserTurn,
 )
 from otaku.backend.commands import COMMANDS, PROSE_DESCRIPTION
 from otaku.backend.files import RawFile
 from otaku.backend.session import Refused, Session
+from otaku.backend.tools import TOOLS, get_tool_label
 from otaku.web.api.request import Ask, Blob, NotFound, Route
 
 
@@ -145,23 +148,37 @@ def event(happened: PlayEvent) -> dict[str, Any]:
     match is exhaustive: a new event kind is a type error here, not a
     silence on the wire."""
     match happened:
-        case Recorded():
+        case UserTurn():
             # `note` is the record's own dim line (a /roll's dice); ""
             # rides along so the shape never depends on the turn.
-            return {"type": "recorded", "turn": turn(happened.message), "note": happened.note}
-        case Reasoning():
-            return {"type": "reasoning", "text": happened.text}
-        case Text():
-            return {"type": "text", "text": happened.text}
-        case ToolCall():
+            return {"type": "user_turn", "turn": turn(happened.message), "note": happened.note}
+        case AssistantReasoning():
+            return {"type": "assistant_reasoning", "text": happened.text}
+        case AssistantText():
+            return {"type": "assistant_text", "text": happened.text}
+        case AssistantToolCall():
             # A piece of a tool call, the tool's name and its inside;
-            # `closed` marks the piece the closing fence ended.
+            # `closed` marks the piece the closing fence ended. The tool's
+            # label and who acts on it ride along where the tool is known,
+            # so the page draws a call otaku runs as it streams.
+            known = TOOLS.get(happened.name)
             return {
-                "type": "tool_call",
+                "type": "assistant_tool_call",
                 "tool": happened.name,
+                "label": known.label if known is not None else "",
+                "actor": known.actor.value if known is not None else None,
                 "text": happened.text,
                 "closed": happened.closed,
             }
+        case AssistantTurn():
+            # The model's row as recorded — split, tags and all — so the
+            # page lands it as the turn it is, in place of what streamed.
+            return {"type": "assistant_turn", "turn": turn(happened.message)}
+        case ToolTurn():
+            # The tool's row: the page draws it after the reply it
+            # answers, then opens the block the reply that continues
+            # streams into.
+            return {"type": "tool_turn", "turn": turn(happened.message)}
         case Declined():
             return {"type": "declined", "reason": happened.reason}
         case Failed():
@@ -183,9 +200,6 @@ def event(happened: PlayEvent) -> dict[str, Any]:
                 if report is not None
                 else None,
                 "notice": report.notice if report is not None else "",
-                # The reply as stored — split, tags and all — so the page lands
-                # it as the turn it is; null when nothing arrived.
-                "reply": turn(happened.reply) if happened.reply else None,
             }
 
 
@@ -207,6 +221,9 @@ def turn(message: Message) -> dict[str, Any]:
         # The turn's pictures, the column's own facts: the name the
         # file routes take, the media type, the measure. [] when none.
         "attachments": [asdict(picture) for picture in message.attachments],
+        # A tool turn's tool, as the page names it (`tools.get_tool_label`);
+        # null on every other turn.
+        "tool_label": get_tool_label(message.provider) if message.role == "tool" else None,
         # The body split: prose, and each block as its tool's facts — the
         # page draws from these and parses nothing. A block of a tag no
         # tool owns is a block all the same, with its text alone.

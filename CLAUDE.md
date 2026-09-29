@@ -50,9 +50,10 @@ review:
     web        → console, backend, formatting
     console    → formatting
     worker     → context, providers, store, logging, formatting
-    backend    → worker, context, providers, store, settings, encryption, logging, formatting
+    backend    → worker, context, providers, integrations, store, settings, encryption, logging, formatting
     context    → store (reads only), providers (its wire vocabulary)
     providers  → settings (its ProviderConfig and sections live there), formatting
+    integrations → settings (its IntegrationConfig and sections live there), formatting
     store      → encryption
     settings   → formatting
     logging    → providers (the request log's Stats), encryption, formatting
@@ -171,15 +172,63 @@ a white list. `tool_calls` lives in `context` because the worker and
 the assembler read it below the backend.
 
 WHICH tools there are is `backend.tools`: one class per tool, declaring
-its `name` (`question` for `otk-question`), who answers its call
-(`Actor`: nobody for `note`, the user for `question`, `SYSTEM` not
-supported yet) and its prompt's key in prompts.toml (`prompt_name`);
-an instance is one call READ. The registry is `TOOLS`; a new tool is a
-subclass and its name there, and the story setting that switches it on
-is the setting's to declare (`backend.story`), not the tool's.
+its `name` (`question` for `otk-question`), its `label` (what a
+frontend calls it where one names it), who acts on its call (`Actor`:
+nobody for `note`, the user for `question`, `SYSTEM` — otaku — for
+`system` and `search`) and its prompt's key in prompts.toml
+(`prompt_name`); an instance is one call READ, and a tool otaku RUNS
+has `run(integrations)`, yielding the RESULT that is the TOOL TURN's
+text, handed the integrations as bound (`Integrations`, off
+`Session.integrations`) and nothing else of the session — the web
+search tool takes its `web_search_engine`, the system tool nothing. "Answer" is the
+question tool's word alone: the user's. The registry is `TOOLS`; a new tool is a subclass and its name there, and
+the story setting that switches it on is the setting's to declare
+(`backend.story`), not the tool's.
+
+A tool otaku runs ends the reply as a question does, and then the
+play stream RUNS IT and GOES ON (`_reply_events`' rounds): the reply
+holding the call is recorded as it stands, ending at the call, its
+closing fence there whether or not the model wrote one, and told
+(`AssistantTurn`); the tool's result is recorded as a turn of role and
+kind `tool` —
+nobody's line, no reply: the tool's NAME its `provider` (as `card`
+names a greeting's), its label a display matter the registry answers by
+that name (`tools.get_tool_label`; the web row carries `tool_label`) —
+and told (`ToolTurn`); the model is asked
+again over the story as it now stands, `_MAX_TOOL_ROUNDS` times at
+most, the last result recorded but not asked about. A tool turn goes
+on the chat wire as the reader's turn — the wire has two sides, and
+the result is what the model is told — enclosed by prompts.toml's
+`tool_framing` (`{tool}` the name the model called it by,
+`{body}` the text), on the
+text wire as a paragraph the same; it counts as none of the reader's
+messages (an injection's depth, undo's one line), the lore pass leaves
+it out as the calls are, and the export leaves it out until the format
+decides its place. Undo and regenerate take a reply as ONE UNIT with its
+tool chain (`Session._pop_reply`: the reply, and where a tool turn
+stands right before it, that turn and the reply holding its call,
+again and again), never the mode: two replies side by side — a continue's
+after the one it went on from — are two units, so a continue is
+undone and regenerated alone, as before. The `system` tool (an empty
+`otk-system` block) answers the time and the load average, a fixture
+for the loop; `search` (`otk-search`, the query inside) answers the
+top results' snippets — "title: snippet" paragraphs cut to a
+character budget, the tool's own constants — through the search engine
+the web search key chose (`Integrations.web_search_engine`;
+`otaku.integrations`, below), a failure a sentence the model reads. The page draws a tool turn as the
+notes block, the label over the text (`article.otk-tool`, never
+editable); the terminal as a dim block behind the bar, the label its
+first row (`render.message(role="tool")`), streamed the same by
+`chat.stream` on `ToolTurn`. The stream's events are named by the
+row's role and what arrived — `UserTurn`, `AssistantText`,
+`AssistantReasoning`, `AssistantToolCall`, `AssistantTurn`,
+`ToolTurn` — and end on one of `Declined`, `Failed`, `Done`; every
+row that lands is told by its own `*Turn` event, the row as recorded,
+and the wire names them the same (`web.api.play.event`).
 
 The play stream (`backend.api.play`) runs the deltas through a
-`ReplyParser`: prose as `Text`, a call's inside as `ToolCall` pieces
+`ReplyParser`: prose as `AssistantText`, a call's inside as
+`AssistantToolCall` pieces
 (`closed` on the piece its closing fence ended), never a fence —
 neither frontend parses; everything that arrived is recorded, fences
 included. A call of a tool the user answers ENDS THE REPLY: nothing
@@ -271,7 +320,8 @@ match nothing from one turn to the next. A "system" one costs nothing.
 
 What a user sees as features are, below the frontends, a STORY's
 settings: one switch each, one class each in `backend.story`. A tool's
-(`StorySettingQuestions`, `StorySettingAssistantNotes`) lets the model
+(`StorySettingQuestions`, `StorySettingAssistantNotes`,
+`StorySettingSystemTool`, `StorySettingWebSearch`) lets the model
 use the tool and injects its prompt; a reminder's injects the user's
 own text — the SHARED reminder (`StorySettingSharedReminder`, one text
 every story that switched it on is sent) and the STORY reminder
@@ -398,10 +448,10 @@ dimmed (`.otk-framed`), typing held to the edited row's span
 (`holdToSpan`, `beforeinput`), and the save writes that row alone. A
 one-row paragraph opens as the plain field in the same place. An EMPTY line is
 the CONTINUE in story mode (`api.play.submit`): no user row is
-recorded, no Recorded event, the reply is another of the model's rows,
+recorded, no `UserTurn` event, the reply is another of the model's rows,
 and undo takes it alone (the page puts the reply's waiting block into
 the flow at once on a continue, `beginTurn(continues)`, since no
-Recorded will bring it in before the first word); both frontends let the empty line through in
+`UserTurn` will bring it in before the first word); both frontends let the empty line through in
 story mode (the composer's guard, the terminal loop's bare Enter) and
 the backend refuses it in chat mode, whose wire has no continue. The
 assembler is otherwise untouched: the recap, the injected rows and the framing
@@ -422,7 +472,8 @@ status line's width is the measure, 23 characters at most.
 Every setting answers the same questions, so a frontend draws them
 alike: `name` (the stored key — `use_shared_reminder`,
 `use_story_reminder`, `allow_assistant_notes`, `allow_questions`,
-`layout`; a rename orphans stored settings), `label`,
+`allow_system_tool`, `allow_web_search`, `layout`; a rename orphans
+stored settings), `label`,
 `injection_label` (the TEXT it injects — lowercase, the backend's:
 `questions`, `assistant notes`, `story reminder`, `shared reminder`;
 None for the layout setting; the page capitalises it and keeps no name table),
@@ -438,8 +489,8 @@ store, raising `Refused` for what the setting does not take;
 is what a switched-on one sends. `StorySettings(from_db,
 store, prompts_file)` is one story's settings as they stand — it reads
 the prompts file and the shared reminder itself — with `injections` in
-the order they share a place (the shared reminder, the story's, then
-the tools) and `tool_set` for the wire.
+the order they share a place (the tools — questions, notes, system,
+web search — then the story reminder, then the shared one) and `tool_set` for the wire.
 
 What a story STORES is `schema.StorySettingDB` (name, `enabled`,
 position, `reminder_text`, `display_notes`, `layout` — the last three
@@ -480,7 +531,7 @@ The data model lives in `otaku/store/schema.py` (the DDL, its
 semantics, and the row types) — always the CURRENT shape: a fresh
 database is created from it directly, and `store/migrations` — a
 versioned ladder over `meta.schema_version` — brings old databases to
-it. Each step is a FROZEN module per version (`v2.py` … `v6.py`):
+it. Each step is a FROZEN module per version (`v2.py` … `v8.py`):
 a step writes what its target version WAS, never what schema.py says now
 (backup-first, unharmed-on-failure, newer-refused). The invariant: a
 migrated database equals a fresh one, `sqlite_master` row for row.
@@ -526,6 +577,54 @@ A provider section's name IS its engine: `[generic]`, `[llamacpp]`,
 name is not served; the registry lists it in `ignored` and the launch
 says so. One section per engine (a second server of one kind is a
 feature not built).
+
+### Integrations
+
+The services otaku asks for something other than a completion — the
+web search engines, so far — are the `integrations` package, the
+providers' shape over: one module per service, one class each
+(`Integration`: `id`, `label`, its fixed `endpoint`, the `key_prefix`
+its keys carry where they carry a mark, and bound as an instance to
+its section's `url` and `api_key`; `SearchEngine` adds `search(query,
+max_results)` answering `SearchResult`s or raising `IntegrationError`),
+the one registry `ALL_INTEGRATIONS` keyed by section name, and their
+own file, `configs/integrations.toml`, whose types live in
+`settings.integrations` as the providers' do: `IntegrationConfig`
+(name, url, sealed `api_key`) per integration, and
+`IntegrationSettings` — those by name, and the one CHOICE the file
+holds besides them, the `[web_search] engine` row naming the engine
+web search asks (`WEB_SEARCH_SECTION`; "" while none). First run
+writes every known
+integration's section on its endpoint with no key and the choice
+empty, every launch ensures them (`migrations.ensure_integrations`)
+and seals a plain key, so the file shows where a key goes; the launch
+resolves the keys as the providers' (`launch._resolve_api_keys`,
+generic over the two), and the package binds them into ONE value,
+`integrations.Integrations.from_settings` — the instances `bound` by
+id, `web_search_engine` the chosen engine bound or None, and what could
+not be bound reported as facts, `ignored` and
+`unknown_web_search_engine`, which the launch turns into notices as it
+does the registry's `ignored` — handed to the session
+(`Session.integrations`): the session never reads a section, and
+`WEB_SEARCH_SECTION` is the file's word, read by its loader and by the
+key save that writes it, nowhere else.
+
+A frontend shows ONE box for the web search key, no engine named,
+under the Tools tab's web search row (the page's `tools.keyBody`, a
+password field masked while a key is held; the terminal's `key`
+field, typed in place over where it stands and forgotten with
+Delete): `backend.api.integrations` — `web_search` (the engine chosen
+and whether it holds a key, never the key), `set_web_search_key` —
+tells the engine from the key's own shape
+(`integrations.search_engine_of_key`: the engine whose `key_prefix`
+it starts with, Tavily's `tvly`, else the one whose keys carry no
+mark, Exa), seals the key into that engine's section (founded keyless
+where a hand edit dropped it), writes the section's name as the
+choice, and binds both in the session at once; "" forgets the chosen
+engine's key and the choice. The page reaches it at
+`/api/integrations/web_search`. What is asked of an integration and
+what is made of the answer is the asker's: the web search tool
+composes the text the model reads.
 
 A client declares where its server runs as `providers.Locality`:
 `LOCAL` (the engines on this machine), `REMOTE` (the hosted catalogs)
@@ -628,8 +727,8 @@ may be asked, as data), `server` (HOW it arrives). `thread` imports only
 `Session` and has never heard of `api`; `api` knows no thread and no
 HTTP; `server` is the only one that knows both. The two big ones are
 packages: `api` mirrors `backend.api` — one module per twin (`play`,
-`stories`, `lore`, `cards`, `providers`, `settings`, `reports`,
-`transfer`), each holding its own rows, merged into the one
+`stories`, `lore`, `cards`, `providers`, `integrations`, `settings`,
+`reports`, `transfer`), each holding its own rows, merged into the one
 `ROUTES`/`FLOWS` in `api/__init__` (a path in two modules fails at
 import), and `request` for what every row is handed (`Ask`, `Pending`)
 and hands back (`Created`, `Blob`, `NotFound`, `landed_story`). A

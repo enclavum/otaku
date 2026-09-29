@@ -20,15 +20,18 @@ from collections.abc import Iterator
 from typing import Any, Self
 
 from otaku.backend.api.play import (
+    AssistantReasoning,
+    AssistantText,
+    AssistantToolCall,
+    AssistantTurn,
     Declined,
     Done,
     Failed,
     PlayEvent,
-    Reasoning,
-    Recorded,
-    Text,
-    ToolCall,
+    ToolTurn,
+    UserTurn,
 )
+from otaku.backend.tools import TOOLS, Actor, get_tool_label
 from otaku.console.sound import ring
 from otaku.terminal.chat.chat import Chat
 from otaku.terminal.tty import DIM, RESET, error_line
@@ -101,7 +104,7 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
         try:
             for event in events:
                 spinner.stop()  # idempotent — the first real signal clears it
-                if isinstance(event, Recorded):
+                if isinstance(event, UserTurn):
                     # The played turn echoes as the grey block; the reply
                     # streams under it. The wait resumes, so the spinner
                     # comes back until the first delta. The record's own
@@ -113,7 +116,7 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                     if event.note:
                         out.write(f"{DIM}[ {event.note} ]{RESET}\n\n")
                     spinner.start()
-                elif isinstance(event, Reasoning):
+                elif isinstance(event, AssistantReasoning):
                     # The thinking streams as a dim block behind the bar
                     # (`render`), as a note does.
                     if block is None or block_name != "thinking":
@@ -124,7 +127,7 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                     written = block.feed(event.text)
                     fed += written
                     streamed = streamed or bool(written)
-                elif isinstance(event, Text):
+                elif isinstance(event, AssistantText):
                     if block_name == "thinking":
                         close_block()  # one blank line to the prose, as after any block
                     text = event.text
@@ -137,9 +140,28 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                     fed += text
                     streamed = True
                     chars += len(event.text)
-                elif isinstance(event, ToolCall):
+                elif isinstance(event, AssistantToolCall):
                     if block_name == "thinking":
                         close_block()
+                    tool = TOOLS.get(event.name)
+                    if tool is not None and tool.actor is Actor.SYSTEM:
+                        # A call otaku runs: a dim block behind the bar,
+                        # the tool's label first, then the call's own text
+                        # (the search's query) — opened once there is text,
+                        # so an empty call (the system tool's) draws nothing;
+                        # the result follows as a block of its own (`ToolTurn`).
+                        if block is None and event.text.strip():
+                            block = BlockStream(out, terminal_width(), dim=True)
+                            block_name = event.name
+                            fed += block.open(streamer, fed)
+                            fed += block.feed(tool.label + "\n")
+                        if block is not None:
+                            written = block.feed(event.text)
+                            fed += written
+                            streamed = streamed or bool(written)
+                        if event.closed:
+                            close_block()
+                        continue
                     if event.name in ("question", "note"):
                         if event.name == "note" and not notes:
                             # Written for the wire alone — and the prose goes on
@@ -175,6 +197,27 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                     streamer.feed(opening + event.text + closing)
                     fed += opening + event.text + closing
                     streamed = True
+                elif isinstance(event, AssistantTurn):
+                    # The row as recorded is what the screen already shows,
+                    # drawn as it streamed: nothing to draw.
+                    continue
+                elif isinstance(event, ToolTurn):
+                    # The reply holding the call ended at it; the tool's
+                    # result is drawn as its own dim block behind the bar
+                    # — as `render.message` draws it again on a resume —
+                    # and the reply that continues streams under it, set
+                    # apart as after any block.
+                    close_block()
+                    call_open = False
+                    block = BlockStream(out, terminal_width(), dim=True)
+                    block_name = "tool"
+                    fed += block.open(streamer, fed)
+                    label = get_tool_label(event.message.provider)
+                    text = f"{label}\n{event.message.body}" if label else event.message.body
+                    written = block.feed(text)
+                    fed += written
+                    streamed = streamed or bool(written)
+                    close_block()
                 elif isinstance(event, Declined):
                     out.write(event.reason + "\n")
                 elif isinstance(event, Failed):

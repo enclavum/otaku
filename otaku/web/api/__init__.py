@@ -12,8 +12,8 @@ wire. What is NOT here is HTTP: `web.server` matches a request against
 this table and carries the result, and nothing else.
 
 The package mirrors `backend.api`: one module per twin — `play`,
-`stories`, `lore`, `cards`, `providers`, `settings`, `reports`,
-`transfer` — each translating its twin's answers into the page's shapes
+`stories`, `lore`, `cards`, `providers`, `integrations`, `settings`,
+`reports`, `transfer` — each translating its twin's answers into the page's shapes
 and holding its own rows, and `request` for what every row is handed
 and hands back. A module calls its own twin and nothing else of
 `backend.api`; what it needs of another twin it takes from that twin's
@@ -40,7 +40,17 @@ its text.
 from collections.abc import Mapping
 from typing import TypeVar
 
-from otaku.web.api import cards, lore, play, providers, reports, settings, stories, transfer
+from otaku.web.api import (
+    cards,
+    integrations,
+    lore,
+    play,
+    providers,
+    reports,
+    settings,
+    stories,
+    transfer,
+)
 from otaku.web.api.play import event, files_from, regenerate, syntax
 from otaku.web.api.reports import context
 from otaku.web.api.request import Ask, Blob, Created, Flow, NotFound, Pending, Route
@@ -63,6 +73,7 @@ __all__ = [
     "event",
     "facts",
     "files_from",
+    "integrations",
     "lore",
     "play",
     "providers",
@@ -108,6 +119,7 @@ ROUTES: dict[tuple[str, str], Route] = _merged(
     stories.ROUTES,
     lore.ROUTES,
     providers.ROUTES,
+    integrations.ROUTES,
     settings.ROUTES,
     reports.ROUTES,
     transfer.ROUTES,

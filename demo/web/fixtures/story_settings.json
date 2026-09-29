@@ -87,6 +87,50 @@
    "layout": null
   },
   {
+   "name": "allow_system_tool",
+   "label": "Allow system tool",
+   "injection_label": "system tool",
+   "tool": "system",
+   "allowed_positions": [
+    "system",
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
+   ],
+   "enabled": false,
+   "position": 1,
+   "reminder_text": null,
+   "display_notes": null,
+   "layout": null
+  },
+  {
+   "name": "allow_web_search",
+   "label": "Allow web search",
+   "injection_label": "web search",
+   "tool": "search",
+   "allowed_positions": [
+    "system",
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
+   ],
+   "enabled": false,
+   "position": 1,
+   "reminder_text": null,
+   "display_notes": null,
+   "layout": null
+  },
+  {
    "name": "layout",
    "label": "Layout",
    "injection_label": null,

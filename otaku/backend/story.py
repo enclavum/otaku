@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import ClassVar
 
 from otaku.backend.errors import Refused
-from otaku.backend.tools import Tool, ToolAssistantNotes, ToolQuestions
+from otaku.backend.tools import Tool, ToolAssistantNotes, ToolQuestions, ToolSystem, ToolWebSearch
 from otaku.context.injections import Injection
 from otaku.context.syntax import OOC_FRAME
 from otaku.context.tool_calls import ToolSet
@@ -249,6 +249,26 @@ class StorySettingAssistantNotes(ToolSetting):
         )
 
 
+class StorySettingSystemTool(ToolSetting):
+    """The system tool's switch: the model may ask the machine the time
+    and its load — otaku runs it."""
+
+    name = "allow_system_tool"
+    label = "Allow system tool"
+    injection_label = "system tool"
+    tool = ToolSystem
+
+
+class StorySettingWebSearch(ToolSetting):
+    """The web search tool's switch: the model may look something up —
+    otaku runs it, through the engine the web search key chose."""
+
+    name = "allow_web_search"
+    label = "Allow web search"
+    injection_label = "web search"
+    tool = ToolWebSearch
+
+
 class StorySettingReminder(InjectingSetting):
     """The story's own reminder: the row's, enclosed out of character —
     it rides a message of the reader's, where bare text would read as
@@ -362,13 +382,15 @@ class StorySettings:
         by_name = {row.name: row for row in from_db}
         # In the order they are sent where they share a place.
         settings: list[StorySetting] = [
+            StorySettingQuestions(by_name.get(StorySettingQuestions.name), prompts),
+            StorySettingAssistantNotes(by_name.get(StorySettingAssistantNotes.name), prompts),
+            StorySettingSystemTool(by_name.get(StorySettingSystemTool.name), prompts),
+            StorySettingWebSearch(by_name.get(StorySettingWebSearch.name), prompts),
+            StorySettingReminder(by_name.get(StorySettingReminder.name)),
             StorySettingSharedReminder(
                 by_name.get(StorySettingSharedReminder.name),
                 store.settings.get_shared_reminder(),
             ),
-            StorySettingReminder(by_name.get(StorySettingReminder.name)),
-            StorySettingAssistantNotes(by_name.get(StorySettingAssistantNotes.name), prompts),
-            StorySettingQuestions(by_name.get(StorySettingQuestions.name), prompts),
             StorySettingLayout(by_name.get(StorySettingLayout.name)),
         ]
         self._by_name = {setting.name: setting for setting in settings}

@@ -170,8 +170,12 @@ export function wire() {
     focusComposer();
   });
   // The same place, the other half of the turn: what the model is doing
-  // is stopped where it was asked for.
-  $(".otk-composer [data-stop]")?.addEventListener("click", stopPlaying);
+  // is stopped where it was asked for — and the caret comes back to the
+  // box, as after Send: what follows a stop is typed.
+  $(".otk-composer [data-stop]")?.addEventListener("click", () => {
+    stopPlaying();
+    focusComposer();
+  });
   // The hint that opens the menu by pointer — for the reader who has not
   // found the slash yet.
   $(".otk-composer [data-prefixes]")?.addEventListener("click", () => {

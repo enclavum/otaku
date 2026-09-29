@@ -99,6 +99,8 @@ class PromptTexts(Protocol):
     def card_framing(self) -> str: ...  # the card block template, for composing card rows
     @property
     def story_framing(self) -> str: ...  # the text wire's instruction around the premise
+    @property
+    def tool_framing(self) -> str: ...  # a tool turn's text as the model reads it
 
 
 @dataclass(frozen=True)
@@ -294,6 +296,7 @@ def assemble_story(
         tool_set=tool_set,
         recap_header=prompts.recap_header,
         story_framing=prompts.story_framing,
+        tool_framing=prompts.tool_framing,
         shape=shape,
         files=store.files,
         pictures_ride=pictures_ride,
@@ -354,6 +357,7 @@ class _Assembly:
     tool_set: tool_calls.ToolSet  # how a row's tool calls go on the wire
     recap_header: str
     story_framing: str  # the text wire's instruction, `{premise}` to fill
+    tool_framing: str  # a tool turn's enclosure, `{tool}` and `{body}` to fill
     shape: ContextShape
     files: FileStore  # where a row's pictures are read from
     pictures_ride: PicturesRide
@@ -576,6 +580,12 @@ class _Assembly:
         if message.kind in (_RECAP_KIND, ROW_KIND):
             return message.body
         body = tool_calls.to_wire(message.body, self.tool_set)
+        if message.role == "tool":
+            # A tool's result — a tool turn: not a typed line, and
+            # read out of character, the tool named as the model named
+            # it in the call — the row's `provider`.
+            name = message.provider or "tool"
+            return self.tool_framing.replace("{tool}", name).replace("{body}", body)
         if message.completion == "text":
             # A text completion's row is not a typed line — no direction
             # to read off it — and goes as it stands: its lead is its
@@ -598,9 +608,12 @@ class _Assembly:
         and nothing else (a recap or injected row has none to look up).
         Consecutive same-role rows rejoin into one turn, pictures and all —
         storage granularity is otaku's bookkeeping; the model sees one
-        prompt per exchange. The seam between two rows is `join_of`'s, as
-        `as_story_text` joins turns: a row a text completion made joins as
-        it stands, every other one after a blank line."""
+        prompt per exchange. A tool turn goes as the reader's — the chat
+        wire has two sides, and a tool's answer is what the model is told
+        — framed by `_wire_text`. The seam between two rows is
+        `join_of`'s, as `as_story_text` joins turns: a row a text
+        completion made joins as it stands, every other one after a
+        blank line."""
         out: list[WireTurn] = []
         volatile = False  # from the first injected row on: it moves with the end
         for position, message in enumerate(rows):
@@ -611,9 +624,10 @@ class _Assembly:
             images = pictures_of.get(message, ())
             volatile = volatile or message.kind == ROW_KIND
             join = join_of(message)
-            if out and out[-1].role == message.role:
+            role = "user" if message.role == "tool" else message.role
+            if out and out[-1].role == role:
                 out[-1] = WireTurn(
-                    role=message.role,
+                    role=role,
                     body=out[-1].body + ("\n\n" if join is Join.PARAGRAPH else "") + text,
                     images=out[-1].images + images,
                     volatile=volatile,
@@ -621,9 +635,7 @@ class _Assembly:
                 )
             else:
                 out.append(
-                    WireTurn(
-                        role=message.role, body=text, images=images, volatile=volatile, join=join
-                    )
+                    WireTurn(role=role, body=text, images=images, volatile=volatile, join=join)
                 )
         return out
 

@@ -27,11 +27,22 @@ const _ABOUT = {
     "The narrator may keep a short note to itself between turns, never played into the story.",
   use_story_reminder: "Sent with every reply in this story, wherever you place it.",
   use_shared_reminder: "Sent with every reply in every story.",
+  allow_system_tool: "The narrator may ask the machine the time and its load; the answer is played into the story.",
+  allow_web_search:
+    "The narrator may look something up on the internet; the results are played into the story.",
 };
 
 /* The one setting whose text is not the story's: every story is sent
    the same reminder, read and written at its own endpoint. */
 const _SHARED_REMINDER = "use_shared_reminder";
+
+/* The one setting with a key under it: the web search key, every
+   story's, read and written at its own endpoint. */
+const _WEB_SEARCH = "allow_web_search";
+
+/* The stand-in a held key is drawn as — the provider panel's
+   (`models._MASK`), copied: one look for a held key in both places. */
+const _MASK = "••••••";
 
 /* What a setting injects is named by the backend (`injection_label`,
    lowercase): the ruler's row and the prompt dialog's title capitalise
@@ -49,9 +60,10 @@ export async function buildTools(view, pane, tabNote) {
     tabNote(view, "tools", "");
     return;
   }
-  const [{ settings }, shared] = await Promise.all([
+  const [{ settings }, shared, webSearch] = await Promise.all([
     api.storySettings(view.subject.id),
     api.sharedReminder(),
+    api.webSearch(),
   ]);
   const drawn = Object.keys(_ABOUT)
     .map((name) => settings.find((setting) => setting.name === name))
@@ -60,14 +72,17 @@ export async function buildTools(view, pane, tabNote) {
   tabNote(view, "tools", `${on} of ${drawn.length} on`);
   // every row's depth opens the one ruler, which places them all
   const open = () => placement(view, drawn, box);
-  box.replaceChildren(...drawn.map((setting) => feature(view, setting, shared.text, open)));
+  box.replaceChildren(
+    ...drawn.map((setting) => feature(view, setting, shared.text, webSearch, open)),
+  );
 }
 
-function feature(view, setting, sharedText, openPlacement) {
+function feature(view, setting, sharedText, webSearch, openPlacement) {
   /* One setting: the switch, its name and what it does, and the one
      control it governs — where its text rides. A reminder carries the
      text itself under the row, a field like every other on this
-     dossier. Off, what the switch governs steps back. */
+     dossier; web search carries its key. Off, what the switch governs
+     steps back. */
   const box = element("div", "otk-feature");
   box.dataset.on = String(setting.enabled);
   box.dataset.setting = setting.name;
@@ -113,6 +128,8 @@ function feature(view, setting, sharedText, openPlacement) {
         saveSetting(view, setting, { reminder_text: typed }),
       ),
     );
+  } else if (setting.name === _WEB_SEARCH) {
+    box.append(keyBody(view, webSearch));
   }
   return box;
 }
@@ -366,6 +383,65 @@ function reminderBody(view, text, write) {
   });
   field.placeholder = "(nothing yet)";
   body.append(edited(field, ""));
+  return body;
+}
+
+function keyBody(view, standing) {
+  /* The web search key: ONE box, no engine named — the backend tells
+     the engine from the key's shape and says which it chose
+     (`backend.api.integrations`), named beside the box. A password
+     field as the provider panel's (`models.keyField`): masked while a
+     key is held, bare once entered so a new one can be typed over it,
+     masked again on leaving with nothing typed. Enter or Save writes
+     what was typed; Save on the bare field forgets the key — the
+     backend's sentence says which. */
+  const body = element("div", "otk-feature__body otk-feature__key");
+  const input = element("input", "otk-field otk-field--mono");
+  input.type = "password";
+  input.autocomplete = "off";
+  input.placeholder = "API key";
+  const engine = span("otk-feature__engine");
+  let held = false;
+  const mask = () => {
+    input.value = _MASK;
+    input.dataset.mask = "yes";
+  };
+  const show = (now) => {
+    held = now.has_key;
+    engine.textContent = now.label ?? "";
+    if (held) mask();
+    else {
+      input.value = "";
+      delete input.dataset.mask;
+    }
+  };
+  input.addEventListener("focus", () => {
+    if (!input.dataset.mask) return;
+    delete input.dataset.mask;
+    input.value = "";
+  });
+  input.addEventListener("blur", () => {
+    if (!input.value && held) mask();
+  });
+  const save = guard(async () => {
+    if (input.dataset.mask) return; // the stand-in, nothing typed
+    const answer = await api.setWebSearchKey(input.value);
+    footnote(view.popup, answer.notice);
+    if (answer.refused) return;
+    show(await api.webSearch());
+    input.blur();
+  });
+  input.addEventListener("keydown", (event) => {
+    // Enter writes a key typed; the bare field is the button's to forget
+    if (event.key !== "Enter" || !input.value) return;
+    event.preventDefault();
+    save();
+  });
+  const button = element("button", "otk-btn", "Save");
+  button.type = "button";
+  button.onclick = save;
+  show(standing);
+  body.append(input, engine, button);
   return body;
 }
 

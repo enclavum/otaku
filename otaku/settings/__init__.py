@@ -34,6 +34,7 @@ class SettingsFiles:
 
     config: Path
     providers: Path
+    integrations: Path
     prompts: Path
     state: Path
     models: Path

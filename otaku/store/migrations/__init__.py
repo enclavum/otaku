@@ -43,7 +43,7 @@ import sqlite3
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from otaku.store.migrations import v2, v3, v4, v5, v6, v7
+from otaku.store.migrations import v2, v3, v4, v5, v6, v7, v8
 from otaku.store.schema import SCHEMA_VERSION
 
 if TYPE_CHECKING:  # circular at runtime: database runs this ladder
@@ -51,7 +51,7 @@ if TYPE_CHECKING:  # circular at runtime: database runs this ladder
 
 # The ladder itself: one entry per schema version, each a version
 # module's frozen step.
-_STEPS = {2: v2.to_2, 3: v3.to_3, 4: v4.to_4, 5: v5.to_5, 6: v6.to_6, 7: v7.to_7}
+_STEPS = {2: v2.to_2, 3: v3.to_3, 4: v4.to_4, 5: v5.to_5, 6: v6.to_6, 7: v7.to_7, 8: v8.to_8}
 
 
 def migrate(conn: sqlite3.Connection, db_path: Path, backups_dir: Path) -> "Note | None":

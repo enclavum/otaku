@@ -806,7 +806,7 @@ paths:
         required: true
         schema:
           type: string
-          enum: [use_shared_reminder, use_story_reminder, allow_assistant_notes, allow_questions, layout]
+          enum: [use_shared_reminder, use_story_reminder, allow_assistant_notes, allow_questions, allow_system_tool, allow_web_search, layout]
     patch:
       operationId: patchStorySetting
       tags: [Dossier]
@@ -1335,12 +1335,50 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "403": { $ref: "#/components/responses/CrossOrigin" }
 
+  /api/integrations/web_search:
+    get:
+      operationId: getWebSearch
+      tags: [Settings]
+      summary: Where web search stands
+      description: |
+        The search engine chosen for the web search tool, and whether it
+        holds a key. The key's value never comes back out.
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: The engine chosen (null while none) and whether it holds a key.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebSearch" }
+    patch:
+      operationId: patchWebSearchKey
+      tags: [Settings]
+      summary: Save the web search key, or clear it
+      description: |
+        ONE key, no engine named: its shape says which engine it belongs
+        to (Tavily's start with `tvly`; any other is Exa's). Sealed into
+        that engine's section of integrations.toml, the engine made the
+        choice, live in the session at once. An empty string CLEARS the
+        chosen engine's key and the choice.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [api_key]
+              properties:
+                api_key: { type: string, description: 'The key as typed; "" clears it.' }
+      responses:
+        "200": { $ref: "#/components/responses/Answered" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+
   /api/prompts/{tool}:
     parameters:
       - name: tool
         in: path
         required: true
-        schema: { type: string, enum: [question, note] }
+        schema: { type: string, enum: [question, note, system, search] }
     get:
       operationId: getPrompt
       tags: [Settings]
@@ -1705,28 +1743,44 @@ components:
       description: One frame of the reply stream, keyed by `type`.
       oneOf:
         - type: object
-          description: The user's turn landed — echo it.
+          description: The user's row landed — echo it.
           properties:
-            type: { const: recorded }
+            type: { const: user_turn }
             turn: { $ref: "#/components/schemas/Turn" }
             note:
               type: string
               description: 'The record''s own dim line — the dice a /roll rolled; "" otherwise.'
         - type: object
+          description: A piece of the model's thinking, as it streams.
           properties:
-            type: { const: reasoning }
+            type: { const: assistant_reasoning }
             text: { type: string }
         - type: object
+          description: A piece of the reply's prose, as it streams.
           properties:
-            type: { const: text }
+            type: { const: assistant_text }
             text: { type: string }
         - type: object
           description: A piece of a tool call — the tool's name and its inside, never a fence; the deltas are parsed for the page, which parses nothing.
           properties:
-            type: { const: tool_call }
-            tool: { type: string, description: The tool's name — question, note; a name no tool owns is a call all the same. }
+            type: { const: assistant_tool_call }
+            tool: { type: string, description: The tool's name — question, note, system, search; a name no tool owns is a call all the same. }
+            label: { type: string, description: 'What the page calls the tool where it names it; "" for a name no tool owns.' }
+            actor: { type: [string, "null"], enum: [nobody, user, system, null], description: "Who acts on the call — nobody (an aside), the user (the reply ends there), the system (otaku runs the tool, and the reply goes on); null for a name no tool owns." }
             text: { type: string }
             closed: { type: boolean, description: This piece is the one the closing fence ended. }
+        - type: object
+          description: The model's row landed, as recorded, once its pieces streamed — it ends where the stream ended, at a tool call (its closing fence there whether or not the model wrote one) or at the reply's own end. Sent before a tool runs, at the end, and before `failed` alike; the page lands it in place of what streamed.
+          properties:
+            type: { const: assistant_turn }
+            turn: { $ref: "#/components/schemas/Turn" }
+        - type: object
+          description: A tool ran and its row landed. The reply that continues from it streams next, in the same stream.
+          properties:
+            type: { const: tool_turn }
+            turn:
+              description: The tool turn — role and kind "tool", its provider the tool's name, `tool_label` its label; no speaker; the result its body.
+              allOf: [{ $ref: "#/components/schemas/Turn" }]
         - type: object
           description: The stream declines mid-way; what already happened stands.
           properties:
@@ -1738,7 +1792,7 @@ components:
             type: { const: failed }
             reason: { type: string }
         - type: object
-          description: The turn's end.
+          description: The turn's end. Every row landed before it, each told by its own event.
           properties:
             type: { const: done }
             stats:
@@ -1762,10 +1816,6 @@ components:
                 truncated: { type: boolean, description: "Derived: the reply was cut at the reply limit." }
                 rate: { type: number, nullable: true, description: "Derived: tokens per second over the generation alone." }
                 context_used: { type: integer, nullable: true, description: "Derived: percent of the context the prompt took." }
-            reply:
-              nullable: true
-              description: The reply as stored, the turn whole — split into segments, fences and all — for the page to land in place; null when nothing arrived.
-              allOf: [{ $ref: "#/components/schemas/Turn" }]
 
     PreparedCard:
       type: object
@@ -1976,6 +2026,20 @@ components:
       properties:
         text: { type: string }
 
+    WebSearch:
+      type: object
+      required: [engine, label, has_key]
+      properties:
+        engine:
+          type: [string, "null"]
+          description: The chosen engine's section name — "tavily", "exa"; null while none is chosen.
+        label:
+          type: [string, "null"]
+          description: The engine's name as shown; null with `engine`.
+        has_key:
+          type: boolean
+          description: Whether the chosen engine holds a key.
+
     Status:
       type: object
       properties:
@@ -2100,15 +2164,18 @@ components:
       type: object
       properties:
         id: { type: integer }
-        role: { type: string, enum: [user, assistant] }
+        role: { type: string, enum: [user, assistant, tool], description: "A tool turn is a tool's result: nobody's line, no reply." }
         body: { type: string }
-        kind: { type: string, enum: [dialogue, narration, ooc, card] }
+        kind: { type: string, enum: [dialogue, narration, ooc, card, tool] }
         speaker:
           type: [string, "null"]
           description: "The extractor's name for who spoke; null until its pass reads the turn."
         provider:
           type: [string, "null"]
-          description: "Who generated an assistant turn ('card' on a card greeting)."
+          description: "Who generated the turn: an engine, 'card' on a card greeting, or a tool's name on a tool turn."
+        tool_label:
+          type: [string, "null"]
+          description: "A tool turn's tool as the page names it; null on every other turn."
         model: { type: [string, "null"] }
         template:
           type: [string, "null"]
@@ -2134,7 +2201,9 @@ components:
                 description: A tool call; a tool's carries what it read (backend.tools.Tool.to_json), one of a name no tool owns its text alone.
                 properties:
                   kind: { const: tool_call }
-                  tool: { type: string, description: The tool's name — question, note; any other is one no tool owns. }
+                  tool: { type: string, description: The tool's name — question, note, system, search; any other is one no tool owns. }
+                  label: { type: string, description: "What the page calls the tool where it names it." }
+                  actor: { type: string, enum: [nobody, user, system], description: "Who acts on the call: nobody, the user, or the system (otaku)." }
                   text: { type: string, description: The call's inside, as written. }
                   question: { type: string, description: "A question's: the question itself." }
                   options:

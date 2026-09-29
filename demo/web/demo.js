@@ -152,6 +152,12 @@ const ROUTES = {
   // Settings
   "GET /api/settings": () => store.settings(),
   "PUT /api/settings/{setting}": (p, q, b) => store.setKnob(p.setting, b.value),
+  // Web search: no key is held or saved in the demo — the product's shape,
+  // the engine null while none is chosen.
+  "GET /api/integrations/web_search": () => ({ engine: null, label: null, has_key: false }),
+  "PATCH /api/integrations/web_search": () => ({
+    notice: `The web search key is not saved in the demo — ${store.INSTALL}.`,
+  }),
   "GET /api/shared_reminder": () => store.sharedReminder(),
   "PUT /api/shared_reminder": (p, q, b) => store.setSharedReminder(String(b.text)),
   "GET /api/prompts/{tool}": (p) => store.prompt(p.tool),
@@ -495,7 +501,7 @@ function play(body, regenerate, signal) {
     // `note` is the record's own dim line (a /roll's dice in the real
     // backend); the demo rolls nothing, so it is always empty — but the
     // field arrives, because the shape must not depend on the turn.
-    events.push({ type: "recorded", turn: store.recordTurn("user", line), note: "" });
+    events.push({ type: "user_turn", turn: store.recordTurn("user", line), note: "" });
   }
   const reply = script.reply(regenerate);
   const promptTokens = store.contextTokens();
@@ -547,10 +553,11 @@ function play(body, regenerate, signal) {
             ? `[ total ${seconds.toFixed(1)}s, prompt ${promptTokens} tok, eval ${tokens} tok @ ${rate} tok/s ]`
             : "";
           const reply = land();
-          // The product's shape: the report's facts beside the line, the
-          // reply as stored, no question (the demo's model asks none), and
-          // a notice the page's own model never has — it finishes what
-          // it starts.
+          // The product's shape: the reply as stored lands as its own
+          // event, then the end — the report's facts beside the line, no
+          // question (the demo's model asks none), and a notice the
+          // page's own model never has: it finishes what it starts.
+          if (reply) frame(controller, { type: "assistant_turn", turn: reply });
           const report = {
             total_seconds: seconds,
             first_token_seconds: Math.min(0.2, seconds),
@@ -563,7 +570,7 @@ function play(body, regenerate, signal) {
             rate: Number(rate),
             context_used: null,
           };
-          frame(controller, { type: "done", stats, report, notice: "", reply });
+          frame(controller, { type: "done", stats, report, notice: "" });
           over = true;
           controller.close();
           return;
@@ -571,7 +578,7 @@ function play(body, regenerate, signal) {
         const chunk = words.slice(at, at + 3).join("");
         at += 3;
         streamed += chunk;
-        frame(controller, { type: "text", text: chunk });
+        frame(controller, { type: "assistant_text", text: chunk });
         timer = setTimeout(tick, 24);
       };
       timer = setTimeout(tick, regenerate ? 350 : 650); // the wait before the first token

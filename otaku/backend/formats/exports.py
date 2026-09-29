@@ -23,7 +23,8 @@ def read_story(store: Store, story_id: int) -> ExportedStory:
     the dualism intact: the typed line on screen, the block composed
     from the archive on the wire."""
     story = store.stories.get(story_id)
-    messages = store.stories.get_messages(story_id)
+    # A tool's turns stay out until the format decides their place.
+    messages = [m for m in store.stories.get_messages(story_id) if m.role != "tool"]
     ordinal = {m.id: i for i, m in enumerate(messages, 1)}
     scenes = store.scenes.get_current(story_id, list(ordinal))
     names = {c.id: c.name for c in store.characters.list(story_id)}

@@ -51,6 +51,7 @@ _ALLOWED = {
         "worker",
         "context",
         "providers",
+        "integrations",
         "store",
         "settings",
         "encryption",
@@ -61,6 +62,9 @@ _ALLOWED = {
     # `formatting` for `Money`: what a provider reports a balance IN is a
     # value type, and value types live in the leaf everyone may reach.
     "providers": {"settings", "formatting"},
+    # The services otaku asks for something other than a completion: their
+    # sections live in settings as the providers' do.
+    "integrations": {"settings", "formatting"},
     "store": {"encryption"},
     "settings": {"formatting"},
     "logging": {"providers", "encryption", "formatting"},

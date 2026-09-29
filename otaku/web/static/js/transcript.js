@@ -482,6 +482,20 @@ function drawTurn(turn, position, { posed = false } = {}) {
     if (turn.attachments?.length) article.append(thumbs(turn.attachments));
     return article;
   }
+  if (turn.role === "tool") {
+    /* A tool turn — a tool's result: nobody's line, no reply — drawn
+       as the notes block is, the tool's label over its text, and never
+       opened for editing. */
+    const article = joined(element("article", "otk-tool"));
+    const label = turn.tool_label || "Tool";
+    const box = element("div", "otk-ask otk-ask--notes");
+    box.append(span("otk-ask__label", label), element("p", "otk-ask__body", turn.body));
+    article.append(
+      element("span", "otk-turn__rubric otk-reply__rubric", `◆ ${position} · ${label.toLowerCase()}`),
+      box,
+    );
+    return article;
+  }
   const article = joined(element("article", "otk-reply"));
   article.append(replyRubric(position), replyReader(turn, { posed }));
   return article;
@@ -521,8 +535,19 @@ function storedCall(segments, posed) {
   const pending = posed ? segments.findLastIndex((segment) => segment.tool === "question") : -1;
   return (segment, i) => {
     if (segment.tool === "question") return i === pending ? null : pastAsk(segment);
+    if (segment.actor === "system") return segment.text.trim() ? callBlock(segment.label, segment.text) : null;
     return shownTools.has(segment.tool) ? notesBlock(segment.text) : null;
   };
+}
+
+function callBlock(label, text) {
+  /* A call of a tool otaku runs — the search's query, the system
+     tool's nothing — drawn as the notes block is, the tool's label over
+     the call's text; the result follows as a turn of its own. */
+  const box = element("div", "otk-ask otk-ask--notes");
+  box.append(span("otk-ask__label", label || "Tool"));
+  box.append(element("p", "otk-ask__body", text.trim()));
+  return box;
 }
 
 function replyNodes(segments, callNode, { verbatim = false } = {}) {
@@ -842,6 +867,38 @@ function beginTurn(regenerate, { continues = false } = {}) {
   // the status line says only that something is running
   working(true);
   showTurnBar();
+  const turn = openArticle();
+  const { article } = turn;
+  /* A regenerate takes the standing reply off the screen before the
+     request is away: the take being replaced must not sit there while
+     the model thinks. The backend validates a regenerate eagerly, so a
+     refusal comes back before anything is lost. The waiting block goes
+     in its place in the same move — a regenerate sends no user turn for
+     the block to join the flow on (`draw`), and the wait must show from
+     the first moment here as it does on a send. */
+  if (regenerate) {
+    holdSpace(() => {
+      dropLastReply();
+      transcript.insertBefore(article, $(".otk-gap", transcript));
+    });
+  } else if (continues) {
+    /* A continue records nothing above the reply, so no user turn would
+       bring the block into the flow before the first word: it goes in
+       now, at the end, and the wait shows from the first moment as it
+       does on a send. */
+    transcript.insertBefore(article, $(".otk-gap", transcript));
+    follow();
+  }
+  showTurnBar();
+  turn.over = over;
+  return turn;
+}
+
+function openArticle() {
+  /* The block a reply streams into, as `beginTurn` opens one and as the
+     reply going on after a tool ran gets one of its own
+     (`DRAW.tool_turn`): the article, its caret and status row, and the
+     rubric numbered as the next drawn turn. */
   const article = element("article", "otk-reply otk-generating is-streaming");
   /* The reply arriving joins as the landed one will (`turn.join_kind`): a
      text completion's as it stands, a chat completion's as a paragraph
@@ -866,36 +923,15 @@ function beginTurn(regenerate, { continues = false } = {}) {
   const ticking = setInterval(() => {
     elapsed.textContent = `${((Date.now() - started) / 1000).toFixed(1)}s`;
   }, 100);
-  /* A regenerate takes the standing reply off the screen before the
-     request is away: the take being replaced must not sit there while
-     the model thinks. The backend validates a regenerate eagerly, so a
-     refusal comes back before anything is lost. The waiting block goes
-     in its place in the same move — a regenerate sends no Recorded for
-     the block to join the flow on (`draw`), and the wait must show from
-     the first moment here as it does on a send. */
-  if (regenerate) {
-    holdSpace(() => {
-      dropLastReply();
-      transcript.insertBefore(article, $(".otk-gap", transcript));
-    });
-  } else if (continues) {
-    /* A continue records nothing above the reply, so no Recorded would
-       bring the block into the flow before the first word: it goes in
-       now, at the end, and the wait shows from the first moment as it
-       does on a send. */
-    transcript.insertBefore(article, $(".otk-gap", transcript));
-    follow();
-  }
   /* Numbered as the next drawn turn — right for a regenerate, whose take
      came off above; a send's line lands first and renumbers it
      (`recorded`). */
   const rubric = replyRubric(ordinal + 1);
   article.prepend(rubric);
-  showTurnBar();
   // `pieces`: what has arrived, in order — prose runs and tool calls, the
   // segments a stored turn carries, kept as they stream so each call
   // draws in its place
-  return { article, block, status, state, rubric, ticking, over, reasoning: null, ask: null, pieces: [] };
+  return { article, block, status, state, rubric, ticking, over: null, reasoning: null, ask: null, pieces: [] };
 }
 
 function streamAsk(turn, call) {
@@ -934,7 +970,7 @@ function streamed(turn) {
 }
 
 function draw(turn, happened) {
-  // A send's block joins the flow on its first event, the Recorded that
+  // A send's block joins the flow on its first event, the user turn that
   // draws the line above it; a regenerate's is in place already
   // (`beginTurn`). Ahead of the held space, which belongs last: behind
   // it, the block would sit between two turns.
@@ -947,7 +983,7 @@ function draw(turn, happened) {
 
 // One drawer per event kind — `web.api.event`'s closed union, drawn.
 const DRAW = {
-  recorded(turn, happened) {
+  user_turn(turn, happened) {
     ordinal += 1;
     turn.rubric.textContent = _replyRubric(ordinal + 1); // the reply follows the line
     retireAsk(); // the line that landed is the answer: the options go, the question stays
@@ -964,7 +1000,7 @@ const DRAW = {
     }
     transcript.insertBefore(drawn, turn.article);
   },
-  reasoning(turn, happened) {
+  assistant_reasoning(turn, happened) {
     if (!turn.reasoning) {
       turn.reasoning = element("p", "otk-reasoning");
       turn.rubric.after(turn.reasoning);
@@ -972,7 +1008,7 @@ const DRAW = {
     turn.reasoning.textContent += happened.text;
     turn.state.textContent = "reasoning";
   },
-  text(turn, happened) {
+  assistant_text(turn, happened) {
     turn.state.textContent = "writing";
     // prose grows the run it is in; after a call it starts a new one
     const last = turn.pieces.at(-1);
@@ -983,7 +1019,7 @@ const DRAW = {
        closed. */
     streamed(turn);
   },
-  tool_call(turn, happened) {
+  assistant_tool_call(turn, happened) {
     /* A tool call is not story: the status row says what the model is
        doing, so the running line never reads as stalled. One the reader
        is shown — the notes, while the story says so — draws as it
@@ -996,15 +1032,50 @@ const DRAW = {
     turn.state.textContent = _calling(happened.tool);
     let call = turn.pieces.at(-1);
     if (call?.kind !== "tool_call" || call.tool !== happened.tool || call.closed) {
-      const box = shownTools.has(happened.tool) ? notesBlock("") : null;
+      const box = shownTools.has(happened.tool)
+        ? notesBlock("")
+        : happened.actor === "system"
+          ? callBlock(happened.label, "")
+          : null;
       call = { kind: "tool_call", tool: happened.tool, text: "", closed: false, box };
       turn.pieces.push(call);
     }
     call.text += happened.text;
     call.closed = happened.closed;
     if (call.box) $(".otk-ask__body", call.box).textContent = call.text.trim();
+    // a call that closed with nothing inside — the system tool's — leaves no block
+    if (call.closed && call.box && !shownTools.has(call.tool) && !call.text.trim()) {
+      call.box.remove();
+      call.box = null;
+    }
     if (happened.tool === "question") streamAsk(turn, call);
     streamed(turn);
+  },
+  assistant_turn(turn, happened) {
+    /* The model's row as recorded — it ends where the stream did, the
+       closing fence of a call there whether or not the model wrote one
+       — kept to land in place of what streamed (`endTurn`, or
+       `tool_turn` first when a tool runs), and the question it closed
+       on, to pose under itself. */
+    turn.reply = happened.turn;
+    turn.call = questionPosed(happened.turn);
+  },
+  tool_turn(turn, happened) {
+    /* A tool ran. The reply holding the call, recorded just before
+       (`assistant_turn`), is landed in place; the tool turn is drawn
+       after it, and a fresh block opened for the reply that continues:
+       one turn, three articles, the block moving on. */
+    clearInterval(turn.ticking);
+    ordinal += 1;
+    const landed = drawTurn(turn.reply, ordinal);
+    turn.article.replaceWith(landed);
+    ordinal += 1;
+    const result = drawTurn(happened.turn, ordinal);
+    landed.after(result);
+    const fresh = openArticle();
+    result.after(fresh.article);
+    Object.assign(turn, fresh, { over: turn.over, reply: null, call: null });
+    follow();
   },
   declined(turn, happened) {
     turn.article.append(failure("The model declined", happened.reason));
@@ -1024,10 +1095,6 @@ const DRAW = {
         $(".otk-generating__status", turn.article),
       );
     }
-    // The reply as stored, to land in place; and the question it closed
-    // on, to pose under itself.
-    turn.reply = happened.reply;
-    turn.call = questionPosed(happened.reply);
   },
 };
 
@@ -1070,13 +1137,13 @@ function endTurn(turn) {
   else if (turn.ask) clearAsk();
   turn.ask = null;
   // the status row STAYS, hidden, so nothing above it moves — until the
-  // next line takes its place (`recorded`)
+  // next line takes its place (`user_turn`)
   turn.article.classList.add("otk-generating--idle");
   turn.article.classList.remove("is-streaming");
   turn.article.setAttribute("aria-busy", "false");
   /* What arrived is stored exactly as it streamed, so it becomes the
      same editor a stored reply is drawn as, in the same box — drawn
-     from the stored turn `done` carried, calls and all; a stream cut
+     from the stored turn `assistant_turn` carried, calls and all; a stream cut
      short carries none, and what streamed stands in: its prose, and
      the calls the reader was shown (the others' facts were never
      read). The block that held the answer's place goes when nothing

@@ -544,6 +544,9 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 
 /* a played turn reads as an interjection, not a speech bubble */
 .otk-turn { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+/* a tool's turn: nobody's line, a block among the flow — the notes block's
+   look inside it, the tool's label over its text */
+.otk-tool { display: flex; flex-direction: column; gap: 8px; }
 .otk-turn__rubric { font-family: var(--otk-font-mono); font-size: var(--otk-size-tag); letter-spacing: 0.26em; text-transform: uppercase; color: var(--otk-accent); }
 .otk-turn__body { margin: 0; max-width: 430px; text-align: center; font-family: var(--otk-font-prose); font-size: var(--otk-size-page); font-style: italic; font-weight: 500; line-height: 1.6; color: var(--otk-ink); overflow-wrap: anywhere; }
 .otk-slash { font-family: var(--otk-font-mono); font-size: 0.82em; font-style: normal; color: var(--otk-accent-ink); }
@@ -556,7 +559,7 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
    turn instead, where it costs no layout. Its words stand the dossier's 6px
    clear of the field, so the open field's ground does not reach them, and
    6 + 18 fills the 24px between turns. */
-.otk-reply, .otk-turn { position: relative; }
+.otk-reply, .otk-turn, .otk-tool { position: relative; }
 .otk-edit--turn { max-width: none; }
 .otk-edit--turn .otk-edit__hint { position: absolute; top: 100%; left: 0; right: 0; height: 24px; padding-top: 6px; }
 /* A double click on the text opens a turn, so its edit verb is never shown —
@@ -683,14 +686,17 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
    is the text's, the rule overshoots on its own, and the gap is the 26px the
    text keeps from text (22 between the rules). */
 .otk-transcript[data-transcript="chat"] { gap: 26px; }
-.otk-transcript[data-transcript="chat"] .otk-reply { max-width: 75%; margin-right: auto; padding-left: 17px; }
+.otk-transcript[data-transcript="chat"] .otk-reply,
+.otk-transcript[data-transcript="chat"] .otk-tool { max-width: 75%; margin-right: auto; padding-left: 17px; }
 .otk-transcript[data-transcript="chat"] .otk-turn {
   width: fit-content; max-width: 75%; margin-left: auto; align-items: stretch; gap: 7px;
   padding-right: 17px;
 }
 .otk-transcript[data-transcript="chat"] .otk-reply::before,
+.otk-transcript[data-transcript="chat"] .otk-tool::before,
 .otk-transcript[data-transcript="chat"] .otk-turn::before { content: ""; position: absolute; top: -2px; bottom: -2px; width: 1px; }
-.otk-transcript[data-transcript="chat"] .otk-reply::before { left: 0; background: var(--otk-chat-story); }
+.otk-transcript[data-transcript="chat"] .otk-reply::before,
+.otk-transcript[data-transcript="chat"] .otk-tool::before { left: 0; background: var(--otk-chat-story); }
 .otk-transcript[data-transcript="chat"] .otk-turn::before { right: 0; background: var(--otk-chat-you); }
 /* who spoke, quietly, above the words, left-aligned on both sides. The
    reply's rubric stands 7px off its first block, as the turn's does, without
@@ -1192,6 +1198,11 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
    takes the column's measure, as the premise's does */
 .otk-feature__body .otk-edit { max-width: none; }
 .otk-feature__body .otk-editable { min-height: 93px; max-height: 150px; overflow-y: auto; }
+/* the web search key: the box, the engine it belongs to, the verb, on one line */
+.otk-feature__key { display: flex; align-items: center; gap: 12px; }
+.otk-feature__key .otk-field { flex: 1; min-width: 0; }
+.otk-feature__engine { font-family: var(--otk-font-prose); font-size: var(--otk-size-note); color: var(--otk-muted); white-space: nowrap; }
+.otk-feature__engine:empty { display: none; }
 /* the verbs close the row, so the row's own padding comes off under them */
 .otk-feature:has(.otk-feature__body) { padding-bottom: 10px; }
 /* off: what the switch governs steps back. The switch is the unambiguous

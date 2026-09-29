@@ -31,6 +31,7 @@ from otaku.backend.story import StoryMode, StorySettingLayout, StorySettings, st
 from otaku.context import assembler
 from otaku.context.assembler import AssembledPrompt, ContextShape
 from otaku.formatting import pretty_path
+from otaku.integrations import Integrations
 from otaku.logging import ErrorLog
 from otaku.providers import (
     Locality,
@@ -149,7 +150,8 @@ class Session:
     _state: State
     _paths: Paths
     _store: Store
-    _providers_registry: Registry
+    _providers: Registry
+    _integrations: Integrations  # the services as bound, and the engine web search asks
     _worker: Worker
     _closed: bool
 
@@ -161,7 +163,8 @@ class Session:
         prompts: Prompts,
         paths: Paths,
         store: Store,
-        registry: Registry,
+        providers: Registry,
+        integrations: Integrations,
         worker: Worker,
         state: State,
     ) -> Self:
@@ -189,7 +192,8 @@ class Session:
         session._state = state
         session._paths = paths
         session._store = store
-        session._providers_registry = registry
+        session._providers = providers
+        session._integrations = integrations
         session._worker = worker
         session._closed = False
         session._read_model()
@@ -500,6 +504,13 @@ class Session:
         )
         return story_mode_of(StorySettingLayout(stored).layout, self.is_story_mode_ready)
 
+    @property
+    def integrations(self) -> Integrations:
+        """The integrations as bound, with the engine web search asks
+        (`otaku.integrations.Integrations`) — what a tool otaku runs is
+        handed, and all it sees of the session."""
+        return self._integrations
+
     def assemble(self, max_context: int | None) -> AssembledPrompt:
         """The next request — the one binding of the session's fields to
         `assembler.assemble_story`, so the turn, the preview, and every
@@ -539,13 +550,13 @@ class Session:
         the registry by name — never a snapshot."""
         if not self.provider:
             return None
-        client = self._providers_registry.get(self.provider)
+        client = self._providers.get(self.provider)
         return client.config if client is not None else None
 
     def _client(self) -> OpenAIClient | None:
         if not self.model:
             return None
-        return self._providers_registry.get(self.provider)
+        return self._providers.get(self.provider)
 
     def _switch_to(self, story_id: int, messages: list[Message] | None = None) -> None:
         """Attach to a story — system, messages (or the given truncated
@@ -588,18 +599,18 @@ class Session:
         self._search_index = None
 
     def _undo(self) -> list[Message]:
-        """Discard the trailing exchange: the assistant reply (if any)
-        plus the ONE user row that prompted it — every submission is a
-        single row (a /me or /you direction rides its row's template),
-        and an imported backlog of consecutive user rows is story, not
-        one submission. Nothing is deleted: the head moves back and the
-        undone turns stay in the tree as siblings. Returns the popped
-        messages."""
+        """Discard the trailing exchange: the reply (if any) with its tool
+        chain (`_pop_reply`) plus the ONE user row that prompted it —
+        every submission is a single row (a /me or /you direction rides
+        its row's template), and an imported backlog of consecutive user
+        rows is story, not one submission; a continue's reply, standing
+        after a reply, is an exchange of its own and goes alone. Nothing
+        is deleted: the head moves back and the undone turns stay in the
+        tree as siblings. Returns the popped messages."""
         popped: list[Message] = []
         if not self._messages:
             return popped
-        if self._messages[-1].role == "assistant":
-            popped.append(self._messages.pop())
+        popped += self._pop_reply()
         if self._messages and self._messages[-1].role == "user":
             popped.append(self._messages.pop())
         if popped:
@@ -607,15 +618,36 @@ class Session:
             self._search_index = None
         return popped
 
-    def _drop_last_reply(self) -> Message | None:
-        """Pop the trailing assistant reply (regenerate's first half): the
-        head moves back one; the discarded reply stays in the tree as a
-        sibling."""
-        if not self._messages or self._messages[-1].role != "assistant":
+    def _regen_pop(self) -> Message | None:
+        """Pop the trailing reply with its tool chain (regenerate's first
+        half, `_pop_reply`), so the take re-runs from what stands before
+        it — the reader's line, or the reply a continue went on from:
+        the head moves back; the discarded turns stay in the tree as
+        siblings. Returns the first of the replies dropped, None where
+        the story does not end on one."""
+        popped = self._pop_reply()
+        if not popped:
             return None
-        popped = self._messages.pop()
         self._move_head()
         self._search_index = None
+        return next((row for row in reversed(popped) if row.role == "assistant"), popped[-1])
+
+    def _pop_reply(self) -> list[Message]:
+        """Pop the trailing reply as ONE unit: the reply, and where a
+        tool turn stands right before it, that turn and the reply holding
+        its call, again and again. The unit ends at a reply with no
+        tool turn before it, so two replies side by side — a continue's
+        after the one it went on from — are two units. Reads roles and
+        their order alone, never the mode. Returns the popped rows,
+        newest first; [] where the story does not end on a reply."""
+        popped: list[Message] = []
+        while self._messages and self._messages[-1].role in ("assistant", "tool"):
+            row = self._messages.pop()
+            popped.append(row)
+            if row.role == "assistant" and not (
+                self._messages and self._messages[-1].role == "tool"
+            ):
+                break
         return popped
 
     def _set_system(self, text: str) -> None:

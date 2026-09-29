@@ -32,7 +32,7 @@ from otaku.backend import Message
 from otaku.backend.api import play as api_play
 from otaku.backend.commands import COMMANDS
 from otaku.backend.story import StorySettingAssistantNotes, StorySettings
-from otaku.backend.tools import ToolQuestions
+from otaku.backend.tools import ToolQuestions, get_tool_label
 from otaku.formatting import printable
 from otaku.terminal.tty import DIM, user_block
 from otaku.terminal.tty.cursor import terminal_width
@@ -216,7 +216,13 @@ class QuestionStream(BlockStream):
 
 
 def message(
-    text: str, role: str, *, pictures: int = 0, notes: bool = False, width: int | None = None
+    text: str,
+    role: str,
+    *,
+    pictures: int = 0,
+    notes: bool = False,
+    width: int | None = None,
+    label: str = "",
 ) -> str:
     """One body styled for display: highlighted (user) or typeset
     (assistant) — and, for a turn that carried pictures, the dim
@@ -238,6 +244,16 @@ def message(
         return styled
     out = io.StringIO()
     streamer = Streamer(out)
+    if role == "tool":
+        # A tool turn — a tool's result: a dim block behind the bar, as
+        # a note is drawn, the tool's `label` its first row. Streamed
+        # the same way (`chat.stream`), so the two cannot differ.
+        result = BlockStream(out, width or terminal_width(), dim=True)
+        result.open(streamer, "")
+        result.feed(f"{label}\n{text}" if label else text)
+        result.close()
+        streamer.flush()
+        return out.getvalue()
     fed = ""
     after_call = False  # a call's block was drawn last: prose going on is set apart
     for segment in api_play.segments(text):
@@ -259,6 +275,19 @@ def message(
                 continue
             block = BlockStream(out, width or terminal_width(), dim=True)
             piece = block.open(streamer, fed) + block.feed(piece) + block.close()
+            after_call = True
+        elif segment.get("actor") == "system":
+            # a call otaku runs: the tool's label, then the call's own
+            # text, dim behind the bar — as `chat.stream` draws it; an
+            # empty call (the system tool's) draws nothing
+            if not piece.strip():
+                continue
+            block = BlockStream(out, width or terminal_width(), dim=True)
+            piece = (
+                block.open(streamer, fed)
+                + block.feed(f"{segment['label']}\n{piece}")
+                + block.close()
+            )
             after_call = True
         else:
             # the calls with no look yet print as they streamed, in the
@@ -345,7 +374,8 @@ def turn(item: Message, *, notes: bool = False) -> str:
     lines."""
     if item.role == "user":
         return user_block(message(item.body, "user", pictures=len(item.attachments)))
-    return "\n".join(message(item.body, item.role, notes=notes).splitlines())
+    label = get_tool_label(item.provider) if item.role == "tool" else ""
+    return "\n".join(message(item.body, item.role, notes=notes, label=label).splitlines())
 
 
 def last_turns(messages: list[Message], count: int, *, notes: bool = False) -> str:
