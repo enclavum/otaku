@@ -257,7 +257,13 @@ def submit(session: Session, line: str, files: Sequence[RawFile] = ()) -> Iterat
     Closing the generator mid-stream records the partial reply and its
     usage. A new reply arms the worker's idle extraction pass —
     [lore_extraction].enabled gates ONLY this automatic arming; the
-    forced /extract path always works."""
+    forced /extract path always works. In story mode the line is
+    recorded AS TYPED, the whitespace at both its edges its seams — the
+    leading to the text it goes on from, the trailing to the model's
+    continuation (`assembler.join_of`); every other line is trimmed
+    here, whatever a frontend sent."""
+    if session.story_mode is not StoryMode.STORY:
+        line = line.strip()
     frame = syntax.read(line)
     error = frame.check()
     if error is not None:

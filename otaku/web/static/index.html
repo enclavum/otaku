@@ -461,6 +461,20 @@
   </div>
 </dialog>
 
+<!-- the web search key: ONE key, Tavily's or Exa's — the backend tells them
+     apart by the key's shape and saves it under the engine it belongs to
+     (`backend.api.integrations`). Esc discards; Save writes integrations.toml;
+     saved empty, the key is forgotten. -->
+<dialog class="otk-dialog" data-dialog="web-search-key" aria-labelledby="otk-web-search-key-title">
+  <span class="otk-eyebrow" id="otk-web-search-key-title">Web search API key</span>
+  <p class="otk-dialog__body">Web search asks Tavily or Exa. Paste a key from either — get one at <a href="https://app.tavily.com" target="_blank" rel="noopener">app.tavily.com</a> or <a href="https://dashboard.exa.ai/api-keys" target="_blank" rel="noopener">dashboard.exa.ai</a>.</p>
+  <input class="otk-field otk-field--mono" type="password" autocomplete="off" aria-label="API key" placeholder="API key" autofocus>
+  <div class="otk-dialog__foot">
+    <button type="button" class="otk-btn" data-choice="cancel">Cancel</button>
+    <button type="button" class="otk-btn otk-btn--primary" data-choice="save">Save</button>
+  </div>
+</dialog>
+
 <!-- where each setting's text rides: the ruler, one row per setting and one
      tick per place the backend allows, built when it opens (`story.placement`).
      A tick moves the setting there and saves at once; the marker drags too. -->

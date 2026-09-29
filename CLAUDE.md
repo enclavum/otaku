@@ -216,10 +216,13 @@ top results' snippets — "title: snippet" paragraphs cut to a
 character budget, the tool's own constants — through the search engine
 the web search key chose (`Integrations.web_search_engine`;
 `otaku.integrations`, below), a failure a sentence the model reads. The page draws a tool turn as the
-notes block, the label over the text (`article.otk-tool`, never
-editable); the terminal as a dim block behind the bar, the label its
-first row (`render.message(role="tool")`), streamed the same by
-`chat.stream` on `ToolTurn`. The stream's events are named by the
+notes block with the label ALONE, the result its hover hint — the
+result is the model's to read, not the story's — (`article.otk-tool`,
+never editable), and a call otaku runs draws nothing there, the status
+row saying it is being called; the terminal the same, its block one
+dim row of the label behind the bar (`render.message(role="tool")`,
+streamed the same by `chat.stream` on `ToolTurn`) and nothing for the
+call — it has no hover, so the result shows nowhere there. The stream's events are named by the
 row's role and what arrived — `UserTurn`, `AssistantText`,
 `AssistantReasoning`, `AssistantToolCall`, `AssistantTurn`,
 `ToolTurn` — and end on one of `Declined`, `Failed`, `Done`; every
@@ -333,9 +336,30 @@ manuscript, chat — MANUSCRIPT until the story says otherwise;
 `enabled` is always true and refused as a write). The names are the
 backend's, so the choice is the story's; each frontend draws the one
 it names in its own medium — the page's `layout.js`, off the
-`data-transcript` attribute; the terminal has its one look and does
-not read it yet — and both Tools tabs leave it out, no caption naming
-it there.
+`data-transcript` attribute; the terminal reads the MODE rather than
+the layout: in story mode the screen is one text (`render.flow`, the
+canvas in that medium) — the reader's line prose, no grey block,
+typeset through the reply's own streamer; every row joined by its seam
+(`api.play.join_kind`: a paragraph under one blank line, an inline
+row on where the text ended, mid-line); a continue going on from the
+text's end. The ledger places the cursor for it (`echo_flow`: the
+typed row erased, and for an inline join the standing blank too, then
+up onto the text's last row past its `tail_column`, measured off the
+last line every print left, `note_printed`), and opens an exchange
+starting at that point, so /undo and /regen erase in place there as in
+chat mode — rewinding to a column, mid-line, the row ended again where
+the erased text had ended it (`_ERASE_FROM`, `_rewound`); `reply_begins`
+marks where the reply starts, the point /regen rewinds to, and
+`restore_tail` places the echoed turns by their offsets in the flow
+(`render.flow_offsets`, `ledger.restore_flow`). The loop passes a
+story-mode line as typed (`LineAssembler.feed(verbatim=)`), its edges
+the seams the backend records. The
+terminal sets the layout too: `/set mode chat|story` writes the
+manuscript or the canvas (`api.settings.set_mode`, the one `/set`
+that is the story's, not the session's), and "story" is offered
+(`mode_choices`, the completer's `MODE_LEAF`) and accepted only on a
+model that can play story mode, refused with the reason otherwise —
+and both Tools tabs leave it out, no caption naming it there.
 
 The MODE a story is played in is DERIVED, never stored (`backend.story`:
 `StoryMode.STORY`, `StoryMode.CHAT`, `story_mode_of(layout, is_story_mode_ready)`;
@@ -398,13 +422,16 @@ rule for the wire and the canvas: a row a text completion made joins
 the text before it "inline", as it stands — recorded VERBATIM in story
 mode, its leading space, break or nothing is the seam — and so does a
 line the READER opened with whitespace, typed so in story mode to go
-on with the model's own sentence (the composer keeps a leading space
-in story mode, `composer.submit`, and trims every line otherwise);
+on with the model's own sentence (a story-mode line is recorded AS
+TYPED, both edges — the trailing whitespace the seam to the model's
+continuation — and every other line trimmed, `api.play.submit`; both
+frontends pass the line through, `composer.submit` and the terminal's
+`LineAssembler.feed(verbatim=)`);
 every other row (a chat completion's, an imported one, the reader's
 plain line) is a "paragraph", a blank line before it; `_wire_turns` joins consecutive
 same-role rows by it and `WireTurn.join` carries it (`assembler.Join`).
-The seam RIDES the wire: `syntax.to_wire` puts a prose line's leading
-whitespace back after the line reader trimmed it, and a text
+The seams RIDE the wire: `syntax.to_wire` puts a line's leading and
+trailing whitespace back after the line reader trimmed them, and a text
 completion's row skips the reader altogether (`_wire_text`), since it
 is not a typed line. WHICH completion
 made a row is the row's: `messages.completion`, 'chat' or 'text', set
@@ -509,7 +536,7 @@ beside — the depth a dropdown in place, a text the editor in place,
 tool's PROMPT is
 prompts.toml's, edited in place — "prompt" on the backend and the
 wire, whatever a frontend calls it (the page's button says
-"Instructions"): `api.settings.get_tool_prompt`/`set_tool_prompt`
+"Prompt", the terminal's row "instructions"): `api.settings.get_tool_prompt`/`set_tool_prompt`
 (`/api/prompts/{tool}`) write that one key with
 `settings.prompts.set_prompt`, backed up by the write every settings
 edit rides (`settings.commit`), read back and refused unless the file
@@ -610,10 +637,10 @@ does the registry's `ignored` — handed to the session
 key save that writes it, nowhere else.
 
 A frontend shows ONE box for the web search key, no engine named,
-under the Tools tab's web search row (the page's `tools.keyBody`, a
-password field masked while a key is held; the terminal's `key`
-field, typed in place over where it stands and forgotten with
-Delete): `backend.api.integrations` — `web_search` (the engine chosen
+on the Tools tab's web search row (the page's "API key" button,
+`tools.keyButton`, opening a dialog that says which engines' keys it
+takes and where to get one; the terminal's `key` field, typed in place
+over where it stands and forgotten with Delete): `backend.api.integrations` — `web_search` (the engine chosen
 and whether it holds a key, never the key), `set_web_search_key` —
 tells the engine from the key's own shape
 (`integrations.search_engine_of_key`: the engine whose `key_prefix`

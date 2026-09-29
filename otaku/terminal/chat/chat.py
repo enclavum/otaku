@@ -8,11 +8,11 @@ the bindings — whoever routes cannot live beside this class.
 
 import sys
 
-from otaku.backend import Message
+from otaku.backend import StoryMode
 from otaku.backend.api import stories as api_stories
 from otaku.backend.session import Session
 from otaku.terminal.chat.ledger import ScreenLedger
-from otaku.terminal.tty.render import notes_displayed, turn
+from otaku.terminal.tty.render import flow_offsets, notes_displayed, turn
 from otaku.terminal.tty.statusline import StatusLine
 
 # Turns echoed when a story (re)opens (the launch, a browser pick, an
@@ -31,11 +31,17 @@ class Chat:
     # The loop's exit flag: /bye (and Ctrl+D) raise it, and the run loop
     # leaves after the current submission instead of unwinding mid-command.
     quit: bool
+    # The submission being played is story mode's CONTINUE — an empty
+    # line, no row of the reader's to echo — so the stream places the
+    # reply where the text ended (`stream.show`). Set by the loop for
+    # the one submission, cleared with it.
+    continuing: bool
 
     def __init__(self, session: Session) -> None:
         self.session = session
         self.ledger = ScreenLedger()
         self.quit = False
+        self.continuing = False
         # One renderer for the prompt's toolbar and the pinned row, both
         # reading the same channel, so the line never twitches at the
         # streaming handoff.
@@ -55,6 +61,7 @@ class Chat:
         Multi-line text is one answer: the bookkeeping runs once."""
         sys.stdout.write(self.ledger.said() + text + "\n")
         sys.stdout.flush()
+        self.ledger.note_printed(text + "\n")
 
     def restore_tail(self, count: int, above: str = "") -> None:
         """Hand the just-echoed tail (`render.last_turns(…, count)`) to
@@ -65,25 +72,52 @@ class Chat:
         blank) right over the echo: it joins the oldest restored exchange
         and refreshes with it instead of going stale. Call right after
         the echo prints, and only when the echo is the flow's last
-        output."""
+        output. In story mode the echo is one text (`render.flow`), and
+        each exchange is placed in it by its offsets
+        (`ledger.restore_flow`)."""
         shown = list(self.session.messages)[-count:]
-        groups: list[tuple[Message | None, Message | None]] = []
+        groups: list[tuple[int | None, int | None]] = []  # indexes into `shown`
         i = len(shown)
         while i > 0:
-            reply = shown[i - 1] if shown[i - 1].role == "assistant" else None
+            reply = i - 1 if shown[i - 1].role == "assistant" else None
             if reply is not None:
                 i -= 1
-            prompt = shown[i - 1] if i > 0 and shown[i - 1].role == "user" else None
+            prompt = i - 1 if i > 0 and shown[i - 1].role == "user" else None
             if prompt is not None:
                 i -= 1
             if reply is None and prompt is None:
                 break  # an unexpected role — better unerasable than wrong
             groups.append((prompt, reply))
         notes = self.notes_displayed
-        for prompt, reply in reversed(groups):
+        ordered = list(reversed(groups))
+        if self.session.story_mode is StoryMode.STORY:
+            text, starts = flow_offsets(shown, notes=notes)
+            for n, (prompt, reply) in enumerate(ordered):
+                first = prompt if prompt is not None else reply
+                assert first is not None
+                start = starts[first]
+                following = ordered[n + 1] if n + 1 < len(ordered) else None
+                end = len(text)
+                if following is not None:
+                    opener = following[0] if following[0] is not None else following[1]
+                    assert opener is not None
+                    end = starts[opener]
+                reply_offset = None
+                if reply is not None:
+                    reply_offset = starts[reply] - start
+                self.ledger.restore_flow(
+                    text[:start],
+                    text[start:end],
+                    reply_offset,
+                    last=following is None,
+                    above=above,
+                )
+                above = ""
+            return
+        for prompt, reply in ordered:
             self.ledger.restore_exchange(
-                turn(prompt) if prompt else None,
-                turn(reply, notes=notes) if reply is not None else None,
+                turn(shown[prompt]) if prompt is not None else None,
+                turn(shown[reply], notes=notes) if reply is not None else None,
                 above=above,
             )
             above = ""  # the report belongs to the oldest exchange only

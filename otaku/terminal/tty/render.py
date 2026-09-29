@@ -246,11 +246,13 @@ def message(
     streamer = Streamer(out)
     if role == "tool":
         # A tool turn — a tool's result: a dim block behind the bar, as
-        # a note is drawn, the tool's `label` its first row. Streamed
-        # the same way (`chat.stream`), so the two cannot differ.
+        # a note is drawn, but the tool's `label` ALONE — the result is
+        # the model's to read, not the story's, and a terminal has no
+        # hover to keep it in. Streamed the same way (`chat.stream`), so
+        # the two cannot differ.
         result = BlockStream(out, width or terminal_width(), dim=True)
         result.open(streamer, "")
-        result.feed(f"{label}\n{text}" if label else text)
+        result.feed(label or "Tool")
         result.close()
         streamer.flush()
         return out.getvalue()
@@ -277,18 +279,11 @@ def message(
             piece = block.open(streamer, fed) + block.feed(piece) + block.close()
             after_call = True
         elif segment.get("actor") == "system":
-            # a call otaku runs: the tool's label, then the call's own
-            # text, dim behind the bar — as `chat.stream` draws it; an
-            # empty call (the system tool's) draws nothing
-            if not piece.strip():
-                continue
-            block = BlockStream(out, width or terminal_width(), dim=True)
-            piece = (
-                block.open(streamer, fed)
-                + block.feed(f"{segment['label']}\n{piece}")
-                + block.close()
-            )
+            # a call otaku runs — the search's query — is the model's,
+            # not the story's: nothing drawn, and no hole where it stood;
+            # its result follows as a turn of its own
             after_call = True
+            continue
         else:
             # the calls with no look yet print as they streamed, in the
             # language's canonical form (`context.tool_calls`), which the
@@ -378,14 +373,64 @@ def turn(item: Message, *, notes: bool = False) -> str:
     return "\n".join(message(item.body, item.role, notes=notes, label=label).splitlines())
 
 
-def last_turns(messages: list[Message], count: int, *, notes: bool = False) -> str:
-    """The last `count` turns, echoed the way they played, one blank line
-    between turns, bodies verbatim, the replies' notes while `notes`."""
+def last_turns(
+    messages: list[Message], count: int, *, notes: bool = False, story: bool = False
+) -> str:
+    """The last `count` turns, echoed the way they played: one blank line
+    between turns, bodies verbatim, the replies' notes while `notes` —
+    or, in `story` mode, as the one text they are (`flow`)."""
+    if story:
+        return flow(messages[-count:], notes=notes)
     out: list[str] = []
     for item in messages[-count:]:
         out.append("")
         out.append(turn(item, notes=notes))
     return "\n".join(out).lstrip("\n")
+
+
+def flow(items: list[Message], *, notes: bool = False) -> str:
+    """The turns as ONE text — story mode's echo, the page's canvas in
+    this medium: a user row as prose, no block, typeset as the text is;
+    every row joined to the text before it by its seam
+    (`api.play.join_kind`) — a paragraph after one blank line, an inline
+    row as it stands, its own leading whitespace the seam; a tool turn
+    a block apart, and the row after it a paragraph, since a block ends
+    its line. No trailing newline, like `turn`."""
+    return flow_offsets(items, notes=notes)[0]
+
+
+def flow_offsets(items: list[Message], *, notes: bool = False) -> tuple[str, list[int]]:
+    """`flow`'s text, and where each turn's own text begins in it — a
+    paragraph join's blank counted with the turn BEFORE it — so the
+    ledger can place echoed turns for erasing (`Chat.restore_tail`)."""
+    out = ""
+    starts: list[int] = []
+    after_block = False
+    for item in items:
+        piece = prose(item.body) if item.role == "user" else turn(item, notes=notes)
+        if not out:
+            starts.append(0)
+            out = piece
+        elif after_block or api_play.join_kind(item) == "paragraph":
+            out = out.rstrip("\n") + "\n\n"
+            starts.append(len(out))
+            out += piece.lstrip("\n")
+        else:
+            starts.append(len(out))
+            out += piece
+        after_block = item.role == "tool"
+    return out, starts
+
+
+def prose(text: str) -> str:
+    """`text` typeset as a reply's prose is — the reader's line in story
+    mode, which reads as the text does: dialogue takes its accent, and
+    no command is picked out, since none is played there."""
+    out = io.StringIO()
+    streamer = Streamer(out)
+    streamer.feed(text)
+    streamer.flush()
+    return out.getvalue()
 
 
 def command_tokens() -> tuple[str, ...]:

@@ -121,11 +121,11 @@ export async function submit(line) {
   // Everything typed here is STORY: the framing words ride inside the
   // line and `context.syntax` reads them at the far end. A line opening
   // with an unknown slash word is prose that starts with a slash. In
-  // story mode a line that OPENS with whitespace keeps it: it continues
-  // the text before it as it stands, the whitespace its seam
-  // (`context.assembler.join_of`); a command never does.
-  const continues = continuing() && said && !said.startsWith("/") && /^\s/.test(line);
-  playLine(continues ? line.trimEnd() : said, files);
+  // story mode a line plays AS TYPED, the whitespace at both its edges
+  // its seams — to the text before it and to the model's continuation
+  // (`api.play.submit` records it so); a command never does.
+  const verbatim = continuing() && said && !said.startsWith("/");
+  playLine(verbatim ? line : said, files);
 }
 
 // Whether the open story is in story mode, off the app root

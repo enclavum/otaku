@@ -297,15 +297,9 @@ class ListScreen:
             focusable=focusable,
         )
 
-    def _list_pane(
-        self,
-        items_window: Window,
-        *,
-        width: AnyDimension = None,
-        notice: bool = False,
-    ) -> AnyContainer:
+    def _list_pane(self, items_window: Window, *, width: AnyDimension = None) -> AnyContainer:
         """The chrome around the list: header, blank, the filter line while
-        filtering, the items, an optional notice line, blank, help."""
+        filtering, the items, blank, help."""
         # Kept so `_max_row_content_width` can measure what the rows
         # actually got; a picker assembling its own pane records it too.
         self._items_window = items_window
@@ -314,15 +308,6 @@ class ListScreen:
             Window(height=1, char=" ", always_hide_cursor=True),
             text_line(self._filter_text, filter=Condition(lambda: self.in_filter)),
             items_window,
-        ]
-        if notice:
-            rows.append(
-                text_line(
-                    lambda: [("class:notice", "  " + self.notice if self.notice else "")],
-                    filter=Condition(lambda: bool(self.notice)),
-                )
-            )
-        rows += [
             Window(height=1, char=" ", always_hide_cursor=True),
             text_line(self._help_text, style="class:help"),
         ]

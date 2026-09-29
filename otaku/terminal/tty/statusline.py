@@ -35,6 +35,7 @@ from otaku.terminal.tty import (
     DIM,
     ERASE_LINE,
     GOTO_ROW,
+    INDEX,
     RESET,
     RESTORE_CURSOR,
     SAVE_CURSOR,
@@ -98,12 +99,15 @@ class StatusLine:
             self._rows = shutil.get_terminal_size().lines
             if self._rows < 3:  # nothing to reserve on a 2-row terminal
                 return
-            # The newline guarantees a free bottom row: if the cursor was
+            # The index guarantees a free bottom row: if the cursor was
             # already on the last one, the screen scrolls instead of the
             # status overwriting live text. Stepping back up afterwards
-            # leaves the cursor exactly where it started.
+            # leaves the cursor exactly where it started — the COLUMN
+            # too, which a newline would not: the tty adds a return to
+            # it, and in story mode the cursor stands mid-line here, where
+            # the reply is about to go on.
             region = SCROLL_ABOVE.format(self._rows - 1)
-            _terminal().write(f"\n{SAVE_CURSOR}{region}{RESTORE_CURSOR}{UP_ONE}")
+            _terminal().write(f"{INDEX}{SAVE_CURSOR}{region}{RESTORE_CURSOR}{UP_ONE}")
             self._open = True
             atexit.register(self.close)
         self.refresh()

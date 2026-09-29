@@ -1173,6 +1173,9 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
 .otk-tools__head { display: flex; flex-direction: column; border-bottom: var(--otk-hair) solid var(--otk-line); }
 /* one feature: a switch, what it does, and the one control it governs */
 .otk-features { display: flex; flex-direction: column; }
+/* the tools, a rule, then the reminders: the group break is a firmer line than the rows' own */
+.otk-features__rule { border: 0; border-top: var(--otk-hair) solid var(--otk-line); margin: 8px 0; width: 100%; }
+.otk-features__rule + .otk-feature { border-top: 0; }
 .otk-feature { display: flex; flex-direction: column; gap: 12px; padding: 18px 0; border-top: var(--otk-hair) solid var(--otk-line-soft); }
 .otk-feature:first-child { border-top: 0; }
 .otk-feature__head { display: flex; align-items: flex-start; gap: 14px; }
@@ -1198,11 +1201,6 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
    takes the column's measure, as the premise's does */
 .otk-feature__body .otk-edit { max-width: none; }
 .otk-feature__body .otk-editable { min-height: 93px; max-height: 150px; overflow-y: auto; }
-/* the web search key: the box, the engine it belongs to, the verb, on one line */
-.otk-feature__key { display: flex; align-items: center; gap: 12px; }
-.otk-feature__key .otk-field { flex: 1; min-width: 0; }
-.otk-feature__engine { font-family: var(--otk-font-prose); font-size: var(--otk-size-note); color: var(--otk-muted); white-space: nowrap; }
-.otk-feature__engine:empty { display: none; }
 /* the verbs close the row, so the row's own padding comes off under them */
 .otk-feature:has(.otk-feature__body) { padding-bottom: 10px; }
 /* off: what the switch governs steps back. The switch is the unambiguous

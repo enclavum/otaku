@@ -19,6 +19,7 @@ import time
 from collections.abc import Iterator
 from typing import Any, Self
 
+from otaku.backend import StoryMode
 from otaku.backend.api.play import (
     AssistantReasoning,
     AssistantText,
@@ -30,6 +31,7 @@ from otaku.backend.api.play import (
     PlayEvent,
     ToolTurn,
     UserTurn,
+    join_kind,
 )
 from otaku.backend.tools import TOOLS, Actor, get_tool_label
 from otaku.console.sound import ring
@@ -65,6 +67,9 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
     status row erase themselves and stay outside)."""
     out = chat.ledger.reply
     session = chat.session
+    # Story mode: the one text — no block for the reader's line, the
+    # reply going on where the text ended (`ledger.echo_flow`).
+    story = session.story_mode is StoryMode.STORY
     streamed = False  # anything shown yet (the error line's lead blank, the line to end)
     chars = 0
     interrupted = False
@@ -93,6 +98,17 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
         block, block_name = None, ""
         after_call = True
 
+    # A continue: no line of the reader's to echo, so the reply goes on
+    # where the text ended — placed NOW, before the wait, so the spinner
+    # spins there as it does after an echoed line; a stream that then
+    # declines or fails before a word says so on a row of its own
+    # (`placed`), not mid-line.
+    placed = False
+    if story and chat.continuing and not chat.ledger.flow_open:
+        chat.ledger.echo_flow(inline=True)
+        chat.ledger.reply_begins()
+        fed = chat.ledger.tail  # what a block's spacing is measured against
+        placed = True
     spinner = Spinner()
     spinner.start()
     streamer = Streamer(out)
@@ -105,14 +121,30 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
             for event in events:
                 spinner.stop()  # idempotent — the first real signal clears it
                 if isinstance(event, UserTurn):
-                    # The played turn echoes as the grey block; the reply
-                    # streams under it. The wait resumes, so the spinner
-                    # comes back until the first delta. The record's own
-                    # note (a /roll's dice) prints dim under the block —
-                    # the card import's report line is the family.
-                    chat.ledger.echo_block(
-                        message(event.message.body, "user", pictures=len(event.message.attachments))
-                    )
+                    if story:
+                        # Story mode: the played line is prose in the one
+                        # text, no block. The ledger places the cursor by the
+                        # line's seam (`join_kind`: under the standing blank,
+                        # or on where the text ended) and the line is typeset
+                        # through the reply's own streamer, so a quote it
+                        # opens and the reply closes reads as one.
+                        chat.ledger.echo_flow(inline=join_kind(event.message) == "inline")
+                        streamer.feed(event.message.body)
+                        streamer.flush()
+                        chat.ledger.reply_begins()
+                        fed += event.message.body
+                        streamed = True
+                    else:
+                        # The played turn echoes as the grey block; the reply
+                        # streams under it. The wait resumes, so the spinner
+                        # comes back until the first delta. The record's own
+                        # note (a /roll's dice) prints dim under the block —
+                        # the card import's report line is the family.
+                        chat.ledger.echo_block(
+                            message(
+                                event.message.body, "user", pictures=len(event.message.attachments)
+                            )
+                        )
                     if event.note:
                         out.write(f"{DIM}[ {event.note} ]{RESET}\n\n")
                     spinner.start()
@@ -145,22 +177,11 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                         close_block()
                     tool = TOOLS.get(event.name)
                     if tool is not None and tool.actor is Actor.SYSTEM:
-                        # A call otaku runs: a dim block behind the bar,
-                        # the tool's label first, then the call's own text
-                        # (the search's query) — opened once there is text,
-                        # so an empty call (the system tool's) draws nothing;
-                        # the result follows as a block of its own (`ToolTurn`).
-                        if block is None and event.text.strip():
-                            block = BlockStream(out, terminal_width(), dim=True)
-                            block_name = event.name
-                            fed += block.open(streamer, fed)
-                            fed += block.feed(tool.label + "\n")
-                        if block is not None:
-                            written = block.feed(event.text)
-                            fed += written
-                            streamed = streamed or bool(written)
-                        if event.closed:
-                            close_block()
+                        # A call otaku runs — the search's query — is the
+                        # model's, not the story's: nothing drawn, as
+                        # `render.message` draws nothing for it; the result
+                        # follows as a block of its own (`ToolTurn`).
+                        after_call = True
                         continue
                     if event.name in ("question", "note"):
                         if event.name == "note" and not notes:
@@ -202,31 +223,32 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                     # drawn as it streamed: nothing to draw.
                     continue
                 elif isinstance(event, ToolTurn):
-                    # The reply holding the call ended at it; the tool's
-                    # result is drawn as its own dim block behind the bar
-                    # — as `render.message` draws it again on a resume —
-                    # and the reply that continues streams under it, set
+                    # The reply holding the call ended at it; the tool turn
+                    # is drawn as its own dim block behind the bar, the label
+                    # alone — the result is the model's to read, not the
+                    # story's — as `render.message` draws it again on a
+                    # resume; the reply that continues streams under it, set
                     # apart as after any block.
                     close_block()
                     call_open = False
                     block = BlockStream(out, terminal_width(), dim=True)
                     block_name = "tool"
                     fed += block.open(streamer, fed)
-                    label = get_tool_label(event.message.provider)
-                    text = f"{label}\n{event.message.body}" if label else event.message.body
-                    written = block.feed(text)
+                    written = block.feed(get_tool_label(event.message.provider) or "Tool")
                     fed += written
                     streamed = streamed or bool(written)
                     close_block()
                 elif isinstance(event, Declined):
-                    out.write(event.reason + "\n")
+                    lead = "\n" if placed and not streamed else ""
+                    out.write(lead + event.reason + "\n")
                 elif isinstance(event, Failed):
                     close_block()
                     streamer.flush()
                     # What streamed is already on the screen, so the story
                     # keeps it — exactly as a Ctrl+C does. A failure before
-                    # any output starts at the margin — no stray blank.
-                    lead = "\n" if streamed else ""
+                    # any output starts at the margin — no stray blank —
+                    # unless the cursor was placed mid-line for a continue.
+                    lead = "\n" if streamed or placed else ""
                     out.write(lead + error_line(f"[ error: {event.reason} ]") + "\n")
                 elif isinstance(event, Done):
                     close_block()  # a reply cut inside its call still shows it
@@ -273,6 +295,11 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
             out.write("\n")
             chat.ledger.rule()
             out.write(f"{DIM}[ regenerating ]{RESET}\n\n")
+            if story:
+                # the fresh take is a paragraph under the marker, placed
+                # here so the next stream does not place it again
+                chat.ledger.echo_flow(inline=False)
+                chat.ledger.reply_begins()
         return True
     if session.notification and not interrupted:
         # The turn is over and the screen wants its reader back. Not

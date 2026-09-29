@@ -242,8 +242,9 @@ def join_of(message: Message) -> Join:
     made (recorded verbatim, its leading whitespace is the seam: a space,
     a blank line, or nothing where it completed a word), and for a line
     the reader OPENED with whitespace — typed so in story mode to go on
-    with the model's own sentence, the whitespace its seam (a typed line
-    is otherwise trimmed); PARAGRAPH, a blank line before it, for every
+    with the model's own sentence, the whitespace its seam (a story-mode
+    line is recorded as typed, both edges; every other line trimmed,
+    `api.play.submit`); PARAGRAPH, a blank line before it, for every
     other row — a chat completion's (stripped when recorded), an imported
     one, the reader's plain line."""
     if message.completion == "text":

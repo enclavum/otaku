@@ -181,7 +181,6 @@ def _style() -> Style:
             # inverted — the one styling that needs no color at all.
             "field.cursor": "reverse",
             "tick": f"fg:{colors.ok.style} {panel}",
-            "notice": f"dim fg:{colors.muted.style} {panel}",
         }
     )
 
@@ -1031,10 +1030,6 @@ class ModelPicker(ListScreen):
                 text_line(self._header_text, style="class:header"),
                 Window(height=1, char=" ", always_hide_cursor=True),
                 items_window,
-                text_line(
-                    lambda: [("class:notice", "  " + self.notice if self.notice else "")],
-                    filter=Condition(lambda: bool(self.notice)),
-                ),
                 Window(height=1, char=" ", always_hide_cursor=True),
                 bottom_row,
             ],

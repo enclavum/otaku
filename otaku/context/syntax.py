@@ -305,12 +305,14 @@ def to_wire(message: Message, *, is_last: bool, card_block: str | None = None) -
     # decided the lifetime of.
     if frame.tail and (frame.inliner == "/ooc" or (frame.inliner == "/cue" and is_last)):
         parts.append(OOC_FRAME.replace("{body}", frame.tail))
-    # A line's leading whitespace is its seam (`assembler.join_of`): typed
-    # to go on with the text before it, it rides the wire as it stands —
-    # the reader trims it off the line's text, so it is put back here. A
-    # direction never opens with whitespace, so this is prose alone.
+    # The whitespace at a line's edges is its seams (`assembler.join_of`,
+    # `api.play.submit`): the leading to the text it goes on from, the
+    # trailing to the model's continuation, both typed so in story mode
+    # and riding the wire as they stand — the reader trims them off the
+    # line's text, so they are put back here. A chat-mode line has none.
     lead = body[: len(body) - len(body.lstrip())]
-    return lead + " ".join(part for part in parts if part)
+    tail = body[len(body.rstrip()) :]
+    return lead + " ".join(part for part in parts if part) + tail
 
 
 # ---------- dice ----------

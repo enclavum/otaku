@@ -30,9 +30,9 @@ shown; Delete forgets it), the instructions row opens the prompt over
 the whole panel (Ctrl+S saves, Esc cancels, the fields return) — and
 Esc returns to the list.
 Every change is written at once through
-`backend.api`; a setting's confirmation is not shown here — the row
-itself shows where the setting now stands — only a refusal is, and the
-texts' own sentences (a reminder or a prompt saved).
+`backend.api`; nothing it says is shown here — the row itself shows
+where the setting now stands. The sentences (a confirmation, a refusal)
+are kept in `notice` for a caller and drawn nowhere.
 
 Editable fields are the write-once primitives; the extractor's own —
 states, and every history, the scene's own included — are shown dim
@@ -113,18 +113,13 @@ _ABOUT: dict[str, str] = {
     "allow_questions": (
         "The narrator may ask you something directly and wait for an answer before going on."
     ),
+    "allow_web_search": "The narrator may look something up on the internet.",
+    "allow_system_tool": "The narrator may ask for local system facts.",
     "allow_assistant_notes": (
         "The narrator may keep a short note to itself between turns, never played into the story."
     ),
-    "use_story_reminder": "Sent with every reply in this story, wherever you place it.",
-    "use_shared_reminder": "Sent with every reply in every story.",
-    "allow_system_tool": (
-        "The narrator may ask the machine the time and its load; "
-        "the answer is played into the story."
-    ),
-    "allow_web_search": (
-        "The narrator may look something up on the internet; the results are played into the story."
-    ),
+    "use_story_reminder": "Injected into this story with every reply.",
+    "use_shared_reminder": "Injected into the story with every reply, common across stories.",
 }
 
 # The one setting whose text is not the story's: every story is sent the
@@ -172,7 +167,6 @@ def _style() -> Style:
             "preview.title": f"bold fg:{colors.title.style} {panel}",
             "preview.muted": f"dim fg:{colors.muted.style} {panel}",
             "preview.body": f"fg:{colors.text.style} {panel}",
-            "notice": f"dim fg:{colors.muted.style} {panel}",
         }
     )
 
@@ -615,17 +609,36 @@ class Dossier(ListScreen):
         return out
 
     def _tool_rows(self) -> StyleAndTextTuples:
-        """One row per setting: its checkbox and its name. The band stays
-        on the list's row while the cursor is in the panel, dimmed so
-        the panel reads as the place the cursor went."""
+        """One row per setting: its checkbox and its name — the tools, a
+        blank row, then the reminders. The band stays on the list's row
+        while the cursor is in the panel, dimmed so the panel reads as
+        the place the cursor went."""
         out: StyleAndTextTuples = []
         if not self.settings:
             out.append(("class:muted", "  (no settings in this build)"))
             return out
+        gap = self._reminders_start()
         for row_i, setting in enumerate(self.settings):
+            if row_i == gap and row_i:
+                out.append(("", "\n"))
             row = f"{_checkbox(setting.enabled)} {setting.label}"
             self._emit_row(out, row_i == self.cursor, row, dim=self.in_panel)
         return out
+
+    def _reminders_start(self) -> int:
+        """Where the reminders begin in the tools list: the first setting
+        that is no tool's, after the tools; the list's length when there
+        is none."""
+        return next((i for i, s in enumerate(self.settings) if s.tool is None), len(self.settings))
+
+    def _cursor_line(self) -> int:
+        """The visual row of the cursor: the tools list draws a blank row
+        between the tools and the reminders (`_tool_rows`), so a cursor
+        on a reminder sits one row below its index."""
+        if self.tab == "tools" and self.settings:
+            gap = self._reminders_start()
+            return self.cursor + (1 if gap and self.cursor >= gap else 0)
+        return self.cursor
 
     def _panel_header_text(self) -> StyleAndTextTuples:
         """The fixed header above the panel's text. It lives in its own
@@ -1141,10 +1154,10 @@ class Dossier(ListScreen):
         display_notes: bool | None = None,
         reminder_text: str | None = None,
     ) -> None:
-        """One field of one setting through `backend.api.stories`. Its
-        confirmation is not shown — the row shows where the setting now
-        stands, once the tab has read the story again — only a refusal
-        is."""
+        """One field of one setting through `backend.api.stories`. Nothing
+        it says is shown — the row shows where the setting now stands,
+        once the tab has read the story again; a refusal is kept in
+        `notice`, drawn nowhere."""
         try:
             api_stories.update_setting(
                 self.session,
@@ -1521,7 +1534,9 @@ class Dossier(ListScreen):
             self._move_edit_cursor(1)
 
         # Focusable so focus has somewhere to return to when editing ends.
-        self._items_control = self._make_items_control(focusable=True)
+        self._items_control = self._make_items_control(
+            focusable=True, cursor_line=self._cursor_line
+        )
         self._items_window = Window(
             content=self._items_control,
             wrap_lines=False,
@@ -1636,10 +1651,6 @@ class Dossier(ListScreen):
             Window(height=1, char=" ", always_hide_cursor=True),
             text_line(self._filter_text, filter=Condition(lambda: self.in_filter)),
             center,
-            text_line(
-                lambda: [("class:notice", "  " + self.notice if self.notice else "")],
-                filter=Condition(lambda: bool(self.notice)),
-            ),
             Window(height=1, char=" ", always_hide_cursor=True),
             text_line(self._help_text, style="class:help"),
         ]

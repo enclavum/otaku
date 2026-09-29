@@ -19,7 +19,7 @@ from typing import NamedTuple
 import click
 
 from otaku import web as web_frontend
-from otaku.backend import commands
+from otaku.backend import StoryMode, commands
 from otaku.backend.api import cards as api_cards
 from otaku.backend.api import lore as api_lore
 from otaku.backend.api import play as api_play
@@ -37,7 +37,7 @@ from otaku.terminal.screens import models as screen_models
 from otaku.terminal.screens import stories as screen_stories
 from otaku.terminal.screens import story as screen_story
 from otaku.terminal.tty import BOLD, DIM, ERASE_LINE, RESET, YES_ANSWERS, error_line, latin_key
-from otaku.terminal.tty.render import command_tokens, last_turns, message
+from otaku.terminal.tty.render import command_tokens, last_turns, message, prose
 from otaku.terminal.tty.typography import highlight_commands
 
 # One OPERATION command: the raw argument text in, the sentence out.
@@ -61,6 +61,7 @@ OPERATIONS: dict[str, Operation] = {
     "/set autocorrect": api_settings.set_autocorrect,
     "/set notification": api_settings.set_notification,
     "/set max_context": api_settings.set_max_context,
+    "/set mode": api_settings.set_mode,
 }
 
 
@@ -136,6 +137,12 @@ def _undo(chat: Chat, raw: str) -> None:
     _report_undo_ending(chat)
 
 
+def _story(chat: Chat) -> bool:
+    """Whether the open story plays in story mode — echoed as one text
+    then (`render.flow`), the played turns' blocks otherwise."""
+    return chat.session.story_mode is StoryMode.STORY
+
+
 def _report_undo_ending(chat: Chat) -> None:
     """The story's new ending, reported and re-echoed — and handed back
     to the ledger, the report line included, so the next /undo or /regen
@@ -145,7 +152,9 @@ def _report_undo_ending(chat: Chat) -> None:
         chat.say("Undone. The story is now empty (its turns stay in the tree).")
         return
     report = f"{DIM}[ undone. the story now ends with: ]{RESET}"
-    turns = last_turns(list(chat.session.messages), 2, notes=chat.notes_displayed)
+    turns = last_turns(
+        list(chat.session.messages), 2, notes=chat.notes_displayed, story=_story(chat)
+    )
     chat.say(f"{report}\n\n{turns}")
     chat.restore_tail(2, above=report)
 
@@ -180,10 +189,18 @@ def _regen(chat: Chat, raw: str) -> None:
         chat.say(marker + "\n")
         # The typed line stays above the marker — nothing of it to erase.
         chat.ledger.typed_gone()
-        chat.ledger.echo_block(
-            message(prompt.body, "user", pictures=len(prompt.attachments)) if prompt else "",
-            above=marker,
-        )
+        if _story(chat):
+            # the prompt re-run reads as prose under the marker, and the
+            # fresh take goes on from it (`ledger.echo_flow`)
+            chat.ledger.echo_flow(inline=False, above=marker)
+            if prompt is not None:
+                chat.ledger.reply.write(prose(prompt.body))
+            chat.ledger.reply_begins()
+        else:
+            chat.ledger.echo_block(
+                message(prompt.body, "user", pictures=len(prompt.attachments)) if prompt else "",
+                above=marker,
+            )
     while stream.show(chat, events):
         events = api_play.regenerate(session)
 
@@ -206,7 +223,8 @@ def _last(chat: Chat, raw: str) -> None:
     # story shows everything it has, and the report must not over-claim.
     shown = (len(list(session.messages)[-rows:]) + 1) // 2
     report = f"The last {shown} turns of this story:"
-    chat.say(f"{report}\n\n{last_turns(list(session.messages), rows, notes=chat.notes_displayed)}")
+    turns = last_turns(list(session.messages), rows, notes=chat.notes_displayed, story=_story(chat))
+    chat.say(f"{report}\n\n{turns}")
     chat.restore_tail(rows, above=report)
 
 
@@ -262,7 +280,9 @@ def _landed(chat: Chat, landed: str | None) -> None:
     if landed is None:
         return
     chat.ledger.rule()
-    turns = last_turns(list(chat.session.messages), RESUME_TURNS, notes=chat.notes_displayed)
+    turns = last_turns(
+        list(chat.session.messages), RESUME_TURNS, notes=chat.notes_displayed, story=_story(chat)
+    )
     # A story with nothing played echoes no turns, and no blank for them.
     chat.say(f"{landed}\n\n{turns}" if turns else landed)
     if turns:
@@ -408,7 +428,9 @@ def _import(chat: Chat, raw: str) -> None:
         if report is not None:
             chat.say(report)
     chat.ledger.rule()
-    turns = last_turns(list(chat.session.messages), RESUME_TURNS, notes=chat.notes_displayed)
+    turns = last_turns(
+        list(chat.session.messages), RESUME_TURNS, notes=chat.notes_displayed, story=_story(chat)
+    )
     chat.say(f"The last turns of this story:\n\n{turns}")
     chat.restore_tail(RESUME_TURNS)
 

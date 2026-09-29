@@ -484,12 +484,14 @@ function drawTurn(turn, position, { posed = false } = {}) {
   }
   if (turn.role === "tool") {
     /* A tool turn — a tool's result: nobody's line, no reply — drawn
-       as the notes block is, the tool's label over its text, and never
-       opened for editing. */
+       as the notes block is, but the tool's label ALONE: the result is
+       the model's to read, not the story's, so its text is the block's
+       hover hint and never in the flow. Never opened for editing. */
     const article = joined(element("article", "otk-tool"));
     const label = turn.tool_label || "Tool";
     const box = element("div", "otk-ask otk-ask--notes");
-    box.append(span("otk-ask__label", label), element("p", "otk-ask__body", turn.body));
+    box.title = turn.body;
+    box.append(span("otk-ask__label", label));
     article.append(
       element("span", "otk-turn__rubric otk-reply__rubric", `◆ ${position} · ${label.toLowerCase()}`),
       box,
@@ -535,19 +537,11 @@ function storedCall(segments, posed) {
   const pending = posed ? segments.findLastIndex((segment) => segment.tool === "question") : -1;
   return (segment, i) => {
     if (segment.tool === "question") return i === pending ? null : pastAsk(segment);
-    if (segment.actor === "system") return segment.text.trim() ? callBlock(segment.label, segment.text) : null;
+    // a call otaku runs — the search's query — is the model's, not the
+    // story's: nothing drawn; its result follows as a turn of its own
+    if (segment.actor === "system") return null;
     return shownTools.has(segment.tool) ? notesBlock(segment.text) : null;
   };
-}
-
-function callBlock(label, text) {
-  /* A call of a tool otaku runs — the search's query, the system
-     tool's nothing — drawn as the notes block is, the tool's label over
-     the call's text; the result follows as a turn of its own. */
-  const box = element("div", "otk-ask otk-ask--notes");
-  box.append(span("otk-ask__label", label || "Tool"));
-  box.append(element("p", "otk-ask__body", text.trim()));
-  return box;
 }
 
 function replyNodes(segments, callNode, { verbatim = false } = {}) {
@@ -1021,33 +1015,26 @@ const DRAW = {
   },
   assistant_tool_call(turn, happened) {
     /* A tool call is not story: the status row says what the model is
-       doing, so the running line never reads as stalled. One the reader
-       is shown — the notes, while the story says so — draws as it
-       arrives, in its place among the prose, in the box the landed
-       reply draws it in; a question never draws raw — the live panel
-       grows as it streams (`streamAsk`), question first and each option
-       as its line completes, and the landed reply confirms or retires
-       it. A call's pieces grow one piece of the turn until the one that
-       closed it; the next tag opens its own. */
+       doing, so the running line never reads as stalled — and for a
+       call otaku runs that is all: the query is the model's, nothing of
+       it draws. One the reader is shown — the notes, while the story
+       says so — draws as it arrives, in its place among the prose, in
+       the box the landed reply draws it in; a question never draws raw
+       — the live panel grows as it streams (`streamAsk`), question
+       first and each option as its line completes, and the landed
+       reply confirms or retires it. A call's pieces grow one piece of
+       the turn until the one that closed it; the next tag opens its
+       own. */
     turn.state.textContent = _calling(happened.tool);
     let call = turn.pieces.at(-1);
     if (call?.kind !== "tool_call" || call.tool !== happened.tool || call.closed) {
-      const box = shownTools.has(happened.tool)
-        ? notesBlock("")
-        : happened.actor === "system"
-          ? callBlock(happened.label, "")
-          : null;
+      const box = shownTools.has(happened.tool) ? notesBlock("") : null;
       call = { kind: "tool_call", tool: happened.tool, text: "", closed: false, box };
       turn.pieces.push(call);
     }
     call.text += happened.text;
     call.closed = happened.closed;
     if (call.box) $(".otk-ask__body", call.box).textContent = call.text.trim();
-    // a call that closed with nothing inside — the system tool's — leaves no block
-    if (call.closed && call.box && !shownTools.has(call.tool) && !call.text.trim()) {
-      call.box.remove();
-      call.box = null;
-    }
     if (happened.tool === "question") streamAsk(turn, call);
     streamed(turn);
   },

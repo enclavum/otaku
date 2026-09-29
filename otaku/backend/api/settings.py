@@ -15,6 +15,8 @@ Refused for what it declines.
 import json
 from dataclasses import dataclass, replace
 
+from otaku.backend import StoryMode, TranscriptLayout
+from otaku.backend.api import stories as api_stories
 from otaku.backend.session import (
     EFFORT_LEVELS,
     NO_MODEL_HINT,
@@ -24,6 +26,7 @@ from otaku.backend.session import (
     Refused,
     Session,
 )
+from otaku.backend.story import StorySettingLayout
 from otaku.backend.tools import TOOLS
 from otaku.providers import reasoning
 from otaku.settings import row
@@ -205,6 +208,54 @@ def set_verbose(session: Session, raw: str) -> str:
         else:
             raise Refused("Usage: /set verbose on|off")
     return f"Verbose: {'on' if session.verbose else 'off'}."
+
+
+def mode_choices(session: Session) -> tuple[str, ...]:
+    """What /set mode takes on the model in use: "chat" always, "story"
+    only where the model can play story mode (`Session.is_story_mode_ready`).
+    The terminal's menu reads this; typed by hand, the same word is
+    refused (`set_mode`)."""
+    return ("chat", "story") if session.is_story_mode_ready else ("chat",)
+
+
+def set_mode(session: Session, raw: str) -> str:
+    """The story's layout, by the mode it is to be played in: "chat"
+    the manuscript, "story" the canvas, which IS story mode — so "story"
+    is refused, with the reason, on a model that cannot continue a text
+    (`mode_choices`). The confirmation, and the report "" answers with,
+    is the mode the story now plays in (`Session.story_mode`), in this
+    family's own words, not the layout write's. The STORY's, unlike the
+    rest of the family: it forks and dies with it
+    (`backend.story.StorySettingLayout`)."""
+    value = raw.strip().lower()
+    if value:
+        if value not in _MODES:
+            raise Refused("Usage: /set mode chat|story")
+        if value not in mode_choices(session):
+            raise Refused(_no_story_mode(session))
+        api_stories.update_setting(session, StorySettingLayout.name, layout=_MODES[value])
+        return f"Set {_MODE_WORDS[session.story_mode]}."
+    return f"{_MODE_WORDS[session.story_mode].capitalize()}."
+
+
+# What /set mode's two words set: the layout each mode is read in.
+_MODES = {"chat": TranscriptLayout.MANUSCRIPT, "story": TranscriptLayout.CANVAS}
+# What /set mode answers with: the mode the story plays in.
+_MODE_WORDS = {StoryMode.CHAT: "chat mode", StoryMode.STORY: "story mode"}
+
+
+def _no_story_mode(session: Session) -> str:
+    """Why the model in use cannot play story mode — the refusal's
+    sentence: no model, no text completion, or no text template known
+    for it (`Session.is_story_mode_ready`'s two halves)."""
+    if session.model is None:
+        return NO_MODEL_HINT
+    if not session.text_completion:
+        return f"Story mode is not available: {session.model} has no text completion."
+    return (
+        f"Story mode is not available: no text template is known for {session.model} "
+        "(a text_template line in models.toml names one)."
+    )
 
 
 def set_autocorrect(session: Session, raw: str) -> str:

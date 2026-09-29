@@ -239,6 +239,8 @@ _ON_THE_PAGE = {
     "/set autocorrect": "screen:/set",
     "/set notification": "screen:/set",
     "/set max_context": "screen:/set",
+    # the layout switch in the contents rail writes the layout setting
+    "/set mode": "PATCH /api/stories/{story}/settings/{setting}",
     "/help": "screen:/help",
     # The one gap that can never be filled: this command's whole purpose
     # is to reach the page, and the reader of the page is already there.

@@ -177,13 +177,15 @@ class LineAssembler:
     prompt), otherwise the message. The one difference between the two
     cases is settled HERE, where it is known: a typed line is stripped, and
     a block keeps the whitespace at its edges — someone who opened a block
-    to lay text out meant the layout."""
+    to lay text out meant the layout. `verbatim` keeps a typed line as it
+    is, both edges: story mode's, where the whitespace it opens and ends
+    with are its seams (`api.play.submit`)."""
 
     def __init__(self) -> None:
         self._lines: list[str] = []
         self.in_block = False
 
-    def feed(self, line: str) -> str | None:
+    def feed(self, line: str, *, verbatim: bool = False) -> str | None:
         if self.in_block:
             before, closed = _cut_suffix(line, _TRIPLE)
             self._lines.append(before)
@@ -200,7 +202,7 @@ class LineAssembler:
             self._lines = [head + rest]
             self.in_block = True
             return None
-        return line.strip()
+        return line if verbatim else line.strip()
 
     @property
     def prefix(self) -> str:
@@ -288,6 +290,7 @@ def build_prompt(
         shortcuts={token: caption for token, (_key, caption) in shortcuts.items()},
         levels=lambda: api_settings.think_choices(session).levels,
         parameters=lambda: api_settings.parameter_names(session),
+        modes=lambda: api_settings.mode_choices(session),
     )
     menu_line = Condition(
         lambda: completer.partial(get_app().current_buffer.document.text_before_cursor) is not None

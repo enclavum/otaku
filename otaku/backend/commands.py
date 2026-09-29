@@ -138,6 +138,7 @@ COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("/export", "[FILE]", "Export the whole story to Markdown (memory + messages)", "transfer", CommandKind.INTERACTIVE),
     # Models and settings
     CommandSpec("/model", "[PROVIDER/MODEL]", "Switch model", "settings", CommandKind.INTERACTIVE),
+    CommandSpec("/set mode", "chat|story", "Play the story as a chat, or as one text the model continues", "settings", CommandKind.OPERATION),
     CommandSpec("/set think", "<level>", "Set the thinking effort for the model, or a thinking budget in tokens where supported", "settings", CommandKind.OPERATION),
     CommandSpec("/set parameter", "<name> <val>", "Set an inference parameter for the model", "settings", CommandKind.OPERATION),
     CommandSpec("/set verbose", "on|off", "Show the stats line after each reply", "settings", CommandKind.OPERATION),

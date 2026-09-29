@@ -12,6 +12,15 @@ again keeps peeling turns off the screen. A resume echo's turns join the
 stack the same way (`restore_exchange`): turns shown at launch, after a
 browser pick, or after an import can be taken back like played ones.
 
+Story mode plays the same game over ONE text (`echo_flow`): an exchange
+there is the reader's line and the reply, or a continue's reply alone,
+starting where the text before it ended — at a column, mid-line, for an
+inline seam — and an erase rewinds to that point rather than a row's
+start (`_ERASE_FROM`), the row ended again where the erased text had
+ended it. `reply_begins` marks where the reply starts inside such an
+exchange, which is where /regen rewinds to, and `restore_flow` adopts
+the exchanges a flow echo printed as `restore_exchange` adopts blocks.
+
 An erase happens only when it provably restores the screen:
 
 - the stack must be live — any inline print the ledger does not make
@@ -65,6 +74,9 @@ from otaku.terminal.tty.cursor import RowTracker, cursor_row, measure, terminal_
 
 # Up N rows, to column 0, erase to the end of the screen.
 _ERASE_UP = "\x1b[{}A\r\x1b[J"
+# Up N rows, to column C, erase from there to the end of the screen: what
+# stood before column C on that row stays.
+_ERASE_FROM = "\x1b[{}A\r\x1b[{}C\x1b[J"
 
 
 class ScreenLedger:
@@ -87,6 +99,16 @@ class ScreenLedger:
         self._ruled = False  # a break rule stands above the current run
         self._reply = _ReplyWriter(self)
         self._cpr_dead = False  # the terminal never answered — stop asking
+        # Where the text on screen ends — the last line's text, escapes
+        # and all, as every print the ledger sees leaves it
+        # (`note_printed`) — for story mode's flow, whose inline line
+        # goes on from there (`echo_flow`); `_pending` the newlines
+        # printed since, which end the line without starting another.
+        self._tail = ""
+        self._pending = 0
+        # A story-mode flow is being written into: the cursor was placed
+        # by `echo_flow`, and the stream must not place it again.
+        self.flow_open = False
 
     # ---------- the submission's typed input ----------
 
@@ -124,12 +146,144 @@ class ScreenLedger:
         erase = _ERASE_UP.format(self._typed_rows) if self._typed_rows else ""
         sys.stdout.write(f"{erase}{block}\n\n")
         sys.stdout.flush()
+        self.note_printed(block + "\n\n")
         entry = _Exchange(measure(block + "\n", width), width)
         if above:
             entry.lead = measure(above + "\n", width) + 1
         self._stack.append(entry)
         self._suppress_gap = True
         self._typed_rows = 0
+
+    def echo_flow(self, *, inline: bool, above: str = "") -> None:
+        """Story mode's stand-in for `echo_block`: the played line is not
+        a block but prose in the ONE text, so this only PLACES the cursor
+        for it, and the caller prints the line through `reply`. The typed
+        input is erased; a paragraph is left under the standing blank; an
+        inline line takes the blank back too and goes on where the text
+        ended (`tail_column`), mid-line — the exchange above then ends
+        there, its ending newline gone with the blank. Opens the
+        exchange /undo and /regen work, starting at that point. Also the
+        continue's placing, with no line to follow; `above` as
+        `echo_block`'s."""
+        self._lead_blank = False
+        self._wrote = True
+        self._suppress_gap = False
+        width = terminal_width()
+        column = self.tail_column if inline else 0
+        tail_before = self._tail
+        rows = self._typed_rows + (1 if inline else 0)
+        if rows:
+            sys.stdout.write(_ERASE_UP.format(rows))
+        if inline:
+            sys.stdout.write(self._onto_tail())
+            top = self._top()
+            if top is not None and top.tracker.rows:
+                top.tracker.rewind(top.tracker.rows - 1, column)
+        else:
+            self._tail = ""
+        self._pending = 0
+        sys.stdout.flush()
+        entry = _Exchange(0, width)
+        entry.flow = True
+        entry.inline = inline
+        # a text that filled its row ends at the width: the line goes on
+        # from the next row's start, where the terminal wraps to
+        entry.start_column = column if column < width else 0
+        entry.tail_before = tail_before
+        entry.tracker.rewind(0, column)
+        if above:
+            entry.lead = measure(above + "\n", width) + 1
+        self._stack.append(entry)
+        self._typed_rows = 0
+        self.flow_open = True
+
+    def reply_begins(self) -> None:
+        """The reply's first character goes where the cursor now stands —
+        story mode's drawer says so once the played line is echoed, or at
+        once for a continue — the point /regen rewinds to."""
+        entry = self._top()
+        if entry is not None and entry.flow:
+            entry.reply_at = (entry.tracker.rows, entry.tracker.column)
+            entry.tail_at_reply = self._tail
+
+    def restore_flow(
+        self, before: str, text: str, reply_offset: int | None, *, last: bool, above: str = ""
+    ) -> None:
+        """Adopt a story-mode exchange a flow echo just printed: `before`
+        is the flow's text above it (its last line places the start
+        column, and is the tail an erase puts back), `text` the
+        exchange's own through the join to the next — a paragraph join's
+        first newline ends the exchange as a reply's own does, and its
+        second is the blank the loop's gap stands in for, so only one is
+        counted — and `reply_offset` where in `text` the reply begins
+        (None: a line no reply followed). `last` says the echo's own
+        newline ended it. Measured, never printed; oldest first, as
+        `restore_exchange`."""
+        width = terminal_width()
+        tail_before = before.rsplit("\n", 1)[-1] if before else ""
+        inline = bool(before) and not before.endswith("\n")
+        column = _column(tail_before, width) if inline else 0
+        entry = _Exchange(0, width)
+        entry.flow = True
+        entry.inline = inline
+        entry.start_column = column if column < width else 0
+        entry.tail_before = tail_before
+        entry.tracker.rewind(0, column)
+        body = text.rstrip("\n")
+        if reply_offset is not None:
+            head = body[:reply_offset]
+            entry.tracker.feed(head)
+            entry.reply_at = (entry.tracker.rows, entry.tracker.column)
+            entry.tail_at_reply = (tail_before + head).rsplit("\n", 1)[-1]
+            entry.tracker.feed(body[reply_offset:])
+        else:
+            entry.tracker.feed(body)
+        if last or text.endswith("\n"):
+            entry.tracker.feed("\n")
+        if above:
+            entry.lead = measure(above + "\n", width) + 1
+        self._stack.append(entry)
+
+    @property
+    def tail(self) -> str:
+        """The last line of text on screen, as printed (escapes and all):
+        what an inline continuation goes on from."""
+        return self._tail
+
+    @property
+    def tail_column(self) -> int:
+        """The column the text on screen ends at — the last line measured
+        as the terminal lays it out, wrapping included."""
+        return _column(self._tail, terminal_width())
+
+    def note_printed(self, text: str) -> None:
+        """Keep where the text ends as `text` prints: the last line's
+        text, and the newlines after it. Newlines alone end the line
+        without starting another — the stream's own after a reply, the
+        loop's gap — so the tail stays the text's until something prints
+        below it. `reply` notes its own writes; the say protocol and the
+        few prints past the ledger call this themselves."""
+        core = text.rstrip("\n")
+        self._pending += len(text) - len(core)
+        if not core:
+            return
+        if self._pending:
+            self._tail = ""
+            self._pending = 0
+        if "\n" in core:
+            self._tail = core.rsplit("\n", 1)[1]
+        else:
+            self._tail += core
+
+    def _onto_tail(self) -> str:
+        """The escape that puts the cursor where the text ended, from the
+        row under it: up onto its last row and past its last character —
+        or, where that row is full, nowhere, since the terminal wraps the
+        next character to the row the cursor is on anyway."""
+        column = self.tail_column
+        if column >= terminal_width():
+            return ""
+        return "\x1b[1A" + (f"\x1b[{column}C" if column else "")
 
     @property
     def reply(self) -> TextIO:
@@ -166,6 +320,7 @@ class ScreenLedger:
         self._lead_blank = False  # nothing prints under a wiped typed line
         sys.stdout.write(CLEAR_SCREEN)
         sys.stdout.flush()
+        self._tail, self._pending = "", 0
         self._stack.clear()
         self._ruled = False
         self._suppress_gap = True
@@ -203,6 +358,7 @@ class ScreenLedger:
         above = lead or ("\n" if wrote_before else "")
         sys.stdout.write(f"{above}{break_rule(terminal_width())}\n\n")
         sys.stdout.flush()
+        self.note_printed(break_rule(terminal_width()) + "\n\n")
         self._ruled = True
 
     # ---------- erasing ----------
@@ -223,11 +379,16 @@ class ScreenLedger:
         nothing; False means fall back to reporting (and the fallback
         print must invalidate)."""
         entry = self._top()
-        if entry is None or not self._erase(self._typed_rows + 1 + entry.rows, entry):
+        if entry is None or not self._erase(
+            self._typed_rows + 1 + entry.rows, entry, column=entry.start_column
+        ):
             return False
         self._stack.pop()
-        self._suppress_gap = True
         self._typed_rows = 0
+        if entry.flow:
+            self._rewound(entry)
+        else:
+            self._suppress_gap = True
         return True
 
     def erase_reply(self) -> bool:
@@ -243,6 +404,18 @@ class ScreenLedger:
         entry = self._top()
         if entry is None:
             return False
+        if entry.flow:
+            # to where the reply began, mid-line where the line was: the
+            # fresh take goes on from the reader's words
+            at_rows, at_column = entry.reply_at or (0, entry.start_column)
+            rows = self._typed_rows + 1 + (entry.tracker.rows - at_rows)
+            if not self._erase(rows, entry, column=at_column):
+                return False
+            entry.tracker.rewind(at_rows, at_column)
+            self._tail = entry.tail_at_reply if entry.reply_at else entry.tail_before
+            self._pending = 0
+            self._typed_rows = 0
+            return True
         rows = self._typed_rows + (1 + entry.tracker.rows if entry.tracker.rows else 0)
         if rows and not self._erase(rows, entry):
             return False
@@ -259,6 +432,14 @@ class ScreenLedger:
         entry = self._top()
         if entry is None or entry.tracker.rows == 0:
             return False
+        if entry.flow:
+            at_rows, at_column = entry.reply_at or (0, entry.start_column)
+            if not self._erase(entry.tracker.rows - at_rows, entry, column=at_column):
+                return False
+            entry.tracker.rewind(at_rows, at_column)
+            self._tail = entry.tail_at_reply if entry.reply_at else entry.tail_before
+            self._pending = 0
+            return True
         if not self._erase(entry.tracker.rows, entry):
             return False
         entry.tracker.reset()
@@ -306,6 +487,7 @@ class ScreenLedger:
         self._stack.clear()
         self._ruled = False
         self._suppress_gap = False
+        self.flow_open = False
 
     def gap(self, *, deferred: bool = False) -> bool:
         """The between-submissions blank line, printed by the run loop
@@ -323,6 +505,7 @@ class ScreenLedger:
         self._suppress_gap = False
         self._typed_rows = 0
         self._wrote = False
+        self.flow_open = False
         if not (wants and not suppressed):
             return False
         if deferred:
@@ -353,7 +536,10 @@ class ScreenLedger:
     def _top(self) -> "_Exchange | None":
         return self._stack[-1] if self._stack else None
 
-    def _erase(self, rows: int, entry: "_Exchange") -> bool:
+    def _erase(self, rows: int, entry: "_Exchange", *, column: int = 0) -> bool:
+        """Up `rows` rows and erase to the end of the screen — from
+        `column` of that row, what stood before it staying, where a flow
+        exchange began mid-line."""
         if entry.width != terminal_width():
             self.invalidate()  # a resize voided every count
             return False
@@ -366,12 +552,37 @@ class ScreenLedger:
         if rows > row - 1:
             return False  # partly in scrollback — beyond repair, keep it
         self._lead_blank = False  # the typed line goes; nothing prints under it
-        sys.stdout.write(_ERASE_UP.format(rows))
+        sys.stdout.write(_ERASE_FROM.format(rows, column) if column else _ERASE_UP.format(rows))
         sys.stdout.flush()
         return True
 
+    def _rewound(self, entry: "_Exchange") -> None:
+        """The screen after a flow exchange is erased: the text above
+        stands as it was, its tail put back. Mid-line, the row is ended
+        again — the newline the erased text had taken — and the loop's
+        gap follows; at a row's start (a paragraph's, or the row after a
+        text that filled its own) the row above is whole already, and a
+        paragraph's standing blank is the gap."""
+        self._tail = entry.tail_before
+        top = self._top()
+        if not entry.inline:
+            self._pending = 2
+            self._suppress_gap = True
+            return
+        if entry.start_column:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+        if top is not None:
+            top.tracker.feed("\n")
+        self._pending = 1
+        # the row is ended but no blank stands under it: the loop's gap
+        # is wanted, which `_wrote` is what asks for
+        self._suppress_gap = False
+        self._wrote = True
+
     def _reply_written(self, text: str) -> None:
         self._wrote = True
+        self.note_printed(text)
         entry = self._top()
         if entry is None:
             return
@@ -388,9 +599,26 @@ class _Exchange:
     """One played submission's screen extent: the grey block, the blank
     under it (claimed once a reply writes), and the reply's tracker —
     all at the width they printed at. `lead` counts an undo report's rows
-    above the block, erased with the exchange and reprinted fresh."""
+    above the block, erased with the exchange and reprinted fresh. A
+    story-mode exchange (`flow`) has no block: its text begins at
+    `start_column` of the row it opened on — mid-line when `inline` —
+    and `reply_at` is where the reply begins in its tracker's count;
+    `tail_before` and `tail_at_reply` are the ledger's tail at those two
+    points, put back when an erase rewinds to them."""
 
-    __slots__ = ("block", "internal", "lead", "tracker", "width")
+    __slots__ = (
+        "block",
+        "flow",
+        "inline",
+        "internal",
+        "lead",
+        "reply_at",
+        "start_column",
+        "tail_at_reply",
+        "tail_before",
+        "tracker",
+        "width",
+    )
 
     def __init__(self, block: int, width: int) -> None:
         self.block = block
@@ -398,10 +626,24 @@ class _Exchange:
         self.lead = 0
         self.tracker = RowTracker(width)
         self.width = width
+        self.flow = False
+        self.inline = False
+        self.start_column = 0
+        self.reply_at: tuple[int, int] | None = None
+        self.tail_before = ""
+        self.tail_at_reply = ""
 
     @property
     def rows(self) -> int:
         return self.lead + self.block + self.internal + self.tracker.rows
+
+
+def _column(text: str, width: int) -> int:
+    """The column `text` ends at when it is the last line on screen —
+    laid out at `width`, wrapping included, escapes taking nothing."""
+    tracker = RowTracker(width)
+    tracker.feed(text)
+    return tracker.column
 
 
 class _ReplyWriter:

@@ -106,7 +106,14 @@ def run(session: Session) -> None:
         # when it opens on a question's answers (`AnswerMenu.top_row`).
         print(api_stories.landed_line(session))
         print()
-        print(last_turns(list(session.messages), RESUME_TURNS, notes=chat.notes_displayed))
+        echoed = last_turns(
+            list(session.messages),
+            RESUME_TURNS,
+            notes=chat.notes_displayed,
+            story=session.story_mode is StoryMode.STORY,
+        )
+        print(echoed)
+        chat.ledger.note_printed(echoed + "\n")  # printed past the ledger: the flow's tail
         answers.top_row = answers.posed
         if not answers.top_row:
             print()
@@ -141,9 +148,10 @@ def run(session: Session) -> None:
         else:
             prefix = PROMPT_PREFIX
         # the hint is the mode's: a story in story mode is continued
+        story = session.story_mode is StoryMode.STORY
         if assembler.in_block:
             placeholder = None
-        elif session.story_mode is StoryMode.STORY:
+        elif story:
             placeholder = STORY_PLACEHOLDER
         else:
             placeholder = CHAT_PLACEHOLDER
@@ -197,16 +205,21 @@ def run(session: Session) -> None:
             sys.stdout.write(f"\x1b[{shown}A\r\x1b[J")
         else:
             chat.ledger.typed(prefix + line + "\n")
-            result = assembler.feed(line)
+            # in story mode the line plays as typed, the whitespace at its
+            # edges its seams (`api.play.submit`); every other line is trimmed
+            result = assembler.feed(line, verbatim=story)
             if result is None:
                 continue  # inside an open """ block — keep collecting lines
             submission = result
-            if not submission and session.story_mode is not StoryMode.STORY:
+            if not submission.strip() and not story:
                 # A bare Enter leaves its prompt row on screen; its rows
                 # stay counted so the next submission's erase takes it
                 # too. In story mode it is the continue: it plays.
                 continue
 
+        # the continue: story mode's empty line, which the stream places
+        # where the text ended rather than echoing (`stream.show`)
+        chat.continuing = story and not submission.strip()
         try:
             submit(chat, submission)
         except KeyboardInterrupt:
@@ -214,6 +227,8 @@ def run(session: Session) -> None:
             # What it left mid-row is not the ledger's to count.
             print()
             chat.ledger.invalidate()
+        finally:
+            chat.continuing = False
         # The systematic blank before the next prompt — the prompt's own
         # to draw when it opens on a question's answers, so the question's
         # block runs on into them.

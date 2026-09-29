@@ -40,7 +40,9 @@ RESET = "\x1b[0m"
 # Erasing and cursor motion
 CLEAR_SCREEN = "\x1b[H\x1b[2J"  # wipe the visible screen, cursor home; scrollback stays
 ERASE_LINE = "\x1b[2K"  # clear the row the cursor is on
+ERASE_TO_END = "\x1b[K"  # clear from the cursor to the row's end, the cursor unmoved
 UP_ONE = "\x1b[1A"
+INDEX = "\x1bD"  # down one row, the screen scrolling at the bottom, the column KEPT
 GOTO_ROW = "\x1b[{};1H"  # CUP to column 1 of the given row
 SAVE_CURSOR = "\x1b7"  # DECSC
 RESTORE_CURSOR = "\x1b8"  # DECRC
