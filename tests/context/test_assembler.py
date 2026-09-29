@@ -10,7 +10,9 @@ steps down to its floor; past the floor the assembly refuses. Across all
 of them the wire promise holds: the model sees the stored messages and
 nothing the code invented but the recap — and the injections it was
 handed, each where it was told to go, a stored reply's tool calls as the
-story's tool set has them.
+story's tool set has them, a tool's turn as the reader's, framed. The
+seam rule (`join_of`, its write side `seam_of`) decides how a row joins
+the text before it, on the wire and in the canvas alike.
 """
 
 from dataclasses import dataclass, replace
@@ -21,11 +23,12 @@ from otaku.context.assembler import (
     IMAGE_TOKENS,
     ContextOverflowError,
     ContextShape,
-    Join,
+    JoinType,
     WirePicture,
     assemble_story,
     context_in_force,
     join_of,
+    seam_of,
 )
 from otaku.context.injections import Injection
 from otaku.context.tool_calls import ToolSet
@@ -490,22 +493,39 @@ class TestInjections:
 
 
 class TestTheSeam:
-    """`join_of`, the one seam rule for the text wire and the canvas."""
+    """`join_of`, the one seam rule for the text wire and the canvas —
+    read off the two texts at the seam and nothing else."""
 
-    def test_a_text_completions_row_joins_as_it_stands(self) -> None:
-        for body in (" the bus.", "\n\nThe rain.", "ing on."):
-            assert join_of(continued(body)) is Join.INLINE, body
+    def test_a_row_opening_with_whitespace_joins_inline(self) -> None:
+        before = user("I was waiting for")
+        for body in (" the bus.", "\tthe bus.", "  the bus."):
+            assert join_of(before, assistant(body)) is JoinType.INLINE, body
+        # the reader's line the same, typed to go on with the sentence
+        assert join_of(assistant("I was waiting"), user(" and the door")) is JoinType.INLINE
 
-    def test_a_line_the_reader_opened_with_whitespace_joins_as_it_stands(self) -> None:
-        assert join_of(user(" and the door")) is Join.INLINE
-        assert join_of(user("\nAnd the door")) is Join.INLINE
+    def test_a_flush_row_joins_inline_only_after_a_text_ending_in_a_space(self) -> None:
+        assert join_of(user("She waited "), assistant("for the bus.")) is JoinType.INLINE
+        # unfinished but flush: a paragraph — the recorder supplies the
+        # space (`seam_of`), the reader never glues
+        assert join_of(user("She waited for"), assistant("the bus.")) is JoinType.PARAGRAPH
+        assert join_of(user("One."), assistant("Two.")) is JoinType.PARAGRAPH
 
-    def test_every_other_row_is_a_paragraph(self) -> None:
-        assert join_of(user("And the door")) is Join.PARAGRAPH
-        # a chat completion's reply, whatever its lead: never verbatim
-        assert join_of(assistant(" Two.")) is Join.PARAGRAPH
-        assert join_of(replied("Two.")) is Join.PARAGRAPH
-        assert join_of(card(1, "Greetings.")) is Join.PARAGRAPH
+    def test_a_lead_holding_a_newline_opens_a_paragraph(self) -> None:
+        for body in ("\n\nThe rain.", "\nAnd the door", " \n The rain."):
+            assert join_of(user("One "), assistant(body)) is JoinType.PARAGRAPH, body
+
+    def test_the_first_row_a_tool_turn_and_the_row_after_it_are_paragraphs(self) -> None:
+        assert join_of(None, user(" the bus.")) is JoinType.PARAGRAPH
+        assert join_of(assistant("Look "), tool("Tides: high.")) is JoinType.PARAGRAPH
+        assert join_of(tool("Tides: high. "), assistant(" It is six.")) is JoinType.PARAGRAPH
+        # an imported or card row is read as any other: by the text alone
+        assert join_of(user("One."), card(1, "Greetings.")) is JoinType.PARAGRAPH
+
+    def test_which_wire_made_a_row_decides_nothing(self) -> None:
+        # a chat completion's row and a text completion's read the same
+        for made in (replied, continued, assistant):
+            assert join_of(user("One "), made(" Two.")) is JoinType.INLINE, made.__name__
+            assert join_of(user("One."), made("Two.")) is JoinType.PARAGRAPH, made.__name__
 
     def test_the_wire_joins_consecutive_rows_by_it(self) -> None:
         prompt = assemble(
@@ -520,22 +540,62 @@ class TestTheSeam:
             ],
             None,
         )
-        assert [(t.role, t.body, t.join) for t in prompt.messages] == [
-            ("user", "I was waiting", Join.PARAGRAPH),
-            ("assistant", " for the bus.\n\nIt rained.", Join.INLINE),
-            ("user", " and the door", Join.INLINE),
-            ("assistant", " swung open.", Join.INLINE),
-            ("user", "Then?", Join.PARAGRAPH),
+        assert [(t.role, t.body, t.join_type) for t in prompt.messages] == [
+            ("user", "I was waiting", JoinType.PARAGRAPH),
+            ("assistant", " for the bus.\n\nIt rained.", JoinType.INLINE),
+            ("user", " and the door", JoinType.INLINE),
+            ("assistant", " swung open.", JoinType.INLINE),
+            ("user", "Then?", JoinType.PARAGRAPH),
         ]
 
     def test_a_paragraphs_rows_join_after_a_blank_line(self) -> None:
-        rows = [user("One."), assistant("Two."), assistant("Three."), user("Four.")]
+        rows = [user("One."), assistant("Two."), assistant("\n\n\nThree."), user("Four.")]
         prompt = assemble("", rows, None)
-        assert [(t.body, t.join) for t in prompt.messages] == [
-            ("One.", Join.PARAGRAPH),
-            ("Two.\n\nThree.", Join.PARAGRAPH),
-            ("Four.", Join.PARAGRAPH),
+        assert [(t.body, t.join_type) for t in prompt.messages] == [
+            ("One.", JoinType.PARAGRAPH),
+            ("Two.\n\nThree.", JoinType.PARAGRAPH),
+            ("Four.", JoinType.PARAGRAPH),
         ]
+
+
+class TestSeamOf:
+    """`seam_of`, the write side of the seam rule: the one space a reply
+    that comes flush after the text is owed — supplied by the recorder,
+    read back by `join_of` — and nothing wherever the read side already
+    has its answer."""
+
+    def test_a_flush_reply_after_an_unfinished_sentence_is_owed_a_space(self) -> None:
+        for body in ("She waited for", "the door,", "and the", "He said:"):
+            assert seam_of(user(body)) == " ", body
+        assert seam_of(assistant("I was waiting")) == " "
+
+    def test_nothing_after_a_text_ending_in_whitespace(self) -> None:
+        # a space is the seam as it stands; a break makes a paragraph
+        for body in ("She waited ", "She waited\n", "She waited\n\n", "the door,\t"):
+            assert seam_of(user(body)) == "", body
+
+    def test_nothing_after_a_finished_sentence(self) -> None:
+        for end in ".!?…\"')\u201d\u2019\u00bb":
+            assert seam_of(user("She waited" + end)) == "", end
+        assert seam_of(user('"Go."')) == ""
+
+    def test_nothing_before_the_first_row_after_a_tool_turn_or_an_empty_text(self) -> None:
+        assert seam_of(None) == ""
+        assert seam_of(tool("Tides: high at six")) == ""
+        assert seam_of(user("")) == ""
+
+    def test_the_two_sides_agree(self) -> None:
+        # the space supplied is what makes the flush reply read inline;
+        # where none is, the join reads off the text as it stands
+        for body, joined in (
+            ("She waited for", JoinType.INLINE),
+            ("She waited ", JoinType.INLINE),
+            ("She waited.", JoinType.PARAGRAPH),
+            ("She waited\n", JoinType.PARAGRAPH),
+        ):
+            before = user(body)
+            reply = assistant(seam_of(before) + "the bus.")
+            assert join_of(before, reply) is joined, body
 
 
 class TestTheStoryAsOneText:
@@ -553,6 +613,23 @@ class TestTheStoryAsOneText:
         )
         assert prompt.as_story_text() == (
             "I was waiting for the bus.\n\nThen?\n\nNothing came. said no one"
+        )
+
+    def test_a_paragraphs_blank_line_lead_is_not_drawn_twice(self) -> None:
+        rows = [user("One."), continued("\n\nTwo."), continued("\n\n\nThree.")]
+        assert assemble("", rows, None).as_story_text() == "One.\n\nTwo.\n\nThree."
+
+    def test_a_tool_turn_is_a_paragraph_of_its_own_framed_as_the_model_reads_it(self) -> None:
+        rows = [
+            user("Look it up."),
+            assistant("```otk-search\ntides\n```"),
+            tool("Tides: high at six."),
+            assistant(" It is six."),
+        ]
+        prompt = assemble("", rows, None, tool_set=ToolSet(on=frozenset({"search"})))
+        assert prompt.as_story_text() == (
+            "Look it up.\n\n```otk-search\ntides\n```\n\n"
+            "<<search: Tides: high at six.>>\n\n It is six."
         )
 
     def test_the_system_text_is_the_premise_and_what_was_injected_after_it(self) -> None:
@@ -602,6 +679,24 @@ class TestToolCalls:
         prompt = assemble("", noted(), 8192, tool_set=NO_TOOLS)
         assert [m.body for m in prompt.messages] == ["One.", "Two.", "Three."]
 
+    def test_a_tool_turn_goes_as_the_readers_turn_framed_by_the_prompts(self) -> None:
+        # the wire has two sides, and the result is what the model is
+        # told: the tool named as the row's `provider` names it, the
+        # framing prompts.toml's
+        rows = [
+            user("Look it up."),
+            assistant("```otk-search\ntides\n```"),
+            tool("Tides: high at six."),
+            assistant("It is six."),
+        ]
+        prompt = assemble("", rows, 8192, tool_set=ToolSet(on=frozenset({"search"})))
+        assert [(m.role, m.body) for m in prompt.messages] == [
+            ("user", "Look it up."),
+            ("assistant", "```otk-search\ntides\n```"),
+            ("user", "<<search: Tides: high at six.>>"),
+            ("assistant", "It is six."),
+        ]
+
 
 # ---------- fixtures ----------
 
@@ -626,6 +721,11 @@ def continued(body: str) -> Message:
 
 def card(message_id: int, body: str) -> Message:
     return Message(id=message_id, role="user", body=body, kind="card")
+
+
+def tool(body: str, name: str = "search") -> Message:
+    """A tool's turn: its result, the tool's name its provider."""
+    return Message(role="tool", kind="tool", body=body, provider=name)
 
 
 def exchange() -> list[Message]:
@@ -799,3 +899,4 @@ class _Prompts:
     recap_header: str
     card_framing: str = ""
     story_framing: str = "<<frame {premise}>>"
+    tool_framing: str = "<<{tool}: {body}>>"

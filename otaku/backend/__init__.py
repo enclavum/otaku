@@ -26,7 +26,6 @@ Internal rule: backend modules import each other as
 package root.
 """
 
-from otaku.backend.story import StoryMode
 from otaku.encryption import EncryptionError
 from otaku.providers import (
     KeySource,
@@ -41,21 +40,25 @@ from otaku.store import DatabaseError
 from otaku.store.ops.stories import StoryListing
 from otaku.store.schema import (
     Character,
+    CompletionType,
     InjectionPosition,
     Journal,
+    Layout,
     Message,
     Scene,
-    TranscriptLayout,
+    Transcript,
 )
 
 __all__ = [
     "Character",
+    "CompletionType",
     "ConfigError",
     "DatabaseError",
     "EncryptionError",
     "InjectionPosition",
     "Journal",
     "KeySource",
+    "Layout",
     "Locality",
     "Message",
     "ModelInfo",
@@ -64,8 +67,7 @@ __all__ = [
     "ProviderInfo",
     "Scene",
     "StoryListing",
-    "StoryMode",
     "TerminalSettings",
-    "TranscriptLayout",
+    "Transcript",
     "WebSettings",
 ]

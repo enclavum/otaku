@@ -255,7 +255,8 @@ in classes, so a stylesheet can name it the same way the scripts do.
 | `data-theme="dark"` / `"light"` | `<html>` | the token set pinned; absent, the OS decides |
 | `data-booting` | `<html>` | the shell unseen until the page knows whether a sign-in comes first |
 | `data-transcript="canvas"` / `"manuscript"` / `"chat"` | `.otk-transcript` | which of the three layouts the same turns are read in |
-| `data-story-mode="story"` / `"chat"` | `.otk-app` | the mode the open story is played in; in story mode the flow shows no picture tiles |
+| `data-completion="chat"` / `"text"` | `.otk-app` | the wire the next request goes over; over the text wire the flow shows no picture tiles |
+| `data-layout="canvas"` / `"manuscript"` / `"chat"` | `.otk-app` | the look the open story is drawn in; on the canvas the composer continues on an empty line |
 | `data-playing` | `.otk-app` | a reply is arriving; the layout glyphs are inert meanwhile |
 | `data-open="true"` | `.otk-rail` | the contents, on a narrow window |
 | `data-editing` | `.otk-edit` | the field editor is open |

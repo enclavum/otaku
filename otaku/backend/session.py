@@ -27,7 +27,7 @@ from typing import Any, Self
 
 from otaku.backend.errors import Refused as Refused  # every caller's door to it
 from otaku.backend.paths import Paths
-from otaku.backend.story import StoryMode, StorySettingLayout, StorySettings, story_mode_of
+from otaku.backend.story import StorySettings, StorySettingTranscript
 from otaku.context import assembler
 from otaku.context.assembler import AssembledPrompt, ContextShape
 from otaku.formatting import pretty_path
@@ -49,7 +49,13 @@ from otaku.settings.config import Config, TerminalSettings, WebSettings
 from otaku.settings.prompts import Prompts
 from otaku.settings.state import State
 from otaku.store import Store
-from otaku.store.schema import Message, StorySettingDB
+from otaku.store.schema import (
+    CompletionType,
+    Layout,
+    Message,
+    StorySettingDB,
+    Transcript,
+)
 from otaku.worker import Worker
 
 # The /set think menu for a model nobody has described: unset first
@@ -448,7 +454,7 @@ class Session:
         """Whether the model in use has the raw text wire: its engine said
         so (`ModelCapabilities.text_completion`), and unknown reads as no,
         the capability's own rule. Read off the cached row, as `vision`
-        is. One of the two facts of `is_story_mode_ready`."""
+        is. One of the two facts of `can_complete_text`."""
         client = self._client()
         if client is None:
             return False
@@ -461,10 +467,10 @@ class Session:
 
     @property
     def text_template(self) -> templates.TextTemplate | None:
-        """The text template the model in use plays story mode with
-        (`templates.resolve`): its models.toml line, else the engine's
-        word off the cached row, else its name; None, and it has no
-        story mode."""
+        """The text template the text wire renders around the story on
+        the model in use (`templates.resolve`): its models.toml line, else
+        the engine's word off the cached row, else its name; None where
+        none is known."""
         if not self.model:
             return None
         client = self._client()
@@ -474,35 +480,53 @@ class Session:
         )
 
     def text_template_for(self, info: ModelInfo) -> templates.TextTemplate | None:
-        """The text template any listed model would play story mode with — the
+        """The text template any listed model would render with — the
         report's word on a model that is not in use, its models.toml line
         read for it."""
         saved = models_file.load(self._paths.models_file).get(info.name, {})
         return templates.resolve(saved.get(models_file.TEMPLATE_KEY), info.text_template, info.name)
 
     @property
-    def is_story_mode_ready(self) -> bool:
-        """Whether the model in use can play story mode: the text wire,
-        and a text template to render around the story. With it, the canvas
-        layout is story mode (`story_mode`)."""
-        return self.text_completion and self.text_template is not None
+    def can_complete_text(self) -> bool:
+        """Whether the novel is offered on the model in use: its engine
+        serves the text wire, and the template in force is `plain` — a
+        base or story-trained model, named so by hand in models.toml. An
+        instruct model has a template too, but fights a bare text, so the
+        novel is kept from it."""
+        template = self.text_template
+        return (
+            self.text_completion and template is not None and template.name == templates.PLAIN.name
+        )
+
+    @property
+    def transcript(self) -> Transcript:
+        """The transcript the open story is read in — its setting, the
+        default until it says otherwise (`StorySettingTranscript`)."""
+        stored = next(
+            (row for row in self._settings_db if row.name == StorySettingTranscript.name), None
+        )
+        return StorySettingTranscript(stored).transcript
+
+    @property
+    def layout(self) -> Layout:
+        """The look the open story is drawn in, off its transcript — what
+        both frontends read (`Transcript.layout`)."""
+        return self.transcript.layout
+
+    @property
+    def completion_type(self) -> CompletionType:
+        """The wire the next request goes over, off the open story's
+        transcript and the model in use (`Transcript.completion_type`,
+        `can_complete_text`)."""
+        return self.transcript.completion_type(self.can_complete_text)
 
     @property
     def can_attach(self) -> bool:
         """Whether a picture may ride the next request: the model in use
-        sees (`vision`), and the mode's wire has room for one — story
-        mode's is one text, which has none. What shows the attach
-        affordances in both frontends; a picture is refused regardless."""
-        return self.vision and self.story_mode is StoryMode.CHAT
-
-    @property
-    def story_mode(self) -> StoryMode:
-        """The mode the open story is played in (`story.StoryMode`): its
-        layout setting, on the model in use (`is_story_mode_ready`)."""
-        stored = next(
-            (row for row in self._settings_db if row.name == StorySettingLayout.name), None
-        )
-        return story_mode_of(StorySettingLayout(stored).layout, self.is_story_mode_ready)
+        sees (`vision`), and the wire has room for one — the text wire is
+        one text, which has none. What shows the attach affordances in
+        both frontends; a picture is refused regardless."""
+        return self.vision and self.completion_type is CompletionType.CHAT
 
     @property
     def integrations(self) -> Integrations:
@@ -517,11 +541,19 @@ class Session:
         other call site can never disagree on what is sent. The pictures
         ride only while the model can see them, and only the latest
         turn's where the engine would gather every turn's onto it — and
-        never in story mode, whose wire is one text (`as_text`): held,
-        and counted as held. Raises `ContextOverflowError` when the story
-        cannot fit the limit even fully degraded."""
+        never over the text wire, which is one text (`as_text`): held,
+        and counted as held. Every injection is a setting's, the canvas's
+        standing instruction included (`StorySettingEmulateTextCompletion`,
+        gated on the transcript), so the warm-up's job rebuilds the same
+        prefix. Raises `ContextOverflowError` when the story cannot fit
+        the limit even fully degraded."""
         client = self._client()
-        settings = StorySettings(self._settings_db, self._store, self._paths.prompts_file)
+        settings = StorySettings(
+            self._settings_db,
+            self._store,
+            self._paths.prompts_file,
+            can_complete_text=self.can_complete_text,
+        )
         shape = ContextShape(
             head_messages=self._config.head_messages,
             min_tail_messages=self._config.min_tail_messages,
@@ -538,7 +570,7 @@ class Session:
             shape=shape,
             pictures_ride=(
                 client.pictures_ride(self.model)
-                if client is not None and self.story_mode is StoryMode.CHAT
+                if client is not None and self.completion_type is CompletionType.CHAT
                 else PicturesRide.NONE
             ),
         )

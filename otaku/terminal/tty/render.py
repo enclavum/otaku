@@ -374,12 +374,12 @@ def turn(item: Message, *, notes: bool = False) -> str:
 
 
 def last_turns(
-    messages: list[Message], count: int, *, notes: bool = False, story: bool = False
+    messages: list[Message], count: int, *, notes: bool = False, is_canvas: bool = False
 ) -> str:
     """The last `count` turns, echoed the way they played: one blank line
     between turns, bodies verbatim, the replies' notes while `notes` —
-    or, in `story` mode, as the one text they are (`flow`)."""
-    if story:
+    or, on the canvas (`is_canvas`), as the one text they are (`flow`)."""
+    if is_canvas:
         return flow(messages[-count:], notes=notes)
     out: list[str] = []
     for item in messages[-count:]:
@@ -389,8 +389,8 @@ def last_turns(
 
 
 def flow(items: list[Message], *, notes: bool = False) -> str:
-    """The turns as ONE text — story mode's echo, the page's canvas in
-    this medium: a user row as prose, no block, typeset as the text is;
+    """The turns as ONE text — the canvas's echo in this medium: a user
+    row as prose, no block, typeset as the text is;
     every row joined to the text before it by its seam
     (`api.play.join_kind`) — a paragraph after one blank line, an inline
     row as it stands, its own leading whitespace the seam; a tool turn
@@ -405,26 +405,26 @@ def flow_offsets(items: list[Message], *, notes: bool = False) -> tuple[str, lis
     ledger can place echoed turns for erasing (`Chat.restore_tail`)."""
     out = ""
     starts: list[int] = []
-    after_block = False
+    previous: Message | None = None
     for item in items:
         piece = prose(item.body) if item.role == "user" else turn(item, notes=notes)
         if not out:
             starts.append(0)
             out = piece
-        elif after_block or api_play.join_kind(item) == "paragraph":
+        elif api_play.join_kind(previous, item) == "paragraph":
             out = out.rstrip("\n") + "\n\n"
             starts.append(len(out))
             out += piece.lstrip("\n")
         else:
             starts.append(len(out))
             out += piece
-        after_block = item.role == "tool"
+        previous = item
     return out, starts
 
 
 def prose(text: str) -> str:
-    """`text` typeset as a reply's prose is — the reader's line in story
-    mode, which reads as the text does: dialogue takes its accent, and
+    """`text` typeset as a reply's prose is — the reader's line on the
+    canvas, which reads as the text does: dialogue takes its accent, and
     no command is picked out, since none is played there."""
     out = io.StringIO()
     streamer = Streamer(out)

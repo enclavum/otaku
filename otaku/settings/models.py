@@ -1,7 +1,7 @@
 """Per-model settings: models.toml — the inference parameters written by
 /set parameter and the thinking level written by /set think, one entry
 per bare model name, and the ONE key a user writes by hand:
-`text_template`, the text template the model plays story mode with,
+`text_template`, the text template the text wire renders around the story,
 which no command sets. Rewritten wholesale on every change; the session carries the
 template line so a rewrite keeps it."""
 
@@ -21,7 +21,7 @@ from otaku.settings import read_settings, write_atomic
 THINK_UNSET = "unset"
 # The entry's two keys that are not inference parameters.
 THINK_KEY = "think"
-# The text template a model plays story mode with
+# The text template the text wire renders around the story on a model
 # (`providers.templates.TEXT_TEMPLATES` names them); written by hand,
 # kept by every save.
 TEMPLATE_KEY = "text_template"
@@ -30,7 +30,7 @@ _HEADER = [
     "# Per-model settings, written by /set parameter and /set think.",
     "# Keyed by bare model name. A model with no think row starts with its",
     "# thinking off where the provider says it thinks; unset sends nothing.",
-    "# text_template = the template story mode wraps the story in, by hand:",
+    "# text_template = the template the text wire wraps the story in, by hand:",
     "# gemma4, gemma, mistral-tekken, chatml, llama3, or plain for none.",
     "",
 ]

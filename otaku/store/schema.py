@@ -291,7 +291,7 @@ class StorySettingDB:
     position: "InjectionPosition | None" = None  # None: unsaid, the setting's default applies
     reminder_text: str = ""
     display_notes: bool = True
-    layout: "TranscriptLayout | None" = None  # None: unsaid, the setting's default applies
+    transcript: "Transcript | None" = None  # None: unsaid, the setting's default applies
 
     @classmethod
     def from_json(cls, text: str) -> tuple[Self, ...]:
@@ -312,7 +312,7 @@ class StorySettingDB:
                     position=InjectionPosition.from_value(state.get("position")),
                     reminder_text=reminder_text if isinstance(reminder_text, str) else "",
                     display_notes=state.get("display_notes") is not False,
-                    layout=TranscriptLayout.from_value(state.get("layout")),
+                    transcript=Transcript.from_value(state.get("transcript")),
                 )
             )
         return tuple(out)
@@ -339,8 +339,8 @@ class StorySettingDB:
                 state.pop("display_notes", None)  # the default; only the exception is said
             else:
                 state["display_notes"] = False
-            if setting.layout is not None:
-                state["layout"] = setting.layout.value
+            if setting.transcript is not None:
+                state["transcript"] = setting.transcript.value
             column[setting.name] = state
         return json.dumps(column, ensure_ascii=False)
 
@@ -386,19 +386,55 @@ class InjectionPosition:
         return cls(value) if type(value) is int and value >= 1 else None
 
 
-class TranscriptLayout(Enum):
-    """How a story's turns are laid out to be read — the same turns three
-    ways, named here so the choice is the story's and each frontend draws
-    it in its own medium: CANVAS one continuous text, nothing marking who
-    wrote what; MANUSCRIPT the played lines as interjections among the
-    prose; CHAT the turns as alternating blocks. `value` is the plain form
-    the column and the wire hold, and `from_value` reads one back."""
+class Transcript(Enum):
+    """How a story's transcript is read — and, for one value, written:
+    the same turns four ways, named here so the choice is the story's and
+    each frontend draws the `layout` of it in its own medium. NOVEL is
+    the canvas over the TEXT wire, the model continuing the text itself;
+    CANVAS one continuous text over the chat wire; MANUSCRIPT the played
+    lines as interjections among the prose; CHAT the turns as alternating
+    blocks. `value` is the plain form the column and the wire hold, and
+    `from_value` reads one back."""
 
+    NOVEL = "novel"
     CANVAS = "canvas"
     MANUSCRIPT = "manuscript"
     CHAT = "chat"
 
     @classmethod
     def from_value(cls, value: object) -> Self | None:
-        """One of the three names; else None."""
+        """One of the four names; else None."""
         return next((each for each in cls if each.value == value), None)
+
+    @property
+    def layout(self) -> "Layout":
+        """The look alone: the novel is drawn as the canvas."""
+        return Layout.CANVAS if self is Transcript.NOVEL else Layout(self.value)
+
+    def completion_type(self, can_complete_text: bool) -> "CompletionType":
+        """The wire alone: TEXT for the novel where the model in use can
+        complete text (`Session.can_complete_text`), CHAT for every other
+        case — a novel on a model that cannot is played as a canvas."""
+        if self is Transcript.NOVEL and can_complete_text:
+            return CompletionType.TEXT
+        return CompletionType.CHAT
+
+
+class Layout(Enum):
+    """The look a transcript is drawn in — the three the stylesheets and
+    the terminal know. A transcript names one (`Transcript.layout`); the
+    frontends read the layout, never the transcript, except to show and
+    set it."""
+
+    CANVAS = "canvas"
+    MANUSCRIPT = "manuscript"
+    CHAT = "chat"
+
+
+class CompletionType(Enum):
+    """The wire a request goes over — CHAT the message list, TEXT the raw
+    text — and `messages.completion`'s word for the one that made a row,
+    kept for the record."""
+
+    CHAT = "chat"
+    TEXT = "text"

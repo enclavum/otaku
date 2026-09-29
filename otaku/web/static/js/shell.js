@@ -10,7 +10,7 @@ import * as api from "./api.js";
 import { guard } from "./browser.js";
 import { $, $$ } from "./dom.js";
 import { label } from "./format.js";
-import { hintCanvas, showLayout } from "./layout.js";
+import { offerNovel, showLayout } from "./layout.js";
 import { offline, reached, tell, told, working } from "./status.js";
 import { displayTools, isPlaying, showCorrected, showPlayed } from "./transcript.js";
 
@@ -50,16 +50,19 @@ export function showFacts(facts) {
   // (`facts.can_attach`: the model sees, and the mode's wire carries one),
   // gone otherwise. The backend refuses a picture regardless.
   for (const button of $$("[data-attach]")) button.hidden = !facts.can_attach;
-  // The verb on the send button is the mode's (`facts.story_mode`): a story in
-  // story mode is continued, not sent to. The words are this medium's.
+  // The verb on the send button is the layout's (`facts.layout`): a story
+  // on the canvas is continued, not sent to. The words are this medium's.
   const send = $("[data-send]");
-  if (send) send.textContent = facts.story_mode === "story" ? "Continue" : "Send";
-  // The mode on the app root, for the stylesheet: in story mode no
-  // picture rides the request, so the flow shows none (docs/web_tokens.md).
-  if (app) app.dataset.storyMode = facts.story_mode;
-  // on a model that can play story mode, the canvas layout IS it: the
-  // glyph's hint says so
-  hintCanvas(facts.is_story_mode_ready);
+  if (send) send.textContent = facts.layout === "canvas" ? "Continue" : "Send";
+  // The wire and the look on the app root, for the stylesheet and the
+  // composer: over the text wire no picture rides the request, so the flow
+  // shows none (docs/web_tokens.md); on the canvas an empty line continues.
+  if (app) {
+    app.dataset.completion = facts.completion_type;
+    app.dataset.layout = facts.layout;
+  }
+  // the novel is offered only where the model can complete text
+  offerNovel(facts.can_complete_text);
   drawn = facts.story_id;
 }
 

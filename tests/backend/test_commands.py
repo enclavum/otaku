@@ -13,7 +13,7 @@ rule, held beside the menu that acts on it.
 from otaku.backend.commands import (
     COMMANDS,
     GROUP_LABELS,
-    CommandKind,
+    CommandType,
     find,
     raw_argument,
     unknown_notice,
@@ -39,7 +39,7 @@ class TestFind:
 
     def test_a_direction_finds_its_syntax_row(self) -> None:
         spec = find("/me Elara: hi")
-        assert spec is not None and spec.kind is CommandKind.SYNTAX
+        assert spec is not None and spec.kind is CommandType.SYNTAX
 
     def test_an_inliner_row_never_matches_a_line_start(self) -> None:
         # `/cue` exists only behind the `…` of the inline group.
@@ -106,7 +106,7 @@ class TestTable:
 
     def test_every_row_names_a_group_and_a_kind(self) -> None:
         for spec in COMMANDS:
-            assert spec.group and isinstance(spec.kind, CommandKind), spec.token
+            assert spec.group and isinstance(spec.kind, CommandType), spec.token
 
     def test_the_inliners_live_behind_the_ellipsis(self) -> None:
         # Written in the table behind a `…`, which is how the mid-line

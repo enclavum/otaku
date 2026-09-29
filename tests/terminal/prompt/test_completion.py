@@ -233,6 +233,25 @@ class TestParameterMenu:
         assert _offered("/set parameter ") == list(PARAMETERS)
 
 
+class TestTranscriptMenu:
+    """The /set transcript menu is what the story may be read in on the
+    model in use, looked up live through `transcripts` — the novel among
+    the four only where the model can complete text."""
+
+    def test_the_menu_is_what_the_session_answers(self) -> None:
+        completer = SlashCompleter.build(transcripts=lambda: ("canvas", "manuscript", "chat"))
+        rows = list(completer.get_completions(Document("/set transcript "), CompleteEvent()))
+        assert [r.text for r in rows] == ["canvas", "manuscript", "chat"]
+        rows = list(completer.get_completions(Document("/set transcript c"), CompleteEvent()))
+        assert [r.text for r in rows] == ["canvas", "chat"]
+
+    def test_without_a_session_all_four_are_offered(self) -> None:
+        assert _offered("/set transcript ") == ["novel", "canvas", "manuscript", "chat"]
+
+    def test_nothing_follows_a_transcript(self) -> None:
+        assert _offered("/set transcript canvas ") == []
+
+
 class TestCastSuggestions:
     """The commands whose argument is a character offer the cast, shaped
     per command: /me inserts `Name:` and the prompt follows, /you inserts

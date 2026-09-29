@@ -5,6 +5,7 @@ import re
 
 from otaku.backend import InjectionPosition
 from otaku.backend.api import reports
+from otaku.backend.api import settings as api_settings
 from otaku.backend.api import stories as api_stories
 from otaku.formatting import format_context
 from scenarios.support import server as scripted
@@ -108,6 +109,20 @@ class TestContextInjections:
         assert all(i.tokens > 0 for i in report.injections)
         # a system injection's tokens are the system message's
         assert report.prompt.system_tokens >= report.injections[0].tokens
+
+    def test_the_emulation_is_listed_on_the_canvas_over_the_chat_wire(self, app: App) -> None:
+        # on by default, and gated: nothing in the manuscript, the system
+        # message's text on the canvas, named as the setting names it
+        app.play("I enter the hall.")
+        assert reports.context(app.session).injections == ()
+        api_settings.set_transcript(app.session, "canvas")
+        (found,) = reports.context(app.session).injections
+        assert (found.label, found.position, found.position_text) == (
+            "text completion emulation",
+            InjectionPosition(),
+            "system",
+        )
+        assert found.tokens > 0
 
     def test_the_terminal_lists_them_under_the_summary(self, app: App, capsys) -> None:
         app.play("I enter the hall.")

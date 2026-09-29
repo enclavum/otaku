@@ -3,8 +3,9 @@ command vocabulary the highlighter picks by; the blocks a reply's calls
 and the thinking are drawn as — behind the bar, wrapped at the width by
 the terminal's own rule, the same whole or in pieces; the question
 parted from its options as the tool reads them; what `message` makes of
-a reply; and the two readings off the story — whether notes are shown,
-and the question it stands on."""
+a reply and of a tool's turn; the canvas's echo as one text joined by
+the seam rule; and the two readings off the story — whether notes are
+shown, and the question it stands on."""
 
 import io
 from types import SimpleNamespace
@@ -22,9 +23,13 @@ from otaku.terminal.tty.render import (
     asked,
     block,
     command_tokens,
+    flow,
+    flow_offsets,
+    last_turns,
     message,
     notes_displayed,
     spaced,
+    user_block,
 )
 
 NORMAL = "\x1b[22m"  # intensity back to normal: what closes a dim block
@@ -226,6 +231,91 @@ class TestMessage:
         body = "```otk-question\nDoes Mara confess tonight, or wait for the ball?\n1. Yes\n```"
         rows = message(body, "assistant", width=30).split("\n")
         assert len(rows) > 1 and all(row.startswith(BAR) and _columns(row) <= 30 for row in rows)
+
+
+class TestToolTurn:
+    """`message` over a tool's turn: the tool's label ALONE as a dim
+    block behind the bar — the result is the model's to read, and a
+    terminal has no hover to keep it in."""
+
+    def test_the_label_alone_behind_the_bar(self) -> None:
+        drawn = message("Time: 12:00\nLoad average: 1.0", "tool", label="System")
+        assert drawn == f"{DIM}{BAR}System{NORMAL}"
+        assert "12:00" not in drawn
+
+    def test_a_tool_without_a_label_is_called_tool(self) -> None:
+        assert message("x", "tool") == f"{DIM}{BAR}Tool{NORMAL}"
+
+
+class TestFlow:
+    """`flow` — the canvas's echo: the turns as ONE text, a user row as
+    prose with no block, every row joined to the text before it by the
+    seam rule (`api.play.join_kind`); `flow_offsets` says where each
+    turn's own text begins, so an echoed turn can be erased in place."""
+
+    def test_rows_join_inline_or_as_paragraphs_by_their_seam(self) -> None:
+        rows = [
+            Message(role="user", body="She waited for"),
+            Message(role="assistant", body=" the bus."),
+            Message(role="user", body="Then?"),
+            Message(role="assistant", body="\n\nNothing came."),
+            Message(role="user", body=" She shivered."),
+        ]
+        assert flow(rows) == "She waited for the bus.\n\nThen?\n\nNothing came. She shivered."
+
+    def test_a_user_row_is_prose_not_a_block(self) -> None:
+        text = flow([Message(role="user", body="I open the door.")])
+        assert text == "I open the door."
+        assert text != user_block(message("I open the door.", "user"))
+
+    def test_each_turns_text_begins_where_the_offsets_say(self) -> None:
+        rows = [
+            Message(role="user", body="She waited for"),
+            Message(role="assistant", body=" the bus."),
+            Message(role="user", body="Then?"),
+        ]
+        text, starts = flow_offsets(rows)
+        assert text == "She waited for the bus.\n\nThen?"
+        assert [text[at:] for at in starts] == [text, " the bus.\n\nThen?", "Then?"]
+        # a paragraph join's blank goes with the turn BEFORE it
+        assert text[starts[2] - 2 : starts[2]] == "\n\n"
+
+    def test_a_tool_turn_is_a_block_apart_and_the_row_after_it_a_paragraph(self) -> None:
+        rows = [
+            Message(role="user", body="Look it up."),
+            Message(role="tool", kind="tool", body="Tides: high.", provider="search"),
+            Message(role="assistant", body="High at six."),
+        ]
+        assert flow(rows) == f"Look it up.\n\n{DIM}{BAR}Web search{NORMAL}\n\nHigh at six."
+
+    def test_a_note_rides_the_flow_only_while_displayed(self) -> None:
+        rows = [
+            Message(role="user", body="One."),
+            Message(role="assistant", body="Two.\n```otk-note\nKey.\n```"),
+        ]
+        assert flow(rows, notes=False) == "One.\n\nTwo."
+        assert flow(rows, notes=True) == f"One.\n\nTwo.\n\n{DIM}{BAR}Key.{NORMAL}"
+
+
+class TestLastTurns:
+    """`last_turns` — the resume echo: the blocks of the last turns, or
+    on the canvas the one text they are."""
+
+    def test_the_blocks_one_blank_line_between(self) -> None:
+        rows = [
+            Message(role="user", body="One."),
+            Message(role="assistant", body="Two."),
+            Message(role="user", body="Three."),
+        ]
+        assert last_turns(rows, 2) == "Two.\n\n" + user_block(message("Three.", "user"))
+
+    def test_on_the_canvas_the_one_text(self) -> None:
+        rows = [
+            Message(role="user", body="She waited for"),
+            Message(role="assistant", body=" the bus."),
+        ]
+        assert last_turns(rows, 2, is_canvas=True) == "She waited for the bus."
+        assert last_turns(rows, 1, is_canvas=True) == " the bus."
 
 
 class TestNotesDisplayed:

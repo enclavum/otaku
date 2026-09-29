@@ -250,7 +250,7 @@ class TestSchemaMigration:
         paths = _v1_database(tmp_path / "state")
         store = _open(paths)
         try:
-            assert any("Database migrated (v1 → v7)" in note.show for note in store.notes)
+            assert any("Database migrated (v1 → v8)" in note.show for note in store.notes)
             (message,) = store.stories.get_messages(1)
             # The v1 `framing` column reads back through the renamed one.
             assert (message.body, message.template) == ("I enter.", "TPL")
@@ -294,7 +294,7 @@ class TestSchemaMigration:
         finally:
             conn.close()
         assert filled == [(1, None), (2, "chat"), (3, None)]
-        assert _meta_version(paths) == "7"
+        assert _meta_version(paths) == "8"
 
     def test_a_migration_that_ran_is_reported_at_launch(
         self, server: ModelServer, tmp_path
@@ -351,6 +351,19 @@ class TestSchemaMigration:
         _insert_kind(conn, "card")  # v2 admits it
         with pytest.raises(sqlite3.IntegrityError):
             _insert_kind(conn, "nonsense")  # the tripwire survives the widening
+        conn.close()
+
+    def test_the_widened_checks_admit_a_tool_turn(self, tmp_path) -> None:
+        paths = _v1_database(tmp_path / "state")
+        conn = sqlite3.connect(paths.database_file)
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_row(conn, "tool", "tool")  # v1 refuses — the CHECKs are live
+        conn.close()
+        _open(paths).close()
+        conn = sqlite3.connect(paths.database_file)
+        _insert_row(conn, "tool", "tool")  # v8 admits the tool's turn, role and kind
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_row(conn, "narrator", "dialogue")  # the tripwire survives the widening
         conn.close()
 
     def test_a_newer_database_is_refused(self, tmp_path) -> None:
@@ -432,10 +445,10 @@ class TestSchemaMigration:
         monkeypatch.setitem(store_migrations._STEPS, 3, store_v3.to_3)
         resumed = _open(paths)
         try:
-            assert any("Database migrated (v2 → v7)" in note.show for note in resumed.notes)
+            assert any("Database migrated (v2 → v8)" in note.show for note in resumed.notes)
         finally:
             resumed.close()
-        assert _meta_version(paths) == "7"
+        assert _meta_version(paths) == "8"
 
 
 class TestFilesFolder:
@@ -606,6 +619,37 @@ class TestConfigMigration:
         for section in ("[llamacpp]", "[koboldcpp]", "[ollama]", "[omlx]", "[lmstudio]"):
             assert section in rendered
         assert set(providers) == {"llamacpp", "koboldcpp", "ollama", "omlx", "lmstudio"}
+
+    def test_a_first_run_writes_the_integrations_file_too(self, tmp_path) -> None:
+        paths = Paths.resolve(tmp_path / "state")
+        paths.ensure_tree()
+        paths.config_key_file.write_bytes(secrets.token_bytes(32))
+        load_config(paths)
+        # every known integration's section on its endpoint with no key,
+        # and the one choice the file holds besides them, empty
+        assert tomllib.loads(paths.integrations_file.read_text()) == {
+            "tavily": {"url": "https://api.tavily.com/search", "api_key": ""},
+            "exa": {"url": "https://api.exa.ai/search", "api_key": ""},
+            "web_search": {"engine": ""},
+        }
+
+    def test_a_missing_integration_section_is_founded_and_a_plain_key_sealed(
+        self, tmp_path
+    ) -> None:
+        paths = Paths.resolve(tmp_path / "state")
+        paths.ensure_tree()
+        paths.config_key_file.write_bytes(secrets.token_bytes(32))
+        paths.config_file.write_text("[settings]\nshow_banner = false\n")
+        paths.integrations_file.write_text(
+            '[exa]\nurl = "https://api.exa.ai/search"\napi_key = "plain-exa"\n'
+        )
+        load_config(paths)
+        raw = paths.integrations_file.read_text()
+        assert "plain-exa" not in raw
+        file = tomllib.loads(raw)
+        assert file["tavily"] == {"url": "https://api.tavily.com/search", "api_key": ""}
+        assert file["web_search"] == {"engine": ""}
+        assert _unsealed(paths, file["exa"]["api_key"]) == "plain-exa"
 
     def test_a_catalog_whose_key_the_shell_carries_is_founded_at_launch(
         self, tmp_path, monkeypatch
@@ -1170,12 +1214,16 @@ def _master(paths: Paths) -> list[tuple]:
 
 
 def _insert_kind(conn, kind: str) -> None:
+    _insert_row(conn, "user", kind)
+
+
+def _insert_row(conn, role: str, kind: str) -> None:
     now = datetime.now().astimezone().isoformat()
     # fmt: off
     conn.execute(
         "INSERT INTO messages (story_id, role, kind, body, created_at, updated_at)"
-        " VALUES (1, 'user', ?, ?, ?, ?)",
-        (kind, b"x", now, now),
+        " VALUES (1, ?, ?, ?, ?, ?)",
+        (role, kind, b"x", now, now),
     )
     # fmt: on
     conn.commit()

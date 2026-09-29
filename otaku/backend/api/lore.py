@@ -45,7 +45,12 @@ def build_job(session: Session, *, force: bool = False) -> Job:
     story_id = session.story_id
     assert story_id is not None  # callers gate on a recorded story
     config, prompts = session._config, session._prompts
-    settings = StorySettings(session._settings_db, session._store, session._paths.prompts_file)
+    settings = StorySettings(
+        session._settings_db,
+        session._store,
+        session._paths.prompts_file,
+        can_complete_text=session.can_complete_text,
+    )
     return Job(
         provider=session.provider,
         model=session.model,

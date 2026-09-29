@@ -182,6 +182,29 @@ class TestExtract:
         assert "[6] She nods." in analyst
         assert app.store.stories.get_messages(app.session.story_id)[-1].body == reply
 
+    def test_a_tool_turn_is_invisible_to_the_pass(self, app: App) -> None:
+        # A tool otaku ran left its result as a turn of its own — not the
+        # scene: the analyst never sees it, and the numbering skips it.
+        api_stories.update_setting(app.session, "allow_system_tool", enabled=True)
+        call = "```otk-system\n```"
+
+        def script(body: dict[str, Any]) -> str:
+            newest = scripted.content_text(body["messages"][-1])
+            if "You are a story analyst" in newest or newest.startswith(("Combine", "Write ")):
+                return scripted.default_script(body)
+            return "It is late." if "Time: " in newest else call
+
+        app.server.script = script
+        for i in range(3):
+            app.play(f"Turn number {i}.")
+        roles = [m.role for m in app.session.messages]
+        assert roles == ["user", "assistant", "tool", "assistant"] * 3
+        app.play("/extract")
+        analyst = next(p for p in lore_calls(app) if "You are a story analyst" in p)
+        assert "Time: " not in analyst and "Load average" not in analyst
+        # nine rows of story, numbered as such: the tool's three are no rows
+        assert "[9]" in analyst and "[10]" not in analyst
+
     def test_an_edited_template_with_literal_json_still_extracts(self, server, tmp_path) -> None:
         # The prompts file's promise: what you edit is exactly what the
         # model sees. A template holding a literal JSON example — braces

@@ -19,16 +19,19 @@ in a new story.
 """
 
 import contextlib
+import tomllib
 from collections.abc import Callable
 
 import pytest
 
-from otaku.backend import InjectionPosition, TranscriptLayout
+from otaku.backend import InjectionPosition, Transcript
+from otaku.backend.api import integrations as api_integrations
 from otaku.backend.api import settings as api_settings
 from otaku.backend.api import stories as api_stories
+from otaku.backend.api.integrations import WebSearch
 from otaku.backend.paths import Paths
 from otaku.backend.session import Refused, Session
-from otaku.backend.story import StorySetting, StorySettingLayout
+from otaku.backend.story import StorySetting, StorySettingTranscript
 from otaku.settings.prompts import Prompts
 from otaku.store.schema import StorySettingDB
 from otaku.terminal.screens import stories as screen_stories
@@ -51,6 +54,7 @@ from scenarios.support.screens import (
 
 Picker = Callable[[Session], "str | None"]
 # The ask instruction the settings stories put into prompts.toml.
+EMULATION = "emulate_text_completion"
 HOW_TO_ASK = "ASK LIKE THIS"
 
 
@@ -605,22 +609,50 @@ class TestToolsTab:
 
     def test_the_story_reminder_edits_in_place(self, app: App) -> None:
         app.play("I push the door.")
-        # third row; its first field is the text: Enter edits, Ctrl+S saves
-        self.tools(app, DOWN + DOWN + ENTER + ENTER + "Rain." + CTRL_S + ESC + ESC)
+        # fifth row, after the four tools; its first field is the text:
+        # Enter edits, Ctrl+S saves
+        self.tools(app, DOWN * 4 + ENTER + ENTER + "Rain." + CTRL_S + ESC + ESC)
         assert self.setting(app, "use_story_reminder").reminder_text == "Rain."
 
     def test_the_shared_reminder_is_every_storys(self, app: App) -> None:
         app.play("I push the door.")
-        self.tools(app, DOWN * 3 + ENTER + ENTER + "Stay grim." + CTRL_S + ESC + ESC)
+        self.tools(app, DOWN * 5 + ENTER + ENTER + "Stay grim." + CTRL_S + ESC + ESC)
         assert api_stories.get_shared_reminder(app.session) == "Stay grim."
 
     def test_the_notes_display_is_a_checkbox_in_the_panel(self, app: App) -> None:
         app.play("I push the door.")
-        # second row: Space in the panel toggles the display; Space on the
+        # fourth row: Space in the panel toggles the display; Space on the
         # list, after Esc, checks the tool itself
-        self.tools(app, DOWN + ENTER + SPACE + ESC + SPACE + ESC)
+        self.tools(app, DOWN * 3 + ENTER + SPACE + ESC + SPACE + ESC)
         notes = self.setting(app, "allow_assistant_notes")
         assert (notes.enabled, notes.display_notes) == (True, False)
+
+    def test_the_web_search_key_is_typed_in_place_and_delete_forgets_it(self, app: App) -> None:
+        app.play("I push the door.")
+        # second row; its fields are the instructions, the key, the depth:
+        # the key is typed over where it stands and saved with Ctrl+S
+        self.tools(app, DOWN + ENTER + DOWN + ENTER + "tvly-abc" + CTRL_S + ESC + ESC)
+        assert api_integrations.web_search(app.session) == WebSearch("tavily", "Tavily", True)
+        raw = app.paths.integrations_file.read_text()
+        assert "tvly-abc" not in raw  # never plain in the file
+        file = tomllib.loads(raw)
+        assert file["tavily"]["api_key"].startswith("sealed:")
+        assert file["web_search"]["engine"] == "tavily"
+        # Delete on the field forgets it, file and session both
+        self.tools(app, DOWN + ENTER + DOWN + DELETE + ESC + ESC)
+        assert api_integrations.web_search(app.session) == WebSearch("", "", False)
+        file = tomllib.loads(app.paths.integrations_file.read_text())
+        assert (file["tavily"]["api_key"], file["web_search"]["engine"]) == ("", "")
+
+    def test_the_emulation_is_the_last_row_its_depth_its_one_field(self, app: App) -> None:
+        app.play("I push the door.")
+        # seventh row, after the reminders: on until unchecked
+        self.tools(app, DOWN * 6 + SPACE + ESC)
+        assert not self.setting(app, EMULATION).enabled
+        # its one field is the depth: the dropdown's next place after the
+        # system message is before the reader's latest message
+        self.tools(app, DOWN * 6 + ENTER + ENTER + DOWN + ENTER + ESC + ESC)
+        assert self.setting(app, EMULATION).injection_position == InjectionPosition(1)
 
     def test_the_instructions_row_edits_the_tools_prompt(self, app: App) -> None:
         app.play("I push the door.")
@@ -631,8 +663,9 @@ class TestToolsTab:
         # Esc in the editor writes nothing
         self.tools(app, ENTER + ENTER + "Dropped. " + ESC + ESC + ESC)
         assert api_settings.get_tool_prompt(app.session, "question") == "Be brief. " + shipped
-        # the notes tool's instructions are its own
-        self.tools(app, DOWN + ENTER + DOWN + ENTER + "Short. " + CTRL_S + ESC + ESC)
+        # the notes tool's instructions are its own: the fourth row, the
+        # field after its display checkbox
+        self.tools(app, DOWN * 3 + ENTER + DOWN + ENTER + "Short. " + CTRL_S + ESC + ESC)
         assert api_settings.get_tool_prompt(app.session, "note").startswith("Short. ")
 
     def test_the_prompts_file_holds_what_was_saved(self, app: App) -> None:
@@ -681,24 +714,27 @@ class TestSettingsAreTheStorys:
         finally:
             app.close()
 
-    def test_a_new_story_starts_with_every_setting_off(self, app: App) -> None:
+    def test_a_new_story_starts_with_every_switch_off_but_the_emulation(self, app: App) -> None:
         api_stories.update_setting(app.session, "allow_questions", enabled=True)
+        api_stories.update_setting(app.session, EMULATION, enabled=False)
         app.play("I push the door.")
         app.play("/new")
-        assert not any(each.enabled for each in switches(app))
+        assert not any(each.enabled for each in switches(app) if each.name != EMULATION)
+        # the one switch on until a story says otherwise
+        assert setting(app, EMULATION).enabled
         # the one value among them starts at its default: a story is
-        # always read in a layout
-        assert setting(app, "layout").layout is TranscriptLayout.MANUSCRIPT
+        # always read in a transcript
+        assert setting(app, "transcript").transcript is Transcript.MANUSCRIPT
 
-    def test_the_layout_is_the_storys_and_reads_back(self, app: App) -> None:
-        api_stories.update_setting(app.session, "layout", layout=TranscriptLayout.CANVAS)
+    def test_the_transcript_is_the_storys_and_reads_back(self, app: App) -> None:
+        api_stories.update_setting(app.session, "transcript", transcript=Transcript.CANVAS)
         app.play("I push the door.")
         assert app.store.stories.get_settings(app.session.story_id) == (
-            StorySettingDB("layout", enabled=True, layout=TranscriptLayout.CANVAS),
+            StorySettingDB("transcript", enabled=True, transcript=Transcript.CANVAS),
         )
-        assert setting(app, "layout").layout is TranscriptLayout.CANVAS
+        assert setting(app, "transcript").transcript is Transcript.CANVAS
         app.play("/new")
-        assert setting(app, "layout").layout is TranscriptLayout.MANUSCRIPT
+        assert setting(app, "transcript").transcript is Transcript.MANUSCRIPT
 
     def test_a_fork_plays_the_way_its_origin_does(self, app: App) -> None:
         api_stories.update_setting(
@@ -785,23 +821,26 @@ class TestSettingsRefused:
             {"name": "use_shared_reminder", "position": InjectionPosition()},
             # The shared reminder's text is no one story's.
             {"name": "use_shared_reminder", "reminder_text": "Stay grim."},
-            # The layout has no switch, and a switch has no layout.
-            {"name": "layout", "enabled": True},
-            {"name": "allow_questions", "layout": TranscriptLayout.CANVAS},
+            # The transcript has no switch, and a switch has no transcript.
+            {"name": "transcript", "enabled": True},
+            {"name": "allow_questions", "transcript": Transcript.CANVAS},
+            # The emulation takes neither a reminder nor a display.
+            {"name": EMULATION, "reminder_text": "Go on."},
+            {"name": EMULATION, "display_notes": False},
         ):
             with pytest.raises(Refused):
                 api_stories.update_setting(app.session, **asked)  # type: ignore[arg-type]
         # Nothing was written by a refusal.
-        assert not any(each.enabled for each in switches(app))
+        assert not any(each.enabled for each in switches(app) if each.name != EMULATION)
 
 
 def switches(app: App) -> list[StorySetting]:
-    """The story's settings that are switches — every one but the layout,
-    which is a value and always in force."""
+    """The story's settings that are switches — every one but the
+    transcript, which is a value and always in force."""
     return [
         each
         for each in api_stories.get_settings(app.session)
-        if not isinstance(each, StorySettingLayout)
+        if not isinstance(each, StorySettingTranscript)
     ]
 
 

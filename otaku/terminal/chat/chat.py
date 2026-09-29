@@ -8,7 +8,7 @@ the bindings — whoever routes cannot live beside this class.
 
 import sys
 
-from otaku.backend import StoryMode
+from otaku.backend import Layout
 from otaku.backend.api import stories as api_stories
 from otaku.backend.session import Session
 from otaku.terminal.chat.ledger import ScreenLedger
@@ -31,7 +31,7 @@ class Chat:
     # The loop's exit flag: /bye (and Ctrl+D) raise it, and the run loop
     # leaves after the current submission instead of unwinding mid-command.
     quit: bool
-    # The submission being played is story mode's CONTINUE — an empty
+    # The submission being played is the canvas's CONTINUE — an empty
     # line, no row of the reader's to echo — so the stream places the
     # reply where the text ended (`stream.show`). Set by the loop for
     # the one submission, cleared with it.
@@ -72,7 +72,7 @@ class Chat:
         blank) right over the echo: it joins the oldest restored exchange
         and refreshes with it instead of going stale. Call right after
         the echo prints, and only when the echo is the flow's last
-        output. In story mode the echo is one text (`render.flow`), and
+        output. In the canvas the echo is one text (`render.flow`), and
         each exchange is placed in it by its offsets
         (`ledger.restore_flow`)."""
         shown = list(self.session.messages)[-count:]
@@ -90,7 +90,7 @@ class Chat:
             groups.append((prompt, reply))
         notes = self.notes_displayed
         ordered = list(reversed(groups))
-        if self.session.story_mode is StoryMode.STORY:
+        if self.session.layout is Layout.CANVAS:
             text, starts = flow_offsets(shown, notes=notes)
             for n, (prompt, reply) in enumerate(ordered):
                 first = prompt if prompt is not None else reply

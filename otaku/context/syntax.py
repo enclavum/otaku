@@ -307,7 +307,7 @@ def to_wire(message: Message, *, is_last: bool, card_block: str | None = None) -
         parts.append(OOC_FRAME.replace("{body}", frame.tail))
     # The whitespace at a line's edges is its seams (`assembler.join_of`,
     # `api.play.submit`): the leading to the text it goes on from, the
-    # trailing to the model's continuation, both typed so in story mode
+    # trailing to the model's continuation, both typed so on the canvas
     # and riding the wire as they stand — the reader trims them off the
     # line's text, so they are put back here. A chat-mode line has none.
     lead = body[: len(body) - len(body.lstrip())]

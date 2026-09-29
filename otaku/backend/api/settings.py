@@ -15,7 +15,7 @@ Refused for what it declines.
 import json
 from dataclasses import dataclass, replace
 
-from otaku.backend import StoryMode, TranscriptLayout
+from otaku.backend import Transcript
 from otaku.backend.api import stories as api_stories
 from otaku.backend.session import (
     EFFORT_LEVELS,
@@ -26,7 +26,7 @@ from otaku.backend.session import (
     Refused,
     Session,
 )
-from otaku.backend.story import StorySettingLayout
+from otaku.backend.story import StorySettingTranscript
 from otaku.backend.tools import TOOLS
 from otaku.providers import reasoning
 from otaku.settings import row
@@ -210,51 +210,50 @@ def set_verbose(session: Session, raw: str) -> str:
     return f"Verbose: {'on' if session.verbose else 'off'}."
 
 
-def mode_choices(session: Session) -> tuple[str, ...]:
-    """What /set mode takes on the model in use: "chat" always, "story"
-    only where the model can play story mode (`Session.is_story_mode_ready`).
-    The terminal's menu reads this; typed by hand, the same word is
-    refused (`set_mode`)."""
-    return ("chat", "story") if session.is_story_mode_ready else ("chat",)
+def transcript_choices(session: Session) -> tuple[str, ...]:
+    """What /set transcript takes on the model in use: the four
+    transcripts, the novel among them only where the model can complete
+    text (`Session.can_complete_text`). The terminal's menu reads this;
+    typed by hand, the novel is refused the same way (`set_transcript`)."""
+    return tuple(
+        each.value
+        for each in Transcript
+        if each is not Transcript.NOVEL or session.can_complete_text
+    )
 
 
-def set_mode(session: Session, raw: str) -> str:
-    """The story's layout, by the mode it is to be played in: "chat"
-    the manuscript, "story" the canvas, which IS story mode — so "story"
-    is refused, with the reason, on a model that cannot continue a text
-    (`mode_choices`). The confirmation, and the report "" answers with,
-    is the mode the story now plays in (`Session.story_mode`), in this
-    family's own words, not the layout write's. The STORY's, unlike the
-    rest of the family: it forks and dies with it
-    (`backend.story.StorySettingLayout`)."""
+def set_transcript(session: Session, raw: str) -> str:
+    """The story's transcript by name — novel, canvas, manuscript, chat
+    — the novel refused, with the reason, on a model that cannot complete
+    text (`transcript_choices`). The confirmation is the setting's
+    standing, as the page's rail answers; "" reports it. The STORY's,
+    unlike the rest of the family: it forks and dies with it
+    (`backend.story.StorySettingTranscript`)."""
     value = raw.strip().lower()
     if value:
-        if value not in _MODES:
-            raise Refused("Usage: /set mode chat|story")
-        if value not in mode_choices(session):
-            raise Refused(_no_story_mode(session))
-        api_stories.update_setting(session, StorySettingLayout.name, layout=_MODES[value])
-        return f"Set {_MODE_WORDS[session.story_mode]}."
-    return f"{_MODE_WORDS[session.story_mode].capitalize()}."
+        chosen = Transcript.from_value(value)
+        if chosen is None:
+            raise Refused("Usage: /set transcript novel|canvas|manuscript|chat")
+        if value not in transcript_choices(session):
+            raise Refused(_no_novel(session))
+        return api_stories.update_setting(session, StorySettingTranscript.name, transcript=chosen)
+    return f"{StorySettingTranscript.label}: {session.transcript.value}"
 
 
-# What /set mode's two words set: the layout each mode is read in.
-_MODES = {"chat": TranscriptLayout.MANUSCRIPT, "story": TranscriptLayout.CANVAS}
-# What /set mode answers with: the mode the story plays in.
-_MODE_WORDS = {StoryMode.CHAT: "chat mode", StoryMode.STORY: "story mode"}
-
-
-def _no_story_mode(session: Session) -> str:
-    """Why the model in use cannot play story mode — the refusal's
-    sentence: no model, no text completion, or no text template known
-    for it (`Session.is_story_mode_ready`'s two halves)."""
+def _no_novel(session: Session) -> str:
+    """Why the novel is not offered on the model in use — the refusal's
+    sentence: no model, no text wire, or no `plain` template naming it a
+    model that continues a bare text (`Session.can_complete_text`)."""
     if session.model is None:
         return NO_MODEL_HINT
     if not session.text_completion:
-        return f"Story mode is not available: {session.model} has no text completion."
+        return (
+            f"The novel needs a model that continues a bare text: "
+            f"{session.model} has no text completion."
+        )
     return (
-        f"Story mode is not available: no text template is known for {session.model} "
-        "(a text_template line in models.toml names one)."
+        f"The novel needs a model that continues a bare text: "
+        f'name {session.model} one with a text_template = "plain" line in models.toml.'
     )
 
 

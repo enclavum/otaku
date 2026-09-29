@@ -458,9 +458,22 @@ function follow() {
 
 // ---------- drawing a turn ----------
 
-/** Whether the open story is in story mode, off the app root
-    (`shell.showFacts`): what a reply arriving now joins as. */
-const storyMode = () => $(".otk-app")?.dataset.storyMode === "story";
+/** Whether the open story is read on the canvas, off the app root
+    (`shell.showFacts`): where a reply arriving now joins the text. */
+const canvas = () => $(".otk-app")?.dataset.layout === "canvas";
+
+function seamJoin(before, piece) {
+  /* How the reply arriving joins the text before it, read off the seam
+     as the backend reads it when the row lands (`context.assembler.join_of`,
+     copied): a lead holding a newline is a paragraph, other leading
+     whitespace inline, a flush first piece inline only after a text
+     ending in a space. `before` is the reader's line when there was one,
+     "" else. */
+  const lead = piece.match(/^\s*/)[0];
+  if (lead.includes("\n")) return "paragraph";
+  if (lead) return "inline";
+  return before.endsWith(" ") ? "inline" : "paragraph";
+}
 
 function drawTurn(turn, position, { posed = false } = {}) {
   // How the turn joins the one before it — the backend's seam rule
@@ -862,6 +875,7 @@ function beginTurn(regenerate, { continues = false } = {}) {
   working(true);
   showTurnBar();
   const turn = openArticle();
+  turn.before = ""; // the text the reply will go on from, once a line lands
   const { article } = turn;
   /* A regenerate takes the standing reply off the screen before the
      request is away: the take being replaced must not sit there while
@@ -894,11 +908,11 @@ function openArticle() {
      (`DRAW.tool_turn`): the article, its caret and status row, and the
      rubric numbered as the next drawn turn. */
   const article = element("article", "otk-reply otk-generating is-streaming");
-  /* The reply arriving joins as the landed one will (`turn.join_kind`): a
-     text completion's as it stands, a chat completion's as a paragraph
-     — the rule is `context.assembler.join_of`'s, read here off the mode
-     the request goes out in, since the row is not stored yet. */
-  article.dataset.join = storyMode() ? "inline" : "paragraph";
+  /* The reply arriving joins as the landed one will (`turn.join_kind`):
+     on the canvas by its seam, settled at the first piece (`seamJoin`)
+     and by the landed row; a paragraph everywhere else, where the join
+     is not drawn. */
+  article.dataset.join = canvas() ? "inline" : "paragraph";
   /* The transcript is a polite live region and a reply rewrites its text
      several times a second: `aria-busy` holds the subtree, so a screen
      reader announces it once when it settles instead of forty times. */
@@ -978,6 +992,7 @@ function draw(turn, happened) {
 // One drawer per event kind — `web.api.event`'s closed union, drawn.
 const DRAW = {
   user_turn(turn, happened) {
+    turn.before = happened.turn.body; // what the reply's seam is read against
     ordinal += 1;
     turn.rubric.textContent = _replyRubric(ordinal + 1); // the reply follows the line
     retireAsk(); // the line that landed is the answer: the options go, the question stays
@@ -1004,6 +1019,10 @@ const DRAW = {
   },
   assistant_text(turn, happened) {
     turn.state.textContent = "writing";
+    // the first piece tells the seam: how the reply joins, on the canvas
+    if (canvas() && !turn.pieces.some((piece) => piece.kind === "prose")) {
+      turn.article.dataset.join = seamJoin(turn.before ?? "", happened.text);
+    }
     // prose grows the run it is in; after a call it starts a new one
     const last = turn.pieces.at(-1);
     if (last?.kind === "prose") last.text += happened.text;

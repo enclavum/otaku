@@ -16,6 +16,7 @@ from collections.abc import Callable
 
 from otaku.settings import Secrets, SettingsFiles, row, write_atomic
 from otaku.settings.integrations import IntegrationConfig
+from otaku.settings.integrations import render as render_integrations
 from otaku.settings.migrations.config_file import hash_plain_password
 from otaku.settings.migrations.integrations_file import ensure_integrations
 from otaku.settings.migrations.prompt_texts import (
@@ -276,11 +277,12 @@ def migrate(
         files.backups_dir,
         _provider_migrations(secrets.seal, secrets.is_sealed),
     )
-    # integrations.toml the same way: founded where missing, every known
-    # integration's section ensured, plain api keys sealed.
+    # integrations.toml the same way: written WHOLE where missing (a
+    # config from before it, or a deleted file — no backup of nothing),
+    # every known integration's section ensured, plain api keys sealed.
     if files.config.exists() and not files.integrations.exists():
         with contextlib.suppress(OSError):
-            write_atomic(files.integrations, "")
+            write_atomic(files.integrations, render_integrations(integration_defaults or {}))
     ensure_integrations(files.integrations, files.backups_dir, integration_defaults or {})
     update_settings_file(
         files.integrations, files.backups_dir, [seal_api_keys(secrets.seal, secrets.is_sealed)]

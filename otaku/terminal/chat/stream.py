@@ -19,7 +19,7 @@ import time
 from collections.abc import Iterator
 from typing import Any, Self
 
-from otaku.backend import StoryMode
+from otaku.backend import Layout
 from otaku.backend.api.play import (
     AssistantReasoning,
     AssistantText,
@@ -31,7 +31,6 @@ from otaku.backend.api.play import (
     PlayEvent,
     ToolTurn,
     UserTurn,
-    join_kind,
 )
 from otaku.backend.tools import TOOLS, Actor, get_tool_label
 from otaku.console.sound import ring
@@ -67,9 +66,13 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
     status row erase themselves and stay outside)."""
     out = chat.ledger.reply
     session = chat.session
-    # Story mode: the one text — no block for the reader's line, the
+    # The canvas: the one text — no block for the reader's line, the
     # reply going on where the text ended (`ledger.echo_flow`).
-    story = session.story_mode is StoryMode.STORY
+    is_canvas = session.layout is Layout.CANVAS
+    # The text the reply goes on from, for its seam (`before`): the last
+    # row's, until a played line lands and is the text instead.
+    before = session.messages[-1].body if session.messages else ""
+    prose_begun = False  # the reply's first prose piece places its seam
     streamed = False  # anything shown yet (the error line's lead blank, the line to end)
     chars = 0
     interrupted = False
@@ -104,7 +107,7 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
     # declines or fails before a word says so on a row of its own
     # (`placed`), not mid-line.
     placed = False
-    if story and chat.continuing and not chat.ledger.flow_open:
+    if is_canvas and chat.continuing and not chat.ledger.flow_open:
         chat.ledger.echo_flow(inline=True)
         chat.ledger.reply_begins()
         fed = chat.ledger.tail  # what a block's spacing is measured against
@@ -121,18 +124,19 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
             for event in events:
                 spinner.stop()  # idempotent — the first real signal clears it
                 if isinstance(event, UserTurn):
-                    if story:
-                        # Story mode: the played line is prose in the one
+                    if is_canvas:
+                        # The canvas: the played line is prose in the one
                         # text, no block. The ledger places the cursor by the
-                        # line's seam (`join_kind`: under the standing blank,
-                        # or on where the text ended) and the line is typeset
-                        # through the reply's own streamer, so a quote it
-                        # opens and the reply closes reads as one.
-                        chat.ledger.echo_flow(inline=join_kind(event.message) == "inline")
+                        # line's seam (the event's `join_type`: under the standing
+                        # blank, or on where the text ended) and the line is
+                        # typeset through the reply's own streamer, so a quote
+                        # it opens and the reply closes reads as one.
+                        chat.ledger.echo_flow(inline=event.join_type.value == "inline")
                         streamer.feed(event.message.body)
                         streamer.flush()
                         chat.ledger.reply_begins()
                         fed += event.message.body
+                        before = event.message.body
                         streamed = True
                     else:
                         # The played turn echoes as the grey block; the reply
@@ -163,6 +167,15 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                     if block_name == "thinking":
                         close_block()  # one blank line to the prose, as after any block
                     text = event.text
+                    # The seam, as the backend reads it when the row lands
+                    # (`assembler.join_of`, the rule copied as the page's
+                    # `seamJoin`): a flush first piece after a text that does
+                    # not end in a space opens a paragraph, and the model
+                    # wrote none of the break — so the drawer does.
+                    flush = not text[:1].isspace() and not before.endswith(" ")
+                    if is_canvas and not prose_begun and not after_call and flush:
+                        text = "\n\n" + text
+                    prose_begun = True
                     if after_call:
                         if not text.strip():
                             continue  # the model's newlines after a block: drawn once, below
@@ -295,7 +308,7 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
             out.write("\n")
             chat.ledger.rule()
             out.write(f"{DIM}[ regenerating ]{RESET}\n\n")
-            if story:
+            if is_canvas:
                 # the fresh take is a paragraph under the marker, placed
                 # here so the next stream does not place it again
                 chat.ledger.echo_flow(inline=False)

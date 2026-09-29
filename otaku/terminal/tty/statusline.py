@@ -104,7 +104,7 @@ class StatusLine:
             # status overwriting live text. Stepping back up afterwards
             # leaves the cursor exactly where it started — the COLUMN
             # too, which a newline would not: the tty adds a return to
-            # it, and in story mode the cursor stands mid-line here, where
+            # it, and on the canvas the cursor stands mid-line here, where
             # the reply is about to go on.
             region = SCROLL_ABOVE.format(self._rows - 1)
             _terminal().write(f"{INDEX}{SAVE_CURSOR}{region}{RESTORE_CURSOR}{UP_ONE}")

@@ -19,7 +19,7 @@ from typing import NamedTuple
 import click
 
 from otaku import web as web_frontend
-from otaku.backend import StoryMode, commands
+from otaku.backend import Layout, commands
 from otaku.backend.api import cards as api_cards
 from otaku.backend.api import lore as api_lore
 from otaku.backend.api import play as api_play
@@ -61,7 +61,7 @@ OPERATIONS: dict[str, Operation] = {
     "/set autocorrect": api_settings.set_autocorrect,
     "/set notification": api_settings.set_notification,
     "/set max_context": api_settings.set_max_context,
-    "/set mode": api_settings.set_mode,
+    "/set transcript": api_settings.set_transcript,
 }
 
 
@@ -137,10 +137,10 @@ def _undo(chat: Chat, raw: str) -> None:
     _report_undo_ending(chat)
 
 
-def _story(chat: Chat) -> bool:
-    """Whether the open story plays in story mode — echoed as one text
+def _is_canvas(chat: Chat) -> bool:
+    """Whether the open story is read on the canvas — echoed as one text
     then (`render.flow`), the played turns' blocks otherwise."""
-    return chat.session.story_mode is StoryMode.STORY
+    return chat.session.layout is Layout.CANVAS
 
 
 def _report_undo_ending(chat: Chat) -> None:
@@ -153,7 +153,7 @@ def _report_undo_ending(chat: Chat) -> None:
         return
     report = f"{DIM}[ undone. the story now ends with: ]{RESET}"
     turns = last_turns(
-        list(chat.session.messages), 2, notes=chat.notes_displayed, story=_story(chat)
+        list(chat.session.messages), 2, notes=chat.notes_displayed, is_canvas=_is_canvas(chat)
     )
     chat.say(f"{report}\n\n{turns}")
     chat.restore_tail(2, above=report)
@@ -189,7 +189,7 @@ def _regen(chat: Chat, raw: str) -> None:
         chat.say(marker + "\n")
         # The typed line stays above the marker — nothing of it to erase.
         chat.ledger.typed_gone()
-        if _story(chat):
+        if _is_canvas(chat):
             # the prompt re-run reads as prose under the marker, and the
             # fresh take goes on from it (`ledger.echo_flow`)
             chat.ledger.echo_flow(inline=False, above=marker)
@@ -223,7 +223,9 @@ def _last(chat: Chat, raw: str) -> None:
     # story shows everything it has, and the report must not over-claim.
     shown = (len(list(session.messages)[-rows:]) + 1) // 2
     report = f"The last {shown} turns of this story:"
-    turns = last_turns(list(session.messages), rows, notes=chat.notes_displayed, story=_story(chat))
+    turns = last_turns(
+        list(session.messages), rows, notes=chat.notes_displayed, is_canvas=_is_canvas(chat)
+    )
     chat.say(f"{report}\n\n{turns}")
     chat.restore_tail(rows, above=report)
 
@@ -281,7 +283,10 @@ def _landed(chat: Chat, landed: str | None) -> None:
         return
     chat.ledger.rule()
     turns = last_turns(
-        list(chat.session.messages), RESUME_TURNS, notes=chat.notes_displayed, story=_story(chat)
+        list(chat.session.messages),
+        RESUME_TURNS,
+        notes=chat.notes_displayed,
+        is_canvas=_is_canvas(chat),
     )
     # A story with nothing played echoes no turns, and no blank for them.
     chat.say(f"{landed}\n\n{turns}" if turns else landed)
@@ -429,7 +434,10 @@ def _import(chat: Chat, raw: str) -> None:
             chat.say(report)
     chat.ledger.rule()
     turns = last_turns(
-        list(chat.session.messages), RESUME_TURNS, notes=chat.notes_displayed, story=_story(chat)
+        list(chat.session.messages),
+        RESUME_TURNS,
+        notes=chat.notes_displayed,
+        is_canvas=_is_canvas(chat),
     )
     chat.say(f"The last turns of this story:\n\n{turns}")
     chat.restore_tail(RESUME_TURNS)

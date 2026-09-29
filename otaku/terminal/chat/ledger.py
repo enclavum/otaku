@@ -12,7 +12,7 @@ again keeps peeling turns off the screen. A resume echo's turns join the
 stack the same way (`restore_exchange`): turns shown at launch, after a
 browser pick, or after an import can be taken back like played ones.
 
-Story mode plays the same game over ONE text (`echo_flow`): an exchange
+The canvas plays the same game over ONE text (`echo_flow`): an exchange
 there is the reader's line and the reply, or a continue's reply alone,
 starting where the text before it ended — at a column, mid-line, for an
 inline seam — and an erase rewinds to that point rather than a row's
@@ -101,7 +101,7 @@ class ScreenLedger:
         self._cpr_dead = False  # the terminal never answered — stop asking
         # Where the text on screen ends — the last line's text, escapes
         # and all, as every print the ledger sees leaves it
-        # (`note_printed`) — for story mode's flow, whose inline line
+        # (`note_printed`) — for the canvas's flow, whose inline line
         # goes on from there (`echo_flow`); `_pending` the newlines
         # printed since, which end the line without starting another.
         self._tail = ""
@@ -155,7 +155,7 @@ class ScreenLedger:
         self._typed_rows = 0
 
     def echo_flow(self, *, inline: bool, above: str = "") -> None:
-        """Story mode's stand-in for `echo_block`: the played line is not
+        """The canvas's stand-in for `echo_block`: the played line is not
         a block but prose in the ONE text, so this only PLACES the cursor
         for it, and the caller prints the line through `reply`. The typed
         input is erased; a paragraph is left under the standing blank; an
@@ -199,7 +199,7 @@ class ScreenLedger:
 
     def reply_begins(self) -> None:
         """The reply's first character goes where the cursor now stands —
-        story mode's drawer says so once the played line is echoed, or at
+        the canvas's drawer says so once the played line is echoed, or at
         once for a continue — the point /regen rewinds to."""
         entry = self._top()
         if entry is not None and entry.flow:

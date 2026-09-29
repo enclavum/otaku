@@ -102,8 +102,8 @@ export async function submit(line) {
   const said = line.trim();
   // A line typed during a reply is refused the way every other door
   // refuses it — silence here trains the reader to press Enter twice.
-  // An empty line is nothing to send — except in story mode, where it
-  // is the continue the button is captioned with (`facts.story_mode`, on the
+  // An empty line is nothing to send — except on the canvas, where it
+  // is the continue the button is captioned with (`facts.layout`, on the
   // app root).
   if ((!said && !staged.length && !continuing()) || midReply()) return;
   if (said && history.at(-1) !== said) history.push(said);
@@ -120,17 +120,17 @@ export async function submit(line) {
   const files = await Promise.all(takeStaged().map(encodeFile));
   // Everything typed here is STORY: the framing words ride inside the
   // line and `context.syntax` reads them at the far end. A line opening
-  // with an unknown slash word is prose that starts with a slash. In
-  // story mode a line plays AS TYPED, the whitespace at both its edges
+  // with an unknown slash word is prose that starts with a slash. On
+  // the canvas a line plays AS TYPED, the whitespace at both its edges
   // its seams — to the text before it and to the model's continuation
   // (`api.play.submit` records it so); a command never does.
   const verbatim = continuing() && said && !said.startsWith("/");
   playLine(verbatim ? line : said, files);
 }
 
-// Whether the open story is in story mode, off the app root
+// Whether the open story is read on the canvas, off the app root
 // (`shell.showFacts`): an empty line then continues the story.
-const continuing = () => $(".otk-app")?.dataset.storyMode === "story";
+const continuing = () => $(".otk-app")?.dataset.layout === "canvas";
 
 // What the box held at the last input event: a refusal above the box
 // stands until the WORDS change — iOS Safari fires input events for

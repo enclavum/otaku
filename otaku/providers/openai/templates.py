@@ -1,7 +1,7 @@
 """Text templates: a model family's chat markers, rendered by otaku for the text wire.
 
 An instruct model was trained on its family's turn markers; fed a bare
-text it repeats itself or answers as an assistant. So story mode
+text it repeats itself or answers as an assistant. So the text wire
 renders the markers around the story itself — the way SillyTavern's
 instruct presets do (its default/content/presets/instruct is the
 reference) — as ONE model turn left open: the premise before it, in the
@@ -160,7 +160,7 @@ def resolve(override: object, engine: str | None, model: str) -> TextTemplate | 
     """The text template for `model`, its `source` set: `override` where
     it names one (an unknown word is the caller's to report, and stands
     for none here), else the engine's word, else the model's name; None
-    when none of the three knows — and there is no story mode for the
+    when none of the three knows — and there is no text wire for the
     model, rather than a bare text an instruct model cannot continue."""
     if isinstance(override, str) and override in TEXT_TEMPLATES:
         return replace(TEXT_TEMPLATES[override], source="override")

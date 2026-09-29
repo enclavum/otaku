@@ -21,7 +21,7 @@ import typing
 from pathlib import Path
 
 import otaku.backend
-from otaku.backend.commands import COMMANDS, CommandKind, CommandSpec
+from otaku.backend.commands import COMMANDS, CommandSpec, CommandType
 from otaku.terminal.chat import bindings
 from otaku.web import api as web_api
 from otaku.web import server as web_server
@@ -239,8 +239,8 @@ _ON_THE_PAGE = {
     "/set autocorrect": "screen:/set",
     "/set notification": "screen:/set",
     "/set max_context": "screen:/set",
-    # the layout switch in the contents rail writes the layout setting
-    "/set mode": "PATCH /api/stories/{story}/settings/{setting}",
+    # the transcript switch in the contents rail writes the same setting
+    "/set transcript": "PATCH /api/stories/{story}/settings/{setting}",
     "/help": "screen:/help",
     # The one gap that can never be filled: this command's whole purpose
     # is to reach the page, and the reader of the page is already there.
@@ -291,7 +291,7 @@ class TestFrontendParity:
 def _dispatchable() -> set[str]:
     """Every command a frontend must answer. SYNTAX rows are the story's
     own language — they play, they do not dispatch."""
-    return {spec.token for spec in COMMANDS if spec.kind is not CommandKind.SYNTAX}
+    return {spec.token for spec in COMMANDS if spec.kind is not CommandType.SYNTAX}
 
 
 def _answerable() -> set[str]:
@@ -478,7 +478,7 @@ class TestPageCaptions:
 
 
 def _syntax_rows() -> list[CommandSpec]:
-    return [spec for spec in COMMANDS if spec.kind is CommandKind.SYNTAX]
+    return [spec for spec in COMMANDS if spec.kind is CommandType.SYNTAX]
 
 
 def _page_source(name: str) -> str:

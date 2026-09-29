@@ -13,6 +13,7 @@ typography.
 import json
 from pathlib import Path
 
+from otaku.backend.api import stories as api_stories
 from otaku.backend.formats import EXPORT_MARKER
 from otaku.backend.formats.exports import read_story
 from otaku.backend.formats.imports import parse_story
@@ -305,6 +306,30 @@ class TestExport:
         wire = "\n".join(str(m["content"]) for m in app.server.requests[-1]["messages"])
         assert "Seraphina joins the story" in wire
         assert "/card" not in wire
+
+    def test_a_tools_turn_stays_out_of_the_export(self, app: App, tmp_path: Path) -> None:
+        # the format has no place for it yet: the reply that called and
+        # the reply that went on are story, the result between them is not
+        api_stories.update_setting(app.session, "allow_system_tool", enabled=True)
+        call = "```otk-system\n```"
+
+        def script(body: dict) -> str:
+            newest = scripted.content_text(body["messages"][-1])
+            if "You are a story analyst" in newest or newest.startswith(("Combine", "Write ")):
+                return scripted.default_script(body)
+            return "It is late." if "Time: " in newest else call
+
+        app.server.script = script
+        app.play("What time is it?")
+        assert [m.role for m in app.session.messages] == ["user", "assistant", "tool", "assistant"]
+        out = tmp_path / "story.md"
+        app.play(f"/export {out}")
+        text = out.read_text(encoding="utf-8")
+        assert "Load average" not in text and "Time: " not in text
+        assert call in text and "It is late." in text
+        # and the document imports back as three turns
+        parsed = parse_story(text)
+        assert len(parsed.messages) == 3
 
     def test_a_name_without_an_extension_gets_md(self, app: App, tmp_path: Path) -> None:
         app.play("I enter the hall.")

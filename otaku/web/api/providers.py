@@ -92,8 +92,8 @@ def _providers(session: Session, scope: str = "") -> dict[str, Any]:
                 # its provider's (Ollama's ollama.com rows), the provider's
                 # otherwise — what a caption on the model reads.
                 "locality": (model.locality or row.locality).value,
-                # The text template story mode wraps the story in, as the
-                # session resolves it; null, and it has no story mode.
+                # The text template the text wire wraps the story in, as the
+                # session resolves it; null where none is known.
                 "text_template": (
                     resolved.name
                     if (resolved := session.text_template_for(model)) is not None

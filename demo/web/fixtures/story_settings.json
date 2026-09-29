@@ -19,7 +19,7 @@
    "position": 2,
    "reminder_text": null,
    "display_notes": null,
-   "layout": null
+   "transcript": null
   },
   {
    "name": "use_story_reminder",
@@ -40,7 +40,7 @@
    "position": 2,
    "reminder_text": "",
    "display_notes": null,
-   "layout": null
+   "transcript": null
   },
   {
    "name": "allow_assistant_notes",
@@ -62,7 +62,7 @@
    "position": 1,
    "reminder_text": null,
    "display_notes": true,
-   "layout": null
+   "transcript": null
   },
   {
    "name": "allow_questions",
@@ -84,7 +84,7 @@
    "position": 1,
    "reminder_text": null,
    "display_notes": null,
-   "layout": null
+   "transcript": null
   },
   {
    "name": "allow_system_tool",
@@ -106,7 +106,7 @@
    "position": 1,
    "reminder_text": null,
    "display_notes": null,
-   "layout": null
+   "transcript": null
   },
   {
    "name": "allow_web_search",
@@ -128,11 +128,33 @@
    "position": 1,
    "reminder_text": null,
    "display_notes": null,
-   "layout": null
+   "transcript": null
   },
   {
-   "name": "layout",
-   "label": "Layout",
+   "name": "emulate_text_completion",
+   "label": "Emulate text completion on canvas",
+   "injection_label": "text completion emulation",
+   "tool": null,
+   "allowed_positions": [
+    "system",
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8
+   ],
+   "enabled": true,
+   "position": "system",
+   "reminder_text": null,
+   "display_notes": null,
+   "transcript": null
+  },
+  {
+   "name": "transcript",
+   "label": "Transcript",
    "injection_label": null,
    "tool": null,
    "allowed_positions": [],
@@ -140,7 +162,7 @@
    "position": null,
    "reminder_text": null,
    "display_notes": null,
-   "layout": "manuscript"
+   "transcript": "manuscript"
   }
  ]
 }

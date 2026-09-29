@@ -220,6 +220,15 @@ Lisbon tram routes 1930s
 The results arrive as the next message, out of character: short snippets
 from the top pages."""
 
+# The canvas over the chat wire: the story is one text the model goes on
+# with, the instruct model told to behave as a text completion would
+# (`StorySettingEmulateTextCompletion`).
+EMULATE_TEXT_COMPLETION_PROMPT = """Behave as a text completion: the story is one continuous text,
+and you continue it exactly from where it ends. When the last sentence is
+unfinished, finish it without repeating any of its words; when it is
+finished, begin the next paragraph. Take over the turn wherever the text
+stops."""
+
 _DEFAULTS = {
     "me_framing": "((OOC: The user writes as {name}.))\n{body}",
     "you_framing": (
@@ -245,7 +254,7 @@ _DEFAULTS = {
         "Example dialogue (voice reference only, never story events): {examples}\n"
         "Standing note: {depth_note}))"
     ),
-    # Story mode's standing instruction, before the premise in the turn
+    # The text wire's standing instruction, before the premise in the turn
     # that precedes the story: the model turn must follow SOME turn — alone
     # it degenerates — and a premise may be empty.
     "story_framing": (
@@ -263,6 +272,9 @@ _DEFAULTS = {
     # What a tool's RESULT is framed as, as the model reads it: the tool
     # turn's text, out of character, the tool named.
     "tool_framing": "((OOC: {tool} result:\n{body}))",
+    # The canvas's standing instruction on the chat wire: what makes an
+    # instruct model continue one text, mid-sentence where it stops.
+    "emulate_text_completion_prompt": EMULATE_TEXT_COMPLETION_PROMPT,
 }
 
 # Placeholders a template cannot do without: every one its built-in text
@@ -284,7 +296,7 @@ _REQUIRED = {
     "scene_history_prompt": ("summaries",),
     "journal_history_prompt": ("name", "entries"),
     # {premise} is the story's own text — without it the premise never
-    # reaches the model in story mode.
+    # reaches the model over the text wire.
     "story_framing": ("premise",),
     # {body} is the tool's result — without it the model reads a label
     # and nothing more.
@@ -316,6 +328,7 @@ class Prompts:
     tool_web_search_prompt: str = _DEFAULTS["tool_web_search_prompt"]
     tool_framing: str = _DEFAULTS["tool_framing"]
     story_framing: str = _DEFAULTS["story_framing"]
+    emulate_text_completion_prompt: str = _DEFAULTS["emulate_text_completion_prompt"]
 
 
 def load(path: Path) -> tuple[Prompts, list[str]]:

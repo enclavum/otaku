@@ -6,14 +6,14 @@ title or an uploaded document."""
 from typing import Any
 
 from otaku import __version__
-from otaku.backend import InjectionPosition, TranscriptLayout
+from otaku.backend import InjectionPosition, Transcript
 from otaku.backend.api import stories as api_stories
 from otaku.backend.session import Session
 from otaku.backend.story import InjectingSetting
 from otaku.formatting import format_context
 from otaku.web.api import transfer
 from otaku.web.api.lore import memory
-from otaku.web.api.play import turn
+from otaku.web.api.play import rows
 from otaku.web.api.request import Ask, Created, Flow, NotFound, Pending, Route, landed_story
 
 
@@ -39,12 +39,14 @@ def facts(session: Session) -> dict[str, Any]:
         # and the mode's wire carries one — what shows the attach button;
         # the backend refuses a picture regardless.
         "can_attach": session.can_attach,
-        # The mode the story is played in (`backend.story.StoryMode`): what the send
-        # button is captioned — and whether the model can play story mode
-        # at all, which words the canvas glyph: with it, canvas is the
-        # story mode.
-        "story_mode": session.story_mode.value,
-        "is_story_mode_ready": session.is_story_mode_ready,
+        # The wire the next request goes over and the look the story is
+        # drawn in (`Session.completion_type`, `Session.layout`): what the send
+        # button is captioned, whether an empty line continues, whether
+        # the pictures show — and whether the novel is offered at all
+        # (`Session.can_complete_text`), which shows its glyph.
+        "completion_type": session.completion_type.value,
+        "layout": session.layout.value,
+        "can_complete_text": session.can_complete_text,
     }
 
 
@@ -98,7 +100,7 @@ def story(session: Session, story_id: int) -> dict[str, Any]:
         "title": listing.title,
         "updated_at": listing.updated_at.isoformat(),
         "premise": api_stories.get_system(session, story_id),
-        "messages": [turn(message) for message in api_stories.messages_of(session, story_id)],
+        "messages": rows(api_stories.messages_of(session, story_id)),
         # the lore half — scenes, characters, how far the pass has read
         **memory(session, story_id),
     }
@@ -120,8 +122,8 @@ def story_settings(session: Session, story_id: int) -> dict[str, Any]:
     """A story's settings as they stand, in the order they are sent: the
     switch, where it injects (null for one that injects nothing) and the
     positions it may take, the story's own text (null for one with
-    none), and the layout the story is read in (null for every setting
-    but the layout's). Any story's; a story that is not there is the
+    none), and the transcript the story is read in (null for every
+    setting but the transcript's). Any story's; a story that is not there is the
     spec's 404."""
     if all(row.id != story_id for row in api_stories.listing(session)):
         raise NotFound(f"no story {story_id}")
@@ -143,7 +145,9 @@ def story_settings(session: Session, story_id: int) -> dict[str, Any]:
                 ),
                 "reminder_text": setting.reminder_text,
                 "display_notes": setting.display_notes,
-                "layout": setting.layout.value if setting.layout is not None else None,
+                "transcript": (
+                    setting.transcript.value if setting.transcript is not None else None
+                ),
             }
             for setting in api_stories.get_settings(session, story_id)
         ]
@@ -170,13 +174,13 @@ def _update_setting(session: Session, ask: Ask) -> str:
         position = InjectionPosition.from_value(raw)
         if position is None:
             raise TypeError('position is not "system" or a count from 1')
-    # One of the three names is a layout (which the setting may still
+    # One of the four names is a transcript (which the setting may still
     # refuse); anything else is not one, a malformed request.
-    layout = None
-    if (raw := ask.body.get("layout")) is not None:
-        layout = TranscriptLayout.from_value(raw)
-        if layout is None:
-            raise TypeError("layout is not one of canvas, manuscript, chat")
+    transcript = None
+    if (raw := ask.body.get("transcript")) is not None:
+        transcript = Transcript.from_value(raw)
+        if transcript is None:
+            raise TypeError("transcript is not one of novel, canvas, manuscript, chat")
     return api_stories.update_setting(
         session,
         ask.params["setting"],
@@ -185,7 +189,7 @@ def _update_setting(session: Session, ask: Ask) -> str:
         position=position,
         reminder_text=reminder_text,
         display_notes=flags["display_notes"],
-        layout=layout,
+        transcript=transcript,
     )
 
 

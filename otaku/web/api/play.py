@@ -35,7 +35,7 @@ from otaku.web.api.request import Ask, Blob, NotFound, Route
 
 def _turns(session: Session) -> list[dict[str, Any]]:
     """The open story, one row per stored turn, oldest first."""
-    return [turn(message) for message in session.messages]
+    return rows(session.messages)
 
 
 def _history(session: Session) -> list[str]:
@@ -55,7 +55,7 @@ def syntax() -> dict[str, Any]:
     shared table's row is a sentence, and where a word is drawn is the
     medium's business. The rows themselves are declared once, in
     `context.syntax`, and reach here through the shared table."""
-    rows = [spec for spec in COMMANDS if spec.kind is commands.CommandKind.SYNTAX]
+    rows = [spec for spec in COMMANDS if spec.kind is commands.CommandType.SYNTAX]
     return {
         # What a line with no framing does — the one row that is not a
         # word, and the sentence the sheet opens with.
@@ -151,7 +151,11 @@ def event(happened: PlayEvent) -> dict[str, Any]:
         case UserTurn():
             # `note` is the record's own dim line (a /roll's dice); ""
             # rides along so the shape never depends on the turn.
-            return {"type": "user_turn", "turn": turn(happened.message), "note": happened.note}
+            return {
+                "type": "user_turn",
+                "turn": turn(happened.message, join=happened.join_type.value),
+                "note": happened.note,
+            }
         case AssistantReasoning():
             return {"type": "assistant_reasoning", "text": happened.text}
         case AssistantText():
@@ -173,12 +177,16 @@ def event(happened: PlayEvent) -> dict[str, Any]:
         case AssistantTurn():
             # The model's row as recorded — split, tags and all — so the
             # page lands it as the turn it is, in place of what streamed.
-            return {"type": "assistant_turn", "turn": turn(happened.message)}
+            return {
+                "type": "assistant_turn",
+                "turn": turn(happened.message, join=happened.join_type.value),
+            }
         case ToolTurn():
             # The tool's row: the page draws it after the reply it
             # answers, then opens the block the reply that continues
             # streams into.
-            return {"type": "tool_turn", "turn": turn(happened.message)}
+            row = turn(happened.message, join=happened.join_type.value)
+            return {"type": "tool_turn", "turn": row}
         case Declined():
             return {"type": "declined", "reason": happened.reason}
         case Failed():
@@ -203,12 +211,25 @@ def event(happened: PlayEvent) -> dict[str, Any]:
             }
 
 
-def turn(message: Message) -> dict[str, Any]:
+def rows(messages: Sequence[Message]) -> list[dict[str, Any]]:
+    """Stored turns in order, each with how it joins the one before it
+    (`api.play.join_kind`, read off the two texts at the seam)."""
+    out: list[dict[str, Any]] = []
+    previous: Message | None = None
+    for message in messages:
+        out.append(turn(message, join=api_play.join_kind(previous, message)))
+        previous = message
+    return out
+
+
+def turn(message: Message, *, join: str) -> dict[str, Any]:
     """One stored turn as the page reads it: the body, and the facts
     recorded with it — the kind the language stored it as, who answered
     an assistant turn and with what template, and the speaker the
     extractor named (None until its pass reads the turn, which is a
-    state the reader pane draws as pending)."""
+    state the reader pane draws as pending) — and `join`, how it joins
+    the turn before it, which the caller knows (`rows`, or the event
+    that carried the row)."""
     return {
         "id": message.id,
         "role": message.role,
@@ -230,7 +251,7 @@ def turn(message: Message) -> dict[str, Any]:
         "segments": api_play.segments(message.body),
         # How it joins the turn before it, for the canvas: "inline", as it
         # stands, or "paragraph", a blank line before it.
-        "join_kind": api_play.join_kind(message),
+        "join_kind": join,
     }
 
 

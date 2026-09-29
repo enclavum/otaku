@@ -930,9 +930,9 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 .otk-thumbs { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; width: 100%; max-width: 430px; padding-top: 2px; }
 .otk-thumbs .otk-thumb { width: calc((100% - 16px) / 3); height: auto; aspect-ratio: 1; cursor: zoom-in; }
 .otk-thumbs .otk-thumb:hover, .otk-thumbs .otk-thumb:focus-visible { border-color: var(--otk-accent); }
-/* in story mode no picture rides the request, so the flow shows none —
+/* over the text wire no picture rides the request, so the flow shows none —
    the tiles alone; the dossier still lists what the story holds */
-.otk-app[data-story-mode="story"] .otk-transcript .otk-thumbs { display: none; }
+.otk-app[data-completion="text"] .otk-transcript .otk-thumbs { display: none; }
 /* the same tiles in the dossier's reader, set flush with its text */
 .otk-detail__section > .otk-thumbs { justify-content: flex-start; }
 /* full size: the picture on the desk, held to the window, its measure beneath */

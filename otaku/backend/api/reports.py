@@ -13,7 +13,7 @@ from dataclasses import dataclass, fields
 from otaku.backend.api import settings as api_settings
 from otaku.backend.api import stories
 from otaku.backend.session import NO_MODEL_HINT, Refused, Session
-from otaku.backend.story import InjectingSetting, StoryMode
+from otaku.backend.story import InjectingSetting
 from otaku.context.assembler import (
     IMAGE_TOKENS,
     AssembledPrompt,
@@ -36,7 +36,7 @@ from otaku.providers import (
     reasoning,
     templates,
 )
-from otaku.store.schema import InjectionPosition
+from otaku.store.schema import CompletionType, InjectionPosition
 
 
 @dataclass(frozen=True)
@@ -68,7 +68,7 @@ class ContextReport:
     — the facts the diagram and the summary are drawn from — the
     injections it carries (in the request's order: the system message
     first, then the deepest first, the costlier first at one place), and
-    one part per message — or, in story mode, ONE part, the text as the
+    one part per message — or, over the text wire, ONE part, the text as the
     text wire sends it (`wire`), rendered in the model's template.
 
     Nothing in it is otaku's own text except the summary and the role
@@ -84,7 +84,7 @@ class ContextReport:
     # the sentence — the model is not loaded, so the window it was cut
     # to is the assembler's substitute until the turn loads it.
     note: str = ""
-    # Story mode: the request as ONE TEXT, exactly as the text wire sends
+    # The text wire: the request as ONE TEXT, exactly as the wire sends
     # it (`AssembledPrompt.as_text`), and the template it is rendered in;
     # "" in chat mode, where the parts are the wire.
     wire: str = ""
@@ -168,9 +168,9 @@ def context(session: Session) -> ContextReport:
         for sent in prompt.injections
     ]
     injections.sort(key=lambda each: (-(each.position.depth or 99), -each.tokens))
-    # In story mode the wire is one text: the preview is that text, as
-    # sent, in one part — its paragraph breaks kept, being its seams.
-    template = session.text_template if session.story_mode is StoryMode.STORY else None
+    # Over the text wire the request is one text: the preview is that
+    # text, as sent, in one part — its paragraph breaks kept, being its seams.
+    template = session.text_template if session.completion_type is CompletionType.TEXT else None
     wire = prompt.as_text(template) if template is not None else ""
     parts = (
         (ContextPart("prompt", "\n".join(_preview_body(printable(wire), keep_breaks=True))),)
@@ -563,7 +563,7 @@ def _model_info(session: Session) -> tuple[tuple[str, str], ...]:
     caps = row.capabilities if row is not None else None
     out.append(("Reasoning", reasoning_words(caps)))
     out.append(("Capabilities", capability_words(caps)))
-    # the text template story mode wraps the story in, and where the word
+    # the text template the text wire wraps the story in, and where the word
     # came from; "unknown", and canvas is a layout alone on it
     out.append(("Text template", _text_template_words(session.text_template)))
     if config.keep_alive:
@@ -578,7 +578,7 @@ def _model_info(session: Session) -> tuple[tuple[str, str], ...]:
 def _text_template_words(template: templates.TextTemplate | None) -> str:
     """The Text template row: the template and where the word came from
     (`TextTemplate.source`: override, engine, model); "unknown" for a
-    model without one, which has no story mode."""
+    model without one, which the text wire cannot serve."""
     if template is None:
         return "unknown"
     return f"{template.name} (from {template.source})"
@@ -667,7 +667,7 @@ def _summary(report: ContextReport) -> str:
         f"  ~{report.total_tokens:,} tokens · {report.used}% of the {prompt.limit:,} limit"
     )
     if report.wire:
-        lines.append(f"  story mode: one text, in the {report.template} template")
+        lines.append(f"  text wire: one text, in the {report.template} template")
     if prompt.system_tokens:
         lines.append(f"  system {prompt.system_tokens:,} · transcript {prompt.transcript_tokens:,}")
     # The summaries are not a third slice of the transcript: they STAND IN

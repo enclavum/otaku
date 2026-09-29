@@ -1,12 +1,12 @@
-/* Which of the three layouts the transcript is read in — canvas,
+/* Which of the four transcripts the story is read in — novel, canvas,
    manuscript, chat: the same turns, drawn three ways by the stylesheet
-   off ONE attribute, `data-transcript` on the flow. Nothing here moves
-   a node; the three looks are `app.css`'s, and the names are the
-   backend's (`TranscriptLayout`).
+   off ONE attribute, `data-transcript` on the flow, the novel drawn as
+   the canvas. Nothing here moves a node; the looks are `app.css`'s, and
+   the names are the backend's (`schema.Transcript`).
 
-   The choice is the STORY's: its `layout` setting, read with the rest
-   where the transcript lands (`shell.drawPlayed`) and written where
-   every setting is (`PATCH /api/stories/{story}/settings/layout`). A
+   The choice is the STORY's: its `transcript` setting, read with the
+   rest where the transcript lands (`shell.drawPlayed`) and written where
+   every setting is (`PATCH /api/stories/{story}/settings/transcript`). A
    story that does not exist yet has no settings to write, so the glyphs
    are inert until its first turn makes it — as the Tools tab has
    nothing to show for it — and while a reply is arriving: the write
@@ -19,8 +19,11 @@ import { $, $$ } from "./dom.js";
 import { tell } from "./status.js";
 import { isPlaying, keepingPlace } from "./transcript.js";
 
-const SETTING = "layout";
+const SETTING = "transcript";
 const DEFAULT = "manuscript"; // the backend's, for a story with no settings yet
+// The look each transcript is drawn in — `Transcript.layout`'s rule,
+// copied: the novel is drawn as the canvas.
+const LAYOUT_OF = { novel: "canvas", canvas: "canvas", manuscript: "manuscript", chat: "chat" };
 
 const transcript = $(".otk-transcript");
 let story = null; // the story whose layout is shown; null while there is none
@@ -30,7 +33,7 @@ let story = null; // the story whose layout is shown; null while there is none
 export function showLayout(storyId, settings) {
   story = storyId;
   const setting = settings.find((each) => each.name === SETTING);
-  apply(setting?.layout ?? DEFAULT);
+  apply(setting?.transcript ?? DEFAULT);
   for (const button of $$("[data-transcript-mode]")) {
     button.setAttribute("aria-disabled", String(story === null));
   }
@@ -47,36 +50,33 @@ export function wireLayout(written) {
       "click",
       guard(async () => {
         if (story === null || isPlaying() || button.getAttribute("aria-pressed") === "true") return;
-        const layout = button.dataset.transcriptMode;
-        const answer = await api.updateSetting(story, SETTING, { layout });
+        const value = button.dataset.transcriptMode;
+        const answer = await api.updateSetting(story, SETTING, { transcript: value });
         if (answer.refused) {
           tell(answer.notice, "otk-error");
           return;
         }
-        apply(layout);
+        apply(value);
         await written(answer.notice);
       }),
     );
   }
 }
 
-/** The canvas glyph's hint: its name — and, while the model in use can
-    play story mode (`facts.is_story_mode_ready`), that it is the story mode
-    too. The other two glyphs' hints are their names, in the markup. */
-export function hintCanvas(storyMode) {
-  const glyph = $('[data-transcript-mode="canvas"]');
-  if (!glyph) return;
-  const hint = storyMode ? "Canvas and the story mode" : "Canvas";
-  glyph.title = hint;
-  glyph.setAttribute("aria-label", hint);
+/** The novel glyph is offered only while the model in use can complete
+    text (`facts.can_complete_text`); hidden otherwise, since the backend
+    would refuse the write. */
+export function offerNovel(available) {
+  const glyph = $('[data-transcript-mode="novel"]');
+  if (glyph) glyph.hidden = !available;
 }
 
-function apply(layout) {
+function apply(value) {
   // the whole flow reflows; the reader stays on the turn they were reading
   keepingPlace(() => {
-    transcript.dataset.transcript = layout;
+    transcript.dataset.transcript = LAYOUT_OF[value] ?? DEFAULT;
   });
   for (const button of $$("[data-transcript-mode]")) {
-    button.setAttribute("aria-pressed", String(button.dataset.transcriptMode === layout));
+    button.setAttribute("aria-pressed", String(button.dataset.transcriptMode === value));
   }
 }

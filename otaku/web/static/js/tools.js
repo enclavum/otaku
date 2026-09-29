@@ -29,7 +29,18 @@ const _ABOUT = {
     "The narrator may keep a short note to itself between turns, never played into the story.",
   use_story_reminder: "Injected into this story with every reply.",
   use_shared_reminder: "Injected into the story with every reply, common across stories.",
+  emulate_text_completion:
+    "Only in the canvas layout. The narrator is told to continue the text from where it ends, " +
+    "as a text completion would, instead of answering it.",
 };
+
+/* A caption's bold opening, where it has one: the words the caption
+   starts with, drawn strong. */
+const _LEAD = { emulate_text_completion: "Only in the canvas layout." };
+
+/* The settings that open a group: a rule stands before each, after the
+   first row — the tools, then the reminders, then the canvas's own. */
+const _OPENS_GROUP = new Set(["use_story_reminder", "emulate_text_completion"]);
 
 /* The one setting whose text is not the story's: every story is sent
    the same reminder, read and written at its own endpoint. */
@@ -66,11 +77,11 @@ export async function buildTools(view, pane, tabNote) {
   tabNote(view, "tools", `${on} of ${drawn.length} on`);
   // every row's depth opens the one ruler, which places them all
   const open = () => placement(view, drawn, box);
-  const rows = drawn.map((setting) => feature(view, setting, shared.text, open));
-  // the tools, a rule, then the reminders: the first setting that is no
-  // tool's opens the second group
-  const reminders = drawn.findIndex((setting) => !setting.tool);
-  if (reminders > 0) rows.splice(reminders, 0, element("hr", "otk-features__rule"));
+  const rows = [];
+  drawn.forEach((setting, i) => {
+    if (i && _OPENS_GROUP.has(setting.name)) rows.push(element("hr", "otk-features__rule"));
+    rows.push(feature(view, setting, shared.text, open));
+  });
   box.replaceChildren(...rows);
 }
 
@@ -104,7 +115,7 @@ function feature(view, setting, sharedText, openPlacement) {
   title.append(span("otk-feature__name", setting.label));
   // A second switch the row may carry sits on the name's line, after it.
   if (setting.display_notes !== null) title.append(shownSwitch(view, setting));
-  text.append(title, element("p", "otk-feature__note", _ABOUT[setting.name]));
+  text.append(title, caption(setting.name));
   head.append(toggle, text);
   if (setting.tool || setting.allowed_positions.length) {
     const control = element("span", "otk-feature__control");
@@ -128,6 +139,16 @@ function feature(view, setting, sharedText, openPlacement) {
     );
   }
   return box;
+}
+
+function caption(name) {
+  /* What the setting does, under its name — its opening in bold where
+     the table gives it one. */
+  const note = element("p", "otk-feature__note");
+  const lead = _LEAD[name];
+  if (lead) note.append(element("strong", "", lead), _ABOUT[name].slice(lead.length));
+  else note.textContent = _ABOUT[name];
+  return note;
 }
 
 function depthButton(setting, openPlacement) {

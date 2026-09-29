@@ -11,19 +11,14 @@ from dataclasses import replace
 from typing import Literal
 
 from otaku.backend.session import Refused, Session
-from otaku.backend.story import StorySettingLayout, StorySettings
+from otaku.backend.story import StorySettings
 from otaku.formatting import flatten, truncate_label
 from otaku.store.ops.stories import StoryListing
-from otaku.store.schema import InjectionPosition, Message, TranscriptLayout
+from otaku.store.schema import InjectionPosition, Message, Transcript
 
 # What picking an earlier turn settles to: continue in a copy (the
 # default), rewind the head (later turns stay as siblings), or stay.
 LandAction = Literal["resume", "fork", "truncate"]
-
-# What a layout write answers when the canvas is the story mode: a
-# caption, no full stop, as the layout's own `standing` is; the status
-# line's width is the measure, 23 characters at most.
-CANVAS_IN_STORY_MODE = "Canvas, in story mode"
 
 # A label INSIDE a backend sentence (the landed line, a fork notice, the
 # info report) is cut here, as part of the wording — an unbounded name
@@ -212,7 +207,12 @@ def get_settings(session: Session, story_id: int | None = None) -> StorySettings
         from_db = session._store.stories.get_settings(story_id)
     else:
         from_db = session._settings_db
-    return StorySettings(from_db, session._store, session._paths.prompts_file)
+    return StorySettings(
+        from_db,
+        session._store,
+        session._paths.prompts_file,
+        can_complete_text=session.can_complete_text,
+    )
 
 
 def update_setting(
@@ -224,7 +224,7 @@ def update_setting(
     position: InjectionPosition | None = None,
     reminder_text: str | None = None,
     display_notes: bool | None = None,
-    layout: TranscriptLayout | None = None,
+    transcript: Transcript | None = None,
 ) -> str:
     """Change one setting of a story — the open one, or the one
     `story_id` names; what is not given stays. Returns the confirmation
@@ -240,21 +240,12 @@ def update_setting(
         position=position,
         reminder_text=reminder_text,
         display_notes=display_notes,
-        layout=layout,
+        transcript=transcript,
     )
     if story_id is not None and story_id != session.story_id:
         session._store.stories.set_setting(story_id, row)
     else:
         session._set_setting(row)
-    # The canvas is story mode on a model that can play it — the fact the
-    # page's canvas glyph is worded by (`Session.is_story_mode_ready`) — and the
-    # confirmation says so; canvas alone otherwise, as any layout.
-    if (
-        isinstance(setting, StorySettingLayout)
-        and row.layout is TranscriptLayout.CANVAS
-        and session.is_story_mode_ready
-    ):
-        return CANVAS_IN_STORY_MODE
     return setting.standing(row)
 
 

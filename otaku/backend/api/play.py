@@ -35,19 +35,25 @@ from otaku.backend.files import (
     save,
 )
 from otaku.backend.session import NO_MODEL_HINT, Refused, Session
-from otaku.backend.story import StoryMode, StorySettings, ToolSetting
+from otaku.backend.story import StorySettings, ToolSetting
 from otaku.backend.tools import TOOLS, Actor, Tool, read_call
 from otaku.context import syntax, tool_calls
-from otaku.context.assembler import AssembledPrompt, ContextOverflowError, join_of
+from otaku.context.assembler import (
+    AssembledPrompt,
+    ContextOverflowError,
+    JoinType,
+    join_of,
+    seam_of,
+)
 from otaku.context.tool_calls import FENCE, Prose, ReplyParser, ToolCall, parse_reply
 from otaku.formatting import format_context
 from otaku.providers import OpenAIClient, ProviderError, Reasoning, Reply, Stats, Text, templates
-from otaku.store.schema import Character, Message
+from otaku.store.schema import Character, CompletionType, Layout, Message
 
-# A picture is refused in story mode though the model sees: the request
-# is one text, which has no room for one (`Session.can_attach`).
-NO_PICTURE_IN_STORY_MODE = "In story mode the request is one text: no picture can ride it."
-# An empty line outside story mode: the chat wire has no continue.
+# A picture is refused over the text wire though the model sees: the
+# request is one text, which has no room for one (`Session.can_attach`).
+NO_PICTURE_ON_TEXT = "The request is one text here: no picture can ride it."
+# An empty line outside the canvas, where an empty line is nothing.
 NOTHING_TO_SEND = "Nothing to send: type a line."
 
 
@@ -58,6 +64,7 @@ class UserTurn:
     dice a /roll rolled; "" for every other row."""
 
     message: Message
+    join_type: JoinType  # how the row joins the text before it (`assembler.join_of`)
     note: str = ""
 
 
@@ -93,9 +100,12 @@ class AssistantTurn:
     it ends where the stream ended — at a call of a tool the user
     answers or otaku runs, the closing fence there whether or not the
     model wrote one, or at the reply's own end — and it is told before
-    a tool runs, at the end, and when the stream failed alike."""
+    a tool runs, at the end, and when the stream failed alike. `join_type` is
+    how it joins the text before it (`assembler.join_of`), for the
+    canvas."""
 
     message: Message
+    join_type: JoinType
 
 
 @dataclass(frozen=True)
@@ -105,6 +115,7 @@ class ToolTurn:
     that continues from it streams next."""
 
     message: Message
+    join_type: JoinType
 
 
 @dataclass(frozen=True)
@@ -257,12 +268,12 @@ def submit(session: Session, line: str, files: Sequence[RawFile] = ()) -> Iterat
     Closing the generator mid-stream records the partial reply and its
     usage. A new reply arms the worker's idle extraction pass —
     [lore_extraction].enabled gates ONLY this automatic arming; the
-    forced /extract path always works. In story mode the line is
-    recorded AS TYPED, the whitespace at both its edges its seams — the
-    leading to the text it goes on from, the trailing to the model's
-    continuation (`assembler.join_of`); every other line is trimmed
-    here, whatever a frontend sent."""
-    if session.story_mode is not StoryMode.STORY:
+    forced /extract path always works. In the canvas the line is recorded
+    AS TYPED, the whitespace at both its edges its seams — the leading to
+    the text it goes on from, the trailing to the model's continuation
+    (`assembler.join_of`); every other line is trimmed here, whatever a
+    frontend sent."""
+    if session.layout is not Layout.CANVAS:
         line = line.strip()
     frame = syntax.read(line)
     error = frame.check()
@@ -274,14 +285,14 @@ def submit(session: Session, line: str, files: Sequence[RawFile] = ()) -> Iterat
     if files and not session.vision:
         raise Refused(CANNOT_SEE)
     if files and not session.can_attach:
-        raise Refused(NO_PICTURE_IN_STORY_MODE)
+        raise Refused(NO_PICTURE_ON_TEXT)
     if len(files) > MAX_PICTURES:
         raise Refused(TOO_MANY)
-    # An empty line is a CONTINUE in story mode — the story goes on where
-    # it stands, no turn recorded (`_submit_events`) — and nothing at all
-    # in chat mode, whose wire wants a message: refused, never an empty
+    # An empty line is a CONTINUE in the canvas — the story goes on where
+    # it stands, no turn recorded (`_submit_events`), over either wire —
+    # and nothing at all in the other layouts: refused, never an empty
     # row.
-    if not line.strip() and not files and session.story_mode is not StoryMode.STORY:
+    if not line.strip() and not files and session.layout is not Layout.CANVAS:
         raise Refused(NOTHING_TO_SEND)
     return _submit_events(session, frame, line, [read_picture(file) for file in files])
 
@@ -305,11 +316,11 @@ def regenerate(session: Session) -> Iterator[PlayEvent]:
     return _regenerate_events(session)
 
 
-def join_kind(message: Message) -> str:
+def join_kind(previous: Message | None, message: Message) -> str:
     """How a stored turn joins the one before it, for a frontend that
     draws the canvas: "inline" or "paragraph" (`context.assembler.join_of`,
-    the wire's own seam rule, its word)."""
-    return join_of(message).value
+    the wire's own seam rule, read off the two texts at the seam)."""
+    return join_of(previous, message).value
 
 
 def segments(body: str) -> list[dict[str, object]]:
@@ -410,7 +421,7 @@ def _submit_events(
             attachments=attachments,
         )
     )
-    yield UserTurn(session._messages[-1], note=frame.note)
+    yield UserTurn(session._messages[-1], _join_of_last(session), note=frame.note)
     reply_speaker = known if frame.speaks == "reply" else None
     yield from _reply_events(session, reply_kind=frame.reply_kind, reply_speaker=reply_speaker)
 
@@ -474,13 +485,14 @@ def _reply_events(
         # is raised or more scenes close. The sentence is the assembler's.
         yield Declined(str(e))
         return
-    # The wire is the mode's (`_request`). A continuation over the text
-    # wire is recorded VERBATIM, its leading space or break included:
-    # that is the seam the text is rendered with next time
-    # (`AssembledPrompt.as_story_text`), and the row says which
-    # completion made it (`completion`).
-    resolved = session.text_template if session.story_mode is StoryMode.STORY else None
-    completion = "text" if resolved is not None else "chat"
+    # The wire is the session's (`completion_type`, `_request`). In the canvas
+    # a reply is recorded VERBATIM over either wire, its leading space or
+    # break included: that is the seam the text is drawn and rendered
+    # with (`join_of`, `AssembledPrompt.as_story_text`); the row records
+    # which wire made it (`completion`).
+    resolved = session.text_template if session.completion_type is CompletionType.TEXT else None
+    completion = session.completion_type.value
+    canvas = session.layout is Layout.CANVAS
     # A text completion that comes back EMPTY, its stream ending clean —
     # an instruct model at the end of a closed paragraph ends its turn at
     # once, every time (Gemma 4, measured) — is asked ONCE more with a
@@ -500,6 +512,13 @@ def _reply_events(
             except ContextOverflowError as e:
                 yield Declined(str(e))
                 return
+        # A reply that comes flush after an unfinished sentence is owed
+        # the one space the model left out (`assembler.seam_of`),
+        # supplied before its first piece streams, so both frontends
+        # draw it and the store keeps it — in the canvas alone, the one
+        # layout that records a reply verbatim.
+        last = session._messages[-1] if session._messages else None
+        seam = seam_of(last) if canvas else ""
         for opener in openers:
             # The tool calls told apart from the prose as they stream. A
             # call of a tool the user answers or otaku runs ends the reply where
@@ -509,7 +528,7 @@ def _reply_events(
             attempt = _Attempt(ReplyParser(ending=_ending_switched_on(session)))
             stream = _request(session, client, assembled, resolved, opener)
             try:
-                yield from _drain(stream, attempt, opener, verbatim=resolved is not None)
+                yield from _drain(stream, attempt, opener, verbatim=canvas, seam=seam)
             except (GeneratorExit, KeyboardInterrupt):
                 # The frontend closed the stream mid-way, or the terminal's
                 # Ctrl+C landed in the wait itself, inside this frame — the
@@ -541,13 +560,13 @@ def _reply_events(
             tool_call = _last_tool_call(content[0])
         reply = _land_reply(session, content, final, reply_kind, reply_speaker, completion)
         if reply is not None:
-            yield AssistantTurn(reply)
+            yield AssistantTurn(reply, _join_of_last(session))
         if attempt.error is not None:
             yield Failed(attempt.error)
             return
         if tool_call is None or tool_call.actor is not Actor.SYSTEM or reply is None:
             break
-        yield ToolTurn(_land_tool_turn(session, tool_call))
+        yield ToolTurn(_land_tool_turn(session, tool_call), _join_of_last(session))
     report = ReplyReport(final, max_context) if final is not None else None
     stats = report.text() if session.verbose and report is not None else ""
     yield Done(report=report, stats=stats)
@@ -560,8 +579,8 @@ def _request(
     resolved: templates.TextTemplate | None,
     opener: str,
 ) -> Reply:
-    """The request the mode sends (`story.StoryMode`), the same stream
-    coming back either way. In story mode (`resolved`, the model's text
+    """The request the wire sends (`Session.completion_type`), the same stream
+    coming back either way. In the text wire (`resolved`, the model's text
     template) it is ONE TEXT the model continues over the engine's text
     wire — the assembly's own rendering (`AssembledPrompt.as_text`, the
     one `/context` previews), `opener` appended (a retry's paragraph
@@ -585,7 +604,7 @@ def _request(
         session.model,
         assembled.as_text(resolved, opener),
         params,
-        # No thinking knob rides story mode: the rendered turn has no
+        # No thinking knob rides the text wire: the rendered turn has no
         # thinking channel to budget, and omlx's engine handed a budget of
         # 0 on a raw prompt returns nothing more often than not (Gemma 4,
         # measured).
@@ -595,7 +614,9 @@ def _request(
     )
 
 
-def _drain(stream: Reply, attempt: _Attempt, opener: str, *, verbatim: bool) -> Iterator[PlayEvent]:
+def _drain(
+    stream: Reply, attempt: _Attempt, opener: str, *, verbatim: bool, seam: str = ""
+) -> Iterator[PlayEvent]:
     """One attempt's chunks as events — reasoning as it comes, prose and
     a call's pieces as the parser tells them apart — filed in `attempt`
     as they go, so what is recorded is exactly what was yielded. The
@@ -620,7 +641,9 @@ def _drain(stream: Reply, attempt: _Attempt, opener: str, *, verbatim: bool) -> 
                 if not text:
                     continue
                 if not attempt.content:
-                    text = opener + text  # the break a retry opened: the reply's seam
+                    # the break a retry opened, else the space a flush
+                    # continuation is owed (`seam`): the reply's seam
+                    text = (opener or (seam if not text[:1].isspace() else "")) + text
                 attempt.content.append(text)
                 yield from _pieces(attempt.parser.feed(text))
                 if attempt.parser.cut is not None:
@@ -648,7 +671,12 @@ def _pieces(found: list[Prose | ToolCall]) -> Iterator[PlayEvent]:
 def _ending_switched_on(session: Session) -> frozenset[str]:
     """The names of the tools the user answers or otaku runs that the
     story has switched on — whose call ends the reply."""
-    settings = StorySettings(session._settings_db, session._store, session._paths.prompts_file)
+    settings = StorySettings(
+        session._settings_db,
+        session._store,
+        session._paths.prompts_file,
+        can_complete_text=session.can_complete_text,
+    )
     return frozenset(
         setting.tool.name
         for setting in settings
@@ -669,6 +697,14 @@ def _last_tool_call(body: str) -> Tool | None:
         return read_call(calls[-1].name, calls[-1].text)
     except KeyError:
         return None
+
+
+def _join_of_last(session: Session) -> JoinType:
+    """How the row just recorded joins the one before it — told with the
+    row, so a frontend drawing the canvas places it without a second
+    read (`assembler.join_of`)."""
+    rows = session._messages
+    return join_of(rows[-2] if len(rows) > 1 else None, rows[-1])
 
 
 def _land_tool_turn(session: Session, tool_call: Tool) -> Message:

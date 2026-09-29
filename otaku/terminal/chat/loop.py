@@ -15,7 +15,7 @@ as it was.
 import functools
 import sys
 
-from otaku.backend import StoryMode
+from otaku.backend import Layout
 from otaku.backend.api import play as api_play
 from otaku.backend.api import stories as api_stories
 from otaku.backend.session import Refused, Session
@@ -23,8 +23,8 @@ from otaku.console import banner
 from otaku.terminal.chat import bindings, stream
 from otaku.terminal.chat.chat import RESUME_TURNS, Chat
 from otaku.terminal.prompt import (
+    CANVAS_PLACEHOLDER,
     CHAT_PLACEHOLDER,
-    STORY_PLACEHOLDER,
     Carry,
     LineAssembler,
     build_prompt,
@@ -110,7 +110,7 @@ def run(session: Session) -> None:
             list(session.messages),
             RESUME_TURNS,
             notes=chat.notes_displayed,
-            story=session.story_mode is StoryMode.STORY,
+            is_canvas=session.layout is Layout.CANVAS,
         )
         print(echoed)
         chat.ledger.note_printed(echoed + "\n")  # printed past the ledger: the flow's tail
@@ -147,12 +147,12 @@ def run(session: Session) -> None:
             prefix = CLOUD_PROMPT_PREFIX
         else:
             prefix = PROMPT_PREFIX
-        # the hint is the mode's: a story in story mode is continued
-        story = session.story_mode is StoryMode.STORY
+        # the hint is the layout's: a story on the canvas is continued
+        is_canvas = session.layout is Layout.CANVAS
         if assembler.in_block:
             placeholder = None
-        elif story:
-            placeholder = STORY_PLACEHOLDER
+        elif is_canvas:
+            placeholder = CANVAS_PLACEHOLDER
         else:
             placeholder = CHAT_PLACEHOLDER
         try:
@@ -205,21 +205,21 @@ def run(session: Session) -> None:
             sys.stdout.write(f"\x1b[{shown}A\r\x1b[J")
         else:
             chat.ledger.typed(prefix + line + "\n")
-            # in story mode the line plays as typed, the whitespace at its
+            # in the canvas the line plays as typed, the whitespace at its
             # edges its seams (`api.play.submit`); every other line is trimmed
-            result = assembler.feed(line, verbatim=story)
+            result = assembler.feed(line, verbatim=is_canvas)
             if result is None:
                 continue  # inside an open """ block — keep collecting lines
             submission = result
-            if not submission.strip() and not story:
+            if not submission.strip() and not is_canvas:
                 # A bare Enter leaves its prompt row on screen; its rows
                 # stay counted so the next submission's erase takes it
-                # too. In story mode it is the continue: it plays.
+                # too. In the canvas it is the continue: it plays.
                 continue
 
-        # the continue: story mode's empty line, which the stream places
+        # the continue: the canvas's empty line, which the stream places
         # where the text ended rather than echoing (`stream.show`)
-        chat.continuing = story and not submission.strip()
+        chat.continuing = is_canvas and not submission.strip()
         try:
             submit(chat, submission)
         except KeyboardInterrupt:

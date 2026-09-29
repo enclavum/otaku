@@ -2,11 +2,11 @@
 
 start()/stop() are idempotent so callers can stop unconditionally on every
 chunk path without bookkeeping. The frame is drawn where the cursor
-stands, with the cursor left AFTER it — a block cursor over the frame
-would show it inverted — and erased on stop, the cursor back where the
-wait began: on an empty row in chat mode, mid-line in story mode right
-after the text the reply will go on from, so what streams next starts
-exactly there.
+stands, with the cursor left one blank cell AFTER it — a block cursor
+over the frame would show it inverted, and touching it reads as part of
+it — and erased on stop, the cursor back where the wait began: on an
+empty row under a block, mid-line on the canvas right after the text
+the reply will go on from, so what streams next starts exactly there.
 """
 
 import sys
@@ -38,22 +38,22 @@ class Spinner:
         self._stop.set()
         self._thread.join()
         self._thread = None
-        # Back over the frame and erase it, so streaming output starts
-        # where the wait began.
+        # Back over the frame and its blank cell and erase them, so
+        # streaming output starts where the wait began.
         if self._drawn:
-            sys.stdout.write(f"\b{ERASE_TO_END}")
+            sys.stdout.write(f"\b\b{ERASE_TO_END}")
             sys.stdout.flush()
         self._drawn = False
 
     def _run(self) -> None:
-        # One cell: the first frame is written where the cursor stands
-        # (wrapping to the next row where the row was full, as the text
-        # would), every later one over it, a backspace first; the cursor
-        # rests after the frame throughout.
+        # Two cells, the frame and a blank: the first frame is written
+        # where the cursor stands (wrapping to the next row where the row
+        # was full, as the text would), every later one over it, two
+        # backspaces first; the cursor rests after the blank throughout.
         i = 0
         while not self._stop.wait(_INTERVAL):
-            back = "\b" if self._drawn else ""
-            sys.stdout.write(f"{back}{FRAMES[i % len(FRAMES)]}")
+            back = "\b\b" if self._drawn else ""
+            sys.stdout.write(f"{back}{FRAMES[i % len(FRAMES)]} ")
             sys.stdout.flush()
             self._drawn = True
             i += 1

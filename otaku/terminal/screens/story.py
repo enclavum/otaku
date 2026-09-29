@@ -120,7 +120,20 @@ _ABOUT: dict[str, str] = {
     ),
     "use_story_reminder": "Injected into this story with every reply.",
     "use_shared_reminder": "Injected into the story with every reply, common across stories.",
+    "emulate_text_completion": (
+        "Only in the canvas layout. The narrator is told to continue the text from where it "
+        "ends, as a text completion would, instead of answering it."
+    ),
 }
+
+# A caption's bold opening, where it has one: the words the caption
+# starts with, drawn bold.
+_LEAD: dict[str, str] = {"emulate_text_completion": "Only in the canvas layout."}
+
+# The settings that open a group: the list draws a blank row before
+# each, after the first row — the tools, then the reminders, then the
+# canvas's own.
+_OPENS_GROUP = frozenset({"use_story_reminder", "emulate_text_completion"})
 
 # The one setting whose text is not the story's: every story is sent the
 # same reminder, read and written through its own operations.
@@ -609,35 +622,33 @@ class Dossier(ListScreen):
         return out
 
     def _tool_rows(self) -> StyleAndTextTuples:
-        """One row per setting: its checkbox and its name — the tools, a
-        blank row, then the reminders. The band stays on the list's row
-        while the cursor is in the panel, dimmed so the panel reads as
-        the place the cursor went."""
+        """One row per setting: its checkbox and its name, a blank row
+        before each group after the first (`_gaps`). The band stays on
+        the list's row while the cursor is in the panel, dimmed so the
+        panel reads as the place the cursor went."""
         out: StyleAndTextTuples = []
         if not self.settings:
             out.append(("class:muted", "  (no settings in this build)"))
             return out
-        gap = self._reminders_start()
+        gaps = self._gaps()
         for row_i, setting in enumerate(self.settings):
-            if row_i == gap and row_i:
+            if row_i in gaps:
                 out.append(("", "\n"))
             row = f"{_checkbox(setting.enabled)} {setting.label}"
             self._emit_row(out, row_i == self.cursor, row, dim=self.in_panel)
         return out
 
-    def _reminders_start(self) -> int:
-        """Where the reminders begin in the tools list: the first setting
-        that is no tool's, after the tools; the list's length when there
-        is none."""
-        return next((i for i, s in enumerate(self.settings) if s.tool is None), len(self.settings))
+    def _gaps(self) -> frozenset[int]:
+        """The rows of the tools list a blank row is drawn before: each
+        setting that opens a group (`_OPENS_GROUP`), the first row aside."""
+        return frozenset(i for i, s in enumerate(self.settings) if i and s.name in _OPENS_GROUP)
 
     def _cursor_line(self) -> int:
         """The visual row of the cursor: the tools list draws a blank row
-        between the tools and the reminders (`_tool_rows`), so a cursor
-        on a reminder sits one row below its index."""
+        before each group (`_tool_rows`), so a cursor sits below its
+        index by the gaps above it."""
         if self.tab == "tools" and self.settings:
-            gap = self._reminders_start()
-            return self.cursor + (1 if gap and self.cursor >= gap else 0)
+            return self.cursor + sum(1 for gap in self._gaps() if self.cursor >= gap)
         return self.cursor
 
     def _panel_header_text(self) -> StyleAndTextTuples:
@@ -833,11 +844,11 @@ class Dossier(ListScreen):
             return [("class:preview.muted", "nothing to preview")]
         setting = self.settings[self.cursor]
         width = max(10, self._preview_inner_width())
-        lines = [("class:preview.body", line) for line in wrap_text(_ABOUT[setting.name], width)]
+        out = _caption(_ABOUT[setting.name], _LEAD.get(setting.name, ""), width)
         above, _, text = self._tool_parts()
         for f in [*above, *([text] if text is not None else [])]:
-            lines += [("class:preview.body", ""), *self._tool_lines(f)]
-        return _joined(lines)
+            out += [("class:preview.body", "\n\n"), *_joined(self._tool_lines(f))]
+        return out
 
     def _tool_text(self) -> StyleAndTextTuples:
         """The reminder's text as read, or the key's standing, where the
@@ -1696,6 +1707,25 @@ class Dossier(ListScreen):
 
 def _checkbox(on: bool) -> str:
     return _CHECKED if on else _UNCHECKED
+
+
+def _caption(text: str, lead: str, width: int) -> StyleAndTextTuples:
+    """A setting's caption wrapped to `width`, a newline between its
+    lines and none after (as `_joined` lays lines), the `lead` it opens
+    with — where it has one — in bold, across the lines it wraps to."""
+    out: StyleAndTextTuples = []
+    remaining = len(lead)
+    lines = wrap_text(text, width)
+    for i, line in enumerate(lines):
+        head, tail = line[:remaining], line[remaining:]
+        remaining = max(0, remaining - len(line) - 1)  # the space the wrap took
+        if head:
+            out.append(("class:preview.body bold", head))
+        if tail or not head:
+            out.append(("class:preview.body", tail))
+        if i < len(lines) - 1:
+            out.append(("class:preview.body", "\n"))
+    return out
 
 
 def _joined(lines: list[tuple[str, str]]) -> StyleAndTextTuples:

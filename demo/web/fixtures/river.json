@@ -8,8 +8,9 @@
   "story_id": 1,
   "turns": 16,
   "can_attach": false,
-  "story_mode": "chat",
-  "is_story_mode_ready": false
+  "completion_type": "chat",
+  "layout": "manuscript",
+  "can_complete_text": false
  },
  "story": {
   "id": 1,

@@ -56,9 +56,9 @@ from otaku.terminal.tty.theme import theme
 _BARRED = BAR.rstrip()
 
 CHAT_PLACEHOLDER = FormattedText([("class:placeholder", "Send a message")])
-# The same hint in story mode (`session.story_mode`), where a line continues
+# The same hint on the canvas (`session.layout`), where a line continues
 # the story rather than being sent to it.
-STORY_PLACEHOLDER = FormattedText([("class:placeholder", "Continue the story")])
+CANVAS_PLACEHOLDER = FormattedText([("class:placeholder", "Continue the story")])
 
 # Ctrl+D submits /bye only on an empty line — the terminal convention.
 # With a draft on the line it falls through to delete-forward, so readline
@@ -178,7 +178,7 @@ class LineAssembler:
     cases is settled HERE, where it is known: a typed line is stripped, and
     a block keeps the whitespace at its edges — someone who opened a block
     to lay text out meant the layout. `verbatim` keeps a typed line as it
-    is, both edges: story mode's, where the whitespace it opens and ends
+    is, both edges: the canvas's, where the whitespace it opens and ends
     with are its seams (`api.play.submit`)."""
 
     def __init__(self) -> None:
@@ -290,7 +290,7 @@ def build_prompt(
         shortcuts={token: caption for token, (_key, caption) in shortcuts.items()},
         levels=lambda: api_settings.think_choices(session).levels,
         parameters=lambda: api_settings.parameter_names(session),
-        modes=lambda: api_settings.mode_choices(session),
+        transcripts=lambda: api_settings.transcript_choices(session),
     )
     menu_line = Condition(
         lambda: completer.partial(get_app().current_buffer.document.text_before_cursor) is not None

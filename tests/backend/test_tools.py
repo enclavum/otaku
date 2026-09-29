@@ -1,14 +1,19 @@
 """The tools a model may use by writing a call in its reply.
 
-A tool is declared by its class — its name, who answers its call, the
-prompts key of its prompt — and registered under its name; `read` binds
-one call to the tool its name says, in any case. `ToolQuestions` reads
+A tool is declared by its class — its name, who acts on its call, the
+prompts key of its prompt — and registered under its name; `read_call`
+binds one call to the tool its name says, in any case, and
+`get_tool_label` names a tool for a reader. `ToolQuestions` reads
 its call as a question and the answers to pick from: the question is
 everything before the first answer line; an answer line opens `1.`,
 `1)`, `a.` or `a)`; none makes the question free-form; whatever follows
 the answers that is not one is no answer; nine at most. `to_json` is
 the call as a frontend draws it; `to_prose` what a call reads as on the
-wire while its tool is off — the question alone, nothing for a note.
+wire while its tool is off — the question alone, nothing for a note. A
+tool otaku RUNS answers its call with `run(integrations)`: the system
+tool the time and the load, the web search tool the top results'
+snippets through the engine the key chose, cut to a budget, or the
+sentence for why there are none.
 """
 
 import re
@@ -16,7 +21,19 @@ from dataclasses import fields
 
 import pytest
 
-from otaku.backend.tools import TOOLS, Actor, Tool, ToolAssistantNotes, ToolQuestions, read
+from otaku.backend.tools import (
+    TOOLS,
+    Actor,
+    Tool,
+    ToolAssistantNotes,
+    ToolQuestions,
+    ToolSystem,
+    ToolWebSearch,
+    get_tool_label,
+    read_call,
+)
+from otaku.integrations import IntegrationConfig, IntegrationError, Integrations, SearchResult
+from otaku.integrations.base import SearchEngine
 from otaku.settings.prompts import Prompts
 
 
@@ -63,14 +80,21 @@ class TestAsk:
         text = "\nStay or go?\n1. She stays\n"
         assert ToolQuestions(text).text == text
 
-    def test_to_json_carries_the_tool_and_what_it_read(self) -> None:
+    def test_to_json_carries_the_tool_who_acts_on_it_and_what_it_read(self) -> None:
         assert ToolQuestions("Stay or go?\n1. Stay").to_json() == {
             "tool": "question",
+            "label": "",
+            "actor": "user",
             "text": "Stay or go?\n1. Stay",
             "question": "Stay or go?",
             "options": ["Stay"],
         }
-        assert ToolAssistantNotes("the seal").to_json() == {"tool": "note", "text": "the seal"}
+        assert ToolAssistantNotes("the seal").to_json() == {
+            "tool": "note",
+            "label": "Notes",
+            "actor": "nobody",
+            "text": "the seal",
+        }
 
     def test_off_a_question_reads_as_the_question_alone_and_a_note_as_nothing(self) -> None:
         # The options were the menu's — a model no longer offered the tool
@@ -106,18 +130,91 @@ class TestIsOption:
         ]
 
 
-class TestRead:
+class TestReadCall:
     def test_a_call_is_read_as_the_tool_its_name_says(self) -> None:
-        ask = read("question", "Stay or go?\n1. Stay")
+        ask = read_call("question", "Stay or go?\n1. Stay")
         assert isinstance(ask, ToolQuestions) and ask.options == ("Stay",)
-        assert isinstance(read("note", "the letter is forged"), ToolAssistantNotes)
+        assert isinstance(read_call("note", "the letter is forged"), ToolAssistantNotes)
+        assert isinstance(read_call("search", "tide tables"), ToolWebSearch)
 
     def test_the_name_is_read_in_any_case(self) -> None:
-        assert isinstance(read("NOTE", "x"), ToolAssistantNotes)
+        assert isinstance(read_call("NOTE", "x"), ToolAssistantNotes)
 
     def test_a_name_no_tool_owns_is_a_key_error(self) -> None:
         with pytest.raises(KeyError):
-            read("plan", "x")
+            read_call("plan", "x")
+
+
+class TestLabel:
+    """`get_tool_label` — what a frontend calls the tool a tool turn's
+    `provider` names."""
+
+    def test_a_known_tool_is_called_by_its_label(self) -> None:
+        assert get_tool_label("search") == "Web search"
+        assert get_tool_label("system") == "System"
+        assert get_tool_label("note") == "Notes"
+
+    def test_a_tool_this_build_does_not_have_keeps_its_name_and_none_is_nothing(self) -> None:
+        assert get_tool_label("plan") == "plan"
+        assert get_tool_label(None) == ""
+        assert get_tool_label("") == ""
+
+
+class TestRun:
+    """`Tool.run` — the result of a call of a tool otaku runs, the TOOL
+    turn's text, given the integrations as bound."""
+
+    def test_only_a_tool_otaku_runs_has_a_result(self) -> None:
+        for tool in TOOLS.values():
+            if tool.actor is Actor.SYSTEM:
+                assert isinstance(tool("").run(Integrations()), str), tool.name
+            else:
+                with pytest.raises(NotImplementedError):
+                    tool("x").run(Integrations())
+
+    def test_the_system_tool_answers_the_time_and_the_load(self) -> None:
+        lines = ToolSystem("").run(Integrations()).splitlines()
+        assert lines[0].startswith("Time: ") and "T" in lines[0]
+        assert lines[1].startswith("Load average (1, 5, 15 min): ")
+
+    def test_the_search_asks_the_chosen_engine_with_the_query_collapsed(self) -> None:
+        engine = _Engine([SearchResult("Tides", "High water at six.")])
+        result = ToolWebSearch("  tide\n tables  ").run(_bound(engine))
+        assert engine.asked == [("tide tables", ToolWebSearch.MAX_RESULTS)]
+        assert result == "Tides: High water at six."
+
+    def test_the_results_are_title_snippet_paragraphs_without_the_empty_ones(self) -> None:
+        engine = _Engine(
+            [
+                SearchResult("Tides", " High water at six. "),
+                SearchResult("Nothing", "   "),
+                SearchResult("Moon", "Full tonight."),
+            ]
+        )
+        result = ToolWebSearch("tides").run(_bound(engine))
+        assert result == "Tides: High water at six.\n\nMoon: Full tonight."
+
+    def test_the_snippets_are_cut_to_the_character_budget(self) -> None:
+        budget = ToolWebSearch.CHAR_BUDGET
+        engine = _Engine([SearchResult("A", "x" * (budget - 10)), SearchResult("B", "y" * 100)])
+        result = ToolWebSearch("q").run(_bound(engine))
+        assert result == "A: " + "x" * (budget - 10) + "\n\nB: " + "y" * 10
+        # nothing past the budget, however many results come back
+        engine = _Engine([SearchResult("A", "x" * budget), SearchResult("B", "y")])
+        assert ToolWebSearch("q").run(_bound(engine)) == "A: " + "x" * budget
+
+    def test_no_results_no_query_and_no_key_each_answer_a_sentence(self) -> None:
+        assert ToolWebSearch("q").run(_bound(_Engine([]))) == "No results found."
+        assert ToolWebSearch("   ").run(_bound(_Engine([]))) == "No query was given."
+        assert ToolWebSearch("q").run(Integrations()) == "Web search is not set up: no API key."
+        keyless = _Engine([], key="")
+        assert ToolWebSearch("q").run(_bound(keyless)) == "Web search is not set up: no API key."
+        assert keyless.asked == []
+
+    def test_a_failing_engine_answers_the_sentence_the_model_reads(self) -> None:
+        engine = _Engine(IntegrationError("the service answered 500"))
+        result = ToolWebSearch("q").run(_bound(engine))
+        assert result == "Web search failed: Stub — the service answered 500."
 
 
 class TestRegistry:
@@ -139,6 +236,40 @@ class TestRegistry:
     def test_a_call_has_its_actor_and_an_aside_has_none(self) -> None:
         assert ToolQuestions.actor is Actor.USER
         assert ToolAssistantNotes.actor is Actor.NOBODY
+        assert ToolSystem.actor is Actor.SYSTEM
+        assert ToolWebSearch.actor is Actor.SYSTEM
+
+    def test_the_four_tools_and_their_names(self) -> None:
+        assert set(TOOLS) == {"question", "note", "system", "search"}
+
+    def test_off_a_tool_otaku_runs_reads_as_nothing(self) -> None:
+        # a call the model is no longer told about teaches it nothing
+        assert ToolSystem.to_prose("") == ""
+        assert ToolWebSearch.to_prose("tide tables") == ""
+
+
+class _Engine(SearchEngine):
+    """A search engine answering canned results, or raising — and
+    recording what it was asked."""
+
+    id = "stub"
+    label = "Stub"
+    endpoint = "https://stub.test/search"
+
+    def __init__(self, answer: list[SearchResult] | IntegrationError, *, key: str = "k") -> None:
+        super().__init__(IntegrationConfig("stub", self.endpoint, key))
+        self._answer = answer
+        self.asked: list[tuple[str, int]] = []
+
+    def search(self, query: str, *, max_results: int) -> list[SearchResult]:
+        self.asked.append((query, max_results))
+        if isinstance(self._answer, IntegrationError):
+            raise self._answer
+        return self._answer
+
+
+def _bound(engine: SearchEngine) -> Integrations:
+    return Integrations(bound={engine.id: engine}, web_search_engine=engine)
 
 
 def every_tool(base: type[Tool]) -> list[type[Tool]]:

@@ -328,196 +328,154 @@ settings: one switch each, one class each in `backend.story`. A tool's
 use the tool and injects its prompt; a reminder's injects the user's
 own text — the SHARED reminder (`StorySettingSharedReminder`, one text
 every story that switched it on is sent) and the STORY reminder
-(`StorySettingReminder`). Every text injected into the chat is out of
+(`StorySettingReminder`); the canvas's (`StorySettingEmulateTextCompletion`,
+"Emulate text completion on canvas") injects prompts.toml's
+`emulate_text_completion_prompt`, what makes an instruct model
+continue one text where it ends rather than answer it — the one
+setting ON until a story switches it off, and GATED by the transcript:
+it injects in the canvas layout over the chat wire alone (the novel's
+model continues by nature, no other layout is one text), the switch
+standing and sending nothing elsewhere; `StorySettings` is handed the
+model's `can_complete_text` for that gate, and the setting's prompt
+is edited by hand in the file — no frontend offers it a prompt button
+yet. Every text injected into the chat is out of
 character, enclosed `((OOC: …))`; the system message takes it bare.
-One setting is a VALUE rather than a switch: the LAYOUT the story is
-read in (`StorySettingLayout`, a `schema.TranscriptLayout` — canvas,
-manuscript, chat — MANUSCRIPT until the story says otherwise;
-`enabled` is always true and refused as a write). The names are the
-backend's, so the choice is the story's; each frontend draws the one
-it names in its own medium — the page's `layout.js`, off the
-`data-transcript` attribute; the terminal reads the MODE rather than
-the layout: in story mode the screen is one text (`render.flow`, the
-canvas in that medium) — the reader's line prose, no grey block,
-typeset through the reply's own streamer; every row joined by its seam
-(`api.play.join_kind`: a paragraph under one blank line, an inline
-row on where the text ended, mid-line); a continue going on from the
-text's end. The ledger places the cursor for it (`echo_flow`: the
-typed row erased, and for an inline join the standing blank too, then
-up onto the text's last row past its `tail_column`, measured off the
-last line every print left, `note_printed`), and opens an exchange
-starting at that point, so /undo and /regen erase in place there as in
-chat mode — rewinding to a column, mid-line, the row ended again where
-the erased text had ended it (`_ERASE_FROM`, `_rewound`); `reply_begins`
-marks where the reply starts, the point /regen rewinds to, and
-`restore_tail` places the echoed turns by their offsets in the flow
-(`render.flow_offsets`, `ledger.restore_flow`). The loop passes a
-story-mode line as typed (`LineAssembler.feed(verbatim=)`), its edges
-the seams the backend records. The
-terminal sets the layout too: `/set mode chat|story` writes the
-manuscript or the canvas (`api.settings.set_mode`, the one `/set`
-that is the story's, not the session's), and "story" is offered
-(`mode_choices`, the completer's `MODE_LEAF`) and accepted only on a
-model that can play story mode, refused with the reason otherwise —
-and both Tools tabs leave it out, no caption naming it there.
+One setting is a VALUE rather than a switch: the TRANSCRIPT the story
+is read in, and for one value written (`StorySettingTranscript`, a
+`schema.Transcript` — `novel`, `canvas`, `manuscript`, `chat` —
+MANUSCRIPT until the story says otherwise; `enabled` is always true and
+refused as a write). Two facts derive from it, and the frontends read
+the facts, never the value, except to show and set it:
 
-The MODE a story is played in is DERIVED, never stored (`backend.story`:
-`StoryMode.STORY`, `StoryMode.CHAT`, `story_mode_of(layout, is_story_mode_ready)`;
-`backend` re-exports `StoryMode`): the canvas
-layout on a model otaku knows how to CONTINUE is STORY mode — one text
-the model continues, over the engine's text wire — and every other
-case CHAT mode, which has nothing to do with the chat layout. A model
-can be continued (`Session.is_story_mode_ready`) when its engine reports
-`ModelCapabilities.text_completion` AND a chat TEMPLATE is known for
-it — TEXT templates, the text wire's alone; chat mode never touches
-them: an instruct model fed a bare text repeats itself or answers as an
-assistant (proven on omlx's Gemma 4 tunes), so the story is rendered
-in the model's own turn markers, the way SillyTavern's instruct
-presets do — `providers.openai.templates`: one frozen `TextTemplate` per
-family (`gemma4`, `gemma`, `mistral-tekken`, `chatml`, `llama3`, and
-`plain` for a base model, chosen on purpose), `render(premise, story)`
-putting the premise in the system turn where the family has one and
-in a user turn otherwise, then the MODEL TURN OPENED and the story
-inside it, unclosed, so the model continues where the story ends. The
-premise goes in FRAMED by prompts.toml's `story_framing` (`{premise}`
-required): the assembly's `story_system`, rendered with the
-story by `AssembledPrompt.as_text` — the ONE rendering, which the turn
-sends (`play._request`) and `/context` previews; a model turn with no turn before it degenerates, and a new
-story's premise is empty, so the standing instruction is what precedes
-the story then. No thinking knob rides the request (`level=None`):
-the turn has no thinking channel, and omlx handed `thinking_budget: 0`
-on a raw prompt answers nothing, most times. A text completion that
-comes back EMPTY with its stream ending clean — an instruct model at
-the end of a closed paragraph ends its turn at once, every time
-(measured on Gemma 4 with a real story) — is asked ONCE more with a
-paragraph break appended to the story, and the break is recorded as
-the reply's own seam (`_reply_events`' `openers`), so the story
-renders again exactly as it was continued; the chat wire is never
-retried. Its
-`stops` (the turn markers) ride the request beside the reader's own.
-BOS is spelled in the text (`TextTemplate.bos`) because omlx adds none on
-a raw prompt — Gemma degenerates without it. WHICH template a model
-gets is `providers.templates.resolve` (a `TextTemplate` with its
-`source` set): the model's `text_template` line in models.toml
-(`settings.models.TEMPLATE_KEY`, written by hand, no command; an
-unknown word is a launch notice), else the engine's word
-(`ModelInfo.text_template`: omlx's `config_model_type` through
-`family_of_config_type`, llama.cpp's own chat template through
-`family_of_chat_template`; "mistral" and "llama" cover more than one
-family and say nothing), else the model's name (`family_of_name`,
-the community's tunes carrying their base: g4-, mn-), else NONE — and
-then there is no story mode for the model, canvas is a layout alone,
-rather than a bare text. `/info` says so as a "Text template" row
-(`reports._text_template_words`), the model listing carries `text_template` per
-model, and the facts carry `is_story_mode_ready`, which words the canvas
-glyph's hint. `Session.story_mode` reads the open story's layout row and
-the cached model row; the page gets `facts.story_mode`; each frontend says
-it in its own words — the send button "Continue", the prompt
-placeholder "Continue the story". The play path
-(`api.play._reply_events`) picks the wire: `completion.text` with the
-rendered text, or `completion.chat` with the messages. The text is
-`AssembledPrompt.system` (the system turn's text) and `as_story_text()` (the
-turns' bodies, no roles), whose SEAM RULE is `assembler.join_of`, ONE
-rule for the wire and the canvas: a row a text completion made joins
-the text before it "inline", as it stands — recorded VERBATIM in story
-mode, its leading space, break or nothing is the seam — and so does a
-line the READER opened with whitespace, typed so in story mode to go
-on with the model's own sentence (a story-mode line is recorded AS
-TYPED, both edges — the trailing whitespace the seam to the model's
-continuation — and every other line trimmed, `api.play.submit`; both
-frontends pass the line through, `composer.submit` and the terminal's
-`LineAssembler.feed(verbatim=)`);
-every other row (a chat completion's, an imported one, the reader's
-plain line) is a "paragraph", a blank line before it; `_wire_turns` joins consecutive
-same-role rows by it and `WireTurn.join` carries it (`assembler.Join`).
-The seams RIDE the wire: `syntax.to_wire` puts a line's leading and
-trailing whitespace back after the line reader trimmed them, and a text
-completion's row skips the reader altogether (`_wire_text`), since it
-is not a typed line. WHICH completion
-made a row is the row's: `messages.completion`, 'chat' or 'text', set
-on a reply as it lands (`_land_reply`), NULL on the reader's rows and
-on rows no completion made; migration v7 adds the column and fills
-'chat' on the replies a provider generated before it (every one came
-over the chat wire), not on a card's greeting or an imported row. The
-export format does not carry it: an imported story joins as
-paragraphs. A turn on the wire carries `join_kind` (`api.play.join_kind`), which
-the CANVAS draws by: the transcript is block flow there and every turn
-INLINE in it, a paragraph join a blank line drawn before the turn
-(`::before`), an inline one nothing, so a continuation runs on in the
-same paragraph — the page draws an inline-joined row's leading
-whitespace as its own `.otk-seam` span (`replyNodes(verbatim)`,
-`withSeam` for the reader's line), since that whitespace IS the seam,
-shown in the canvas and hidden by every other layout, where a turn is
-a block of its own; a reply that lands without its `done` (stopped,
-failed) keeps the join it streamed with, and a STOPPED reply is read
-back from the store once the backend has landed it
-(`transcript.settleFromStore`, retried briefly: the landing happens
-when the backend's next write to the closed stream fails, a moment
-after the page let go) — the backend records all it read, which runs
-past what reached the page, and the page's edit guard compares the
-text it drew with the store's; the reply arriving is inline too, its waiting caret right
-after the text it continues, and its status row and stats line stand
-under the text with no pull-up, the idle row gone. The gap before a
-paragraph is a BLOCK one prose line tall (`::before`), never line
-breaks — a block measures its height wherever it lands — and the
-canvas's articles take the prose's face and leading, so every line box
-is a prose line. EDITING keeps the textarea editor and the paragraph's
-size: in the canvas a paragraph of several rows opens as ONE field
-holding all their text (`transcript.frame`, on `edited`'s `opening`
-hook; `editable`'s `_frame` = prefix and suffix, `_typed()` the field's
-own text, which `_commit` writes), at the paragraph's place and in its
-metrics, so nothing moves — verified in Playwright, the paragraph after
-it unmoved; the other rows step out of the flow (`data-framed`, their
-first keeping the gap before the paragraph), the field's text is
-transparent and the reading stays behind it as a MIRROR of the raw
-text (`data-framing`), the edited row's part in ink and the others'
-dimmed (`.otk-framed`), typing held to the edited row's span
-(`holdToSpan`, `beforeinput`), and the save writes that row alone. A
-one-row paragraph opens as the plain field in the same place. An EMPTY line is
-the CONTINUE in story mode (`api.play.submit`): no user row is
-recorded, no `UserTurn` event, the reply is another of the model's rows,
-and undo takes it alone (the page puts the reply's waiting block into
-the flow at once on a continue, `beginTurn(continues)`, since no
-`UserTurn` will bring it in before the first word); both frontends let the empty line through in
-story mode (the composer's guard, the terminal loop's bare Enter) and
-the backend refuses it in chat mode, whose wire has no continue. The
-assembler is otherwise untouched: the recap, the injected rows and the framing
-templates ride the text as they ride the chat; pictures never ride one
-text (`Session.assemble` passes `PicturesRide.NONE` in story mode, so
-they count as held; the attach affordances go with `Session.can_attach`;
-the page carries the mode as `data-story-mode` on the app root and hides the
-transcript's tiles). `/context` in story mode previews the TEXT as the wire sends it —
-`ContextReport.wire`, `AssembledPrompt.as_text`'s rendering, one part
-`[prompt]` with its paragraph breaks kept — and counts its tokens at the
-text's estimate, markers and framing included. A layout write's confirmation is
-the setting's `standing` ("Layout: canvas", no full stop) except when the canvas is
-written on a model that can play story mode (`Session.is_story_mode_ready`,
-the canvas glyph's own condition): then it is
-`api.stories.CANVAS_IN_STORY_MODE`, "Canvas, in story mode" — the
-status line's width is the measure, 23 characters at most.
+- `layout` (`schema.Layout`, `Transcript.layout`, `Session.layout`): the
+  LOOK — canvas, manuscript or chat; the novel is drawn as the canvas.
+  The page draws it off the `data-transcript` attribute (`layout.js`,
+  the manuscript and the chat one structure under two stylesheets, the
+  canvas block flow with inline turns); the terminal draws the canvas as
+  ONE TEXT (`render.flow`) and the other two as its blocks, which it
+  cannot tell apart.
+- `completion_type` (`schema.CompletionType`, `Transcript.completion_type(can_complete_text)`,
+  `Session.completion_type`): the WIRE —
+  TEXT for a novel on a model that can complete text
+  (`Session.can_complete_text`: its engine reports
+  `ModelCapabilities.text_completion` AND the template in force is
+  `plain`, a base or story-trained model named so by hand in
+  models.toml — an instruct model has a template too, but fights a bare
+  text, so the novel is kept from it), CHAT for everything else, a novel
+  reopened on a model that cannot included. The novel glyph on the
+  page's rail (left of the canvas, hidden while `facts.can_complete_text`
+  is false) and `/set transcript novel` in the terminal (offered by
+  `api.settings.transcript_choices`, the completer's `TRANSCRIPT_LEAF`,
+  refused with the reason otherwise, `_no_novel`) are the two doors to
+  it; `/set transcript` takes all four words and answers the setting's
+  `standing`, "Transcript: canvas", no full stop. There is no "story
+  mode": every behaviour is the layout's or the wire's.
+
+THE CANVAS, on either wire, is the story as one text. A line is
+recorded AS TYPED (`api.play.submit`), the whitespace at both edges its
+seams — the leading to the text it goes on from, the trailing to the
+model's continuation — and every other layout's line is trimmed there,
+whatever a frontend sent (both pass a canvas line through:
+`composer.submit`, the terminal's `LineAssembler.feed(verbatim=)`). A
+reply is recorded VERBATIM in the canvas, its leading space or break
+kept (`_drain(verbatim=)`), and a reply that comes flush after an
+unfinished sentence is handed the one space the model left out before
+its first piece streams (`assembler.seam_of`, the rule's write side;
+`_reply_events` decides only when):
+a word is never completed across rows. The SEAM RULE is `assembler.join_of(previous,
+message)`, ONE rule for the wire and both canvases, read off the two
+texts and nothing else: INLINE when the row opens with whitespace
+holding no newline, or when the text before ends with a space; PARAGRAPH
+otherwise — a lead with a newline in it, a flush row after a finished sentence,
+the first row, a tool's turn and the row after it, an imported row, a
+plain line. Nothing is stored for it; `messages.completion` stays as a
+record of which wire made a row and decides nothing (migration v7 adds
+it, 'chat' on the replies before it). `as_story_text` and `_wire_turns`
+join by it (a paragraph's blank-line lead is not drawn twice), the row
+events carry it (`UserTurn.join_type`, `AssistantTurn.join_type`, `ToolTurn.join_type`,
+the wire's `join_kind`), and the page settles the arriving reply's join
+at its first piece (`transcript.seamJoin`, the rule copied), the
+terminal drawing the paragraph break a flush chat reply owes
+(`chat.stream`). An EMPTY line is the CONTINUE in the canvas
+(`api.play.submit`): no user row is recorded, no `UserTurn` event, the
+reply is another of the model's rows, and undo takes it alone — over
+the text wire plain generation from the text's end, over the chat wire
+an ask with no new line, the standing instruction carrying it (the page
+puts the reply's waiting block into the flow at once,
+`beginTurn(continues)`; the terminal places the cursor at the text's
+end before the wait, `Chat.continuing`, `ledger.echo_flow`); both
+frontends let the empty line through in the canvas and the backend
+refuses it elsewhere. The canvas over the CHAT wire carries its standing
+instruction as the emulation setting's injection
+(`StorySettingEmulateTextCompletion`, above: the system position by
+default, `/context` listing it under "text completion emulation"),
+what makes an instruct model continue one text; the novel needs none.
+The page says the canvas in its words — the send
+button "Continue", the app root's `data-layout` and `data-completion`,
+the tiles hidden over the text wire — and the terminal in its: the
+prompt placeholder "Continue the story", the one-text look, in-place
+undo and regen (`ledger.echo_flow`, `_ERASE_FROM`, `reply_begins`,
+`restore_flow`, `render.flow_offsets`).
+
+THE TEXT WIRE (`CompletionType.TEXT`) is the novel's alone: the request is
+one text — `AssembledPrompt.as_text`, the story rendered in the model's
+own turn markers by its `TextTemplate` (`providers.openai.templates`:
+one frozen template per family, `gemma4`, `gemma`, `mistral-tekken`,
+`chatml`, `llama3`, and `plain` for a base model; `render(premise,
+story)` puts the premise in the system turn where the family has one
+and in a user turn otherwise, then the MODEL TURN OPENED and the story
+inside it, unclosed, so the model continues where the story ends), the
+premise FRAMED by prompts.toml's `story_framing` (`{premise}` required:
+a model turn with no turn before it degenerates, and a new story's
+premise is empty), the turn markers riding as stops, BOS spelled in the
+text (`TextTemplate.bos`) because omlx adds none. WHICH template a
+model gets is `templates.resolve` (a `TextTemplate` with its `source`):
+the model's `text_template` line in models.toml (`settings.models.TEMPLATE_KEY`,
+written by hand; an unknown word is a launch notice), else the engine's
+word (`ModelInfo.text_template`), else the model's name
+(`family_of_name`), else NONE; `/info` says so as a "Text template" row,
+the model listing carries `text_template` per model. No thinking knob
+rides the request (`level=None`), a text completion that comes back
+EMPTY with its stream ending clean is asked ONCE more with a paragraph
+break appended and the break recorded as the reply's seam
+(`_reply_events`' `openers`), pictures never ride it (`Session.assemble`
+passes `PicturesRide.NONE`, `can_attach` false), and `/context`
+previews the TEXT as sent — `ContextReport.wire`, one part `[prompt]`,
+its tokens at the text's estimate. The play path
+(`api.play._reply_events`) picks the wire off `Session.completion_type`:
+`completion.text` with the rendered text, or `completion.chat` with the
+messages; the recap, the injected rows and the framing templates ride
+the text as they ride the chat, a tool's turn as a paragraph.
 
 Every setting answers the same questions, so a frontend draws them
 alike: `name` (the stored key — `use_shared_reminder`,
 `use_story_reminder`, `allow_assistant_notes`, `allow_questions`,
-`allow_system_tool`, `allow_web_search`, `layout`; a rename orphans
+`allow_system_tool`, `allow_web_search`, `emulate_text_completion`,
+`transcript`; a rename orphans
 stored settings), `label`,
 `injection_label` (the TEXT it injects — lowercase, the backend's:
-`questions`, `assistant notes`, `story reminder`, `shared reminder`;
-None for the layout setting; the page capitalises it and keeps no name table),
+`questions`, `assistant notes`, `story reminder`, `shared reminder`,
+`text completion emulation`;
+None for the transcript setting; the page capitalises it and keeps no name table),
 `enabled`, `injection_position`, `allowed_positions` (a closed list a
 frontend offers and decides nothing about: "system" and 1 … 8 for a
-tool, the numbers alone for a reminder, empty for the layout setting; a stored
+tool and the emulation, the numbers alone for a reminder, empty for the
+transcript setting; a stored
 position off the list reads as the default, 1 for a tool, 2 for a
-reminder), `reminder_text` (the story reminder's alone),
+reminder, "system" for the emulation), `reminder_text` (the story reminder's alone),
 `display_notes` (the notes tool's alone) and `layout` (the layout
 setting's alone). `to_db(…)` is the row to
 store, raising `Refused` for what the setting does not take;
 `standing(row)` the confirmation a write answers with; `injection`
 is what a switched-on one sends. `StorySettings(from_db,
-store, prompts_file)` is one story's settings as they stand — it reads
-the prompts file and the shared reminder itself — with `injections` in
-the order they share a place (the tools — questions, notes, system,
-web search — then the story reminder, then the shared one) and `tool_set` for the wire.
+store, prompts_file, can_complete_text=)` is one story's settings as
+they stand — it reads the prompts file and the shared reminder itself
+— with `injections` in the order they share a place (the shared
+reminder, the story's, then the tools — notes, questions, system, web
+search — then the emulation; a frontend draws them in its own caption
+table's order, never this one) and `tool_set` for the wire. Every
+injection a request carries is a setting's, so the warm-up's job
+(`lore.build_job`) rebuilds the same prefix as the turn.
 
 What a story STORES is `schema.StorySettingDB` (name, `enabled`,
 position, `reminder_text`, `display_notes`, `layout` — the last three
@@ -530,9 +488,15 @@ page reaches them at `/api/stories/{story}/settings` and
 `/api/shared_reminder`, the terminal on the dossier's Tools tab
 (`screens.story`: a checkbox row per setting, its fields in the panel
 beside — the depth a dropdown in place, a text the editor in place,
-`base._preview_panel`'s `alternate` body). `Refused` lives in
+`base._preview_panel`'s `alternate` body). Both Tools tabs draw three
+groups in one order — the tools, the two reminders, the emulation — a
+blank row between them in the terminal (`_OPENS_GROUP`, `_gaps`) and
+a rule on the page; each setting's caption is the frontend's own
+(`_ABOUT`, the same table twice), the emulation's opening "Only in the
+canvas layout." in bold (`_LEAD`; the terminal's `_caption`). `Refused` lives in
 `backend.errors`, a leaf, and `backend.session` re-exports it;
-`backend` re-exports `InjectionPosition` and `TranscriptLayout`. A
+`backend` re-exports `InjectionPosition`, `Transcript`, `Layout` and
+`CompletionType`. A
 tool's PROMPT is
 prompts.toml's, edited in place — "prompt" on the backend and the
 wire, whatever a frontend calls it (the page's button says
@@ -545,7 +509,8 @@ text stands again.
 
 Where a setting is kept: ONE STORY'S is the database's
 (`stories.settings`, sealed JSON) because it must fork, export and die
-with its story; a new story starts with everything off, the session
+with its story; a new story starts with everything off but the
+emulation, the session
 holding the rows until a first turn makes the story. One that stories
 SHARE is the `settings` table's (key/value, sealed; an emptied value
 deletes its row) when it is a TEXT THAT MAY NEED SEALING — a config
@@ -593,8 +558,8 @@ the same image, then into the folder. Its limits are its own module
 constants (10 MB a file, 40 megapixels, 8 pictures a turn); every refusal
 is a `Refused` sentence. A model without vision is never sent a picture,
 and the attach affordances exist only while one may ride the next
-request (`Session.can_attach`: the model in use sees, and the mode's
-wire carries one — story mode's text never does).
+request (`Session.can_attach`: the model in use sees, and the wire
+carries one — the text wire's one text never does).
 
 ### Providers
 

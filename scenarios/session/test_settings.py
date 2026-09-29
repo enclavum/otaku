@@ -15,6 +15,7 @@ import tomllib
 
 import pytest
 
+from otaku.backend import CompletionType, Transcript
 from otaku.backend import launch as backend_launch
 from otaku.backend.api import providers as api_providers
 from otaku.backend.api import reports
@@ -23,6 +24,7 @@ from otaku.backend.paths import Paths
 from otaku.backend.session import PARAMETERS, THINK_MENU, Refused
 from otaku.encryption import unseal
 from otaku.providers import Locality, ModelState
+from otaku.settings import models as models_file
 from otaku.terminal.chat import stream
 from otaku.terminal.screens import models as screen_models
 from otaku.terminal.tty import clipboard
@@ -840,6 +842,78 @@ class TestMaxContext:
         app.play("We continue.")
         assert len(app.server.requests) == before  # nothing was sent
         assert "does not fit the context limit" in capsys.readouterr().out
+
+
+class TestTranscript:
+    """`/set transcript`: the four words, the setting's standing as the
+    confirmation, a bare call reporting it — and the novel offered on a
+    model that can complete text alone, refused with the reason
+    otherwise, typed or picked from the menu alike."""
+
+    def test_a_word_sets_it_and_a_bare_call_reports_it(self, app: App) -> None:
+        assert api_settings.set_transcript(app.session, "") == "Transcript: manuscript"
+        assert api_settings.set_transcript(app.session, "canvas") == "Transcript: canvas"
+        assert app.session.transcript is Transcript.CANVAS
+        assert api_settings.set_transcript(app.session, " CHAT ") == "Transcript: chat"
+        assert api_settings.set_transcript(app.session, "") == "Transcript: chat"
+        usage = r"^Usage: /set transcript novel\|canvas\|manuscript\|chat$"
+        with pytest.raises(Refused, match=usage):
+            api_settings.set_transcript(app.session, "scroll")
+        assert app.session.transcript is Transcript.CHAT
+        # the story's own: it survives a launch with the story
+        app.play("I push the door.")
+
+    def test_the_novel_needs_a_model_that_continues_a_bare_text(self, tmp_path) -> None:
+        root = tmp_path / "state"
+        server = scripted.ModelServer()
+        server.status = True
+        server.types["test-model"] = "vlm"
+        server.config_types["test-model"] = "gemma4"  # an instruct model: a template, not plain
+        try:
+            set_config_provider(root, server, name="omlx")
+            app = launch(root, server, spec="omlx/test-model")
+            try:
+                assert api_settings.transcript_choices(app.session) == (
+                    "canvas",
+                    "manuscript",
+                    "chat",
+                )
+                with pytest.raises(Refused, match="text_template") as caught:
+                    api_settings.set_transcript(app.session, "novel")
+                assert str(caught.value).startswith(
+                    "The novel needs a model that continues a bare text"
+                )
+                assert app.session.transcript is Transcript.MANUSCRIPT
+            finally:
+                app.close()
+            # named a plain-text model by hand, the novel is offered
+            paths = Paths.resolve(root)
+            models_file.save(paths.models_file, "test-model", {models_file.TEMPLATE_KEY: "plain"})
+            app = launch(root, server, spec="omlx/test-model")
+            try:
+                assert api_settings.transcript_choices(app.session) == (
+                    "novel",
+                    "canvas",
+                    "manuscript",
+                    "chat",
+                )
+                assert api_settings.set_transcript(app.session, "novel") == "Transcript: novel"
+                assert app.session.completion_type is CompletionType.TEXT
+            finally:
+                app.close()
+        finally:
+            server.close()
+
+    def test_without_a_model_the_novel_is_refused_with_the_hint(self, server, tmp_path) -> None:
+        app = launch(tmp_path / "state", server, spec=None)
+        try:
+            assert "novel" not in api_settings.transcript_choices(app.session)
+            with pytest.raises(Refused):
+                api_settings.set_transcript(app.session, "novel")
+            # the other three need no model
+            assert api_settings.set_transcript(app.session, "canvas") == "Transcript: canvas"
+        finally:
+            app.close()
 
 
 class TestManagedPicker:
