@@ -37,7 +37,7 @@ class TestRender:
         assert section_block(config) == (
             '[exa]\nurl = "https://api.exa.ai/search"\napi_key = "sealed:k"'
         )
-        assert web_search_block("exa") == f"[{WEB_SEARCH_SECTION}]\n{ENGINE_KEY} = \"exa\""
+        assert web_search_block("exa") == f'[{WEB_SEARCH_SECTION}]\n{ENGINE_KEY} = "exa"'
         # a founded section carries no key, and the whole file is made of these blocks
         whole = render({"exa": config}, "exa")
         assert section_block(config) in whole and web_search_block("exa") in whole

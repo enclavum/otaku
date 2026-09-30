@@ -1307,6 +1307,9 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
    here — `.otk-derived` is also a row in the message detail and a block in a
    report, and neither wants the space. */
 .otk-margin__fact > .otk-derived { margin: 8px 0; }
+/* what you do TO the character, pinned under what is known about it */
+.otk-manage { flex: none; display: flex; flex-direction: column; gap: 8px; padding-top: 14px; border-top: var(--otk-hair) solid var(--otk-line-soft); }
+.otk-manage__row { display: flex; flex-wrap: wrap; gap: 8px; }
 
 /* the detail pane of a panel: a body that scrolls, and verbs that do not */
 .otk-detail { min-height: 0; overflow: hidden; display: flex; flex-direction: column; padding: 22px var(--otk-panel-pad) 14px; }

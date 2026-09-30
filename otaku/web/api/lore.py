@@ -1,6 +1,7 @@
 """The lore, as the page asks for it: the cast, a scene's, a character's
-and a journal's writable fields, a merge, and the extraction pass the
-page starts, stops and polls — the flows keyed by story in `Pending`."""
+and a journal's writable fields, a merge, a delete, and the extraction
+pass the page starts, stops and polls — the flows keyed by story in
+`Pending`."""
 
 from typing import Any
 
@@ -73,7 +74,13 @@ def _edit_lore(session: Session, ask: Ask, target: str, kinds: dict[str, FieldKi
 
 
 def _merge(session: Session, ask: Ask) -> str:
-    return api_lore.merge_by_id(session, ask.id("character"), int(ask.body["into"]))
+    return api_lore.merge_by_id(
+        session, ask.id("character"), int(ask.body["into"]), ask.id("story")
+    )
+
+
+def _delete_character(session: Session, ask: Ask) -> str:
+    return api_lore.delete_character(session, ask.id("character"), ask.id("story"))
 
 
 def _stop_extract(session: Session, ask: Ask, pending: Pending) -> dict[str, Any]:
@@ -130,6 +137,10 @@ def memory(session: Session, story_id: int) -> dict[str, Any]:
                 # audit stamp, display alone).
                 "history": scene.history,
                 "updated_at": scene.updated_at,
+                # Who made it — the pass's engine and model; null before
+                # the columns existed.
+                "provider": scene.provider,
+                "model": scene.model,
                 "present": [
                     character.name
                     for character in view.cast
@@ -158,6 +169,10 @@ def memory(session: Session, story_id: int) -> dict[str, Any]:
                 "history": view.character_history(character.id),
                 # When the extractor last wrote them — display alone.
                 "updated_at": character.updated_at,
+                # Who made them — a pass's engine and model, or `card` and
+                # the card's file; null for an imported story's or an older row.
+                "provider": character.provider,
+                "model": character.model,
                 "journals": [
                     journal(record)
                     for record in view.journals
@@ -192,6 +207,7 @@ ROUTES: dict[tuple[str, str], Route] = {
     ("GET", "/api/cast"): lambda session, ask: cast(session),
     ("PATCH", "/api/stories/{story}/scenes/{scene}"): _edit_scene,
     ("PATCH", "/api/stories/{story}/characters/{character}"): _edit_character,
+    ("DELETE", "/api/stories/{story}/characters/{character}"): _delete_character,
     ("PUT", "/api/stories/{story}/characters/{character}/merge"): _merge,
     ("PATCH", "/api/stories/{story}/journals/{record}"): _edit_journal,
 }

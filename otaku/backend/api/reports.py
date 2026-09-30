@@ -636,6 +636,12 @@ def _session_rows(session: Session) -> tuple[tuple[str, str], ...]:
     if label := stories.headline(session):
         out.append(("Story", truncate_label(label, stories.LABEL_WIDTH)))
     out.append(("Messages", str(len(session.messages))))
+    # Where lore extraction reads the story: the model saved for it, or
+    # the one the model block above names.
+    if session.extraction_model:
+        out.append(("Extraction", session.full_extraction_model_name))
+    elif session.model:
+        out.append(("Extraction", "the story model"))
     # No premise row: a premise is a DOCUMENT, not a fact about the
     # session — it is as long as a reader made it, and `/system` reports
     # it on its own, at whatever length that is. A report of one-line

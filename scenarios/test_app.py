@@ -21,6 +21,7 @@ from otaku import encryption
 from otaku import logging as otaku_logging
 from otaku.backend import files as backend_files
 from otaku.backend import launch as backend_launch
+from otaku.backend.api import providers as api_providers
 from otaku.backend.files import RawFile
 from otaku.backend.paths import Paths
 from otaku.encryption import Cipher, EncryptionError, PlainCipher
@@ -250,7 +251,7 @@ class TestSchemaMigration:
         paths = _v1_database(tmp_path / "state")
         store = _open(paths)
         try:
-            assert any("Database migrated (v1 → v8)" in note.show for note in store.notes)
+            assert any("Database migrated (v1 → v9)" in note.show for note in store.notes)
             (message,) = store.stories.get_messages(1)
             # The v1 `framing` column reads back through the renamed one.
             assert (message.body, message.template) == ("I enter.", "TPL")
@@ -283,6 +284,12 @@ class TestSchemaMigration:
             # The v7 `completion` column trails the row: a v1 row reads
             # NULL there, a turn no completion made.
             assert message.completion is None
+            # The v9 `provider` and `model` columns trail the three
+            # derivatives: a v1 row reads NULL there — nothing recorded
+            # which model made it.
+            (journal,) = store.journals.list(1)
+            for row in (scene, keeper, journal):
+                assert (row.provider, row.model) == (None, None)
         finally:
             store.close()
         # Step 7 filled the column on the rows it found: the reply a
@@ -294,7 +301,7 @@ class TestSchemaMigration:
         finally:
             conn.close()
         assert filled == [(1, None), (2, "chat"), (3, None)]
-        assert _meta_version(paths) == "8"
+        assert _meta_version(paths) == "9"
 
     def test_a_migration_that_ran_is_reported_at_launch(
         self, server: ModelServer, tmp_path
@@ -445,10 +452,10 @@ class TestSchemaMigration:
         monkeypatch.setitem(store_migrations._STEPS, 3, store_v3.to_3)
         resumed = _open(paths)
         try:
-            assert any("Database migrated (v2 → v8)" in note.show for note in resumed.notes)
+            assert any("Database migrated (v2 → v9)" in note.show for note in resumed.notes)
         finally:
             resumed.close()
-        assert _meta_version(paths) == "8"
+        assert _meta_version(paths) == "9"
 
 
 class TestFilesFolder:
@@ -1081,6 +1088,24 @@ class TestResume:
         try:
             assert session.provider == "" and session.model == ""
             assert any("ghost/model" in notice for notice in session.notices)
+        finally:
+            session.close()
+
+    def test_a_saved_extraction_model_of_a_deleted_provider_reports_and_goes(
+        self, app: App
+    ) -> None:
+        # The same promise for the model saved for extraction: reported,
+        # dropped, and extraction asks the story's model again.
+        api_providers.set_extraction_model(app.session, "generic", "extract-model")
+        state_file = app.paths.state_file
+        state_file.write_text(
+            state_file.read_text().replace('"generic/extract-model"', '"ghost/extract-model"')
+        )
+        session = backend_launch.open_session(app.paths.root)
+        try:
+            assert session.extraction_model == ""
+            assert session.full_extraction_model_name == session.full_model_name
+            assert any("ghost/extract-model" in notice for notice in session.notices)
         finally:
             session.close()
 

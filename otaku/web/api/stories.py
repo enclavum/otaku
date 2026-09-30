@@ -30,6 +30,9 @@ def facts(session: Session) -> dict[str, Any]:
         "version": __version__,
         "model": session.model or "(no model)",
         "provider": session.provider,
+        # "provider/model" lore extraction asks — its own pinned, or the
+        # one played with; "" with neither. What the extract dialog names.
+        "extraction_model": session.full_extraction_model_name,
         "max_context": format_context(max_context) if max_context else "",
         "story": api_stories.headline(session),
         "story_id": session.story_id,

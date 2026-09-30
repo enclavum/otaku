@@ -121,6 +121,16 @@ def open_session(root: str | Path | None = None, *, ask_secret: AskSecret | None
             NO_MODEL_HINT,
         ]
         state = replace(state, model="")
+    # A pinned extraction model the same way — dropped with a notice, and
+    # extraction follows the model played with.
+    if state.extraction_model and (
+        state.extraction_provider not in providers or not state.extraction_bare_model
+    ):
+        notices.append(
+            f"The remembered extraction model ({state.extraction_model}) names no configured "
+            "provider; lore extraction uses the model you play with."
+        )
+        state = replace(state, extraction_model="")
 
     fresh = not paths.database_file.exists()
     store = Store.open(

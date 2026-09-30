@@ -323,7 +323,8 @@ def _extract(chat: Chat, raw: str) -> None:
     """Schedule the forced pass, echo the worker's status on one updating
     line, Ctrl+C cancels; the report prints when the WorkerRun returns."""
     run = api_lore.extract(chat.session)
-    report = _wait_run(chat, run, opening="Closing a scene…")
+    model = chat.session.full_extraction_model_name
+    report = _wait_run(chat, run, opening=f"Closing a scene with {model}…")
     if report is not None:
         chat.say(error_line(report) if run.failed else report)
 
@@ -429,7 +430,8 @@ def _import(chat: Chat, raw: str) -> None:
         chat.say(notice)
     if result.extraction is not None:
         sys.stdout.write("\n")  # the import's counts, then its extraction, apart
-        report = _wait_run(chat, result.extraction, opening="Closing a scene…")
+        model = chat.session.full_extraction_model_name
+        report = _wait_run(chat, result.extraction, opening=f"Closing a scene with {model}…")
         if report is not None:
             chat.say(report)
     chat.ledger.rule()
@@ -479,10 +481,10 @@ def _export(chat: Chat, raw: str) -> None:
 
 def _model(chat: Chat, raw: str) -> None:
     """Bare: the picker screen (which executes a confirmed switch and
-    returns the notice); with an argument: api.providers.switch_spec
+    returns the notice); with an argument: api.providers.set_model_raw
     (the split rule lives there)."""
     if raw.strip():
-        chat.say(_bold_switch(api_providers.switch_spec(chat.session, raw)))
+        chat.say(_bold_switch(api_providers.set_model_raw(chat.session, raw)))
         return
     notice = screen_models.pick(chat.session, initial_spec=api_providers.listed_spec(chat.session))
     if notice:

@@ -244,6 +244,19 @@ class TestFork:
         assert relaunched.session.story_id == fork
         relaunched.close()
 
+    def test_a_fork_keeps_who_made_its_memory(self, app: App) -> None:
+        # The copy's scenes, journals and cast are the origin's rows, so
+        # the model that made each travels with it.
+        for i in range(3):
+            app.play(f"Turn number {i}.")
+        app.play("/extract")
+        app.play("/fork")
+        fork = app.session.story_id
+        store = app.store
+        rows = (*store.scenes.list(fork), *store.characters.list(fork), *store.journals.list(fork))
+        assert rows
+        assert {(row.provider, row.model) for row in rows} == {("generic", "test-model")}
+
     def test_an_untitled_story_forks_untitled(self, app: App, capsys) -> None:
         app.play("I enter the hall.")
         app.play("/fork")

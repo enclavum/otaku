@@ -102,6 +102,10 @@ const ROUTES = {
       num(p.character),
       String(b.card ?? b.description),
     ),
+  "DELETE /api/stories/{story}/characters/{character}": () => ({
+    notice: `Deleting characters is not in the demo — ${store.INSTALL}.`,
+    refused: true,
+  }),
   "PUT /api/stories/{story}/characters/{character}/merge": () => ({
     notice: `Merging characters is not in the demo — ${store.INSTALL}.`,
     refused: true,
@@ -130,6 +134,9 @@ const ROUTES = {
   "PATCH /api/providers/{provider}/models/{model}": (p, q, b) =>
     store.loadModel(p.model, Boolean(b.loaded)),
   "PUT /api/session/model": (p, q, b) => store.switchModel(String(b.provider), String(b.model)),
+  "PUT /api/session/extraction_model": (p, q, b) =>
+    store.setExtractionModel(String(b.provider), String(b.model)),
+  "DELETE /api/session/extraction_model": () => store.clearExtractionModel(),
   "PUT /api/session/model/parameters/{name}": (p, q, b) => store.setParameter(p.name, b.value),
   "DELETE /api/session/model/parameters/{name}": (p) => store.setParameter(p.name, "reset"),
   "GET /api/machine": () => store.memory(),

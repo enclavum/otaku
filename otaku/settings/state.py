@@ -15,6 +15,7 @@ from otaku.settings import read_settings, row, write_atomic
 @dataclass(frozen=True)
 class State:
     model: str = ""  # "provider/model" to resume; "" = open the picker
+    extraction_model: str = ""  # "provider/model" lore extraction uses; "" = `model`
     story: int = 0  # story id to reattach; 0 = start detached
     verbose: bool = False
     autocorrect: bool = True
@@ -32,6 +33,17 @@ class State:
         remembered, and "" for a half-written spec ("ollama/")."""
         return self.model.partition("/")[2]
 
+    @property
+    def extraction_provider(self) -> str:
+        """`extraction_model`'s provider half, split as `provider` is."""
+        return self.extraction_model.partition("/")[0]
+
+    @property
+    def extraction_bare_model(self) -> str:
+        """`extraction_model`'s model half; "" when extraction follows
+        `model`, and for a half-written spec."""
+        return self.extraction_model.partition("/")[2]
+
 
 def load(path: Path) -> tuple[State, list[str]]:
     """Missing file → defaults; a malformed one falls back with a
@@ -46,6 +58,7 @@ def load(path: Path) -> tuple[State, list[str]]:
     story = raw.get("story")
     return State(
         model=str(raw.get("model", "")),
+        extraction_model=str(raw.get("extraction_model", "")),
         story=story if isinstance(story, int) and story > 0 else 0,
         verbose=bool(raw.get("verbose", False)),
         autocorrect=bool(raw.get("autocorrect", True)),
@@ -58,6 +71,10 @@ def save(path: Path, state: State) -> None:
         [
             "# Written by otaku — what it remembers between sessions.",
             row(f"model = {toml_scalar(state.model)}", "bare `otaku` resumes this model"),
+            row(
+                f"extraction_model = {toml_scalar(state.extraction_model)}",
+                'lore extraction uses this model; "" = the one above',
+            ),
             row(f"story = {state.story}", "and reattaches this story (0 = none)"),
             row(f"verbose = {str(state.verbose).lower()}", "/set verbose"),
             row(f"autocorrect = {str(state.autocorrect).lower()}", "/set autocorrect"),

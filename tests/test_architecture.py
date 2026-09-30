@@ -224,7 +224,8 @@ _ON_THE_PAGE = {
     "/lore": "screen:/lore",
     "/cast": "screen:/cast",
     "/extract": "screen:/extract",
-    "/merge": "none:no UI yet — the cast pane has no merge, by decision",
+    # the cast pane's Merge into… writes the same fold
+    "/merge": "PUT /api/stories/{story}/characters/{character}/merge",
     "/context": "screen:/context",
     "/balance": "screen:/balance",
     "/usage": "screen:/usage",

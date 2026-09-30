@@ -904,7 +904,7 @@ class TestPictures:
     def test_a_model_that_cannot_see_gets_none_of_the_storys_pictures(self, tmp_path) -> None:
         with _seeing(tmp_path) as app:
             _play(app, "What is this?", [_cat()])
-            api_providers.switch_model(app.session, "generic", "test-model")
+            api_providers.set_model(app.session, "generic", "test-model")
             app.play("And now?")
             messages = app.server.requests[-1]["messages"]
             assert all(isinstance(message["content"], str) for message in messages)

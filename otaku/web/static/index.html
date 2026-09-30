@@ -429,6 +429,20 @@
   </div>
 </dialog>
 
+<!-- the same shape for a character the extractor should never have made -->
+<dialog class="otk-dialog" data-dialog="delete-character" aria-labelledby="otk-del-character-title">
+  <span class="otk-eyebrow" id="otk-del-character-title">Delete this character?</span>
+  <div class="otk-dialog__subject">
+    <span class="otk-dialog__name"></span>
+    <span class="otk-index__sub"></span>
+  </div>
+  <p class="otk-dialog__body">Their journals go with them. Scene summaries still mention them. This cannot be undone.</p>
+  <div class="otk-dialog__foot">
+    <button type="button" class="otk-btn" data-choice="cancel" autofocus>Cancel</button>
+    <button type="button" class="otk-btn otk-btn--danger" data-choice="delete">Delete</button>
+  </div>
+</dialog>
+
 <!-- the same shape with choices instead of a message: resume above the tail -->
 <dialog class="otk-dialog" data-dialog="landing" aria-labelledby="otk-resume-title">
   <span class="otk-eyebrow" data-title id="otk-resume-title"></span>
@@ -446,6 +460,18 @@
   <div class="otk-dialog__foot">
     <button type="button" class="otk-btn" data-choice="cancel">Cancel</button>
     <button type="button" class="otk-btn otk-btn--primary" data-choice="confirm">Fork</button>
+  </div>
+</dialog>
+
+<!-- the character this one really is: a list of the others, filled when it
+     opens (`story.askMerge`) -->
+<dialog class="otk-dialog" data-dialog="merge" aria-labelledby="otk-merge-title">
+  <span class="otk-eyebrow" data-title id="otk-merge-title"></span>
+  <p class="otk-dialog__body"></p>
+  <select class="otk-field" data-into aria-label="Merge into" autofocus></select>
+  <div class="otk-dialog__foot">
+    <button type="button" class="otk-btn" data-choice="cancel">Cancel</button>
+    <button type="button" class="otk-btn otk-btn--primary" data-choice="merge">Merge</button>
   </div>
 </dialog>
 

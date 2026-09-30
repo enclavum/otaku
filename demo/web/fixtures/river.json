@@ -3,6 +3,7 @@
   "version": "0.6.0",
   "model": "",
   "provider": "",
+  "extraction_model": "ollama/test-model",
   "max_context": "",
   "story": "The River That Forgot Its Name",
   "story_id": 1,
@@ -373,6 +374,8 @@
     "summary": "Maren, a traveling cartographer, follows the post road into the Meade valley and finds the river missing from its bed: a channel of pale dry stones, fish bones weathered far older than three days, and the ferry up on chocks with its rope still strung across the air. The only person left at the crossing is Tallis, the old ferryman. He tells her the water departed three nights ago and — quietly, like a man afraid of being overheard — that it went uphill. Maren writes his words in her notebook where he can watch her do it, choosing to treat his account as testimony rather than grief.",
     "history": "Maren, a traveling cartographer, follows the post road into the Meade valley and finds the river missing from its bed: a channel of pale dry stones, fish bones weathered far older than three days, and the ferry up on chocks with its rope still strung across the air. The only person left at the crossing is Tallis, the old ferryman. He tells her the water departed three nights ago and — quietly, like a man afraid of being overheard — that it went uphill. Maren writes his words in her notebook where he can watch her do it, choosing to treat his account as testimony rather than grief.",
     "updated_at": "2026-01-01T00:00:00+00:00",
+    "provider": null,
+    "model": null,
     "present": [
      "Maren",
      "Tallis"
@@ -404,6 +407,8 @@
     "summary": "Tallis leads Maren up the empty channel, where every mark a river leaves behind — scour grooves, combed grass, a climbing waterline — runs against the slope: the water was walking uphill when it left. Back on the ferry deck, Maren unrolls her survey and asks him to point to where the river bent wrong. His finger comes down on the weir at Harrow Lock, and before both their eyes the inked river shifts a hair's width toward his hand and holds its new course. Maren marks the true course in red ink and, with dusk coming down, sets out alone along the towpath for Harrow Lock.",
     "history": "The traveling cartographer Maren came down into the Meade valley to update her survey and found the river gone from its bed — dry as old bone, the ferry up on chocks. Tallis, the old ferryman and the only soul who stayed, told her the water left three nights ago and that it went uphill, and the scour marks along the empty channel bear him out. On the ferry deck he pointed to the weir at Harrow Lock as the place the river always fought, and under his finger the inked river on Maren's own map moved. She has drawn the true course in red and set out for the lock as dusk comes down.",
     "updated_at": "2026-01-01T00:00:00+00:00",
+    "provider": null,
+    "model": null,
     "present": [
      "Maren",
      "Tallis"
@@ -437,6 +442,8 @@
     "card": "",
     "history": "Maren came down the post road to bring her survey of the Meade valley up to date and found the river vanished from its bed. Tallis, the last ferryman, told her it left three nights ago and went uphill — and the scoured banks of the empty channel bore him out in every particular. When he pointed to the weir at Harrow Lock on her survey map, the inked river moved under his finger, the first map Maren has ever seen change its mind. She has drawn the true course in red and set out along the towpath to reach the lock before full dark.",
     "updated_at": "2026-01-01T00:00:00+00:00",
+    "provider": null,
+    "model": null,
     "journals": [
      {
       "id": 1,
@@ -466,6 +473,8 @@
     "card": "",
     "history": "Tallis stayed with his beached ferry after the river left the Meade valley, telling anyone who would listen that the water had gone uphill — and no one listened until the cartographer Maren came down the post road. She took his account as testimony, read the truth of it in the scoured banks, and when her map moved under his finger at the ferry deck he gave her honest directions to Harrow Lock. He could not make himself go along, and the shame of staying sits with him by the dry landing.",
     "updated_at": "2026-01-01T00:00:00+00:00",
+    "provider": null,
+    "model": null,
     "journals": [
      {
       "id": 2,

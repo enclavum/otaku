@@ -33,14 +33,16 @@ class SceneOps:
         title: str | None = None,
         summary: str | None = None,
         history: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
     ) -> int:
-        """One INSERT writes the whole scene."""
+        """One INSERT writes the whole scene, and who made it."""
         now = self._db.now()
         with self._db.conn as conn:
             # fmt: off
             cur = conn.execute(
-                "INSERT INTO scenes (story_id, start_message_id, end_message_id, title, summary, history, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (story_id, start_message_id, end_message_id, self._db.seal_opt(title), self._db.seal_opt(summary), self._db.seal_opt(history), now, now),
+                "INSERT INTO scenes (story_id, start_message_id, end_message_id, title, summary, history, created_at, updated_at, provider, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (story_id, start_message_id, end_message_id, self._db.seal_opt(title), self._db.seal_opt(summary), self._db.seal_opt(history), now, now, provider, model),
             )
             # fmt: on
         return int(cur.lastrowid or 0)
@@ -48,7 +50,7 @@ class SceneOps:
     def list(self, story_id: int) -> builtins.list[Scene]:
         # fmt: off
         rows = self._db.conn.execute(
-            "SELECT id, start_message_id, end_message_id, title, summary, history, updated_at FROM scenes WHERE story_id = ? ORDER BY id",
+            "SELECT id, start_message_id, end_message_id, title, summary, history, updated_at, provider, model FROM scenes WHERE story_id = ? ORDER BY id",
             (story_id,),
         ).fetchall()
         # fmt: on
@@ -61,8 +63,10 @@ class SceneOps:
                 summary=self._db.unseal(summary),
                 history=self._db.unseal(history),
                 updated_at=str(updated),
+                provider=provider,
+                model=model,
             )
-            for sid, start, end, title, summary, history, updated in rows
+            for sid, start, end, title, summary, history, updated, provider, model in rows
         ]
 
     def update(
@@ -169,14 +173,16 @@ class CharacterOps:
         aliases: tuple[str, ...] = (),
         description: str | None = None,
         card: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
     ) -> int:
         now = self._db.now()
         sealed_aliases = self._db.seal_opt(json.dumps(list(aliases)) if aliases else None)
         with self._db.conn as conn:
             # fmt: off
             cur = conn.execute(
-                "INSERT INTO characters (story_id, name, aliases, description, card, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (story_id, self._db.seal(name), sealed_aliases, self._db.seal_opt(description), self._db.seal_opt(card), now, now),
+                "INSERT INTO characters (story_id, name, aliases, description, card, created_at, updated_at, provider, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (story_id, self._db.seal(name), sealed_aliases, self._db.seal_opt(description), self._db.seal_opt(card), now, now, provider, model),
             )
             # fmt: on
         return int(cur.lastrowid or 0)
@@ -184,7 +190,7 @@ class CharacterOps:
     def list(self, story_id: int) -> builtins.list[Character]:
         # fmt: off
         rows = self._db.conn.execute(
-            "SELECT id, name, aliases, description, card, updated_at FROM characters WHERE story_id = ? ORDER BY id",
+            "SELECT id, name, aliases, description, card, updated_at, provider, model FROM characters WHERE story_id = ? ORDER BY id",
             (story_id,),
         ).fetchall()
         # fmt: on
@@ -196,8 +202,10 @@ class CharacterOps:
                 description=self._db.unseal(description),
                 card=self._db.unseal_opt(card),
                 updated_at=str(updated),
+                provider=provider,
+                model=model,
             )
-            for cid, name, aliases, description, card, updated in rows
+            for cid, name, aliases, description, card, updated, provider, model in rows
         ]
 
     def update(
@@ -232,12 +240,16 @@ class CharacterOps:
     # ---------- getters and setters ----------
 
     def delete(self, character_id: int) -> None:
-        """Remove a cast row — the undo of an import whose character is
-        still unplayed (the caller checks the journals; a row with any
-        would CASCADE them away). The declared references do the rest:
-        message rows keep their speaker name and drop the id link."""
+        """Remove a cast row, its journals CASCADING away with it. The
+        rows it spoke lose the name with the link: a deleted character
+        spoke nothing, and a label kept would bring them back through an
+        export and its import."""
         with self._db.conn as conn:
             # fmt: off
+            conn.execute(
+                "UPDATE messages SET speaker = NULL, speaker_id = NULL WHERE speaker_id = ?",
+                (character_id,),
+            )
             conn.execute(
                 "DELETE FROM characters WHERE id = ?", (character_id,)
             )
@@ -369,7 +381,15 @@ class JournalOps:
         self._db = db
 
     def add(
-        self, story_id: int, scene_id: int, character_id: int, *, entry: str, state: str
+        self,
+        story_id: int,
+        scene_id: int,
+        character_id: int,
+        *,
+        entry: str,
+        state: str,
+        provider: str | None = None,
+        model: str | None = None,
     ) -> int:
         """Append one character's record of one scene. `history` starts NULL;
         a rollup completes the row later. One row per (scene, character) —
@@ -378,8 +398,8 @@ class JournalOps:
         with self._db.conn as conn:
             # fmt: off
             cur = conn.execute(
-                "INSERT INTO journals (story_id, scene_id, character_id, entry, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (story_id, scene_id, character_id, self._db.seal(entry), self._db.seal(state), now, now),
+                "INSERT INTO journals (story_id, scene_id, character_id, entry, state, created_at, updated_at, provider, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (story_id, scene_id, character_id, self._db.seal(entry), self._db.seal(state), now, now, provider, model),
             )
             # fmt: on
         return int(cur.lastrowid or 0)
@@ -388,7 +408,7 @@ class JournalOps:
         """Every journal row of the story, oldest first."""
         # fmt: off
         rows = self._db.conn.execute(
-            "SELECT id, scene_id, character_id, entry, state, history, updated_at FROM journals WHERE story_id = ? ORDER BY id",
+            "SELECT id, scene_id, character_id, entry, state, history, updated_at, provider, model FROM journals WHERE story_id = ? ORDER BY id",
             (story_id,),
         ).fetchall()
         # fmt: on
@@ -401,8 +421,10 @@ class JournalOps:
                 state=self._db.unseal(state),
                 history=self._db.unseal(history),
                 updated_at=str(updated),
+                provider=provider,
+                model=model,
             )
-            for jid, sid, cid, entry, state, history, updated in rows
+            for jid, sid, cid, entry, state, history, updated, provider, model in rows
         ]
 
     # ---------- getters and setters ----------

@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Self
 
-SCHEMA_VERSION = "8"
+SCHEMA_VERSION = "9"
 
 SCHEMA_DDL = """
 -- ---------- source: what was actually said ----------
@@ -62,6 +62,11 @@ CREATE TABLE messages (
 
 -- ---------- derivatives: memory distilled from the source ----------
 
+-- `provider` and `model` on the three tables name who MADE the row, as on
+-- messages: the pass that wrote it (its engine and model), or 'card' and
+-- the card's file for an imported character. An edit or a later rollup
+-- never changes them; NULL where no pass made the row, or before v9.
+
 CREATE TABLE scenes (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     story_id         INTEGER NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
@@ -72,6 +77,8 @@ CREATE TABLE scenes (
     history          BLOB,               -- story-so-far THROUGH this scene; latest = the arc
     created_at       TEXT NOT NULL,
     updated_at       TEXT NOT NULL,
+    provider         TEXT,               -- who made the row
+    model            TEXT,
     UNIQUE (story_id, id),               -- composite-FK target: same-story references only
     FOREIGN KEY (story_id, start_message_id) REFERENCES messages(story_id, id),
     FOREIGN KEY (story_id, end_message_id)   REFERENCES messages(story_id, id)
@@ -86,6 +93,8 @@ CREATE TABLE characters (
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL,
     card        BLOB,                    -- an imported card as TOML
+    provider    TEXT,                    -- who made the row
+    model       TEXT,
     UNIQUE (story_id, id)                -- composite-FK target: same-story references only
 );
 
@@ -99,6 +108,8 @@ CREATE TABLE journals (
     history      BLOB,                   -- cumulative rollup from their entries
     created_at   TEXT NOT NULL,
     updated_at   TEXT NOT NULL,
+    provider     TEXT,                   -- who made the row
+    model        TEXT,
     UNIQUE (scene_id, character_id),
     FOREIGN KEY (story_id, scene_id) REFERENCES scenes(story_id, id) ON DELETE CASCADE,
     FOREIGN KEY (story_id, character_id) REFERENCES characters(story_id, id) ON DELETE CASCADE
@@ -251,6 +262,8 @@ class Scene:
     summary: str = ""
     history: str = ""  # story-so-far through this scene; "" when not generated here
     updated_at: str = ""  # audit column, surfaced for display alone ("extracted 4m ago")
+    provider: str | None = None  # who made the row (see the DDL)
+    model: str | None = None
 
 
 @dataclass(frozen=True)
@@ -261,6 +274,8 @@ class Character:
     description: str = ""
     card: str | None = None  # the import archive; None for extracted characters
     updated_at: str = ""  # audit column, surfaced for display alone
+    provider: str | None = None  # who made the row (see the DDL)
+    model: str | None = None
 
 
 @dataclass(frozen=True)
@@ -274,6 +289,8 @@ class Journal:
     state: str
     history: str = ""
     updated_at: str = ""  # audit column, surfaced for display alone
+    provider: str | None = None  # who made the row (see the DDL)
+    model: str | None = None
 
 
 @dataclass(frozen=True)

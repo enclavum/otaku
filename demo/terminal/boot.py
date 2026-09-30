@@ -788,7 +788,7 @@ def main() -> None:
     (cards / "odo.json").write_text(demo_script.SAMPLE_CARD, encoding="utf-8")
     session = backend_launch.open_session(root)
     if not session.model:
-        api_providers.switch_model(session, PROVIDER, MODEL)
+        api_providers.set_model(session, PROVIDER, MODEL)
 
     term_input, term_output = _build_ptk_io()
     try:

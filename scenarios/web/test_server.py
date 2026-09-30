@@ -141,6 +141,34 @@ class TestReading:
         assert facts["model"] == "test-model"
         assert facts["provider"]
 
+    def test_the_extraction_model_is_saved_named_and_unset(self, page: Page) -> None:
+        # The session facts name the model extraction asks — the story's
+        # until one is saved — and the picker marks a saved one alone.
+        assert page.get("/api/session")["extraction_model"] == "generic/test-model"
+        assert page.get("/api/providers?scope=local")["extraction"] == ""
+        saved = page.put("/api/session/extraction_model", {"provider": "generic", "model": "x"})
+        assert saved["notice"] and not saved.get("refused")
+        assert page.get("/api/session")["extraction_model"] == "generic/x"
+        assert page.get("/api/providers?scope=local")["extraction"] == "generic/x"
+        assert not page.delete("/api/session/extraction_model").get("refused")
+        assert page.get("/api/session")["extraction_model"] == "generic/test-model"
+        assert page.delete("/api/session/extraction_model")["refused"] is True
+
+    def test_scenes_and_characters_say_who_made_them(self, page: Page) -> None:
+        page.play("I listen at the culvert mouth.")
+        story = page.get("/api/session")["story_id"]
+        ids = page.store.stories.get_messages_ids(story)
+        first, last = ids[0], ids[-1]
+        page.store.scenes.add(
+            story, start_message_id=first, end_message_id=last, summary="s", provider="p", model="m"
+        )
+        page.store.characters.add(story, "Maren", provider="card", model="maren.png")
+        page.store.characters.add(story, "Tallis")
+        memory = page.get(f"/api/stories/{story}")
+        assert [(s["provider"], s["model"]) for s in memory["scenes"]] == [("p", "m")]
+        made = [(c["provider"], c["model"]) for c in memory["characters"]]
+        assert made == [("card", "maren.png"), (None, None)]
+
     def test_the_turns_are_the_story_as_the_store_has_it(self, page: Page) -> None:
         page.play("I listen at the culvert mouth.")
         story = page.get("/api/session")["story_id"]
@@ -492,6 +520,17 @@ class TestWrites:
         answer = page.patch(f"/api/stories/{other}/messages/{first.id}", {"text": "rewritten"})
         assert answer["refused"] is True
         assert page.store.stories.get_messages(mine)[0].body == first.body
+
+    def test_a_character_is_deleted_only_under_its_own_story(self, page: Page) -> None:
+        page.play("I listen at the culvert mouth.")
+        mine = page.get("/api/session")["story_id"]
+        stranger = page.store.characters.add(mine, "Stranger")
+        other = page.sent("POST", "/api/stories", {"title": "Elsewhere"})[2]["story"]
+        assert page.delete(f"/api/stories/{other}/characters/{stranger}")["refused"] is True
+        assert [c.id for c in page.store.characters.list(mine)] == [stranger]
+        answer = page.delete(f"/api/stories/{mine}/characters/{stranger}")
+        assert answer["notice"] and not answer.get("refused")
+        assert page.store.characters.list(mine) == []
 
     def test_a_null_where_a_number_belongs_is_the_page_s_fault(self, page: Page) -> None:
         # Malformed, not broken: a 400 and no crash filed. Anything that
@@ -1071,7 +1110,11 @@ class TestTheNovelOverTheWire:
             page.play("")
             turns = page.get("/api/play")["messages"]
             assert [turn["role"] for turn in turns][-3:] == ["user", "assistant", "assistant"]
-            assert [turn["join_kind"] for turn in turns][-3:] == ["paragraph", "inline", "paragraph"]
+            assert [turn["join_kind"] for turn in turns][-3:] == [
+                "paragraph",
+                "inline",
+                "paragraph",
+            ]
             assert turns[-2]["body"].startswith(" ")
 
     def test_the_novel_is_refused_on_a_model_that_cannot_complete_text(self, page: Page) -> None:

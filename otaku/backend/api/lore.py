@@ -1,5 +1,5 @@
-"""The memory, operated: the forced extraction pass, and the lore view
-both frontends browse and correct.
+"""The memory, operated: the forced extraction pass, a character merged
+or deleted, and the lore view both frontends browse and correct.
 
 The view is loaded whole and reloaded after every edit — cheap for one
 story, and the store's own invalidation (edits null the rollups built
@@ -38,10 +38,11 @@ FieldKind = Literal[
 
 
 def build_job(session: Session, *, force: bool = False) -> Job:
-    """The worker job for the session as it stands: the story, the model,
-    the extraction settings, and the snapshot the warm-up rebuilds the
-    next request from. The one composer, so play's idle arming and the
-    forced close can never disagree on the snapshot."""
+    """The worker job for the session as it stands: the story, the model
+    extraction asks, the extraction settings, and the snapshot the
+    warm-up rebuilds the next request from, with the model it goes to.
+    The one composer, so play's idle arming and the forced close can
+    never disagree on the snapshot."""
     story_id = session.story_id
     assert story_id is not None  # callers gate on a recorded story
     config, prompts = session._config, session._prompts
@@ -51,7 +52,10 @@ def build_job(session: Session, *, force: bool = False) -> Job:
         session._paths.prompts_file,
         can_complete_text=session.can_complete_text,
     )
+    extraction_provider, extraction_model = session._extraction_spec()
     return Job(
+        extraction_provider=extraction_provider,
+        extraction_model=extraction_model,
         provider=session.provider,
         model=session.model,
         story_id=story_id,
@@ -142,10 +146,10 @@ def extract(session: Session) -> WorkerRun:
     """Run the extraction right now, through the worker (one path into a
     pass, so a forced close can never race an automatic one): gate and
     settle margin dropped, closing right up to the last message. Raises
-    Refused without a story or a model."""
+    Refused without a story or a model to extract with."""
     if session.story_id is None:
         raise Refused(NO_STORY_HINT)
-    if session._client() is None:
+    if session._extraction_client() is None:
         raise Refused(NO_MODEL_HINT)
     run = WorkerRun(session)
     session._worker.schedule(replace(build_job(session, force=True), on_done=run._finish), now=True)
@@ -167,20 +171,20 @@ def merge_raw(session: Session, raw: str) -> str:
     if source is None or target is None:
         missing = src_raw if source is None else dst_raw
         raise Refused(f"No character named '{missing.strip()}' in this story (see /cast).")
-    return merge_by_id(session, source.id, target.id)
+    return merge_by_id(session, source.id, target.id, session.story_id)
 
 
-def merge_by_id(session: Session, source_id: int, target_id: int) -> str:
+def merge_by_id(session: Session, source_id: int, target_id: int, story_id: int) -> str:
     """Fold one character into another BY ID — speakers and journals
     follow, the source becomes an alias. Refused toward the direction
     that would destroy an imported card's archive. Returns the
     confirmation. A surface that already holds the cast (a browser)
-    names the two rows; a typed line resolves names to ids first."""
-    if session.story_id is None:
-        raise Refused(NO_STORY_HINT)
-    # Resolved against THIS story's cast, so an id from another story is
+    names the two rows and the story it read them in, any story; a
+    typed line resolves names in the open one first."""
+    _ensure_cast_idle(session, story_id)
+    # Resolved against THAT story's cast, so an id from another story is
     # as refused as an id that is not there at all.
-    cast = {row.id: row for row in session._store.characters.list(session.story_id)}
+    cast = {row.id: row for row in session._store.characters.list(story_id)}
     source, target = cast.get(source_id), cast.get(target_id)
     if source is None or target is None:
         raise Refused("No such character in this story (see /cast).")
@@ -196,10 +200,38 @@ def merge_by_id(session: Session, source_id: int, target_id: int) -> str:
             f"merge the other direction (/merge {target.name} into {source.name}) "
             f"so the card survives."
         )
-    session._store.characters.merge(session.story_id, source.id, target.id)
+    session._store.characters.merge(story_id, source.id, target.id)
     # SOURCE is now an alias of TARGET, so a later /me or /you naming it
     # still resolves — nothing else to update.
     return f"Merged {source.name} into {target.name} ('{source.name}' is now an alias)."
+
+
+def delete_character(session: Session, character_id: int, story_id: int) -> str:
+    """Remove a character the extractor should never have made, their
+    journals with them, and their name from every line they spoke.
+    Prose that mentions them (summaries, other characters' entries)
+    stays, and a later pass may make them again from new messages.
+    Refused for a character carrying an imported card: the greeting
+    composes its block from that archive."""
+    _ensure_cast_idle(session, story_id)
+    cast = session._store.characters.list(story_id)
+    _theirs(cast, character_id, "character")
+    character = next(row for row in cast if row.id == character_id)
+    if character.card:
+        raise Refused(
+            f"{character.name} carries an imported card — "
+            f"only an extracted character can be deleted."
+        )
+    session._store.characters.delete(character.id)
+    return f"Deleted {character.name} and their journals."
+
+
+def _ensure_cast_idle(session: Session, story_id: int) -> None:
+    """A pass resolves names against the cast it read at its start and
+    writes each row alone, so a row removed under it would fail a scene
+    half-written: the cast is not rewritten while one runs."""
+    if session._worker.extracting_story_id == story_id:
+        raise Refused("An extraction pass is running — try again when it lands.")
 
 
 def cast(session: Session) -> tuple[Character, ...]:

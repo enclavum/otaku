@@ -55,7 +55,7 @@ class App:
         # as in the real launcher.
         if spec and not self.session.model:
             provider, _, model = spec.partition("/")
-            api_providers.switch_model(self.session, provider, model)
+            api_providers.set_model(self.session, provider, model)
         self.chat = Chat(self.session)
         # What `loop.run` attaches once it owns the screen: a notice
         # raised after the launch is SAID, not collected.

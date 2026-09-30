@@ -1,6 +1,6 @@
-"""The model and the knobs: /model, /set think, /set verbose,
-/set parameter, /set notification, /set max_context — and what each
-remembers across a relaunch.
+"""The model and the knobs: /model and the model lore extraction uses,
+/set think, /set verbose, /set parameter, /set notification,
+/set max_context — and what each remembers across a relaunch.
 
 The design: `/set think` and `/set parameter` follow the MODEL they
 were set on; `/set verbose` and `/set notification` are session-wide
@@ -122,6 +122,63 @@ class TestModel:
                 app.close()
         finally:
             server.close()
+
+
+class TestExtractionModel:
+    """Lore extraction asks the story's model unless one is saved for
+    it: saved from either picker, remembered, kept across a switch of
+    the story's model, and unset back to it."""
+
+    def test_a_saved_model_is_remembered_and_kept_across_a_switch(self, app: App) -> None:
+        api_providers.set_extraction_model(app.session, "generic", "extract-model")
+        app.play("/model generic/other-model")
+        assert app.session.full_extraction_model_name == "generic/extract-model"
+        relaunched = launch(app.paths.root, app.server)
+        try:
+            assert relaunched.session.extraction_model == "extract-model"
+            assert relaunched.session.model == "other-model"
+        finally:
+            relaunched.close()
+
+    def test_unset_returns_extraction_to_the_story_model(self, app: App) -> None:
+        api_providers.set_extraction_model(app.session, "generic", "extract-model")
+        api_providers.clear_extraction_model(app.session)
+        assert app.session.extraction_model == ""
+        assert app.session.full_extraction_model_name == "generic/test-model"
+        app.play("/model generic/other-model")
+        assert app.session.full_extraction_model_name == "generic/other-model"
+
+    def test_the_saved_model_again_or_an_unset_of_none_is_refused(self, app: App) -> None:
+        with pytest.raises(Refused):
+            api_providers.clear_extraction_model(app.session)
+        api_providers.set_extraction_model(app.session, "generic", "extract-model")
+        with pytest.raises(Refused):
+            api_providers.set_extraction_model(app.session, "generic", "extract-model")
+        with pytest.raises(Refused):
+            api_providers.set_extraction_model(app.session, "nowhere", "extract-model")
+        assert app.session.full_extraction_model_name == "generic/extract-model"
+
+    def test_the_pass_asks_the_saved_model_and_the_turns_the_story_model(self, app: App) -> None:
+        api_providers.set_extraction_model(app.session, "generic", "extract-model")
+        for i in range(3):
+            app.play(f"Turn number {i}.")
+        app.play("/extract")
+        chats = [r for r in app.server.requests if "messages" in r]
+        analyst = [
+            r
+            for r in chats
+            if "You are a story analyst" in scripted.content_text(r["messages"][-1])
+        ]
+        assert {r["model"] for r in analyst} == {"extract-model"}
+        assert {r["model"] for r in chats if r not in analyst} == {"test-model"}
+        story_id = app.session.story_id
+        made = {(s.provider, s.model) for s in app.store.scenes.list(story_id)}
+        assert made == {("generic", "extract-model")}
+
+    def test_the_picker_marks_only_a_saved_model(self, app: App) -> None:
+        assert api_providers.listed_extraction_spec(app.session) == ""
+        api_providers.set_extraction_model(app.session, "generic", "test-model")
+        assert api_providers.listed_extraction_spec(app.session) == "generic/test-model"
 
 
 class TestThink:
@@ -989,6 +1046,20 @@ class TestManagedPicker:
             # The load request carried the provider's keep_alive.
             load = next(r for r in server.requests if r.get("prompt") == "")
             assert load["keep_alive"] == "24h"
+        finally:
+            app.close()
+            server.close()
+
+    def test_x_saves_the_model_for_extraction_and_again_unsets_it(self, tmp_path) -> None:
+        app, server = self.launch_managed(tmp_path)
+        try:
+            with contextlib.suppress(EOFError):
+                run_screen(_DOWN + "x" + ESC, lambda: self.settled_pick(app))
+            assert app.session.full_extraction_model_name == "ollama/beta"
+            with contextlib.suppress(EOFError):
+                run_screen(_DOWN + "x" + ESC, lambda: self.settled_pick(app))
+            assert app.session.extraction_model == ""
+            assert app.session.model == "alpha"  # the story's model never moved
         finally:
             app.close()
             server.close()

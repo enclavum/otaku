@@ -139,19 +139,22 @@ class Report:
 
 class _Cast:
     """Name → character-id resolution (case-insensitive, alias-aware),
-    creating unknown characters on first mention."""
+    creating unknown characters on first mention — made by the pass's
+    `provider` and `model`."""
 
-    def __init__(self, store: Store, story_id: int) -> None:
+    def __init__(self, store: Store, story_id: int, provider: str, model: str) -> None:
         self._store = store
         self._story_id = story_id
+        self._provider = provider
+        self._model = model
         self._id_by_name: dict[str, int] = {}
         self._name_by_id: dict[int, str] = {}
 
     @classmethod
-    def load(cls, store: Store, story_id: int) -> Self:
+    def load(cls, store: Store, story_id: int, provider: str, model: str) -> Self:
         """A cast seeded with the story's existing characters, so the pass
         resolves against the live cast instead of starting empty."""
-        cast = cls(store, story_id)
+        cast = cls(store, story_id, provider, model)
         for character in store.characters.list(story_id):
             cast._id_by_name[character.name.casefold()] = character.id
             for alias in character.aliases:
@@ -179,7 +182,12 @@ class _Cast:
                     self._id_by_name.setdefault(alias.strip().casefold(), found)
             return found
         cid = self._store.characters.add(
-            self._story_id, name, aliases=aliases, description=description
+            self._story_id,
+            name,
+            aliases=aliases,
+            description=description,
+            provider=self._provider,
+            model=self._model,
         )
         self._id_by_name[name.casefold()] = cid
         for alias in aliases:
@@ -226,6 +234,9 @@ class Extractor:
         self._cancel = cancel or _NEVER_CANCELLED
         self._progress = progress or (lambda line: None)
         self._log = log or (lambda line: None)
+        # Whether a request reached for the model — what tells the worker
+        # the pass may have loaded it on the engine.
+        self.asked = False
 
     def run(self, *, force: bool = False) -> tuple[PassResult, Report]:
         """One pass over the story's unextracted tail: scene closes, then
@@ -348,7 +359,7 @@ class Extractor:
         # off the SAME read the staleness check guarded: a second read
         # could see an undo that landed after it.
         number = {m.id: i for i, m in enumerate(chain, 1)}
-        cast = _Cast.load(self._store, self._story_id)
+        cast = _Cast.load(self._store, self._story_id, self._client.id, self._model)
         pass_started = time.monotonic()
         self._log(
             f"extraction started (story {self._story_id}): "
@@ -490,6 +501,8 @@ class Extractor:
             end_message_id=span[-1].id,
             title=_as_str(scene_data.get("title")),
             summary=summary,
+            provider=self._client.id,
+            model=self._model,
         )
         report.last_scene_title = _as_str(scene_data.get("title")) or ""
 
@@ -518,6 +531,8 @@ class Extractor:
                 # carries forward, since it is a standing snapshot.
                 entry=entry or "",
                 state=state or (prev.state if prev else ""),
+                provider=self._client.id,
+                model=self._model,
             )
             report.journals += 1
 
@@ -675,6 +690,7 @@ class Extractor:
     ) -> str:
         """One attempt of `complete`: stream, accumulate, record usage.
         Raises the provider error so the wrapper can retry."""
+        self.asked = True
         buf: list[str] = []
         final: Stats | None = None
         # max_tokens bounds a repetition loop — without it a looping model

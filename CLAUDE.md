@@ -124,7 +124,7 @@ terminal answers each token in `chat.bindings.OPERATIONS` and
 `_INTERACTIVE`. The page does NOT dispatch by token — a button calls an
 endpoint — so how it reaches each command is HAND-KEPT in `_ON_THE_PAGE`
 (`tests/test_architecture.py`): a screen, an endpoint, or a deliberate
-gap with the reason it is one (`/merge` has no UI). Nothing in the
+gap with the reason it is one (`/web`: the page is already there). Nothing in the
 source can say that Rename stands for `/title`, and a gap must be
 written down rather than going quiet. A new command is a row in the
 shared table, a row in the terminal's, and a decision recorded there —
@@ -523,7 +523,7 @@ The data model lives in `otaku/store/schema.py` (the DDL, its
 semantics, and the row types) — always the CURRENT shape: a fresh
 database is created from it directly, and `store/migrations` — a
 versioned ladder over `meta.schema_version` — brings old databases to
-it. Each step is a FROZEN module per version (`v2.py` … `v8.py`):
+it. Each step is a FROZEN module per version (`v2.py` … `v9.py`):
 a step writes what its target version WAS, never what schema.py says now
 (backup-first, unharmed-on-failure, newer-refused). The invariant: a
 migrated database equals a fresh one, `sqlite_master` row for row.
@@ -531,6 +531,14 @@ migrated database equals a fresh one, `sqlite_master` row for row.
 `created_at` / `updated_at` columns are audit fields: no business logic
 may ever rely on them. UI display use (e.g. ordering the story list by
 recency, "extracted 4m ago") is allowed.
+
+`provider` and `model` name who MADE a row, on messages and on the
+three derivatives alike (scenes, characters, journals): the engine and
+model of the pass that wrote it, or `card` and the card's file for an
+imported character. An edit or a later rollup never changes them; NULL
+where no pass made the row (an imported story's) or before schema 9.
+Both frontends show a scene's and a character's where they show a
+turn's: the page's margin, the terminal's preview.
 
 A turn's pictures are the one thing the database only NAMES:
 `messages.attachments` is a plain JSON list (`schema.Attachment` — the
@@ -767,6 +775,19 @@ off word of the model's shape (`reasoning.off_level`), written back as
 model the provider cannot describe (a hosted catalog at launch, an
 engine that is down) gets no row until it can, at a later launch or
 switch.
+
+Lore extraction asks the model played with unless one is PINNED for it:
+state.toml's `extraction_model` ("" follows), set by either picker (the
+page's "Use for extraction", the terminal's `x`) through
+`api.providers.set_extraction_model` / `clear_extraction_model`, and
+kept when the play model changes. A pin naming a provider no longer
+configured is dropped at launch with a notice; a pinned model the
+engine no longer serves fails the pass and holds the status — never a
+quiet fall back to the play model. The worker's `Job` carries both, by
+the session's convention: the pass asks `extraction_model`, the warm-up
+the story's `model`, and the warm-up also runs after any pass that
+asked a model other than the story's (on one engine it may have pushed
+the story's model out of memory).
 
 One state-dir DIRECTORY is the user's alone and the app never writes in
 it: `web/`, holding `custom.css` (loaded last by the web frontend, so

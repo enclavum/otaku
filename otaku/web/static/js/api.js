@@ -177,6 +177,8 @@ export const editJournal = (story, record, fields) =>
   patch(`/api/stories/${story}/journals/${record}`, fields);
 export const mergeCharacter = (story, character, into) =>
   put(`/api/stories/${story}/characters/${character}/merge`, { into });
+export const deleteCharacter = (story, character) =>
+  remove(`/api/stories/${story}/characters/${character}`);
 export const storySettings = (story) => get(`/api/stories/${story}/settings`);
 export const updateSetting = (story, name, fields) =>
   patch(`/api/stories/${story}/settings/${name}`, fields);
@@ -208,6 +210,10 @@ export const setLoaded = (provider, model, loaded) =>
     { loaded },
   );
 export const switchModel = (provider, model) => put("/api/session/model", { provider, model });
+// The model lore extraction uses: pinned, or back to the one played with.
+export const setExtractionModel = (provider, model) =>
+  put("/api/session/extraction_model", { provider, model });
+export const clearExtractionModel = () => remove("/api/session/extraction_model");
 export const machine = () => get("/api/machine");
 
 // ---------- the session ----------

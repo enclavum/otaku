@@ -361,13 +361,13 @@ class StoryOps:
 
             character_map: dict[int, int] = {}
             rows = conn.execute(
-                "SELECT id, name, aliases, description, card FROM characters WHERE story_id = ?",
+                "SELECT id, name, aliases, description, card, provider, model FROM characters WHERE story_id = ?",
                 (story_id,),
             ).fetchall()
-            for cid, name, aliases, description, card in rows:
+            for cid, name, aliases, description, card, c_provider, c_model in rows:
                 cur = conn.execute(
-                    "INSERT INTO characters (story_id, name, aliases, description, card, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (new_story, name, aliases, description, card, now, now),
+                    "INSERT INTO characters (story_id, name, aliases, description, card, created_at, updated_at, provider, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (new_story, name, aliases, description, card, now, now, c_provider, c_model),
                 )
                 character_map[int(cid)] = int(cur.lastrowid or 0)
 
@@ -387,28 +387,28 @@ class StoryOps:
 
             scene_map: dict[int, int] = {}
             rows = conn.execute(
-                "SELECT id, start_message_id, end_message_id, title, summary, history, created_at FROM scenes WHERE story_id = ? ORDER BY id",
+                "SELECT id, start_message_id, end_message_id, title, summary, history, created_at, provider, model FROM scenes WHERE story_id = ? ORDER BY id",
                 (story_id,),
             ).fetchall()
-            for sid, start, end, s_title, summary, history, created in rows:
+            for sid, start, end, s_title, summary, history, created, s_provider, s_model in rows:
                 if start not in copied or end not in copied:
                     continue
                 cur = conn.execute(
-                    "INSERT INTO scenes (story_id, start_message_id, end_message_id, title, summary, history, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (new_story, message_map[start], message_map[end], s_title, summary, history, created, now),
+                    "INSERT INTO scenes (story_id, start_message_id, end_message_id, title, summary, history, created_at, updated_at, provider, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (new_story, message_map[start], message_map[end], s_title, summary, history, created, now, s_provider, s_model),
                 )
                 scene_map[int(sid)] = int(cur.lastrowid or 0)
 
             rows = conn.execute(
-                "SELECT scene_id, character_id, entry, state, history, created_at FROM journals WHERE story_id = ? ORDER BY id",
+                "SELECT scene_id, character_id, entry, state, history, created_at, provider, model FROM journals WHERE story_id = ? ORDER BY id",
                 (story_id,),
             ).fetchall()
-            for scene_id, character_id, entry, state, history, created in rows:
+            for scene_id, character_id, entry, state, history, created, j_provider, j_model in rows:
                 if scene_id not in scene_map:
                     continue
                 conn.execute(
-                    "INSERT INTO journals (story_id, scene_id, character_id, entry, state, history, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (new_story, scene_map[scene_id], character_map[character_id], entry, state, history, created, now),
+                    "INSERT INTO journals (story_id, scene_id, character_id, entry, state, history, created_at, updated_at, provider, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (new_story, scene_map[scene_id], character_map[character_id], entry, state, history, created, now, j_provider, j_model),
                 )
 
             new_head = message_map.get(cut) if cut is not None else None

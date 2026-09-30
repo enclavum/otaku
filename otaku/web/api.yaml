@@ -720,6 +720,18 @@ paths:
         "200": { $ref: "#/components/responses/Answered" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "403": { $ref: "#/components/responses/CrossOrigin" }
+    delete:
+      operationId: deleteStoryCharacter
+      tags: [Dossier]
+      summary: Delete a character the extractor should never have made
+      description: |
+        Their journals go with them, and their name leaves every line
+        they spoke; prose that mentions them stays. Refused for a
+        character carrying an imported card, and while an extraction
+        pass is writing to the story — as a merge is.
+      responses:
+        "200": { $ref: "#/components/responses/Answered" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
 
   /api/stories/{story}/characters/{character}/merge:
     parameters:
@@ -733,7 +745,8 @@ paths:
         What `/merge A into B` does. Its scenes, journals and aliases
         move across and THIS CHARACTER STOPS EXISTING — which is why it
         is not a field of the PATCH above. Ids, not names: the page
-        holds the cast and resolves the name it showed.
+        holds the cast and resolves the name it showed. Refused while an
+        extraction pass is writing to the story.
       requestBody:
         content:
           application/json:
@@ -1071,6 +1084,37 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/Answered" }
         "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+
+  /api/session/extraction_model:
+    put:
+      operationId: putSessionExtractionModel
+      tags: [Models]
+      summary: Pin lore extraction to a model of its own
+      description: |
+        Remembered, like the session's model, and kept when that one
+        changes — the model played with included, once pinned. Refused
+        for an unknown provider, or the model already pinned.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [provider, model]
+              properties:
+                provider: { type: string }
+                model: { type: string }
+      responses:
+        "200": { $ref: "#/components/responses/Answered" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+    delete:
+      operationId: deleteSessionExtractionModel
+      tags: [Models]
+      summary: Unpin — lore extraction uses the model played with again
+      description: Refused when nothing is pinned.
+      responses:
+        "200": { $ref: "#/components/responses/Answered" }
         "403": { $ref: "#/components/responses/CrossOrigin" }
 
   /api/session/model/parameters/{name}:
@@ -1607,6 +1651,10 @@ components:
         card: { type: string, description: 'The import archive, as TOML; "" for an extracted character.' }
         history: { type: string, description: 'Their arc so far — the newest rollup a pass wrote, derived and never written back; "" before the first one.' }
         updated_at: { type: string, format: date-time, description: "When the extractor last wrote the character — display alone." }
+        provider:
+          type: [string, "null"]
+          description: "Who made the character: the engine of the pass that named them, or 'card' for an imported one; null for an imported story's, or one made before the column existed. An edit never changes it."
+        model: { type: [string, "null"], description: "The pass's model, or the card's file name." }
         journals:
           type: array
           items: { $ref: "#/components/schemas/JournalRecord" }
@@ -1846,6 +1894,7 @@ components:
         /api/machine and nothing carries a second copy.
       properties:
         current: { type: string, description: '"provider/model" as the provider lists the model (Ollama tags a bare name ":latest"), which is how the page finds its row; "" without a model.' }
+        extraction: { type: string, description: 'The model pinned for lore extraction, listed as `current` is; "" while extraction uses the model played with.' }
         providers:
           type: array
           items:
@@ -1950,6 +1999,10 @@ components:
         summary: { type: string }
         history: { type: string, description: 'The story-so-far THROUGH this scene; "" when not generated here. DERIVED — there is no write for it.' }
         updated_at: { type: string, format: date-time, description: "When the extractor last wrote the scene — display alone." }
+        provider:
+          type: [string, "null"]
+          description: "Who made the scene: the engine of the pass that closed it; null for an imported story's, or one made before the column existed. A later rollup or an edit never changes it."
+        model: { type: [string, "null"], description: "The pass's model." }
         present:
           type: array
           items: { type: string }
@@ -1970,6 +2023,7 @@ components:
         version: { type: string }
         model: { type: string, description: "The bare model name; \"(no model)\" when none." }
         provider: { type: string, description: "The provider serving the model; \"\" without a model." }
+        extraction_model: { type: string, description: "\"provider/model\" lore extraction asks — the one pinned for it, else the model played with; \"\" with neither." }
         max_context:
           type: string
           description: >

@@ -125,7 +125,10 @@ def add(session: Session, prepared: PreparedCard, persona: str) -> ImportedCard:
     session._record_turn(Message(role="user", body=prepared.line, kind="card"))
     story_id = session.story_id
     assert story_id is not None  # _record_turn just ensured it
-    character_id = session._store.characters.add(story_id, card.name, card=toml)
+    # Made by the card, spelled as the greeting spells its source below.
+    character_id = session._store.characters.add(
+        story_id, card.name, card=toml, provider="card", model=card.file_name
+    )
     # The speaker link is the compose key: the row was recorded before
     # the cast row could exist, so the attribution follows it.
     row = session._messages[-1]

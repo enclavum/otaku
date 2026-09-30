@@ -241,6 +241,18 @@ class Session:
         return self._state.bare_model
 
     @property
+    def extraction_provider(self) -> str:
+        """The provider of the model saved for lore extraction; "" while
+        extraction uses the story's model."""
+        return self._state.extraction_provider if self._state.extraction_bare_model else ""
+
+    @property
+    def extraction_model(self) -> str:
+        """The bare model saved for lore extraction — kept when the story's
+        model changes; "" while extraction uses the story's model."""
+        return self._state.extraction_bare_model
+
+    @property
     def story_id(self) -> int | None:
         return self._story_id
 
@@ -295,6 +307,13 @@ class Session:
         """ "provider/model" as remembered, for display; "" without a
         model, a half-written spec included."""
         return self._state.model if self._state.bare_model else ""
+
+    @property
+    def full_extraction_model_name(self) -> str:
+        """ "provider/model" lore extraction uses, for display — the one
+        saved for it, else the story's; "" with neither."""
+        provider, model = self._extraction_spec()
+        return f"{provider}/{model}" if model else ""
 
     @property
     def terminal(self) -> TerminalSettings:
@@ -589,6 +608,19 @@ class Session:
         if not self.model:
             return None
         return self._providers.get(self.provider)
+
+    def _extraction_spec(self) -> tuple[str, str]:
+        """(provider, model) lore extraction asks: the pair saved for it,
+        else the story's — the halves fall back together, never one alone."""
+        if self.extraction_model:
+            return self.extraction_provider, self.extraction_model
+        return self.provider, self.model
+
+    def _extraction_client(self) -> OpenAIClient | None:
+        """The client lore extraction asks — `_client`'s, unless a model
+        of its own is saved."""
+        provider, model = self._extraction_spec()
+        return self._providers.get(provider) if model else None
 
     def _switch_to(self, story_id: int, messages: list[Message] | None = None) -> None:
         """Attach to a story — system, messages (or the given truncated

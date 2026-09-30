@@ -31,7 +31,7 @@ from otaku.settings.migrations import PROMPT_CACHE_ROW, surgery
 ProviderField = Literal["url", "api_key"]
 
 
-def switch_model(session: Session, provider: str, model: str) -> str:
+def set_model(session: Session, provider: str, model: str) -> str:
     """Switch for the rest of the session, keeping the context (compare
     models on one prompt: switch, then regenerate). Parameters follow the
     model; the switch is remembered. Returns the confirmation; raises
@@ -46,10 +46,10 @@ def switch_model(session: Session, provider: str, model: str) -> str:
     return f"Switched to {session.full_model_name}."
 
 
-def switch_spec(session: Session, raw: str) -> str:
+def set_model_raw(session: Session, raw: str) -> str:
     """The typed `/model PROVIDER/MODEL` form: owns the ONE split rule
     (the first slash — model names may carry more) and the refusal that
-    lists the known providers, then wraps `switch_model`. Both frontends'
+    lists the known providers, then wraps `set_model`. Both frontends'
     chat boxes route here; the picker and the web PUT use the structured
     form."""
     known = session._providers.list()
@@ -57,7 +57,30 @@ def switch_spec(session: Session, raw: str) -> str:
     if head not in known or not rest:
         names = ", ".join(known)
         raise Refused(f"Use PROVIDER/MODEL (providers: {names}), or /model with no args to pick.")
-    return switch_model(session, head, rest)
+    return set_model(session, head, rest)
+
+
+def set_extraction_model(session: Session, provider: str, model: str) -> str:
+    """Save a model of its own for lore extraction — any the picker
+    lists, the story's included: saved, it stays when that one changes.
+    Remembered. Returns the confirmation; raises Refused for an unknown
+    provider or the model already saved."""
+    if provider not in session._providers.list():
+        raise Refused(f"Unknown provider {provider!r}.")
+    spec = f"{provider}/{model}"
+    if spec == f"{session.extraction_provider}/{session.extraction_model}":
+        raise Refused(f"Lore extraction already uses {spec}.")
+    session._update_state(extraction_model=spec)
+    return f"Lore extraction uses {spec}."
+
+
+def clear_extraction_model(session: Session) -> str:
+    """Forget the saved model: lore extraction uses the story's again.
+    Returns the confirmation; raises Refused when none is saved."""
+    if not session.extraction_model:
+        raise Refused("Lore extraction already uses the model you play with.")
+    session._update_state(extraction_model="")
+    return "Lore extraction uses the model you play with."
 
 
 def listed_spec(session: Session) -> str:
@@ -67,11 +90,22 @@ def listed_spec(session: Session) -> str:
     ":latest" tag, and a spec typed without the tag must still be
     found. The remembered spelling where the provider has not listed
     the model, and "" without one."""
-    client = session._client()
-    found = client.models.cached(session.model) if client is not None else None
-    if found is None:
-        return session.full_model_name
-    return f"{session.provider}/{found.name}"
+    return _listed(session, session.provider, session.model)
+
+
+def listed_extraction_spec(session: Session) -> str:
+    """The model saved for lore extraction as its provider lists it, by
+    `listed_spec`'s rule — the row a picker marks; "" while extraction
+    uses the story's model."""
+    return _listed(session, session.extraction_provider, session.extraction_model)
+
+
+def _listed(session: Session, provider: str, model: str) -> str:
+    if not model:
+        return ""
+    client = session._providers.get(provider)
+    found = client.models.cached(model) if client is not None else None
+    return f"{provider}/{found.name if found is not None else model}"
 
 
 @dataclass(frozen=True)

@@ -57,6 +57,7 @@ const state = {
   nextStory: 1,
   nextMessage: 1,
   model: "demo-model",
+  extraction: "", // "provider/model" pinned for lore extraction; "" = the model above
   settings: null, // seeded from the settings fixture; values live here
   storySettingDefaults: null, // every story's settings as a fresh story reads them
   storySettings: new Map(), // id → the settings a story changed, in the read's shape
@@ -106,6 +107,7 @@ export function facts(version) {
     version,
     model: state.model,
     provider: "demo",
+    extraction_model: state.extraction || `${PROVIDER}/${state.model}`,
     max_context: model ? model.max_context_catalogue : "",
     story: story ? label(story) : "",
     story_id: state.open,
@@ -202,7 +204,12 @@ export function providers(scope = "") {
   // now, the cloud catalogs after. The demo has no cloud half, and says
   // so with an empty second phase rather than doubled providers.
   if (scope === "cloud") {
-    return { current: `${PROVIDER}/${state.model}`, memory: memory().memory, providers: [] };
+    return {
+      current: `${PROVIDER}/${state.model}`,
+      extraction: state.extraction,
+      memory: memory().memory,
+      providers: [],
+    };
   }
   const all = allProviders();
   if (scope && scope !== "local") {
@@ -217,6 +224,7 @@ export function providers(scope = "") {
 function allProviders() {
   return {
     current: `${PROVIDER}/${state.model}`,
+    extraction: state.extraction,
     memory: memory().memory,
     providers: [
       {
@@ -665,6 +673,22 @@ export function switchModel(provider, model) {
   return say(`Switched to ${PROVIDER}/${state.model}.`);
 }
 
+// The model lore extraction uses, pinned or back to the model above —
+// the product's refusals and sentences (`backend.api.providers`).
+export function setExtractionModel(provider, model) {
+  if (provider !== PROVIDER) return refuse(`Unknown provider '${provider}'.`);
+  const spec = `${provider}/${model}`;
+  if (spec === state.extraction) return refuse(`Lore extraction already uses ${spec}.`);
+  state.extraction = spec;
+  return say(`Lore extraction uses ${spec}.`);
+}
+
+export function clearExtractionModel() {
+  if (!state.extraction) return refuse("Lore extraction already uses the model you play with.");
+  state.extraction = "";
+  return say("Lore extraction uses the model you play with.");
+}
+
 export function loadModel(model, wanted) {
   const row = MODELS.find((m) => m.name === model);
   if (!row || !CAPABILITIES.model_management) return refuse(`${PROVIDER} cannot load or unload models.`);
@@ -882,6 +906,9 @@ export function importCard(landed) {
     card: landed.card,
     history: "",
     updated_at: new Date().toISOString(),
+    // made by the card, as the product records it (`api.cards`)
+    provider: "card",
+    model: landed.fileName,
     journals: [],
   });
   story.persona = landed.persona;

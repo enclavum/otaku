@@ -15,7 +15,8 @@ as a FIELD LIST — one row per text (`LoreView.scene_fields` /
 `char_fields`; the view composes, this screen renders) — and Enter on a
 field edits it IN PLACE (Ctrl+S saves, Esc cancels). A journal row is
 the intersection of a scene and a character, so `o` pivots to the same
-entry through the other tab. The tools tab is the story's settings
+entry through the other tab. Del on a cast row deletes the character
+after a y/n confirm. The tools tab is the story's settings
 (`backend.story`), one row each — a checkbox and the name; Space
 checks and unchecks it — with the setting's fields in the panel beside:
 the notes' display, a reminder's text, a tool's instructions (its
@@ -58,6 +59,7 @@ from prompt_toolkit.key_binding import (
     KeyBindings,
     merge_key_bindings,
 )
+from prompt_toolkit.keys import Keys
 from prompt_toolkit.layout.containers import (
     AnyContainer,
     ConditionalContainer,
@@ -272,6 +274,8 @@ class Dossier(ListScreen):
         # which _RESUME_OPTIONS row is highlighted (fork is the default).
         self.confirming_resume: bool = False
         self.resume_choice: int = 0
+        # The delete confirm (Del on a cast row): up or not.
+        self.confirming_cast_delete: bool = False
 
         # A prompt open for editing: the tools panel is the editor alone
         # until Ctrl+S or Esc (`_start_edit` sets it, `_finish_edit` clears).
@@ -713,13 +717,10 @@ class Dossier(ListScreen):
                 out.append(("class:preview.body", "\n"))
             for line in wrap_text(m.template, width):
                 out.append(("class:preview.muted", line + "\n"))
-        # The model that generated THIS turn, dimmed and right-aligned —
-        # user turns have none (messages.model is NULL there) and show
-        # nothing.
-        if m.role == "assistant" and m.model:
-            label = f"{m.provider}/{m.model}" if m.provider else m.model
-            out.append(("class:preview.body", "\n"))
-            out.append(("class:preview.muted", label.rjust(width) + "\n"))
+        # The model that generated THIS turn — user turns have none
+        # (messages.model is NULL there) and show nothing.
+        if m.role == "assistant":
+            out += _made_by(m.provider, m.model, width)
         return out
 
     def _field_preview(self, width: int) -> StyleAndTextTuples:
@@ -760,6 +761,7 @@ class Dossier(ListScreen):
         if present:
             out.append(("class:preview.body", "\n"))
             out.append(("class:preview.muted", "present: " + ", ".join(present) + "\n"))
+        out += _made_by(s.provider, s.model, width)
         return out
 
     def _cast_preview(self, width: int) -> StyleAndTextTuples:
@@ -789,6 +791,7 @@ class Dossier(ListScreen):
         else:
             out.append(("class:preview.body", "\n"))
             out.append(("class:preview.muted", "(no journal yet)\n"))
+        out += _made_by(c.provider, c.model, width)
         return out
 
     def _tool_parts(self) -> tuple[list[_ToolField], list[_ToolField], _ToolField | None]:
@@ -886,6 +889,18 @@ class Dossier(ListScreen):
         out.append(("class:dialog.muted", "↑/↓ choose · enter confirm · esc cancel"))
         return out
 
+    def _cast_delete_text(self) -> StyleAndTextTuples:
+        """The confirm: the question naming the character, a blank row,
+        the keys."""
+        target = self._cast_target()
+        if target is None:
+            return []
+        return [
+            ("class:dialog.title", f"Delete {truncate(flatten(target.name), 50)}?\n"),
+            ("class:dialog.body", "\n"),
+            ("class:dialog.muted", "y to confirm     n / esc to cancel"),
+        ]
+
     def _help_text(self) -> StyleAndTextTuples:
         if self.editing:
             return [("class:help", " editing — ctrl+s save · esc cancel")]
@@ -933,6 +948,13 @@ class Dossier(ListScreen):
                     "class:help",
                     " ↑/↓ navigate · / filter · e edit · enter resume from this turn"
                     f" · ←/→ tabs · esc {back}",
+                )
+            ]
+        if self.tab == "cast":
+            return [
+                (
+                    "class:help",
+                    f" ↑/↓ navigate · / filter · enter open · del delete · ←/→ tabs · esc {back}",
                 )
             ]
         return [
@@ -1190,6 +1212,38 @@ class Dossier(ListScreen):
         its list again."""
         get_app().exit()
 
+    # ---------- a cast row's delete ----------
+
+    def _cast_target(self) -> Character | None:
+        """The character under the cast list's cursor; None anywhere else,
+        an open detail included."""
+        if not self.dossier_on or self.tab != "cast" or self.detail is not None:
+            return None
+        if not self.cast_f or self.view is None:
+            return None
+        return self.view.cast[self.cast_f[self.cursor]]
+
+    def _request_cast_delete(self) -> None:
+        self.notice = ""
+        if self._cast_target() is not None:
+            self.confirming_cast_delete = True
+
+    def _do_cast_delete(self) -> None:
+        """y on the confirm: the character through `backend.api.lore`,
+        then the memory and the cast's visible rows read again. A refusal
+        is kept in `notice`, drawn nowhere, and the row stays."""
+        self.confirming_cast_delete = False
+        target = self._cast_target()
+        if target is None:
+            return
+        try:
+            self.notice = api_lore.delete_character(self.session, target.id, self.story_id)
+        except Refused as e:
+            self.notice = str(e)
+            return
+        self._reload()
+        self._refilter()
+
     # ---------- the landings ----------
 
     def _do_resume(self) -> None:
@@ -1444,6 +1498,21 @@ class Dossier(ListScreen):
         def _choose_enter(event: Any) -> None:
             self._choose_place(confirm=True)
 
+        # While the delete confirm is up: only y/n/esc do anything.
+        deleting = Condition(lambda: self.confirming_cast_delete)
+
+        @kb.add("escape", eager=True, filter=deleting)
+        def _cast_delete_esc(event: Any) -> None:
+            self.confirming_cast_delete = False
+
+        @kb.add(Keys.Any, filter=deleting, eager=True)
+        def _cast_delete_any(event: Any) -> None:
+            key = latin_key(event.data) if event.data else ""
+            if key == "y":
+                self._do_cast_delete()
+            elif key == "n":
+                self.confirming_cast_delete = False
+
         # In the tools panel the arrows walk the setting's fields, not the
         # list; Enter, Space and Esc are the standard keys' and read
         # `in_panel` themselves.
@@ -1457,7 +1526,7 @@ class Dossier(ListScreen):
         def _field_down(event: Any) -> None:
             self._move_field(1)
 
-        idle = ~resuming & ~choosing & self._extra_idle()
+        idle = ~resuming & ~choosing & ~deleting & self._extra_idle()
         self._standard_keys(kb, when=idle & ~in_panel)
 
         # What the panel keeps of the standard keys: Enter acts on the
@@ -1496,6 +1565,20 @@ class Dossier(ListScreen):
         @kb.add("tab", filter=idle & in_dossier & on_tools_list)
         def _into_panel(event: Any) -> None:
             self._enter_panel()
+
+        # Del on a cast row asks to delete the character. The key macOS
+        # captions "delete" arrives as backspace, honoured wherever no
+        # filter is open for it to edit — after the standard keys, so it
+        # outranks their no-op, as on the story list.
+        on_cast_row = Condition(lambda: self._cast_target() is not None)
+
+        @kb.add("delete", filter=idle & on_cast_row)
+        def _cast_delete_key(event: Any) -> None:
+            self._request_cast_delete()
+
+        @kb.add("backspace", filter=idle & on_cast_row & Condition(lambda: not self.in_filter))
+        def _cast_delete_backspace(event: Any) -> None:
+            self._request_cast_delete()
 
         self._extra_keys(kb, idle)
 
@@ -1699,14 +1782,34 @@ class Dossier(ListScreen):
             ),
             filter=resuming,
         )
+        cast_delete_dialog = ConditionalContainer(
+            content=bordered_box(
+                FormattedTextControl(text=self._cast_delete_text, show_cursor=False),
+                width=D(min=44, max=70, preferred=60),
+                height=D.exact(7),
+                style="class:dialog.body",
+                border_style="class:dialog.border",
+            ),
+            filter=deleting,
+        )
 
         root = VSplit([left_pane, preview_side])
-        floats: list[AnyContainer] = [resume_dialog, *self._extra_floats()]
+        floats: list[AnyContainer] = [resume_dialog, cast_delete_dialog, *self._extra_floats()]
         return self._finish_app(root, bindings, _style(), floats=floats)
 
 
 def _checkbox(on: bool) -> str:
     return _CHECKED if on else _UNCHECKED
+
+
+def _made_by(provider: str | None, model: str | None, width: int) -> StyleAndTextTuples:
+    """Who made a turn, a scene or a character, closing its preview: after
+    a blank row, dimmed and right-aligned. Nothing without a model — a
+    row no pass made, or one made before anything recorded it."""
+    if not model:
+        return []
+    label = f"{provider}/{model}" if provider else model
+    return [("class:preview.body", "\n"), ("class:preview.muted", label.rjust(width) + "\n")]
 
 
 def _caption(text: str, lead: str, width: int) -> StyleAndTextTuples:

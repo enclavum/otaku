@@ -1,6 +1,7 @@
 """Providers and models, as the picker asks for them: the listing in its
 two phases, a provider's own, the machine's memory, a model switched,
-loaded or unloaded, a provider's fields saved."""
+loaded or unloaded, the model lore extraction uses pinned or unpinned,
+a provider's fields saved."""
 
 from typing import Any
 
@@ -119,6 +120,9 @@ def _providers(session: Session, scope: str = "") -> dict[str, Any]:
     return {
         # Under its listed name, which is how the page finds its row.
         "current": api_providers.listed_spec(session),
+        # The model pinned for lore extraction, listed the same way; ""
+        # while extraction follows the current one.
+        "extraction": api_providers.listed_extraction_spec(session),
         # The one machine fact a picker needs: loading a model is what
         # fills a machine up. Said below both frontends, so the terminal's
         # gauge and the page's are one sentence (`backend.meminfo`).
@@ -195,8 +199,12 @@ def _card(
     }
 
 
-def _switch_model(session: Session, ask: Ask) -> str:
-    return api_providers.switch_model(session, ask.need("provider"), ask.need("model"))
+def _set_model(session: Session, ask: Ask) -> str:
+    return api_providers.set_model(session, ask.need("provider"), ask.need("model"))
+
+
+def _set_extraction_model(session: Session, ask: Ask) -> str:
+    return api_providers.set_extraction_model(session, ask.need("provider"), ask.need("model"))
 
 
 def _load_model(session: Session, ask: Ask) -> str:
@@ -242,6 +250,10 @@ ROUTES: dict[tuple[str, str], Route] = {
     ),
     ("PATCH", "/api/providers/{provider}"): _save_provider,
     ("PATCH", "/api/providers/{provider}/models/{model}"): _load_model,
-    ("PUT", "/api/session/model"): _switch_model,
+    ("PUT", "/api/session/model"): _set_model,
+    ("PUT", "/api/session/extraction_model"): _set_extraction_model,
+    ("DELETE", "/api/session/extraction_model"): lambda session, ask: (
+        api_providers.clear_extraction_model(session)
+    ),
     ("GET", "/api/machine"): lambda session, ask: _memory(session),
 }

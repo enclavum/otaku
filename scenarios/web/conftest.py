@@ -253,7 +253,7 @@ def _serving(
             # A story that launches twice over one state dir finds the
             # model already remembered, which is a refusal and not a fault.
             with contextlib.suppress(Refused):
-                api_providers.switch_model(session, provider, MODEL)
+                api_providers.set_model(session, provider, MODEL)
             try:
                 serving.put(address(where))
                 serve(
