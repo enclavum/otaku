@@ -516,7 +516,7 @@
    "total_tokens": 1429,
    "used": 4
   },
-  "lede": "Context preview — the exact request to be sent. Context summary:\n\n  ~1,429 tokens · 4% of the 32,574 limit\n  system 73 · transcript 1,356\n  16 messages verbatim\n  2 pictures on the verbatim messages not sent: the model cannot see, or the file is gone",
+  "lede": "Context preview — the exact request to be sent. Context summary:\n\n  ~1,429 tokens projected · 4% of the 32,574 limit\n  system 73 · transcript 1,356\n  16 messages verbatim\n  2 pictures on the verbatim messages not sent: the model cannot see, or the file is gone",
   "note": "",
   "injections": [],
   "parts": [

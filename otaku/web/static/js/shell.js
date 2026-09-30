@@ -28,14 +28,18 @@ let drawn = null;
 // What the offline line says — needed in two places, so it is named once.
 const GONE = "otaku is down";
 
+// The provider line is drawn from two reads: the facts, and how full the
+// next request is ("85% of 64K", the backend's sentence; "" while
+// the window is not known) — each kept here, so either redraws the line.
+let providing = null;
+let fill = "";
+
 export function showFacts(facts) {
-  const provider = [facts.provider, facts.max_context && `${facts.max_context} context`]
-    .filter(Boolean)
-    .join(" · ");
+  providing = facts;
+  drawProvider();
   const fields = {
     version: `v${facts.version}`,
     model: facts.model,
-    provider: provider,
     story: label(facts.story) || "No story yet",
     turns: facts.turns ? `${facts.turns} messages` : "",
   };
@@ -70,7 +74,23 @@ export function showFacts(facts) {
 export async function refresh() {
   const facts = await api.facts();
   showFacts(facts);
-  await drawPlayed(facts.story_id);
+  await Promise.all([drawPlayed(facts.story_id), showContextUse()]);
+}
+
+/** How full the next request is, beside the provider — read again with
+    every landing, so after a turn, a switch, an undo. Its own read: the
+    facts stay cheap, and this one assembles the request. */
+export async function showContextUse() {
+  ({ text: fill } = await api.contextUse());
+  drawProvider();
+}
+
+function drawProvider() {
+  /* The provider, then how full the next request is — or, while that is
+     not known, the window alone, where the facts have it. */
+  if (!providing) return;
+  const text = [providing.provider, fill || providing.max_context].filter(Boolean).join(" · ");
+  for (const slot of $$('[data-fact="provider"]')) slot.textContent = text;
 }
 
 /** The transcript from the store: the turns, and — off the story's
@@ -95,11 +115,13 @@ export async function landed(notice, { redraw = "if-moved", corrected = null, ki
   const facts = await api.facts();
   const moved = facts.story_id !== drawn;
   showFacts(facts);
+  const using = showContextUse();
   if (redraw === "always" || (redraw === "if-moved" && moved)) {
     await drawPlayed(facts.story_id);
   } else if (corrected) {
     await showCorrected(...corrected);
   }
+  await using;
   tell(notice, kind);
 }
 

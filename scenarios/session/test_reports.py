@@ -3,10 +3,13 @@ counts the tokens spent, /info dumps what otaku knows."""
 
 import re
 
+import pytest
+
 from otaku.backend import InjectionPosition
 from otaku.backend.api import reports
 from otaku.backend.api import settings as api_settings
 from otaku.backend.api import stories as api_stories
+from otaku.backend.session import Refused
 from otaku.formatting import format_context
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch, set_config, set_config_provider
@@ -131,6 +134,60 @@ class TestContextInjections:
         app.play("/context")
         out = capsys.readouterr().out
         assert "  injected:\n  - questions (2nd last, ~" in out
+
+
+class TestContextUse:
+    """How full the next request is: the preview's own figure, against
+    the context the story is cut to, read after every turn — and nothing
+    while the model's window is not known."""
+
+    def test_the_figure_is_the_preview_s_own(self, tmp_path) -> None:
+        app, server = _loaded_ollama(tmp_path)
+        try:
+            for i in range(3):
+                app.play(f"Turn number {i}. " + "x" * 400)
+            use = reports.context_use(app.session)
+            assert use is not None
+            assert use.used == reports.context(app.session).used > 0
+            assert use.context == 32768
+        finally:
+            app.close()
+            server.close()
+
+    def test_the_cap_is_the_context_it_is_of(self, tmp_path) -> None:
+        app, server = _loaded_ollama(tmp_path, cap=16384)
+        try:
+            app.play("I knock at the gate.")
+            use = reports.context_use(app.session)
+            assert use is not None and use.context == 16384
+        finally:
+            app.close()
+            server.close()
+
+    def test_a_story_that_cannot_fit_reads_over_a_hundred(self, tmp_path) -> None:
+        # The preview refuses; the figure says by how much it does not fit.
+        app, server = _loaded_ollama(tmp_path, cap=2048)
+        try:
+            app.play("I knock at the gate.")
+            api_stories.set_system(app.session, "The valley. " * 1200, app.session.story_id)
+            use = reports.context_use(app.session)
+            assert use is not None and use.used > 100 and use.context == 2048
+            with pytest.raises(Refused):
+                reports.context(app.session)
+        finally:
+            app.close()
+            server.close()
+
+    def test_nothing_while_the_model_is_not_loaded(self, tmp_path) -> None:
+        # Ollama states the window a model runs under only while it runs;
+        # a figure against the assembler's stand-in would mislead.
+        app, server = _loaded_ollama(tmp_path)
+        server.loaded.clear()
+        try:
+            assert reports.context_use(app.session) is None
+        finally:
+            app.close()
+            server.close()
 
 
 class TestUsage:
@@ -342,3 +399,16 @@ def _llamacpp_rows(root, *, trained: int, window: int) -> dict[str, str]:
             app.close()
     finally:
         server.close()
+
+
+def _loaded_ollama(tmp_path, *, cap: int = 0) -> tuple[App, scripted.ModelServer]:
+    """A session on a scripted Ollama whose model is loaded with a 32K
+    window — the engine states its window only while it runs — and the
+    configured cap, 0 for none."""
+    server = scripted.ModelServer(managed=True)
+    server.contexts["test-model"] = 32768
+    server.loaded.add("test-model")
+    root = tmp_path / "state"
+    set_config(root, max_context=cap)
+    set_config_provider(root, server, name="ollama")
+    return launch(root, server, spec="ollama/test-model"), server

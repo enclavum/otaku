@@ -31,6 +31,7 @@ import threading
 from collections.abc import Callable, Iterator
 from typing import TextIO
 
+from otaku.formatting import truncate
 from otaku.terminal.tty import (
     DIM,
     ERASE_LINE,
@@ -57,22 +58,34 @@ def _terminal() -> TextIO:
 LABEL = " background task: "
 
 
-def render(status: str) -> str:
-    """The line's text — blank when idle. ONE owner, because the prompt
+def render(status: str, aside: str = "", width: int = 0) -> str:
+    """The line's text: what the background worker is doing — blank when
+    idle — and `aside` against the right edge of `width` columns, the
+    worker's words giving way where both do not fit. The last column
+    stays empty, so the row never wraps. ONE owner, because the prompt
     toolbar and this pinned row draw the same line on the same terminal
     row, and any difference between them shows up as the line twitching
     the moment a reply starts streaming."""
-    return f"{LABEL}{status}" if status else ""
+    left = f"{LABEL}{status}" if status else ""
+    room = width - 1
+    if not aside or room <= len(aside):
+        return left[: max(0, room)] if width else left
+    space = room - len(aside)
+    if len(left) > space - 2:
+        left = truncate(left, max(0, space - 2))
+    return left + " " * (space - len(left)) + aside
 
 
 class StatusLine:
-    """Reserves the bottom terminal row and paints `read()` into it.
-    Long-lived: the REPL builds one per session; `pinned()` holds the row
-    for a streaming window, and `refresh()` (safe from the worker thread)
-    is a no-op whenever the row isn't held."""
+    """Reserves the bottom terminal row and paints `read()` into it, with
+    `aside()` against its right edge. Long-lived: the REPL builds one per
+    session; `pinned()` holds the row for a streaming window, and
+    `refresh()` (safe from the worker thread) is a no-op whenever the row
+    isn't held."""
 
-    def __init__(self, read: Callable[[], str]) -> None:
+    def __init__(self, read: Callable[[], str], aside: Callable[[], str]) -> None:
         self._read = read
+        self._aside = aside
         self._lock = threading.Lock()
         self._rows = 0
         self._open = False
@@ -139,7 +152,7 @@ class StatusLine:
                 _terminal().write(
                     f"{SAVE_CURSOR}{SCROLL_ABOVE.format(self._rows - 1)}{RESTORE_CURSOR}"
                 )
-            body = render(self._read())[: max(0, size.columns - 1)]
+            body = render(self._read(), self._aside(), size.columns)
             _terminal().write(
                 f"{SAVE_CURSOR}{GOTO_ROW.format(self._rows)}{ERASE_LINE}{DIM}{body}{RESET}{RESTORE_CURSOR}"
             )

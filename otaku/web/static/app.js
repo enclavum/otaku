@@ -25,6 +25,7 @@ import {
   disconnected,
   drawPlayed,
   landed,
+  showContextUse,
   showFacts,
   watchServer,
   wireFullscreen,
@@ -54,7 +55,7 @@ async function boot() {
     ]);
     loadTable(language);
     showFacts(facts);
-    await drawPlayed(facts.story_id);
+    await Promise.all([drawPlayed(facts.story_id), showContextUse()]);
     primeHistory(history);
     disconnected(false);
   } catch {

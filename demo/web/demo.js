@@ -153,6 +153,7 @@ const ROUTES = {
           b.discard ? "truncate" : "resume",
         ),
   "GET /api/session/context": () => store.context(),
+  "GET /api/session/context_use": () => store.contextUse(),
   "GET /api/session/info": () => store.info(version),
   "GET /api/balance": () => store.balance(),
   "GET /api/usage": (p, q) => store.usage(q.get("scope") ?? ""),

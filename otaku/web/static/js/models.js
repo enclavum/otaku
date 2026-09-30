@@ -208,12 +208,12 @@ function modelRow(entry, { current, extraction }) {
   const lamp = span("otk-row__lamp", "");
   const managed = entry.provider.capabilities?.model_management;
   if (managed && entry.model.loaded) lamp.append(span("otk-dot otk-dot--sm", ""));
-  // The chosen model wears its tag right after its name, where the eye
-  // reads the name, not out past the figures — and the one pinned for
+  // The story's model wears its tag right after its name, where the eye
+  // reads the name, not out past the figures — and the one saved for
   // extraction its own.
   const spec = `${entry.provider.id}/${entry.model.name}`;
   const title = span("otk-row__title", entry.model.name);
-  if (spec === current) title.append(" ", span("otk-tag", "chosen"));
+  if (spec === current) title.append(" ", span("otk-tag", "story"));
   if (spec === extraction) title.append(" ", span("otk-tag", "extraction"));
   const button = row(
     lamp,

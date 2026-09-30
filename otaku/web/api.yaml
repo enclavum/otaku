@@ -1231,6 +1231,33 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ContextReport" }
 
+  /api/session/context_use:
+    get:
+      operationId: getSessionContextUse
+      tags: [Session]
+      summary: How full the next request is
+      description: |
+        The context preview's own figure — `ContextReport.shape.used`, the
+        percent of the limit — and the context the story is cut to, with
+        the sentence the page shows. Over 100 where the story cannot fit
+        even fully summarized. Nulls and "" while the model's window is
+        not known: no model, a model not loaded, a catalog that has not
+        answered. Asks a local engine for the window; nothing across the
+        internet.
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: The figure and its sentence.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [used, context, text]
+                properties:
+                  used: { type: [integer, "null"], description: "Percent of the limit." }
+                  context: { type: [integer, "null"], description: "The context in force, in tokens." }
+                  text: { type: string, description: '"85% of 128K"; "" while the window is not known.' }
+
   /api/session/info:
     get:
       operationId: getSessionInfo
@@ -1859,11 +1886,11 @@ components:
                 prompt_tokens: { type: integer, nullable: true }
                 cached_tokens: { type: integer, nullable: true }
                 completion_tokens: { type: integer, nullable: true }
-                max_context: { type: integer, nullable: true, description: "The context the prompt was measured against." }
+                max_context: { type: integer, nullable: true, description: "The context the prompt was cut to: the model's window under the configured cap; null while the window is not known." }
                 finish_reason: { type: string, nullable: true, description: 'Why the model stopped, in the wire''s word: "stop", "length", …; null where it said none.' }
                 truncated: { type: boolean, description: "Derived: the reply was cut at the reply limit." }
                 rate: { type: number, nullable: true, description: "Derived: tokens per second over the generation alone." }
-                context_used: { type: integer, nullable: true, description: "Derived: percent of the context the prompt took." }
+                context_used: { type: integer, nullable: true, description: "Derived: percent of that context the prompt actually took, by the engine's own count." }
 
     PreparedCard:
       type: object

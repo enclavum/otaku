@@ -66,7 +66,7 @@ cancelled picker leaves the screen exactly as it was.
 
 import contextlib
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from typing import TextIO, cast
 
 from otaku.terminal.tty import CLEAR_SCREEN, break_rule, user_block
@@ -86,7 +86,11 @@ class ScreenLedger:
     (past sys.stdout) and are cursor-neutral, so they stay outside the
     count by construction."""
 
-    def __init__(self) -> None:
+    def __init__(self, repaint: Callable[[], None] = lambda: None) -> None:
+        # What stands on the pinned status row is painted again after an
+        # erase: an erase to the end of the screen ignores the scroll
+        # region and takes that row too.
+        self._repaint = repaint
         # Rows the current submission's typed input still occupies on
         # screen — fed by `typed`, consumed by the echo and the erases,
         # dropped by `typed_gone`, ended by `gap`.
@@ -146,6 +150,8 @@ class ScreenLedger:
         erase = _ERASE_UP.format(self._typed_rows) if self._typed_rows else ""
         sys.stdout.write(f"{erase}{block}\n\n")
         sys.stdout.flush()
+        if erase:
+            self._repaint()
         self.note_printed(block + "\n\n")
         entry = _Exchange(measure(block + "\n", width), width)
         if above:
@@ -183,6 +189,8 @@ class ScreenLedger:
             self._tail = ""
         self._pending = 0
         sys.stdout.flush()
+        if rows:
+            self._repaint()
         entry = _Exchange(0, width)
         entry.flow = True
         entry.inline = inline
@@ -554,6 +562,7 @@ class ScreenLedger:
         self._lead_blank = False  # the typed line goes; nothing prints under it
         sys.stdout.write(_ERASE_FROM.format(rows, column) if column else _ERASE_UP.format(rows))
         sys.stdout.flush()
+        self._repaint()
         return True
 
     def _rewound(self, entry: "_Exchange") -> None:

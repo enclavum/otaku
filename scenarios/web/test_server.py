@@ -169,6 +169,22 @@ class TestReading:
         made = [(c["provider"], c["model"]) for c in memory["characters"]]
         assert made == [("card", "maren.png"), (None, None)]
 
+    def test_the_context_use_is_the_preview_s_own_figure(self, tmp_path: Path) -> None:
+        # Absent while the model is not loaded; once a turn loaded it, the
+        # figure /context reports, against the model's window.
+        engine = ModelServer(managed=True)
+        engine.contexts["test-model"] = 32768
+        try:
+            with serving(engine, tmp_path, provider="ollama") as page:
+                unknown = page.get("/api/session/context_use")
+                assert unknown == {"used": None, "context": None, "text": ""}
+                page.play("I listen at the culvert mouth.")
+                use = page.get("/api/session/context_use")
+                assert use["used"] == page.get("/api/session/context")["shape"]["used"]
+                assert use["context"] == 32768 and use["text"]
+        finally:
+            engine.close()
+
     def test_the_turns_are_the_story_as_the_store_has_it(self, page: Page) -> None:
         page.play("I listen at the culvert mouth.")
         story = page.get("/api/session")["story_id"]

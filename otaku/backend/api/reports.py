@@ -18,6 +18,7 @@ from otaku.context.assembler import (
     IMAGE_TOKENS,
     AssembledPrompt,
     ContextOverflowError,
+    context_in_force,
     estimate_tokens,
 )
 from otaku.formatting import (
@@ -32,6 +33,7 @@ from otaku.providers import (
     ALL_CLIENTS,
     Locality,
     ModelCapabilities,
+    ModelInfo,
     ModelState,
     reasoning,
     templates,
@@ -136,12 +138,59 @@ def context(session: Session) -> ContextReport:
     says so."""
     client = session._client()
     found = client.models.get(session.model) if client is not None else None
-    max_context = found.max_context if found else None
     try:
-        prompt = session.assemble(max_context)
+        return _preview(session, found)
     except ContextOverflowError as e:
         # The preview of a request that would not be sent is its refusal.
         raise Refused(str(e)) from e
+
+
+@dataclass(frozen=True)
+class ContextUse:
+    """How full the next request is, as `/context` measures it: `used`,
+    its percent of the limit — over 100 where the story cannot fit even
+    fully summarized — and `context`, the window the story is cut to."""
+
+    used: int
+    context: int
+
+    def text(self) -> str:
+        return f"{self.used}% of {format_context(self.context)}"
+
+
+def context_use(session: Session) -> ContextUse | None:
+    """How full the next request is — `context`'s own figure, read after
+    every turn. None while the window is not known (no model, a model
+    not loaded, a catalog that has not answered): a figure against the
+    assembler's stand-in would mislead. Never waits on the internet — a
+    local engine is asked, as the header asks it, and anything else
+    answers from what is cached."""
+    client = session._client()
+    if client is None:
+        return None
+    try:
+        if client.locality_of(session.model) is Locality.LOCAL:
+            found = client.models.get(session.model)
+        else:
+            found = client.models.cached(session.model)
+    except Exception:
+        return None
+    window = found.max_context if found is not None else None
+    if not window:
+        return None
+    try:
+        report = _preview(session, found)
+    except ContextOverflowError as e:
+        return ContextUse(round(100 * e.tokens / e.limit) if e.limit else 0, e.context)
+    return ContextUse(report.used, context_in_force(window, session.max_context_setting))
+
+
+def _preview(session: Session, found: ModelInfo | None) -> ContextReport:
+    """`context`'s report over the model's row as the caller found it —
+    the one computation both reports read their figure from. Raises
+    `ContextOverflowError` for a story that cannot fit."""
+    max_context = found.max_context if found else None
+    prompt = session.assemble(max_context)
     cold = (
         found is not None
         and max_context is None
@@ -670,7 +719,8 @@ def _summary(report: ContextReport) -> str:
     prompt = report.prompt
     lines = ["Context preview — the exact request to be sent. Context summary:", ""]
     lines.append(
-        f"  ~{report.total_tokens:,} tokens · {report.used}% of the {prompt.limit:,} limit"
+        f"  ~{report.total_tokens:,} tokens projected · "
+        f"{report.used}% of the {prompt.limit:,} limit"
     )
     if report.wire:
         lines.append(f"  text wire: one text, in the {report.template} template")

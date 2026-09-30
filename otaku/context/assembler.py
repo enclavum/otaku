@@ -85,7 +85,15 @@ _TAIL_FLOOR = 50
 
 class ContextOverflowError(Exception):
     """Case 6: the story cannot fit the limit even fully degraded. The
-    message is the sentence to show."""
+    message is the sentence to show; the figures that did not meet ride
+    with it — `tokens` the smallest the story gets, `limit` what it had
+    to fit (the context less the reply's reserve), `context` the window."""
+
+    def __init__(self, message: str, *, tokens: int, limit: int, context: int) -> None:
+        super().__init__(message)
+        self.tokens = tokens
+        self.limit = limit
+        self.context = context
 
 
 class PromptTexts(Protocol):
@@ -350,7 +358,10 @@ def assemble_story(
         f"The story does not fit the context limit: it needs {prompt.total_tokens:,} tokens even "
         f"fully summarized and with the tail reduced, and the context is {shape.max_context:,} "
         f"tokens — "
-        f"raise it or run /extract to close more scenes."
+        f"raise it or run /extract to close more scenes.",
+        tokens=prompt.total_tokens,
+        limit=limit,
+        context=shape.max_context,
     )
 
 

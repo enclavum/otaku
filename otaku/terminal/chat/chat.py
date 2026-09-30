@@ -36,16 +36,22 @@ class Chat:
     # reply where the text ended (`stream.show`). Set by the loop for
     # the one submission, cleared with it.
     continuing: bool
+    # How full the next request is, as the status row shows it on its
+    # right ("85% of 128K"); "" while the window is not known.
+    # Read again by the loop before every prompt.
+    context_use: str
 
     def __init__(self, session: Session) -> None:
         self.session = session
-        self.ledger = ScreenLedger()
         self.quit = False
         self.continuing = False
+        self.context_use = ""
         # One renderer for the prompt's toolbar and the pinned row, both
-        # reading the same channel, so the line never twitches at the
+        # reading the same channels, so the line never twitches at the
         # streaming handoff.
-        self.status_line = StatusLine(session.status)
+        self.status_line = StatusLine(session.status, lambda: self.context_use)
+        # An erase the ledger makes mid-stream takes the pinned row with it.
+        self.ledger = ScreenLedger(repaint=self.status_line.refresh)
 
     @property
     def notes_displayed(self) -> bool:

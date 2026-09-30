@@ -97,6 +97,19 @@ the same rows — `text()` is what a terminal shows, not a summary of the
 object. A frontend that parses a report's text back into fields has
 taken the wrong half.
 
+How full the next request is — `reports.context_use`, `/context`'s own
+`used` figure, over 100 where the story cannot fit (the overflow refusal,
+`ContextOverflowError`, carries its figures) — is shown by both frontends
+after every landing: on the terminal's status row, against the right
+edge (read again before each prompt), and on the page's provider line
+in place of the window (`GET /api/session/context_use`, read with every
+`landed`; one line, cut with an ellipsis). It
+never asks across the internet, and shows nothing while the model's
+window is not known. It is the PROJECTED figure, and `/context` says so;
+the verbose line's `actual ctx` is the engine's own count of the request
+just sent (`ReplyReport.context_used`), against the same context — the
+model's window under the configured cap.
+
 A frontend reads ONE settings slice and only its own, and reads it off
 the SESSION rather than the file. Every setting is cut into a typed slice
 in `settings.config`: the terminal's looks arrive as `session.terminal`,
@@ -787,7 +800,10 @@ quiet fall back to the play model. The worker's `Job` carries both, by
 the session's convention: the pass asks `extraction_model`, the warm-up
 the story's `model`, and the warm-up also runs after any pass that
 asked a model other than the story's (on one engine it may have pushed
-the story's model out of memory).
+the story's model out of memory). The cloud prompt marker
+(`Session.on_cloud`) lights for either model on a hosted catalog — the
+extraction model's only while idle extraction is on, since otherwise the
+story leaves only when a pass is asked for.
 
 One state-dir DIRECTORY is the user's alone and the app never writes in
 it: `web/`, holding `custom.css` (loaded last by the web frontend, so

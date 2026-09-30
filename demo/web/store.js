@@ -103,6 +103,12 @@ export function seed(fixtures) {
 export function facts(version) {
   const story = state.stories.get(state.open);
   const model = MODELS.find((m) => m.name === state.model);
+  // With no story open, the settings a first turn would make it with.
+  const held = story ? _settingsOf(state.open) : state.storySettingDefaults;
+  const transcript = held?.find((s) => s.name === "transcript")?.transcript ?? "manuscript";
+  const canCompleteText = Boolean(
+    model?.capabilities.text_completion && model?.text_template === "plain",
+  );
   return {
     version,
     model: state.model,
@@ -114,18 +120,14 @@ export function facts(version) {
     turns: story ? story.turns.length : 0,
     // The demo's model cannot see: no attach button, no pictures anywhere.
     can_attach: false,
-    // The mode the story is played in, derived as the backend derives it
-    // (`backend.story.StoryMode`): the canvas layout on a model with the text wire.
-    story_mode:
-      story &&
-      _settingsOf(state.open).find((s) => s.name === "layout")?.layout === "canvas" &&
-      model?.capabilities.text_completion &&
-      model?.text_template
-        ? "story"
-        : "chat",
-    // story mode needs the text wire and a known template: the demo's
-    // model has neither, so canvas stays a layout here
-    is_story_mode_ready: Boolean(model?.capabilities.text_completion && model?.text_template),
+    // The wire and the look, derived from the story's transcript as the
+    // backend derives them (`schema.Transcript`): the novel is drawn as
+    // the canvas, and goes over the text wire only on a model that
+    // continues a bare text — its engine's text completion and a `plain`
+    // template (`Session.can_complete_text`) — which the demo's is not.
+    completion_type: transcript === "novel" && canCompleteText ? "text" : "chat",
+    layout: transcript === "novel" ? "canvas" : transcript,
+    can_complete_text: canCompleteText,
   };
 }
 
@@ -296,7 +298,7 @@ export function context() {
   const used = Math.round((100 * total) / LIMIT);
   const lede =
     "Context preview — the exact request to be sent. Context summary:\n\n" +
-    `  ~${total.toLocaleString("en-US")} tokens · ${used}% of the ${LIMIT.toLocaleString("en-US")} limit\n` +
+    `  ~${total.toLocaleString("en-US")} tokens projected · ${used}% of the ${LIMIT.toLocaleString("en-US")} limit\n` +
     (systemTokens ? `  system ${systemTokens.toLocaleString("en-US")} · transcript ${transcript.toLocaleString("en-US")}\n` : "") +
     `  ${bodies.length} messages verbatim`;
   return {
@@ -326,6 +328,14 @@ export function context() {
       ...bodies.map((t) => ({ role: t.role, body: t.body })),
     ],
   };
+}
+
+// How full the next request is: the preview's own figure over the
+// demo model's window, and the sentence (`reports.ContextUse.text`).
+export function contextUse() {
+  const { shape } = context();
+  const size = WINDOW >= 1024 ? `${Math.round(WINDOW / 1024)}K` : String(WINDOW);
+  return { used: shape.used, context: WINDOW, text: `${shape.used}% of ${size}` };
 }
 
 export function usage(scope) {
@@ -512,6 +522,12 @@ export function updateSetting(storyId, name, body) {
     const known = settings.map((s) => s.name).join(", ");
     return refuse(`Unknown setting '${name}'. Settings: ${known}.`);
   }
+  // the transcript setting is the one that holds a transcript: a value,
+  // not a switch — its switch refused before anything else, as there
+  const holdsTranscript = setting.transcript != null;
+  if (holdsTranscript && body.enabled != null) {
+    return refuse(`${setting.label} has no switch: a story is always read in one.`);
+  }
   if (body.position != null) {
     if (!setting.allowed_positions.length) {
       return refuse(`${setting.label} has no position: it injects nothing.`);
@@ -528,17 +544,13 @@ export function updateSetting(storyId, name, body) {
   if (body.display_notes != null && setting.display_notes === null) {
     return refuse(`${setting.label} has nothing to display.`);
   }
-  // the layout setting is the one that holds a layout: a value, not a switch
-  const holdsLayout = setting.layout != null;
-  if (body.layout != null && !holdsLayout) {
-    return refuse(`${setting.label} has no layout.`);
+  if (body.transcript != null && !holdsTranscript) {
+    return refuse(`${setting.label} has no transcript.`);
   }
-  if (holdsLayout) {
-    if (body.enabled != null) {
-      return refuse(`${setting.label} has no switch: a story is always read in one.`);
-    }
-    if (body.layout != null) setting.layout = body.layout;
-    return say(`${setting.label}: ${setting.layout}`); // `StorySettingLayout.standing`, no full stop
+  if (holdsTranscript) {
+    if (body.transcript != null) setting.transcript = body.transcript;
+    // `StorySettingTranscript.standing`: a caption, no full stop
+    return say(`${setting.label}: ${setting.transcript}`);
   }
   if (body.display_notes != null) setting.display_notes = body.display_notes;
   if (body.enabled != null) setting.enabled = body.enabled;
@@ -547,8 +559,12 @@ export function updateSetting(storyId, name, body) {
   if (!setting.enabled) return say(`${setting.label}: off.`);
   if (setting.position === null) return say(`${setting.label}: on.`);
   if (setting.position === "system") return say(`${setting.label}: on, in the system message.`);
-  const back = -setting.position;
-  return say(`${setting.label}: on, ${back} message${back === 1 ? "" : "s"} from the end.`);
+  // before which of the reader's messages, counted from the end
+  // (`StorySetting.standing`)
+  const depth = setting.position;
+  if (depth === 1) return say(`${setting.label}: on, before your latest message.`);
+  if (depth === 2) return say(`${setting.label}: on, before your previous message.`);
+  return say(`${setting.label}: on, before your ${depth}${depth === 3 ? "rd" : "th"}-last message.`);
 }
 
 export function sharedReminder() {

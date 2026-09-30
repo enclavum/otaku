@@ -263,10 +263,12 @@ def build_prompt(
     assembler: LineAssembler,
     *,
     shortcuts: Mapping[str, tuple[str, str]],
+    aside: Callable[[], str],
 ) -> tuple[PromptSession[str], AnswerMenu]:
     """The assembled prompt session and the answer menu it draws above
     its line: history, menu, style, the activity toolbar reading
-    `session.status()`, and the shortcut keybindings —
+    `session.status()` with `aside()` against its right edge, and the
+    shortcut keybindings —
     `shortcuts` maps a command token to its key in both spellings, the
     binding form and the menu caption (`chat.bindings.SHORTCUTS` passed
     as data, not an import: the prompt sits below the chat surface).
@@ -305,7 +307,7 @@ def build_prompt(
         enable_history_search=False,
         style=_prompt_style(),
         cursor=CursorShape.BLINKING_BEAM,
-        bottom_toolbar=_activity_toolbar(session),
+        bottom_toolbar=_activity_toolbar(session, aside),
     )
     # Snappy Esc for closing the command menu — the 0.5s default delay makes
     # the close feel broken.
@@ -380,16 +382,18 @@ def _prompt_style() -> Style:
     )
 
 
-def _activity_toolbar(session: Session) -> Callable[[], FormattedText]:
+def _activity_toolbar(session: Session, aside: Callable[[], str]) -> Callable[[], FormattedText]:
     """The prompt's activity line: what the background worker is doing, or
-    blank when idle. Always present — the row is reserved for the whole
-    prompt, so it never reflows the screen. `statusline.render`, not a
-    local format string: the pinned row draws the same line on the same
-    terminal row, and any difference shows as a twitch when a reply starts
-    streaming."""
+    blank when idle, and `aside()` against the right edge. Always present —
+    the row is reserved for the whole prompt, so it never reflows the
+    screen. `statusline.render`, not a local format string: the pinned row
+    draws the same line on the same terminal row, and any difference shows
+    as a twitch when a reply starts streaming."""
 
     def render() -> FormattedText:
-        return FormattedText([("class:bottom-toolbar.text", statusline.render(session.status()))])
+        width = get_app().output.get_size().columns
+        line = statusline.render(session.status(), aside(), width)
+        return FormattedText([("class:bottom-toolbar.text", line)])
 
     return render
 

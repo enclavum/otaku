@@ -344,6 +344,17 @@ class TestRejected:
         with pytest.raises(ContextOverflowError):
             assemble("", rows, 2048, head_messages=5, min_tail_messages=10)
 
+    def test_the_refusal_carries_the_figures_that_did_not_meet(self) -> None:
+        # The smallest the story gets, the limit it had to fit and the
+        # window — numbers a status can show as a percent over 100.
+        rows = [user(f"turn {i}. " + "x" * 400, message_id=i) for i in range(1, 41)]
+        with pytest.raises(ContextOverflowError) as caught:
+            assemble("", rows, 2048, head_messages=5, min_tail_messages=10)
+        refusal = caught.value
+        assert refusal.context == 2048
+        assert 0 < refusal.limit < refusal.context
+        assert refusal.tokens > refusal.limit
+
 
 class TestWirePromise:
     """Cross-case: the model sees the stored messages and nothing the

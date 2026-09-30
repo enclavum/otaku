@@ -226,6 +226,8 @@ export const facts = () => get("/api/session");
 export const setHead = (story, message, discard = false) =>
   put("/api/session/head", { story, message, discard });
 export const context = () => get("/api/session/context");
+// How full the next request is, and its sentence; "" while the window is unknown.
+export const contextUse = () => get("/api/session/context_use");
 export const info = () => get("/api/session/info");
 export const balance = () => get("/api/balance");
 // The slip's first paint: the roster costs no network — rows and notes

@@ -17,6 +17,7 @@ import pytest
 
 from otaku.backend import CompletionType, Transcript
 from otaku.backend import launch as backend_launch
+from otaku.backend.api import play as api_play
 from otaku.backend.api import providers as api_providers
 from otaku.backend.api import reports
 from otaku.backend.api import settings as api_settings
@@ -29,7 +30,7 @@ from otaku.terminal.chat import stream
 from otaku.terminal.screens import models as screen_models
 from otaku.terminal.tty import clipboard
 from scenarios.support import server as scripted
-from scenarios.support.harness import App, launch, set_config_provider
+from scenarios.support.harness import App, launch, set_config, set_config_provider
 from scenarios.support.screens import CTRL_V, ENTER, ESC, pasted, run_screen
 from scenarios.support.server import ModelServer
 
@@ -174,6 +175,25 @@ class TestExtractionModel:
         story_id = app.session.story_id
         made = {(s.provider, s.model) for s in app.store.scenes.list(story_id)}
         assert made == {("generic", "extract-model")}
+
+    def test_a_hosted_extraction_model_lights_the_cloud_marker(
+        self, server: ModelServer, tmp_path
+    ) -> None:
+        # What is typed leaves the machine on the next idle pass: the
+        # marker says so while idle extraction runs, and nothing is known
+        # to leave while it is off.
+        for enabled in (True, False):
+            root = tmp_path / str(enabled) / "state"
+            set_config(root, lore_enabled=enabled)
+            set_config_provider(root, server, name="llamacpp")
+            set_config_provider(root, server, name="openrouter")
+            app = launch(root, server, spec="llamacpp/test-model")
+            try:
+                assert not app.session.on_cloud
+                api_providers.set_extraction_model(app.session, "openrouter", "cloud-model")
+                assert app.session.on_cloud is enabled
+            finally:
+                app.close()
 
     def test_the_picker_marks_only_a_saved_model(self, app: App) -> None:
         assert api_providers.listed_extraction_spec(app.session) == ""
@@ -873,6 +893,25 @@ class TestMaxContext:
         relaunched = launch(app.paths.root, app.server)
         assert relaunched.session.max_context_setting == 32000
         relaunched.close()
+
+    def test_a_reply_is_measured_against_the_capped_context(self, tmp_path) -> None:
+        # The reply's report — the verbose line's actual share — divides by
+        # what the story was cut to, the cap included, not the whole window.
+        engine = ModelServer(managed=True)
+        engine.contexts["test-model"] = 32768
+        try:
+            root = tmp_path / "state"
+            set_config(root, max_context=16384)
+            set_config_provider(root, engine, name="ollama")
+            app = launch(root, engine, spec="ollama/test-model")
+            try:
+                events = api_play.submit(app.session, "I knock at the gate.")
+                done = next(e for e in events if isinstance(e, api_play.Done))
+                assert done.report is not None and done.report.max_context == 16384
+            finally:
+                app.close()
+        finally:
+            engine.close()
 
     def test_a_bare_set_reports_and_changes_nothing(self, app: App, capsys) -> None:
         # Reported against a value the story SET, not against the

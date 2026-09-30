@@ -42,6 +42,7 @@ from otaku.context.assembler import (
     AssembledPrompt,
     ContextOverflowError,
     JoinType,
+    context_in_force,
     join_of,
     seam_of,
 )
@@ -162,7 +163,7 @@ class ReplyReport:
     and `notice` the sentence that says so, "" otherwise."""
 
     stats: Stats
-    max_context: int | None
+    max_context: int | None  # the context the prompt was cut to: the window, under the cap
 
     @property
     def truncated(self) -> bool:
@@ -184,8 +185,9 @@ class ReplyReport:
 
     @property
     def context_used(self) -> int | None:
-        """Percent of the context the prompt took; None where either
-        figure is unknown."""
+        """Percent of the context the prompt ACTUALLY took — the engine's
+        own count of it, where `/context` projects the next one; None
+        where either figure is unknown."""
         if self.stats.prompt_tokens is None or not self.max_context:
             return None
         return round(100 * self.stats.prompt_tokens / self.max_context)
@@ -193,7 +195,7 @@ class ReplyReport:
     def text(self) -> str:
         """The verbose stats line:
 
-            [ total 1.3s, prompt 40 tok, eval 37 tok @ 35.2 tok/s, ctx 12% / 32K ]
+            [ total 1.3s, prompt 40 tok, eval 37 tok @ 35.2 tok/s, actual ctx 12% / 32K ]
 
         `total` is wall-clock for the whole request; the rate is over
         the decode-only span, so it reflects generation speed. Fields
@@ -213,7 +215,7 @@ class ReplyReport:
                 + (f" @ {rate:.1f} tok/s" if rate is not None else "")
             )
         if self.context_used is not None:
-            parts.append(f"ctx {self.context_used}% / {format_context(self.max_context)}")
+            parts.append(f"actual ctx {self.context_used}% / {format_context(self.max_context)}")
         return f"[ {', '.join(parts)} ]"
 
 
@@ -567,7 +569,10 @@ def _reply_events(
         if tool_call is None or tool_call.actor is not Actor.SYSTEM or reply is None:
             break
         yield ToolTurn(_land_tool_turn(session, tool_call), _join_of_last(session))
-    report = ReplyReport(final, max_context) if final is not None else None
+    # Measured against what the story was cut to: the model's window under
+    # the configured cap — unknown with the window.
+    in_force = context_in_force(max_context, session.max_context_setting) if max_context else None
+    report = ReplyReport(final, in_force) if final is not None else None
     stats = report.text() if session.verbose and report is not None else ""
     yield Done(report=report, stats=stats)
 

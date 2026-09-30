@@ -1523,7 +1523,7 @@ class Prompting:
     def drive(self, *strokes: str, top_row: bool = False) -> str:
         with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
             self.session, answers = build_prompt(
-                self.app.session, Carry(), LineAssembler(), shortcuts=SHORTCUTS
+                self.app.session, Carry(), LineAssembler(), shortcuts=SHORTCUTS, aside=lambda: ""
             )
             answers.top_row = top_row
 

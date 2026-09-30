@@ -45,7 +45,7 @@ export async function openContext() {
   const lead = element("span", "otk-context__lead");
   lead.append(
     span("otk-context__figure", `~${count(shape.total_tokens)}`),
-    span("otk-label", "tokens"),
+    span("otk-label", "tokens projected"),
   );
   summary.append(lead, span("otk-meta", `${shape.used}% of ${count(shape.limit)}`));
   summary.append(
@@ -101,7 +101,7 @@ export async function openContext() {
   }
 
   body.replaceChildren(head, wire);
-  footnote(popup, `~${count(shape.total_tokens)} of ${count(shape.limit)} tokens`);
+  footnote(popup, `~${count(shape.total_tokens)} of ${count(shape.limit)} tokens projected`);
   body.focus();
 }
 

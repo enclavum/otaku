@@ -17,6 +17,7 @@ import sys
 
 from otaku.backend import Layout
 from otaku.backend.api import play as api_play
+from otaku.backend.api import reports as api_reports
 from otaku.backend.api import stories as api_stories
 from otaku.backend.session import Refused, Session
 from otaku.console import banner
@@ -89,7 +90,9 @@ def run(session: Session) -> None:
         )
     carry = Carry()
     assembler = LineAssembler()
-    prompt_session, answers = build_prompt(session, carry, assembler, shortcuts=bindings.SHORTCUTS)
+    prompt_session, answers = build_prompt(
+        session, carry, assembler, shortcuts=bindings.SHORTCUTS, aside=lambda: chat.context_use
+    )
 
     if session.notice:
         # The one bold hint, above the resumed story: a story that ends on
@@ -138,6 +141,11 @@ def run(session: Session) -> None:
     session.start_worker()
 
     while not chat.quit:
+        # How full the next request is, read again before every prompt —
+        # so after a turn, a story switch, an undo, a switched model —
+        # and drawn on the status row's right until the next one.
+        use = api_reports.context_use(session)
+        chat.context_use = use.text() if use is not None else ""
         # The marker carries the cloud, not the hint: the hint goes at
         # the first keystroke, which is exactly when the text is being
         # written to leave the machine.

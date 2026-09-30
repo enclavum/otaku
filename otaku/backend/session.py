@@ -228,12 +228,21 @@ class Session:
 
     @property
     def on_cloud(self) -> bool:
-        """Whether the story is played against a hosted catalog — the
-        prompt marker's question, answered per turn. The generic provider
-        is not one: its url could name a catalog, but the marker says
-        what is known, not what might be."""
+        """Whether what is typed leaves this machine — the prompt marker's
+        question, answered per turn: the story is played against a hosted
+        catalog, or lore extraction, running on idle, asks one. With idle
+        extraction off the story leaves only when a pass is asked for, so
+        its model says nothing here. The generic provider is not one: its
+        url could name a catalog, but the marker says what is known, not
+        what might be."""
         client = self._client()
-        return client is not None and client.locality_of(self.model) is Locality.REMOTE
+        if client is not None and client.locality_of(self.model) is Locality.REMOTE:
+            return True
+        if not self._config.lore_enabled:
+            return False
+        extraction = self._extraction_client()
+        model = self._extraction_spec()[1]
+        return extraction is not None and extraction.locality_of(model) is Locality.REMOTE
 
     @property
     def model(self) -> str:
