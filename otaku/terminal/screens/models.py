@@ -20,8 +20,8 @@ panel naming what is still loading. The user can:
     - press Esc to leave without picking.
 
 Loaded models render bold; not-loaded muted. The story's model reads
-"(story)" after its name and the one saved for extraction "(extraction)",
-both on a model that is both. The cursor restores to the last-used model
+"[ writing ]" against its figures and the one saved for extraction
+"[ extraction ]", both on a model that is both. The cursor restores to the last-used model
 on open. A provider without load/unload serves its models
 statically: they all show as loaded, Enter picks them directly, and the
 l/u keys (and their help entries) disappear on such a row.
@@ -149,6 +149,11 @@ _KEY_CAPTIONS = {KeySource.CONFIG: "(set)", KeySource.ENV: "(from environment)",
 # to a stub on a pane too narrow to hold one, because a row wider than
 # the pane would wrap, and the scroll maths counts one line per model.
 _ROW_PREFIX = 4
+# The fewest columns a name keeps beside its marks ("[ writing ]"):
+# on a pane narrower than that the marks give way — the name is what
+# tells the row.
+_MIN_NAME = 8
+_MARK_GAP = 4
 _SIZE_COL = 8
 _CONTEXT_COL = 4
 _COL_GAP = 3
@@ -315,17 +320,16 @@ class ModelPicker(ListScreen):
         tail = _COL_GAP + _SIZE_COL + _COL_GAP + _CONTEXT_COL
         return max(0, self._row_width() - _ROW_PREFIX - tail)
 
-    def _label(self, entry: ModelEntry, story: str, pinned: str) -> str:
-        """A row's name cut to its column, then what the model is to the
-        session — "(story)", "(extraction)", or both — the name giving way
-        so the mark stays."""
+    def _marks(self, entry: ModelEntry, story: str, pinned: str) -> str:
+        """What the model is to the session — "[ writing ]",
+        "[ extraction ]", or both — standing against the figures; "" for
+        neither."""
         roles = [
             role
-            for role, spec in (("story", story), ("extraction", pinned))
+            for role, spec in (("writing", story), ("extraction", pinned))
             if spec == entry.full_spec
         ]
-        mark = f" ({', '.join(roles)})" if roles else ""
-        return truncate(entry.model, max(0, self._name_width() - len(mark))) + mark
+        return " ".join(f"[ {role} ]" for role in roles)
 
     def _header_text(self) -> StyleAndTextTuples:
         n, total = len(self.filtered), len(self.all)
@@ -366,11 +370,23 @@ class ModelPicker(ListScreen):
         # Every row spans one width: the model name on the left, cut to
         # what the pane leaves it, then the two fixed columns at the
         # right edge — same place on every row, whatever arrives later.
+        # The marks stand against the figures, and the name gives way to
+        # them — down to `_MIN_NAME`, past which the marks give way.
         story = api_providers.listed_spec(self.session)
         pinned = api_providers.listed_extraction_spec(self.session)
-        labels = [self._label(e, story, pinned) for e in rows]
+        marks = [self._marks(e, story, pinned) for e in rows]
         # A catalog row has no size at all — not even the unknown dash.
         sizes = ["" if e.cloud else format_size(e.size_bytes) for e in rows]
+        labels: list[str] = []
+        for i, entry in enumerate(rows):
+            # The marks sit `_MARK_GAP` before the size's own text, so what
+            # they take from the name is whatever overflows the size column.
+            marked = sizes[i] if not marks[i] else marks[i] + " " * _MARK_GAP + sizes[i]
+            room = self._name_width() - max(0, len(marked) - _SIZE_COL)
+            if marks[i] and room < min(len(entry.model), _MIN_NAME):
+                marked, room = sizes[i], self._name_width()
+            sizes[i] = marked
+            labels.append(truncate(entry.model, max(0, room)))
         # The context column says what a request would get: the running
         # instance's size while one runs, the model's own otherwise.
         contexts = [format_context(e.max_context_loaded or e.max_context_catalogue) for e in rows]

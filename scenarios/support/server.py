@@ -49,6 +49,7 @@ class ModelServer:
         *,
         managed: bool = False,
         tls: ssl.SSLContext | None = None,
+        port: int = 0,
     ) -> None:
         self.models = list(models)
         self.managed = managed
@@ -566,7 +567,9 @@ class ModelServer:
             def _event(self, payload: dict[str, Any]) -> None:
                 self.wfile.write(b"data: " + json.dumps(payload).encode() + b"\n\n")
 
-        self._httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        # A free port unless one is asked for — an engine's own, where the
+        # server stands in for it by hand (`scripts/test_model.py`).
+        self._httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
         scheme = "http"
         if tls is not None:
             # A server behind its own certificate — KoboldCpp's --ssl, a

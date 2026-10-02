@@ -274,27 +274,18 @@ def seam_of(previous: Message | None) -> str:
     """The space a reply that comes FLUSH after `previous` is owed — the
     WRITE side of the seam rule, what the recorder puts before the
     reply's first piece in the canvas (`api.play`) so that `join_of`
-    then reads the seam off the text: a word is never completed across
-    rows. Nothing wherever the read side already has its answer — no row
-    or a tool's before it (a paragraph), a text ending in whitespace (a
-    space is the seam as it stands, a break makes a paragraph), a text
-    that ended its sentence (a paragraph) — and one space otherwise, the
-    one the model left out of its continuation."""
+    then reads the seam off the text: a reply goes on in the paragraph
+    it follows, and a word is never completed across rows. Nothing
+    wherever the read side already has its answer — no row or a tool's
+    before it (a paragraph), a text ending in whitespace (a space is the
+    seam as it stands, a break — the reader's Enter at a line's end —
+    makes a paragraph) — and one space otherwise, the one the model left
+    out of its continuation."""
     if previous is None or previous.role == "tool" or not previous.body:
         return ""
-    if previous.body[-1].isspace() or _ends_sentence(previous.body):
+    if previous.body[-1].isspace():
         return ""
     return " "
-
-
-# What ends a sentence, for the seam rule: a stop, or a quote or bracket
-# closing after one (the curly quotes spelled by code point, as the
-# linter wants them told from the straight ones).
-_SENTENCE_END = frozenset(".!?…\"')\u201d\u2019\u00bb")
-
-
-def _ends_sentence(text: str) -> bool:
-    return text.rstrip()[-1:] in _SENTENCE_END
 
 
 def estimate_tokens(text: str) -> int:

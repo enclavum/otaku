@@ -14,7 +14,7 @@ from otaku.backend.session import Refused, Session
 from otaku.backend.story import StorySettings
 from otaku.formatting import flatten, truncate_label
 from otaku.store.ops.stories import StoryListing
-from otaku.store.schema import InjectionPosition, Message, Transcript
+from otaku.store.schema import InjectionPosition, Layout, Message
 
 # What picking an earlier turn settles to: continue in a copy (the
 # default), rewind the head (later turns stay as siblings), or stay.
@@ -224,7 +224,7 @@ def update_setting(
     position: InjectionPosition | None = None,
     reminder_text: str | None = None,
     display_notes: bool | None = None,
-    transcript: Transcript | None = None,
+    layout: Layout | None = None,
 ) -> str:
     """Change one setting of a story — the open one, or the one
     `story_id` names; what is not given stays. Returns the confirmation
@@ -240,7 +240,7 @@ def update_setting(
         position=position,
         reminder_text=reminder_text,
         display_notes=display_notes,
-        transcript=transcript,
+        layout=layout,
     )
     if story_id is not None and story_id != session.story_id:
         session._store.stories.set_setting(story_id, row)

@@ -51,6 +51,10 @@ RESTORE_CURSOR = "\x1b8"  # DECRC
 SCROLL_ABOVE = "\x1b[1;{}r"  # DECSTBM: scrolling confined to rows 1..N
 SCROLL_ALL = "\x1b[r"  # DECSTBM reset: the whole screen scrolls again
 CURSOR_BLINK_ON = "\x1b[?12h"  # DECSET 12: ask the terminal to blink the cursor
+# PROTOTYPE: xterm's modifyOtherKeys, level 1 — Ctrl+Enter reported apart from
+# Enter (`ESC[27;5;13~`) where the terminal can; ignored where it cannot
+MODIFY_OTHER_KEYS_ON = "\x1b[>4;1m"
+MODIFY_OTHER_KEYS_OFF = "\x1b[>4;0m"
 
 # Confirm-prompt answers, matched after `latin_key` folds the typed layout.
 # A site with a yes-default accepts the empty answer explicitly.

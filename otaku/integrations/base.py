@@ -80,6 +80,10 @@ def post_json(url: str, headers: dict[str, str], body: dict[str, object]) -> obj
         with urllib.request.urlopen(request, timeout=TIMEOUT) as reply:
             return json.loads(reply.read())
     except urllib.error.HTTPError as e:
+        # 401 is the key's verdict, whatever the service: a key was sent
+        # (a missing one never reaches a service), and it is not valid.
+        if e.code == 401:
+            raise IntegrationError("the key is not valid") from e
         raise IntegrationError(f"the service answered {e.code}") from e
     except (urllib.error.URLError, TimeoutError, OSError) as e:
         reason = getattr(e, "reason", e)

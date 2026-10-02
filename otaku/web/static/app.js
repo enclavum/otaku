@@ -131,11 +131,20 @@ function start() {
       toggleRail();
       return;
     }
-    // The model's question: an option picked is the line, sent; copied,
-    // it lands in the box to be edited first.
+    // A layout taken (`layout.wireLayout` writes it): the story is read
+    // another way, and the next line is still typed — the caret comes
+    // back to the box.
+    if (event.target.closest("[data-transcript-mode]")) {
+      refocus();
+      return;
+    }
+    // The model's question: an option picked is the line, sent, and the
+    // caret comes back to the box for the next; copied, it lands in the
+    // box to be edited first.
     const pick = event.target.closest("[data-ask-send]");
     if (pick) {
       submit(pick.dataset.askSend);
+      refocus();
       return;
     }
     const copy = event.target.closest("[data-ask-copy]");
@@ -150,9 +159,8 @@ function start() {
     if (turn && turn.getAttribute("aria-disabled") !== "true") {
       runCommand(turn.dataset.turn === "undo" ? "/undo" : "/regen");
       // Either verb is about the last exchange, and the next one is
-      // typed: the caret comes back to the box — not on a touch screen,
-      // where focus raises the keyboard over the reply about to be read.
-      if (!window.matchMedia("(pointer: coarse)").matches) focusComposer();
+      // typed: the caret comes back to the box.
+      refocus();
     }
   });
 
@@ -199,6 +207,13 @@ function toggleRail(force) {
 
 function foldRail() {
   toggleRail(false);
+}
+
+/* The caret back in the composer after a click that ends with the next
+   line to type — not on a touch screen, where the focus raises the
+   keyboard over the reply about to be read. */
+function refocus() {
+  if (!window.matchMedia("(pointer: coarse)").matches) focusComposer();
 }
 
 function onKey(event) {

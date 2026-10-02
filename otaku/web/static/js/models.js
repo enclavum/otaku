@@ -208,16 +208,16 @@ function modelRow(entry, { current, extraction }) {
   const lamp = span("otk-row__lamp", "");
   const managed = entry.provider.capabilities?.model_management;
   if (managed && entry.model.loaded) lamp.append(span("otk-dot otk-dot--sm", ""));
-  // The story's model wears its tag right after its name, where the eye
-  // reads the name, not out past the figures — and the one saved for
-  // extraction its own.
+  // What the model is to the session — the story's, the one saved for
+  // extraction — as tags against the figures, beside the size.
   const spec = `${entry.provider.id}/${entry.model.name}`;
-  const title = span("otk-row__title", entry.model.name);
-  if (spec === current) title.append(" ", span("otk-tag", "story"));
-  if (spec === extraction) title.append(" ", span("otk-tag", "extraction"));
+  const tags = [];
+  if (spec === current) tags.push(span("otk-tag otk-tag--role", "writing"));
+  if (spec === extraction) tags.push(span("otk-tag otk-tag--role", "extraction"));
   const button = row(
     lamp,
-    title,
+    span("otk-row__title", entry.model.name),
+    ...tags,
     span("otk-row__num otk-row__num--size", entry.model.size),
     // what a request would get: the running instance's size while one
     // runs, the model's own otherwise
@@ -430,8 +430,8 @@ function whereItRuns(provider) {
 
 // What a key that is SET looks like. The value never arrives on this
 // side, so these stand for it: cleared when the field is entered, and
-// never saved back.
-const _MASK = "••••••";
+// never saved back. The web search key's dialog wears it too (`tools.keyButton`).
+export const KEY_MASK = "••••••";
 
 // How long "Checking" stands before it is allowed to become the answer.
 // A reader who pressed Test has to see that the question was asked.
@@ -461,7 +461,7 @@ function keyField(state, provider) {
   }
   if (provider.key_source === "config") {
     const mask = () => {
-      input.value = _MASK;
+      input.value = KEY_MASK;
       input.dataset.mask = "yes";
     };
     mask();

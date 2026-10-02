@@ -159,7 +159,7 @@ export async function playLine(line, files = []) {
        the story, and every line after it moves the count. No notice: the
        reply IS the answer — unless the line was refused, and then the
        refusal stands through the landing rather than being wiped by it. */
-    await landed(refused ?? "", { kind: refused ? "otk-error" : "" });
+    await landed(refused ?? "", { kind: refused ? "otk-error" : "", keepPlace: true });
   } catch (e) {
     if (e?.answered) tell(String(e.message ?? e), "otk-error");
   }

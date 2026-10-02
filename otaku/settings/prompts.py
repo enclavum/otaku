@@ -198,12 +198,12 @@ Close the block before anything else follows, never put a block inside another,
 and stop after the closing fence. Never mention the block's marker. Never write
 it outside the block itself."""
 
-TOOL_SYSTEM_DEFAULT = """\
-You may ask the machine what time it is and how busy it is, when the story
-needs it: end your reply with an empty fenced code block marked otk-system,
-like this:
+TOOL_SYSTEM_INFO_DEFAULT = """\
+You may ask the time, the phase of the moon, the nearest solstice or
+equinox, and which model you are, when the story needs it: end your reply
+with an empty fenced code block marked otk-system-info, like this:
 
-```otk-system
+```otk-system-info
 ```
 
 The answer arrives as the next message, out of character."""
@@ -211,9 +211,9 @@ The answer arrives as the next message, out of character."""
 TOOL_WEB_SEARCH_DEFAULT = """\
 You may look something up on the internet when a character would, or when
 the story needs a real fact: end your reply with a fenced code block marked
-otk-search holding the query alone, like this, from an unrelated story:
+otk-web-search holding the query alone, like this, from an unrelated story:
 
-```otk-search
+```otk-web-search
 Lisbon tram routes 1930s
 ```
 
@@ -267,7 +267,7 @@ _DEFAULTS = {
     "recap_header": "[The story so far — the scenes between these moments:]",
     "tool_questions_prompt": TOOL_QUESTIONS_DEFAULT,
     "tool_assistant_notes_prompt": TOOL_ASSISTANT_NOTES_DEFAULT,
-    "tool_system_prompt": TOOL_SYSTEM_DEFAULT,
+    "tool_system_info_prompt": TOOL_SYSTEM_INFO_DEFAULT,
     "tool_web_search_prompt": TOOL_WEB_SEARCH_DEFAULT,
     # What a tool's RESULT is framed as, as the model reads it: the tool
     # turn's text, out of character, the tool named.
@@ -324,7 +324,7 @@ class Prompts:
     recap_header: str = _DEFAULTS["recap_header"]
     tool_questions_prompt: str = _DEFAULTS["tool_questions_prompt"]
     tool_assistant_notes_prompt: str = _DEFAULTS["tool_assistant_notes_prompt"]
-    tool_system_prompt: str = _DEFAULTS["tool_system_prompt"]
+    tool_system_info_prompt: str = _DEFAULTS["tool_system_info_prompt"]
     tool_web_search_prompt: str = _DEFAULTS["tool_web_search_prompt"]
     tool_framing: str = _DEFAULTS["tool_framing"]
     story_framing: str = _DEFAULTS["story_framing"]

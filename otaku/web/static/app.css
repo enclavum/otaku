@@ -449,6 +449,8 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
   color: var(--otk-faint); border: var(--otk-hair) solid var(--otk-line-soft);
   padding: 1px 5px;
 }
+/* what a model is to the session, in the models list: the story's, extraction's */
+.otk-tag--role { font-weight: 600; }
 
 /* =============================================================================
    SHELL
@@ -617,6 +619,45 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
    a line of text or after the field a paragraph became, where two breaks
    would make two blank lines. The first turn opens the text. */
 .otk-transcript[data-transcript="canvas"] > [data-join="paragraph"]:not(:first-child)::before { content: ""; display: block; height: var(--otk-block-gap); }
+/* The canvas is typed in where the story is: its end editable — the TAIL
+   (`transcript.showTail`) — in the text's own face, the composer's box
+   standing disabled below with its verbs. */
+.otk-tail { display: none; }
+.otk-transcript[data-transcript="canvas"] > .otk-tail {
+  display: inline; white-space: pre-wrap; outline: none;
+  font-family: var(--otk-font-prose); font-size: var(--otk-size-page); line-height: var(--otk-leading-page);
+  color: var(--otk-ink);
+}
+/* a paragraph Enter opened: spaced as the story's are — one prose line — and
+   a line tall while empty, so the caret has somewhere to stand */
+.otk-transcript[data-transcript="canvas"] > .otk-tail > .otk-tail__p {
+  display: block;
+  margin-top: calc(var(--otk-size-page) * var(--otk-leading-page));
+  min-height: calc(var(--otk-size-page) * var(--otk-leading-page));
+}
+/* the seam's space, outside the editable tail so the caret stands after it */
+.otk-tail-seam { display: none; }
+.otk-transcript[data-transcript="canvas"] > .otk-tail-seam:not([hidden]) {
+  display: inline; white-space: pre-wrap;
+  font-family: var(--otk-font-prose); font-size: var(--otk-size-page); line-height: var(--otk-leading-page);
+}
+.otk-transcript[data-transcript="canvas"] > .otk-tail[data-blank]::after {
+  content: attr(data-placeholder); color: var(--otk-faint); cursor: text;
+}
+/* the box stands, disabled, its placeholder saying where the turn is typed
+   (`shell.showFacts`) — looking as any placeholder does */
+.otk-composer__input textarea:disabled { opacity: 1; cursor: default; }
+.otk-composer__input textarea:disabled::placeholder { color: var(--otk-faint); opacity: 1; }
+/* the keys as the tail answers them: Enter a paragraph, no history to walk */
+.otk-hints > [data-hint-canvas],
+.otk-app[data-layout="canvas"] .otk-hints > [data-hint-box] { display: none; }
+.otk-app[data-layout="canvas"] .otk-hints > [data-hint-canvas] { display: inline; }
+/* A tool's turn is a block of its own in the text, not a paragraph of it:
+   it stands one gap off the text on both sides, in place of the blank line
+   it and the row after it would open with. */
+.otk-transcript[data-transcript="canvas"] > .otk-tool { margin: 17px 0; }
+.otk-transcript[data-transcript="canvas"] > .otk-tool[data-join]::before,
+.otk-transcript[data-transcript="canvas"] > .otk-tool + [data-join="paragraph"]::before { content: none; }
 /* the played line reads as the prose does */
 .otk-transcript[data-transcript="canvas"] .otk-turn__body {
   max-width: none; text-align: start;
@@ -641,16 +682,23 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
    continuation runs on in the paragraph unsplit. The room is the row's
    18px under its 10px pull-up (`.otk-generating__status`). */
 .otk-transcript[data-transcript="canvas"] .otk-generating--idle:last-of-type::after { content: ""; display: block; height: calc(10px + 18px); }
+/* the tail goes on from the reply's text, as the played line will */
+.otk-transcript[data-transcript="canvas"]:has(> .otk-tail) .otk-generating--idle:last-of-type::after { content: none; }
 /* the live question is a block of the reply's, spaced by the article's gap in
    the other layouts; the canvas has no flex gap, so the block's own margin
-   stands the one gap off the text it follows */
-.otk-transcript[data-transcript="canvas"] .otk-ask--live { margin-top: var(--otk-block-gap); }
+   stands the one gap off the text it follows — and the past question it
+   becomes once answered, drawn in its place (`transcript.retireAsk`) */
+.otk-transcript[data-transcript="canvas"] .otk-reply > .otk-ask { margin-top: var(--otk-block-gap); }
 /* A block that OPENS a reply (`.otk-ask--first`) leaves the spacing to what
    stands before the reply: the transcript's gap in the other layouts, the
    paragraph gap (`::before`) here. A reply joined inline has neither, so its
    opening block stands its own gap off the text — as the live question does. */
 .otk-transcript[data-transcript="canvas"] [data-join="inline"] .otk-typeset > .otk-ask--first { margin-top: var(--otk-block-gap); }
 .otk-transcript[data-transcript="canvas"] .otk-verbose { margin: 4px 0 0; }
+/* No thinking in the one text: it would split the line the reply goes on
+   from, and leave a hole when a redraw takes it away (it is never stored).
+   The status row says the model is reasoning. */
+.otk-transcript[data-transcript="canvas"] .otk-reasoning { display: none; }
 /* Editing in the canvas: the field takes the paragraph's place, the same
    text in the same metrics as the reading it stands in for, so the
    paragraph keeps its size and nothing moves. A paragraph of several
@@ -687,10 +735,10 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
    text keeps from text (22 between the rules). */
 .otk-transcript[data-transcript="chat"] { gap: 26px; }
 .otk-transcript[data-transcript="chat"] .otk-reply,
-.otk-transcript[data-transcript="chat"] .otk-tool { max-width: 75%; margin-right: auto; padding-left: 17px; }
+.otk-transcript[data-transcript="chat"] .otk-tool { max-width: 75%; margin-right: auto; padding-left: 22px; }
 .otk-transcript[data-transcript="chat"] .otk-turn {
   width: fit-content; max-width: 75%; margin-left: auto; align-items: stretch; gap: 7px;
-  padding-right: 17px;
+  padding-right: 22px;
 }
 .otk-transcript[data-transcript="chat"] .otk-reply::before,
 .otk-transcript[data-transcript="chat"] .otk-tool::before,
@@ -722,12 +770,20 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 .otk-transcript[data-transcript="chat"] .otk-thumbs .otk-thumb { width: 138px; }
 /* the verbs keep to the right edge of the text, as in every layout: the
    turn's padding lies between the text and its rule */
-.otk-transcript[data-transcript="chat"] .otk-turn .otk-edit--turn .otk-edit__hint { right: 17px; }
-/* the blocks a reply holds — a failure, a question, the notes — drop their
-   own rule here: the reply's is the one mark on the story's side. They keep
-   a small inset, so they still read as set apart from the prose. */
+.otk-transcript[data-transcript="chat"] .otk-turn .otk-edit--turn .otk-edit__hint { right: 22px; }
+/* The gap between a reply's blocks — the thinking, a question, the notes, a
+   failure, and the prose they stand off — is tighter here than the prose's
+   own blank line; what pulls up against it (the rubric, the status row, the
+   stats line) keeps its distance, being measured from it. */
+.otk-transcript[data-transcript="chat"] .otk-reply,
+.otk-transcript[data-transcript="chat"] .otk-typeset { --otk-block-gap: 25px; }
+/* the blocks a reply holds — a failure, a question, the notes, the thinking,
+   a tool's turn (the notes block) — drop their own rule here: the reply's is
+   the one mark on the story's side. They keep a small inset, so they still
+   read as set apart from the prose. */
 .otk-transcript[data-transcript="chat"] .otk-error,
-.otk-transcript[data-transcript="chat"] .otk-ask { border-left: 0; padding-left: 7px; }
+.otk-transcript[data-transcript="chat"] .otk-ask,
+.otk-transcript[data-transcript="chat"] .otk-reasoning { border-left: 0; padding-left: 3px; }
 /* A landed reply keeps its status row's slot so nothing moves (below); here
    the slot would show as the rule running on under the text. So the row goes
    and the article keeps the same room as a margin, outside the rule, for as

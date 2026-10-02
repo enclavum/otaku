@@ -19,7 +19,7 @@ from typing import NamedTuple
 import click
 
 from otaku import web as web_frontend
-from otaku.backend import Layout, commands
+from otaku.backend import commands
 from otaku.backend.api import cards as api_cards
 from otaku.backend.api import lore as api_lore
 from otaku.backend.api import play as api_play
@@ -61,7 +61,7 @@ OPERATIONS: dict[str, Operation] = {
     "/set autocorrect": api_settings.set_autocorrect,
     "/set notification": api_settings.set_notification,
     "/set max_context": api_settings.set_max_context,
-    "/set transcript": api_settings.set_transcript,
+    "/set layout": api_settings.set_layout,
 }
 
 
@@ -140,7 +140,7 @@ def _undo(chat: Chat, raw: str) -> None:
 def _is_canvas(chat: Chat) -> bool:
     """Whether the open story is read on the canvas — echoed as one text
     then (`render.flow`), the played turns' blocks otherwise."""
-    return chat.session.layout is Layout.CANVAS
+    return chat.session.layout.is_canvas
 
 
 def _report_undo_ending(chat: Chat) -> None:
@@ -153,7 +153,7 @@ def _report_undo_ending(chat: Chat) -> None:
         return
     report = f"{DIM}[ undone. the story now ends with: ]{RESET}"
     turns = last_turns(
-        list(chat.session.messages), 2, notes=chat.notes_displayed, is_canvas=_is_canvas(chat)
+        list(chat.session.messages), 2, shown=chat.shown_tools, is_canvas=_is_canvas(chat)
     )
     chat.say(f"{report}\n\n{turns}")
     chat.restore_tail(2, above=report)
@@ -224,7 +224,7 @@ def _last(chat: Chat, raw: str) -> None:
     shown = (len(list(session.messages)[-rows:]) + 1) // 2
     report = f"The last {shown} turns of this story:"
     turns = last_turns(
-        list(session.messages), rows, notes=chat.notes_displayed, is_canvas=_is_canvas(chat)
+        list(session.messages), rows, shown=chat.shown_tools, is_canvas=_is_canvas(chat)
     )
     chat.say(f"{report}\n\n{turns}")
     chat.restore_tail(rows, above=report)
@@ -285,7 +285,7 @@ def _landed(chat: Chat, landed: str | None) -> None:
     turns = last_turns(
         list(chat.session.messages),
         RESUME_TURNS,
-        notes=chat.notes_displayed,
+        shown=chat.shown_tools,
         is_canvas=_is_canvas(chat),
     )
     # A story with nothing played echoes no turns, and no blank for them.
@@ -407,7 +407,7 @@ def _card(chat: Chat, raw: str) -> None:
     print(f"{DIM}[ {landed.report} ]{RESET}", file=out)
     if landed.greeting is not None:
         print(file=out)
-        print(message(landed.greeting.body, "assistant", notes=chat.notes_displayed), file=out)
+        print(message(landed.greeting.body, "assistant", shown=chat.shown_tools), file=out)
 
 
 def _import(chat: Chat, raw: str) -> None:
@@ -438,7 +438,7 @@ def _import(chat: Chat, raw: str) -> None:
     turns = last_turns(
         list(chat.session.messages),
         RESUME_TURNS,
-        notes=chat.notes_displayed,
+        shown=chat.shown_tools,
         is_canvas=_is_canvas(chat),
     )
     chat.say(f"The last turns of this story:\n\n{turns}")

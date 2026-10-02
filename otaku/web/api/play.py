@@ -242,9 +242,11 @@ def turn(message: Message, *, join: str) -> dict[str, Any]:
         # The turn's pictures, the column's own facts: the name the
         # file routes take, the media type, the measure. [] when none.
         "attachments": [asdict(picture) for picture in message.attachments],
-        # A tool turn's tool, as the page names it (`tools.get_tool_label`);
-        # null on every other turn.
-        "tool_label": get_tool_label(message.provider) if message.role == "tool" else None,
+        # A tool turn's tool, as the page names it for what it holds
+        # (`tools.get_tool_label`); null on every other turn.
+        "tool_label": (
+            get_tool_label(message.provider, message.body) if message.role == "tool" else None
+        ),
         # The body split: prose, and each block as its tool's facts — the
         # page draws from these and parses nothing. A block of a tag no
         # tool owns is a block all the same, with its text alone.

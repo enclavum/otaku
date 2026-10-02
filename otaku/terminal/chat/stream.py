@@ -11,6 +11,7 @@ close handling; Ctrl+R closes it and reports `regen` so the caller runs
 
 import contextlib
 import os
+import re
 import select
 import signal
 import sys
@@ -19,7 +20,6 @@ import time
 from collections.abc import Iterator
 from typing import Any, Self
 
-from otaku.backend import Layout
 from otaku.backend.api.play import (
     AssistantReasoning,
     AssistantText,
@@ -68,7 +68,7 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
     session = chat.session
     # The canvas: the one text — no block for the reader's line, the
     # reply going on where the text ended (`ledger.echo_flow`).
-    is_canvas = session.layout is Layout.CANVAS
+    is_canvas = session.layout.is_canvas
     # The text the reply goes on from, for its seam (`before`): the last
     # row's, until a played line lands and is the text instead.
     before = session.messages[-1].body if session.messages else ""
@@ -84,7 +84,7 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
     # else, a call's its closing fence.
     block: BlockStream | None = None
     block_name = ""
-    notes = chat.notes_displayed  # a story's switch, read once: it cannot move mid-stream
+    shown = chat.shown_tools  # a story's switches, read once: they cannot move mid-stream
     start = time.monotonic()
 
     def close_block() -> None:
@@ -122,6 +122,10 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
     with chat.status_line.pinned(), watcher:
         try:
             for event in events:
+                # No thinking in the canvas: the one text has no place for
+                # it, and it is never stored — the spinner turns on through it.
+                if is_canvas and isinstance(event, AssistantReasoning):
+                    continue
                 spinner.stop()  # idempotent — the first real signal clears it
                 if isinstance(event, UserTurn):
                     if is_canvas:
@@ -131,8 +135,15 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                         # blank, or on where the text ended) and the line is
                         # typeset through the reply's own streamer, so a quote
                         # it opens and the reply closes reads as one.
-                        chat.ledger.echo_flow(inline=event.join_type.value == "inline")
-                        streamer.feed(event.message.body)
+                        inline = chat.ledger.echo_flow(inline=event.join_type.value == "inline")
+                        # PROTOTYPE: a paragraph's lead and a break the line
+                        # ends on are the joins' to draw, not drawn twice; a
+                        # line placed on a row of its own (under a command's
+                        # output) drops the seam's space it goes on with
+                        body = event.message.body.rstrip("\n")
+                        if not inline:
+                            body = re.sub(r"^\s*\n", "", body).lstrip(" ")
+                        streamer.feed(body)
                         streamer.flush()
                         chat.ledger.reply_begins()
                         fed += event.message.body
@@ -197,9 +208,10 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                         after_call = True
                         continue
                     if event.name in ("question", "note"):
-                        if event.name == "note" and not notes:
-                            # Written for the wire alone — and the prose goes on
-                            # as after any block, so no hole marks the place.
+                        if event.name not in shown:
+                            # A tool the story does not show — the notes' display
+                            # off, or the tool itself — and the prose goes on as
+                            # after any block, so no hole marks the place.
                             after_call = True
                             continue
                         # Streamed as it arrives, a block behind the bar
@@ -247,7 +259,8 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                     block = BlockStream(out, terminal_width(), dim=True)
                     block_name = "tool"
                     fed += block.open(streamer, fed)
-                    written = block.feed(get_tool_label(event.message.provider) or "Tool")
+                    label = get_tool_label(event.message.provider, event.message.body)
+                    written = block.feed(label or "Tool")
                     fed += written
                     streamed = streamed or bool(written)
                     close_block()

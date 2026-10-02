@@ -27,7 +27,7 @@ from typing import Any, Self
 
 from otaku.backend.errors import Refused as Refused  # every caller's door to it
 from otaku.backend.paths import Paths
-from otaku.backend.story import StorySettings, StorySettingTranscript
+from otaku.backend.story import StorySettingLayout, StorySettings
 from otaku.context import assembler
 from otaku.context.assembler import AssembledPrompt, ContextShape
 from otaku.formatting import pretty_path
@@ -54,7 +54,6 @@ from otaku.store.schema import (
     Layout,
     Message,
     StorySettingDB,
-    Transcript,
 )
 from otaku.worker import Worker
 
@@ -527,26 +526,21 @@ class Session:
         )
 
     @property
-    def transcript(self) -> Transcript:
-        """The transcript the open story is read in — its setting, the
-        default until it says otherwise (`StorySettingTranscript`)."""
-        stored = next(
-            (row for row in self._settings_db if row.name == StorySettingTranscript.name), None
-        )
-        return StorySettingTranscript(stored).transcript
-
-    @property
     def layout(self) -> Layout:
-        """The look the open story is drawn in, off its transcript — what
-        both frontends read (`Transcript.layout`)."""
-        return self.transcript.layout
+        """The layout the open story is read in — its setting, the default
+        until it says otherwise (`StorySettingLayout`); a frontend reads
+        `is_canvas` off it."""
+        stored = next(
+            (row for row in self._settings_db if row.name == StorySettingLayout.name), None
+        )
+        return StorySettingLayout(stored).layout
 
     @property
     def completion_type(self) -> CompletionType:
         """The wire the next request goes over, off the open story's
-        transcript and the model in use (`Transcript.completion_type`,
+        layout and the model in use (`Layout.completion_type`,
         `can_complete_text`)."""
-        return self.transcript.completion_type(self.can_complete_text)
+        return self.layout.completion_type(self.can_complete_text)
 
     @property
     def can_attach(self) -> bool:

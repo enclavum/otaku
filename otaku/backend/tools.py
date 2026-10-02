@@ -14,19 +14,21 @@ story's setting (`backend.story`).
 A tool otaku RUNS (`Actor.SYSTEM`) ends the reply as a question does,
 and its `run` yields the RESULT otaku records as the TOOL turn the
 model reads next — the reply stream's loop (`api.play._reply_events`)
-hands it the integrations as bound, records the result, and asks the
-model again.
+hands it the session, records the result, and asks the model again.
 
 A new tool is a subclass and its name in `TOOLS`.
 """
 
 import enum
-import os
 import re
 from datetime import datetime
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
-from otaku.integrations import IntegrationError, Integrations, SearchResult
+from otaku.integrations import IntegrationError, SearchResult, moon_phase, turning_point
+
+if TYPE_CHECKING:
+    # the session imports the stories' settings, which import these tools
+    from otaku.backend.session import Session
 
 
 class Actor(enum.Enum):
@@ -64,22 +66,21 @@ class Tool:
             "text": self.text,
         }
 
-    def run(self, integrations: Integrations) -> str:
+    def run(self, session: "Session") -> str:
         """The RESULT of a call of this tool — the TOOL turn's text, the
-        model's to read next — given the integrations as bound, of which
-        a tool takes the one it runs on, or none. A tool the SYSTEM acts
-        on has a result; every other has none to give."""
+        model's to read next — read off the session, which a tool reads
+        and never writes. A tool the SYSTEM acts on has a result; every
+        other has none to give."""
         raise NotImplementedError(f"the {self.name} tool is not otaku's to run")
 
     @classmethod
-    def to_prose(cls, text: str) -> str:
-        """What a call of this tool reads as on the wire while the tool is
-        OFF — story text, or nothing. Nothing by default: a call the
-        model is no longer told about teaches it nothing."""
-        return ""
+    def label_of(cls, result: str) -> str:
+        """What a frontend calls a TOOL turn of this tool holding `result`
+        — the tool's label, unless the result says it is something else."""
+        return cls.label
 
 
-class ToolQuestions(Tool):
+class ToolQuestion(Tool):
     """A block marked `otk-question` — ONE question to the user, closing the reply:
     the `question`, then the `options` to pick from — none when the
     question is free-form, `_MAX_OPTIONS` at most. Whatever follows the
@@ -87,6 +88,7 @@ class ToolQuestions(Tool):
     user's line, and a closing remark must not ride it."""
 
     name = "question"
+    label = "Questions"
     actor = Actor.USER
     prompt_name = "tool_questions_prompt"
     # An answer line: `1.` `1)` `a.` `a)` at the head of a line, then the
@@ -121,15 +123,8 @@ class ToolQuestions(Tool):
         same rule the parse does."""
         return cls._OPTION.fullmatch(line) is not None
 
-    @classmethod
-    def to_prose(cls, text: str) -> str:
-        # The question alone, as the narrator's own: the reader's answer
-        # that follows still has something to answer. The options were
-        # the menu's, and a menu is what the model must not learn here.
-        return cls(text).question
 
-
-class ToolAssistantNotes(Tool):
+class ToolAssistantNote(Tool):
     """A block marked `otk-note` — the model's private aside before its reply:
     what the visible scene cannot show, kept for its own later turns."""
 
@@ -138,52 +133,62 @@ class ToolAssistantNotes(Tool):
     prompt_name = "tool_assistant_notes_prompt"
 
 
-class ToolSystem(Tool):
-    """A block marked `otk-system`, empty — the model asks the machine:
-    the time now, and the load it is under. A fixture for the tools
-    otaku runs, and the one result that needs no key."""
+class ToolSystemInfo(Tool):
+    """A block marked `otk-system-info`, empty — the model asks the hour and
+    the sky, and which model it is: the local time and weekday, the
+    moon's phase, the nearest solstice or equinox, the model's name.
+    Nothing that tells where the machine is — the time carries no zone —
+    or what it runs. A fixture for the tools otaku runs, and the one
+    result that needs no key."""
 
-    name = "system"
-    label = "System"
+    name = "system-info"
+    label = "System info"
     actor = Actor.SYSTEM
-    prompt_name = "tool_system_prompt"
+    prompt_name = "tool_system_info_prompt"
 
-    def run(self, integrations: Integrations) -> str:
-        now = datetime.now().astimezone().isoformat(timespec="seconds")
-        try:
-            one, five, fifteen = os.getloadavg()
-            load = f"{one:.2f} {five:.2f} {fifteen:.2f}"
-        except (AttributeError, OSError):
-            load = "unknown"
-        return f"Time: {now}\nLoad average (1, 5, 15 min): {load}"
+    def run(self, session: "Session") -> str:
+        now = datetime.now().astimezone()
+        return "\n".join(
+            (
+                f"Time: {now:%Y-%m-%d %H:%M (%A)}",
+                f"Moon: {moon_phase(now)}",
+                f"Sun: {turning_point(now)}",
+                f"Model: {session.model}",
+            )
+        )
 
 
 class ToolWebSearch(Tool):
-    """A block marked `otk-search` — the model looks something up: the
+    """A block marked `otk-web-search` — the model looks something up: the
     inside is the query, and the result is the top results' snippets as
     "title: snippet" paragraphs, cut to a character budget so the
     result's cost is bounded whatever comes back — or the sentence for
     why there are none. The engine asked is the one the web search key
     chose (`Integrations.web_search_engine`)."""
 
-    name = "search"
+    name = "web-search"
     label = "Web search"
     actor = Actor.SYSTEM
     prompt_name = "tool_web_search_prompt"
     MAX_RESULTS: ClassVar[int] = 4
     CHAR_BUDGET: ClassVar[int] = 1500  # characters of snippets at most
+    # What a failure's sentence opens with, and what its turn is called.
+    _FAILED: ClassVar[str] = "Web search failed"
 
-    def run(self, integrations: Integrations) -> str:
+    def run(self, session: "Session") -> str:
         query = " ".join(self.text.split())
         if not query:
             return "No query was given."
-        engine = integrations.web_search_engine
+        engine = session.integrations.web_search_engine
+        # No key, no request: no engine is asked without one.
         if engine is None or not engine.api_key:
-            return "Web search is not set up: no API key."
+            return f"{self._FAILED}: the key is missing."
         try:
             results = engine.search(query, max_results=self.MAX_RESULTS)
         except IntegrationError as e:
-            return f"Web search failed: {engine.label} — {e}."
+            # No engine named: the model reads this, and which service
+            # the key chose is the reader's business, not the story's.
+            return f"{self._FAILED}: {e}."
         return self._render(results)
 
     def _render(self, results: list[SearchResult]) -> str:
@@ -201,10 +206,15 @@ class ToolWebSearch(Tool):
             used += len(snippet)
         return "\n\n".join(parts) if parts else "No results found."
 
+    @classmethod
+    def label_of(cls, result: str) -> str:
+        # a search that failed is called so, in both frontends
+        return cls._FAILED if result.startswith(f"{cls._FAILED}:") else cls.label
+
 
 # Every tool, keyed by its name — the one registry.
 TOOLS: dict[str, type[Tool]] = {
-    cls.name: cls for cls in (ToolQuestions, ToolAssistantNotes, ToolSystem, ToolWebSearch)
+    cls.name: cls for cls in (ToolQuestion, ToolAssistantNote, ToolSystemInfo, ToolWebSearch)
 }
 
 
@@ -214,11 +224,12 @@ def read_call(name: str, text: str) -> Tool:
     return TOOLS[name.lower()](text)
 
 
-def get_tool_label(name: str | None) -> str:
-    """What a frontend calls the tool a tool turn's `provider` names —
-    the registry's label; the name itself for one this build does not
-    have, "" for none."""
+def get_tool_label(name: str | None, result: str) -> str:
+    """What a frontend calls a tool turn: the label of the tool its
+    `provider` names, for the `result` it holds (`Tool.label_of` — "Web
+    search failed" for a search that failed); the name itself for a tool
+    this build does not have, "" for none."""
     if not name:
         return ""
     found = TOOLS.get(name)
-    return found.label if found is not None else name
+    return found.label_of(result) if found is not None else name

@@ -13,9 +13,13 @@ as it was.
 """
 
 import functools
+import re
 import sys
 
-from otaku.backend import Layout
+from prompt_toolkit import PromptSession
+from prompt_toolkit.formatted_text import ANSI, StyleAndTextTuples, to_formatted_text
+
+from otaku.backend import commands
 from otaku.backend.api import play as api_play
 from otaku.backend.api import reports as api_reports
 from otaku.backend.api import stories as api_stories
@@ -26,6 +30,8 @@ from otaku.terminal.chat.chat import RESUME_TURNS, Chat
 from otaku.terminal.prompt import (
     CANVAS_PLACEHOLDER,
     CHAT_PLACEHOLDER,
+    START_PLACEHOLDER,
+    AnswerMenu,
     Carry,
     LineAssembler,
     build_prompt,
@@ -36,6 +42,8 @@ from otaku.terminal.tty import (
     BOLD,
     CLOUD_PROMPT_PREFIX,
     CURSOR_BLINK_ON,
+    MODIFY_OTHER_KEYS_OFF,
+    MODIFY_OTHER_KEYS_ON,
     PROMPT_CONTINUATION,
     PROMPT_PREFIX,
     RESET,
@@ -112,14 +120,15 @@ def run(session: Session) -> None:
         echoed = last_turns(
             list(session.messages),
             RESUME_TURNS,
-            notes=chat.notes_displayed,
-            is_canvas=session.layout is Layout.CANVAS,
+            shown=chat.shown_tools,
+            is_canvas=session.layout.is_canvas,
         )
         print(echoed)
         chat.ledger.note_printed(echoed + "\n")  # printed past the ledger: the flow's tail
         answers.top_row = answers.posed
         if not answers.top_row:
             print()
+            chat.ledger.note_printed("\n")  # the rows under the text's end, counted
         chat.restore_tail(RESUME_TURNS)
 
     # One status callback, two surfaces: the prompt's toolbar while the
@@ -149,29 +158,71 @@ def run(session: Session) -> None:
         # The marker carries the cloud, not the hint: the hint goes at
         # the first keystroke, which is exactly when the text is being
         # written to leave the machine.
+        is_canvas = session.layout.is_canvas
         if assembler.in_block:
             prefix = PROMPT_CONTINUATION
+        elif is_canvas:
+            prefix = ""  # PROTOTYPE: the canvas is one text, no prompt marker in it
         elif session.on_cloud:
             prefix = CLOUD_PROMPT_PREFIX
         else:
             prefix = PROMPT_PREFIX
         # the hint is the layout's: a story on the canvas is continued
-        is_canvas = session.layout is Layout.CANVAS
         if assembler.in_block:
             placeholder = None
         elif is_canvas:
-            placeholder = CANVAS_PLACEHOLDER
+            placeholder = CANVAS_PLACEHOLDER if session.messages else START_PLACEHOLDER
         else:
             placeholder = CHAT_PLACEHOLDER
+        # the answers to a pending question, as rows over the prefix
+        message = functools.partial(answers.message, prefix)
+        # PROTOTYPE: in the canvas the prompt stands in the story's own text
+        # — its last line drawn again as the prompt's message, the seam's
+        # space after it — wherever the text is the last thing on screen
+        in_text = (
+            is_canvas
+            and not assembler.in_block
+            and not answers.posed
+            and not carry.command_paragraph
+            and chat.ledger.can_type_in_text()
+        )
+        carry.in_text = in_text
+        # PROTOTYPE: the canvas's keys in every canvas prompt but a block's
+        carry.canvas_keys = is_canvas and not assembler.in_block
+        seam = ""
+        if in_text:
+            tail = chat.ledger.tail
+            seam = "" if _plain(tail)[-1:].isspace() else " "
+            chat.ledger.lift_to_tail()
+            message = functools.partial(_in_text_message, tail, seam)
+        # PROTOTYPE: a prompt in the text erases all it drew as it ends — its
+        # message, the text's last line, too — and the ledger writes that line
+        # again (`resume_tail`): no row is counted after it
+        prompt_session.app.erase_when_done = in_text
+        if carry.canvas_keys:
+            # PROTOTYPE: Ctrl+Enter, the send, told from Enter where it can be
+            sys.stdout.write(MODIFY_OTHER_KEYS_ON)
+            sys.stdout.flush()
         try:
-            # the answers to a pending question, as rows over the prefix
-            message = functools.partial(answers.message, prefix)
             line = prompt_session.prompt(
-                message, placeholder=placeholder, default=carry.take_text(), pre_run=answers.open
+                message,
+                placeholder=placeholder,
+                default=carry.take_text(),
+                pre_run=functools.partial(
+                    _opening, answers, prompt_session, command=carry.command_paragraph
+                ),
             )
         except EOFError:
             break
         except KeyboardInterrupt:
+            if in_text:
+                # PROTOTYPE: the line typed in the text goes; the text and
+                # the layout under it stay, for the next prompt to stand in
+                chat.ledger.resume_tail()
+                chat.ledger.below_text()
+                assembler.reset()
+                chat.ledger.typed_gone()
+                continue
             # ^C clears the line; inside a """ block it also drops the
             # buffer. The aborted prompt line stays on screen as a row
             # the ledger cannot measure, so erasing is off until the
@@ -190,9 +241,39 @@ def run(session: Session) -> None:
             assembler.reset()
             chat.ledger.typed_gone()
             continue
+        finally:
+            if in_text:
+                prompt_session.app.erase_when_done = False
+            if carry.canvas_keys:
+                sys.stdout.write(MODIFY_OTHER_KEYS_OFF)
+                sys.stdout.flush()
         # The prompt drew its blank, if it owed one; whatever follows
         # stands under the line it read.
         answers.top_row = False
+
+        # PROTOTYPE: the command paragraph — opened from the text by `/`, it
+        # is a prompt of its own under the text, the slash typed; left by
+        # Esc or Backspace, its row goes and the text's prompt comes back,
+        # the story typed so far with it
+        if carry.to_command:
+            carry.to_command = False
+            chat.ledger.resume_tail()
+            chat.ledger.below_text()
+            carry.command_paragraph = True
+            carry.text = "/"
+            continue
+        was_command = carry.command_paragraph
+        carry.command_paragraph = False
+        if carry.from_command:
+            # the prompt erased what it drew (`erase_when_done`): the caret
+            # stands where the command paragraph began, under the text
+            carry.from_command = False
+            prompt_session.app.erase_when_done = False
+            carry.text, carry.draft = carry.draft, ""
+            continue
+        if was_command and carry.draft:
+            # the story typed before the command waits at the next prompt
+            carry.text, carry.draft = carry.draft, ""
 
         if carry.take_shortcut():
             # A shortcut key exited the prompt with its command as the
@@ -206,19 +287,41 @@ def run(session: Session) -> None:
             chat.ledger.typed_gone()
             if assembler.in_block:
                 chat.ledger.invalidate()
-            # The rows the aborted prompt read occupies — the prefix plus
-            # the in-progress line, wrapping and embedded newlines
-            # included — go back up and away.
-            shown = measure(prefix + carry.text + "\n", terminal_width())
-            sys.stdout.write(f"\x1b[{shown}A\r\x1b[J")
+            if in_text:
+                # PROTOTYPE: back to the text's end, the layout under it put back
+                chat.ledger.resume_tail()
+                chat.ledger.below_text()
+            else:
+                # The rows the aborted prompt read occupies — the prefix plus
+                # the in-progress line, wrapping and embedded newlines
+                # included — go back up and away.
+                shown = measure(prefix + carry.text + "\n", terminal_width())
+                sys.stdout.write(f"\x1b[{shown}A\r\x1b[J")
         else:
-            chat.ledger.typed(prefix + line + "\n")
+            if in_text:
+                chat.ledger.resume_tail()
+            else:
+                chat.ledger.typed(prefix + line + "\n")
             # in the canvas the line plays as typed, the whitespace at its
             # edges its seams (`api.play.submit`); every other line is trimmed
             result = assembler.feed(line, verbatim=is_canvas)
             if result is None:
+                if in_text:
+                    chat.ledger.below_text(prefix + line)
                 continue  # inside an open """ block — keep collecting lines
             submission = result
+            if in_text:
+                # PROTOTYPE: a command shows under the text as a prompt there
+                # would have; a story line takes the seam's space it was
+                # typed after, unless it opens with whitespace of its own
+                if commands.is_command(submission):
+                    chat.ledger.below_text(prefix + submission)
+                elif seam and submission[:1] not in ("", "/") and not submission[0].isspace():
+                    submission = seam + submission
+            elif is_canvas and submission[:1] not in ("", "/") and not submission[0].isspace():
+                # PROTOTYPE: typed under the text (after a command), a line
+                # still goes on in the story's paragraph, as one typed in it
+                submission = _seam_after(session) + submission
             if not submission.strip() and not is_canvas:
                 # A bare Enter leaves its prompt row on screen; its rows
                 # stay counted so the next submission's erase takes it
@@ -280,3 +383,34 @@ def submit(chat: Chat, line: str) -> None:
         path = session.record_crash(f"command {line.split(' ', 1)[0]!r}", e)
         where = f" — recorded in {path}" if path else ""
         chat.say(error_line(f"Command failed ({type(e).__name__}){where}"))
+
+
+def _in_text_message(tail: str, seam: str) -> StyleAndTextTuples:
+    """PROTOTYPE: the prompt's message in the story's text — its last line
+    as printed, escapes and all, and the seam's space after it."""
+    return [*to_formatted_text(ANSI(tail)), ("", seam)]
+
+
+_ESCAPE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+
+
+def _plain(text: str) -> str:
+    return _ESCAPE.sub("", text)
+
+
+def _seam_after(session: Session) -> str:
+    """PROTOTYPE: the space a line typed under the text owes the story's
+    last row to go on in its paragraph — none after a tool's turn, none
+    where the row ends in whitespace already, none with no row at all."""
+    last = session.messages[-1] if session.messages else None
+    if last is None or last.role == "tool" or not last.body or last.body[-1].isspace():
+        return ""
+    return " "
+
+
+def _opening(answers: AnswerMenu, prompt_session: PromptSession[str], *, command: bool) -> None:
+    """As each prompt opens: the question's answers read; and the command
+    paragraph's menu shown at once, its slash typed (PROTOTYPE)."""
+    answers.open()
+    if command:
+        prompt_session.default_buffer.start_completion(select_first=False)

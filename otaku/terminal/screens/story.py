@@ -91,7 +91,7 @@ from otaku.terminal.screens.base import (
 )
 from otaku.terminal.tty import latin_key
 from otaku.terminal.tty.render import message as render_message
-from otaku.terminal.tty.render import notes_displayed, pictures_note
+from otaku.terminal.tty.render import pictures_note, shown_tools
 from otaku.terminal.tty.theme import theme
 from otaku.terminal.tty.typography import highlight_toml
 
@@ -116,7 +116,7 @@ _ABOUT: dict[str, str] = {
         "The narrator may ask you something directly and wait for an answer before going on."
     ),
     "allow_web_search": "The narrator may look something up on the internet.",
-    "allow_system_tool": "The narrator may ask for local system facts.",
+    "allow_system_info": "The narrator may ask for local system facts.",
     "allow_assistant_notes": (
         "The narrator may keep a short note to itself between turns, never played into the story."
     ),
@@ -264,7 +264,7 @@ class Dossier(ListScreen):
         # where web search stands: its engine, and whether it holds a key
         self.web_search = api_integrations.WebSearch("", "", False)
         self.prompts: dict[str, str] = {}  # each tool's prompt, by the tool's name
-        self.notes_displayed: bool = False
+        self.shown_tools: frozenset[str] = frozenset()
         self.in_panel: bool = False
         self.field: int = 0
         self.choosing: bool = False
@@ -344,7 +344,7 @@ class Dossier(ListScreen):
             for setting in self.settings
             if setting.tool is not None
         }
-        self.notes_displayed = notes_displayed(held)
+        self.shown_tools = shown_tools(held)
 
     # ---------- view lookups ----------
 
@@ -563,9 +563,7 @@ class Dossier(ListScreen):
             # line again: a reply's calls are drawn as blocks, on rows of
             # their own, and a row has no rows. Never longer than the cut:
             # the tags the drawing drops outweigh the bar it adds.
-            head = flatten(
-                self._render(head, m.role, pictures=pictures, notes=self.notes_displayed)
-            )
+            head = flatten(self._render(head, m.role, pictures=pictures, shown=self.shown_tools))
             # The original message number, so a filtered row still reads
             # as its true position in the story.
             row = f"{orig + 1:>4} · {m.role:<{role_w}} · {head}"
@@ -702,7 +700,7 @@ class Dossier(ListScreen):
                 m.body,
                 m.role,
                 pictures=len(m.attachments),
-                notes=self.notes_displayed,
+                shown=self.shown_tools,
                 width=max(10, self._preview_inner_width()),
             )
             if not body.endswith("\n"):

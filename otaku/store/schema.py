@@ -308,14 +308,14 @@ class StorySettingDB:
     position: "InjectionPosition | None" = None  # None: unsaid, the setting's default applies
     reminder_text: str = ""
     display_notes: bool = True
-    transcript: "Transcript | None" = None  # None: unsaid, the setting's default applies
+    layout: "Layout | None" = None  # None: unsaid, the setting's default applies
 
     @classmethod
     def from_json(cls, text: str) -> tuple[Self, ...]:
         """The column read back: every setting it holds, in its order.
         What makes no sense reads as unsaid — `enabled` that is not `true`
         is False, a position that is not "system" or a count from 1 is
-        None, a layout that is none of the three names is None — and a
+        None, a layout that is none of the four names is None — and a
         text that is no JSON object of objects holds none."""
         out = []
         for name, state in cls._parse(text).items():
@@ -329,7 +329,7 @@ class StorySettingDB:
                     position=InjectionPosition.from_value(state.get("position")),
                     reminder_text=reminder_text if isinstance(reminder_text, str) else "",
                     display_notes=state.get("display_notes") is not False,
-                    transcript=Transcript.from_value(state.get("transcript")),
+                    layout=Layout.from_value(state.get("layout")),
                 )
             )
         return tuple(out)
@@ -356,8 +356,8 @@ class StorySettingDB:
                 state.pop("display_notes", None)  # the default; only the exception is said
             else:
                 state["display_notes"] = False
-            if setting.transcript is not None:
-                state["transcript"] = setting.transcript.value
+            if setting.layout is not None:
+                state["layout"] = setting.layout.value
             column[setting.name] = state
         return json.dumps(column, ensure_ascii=False)
 
@@ -403,15 +403,16 @@ class InjectionPosition:
         return cls(value) if type(value) is int and value >= 1 else None
 
 
-class Transcript(Enum):
-    """How a story's transcript is read — and, for one value, written:
-    the same turns four ways, named here so the choice is the story's and
-    each frontend draws the `layout` of it in its own medium. NOVEL is
-    the canvas over the TEXT wire, the model continuing the text itself;
-    CANVAS one continuous text over the chat wire; MANUSCRIPT the played
-    lines as interjections among the prose; CHAT the turns as alternating
-    blocks. `value` is the plain form the column and the wire hold, and
-    `from_value` reads one back."""
+class Layout(Enum):
+    """How a story is laid out — read, and for one value written: the
+    same turns four ways, the choice the story's. NOVEL is the canvas
+    over the TEXT wire, the model continuing the text itself; CANVAS one
+    continuous text over the chat wire; MANUSCRIPT the played lines as
+    interjections among the prose; CHAT the turns as alternating blocks.
+    Two facts derive from it, and the frontends read the facts: whether
+    it is drawn as the canvas (`is_canvas`) and the wire
+    (`completion_type`). `value` is the plain form the column and the
+    wire hold, and `from_value` reads one back."""
 
     NOVEL = "novel"
     CANVAS = "canvas"
@@ -424,28 +425,18 @@ class Transcript(Enum):
         return next((each for each in cls if each.value == value), None)
 
     @property
-    def layout(self) -> "Layout":
-        """The look alone: the novel is drawn as the canvas."""
-        return Layout.CANVAS if self is Transcript.NOVEL else Layout(self.value)
+    def is_canvas(self) -> bool:
+        """Whether it is drawn as the canvas, one text: the canvas, and
+        the novel, which is drawn as the canvas."""
+        return self in (Layout.CANVAS, Layout.NOVEL)
 
     def completion_type(self, can_complete_text: bool) -> "CompletionType":
         """The wire alone: TEXT for the novel where the model in use can
         complete text (`Session.can_complete_text`), CHAT for every other
         case — a novel on a model that cannot is played as a canvas."""
-        if self is Transcript.NOVEL and can_complete_text:
+        if self is Layout.NOVEL and can_complete_text:
             return CompletionType.TEXT
         return CompletionType.CHAT
-
-
-class Layout(Enum):
-    """The look a transcript is drawn in — the three the stylesheets and
-    the terminal know. A transcript names one (`Transcript.layout`); the
-    frontends read the layout, never the transcript, except to show and
-    set it."""
-
-    CANVAS = "canvas"
-    MANUSCRIPT = "manuscript"
-    CHAT = "chat"
 
 
 class CompletionType(Enum):

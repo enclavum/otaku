@@ -54,13 +54,23 @@ export function showFacts(facts) {
   // (`facts.can_attach`: the model sees, and the mode's wire carries one),
   // gone otherwise. The backend refuses a picture regardless.
   for (const button of $$("[data-attach]")) button.hidden = !facts.can_attach;
-  // The verb on the send button is the layout's (`facts.layout`): a story
-  // on the canvas is continued, not sent to. The words are this medium's.
-  const send = $("[data-send]");
-  if (send) send.textContent = facts.layout === "canvas" ? "Continue" : "Send";
   // The wire and the look on the app root, for the stylesheet and the
   // composer: over the text wire no picture rides the request, so the flow
   // shows none (docs/web_tokens.md); on the canvas an empty line continues.
+  // The canvas is typed in where the story is (`transcript.showTail`): the
+  // box stays, disabled, its placeholder saying so — the markup's own one
+  // in every other layout
+  const box = $("#otk-msg");
+  if (box) {
+    box.dataset.placeholder ??= box.placeholder;
+    const was = box.disabled;
+    box.disabled = facts.layout === "canvas";
+    box.placeholder = box.disabled ? "Type your turn in the story above" : box.dataset.placeholder;
+    // opened again — a layout switched away from the canvas — it takes the
+    // caret the click could not give it while it was shut
+    const idle = document.activeElement === document.body;
+    if (was && !box.disabled && idle && !window.matchMedia("(pointer: coarse)").matches) box.focus();
+  }
   if (app) {
     app.dataset.completion = facts.completion_type;
     app.dataset.layout = facts.layout;
@@ -96,28 +106,34 @@ function drawProvider() {
 /** The transcript from the store: the turns, and — off the story's
     settings, which a story that does not exist yet has none of — which
     tools' calls the reader is shown, and which layout it is read in. */
-export async function drawPlayed(storyId) {
+export async function drawPlayed(storyId, { keepPlace = false } = {}) {
   const [played, held] = await Promise.all([
     api.played(),
     storyId === null ? null : api.storySettings(storyId),
   ]);
   displayTools(held?.settings ?? []);
   showLayout(storyId, held?.settings ?? []);
-  showPlayed(played);
+  showPlayed(played, { keepPlace });
 }
 
 /** What a write answered with, shown where it belongs. The facts are
     always asked again; the transcript is redrawn only when the story it
     draws is no longer the one that is open, because a redraw costs the
     reader their place. `corrected` — `[position, text]` — is one turn
-    corrected elsewhere, shown where the transcript draws it instead. */
-export async function landed(notice, { redraw = "if-moved", corrected = null, kind = "" } = {}) {
+    corrected elsewhere, shown where the transcript draws it instead.
+    `keepPlace`: what a redraw would draw is on the page already — a
+    played line's turns, its story made by that line — so it moves
+    nothing. */
+export async function landed(
+  notice,
+  { redraw = "if-moved", corrected = null, kind = "", keepPlace = false } = {},
+) {
   const facts = await api.facts();
   const moved = facts.story_id !== drawn;
   showFacts(facts);
   const using = showContextUse();
   if (redraw === "always" || (redraw === "if-moved" && moved)) {
-    await drawPlayed(facts.story_id);
+    await drawPlayed(facts.story_id, { keepPlace });
   } else if (corrected) {
     await showCorrected(...corrected);
   }
@@ -320,6 +336,8 @@ export function disconnected(gone = true) {
   for (const control of $$(
     ".otk-toc button, .otk-modes button, .otk-rail__foot, .otk-composer textarea, [data-send], [data-turn], [data-prefixes]",
   )) {
-    control.disabled = gone;
+    // the box stays shut in the canvas, which is typed in (`showFacts`)
+    const canvasBox = control.matches("#otk-msg") && $(".otk-app")?.dataset.layout === "canvas";
+    control.disabled = gone || canvasBox;
   }
 }

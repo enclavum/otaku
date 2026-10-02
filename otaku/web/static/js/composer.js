@@ -22,7 +22,7 @@ import { midReply, playLine, run } from "./commands.js";
 import { $, $$, element, encodeFile, pickFiles, setValue, span } from "./dom.js";
 import { rows as syntaxRows } from "./table.js";
 import { settle, tell } from "./status.js";
-import { stopPlaying } from "./transcript.js";
+import { focusTail, stopPlaying, tailText } from "./transcript.js";
 
 const composer = $(".otk-composer__input textarea");
 const menu = $(".otk-prefixes");
@@ -85,6 +85,7 @@ export function draft(line) {
 }
 
 export function focusComposer() {
+  if (focusTail()) return; // the canvas is typed in where the story is
   if (!composer.disabled) composer.focus();
 }
 
@@ -166,7 +167,7 @@ export function wire() {
   // Sent by the button, the caret comes back to the box: the next line
   // is typed, not clicked for.
   $(".otk-composer [data-send]")?.addEventListener("click", () => {
-    submit(composer.value);
+    submit(tailText() ?? composer.value); // the canvas's own end, or the box
     focusComposer();
   });
   // The same place, the other half of the turn: what the model is doing

@@ -15,7 +15,7 @@ Refused for what it declines.
 import json
 from dataclasses import dataclass, replace
 
-from otaku.backend import Transcript
+from otaku.backend import Layout
 from otaku.backend.api import stories as api_stories
 from otaku.backend.session import (
     EFFORT_LEVELS,
@@ -26,7 +26,7 @@ from otaku.backend.session import (
     Refused,
     Session,
 )
-from otaku.backend.story import StorySettingTranscript
+from otaku.backend.story import StorySettingLayout
 from otaku.backend.tools import TOOLS
 from otaku.providers import reasoning
 from otaku.settings import row
@@ -210,34 +210,32 @@ def set_verbose(session: Session, raw: str) -> str:
     return f"Verbose: {'on' if session.verbose else 'off'}."
 
 
-def transcript_choices(session: Session) -> tuple[str, ...]:
-    """What /set transcript takes on the model in use: the four
-    transcripts, the novel among them only where the model can complete
-    text (`Session.can_complete_text`). The terminal's menu reads this;
-    typed by hand, the novel is refused the same way (`set_transcript`)."""
+def layout_choices(session: Session) -> tuple[str, ...]:
+    """What /set layout takes on the model in use: the four layouts, the
+    novel among them only where the model can complete text
+    (`Session.can_complete_text`). The terminal's menu reads this; typed
+    by hand, the novel is refused the same way (`set_layout`)."""
     return tuple(
-        each.value
-        for each in Transcript
-        if each is not Transcript.NOVEL or session.can_complete_text
+        each.value for each in Layout if each is not Layout.NOVEL or session.can_complete_text
     )
 
 
-def set_transcript(session: Session, raw: str) -> str:
-    """The story's transcript by name — novel, canvas, manuscript, chat
-    — the novel refused, with the reason, on a model that cannot complete
-    text (`transcript_choices`). The confirmation is the setting's
-    standing, as the page's rail answers; "" reports it. The STORY's,
-    unlike the rest of the family: it forks and dies with it
-    (`backend.story.StorySettingTranscript`)."""
+def set_layout(session: Session, raw: str) -> str:
+    """The story's layout by name — novel, canvas, manuscript, chat — the
+    novel refused, with the reason, on a model that cannot complete text
+    (`layout_choices`). The confirmation is the setting's standing, as
+    the page's rail answers; "" reports it. The STORY's, unlike the rest
+    of the family: it forks and dies with it
+    (`backend.story.StorySettingLayout`)."""
     value = raw.strip().lower()
     if value:
-        chosen = Transcript.from_value(value)
+        chosen = Layout.from_value(value)
         if chosen is None:
-            raise Refused("Usage: /set transcript novel|canvas|manuscript|chat")
-        if value not in transcript_choices(session):
+            raise Refused("Usage: /set layout novel|canvas|manuscript|chat")
+        if value not in layout_choices(session):
             raise Refused(_no_novel(session))
-        return api_stories.update_setting(session, StorySettingTranscript.name, transcript=chosen)
-    return f"{StorySettingTranscript.label}: {session.transcript.value}"
+        return api_stories.update_setting(session, StorySettingLayout.name, layout=chosen)
+    return f"{StorySettingLayout.label}: {session.layout.value}"
 
 
 def _no_novel(session: Session) -> str:

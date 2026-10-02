@@ -49,7 +49,7 @@ from otaku.context.assembler import (
 from otaku.context.tool_calls import FENCE, Prose, ReplyParser, ToolCall, parse_reply
 from otaku.formatting import format_context
 from otaku.providers import OpenAIClient, ProviderError, Reasoning, Reply, Stats, Text, templates
-from otaku.store.schema import Character, CompletionType, Layout, Message
+from otaku.store.schema import Character, CompletionType, Message
 
 # A picture is refused over the text wire though the model sees: the
 # request is one text, which has no room for one (`Session.can_attach`).
@@ -275,7 +275,7 @@ def submit(session: Session, line: str, files: Sequence[RawFile] = ()) -> Iterat
     the text it goes on from, the trailing to the model's continuation
     (`assembler.join_of`); every other line is trimmed here, whatever a
     frontend sent."""
-    if session.layout is not Layout.CANVAS:
+    if not session.layout.is_canvas:
         line = line.strip()
     frame = syntax.read(line)
     error = frame.check()
@@ -294,7 +294,7 @@ def submit(session: Session, line: str, files: Sequence[RawFile] = ()) -> Iterat
     # it stands, no turn recorded (`_submit_events`), over either wire —
     # and nothing at all in the other layouts: refused, never an empty
     # row.
-    if not line.strip() and not files and session.layout is not Layout.CANVAS:
+    if not line.strip() and not files and not session.layout.is_canvas:
         raise Refused(NOTHING_TO_SEND)
     return _submit_events(session, frame, line, [read_picture(file) for file in files])
 
@@ -494,7 +494,7 @@ def _reply_events(
     # which wire made it (`completion`).
     resolved = session.text_template if session.completion_type is CompletionType.TEXT else None
     completion = session.completion_type.value
-    canvas = session.layout is Layout.CANVAS
+    canvas = session.layout.is_canvas
     # A text completion that comes back EMPTY, its stream ending clean —
     # an instruct model at the end of a closed paragraph ends its turn at
     # once, every time (Gemma 4, measured) — is asked ONCE more with a
@@ -514,8 +514,8 @@ def _reply_events(
             except ContextOverflowError as e:
                 yield Declined(str(e))
                 return
-        # A reply that comes flush after an unfinished sentence is owed
-        # the one space the model left out (`assembler.seam_of`),
+        # A reply that comes flush after a text not ending in whitespace
+        # is owed the one space the model left out (`assembler.seam_of`),
         # supplied before its first piece streams, so both frontends
         # draw it and the store keeps it — in the canvas alone, the one
         # layout that records a reply verbatim.
@@ -716,8 +716,8 @@ def _land_tool_turn(session: Session, tool_call: Tool) -> Message:
     """Run the tool and record its result as a TOOL turn — nobody's
     line, the tool's name its `provider` — and hand the row back for
     the frontends to draw."""
-    # the tool is handed the integrations as bound and nothing else of the session
-    result = tool_call.run(session.integrations)
+    # the tool reads what it needs off the session, and writes nothing
+    result = tool_call.run(session)
     session._record_turn(Message(role="tool", kind="tool", body=result, provider=tool_call.name))
     return session._messages[-1]
 

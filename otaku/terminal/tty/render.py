@@ -12,14 +12,15 @@ A reply's tool calls are drawn as what they are, never as their tags,
 each a BLOCK of its own in the flow — a blank line before it, one after
 it where prose goes on (`spaced`), a bar opening every row, the text
 wrapped at the width and plain (`BlockStream`), streamed piece by piece
-and echoed through the same object: a question is the question alone
-(`QuestionStream`) — its answers are the prompt's menu while the story
-stands on it (`asked`, the page's `transcript.questionPosed` rule
-copied), and are gone with the menu once answered; a note is dim, bar
-and all, and drawn only while the story displays notes
-(`notes_displayed`, the caller's to read off the story's settings and
-pass) — otherwise left out, fences and all. Every other call still
-prints as it streamed, fences and all, until its look is decided.
+and echoed through the same object — a question or a note only while
+the story shows its tool (`shown_tools`, the caller's to read off the
+story's settings and pass), otherwise left out, fences and all, as the
+wire leaves it out. A question is the question alone (`QuestionStream`)
+— its answers are the prompt's menu while the story stands on it
+(`asked`, the page's `transcript.questionPosed` rule copied), and are
+gone with the menu once answered; a note is dim, bar and all. Every
+other call still prints as it streamed, fences and all, until its look
+is decided.
 """
 
 import io
@@ -31,8 +32,8 @@ from prompt_toolkit.utils import get_cwidth
 from otaku.backend import Message
 from otaku.backend.api import play as api_play
 from otaku.backend.commands import COMMANDS
-from otaku.backend.story import StorySettingAssistantNotes, StorySettings
-from otaku.backend.tools import ToolQuestions, get_tool_label
+from otaku.backend.story import StorySettingAssistantNotes, StorySettingQuestions, StorySettings
+from otaku.backend.tools import ToolQuestion, get_tool_label
 from otaku.formatting import printable
 from otaku.terminal.tty import DIM, user_block
 from otaku.terminal.tty.cursor import terminal_width
@@ -158,10 +159,10 @@ class QuestionStream(BlockStream):
     alone, as a block — its answers are the prompt's menu while the
     story stands on it, not text in the flow, so what stays in the
     scrollback is what a past question shows. The question is the lines
-    before the first option, as the tool reads it (`ToolQuestions`), and
+    before the first option, as the tool reads it (`ToolQuestion`), and
     that is decided line by line as the call streams: a line whose first
     token is an option's head (`1.`, `a)`) is held until its end tells
-    (`ToolQuestions.is_option`), and once a line is an option, it and
+    (`ToolQuestion.is_option`), and once a line is an option, it and
     everything after it is dropped; every other line streams word by
     word."""
 
@@ -179,7 +180,7 @@ class QuestionStream(BlockStream):
 
     def close(self) -> str:
         held = ""
-        if not self._options and not self._decided and not ToolQuestions.is_option(self._line):
+        if not self._options and not self._decided and not ToolQuestion.is_option(self._line):
             held = self._pass(self._line)  # a last line without its newline, the question's
         self._line = ""
         self._out.write(held)
@@ -191,7 +192,7 @@ class QuestionStream(BlockStream):
         if ch == "\n":
             out = ""
             if not self._decided:
-                if ToolQuestions.is_option(self._line):
+                if ToolQuestion.is_option(self._line):
                     self._options = True
                     return ""
                 out = self._pass(self._line)
@@ -205,7 +206,7 @@ class QuestionStream(BlockStream):
         if (
             ch.isspace()
             and self._line.strip()
-            and not ToolQuestions.is_option(self._line.strip() + " x")
+            and not ToolQuestion.is_option(self._line.strip() + " x")
         ):
             self._decided = True
             return self._pass(self._line)
@@ -220,7 +221,7 @@ def message(
     role: str,
     *,
     pictures: int = 0,
-    notes: bool = False,
+    shown: frozenset[str] = frozenset(),
     width: int | None = None,
     label: str = "",
 ) -> str:
@@ -228,8 +229,8 @@ def message(
     (assistant) — and, for a turn that carried pictures, the dim
     bracketed note on the same line after the words, the stats line's
     family. A reply's questions are drawn as the question alone
-    (`QuestionStream`), its notes dim (`BlockStream`) while `notes` says
-    the story displays them, else left out — blocks behind the bar,
+    (`QuestionStream`) and its notes dim (`BlockStream`), each while
+    `shown` holds its tool (`shown_tools`), else left out — blocks behind the bar,
     wrapped at `width`, the terminal's unless the caller draws into a
     narrower place. Takes no settings besides that — the
     user's colors reached the theme at launch, so a caller only has to
@@ -268,11 +269,14 @@ def message(
                 after_call = False
             streamer.feed(piece)
         elif segment["tool"] == "question":
+            if "question" not in shown:
+                after_call = True  # left out — and the hole it would leave with it
+                continue
             block: BlockStream = QuestionStream(out, width or terminal_width())
             piece = block.open(streamer, fed) + block.feed(piece) + block.close()
             after_call = True
         elif segment["tool"] == "note":
-            if not notes:
+            if "note" not in shown:
                 after_call = True  # left out — and the hole it would leave with it
                 continue
             block = BlockStream(out, width or terminal_width(), dim=True)
@@ -324,23 +328,30 @@ def _columns(text: str) -> int:
     return sum(max(0, get_cwidth(ch)) for ch in text)
 
 
-def notes_displayed(settings: StorySettings) -> bool:
-    """Whether the reader is shown the model's notes: the notes tool
-    switched on, and its display switch with it. The page's
-    `transcript.displayTools`, the rule copied — a tool that is on, with
-    its display switch on — for the one tool the terminal draws that
-    way."""
+def shown_tools(settings: StorySettings) -> frozenset[str]:
+    """The tools whose calls the reader is shown: a question while its
+    tool is on — off, a tool does not exist for the model, and the
+    reader sees what the model reads — and the notes while theirs is on
+    with its display switch. The page's `transcript.displayTools`, the
+    rule copied."""
+    shown: set[str] = set()
+    questions = settings.get(StorySettingQuestions.name)
+    if questions is not None and questions.enabled:
+        shown.add("question")
     notes = settings.get(StorySettingAssistantNotes.name)
-    return notes is not None and notes.enabled and bool(notes.display_notes)
+    if notes is not None and notes.enabled and notes.display_notes:
+        shown.add("note")
+    return frozenset(shown)
 
 
-def asked(newest: Message | None) -> ToolQuestions | None:
-    """The question the story stands on, read: the newest message is a
-    reply whose last call is a question, with nothing after it but notes
-    and whitespace — prose, or a call of a tool this build does not know,
-    means the model went on past it; a line played since means it was
-    answered. The page's `transcript.questionPosed`, the rule copied."""
-    if newest is None or newest.role != "assistant":
+def asked(newest: Message | None, shown: frozenset[str]) -> ToolQuestion | None:
+    """The question the story stands on, read: the questions tool is on
+    (`shown`), and the newest message is a reply whose last call is a
+    question, with nothing after it but notes and whitespace — prose, or
+    a call of a tool this build does not know, means the model went on
+    past it; a line played since means it was answered. The page's
+    `transcript.questionPosed`, the rule copied."""
+    if newest is None or newest.role != "assistant" or "question" not in shown:
         return None
     for segment in reversed(api_play.segments(newest.body)):
         if segment["kind"] == "prose":
@@ -348,7 +359,7 @@ def asked(newest: Message | None) -> ToolQuestions | None:
                 return None
             continue
         if segment["tool"] == "question":
-            return ToolQuestions(str(segment["text"]))
+            return ToolQuestion(str(segment["text"]))
         if segment["tool"] != "note":
             return None
     return None
@@ -362,33 +373,37 @@ def pictures_note(count: int) -> str:
     return f"[ {count} picture{'s' if count != 1 else ''} ]"
 
 
-def turn(item: Message, *, notes: bool = False) -> str:
+def turn(item: Message, *, shown: frozenset[str] = frozenset()) -> str:
     """One turn exactly as the echoes print it: a user turn as the grey
-    block, a model turn as it streamed, its notes while `notes` — the
+    block, a model turn as it streamed, the calls of the tools `shown` — the
     trailing newline normalized away, the caller joining and terminating
     lines."""
     if item.role == "user":
         return user_block(message(item.body, "user", pictures=len(item.attachments)))
-    label = get_tool_label(item.provider) if item.role == "tool" else ""
-    return "\n".join(message(item.body, item.role, notes=notes, label=label).splitlines())
+    label = get_tool_label(item.provider, item.body) if item.role == "tool" else ""
+    return "\n".join(message(item.body, item.role, shown=shown, label=label).splitlines())
 
 
 def last_turns(
-    messages: list[Message], count: int, *, notes: bool = False, is_canvas: bool = False
+    messages: list[Message],
+    count: int,
+    *,
+    shown: frozenset[str] = frozenset(),
+    is_canvas: bool = False,
 ) -> str:
     """The last `count` turns, echoed the way they played: one blank line
-    between turns, bodies verbatim, the replies' notes while `notes` —
+    between turns, bodies verbatim, the calls of the tools `shown` —
     or, on the canvas (`is_canvas`), as the one text they are (`flow`)."""
     if is_canvas:
-        return flow(messages[-count:], notes=notes)
+        return flow(messages[-count:], shown=shown)
     out: list[str] = []
     for item in messages[-count:]:
         out.append("")
-        out.append(turn(item, notes=notes))
+        out.append(turn(item, shown=shown))
     return "\n".join(out).lstrip("\n")
 
 
-def flow(items: list[Message], *, notes: bool = False) -> str:
+def flow(items: list[Message], *, shown: frozenset[str] = frozenset()) -> str:
     """The turns as ONE text — the canvas's echo in this medium: a user
     row as prose, no block, typeset as the text is;
     every row joined to the text before it by its seam
@@ -396,10 +411,12 @@ def flow(items: list[Message], *, notes: bool = False) -> str:
     row as it stands, its own leading whitespace the seam; a tool turn
     a block apart, and the row after it a paragraph, since a block ends
     its line. No trailing newline, like `turn`."""
-    return flow_offsets(items, notes=notes)[0]
+    return flow_offsets(items, shown=shown)[0]
 
 
-def flow_offsets(items: list[Message], *, notes: bool = False) -> tuple[str, list[int]]:
+def flow_offsets(
+    items: list[Message], *, shown: frozenset[str] = frozenset()
+) -> tuple[str, list[int]]:
     """`flow`'s text, and where each turn's own text begins in it — a
     paragraph join's blank counted with the turn BEFORE it — so the
     ledger can place echoed turns for erasing (`Chat.restore_tail`)."""
@@ -407,7 +424,7 @@ def flow_offsets(items: list[Message], *, notes: bool = False) -> tuple[str, lis
     starts: list[int] = []
     previous: Message | None = None
     for item in items:
-        piece = prose(item.body) if item.role == "user" else turn(item, notes=notes)
+        piece = prose(item.body) if item.role == "user" else turn(item, shown=shown)
         if not out:
             starts.append(0)
             out = piece

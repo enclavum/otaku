@@ -12,6 +12,7 @@
 import * as api from "./api.js";
 import { ask, edited, editable, footnote, guard } from "./browser.js";
 import { $, element, span } from "./dom.js";
+import { KEY_MASK } from "./models.js";
 import { landed } from "./shell.js";
 
 /* What each story setting does, under its name — in the order the
@@ -24,7 +25,7 @@ const _ABOUT = {
   allow_questions:
     "The narrator may ask you something directly and wait for an answer before going on.",
   allow_web_search: "The narrator may look something up on the internet.",
-  allow_system_tool: "The narrator may ask for local system facts.",
+  allow_system_info: "The narrator may ask for local system facts.",
   allow_assistant_notes:
     "The narrator may keep a short note to itself between turns, never played into the story.",
   use_story_reminder: "Injected into this story with every reply.",
@@ -406,22 +407,99 @@ function reminderBody(view, text, write) {
 function keyButton(view) {
   /* The web search key — "Search API key" on the page — in a dialog: ONE box,
      no engine named; the backend tells the engine from the key's shape
-     and says which it chose (`backend.api.integrations`). Save writes
-     what was typed, and an emptied box forgets the key — the backend's
-     sentence says which. */
+     and says which it chose (`backend.api.integrations`). A key that is
+     set shows masked, as a provider's does (`models.keyField`); Save
+     writes what was typed, and a box emptied of a key forgets it — the
+     backend's sentence says which. */
   const button = element("button", "otk-btn", "Search API key");
   button.type = "button";
   button.onclick = guard(async () => {
     const dialog = $('dialog[data-dialog="web-search-key"]');
     const field = $("input", dialog);
+    const { has_key: set } = await api.webSearch();
+    const key = maskedKey(field, set);
     const choice = await ask("web-search-key", () => {
-      field.value = "";
+      key.arm();
+      // A key that is set opens on Cancel, its mask standing: the box is
+      // entered to replace the key, not on the way in. With none, the
+      // box has the focus, for the key to be pasted.
+      field.autofocus = !set;
+      $('[data-choice="cancel"]', dialog).autofocus = set;
     });
+    key.disarm();
     if (choice !== "save") return;
-    const answer = await api.setWebSearchKey(field.value);
+    const typed = key.pending();
+    if (typed === null) return; // the key stands as it was
+    const answer = await api.setWebSearchKey(typed);
     footnote(view.popup, answer.notice);
   });
   return button;
+}
+
+function maskedKey(input, set) {
+  /* The dialog's box over a key that may be set, as a provider's key
+     field is (`models.keyField`): masked while a key is set, the mask
+     cleared on entering the box so a new key can be typed, and put back
+     on leaving it with none typed. Delete or Backspace on the bare box
+     marks the key to be FORGOTTEN, the box captioned so; typing a key
+     instead replaces it. */
+  const wired = new AbortController();
+  const on = (type, handler) => input.addEventListener(type, handler, { signal: wired.signal });
+  // the markup's own placeholder, which a forgotten key's caption stands in for
+  input.dataset.rest ??= input.placeholder;
+  const mask = () => {
+    input.value = KEY_MASK;
+    input.dataset.mask = "yes";
+  };
+  const forget = () => {
+    delete input.dataset.mask;
+    input.value = "";
+    input.dataset.forget = "yes";
+    input.placeholder = "cleared";
+  };
+  const keep = () => {
+    delete input.dataset.forget;
+    input.placeholder = input.dataset.rest;
+  };
+  return {
+    arm() {
+      delete input.dataset.mask;
+      input.value = "";
+      keep();
+      if (!set) return;
+      mask();
+      on("focus", () => {
+        if (!input.dataset.mask) return;
+        delete input.dataset.mask;
+        input.value = "";
+      });
+      on("blur", () => {
+        if (!input.value && !input.dataset.forget) mask();
+      });
+      on("keydown", (event) => {
+        if (event.key !== "Delete" && event.key !== "Backspace") return;
+        // erasing typed characters is ordinary editing; the bare box is
+        // where the key itself is meant
+        if (input.value && !input.dataset.mask) return;
+        event.preventDefault();
+        forget();
+      });
+      on("input", () => {
+        if (input.value) keep();
+      });
+    },
+    disarm() {
+      wired.abort();
+    },
+    /** What Save writes: the key typed, "" for one forgotten — or for an
+        empty box over no key, as before — and null while the key stands. */
+    pending() {
+      if (input.dataset.forget) return "";
+      if (input.dataset.mask) return null;
+      if (set && !input.value.trim()) return null;
+      return input.value;
+    },
+  };
 }
 
 async function saveSetting(view, setting, fields) {

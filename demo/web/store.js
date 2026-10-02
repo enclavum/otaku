@@ -105,7 +105,7 @@ export function facts(version) {
   const model = MODELS.find((m) => m.name === state.model);
   // With no story open, the settings a first turn would make it with.
   const held = story ? _settingsOf(state.open) : state.storySettingDefaults;
-  const transcript = held?.find((s) => s.name === "transcript")?.transcript ?? "manuscript";
+  const layout = held?.find((s) => s.name === "layout")?.layout ?? "manuscript";
   const canCompleteText = Boolean(
     model?.capabilities.text_completion && model?.text_template === "plain",
   );
@@ -120,13 +120,13 @@ export function facts(version) {
     turns: story ? story.turns.length : 0,
     // The demo's model cannot see: no attach button, no pictures anywhere.
     can_attach: false,
-    // The wire and the look, derived from the story's transcript as the
-    // backend derives them (`schema.Transcript`): the novel is drawn as
+    // The wire and the look, derived from the story's layout as the
+    // backend derives them (`schema.Layout`): the novel is drawn as
     // the canvas, and goes over the text wire only on a model that
     // continues a bare text — its engine's text completion and a `plain`
     // template (`Session.can_complete_text`) — which the demo's is not.
-    completion_type: transcript === "novel" && canCompleteText ? "text" : "chat",
-    layout: transcript === "novel" ? "canvas" : transcript,
+    completion_type: layout === "novel" && canCompleteText ? "text" : "chat",
+    layout: layout === "novel" ? "canvas" : layout,
     can_complete_text: canCompleteText,
   };
 }
@@ -522,10 +522,10 @@ export function updateSetting(storyId, name, body) {
     const known = settings.map((s) => s.name).join(", ");
     return refuse(`Unknown setting '${name}'. Settings: ${known}.`);
   }
-  // the transcript setting is the one that holds a transcript: a value,
-  // not a switch — its switch refused before anything else, as there
-  const holdsTranscript = setting.transcript != null;
-  if (holdsTranscript && body.enabled != null) {
+  // the layout setting is the one that holds a layout: a value, not a
+  // switch — its switch refused before anything else, as there
+  const holdsLayout = setting.layout != null;
+  if (holdsLayout && body.enabled != null) {
     return refuse(`${setting.label} has no switch: a story is always read in one.`);
   }
   if (body.position != null) {
@@ -544,13 +544,13 @@ export function updateSetting(storyId, name, body) {
   if (body.display_notes != null && setting.display_notes === null) {
     return refuse(`${setting.label} has nothing to display.`);
   }
-  if (body.transcript != null && !holdsTranscript) {
-    return refuse(`${setting.label} has no transcript.`);
+  if (body.layout != null && !holdsLayout) {
+    return refuse(`${setting.label} has no layout.`);
   }
-  if (holdsTranscript) {
-    if (body.transcript != null) setting.transcript = body.transcript;
-    // `StorySettingTranscript.standing`: a caption, no full stop
-    return say(`${setting.label}: ${setting.transcript}`);
+  if (holdsLayout) {
+    if (body.layout != null) setting.layout = body.layout;
+    // `StorySettingLayout.standing`: a caption, no full stop
+    return say(`${setting.label}: ${setting.layout}`);
   }
   if (body.display_notes != null) setting.display_notes = body.display_notes;
   if (body.enabled != null) setting.enabled = body.enabled;

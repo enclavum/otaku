@@ -61,10 +61,10 @@ THINK_LEAF = "<level>"
 # each followed by its `reset`.
 PARAMETER_LEAF = "<parameter>"
 
-# And TRANSCRIPT_LEAF: "a /set transcript goes here" — the four
-# transcripts, the novel among them where the model in use can complete
-# text (`api.settings.transcript_choices`).
-TRANSCRIPT_LEAF = "<transcript>"
+# And LAYOUT_LEAF: "a /set layout goes here" — the four layouts, the
+# novel among them where the model in use can complete text
+# (`api.settings.layout_choices`).
+LAYOUT_LEAF = "<layout>"
 
 CompletionTree = dict[str, "CompletionTree | str | None"]
 
@@ -119,17 +119,17 @@ class CommandCompleter(_Surface):
         cast: Callable[[], Cast] | None = None,
         levels: Callable[[], Sequence[str]] | None = None,
         parameters: Callable[[], Sequence[str]] | None = None,
-        transcripts: Callable[[], Sequence[str]] | None = None,
+        layouts: Callable[[], Sequence[str]] | None = None,
     ) -> None:
         self.tree = tree
         # The story's cast, looked up live: (name, one-line description)
         # rows for the commands whose argument is a character.
         self.cast = cast or (lambda: ())
-        # What /set think, /set parameter and /set transcript take on the model
+        # What /set think, /set parameter and /set layout take on the model
         # in use, looked up live — the whole vocabulary with no session to ask.
         self.levels = levels or (lambda: THINK_MENU)
         self.parameters = parameters or (lambda: tuple(PARAMETERS))
-        self.transcripts = transcripts or (lambda: ("novel", "canvas", "manuscript", "chat"))
+        self.layouts = layouts or (lambda: ("novel", "canvas", "manuscript", "chat"))
         self.shortcuts: dict[str, str] = {}
 
     @staticmethod
@@ -200,8 +200,8 @@ class CommandCompleter(_Surface):
             return {level: None for level in self.levels()}
         if node == PARAMETER_LEAF:
             return {name: {"reset": None} for name in self.parameters()}
-        if node == TRANSCRIPT_LEAF:
-            return {name: None for name in self.transcripts()}
+        if node == LAYOUT_LEAF:
+            return {name: None for name in self.layouts()}
         return node
 
 
@@ -284,21 +284,21 @@ class SlashCompleter(Completer):
         shortcuts: dict[str, str] | None = None,
         levels: Callable[[], Sequence[str]] | None = None,
         parameters: Callable[[], Sequence[str]] | None = None,
-        transcripts: Callable[[], Sequence[str]] | None = None,
+        layouts: Callable[[], Sequence[str]] | None = None,
         pictures_accepted: Callable[[], bool] | None = None,
     ) -> Self:
         """A completer over the shared command table. `prefix` supplies an
         open block's collected text — the line being typed is read in the
         context of the message it belongs to, or every continuation line
         would look like the start of one. `cast` answers with the story's
-        characters, looked up live; `levels`, `parameters` and `transcripts`
-        with what /set think, /set parameter and /set transcript take on the
+        characters, looked up live; `levels`, `parameters` and `layouts`
+        with what /set think, /set parameter and /set layout take on the
         model in use, likewise;
         `pictures_accepted` whether a picture would be taken, which is when the picture
         menu may open (never, by default). `shortcuts` (token → caption,
         from `chat.bindings.SHORTCUTS` as data) fills the menu's key
         column."""
-        command = CommandCompleter(_completion_tree(), cast, levels, parameters, transcripts)
+        command = CommandCompleter(_completion_tree(), cast, levels, parameters, layouts)
         command.shortcuts = shortcuts or {}
         picture = PictureCompleter(pictures_accepted or (lambda: False))
         return cls((picture, command, InlinerCompleter(_inliner_menu())), prefix)
@@ -365,8 +365,8 @@ def _subcommand_leaf(name: str) -> "CompletionTree | str | None":
         return PARAMETER_LEAF
     if name in ("verbose", "autocorrect", "notification"):
         return {"on": None, "off": None}
-    if name == "transcript":
-        return TRANSCRIPT_LEAF
+    if name == "layout":
+        return LAYOUT_LEAF
     return None
 
 

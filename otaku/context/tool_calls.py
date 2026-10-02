@@ -14,8 +14,9 @@ consulted (`backend.tools` owns those): a body keeps its fences for
 good while the tools come and go between builds, so "not story" has to
 be a property of the TEXT — a call stays one in a build that never
 heard of its tool. Three rules, and one piece of state, the open call:
-a fence line whose info string is `otk-` and a name of ASCII letters
-(any case, 32 at most, spaces allowed around it) opens a call, ending
+a fence line whose info string is `otk-` and a name of ASCII letters,
+words joined by single hyphens (any case, 32 at most, spaces allowed
+around it) opens a call, ending
 the one open, so calls never nest; a bare fence line ends the open
 call, and is prose when none is; any other line is what it is where it
 stands — prose outside a call, the call's own inside one, a fence with
@@ -36,40 +37,39 @@ the lore pass without its calls (`strip`). Pure strings.
 """
 
 import re
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 FENCE = "```"  # bare, the line that closes a call
 _NAMESPACE = "otk-"
-# A name is letters alone, and no longer than this.
+# A name is words of letters joined by single hyphens (`web-search`),
+# and no longer than this, its hyphens counted: the lookahead caps the
+# run, the rest spells the words.
 _MAX_NAME = 32
+_NAME = rf"(?=[a-z-]{{1,{_MAX_NAME}}}(?![a-z-]))[a-z]+(?:-[a-z]+)*"
 _FLAGS = re.IGNORECASE | re.ASCII
 # A whole line (its newline off) that opens a call: the fence, the
 # namespace and a name, spaces allowed around the info string.
-_OPENER = re.compile(rf" {{0,3}}`{{3,}}[ \t]*{_NAMESPACE}([a-z]{{1,{_MAX_NAME}}})[ \t]*", _FLAGS)
+_OPENER = re.compile(rf" {{0,3}}`{{3,}}[ \t]*{_NAMESPACE}({_NAME})[ \t]*", _FLAGS)
 # A whole line that is a bare fence: what closes a call.
 _BARE = re.compile(r" {0,3}`{3,}[ \t]*")
 # A line still arriving that may yet complete into either — held back
 # until its newline decides it, or it cannot.
 _SO_FAR = re.compile(
     rf" {{0,3}}`{{0,2}}"
-    rf"| {{0,3}}`{{3,}}[ \t]*(?:o|ot|otk|{_NAMESPACE}[a-z]{{0,{_MAX_NAME}}}[ \t]*)?",
+    rf"| {{0,3}}`{{3,}}[ \t]*(?:o|ot|otk|{_NAMESPACE}[a-z-]{{0,{_MAX_NAME}}}[ \t]*)?",
     _FLAGS,
 )
 
 
 @dataclass(frozen=True)
 class ToolSet:
-    """The tools a story knows, by name, each on or off: how their calls
-    go on the wire. A call of a tool in `on` is sent as written — the
-    history teaches the model the convention; one of a tool in `off`
-    becomes what its rule makes of the inside — the story keeps only
-    what reads as story; one of any other name leaves the wire — a tool
-    this build no longer has. A white list, so a decommissioned tool's
-    calls never ride."""
+    """The tools a story has switched on, by name: how their calls go on
+    the wire. A call of a tool in `on` is sent as written — the history
+    teaches the model the convention; any other leaves the wire, fences,
+    inside and all — a tool switched off, or one this build no longer
+    has. A white list: a tool that is off does not exist for the model."""
 
     on: frozenset[str] = frozenset()
-    off: Mapping[str, Callable[[str], str]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -220,10 +220,9 @@ def to_wire(body: str, tools: ToolSet) -> str:
     """The body as it goes on the wire under `tools`: a call of a tool
     that is on as its canonical self — the inside byte for byte between
     the canonical opening fence and a bare closing one, whatever the
-    text spelled or left open, so the history teaches closed calls; one
-    of a tool that is off replaced by its rule's text; any other
-    removed. A call that leaves takes the blank line beside it — after
-    it, or before it at the end — so no seam is left."""
+    text spelled or left open, so the history teaches closed calls; any
+    other removed. A call that leaves takes the blank line beside it —
+    after it, or before it at the end — so no seam is left."""
     out: list[str] = []
     at = 0  # how far the body is written
     for name, start, end, inside in _spans(body):
@@ -231,10 +230,6 @@ def to_wire(body: str, tools: ToolSet) -> str:
         if name in tools.on:
             opening = f"{FENCE}{_NAMESPACE}{name}"
             made = f"{opening}\n{inside}\n{FENCE}" if inside else f"{opening}\n{FENCE}"
-        else:
-            rule = tools.off.get(name)
-            made = rule(inside) if rule else ""
-        if made:
             out.append(before + made)
             at = end
             continue

@@ -103,7 +103,7 @@ openapi: 3.1.0
 
 info:
   title: otaku web API
-  version: 0.6.1
+  version: 0.7.0
   contact:
     name: otaku
     url: https://otaku.sh
@@ -819,7 +819,7 @@ paths:
         required: true
         schema:
           type: string
-          enum: [use_shared_reminder, use_story_reminder, allow_assistant_notes, allow_questions, allow_system_tool, allow_web_search, emulate_text_completion, transcript]
+          enum: [use_shared_reminder, use_story_reminder, allow_assistant_notes, allow_questions, allow_system_info, allow_web_search, emulate_text_completion, layout]
     patch:
       operationId: patchStorySetting
       tags: [Dossier]
@@ -849,7 +849,7 @@ paths:
                     - { type: integer, minimum: 1 }
                 reminder_text: { type: string, description: The story's own reminder; "" clears it. }
                 display_notes: { type: boolean, description: Whether the reader is shown the notes the model writes; refused for a setting with nothing to display. }
-                transcript: { type: string, enum: [novel, canvas, manuscript, chat], description: "The transcript the story is read in; taken by the transcript setting alone. The novel is refused on a model that cannot complete text." }
+                layout: { type: string, enum: [novel, canvas, manuscript, chat], description: "The layout the story is read in; taken by the layout setting alone. The novel is refused on a model that cannot complete text." }
       responses:
         "200": { $ref: "#/components/responses/Answered" }
         "400": { $ref: "#/components/responses/BadRequest" }
@@ -2208,7 +2208,7 @@ components:
                   oneOf:
                     - { type: string, enum: [system] }
                     - { type: integer, minimum: 1 }
-              enabled: { type: boolean, description: "Whether it is on — off for a new story, but the text completion emulation, on until switched off; always true for the transcript setting, which has no switch." }
+              enabled: { type: boolean, description: "Whether it is on — off for a new story; always true for the layout setting, which has no switch." }
               position:
                 nullable: true
                 description: Where its injection rides — "system" appends it to the system message; a number puts it before that one of the reader's messages counted from the end, 1 the latest; null for a setting that injects nothing.
@@ -2217,7 +2217,7 @@ components:
                   - { type: integer, minimum: 1 }
               reminder_text: { type: string, nullable: true, description: "The story's own reminder; null for a setting that has none (every one but the story reminder's)." }
               display_notes: { type: boolean, nullable: true, description: "Whether the reader is shown the notes the model writes; null for a setting with nothing to display." }
-              transcript: { type: string, nullable: true, enum: [novel, canvas, manuscript, chat, null], description: "The transcript the story is read in — novel (the canvas over the text wire, the model continuing the text), canvas (one continuous text), manuscript (played lines as interjections), chat (alternating blocks); manuscript until the story says otherwise. Null for every setting but the transcript's." }
+              layout: { type: string, nullable: true, enum: [novel, canvas, manuscript, chat, null], description: "The layout the story is read in — novel (the canvas over the text wire, the model continuing the text), canvas (one continuous text), manuscript (played lines as interjections), chat (alternating blocks); manuscript until the story says otherwise. Null for every setting but the layout's." }
 
     Syntax:
       type: object
@@ -2257,7 +2257,7 @@ components:
           description: "Who generated the turn: an engine, 'card' on a card greeting, or a tool's name on a tool turn."
         tool_label:
           type: [string, "null"]
-          description: "A tool turn's tool as the page names it; null on every other turn."
+          description: "A tool turn's tool as the page names it for the result it holds ('Web search failed' for a search that failed); null on every other turn."
         model: { type: [string, "null"] }
         template:
           type: [string, "null"]

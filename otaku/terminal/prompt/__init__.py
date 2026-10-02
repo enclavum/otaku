@@ -36,7 +36,9 @@ from prompt_toolkit.formatted_text import (
     to_formatted_text,
 )
 from prompt_toolkit.history import History
+from prompt_toolkit.input.ansi_escape_sequences import ANSI_SEQUENCES
 from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.keys import Keys
 from prompt_toolkit.layout import menus as _ptk_menus
 from prompt_toolkit.layout.controls import BufferControl
 from prompt_toolkit.lexers import Lexer
@@ -44,21 +46,32 @@ from prompt_toolkit.styles import Style
 
 from otaku.backend.api import lore
 from otaku.backend.api import settings as api_settings
+from otaku.backend.api import stories as api_stories
 from otaku.backend.session import Session
 from otaku.formatting import flatten, truncate
 from otaku.terminal.prompt.completion import SlashCompleter
 from otaku.terminal.tty import statusline
-from otaku.terminal.tty.render import BAR, asked, block, command_tokens, message
+from otaku.terminal.tty.render import BAR, asked, block, command_tokens, message, shown_tools
 from otaku.terminal.tty.theme import theme
 
 # The blank before a prompt that opens on a question's answers, while
 # they show: the bar alone, the question's block running on into the rows.
 _BARRED = BAR.rstrip()
 
+# PROTOTYPE: Ctrl+Enter told from Enter where the terminal reports it —
+# xterm's modifyOtherKeys form and the CSI u form, which prompt_toolkit
+# reads as Enter — spelled as Windows' console input spells it (Esc, then
+# Ctrl+J), so one binding sends on every platform (`_make_bindings`)
+_CONTROL_ENTER = ("\x1b[27;5;13~", "\x1b[13;5u")
+for _sequence in _CONTROL_ENTER:
+    ANSI_SEQUENCES[_sequence] = (Keys.Escape, Keys.ControlJ)
+
 CHAT_PLACEHOLDER = FormattedText([("class:placeholder", "Send a message")])
-# The same hint on the canvas (`session.layout`), where a line continues
+# The same hint on the canvas (`Layout.is_canvas`), where a line continues
 # the story rather than being sent to it.
-CANVAS_PLACEHOLDER = FormattedText([("class:placeholder", "Continue the story")])
+# the canvas's, in the story's text or under it — an empty story is begun
+CANVAS_PLACEHOLDER = FormattedText([("class:placeholder", "Continue…")])
+START_PLACEHOLDER = FormattedText([("class:placeholder", "Start the story")])
 
 # Ctrl+D submits /bye only on an empty line — the terminal convention.
 # With a draft on the line it falls through to delete-forward, so readline
@@ -78,6 +91,21 @@ class Carry:
     def __init__(self) -> None:
         self.text = ""
         self.shortcut = False
+        # PROTOTYPE: the canvas's keys are in force — Enter a paragraph,
+        # Ctrl+Enter (or Ctrl+S) the send (`_make_bindings`)
+        self.canvas_keys = False
+        # PROTOTYPE: the prompt stands in the story's text; `/` at the start
+        # of an empty paragraph there leaves it for the COMMAND PARAGRAPH,
+        # a prompt of its own under the text (`to_command`, what stood in
+        # the text in `shown`, the story typed so far kept as `draft`);
+        # Esc or Backspace on the bare slash leaves that for the text again
+        # (`from_command`)
+        self.in_text = False
+        self.command_paragraph = False
+        self.to_command = False
+        self.from_command = False
+        self.shown = ""
+        self.draft = ""
 
     def take_text(self) -> str:
         text, self.text = self.text, ""
@@ -292,7 +320,7 @@ def build_prompt(
         shortcuts={token: caption for token, (_key, caption) in shortcuts.items()},
         levels=lambda: api_settings.think_choices(session).levels,
         parameters=lambda: api_settings.parameter_names(session),
-        transcripts=lambda: api_settings.transcript_choices(session),
+        layouts=lambda: api_settings.layout_choices(session),
     )
     menu_line = Condition(
         lambda: completer.partial(get_app().current_buffer.document.text_before_cursor) is not None
@@ -331,7 +359,8 @@ def _answers(session: Session) -> Sequence[str]:
     """The answers to pick from, while the story stands on a question
     with a fixed set — read as each prompt opens: the line played next
     answers the question, and the rows go."""
-    question = asked(session.messages[-1] if session.messages else None)
+    newest = session.messages[-1] if session.messages else None
+    question = asked(newest, shown_tools(api_stories.get_settings(session)))
     return question.options if question is not None else ()
 
 
@@ -408,6 +437,59 @@ def _make_bindings(
     answers: AnswerMenu,
 ) -> KeyBindings:
     kb = KeyBindings()
+    # PROTOTYPE: in the canvas Enter opens a paragraph — the blank line the
+    # story stores — and the line is sent by Ctrl+Enter where the terminal
+    # tells it from Enter (Windows always; elsewhere where it honours
+    # modifyOtherKeys, `_CONTROL_ENTER`), by Ctrl+S on every terminal, and
+    # by Ctrl+J, which some send for Ctrl+Enter. A line of a command or a
+    # direction is one line: Enter sends it; a question's answer rows,
+    # while they show, take Enter as everywhere.
+    canvas_keys = Condition(lambda: carry.canvas_keys)
+
+    @kb.add("enter", filter=canvas_keys & ~completion_is_selected & ~Condition(answers.shown))
+    def _paragraph(event: Any) -> None:
+        buffer = event.current_buffer
+        if buffer.text.lstrip().startswith("/") and "\n" not in buffer.text:
+            buffer.validate_and_handle()
+        else:
+            buffer.insert_text("\n\n")
+
+    @kb.add("escape", "c-j", filter=canvas_keys)
+    @kb.add("c-j", filter=canvas_keys)
+    @kb.add("c-s", filter=canvas_keys)
+    def _send(event: Any) -> None:
+        event.current_buffer.validate_and_handle()
+
+    def _empty_paragraph() -> bool:
+        # the caret at the start of an empty paragraph: nothing typed yet,
+        # or a blank line just opened at the end of what was
+        document = get_app().current_buffer.document
+        before = document.text_before_cursor
+        if document.text_after_cursor.strip():
+            return False
+        return not before.strip() or before.endswith("\n\n")
+
+    @kb.add("/", filter=Condition(lambda: carry.in_text) & Condition(_empty_paragraph))
+    def _to_command(event: Any) -> None:
+        buffer = event.current_buffer
+        carry.shown = buffer.text
+        carry.draft = buffer.text.rstrip()
+        carry.to_command = True
+        event.app.exit(result="")
+
+    command_paragraph = Condition(lambda: carry.command_paragraph)
+    bare_slash = Condition(lambda: get_app().current_buffer.text == "/")
+
+    @kb.add("escape", filter=command_paragraph & ~has_completions)
+    @kb.add("backspace", filter=command_paragraph & bare_slash)
+    def _from_command(event: Any) -> None:
+        carry.shown = event.current_buffer.text
+        carry.from_command = True
+        # everything it drew goes — the line, and a menu open under it — the
+        # caret back where it began, so nothing is left to count
+        event.app.erase_when_done = True
+        event.app.exit(result="")
+
     for command, (key, _caption) in shortcuts.items():
         # Ctrl+D quits only on an empty line — the terminal convention;
         # with a draft it falls through to delete-forward, so readline
@@ -459,7 +541,7 @@ def _make_bindings(
     # …and does NOT close on backspace. prompt_toolkit restarts the menu
     # only on text INSERTS, so a plain backspace while filtering would
     # dismiss it; this deletes and re-opens while the line is a command.
-    @kb.add("backspace", filter=menu_line)
+    @kb.add("backspace", filter=menu_line & ~(command_paragraph & bare_slash))
     def _bs_refilter(event: Any) -> None:
         event.current_buffer.delete_before_cursor(count=event.arg)
         if menu_line():

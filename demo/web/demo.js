@@ -82,10 +82,10 @@ const ROUTES = {
   "GET /api/stories/{story}/settings": (p) => store.storySettings(num(p.story)),
   "PATCH /api/stories/{story}/settings/{setting}": (p, q, b) =>
     // A flag that is not a boolean is malformed, as the server answers
-    // it; so is a transcript that is none of the four names.
+    // it; so is a layout that is none of the four names.
     (b.enabled != null && typeof b.enabled !== "boolean") ||
     (b.display_notes != null && typeof b.display_notes !== "boolean") ||
-    (b.transcript != null && !["novel", "canvas", "manuscript", "chat"].includes(b.transcript))
+    (b.layout != null && !["novel", "canvas", "manuscript", "chat"].includes(b.layout))
       ? status(400)
       : store.updateSetting(num(p.story), p.setting, b),
   "PATCH /api/stories/{story}/scenes/{scene}": (p, q, b) =>

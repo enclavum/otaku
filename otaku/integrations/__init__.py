@@ -1,6 +1,9 @@
 """The integrations: the services otaku asks for something other than a
 completion — the web search engines, one module each — and the one
-registry. A section of integrations.toml IS its integration
+registry; beside them, the sky's own facts, asked of no service
+(`astronomy`: the moon's phase, the nearest solstice or equinox).
+
+A section of integrations.toml IS its integration
 (`ALL_INTEGRATIONS`, keyed by section name, as the providers' sections
 are their engines); a section under any other name is passed over, and
 the launch says so. The type of a section is `settings.integrations`',
@@ -14,6 +17,7 @@ A new integration is a module, a subclass of `Integration` (or of
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
+from otaku.integrations.astronomy import moon_phase, turning_point
 from otaku.integrations.base import (
     Integration,
     IntegrationError,
@@ -35,7 +39,9 @@ __all__ = [
     "SearchEngine",
     "SearchResult",
     "default_sections",
+    "moon_phase",
     "search_engine_of_key",
+    "turning_point",
 ]
 
 
@@ -44,7 +50,7 @@ class Integrations:
     """The integrations as BOUND — one instance per configured integration
     the registry knows, by id, each holding its url and key — and the
     engine web search asks, chosen by the key saved (None while none
-    is). What a tool runs on (`Tool.run`), and all a tool sees. Not the
+    is). What a tool runs on reads off the session (`Tool.run`). Not the
     settings: those are `settings.integrations.IntegrationSettings`,
     bound into this by `from_settings` at launch; a key saved rebinds
     one engine and moves the choice (`backend.api.integrations`). What

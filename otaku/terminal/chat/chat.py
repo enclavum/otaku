@@ -8,11 +8,10 @@ the bindings — whoever routes cannot live beside this class.
 
 import sys
 
-from otaku.backend import Layout
 from otaku.backend.api import stories as api_stories
 from otaku.backend.session import Session
 from otaku.terminal.chat.ledger import ScreenLedger
-from otaku.terminal.tty.render import flow_offsets, notes_displayed, turn
+from otaku.terminal.tty.render import flow_offsets, shown_tools, turn
 from otaku.terminal.tty.statusline import StatusLine
 
 # Turns echoed when a story (re)opens (the launch, a browser pick, an
@@ -54,11 +53,11 @@ class Chat:
         self.ledger = ScreenLedger(repaint=self.status_line.refresh)
 
     @property
-    def notes_displayed(self) -> bool:
-        """Whether the open story displays the model's notes
-        (`render.notes_displayed` over its settings) — read as each echo
-        draws, so an echo and the ledger's measure of it agree."""
-        return notes_displayed(api_stories.get_settings(self.session))
+    def shown_tools(self) -> frozenset[str]:
+        """The tools whose calls the open story shows (`render.shown_tools`
+        over its settings) — read as each echo draws, so an echo and the
+        ledger's measure of it agree."""
+        return shown_tools(api_stories.get_settings(self.session))
 
     def say(self, text: str) -> None:
         """Print command output below the typed line: the lead blank on
@@ -94,10 +93,10 @@ class Chat:
             if reply is None and prompt is None:
                 break  # an unexpected role — better unerasable than wrong
             groups.append((prompt, reply))
-        notes = self.notes_displayed
+        drawn = self.shown_tools
         ordered = list(reversed(groups))
-        if self.session.layout is Layout.CANVAS:
-            text, starts = flow_offsets(shown, notes=notes)
+        if self.session.layout.is_canvas:
+            text, starts = flow_offsets(shown, shown=drawn)
             for n, (prompt, reply) in enumerate(ordered):
                 first = prompt if prompt is not None else reply
                 assert first is not None
@@ -123,7 +122,7 @@ class Chat:
         for prompt, reply in ordered:
             self.ledger.restore_exchange(
                 turn(shown[prompt]) if prompt is not None else None,
-                turn(shown[reply], notes=notes) if reply is not None else None,
+                turn(shown[reply], shown=drawn) if reply is not None else None,
                 above=above,
             )
             above = ""  # the report belongs to the oldest exchange only
