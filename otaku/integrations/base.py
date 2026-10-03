@@ -68,8 +68,9 @@ class SearchEngine(Integration):
 
 
 def post_json(url: str, headers: dict[str, str], body: dict[str, object]) -> object:
-    """POST `body` as JSON and parse the answer. Every failure is an
-    IntegrationError with the sentence for it."""
+    """POST `body` as JSON and parse the answer — None where the service
+    answers 204, no content. Every failure is an IntegrationError with
+    the sentence for it."""
     request = urllib.request.Request(
         url,
         data=json.dumps(body).encode(),
@@ -78,6 +79,8 @@ def post_json(url: str, headers: dict[str, str], body: dict[str, object]) -> obj
     )
     try:
         with urllib.request.urlopen(request, timeout=TIMEOUT) as reply:
+            if reply.status == 204:
+                return None
             return json.loads(reply.read())
     except urllib.error.HTTPError as e:
         # 401 is the key's verdict, whatever the service: a key was sent

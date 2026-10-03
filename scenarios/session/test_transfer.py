@@ -310,8 +310,8 @@ class TestExport:
     def test_a_tools_turn_stays_out_of_the_export(self, app: App, tmp_path: Path) -> None:
         # the format has no place for it yet: the reply that called and
         # the reply that went on are story, the result between them is not
-        api_stories.update_setting(app.session, "allow_system_tool", enabled=True)
-        call = "```otk-system\n```"
+        api_stories.update_setting(app.session, "allow_system_info", enabled=True)
+        call = "```otk-system-info\n```"
 
         def script(body: dict) -> str:
             newest = scripted.content_text(body["messages"][-1])
@@ -325,7 +325,7 @@ class TestExport:
         out = tmp_path / "story.md"
         app.play(f"/export {out}")
         text = out.read_text(encoding="utf-8")
-        assert "Load average" not in text and "Time: " not in text
+        assert "Moon: " not in text and "Time: " not in text
         assert call in text and "It is late." in text
         # and the document imports back as three turns
         parsed = parse_story(text)

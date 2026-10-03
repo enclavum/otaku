@@ -15,12 +15,13 @@ import tomllib
 
 import pytest
 
-from otaku.backend import CompletionType, Transcript
+from otaku.backend import CompletionType, Layout
 from otaku.backend import launch as backend_launch
 from otaku.backend.api import play as api_play
 from otaku.backend.api import providers as api_providers
 from otaku.backend.api import reports
 from otaku.backend.api import settings as api_settings
+from otaku.backend.api import stories as api_stories
 from otaku.backend.paths import Paths
 from otaku.backend.session import PARAMETERS, THINK_MENU, Refused
 from otaku.encryption import unseal
@@ -940,26 +941,30 @@ class TestMaxContext:
         assert "does not fit the context limit" in capsys.readouterr().out
 
 
-class TestTranscript:
-    """`/set transcript`: the four words, the setting's standing as the
-    confirmation, a bare call reporting it — and the novel offered on a
-    model that can complete text alone, refused with the reason
-    otherwise, typed or picked from the menu alike."""
+class TestMode:
+    """`/set mode`, the terminal's own command: `story` stores the canvas
+    layout, `chat` the manuscript — the story's layout setting, so it
+    forks and dies with the story; a bare call or a word it does not
+    take changes nothing."""
 
-    def test_a_word_sets_it_and_a_bare_call_reports_it(self, app: App) -> None:
-        assert api_settings.set_transcript(app.session, "") == "Transcript: manuscript"
-        assert api_settings.set_transcript(app.session, "canvas") == "Transcript: canvas"
-        assert app.session.transcript is Transcript.CANVAS
-        assert api_settings.set_transcript(app.session, " CHAT ") == "Transcript: chat"
-        assert api_settings.set_transcript(app.session, "") == "Transcript: chat"
-        usage = r"^Usage: /set transcript novel\|canvas\|manuscript\|chat$"
-        with pytest.raises(Refused, match=usage):
-            api_settings.set_transcript(app.session, "scroll")
-        assert app.session.transcript is Transcript.CHAT
-        # the story's own: it survives a launch with the story
+    def test_a_word_stores_its_layout(self, app: App) -> None:
+        app.play("/set mode story")
+        assert app.session.layout is Layout.CANVAS
+        app.play("/set mode CHAT")
+        assert app.session.layout is Layout.MANUSCRIPT
+        # the story's own: it rides the story's first turn into the store
+        app.play("/set mode story")
         app.play("I push the door.")
+        stored = app.store.stories.get_settings(app.session.story_id)
+        assert [(row.name, row.layout) for row in stored] == [("layout", Layout.CANVAS)]
 
-    def test_the_novel_needs_a_model_that_continues_a_bare_text(self, tmp_path) -> None:
+    def test_a_bare_call_or_a_word_it_does_not_take_changes_nothing(self, app: App) -> None:
+        app.play("/set mode story")
+        for line in ("/set mode", "/set mode novel", "/set mode scroll"):
+            app.play(line)
+            assert app.session.layout is Layout.CANVAS, line
+
+    def test_the_novel_plays_over_the_text_wire_only_on_a_plain_text_model(self, tmp_path) -> None:
         root = tmp_path / "state"
         server = scripted.ModelServer()
         server.status = True
@@ -969,47 +974,24 @@ class TestTranscript:
             set_config_provider(root, server, name="omlx")
             app = launch(root, server, spec="omlx/test-model")
             try:
-                assert api_settings.transcript_choices(app.session) == (
-                    "canvas",
-                    "manuscript",
-                    "chat",
-                )
-                with pytest.raises(Refused, match="text_template") as caught:
-                    api_settings.set_transcript(app.session, "novel")
-                assert str(caught.value).startswith(
-                    "The novel needs a model that continues a bare text"
-                )
-                assert app.session.transcript is Transcript.MANUSCRIPT
+                api_stories.update_setting(app.session, "layout", layout=Layout.NOVEL)
+                # a novel on a model that cannot continue a bare text is a canvas
+                assert not app.session.can_complete_text
+                assert app.session.completion_type is CompletionType.CHAT
             finally:
                 app.close()
-            # named a plain-text model by hand, the novel is offered
+            # named a plain-text model by hand, the novel goes as one text
             paths = Paths.resolve(root)
             models_file.save(paths.models_file, "test-model", {models_file.TEMPLATE_KEY: "plain"})
             app = launch(root, server, spec="omlx/test-model")
             try:
-                assert api_settings.transcript_choices(app.session) == (
-                    "novel",
-                    "canvas",
-                    "manuscript",
-                    "chat",
-                )
-                assert api_settings.set_transcript(app.session, "novel") == "Transcript: novel"
+                api_stories.update_setting(app.session, "layout", layout=Layout.NOVEL)
+                assert app.session.can_complete_text
                 assert app.session.completion_type is CompletionType.TEXT
             finally:
                 app.close()
         finally:
             server.close()
-
-    def test_without_a_model_the_novel_is_refused_with_the_hint(self, server, tmp_path) -> None:
-        app = launch(tmp_path / "state", server, spec=None)
-        try:
-            assert "novel" not in api_settings.transcript_choices(app.session)
-            with pytest.raises(Refused):
-                api_settings.set_transcript(app.session, "novel")
-            # the other three need no model
-            assert api_settings.set_transcript(app.session, "canvas") == "Transcript: canvas"
-        finally:
-            app.close()
 
 
 class TestManagedPicker:

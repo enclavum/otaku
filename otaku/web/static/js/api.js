@@ -246,6 +246,7 @@ export const prompt = (tool) => get(`/api/prompts/${tool}`);
 export const setPrompt = (tool, text) => put(`/api/prompts/${tool}`, { text });
 // Web search: where it stands, and its one key — which engine is told from the key.
 export const webSearch = () => get("/api/integrations/web_search");
+export const sendSupport = (message, email) => post("/api/support", { message, email });
 export const setWebSearchKey = (key) => patch("/api/integrations/web_search", { api_key: key });
 export const setSetting = (name, value) => put(`/api/settings/${name}`, { value });
 export const setParameter = (name, value) =>

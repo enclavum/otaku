@@ -377,6 +377,33 @@
   </section>
 </dialog>
 
+<!-- the support docket: a message to otaku's author, sent through
+     otaku.sh, and the address to answer at; nothing of the story rides -->
+<dialog data-popup="/support" aria-label="Feedback / support request">
+  <section class="otk-docket">
+    <div class="otk-docket__tear"></div>
+    <div class="otk-docket__body" tabindex="-1" autofocus>
+      <span class="otk-eyebrow">Feedback / support request</span>
+      <div class="otk-hr"></div>
+      <label class="otk-v otk-v--sm">
+        <span class="otk-label">email <span class="otk-faint">· optional, for a reply</span></span>
+        <input class="otk-field" type="email" placeholder="you@example.com" autocomplete="email" data-support-email>
+      </label>
+      <label class="otk-v otk-v--sm">
+        <span class="otk-label">message</span>
+        <textarea class="otk-field otk-field--area" rows="6" placeholder="What happened, or what you'd like to see" data-support-message></textarea>
+      </label>
+      <p class="otk-note">A bug, a question, or something you'd like otaku to do.</p>
+    </div>
+    <div class="otk-docket__foot">
+      <span class="otk-docket__note" data-note></span>
+      <button type="button" class="otk-btn otk-close">Cancel</button>
+      <button type="button" class="otk-btn otk-btn--primary" data-send>Send</button>
+    </div>
+    <div class="otk-docket__tear otk-docket__tear--bottom"></div>
+  </section>
+</dialog>
+
 <!-- the help docket: the keys, and the language they are typed in -->
 <dialog data-popup="/help" aria-label="Help">
   <section class="otk-docket otk-docket--wide">
@@ -387,6 +414,8 @@
       <div class="otk-slot" data-help-body></div>
     </div>
     <div class="otk-docket__foot">
+      <!-- a command button: the page closes this docket and opens the support one -->
+      <button type="button" class="otk-btn" data-command="/support">Support request</button>
       <span class="otk-docket__note" data-note></span>
       <button type="button" class="otk-btn otk-close">Close <span class="otk-btn__key">esc</span></button>
     </div>

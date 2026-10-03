@@ -25,7 +25,7 @@ from datetime import datetime
 
 from otaku.store.database import Database
 from otaku.store.files import FileStore
-from otaku.store.schema import Attachment, Message, Story, StorySettingDB
+from otaku.store.schema import Attachment, Message, Story, StoryMode, StorySettingDB
 
 # The numbered suffix a fork's title carries — every one it has collected,
 # so numbering works off the stem and the suffixes can never pile up
@@ -242,8 +242,8 @@ class StoryOps:
             head = self.get_head(story_id)
             # fmt: off
             cur = conn.execute(
-                "INSERT INTO messages (story_id, parent_id, role, kind, speaker_id, speaker, body, template, provider, model, created_at, updated_at, attachments, completion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (story_id, head, message.role, message.kind, message.speaker_id, self._db.seal_opt(message.speaker), self._db.seal(message.body), self._db.seal_opt(message.template), message.provider, message.model, now, now, Attachment.to_json(message.attachments), message.completion),
+                "INSERT INTO messages (story_id, parent_id, role, kind, speaker_id, speaker, body, template, provider, model, created_at, updated_at, attachments, mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (story_id, head, message.role, message.kind, message.speaker_id, self._db.seal_opt(message.speaker), self._db.seal(message.body), self._db.seal_opt(message.template), message.provider, message.model, now, now, Attachment.to_json(message.attachments), message.mode.value),
             )
             message_id = int(cur.lastrowid or 0)
             conn.execute(
@@ -265,7 +265,7 @@ class StoryOps:
             "    SELECT id, parent_id, 0 FROM messages WHERE id = ?"
             "    UNION ALL"
             "    SELECT m.id, m.parent_id, chain.depth + 1 FROM messages m JOIN chain ON m.id = chain.parent_id) "
-            "SELECT m.id, m.role, m.kind, m.speaker_id, m.speaker, m.body, m.template, m.provider, m.model, m.attachments, m.completion "
+            "SELECT m.id, m.role, m.kind, m.speaker_id, m.speaker, m.body, m.template, m.provider, m.model, m.attachments, m.mode "
             "FROM chain JOIN messages m ON m.id = chain.id ORDER BY chain.depth DESC",
             (head,),
         ).fetchall()
@@ -282,9 +282,9 @@ class StoryOps:
                 provider=provider,
                 model=model,
                 attachments=Attachment.from_json(attachments),
-                completion=completion,
+                mode=StoryMode.from_value(mode),
             )
-            for mid, role, kind, speaker_id, speaker, body, template, provider, model, attachments, completion in rows
+            for mid, role, kind, speaker_id, speaker, body, template, provider, model, attachments, mode in rows
         ]
 
     def get_messages_ids(self, story_id: int) -> builtins.list[int]:
@@ -374,14 +374,14 @@ class StoryOps:
             message_map: dict[int, int] = {}
             for mid in chain:
                 row = conn.execute(
-                    "SELECT parent_id, role, kind, speaker_id, speaker, body, template, provider, model, created_at, attachments, completion FROM messages WHERE id = ?",
+                    "SELECT parent_id, role, kind, speaker_id, speaker, body, template, provider, model, created_at, attachments, mode FROM messages WHERE id = ?",
                     (mid,),
                 ).fetchone()
                 parent, role, kind, speaker_id, speaker = row[:5]
-                body, template, provider, model, created, attachments, completion = row[5:]
+                body, template, provider, model, created, attachments, mode = row[5:]
                 cur = conn.execute(
-                    "INSERT INTO messages (story_id, parent_id, role, kind, speaker_id, speaker, body, template, provider, model, created_at, updated_at, attachments, completion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (new_story, message_map.get(parent), role, kind, character_map.get(speaker_id), speaker, body, template, provider, model, created, now, attachments, completion),
+                    "INSERT INTO messages (story_id, parent_id, role, kind, speaker_id, speaker, body, template, provider, model, created_at, updated_at, attachments, mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (new_story, message_map.get(parent), role, kind, character_map.get(speaker_id), speaker, body, template, provider, model, created, now, attachments, mode),
                 )
                 message_map[int(mid)] = int(cur.lastrowid or 0)
 

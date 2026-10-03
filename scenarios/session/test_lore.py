@@ -199,8 +199,8 @@ class TestExtract:
     def test_a_tool_turn_is_invisible_to_the_pass(self, app: App) -> None:
         # A tool otaku ran left its result as a turn of its own — not the
         # scene: the analyst never sees it, and the numbering skips it.
-        api_stories.update_setting(app.session, "allow_system_tool", enabled=True)
-        call = "```otk-system\n```"
+        api_stories.update_setting(app.session, "allow_system_info", enabled=True)
+        call = "```otk-system-info\n```"
 
         def script(body: dict[str, Any]) -> str:
             newest = scripted.content_text(body["messages"][-1])

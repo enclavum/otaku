@@ -529,7 +529,7 @@ class Session:
     def layout(self) -> Layout:
         """The layout the open story is read in — its setting, the default
         until it says otherwise (`StorySettingLayout`); a frontend reads
-        `is_canvas` off it."""
+        its `mode` off it."""
         stored = next(
             (row for row in self._settings_db if row.name == StorySettingLayout.name), None
         )

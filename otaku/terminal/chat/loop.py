@@ -19,7 +19,7 @@ import sys
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import ANSI, StyleAndTextTuples, to_formatted_text
 
-from otaku.backend import commands
+from otaku.backend import StoryMode, commands
 from otaku.backend.api import play as api_play
 from otaku.backend.api import reports as api_reports
 from otaku.backend.api import stories as api_stories
@@ -121,7 +121,7 @@ def run(session: Session) -> None:
             list(session.messages),
             RESUME_TURNS,
             shown=chat.shown_tools,
-            is_canvas=session.layout.is_canvas,
+            is_canvas=session.layout.mode is StoryMode.STORY,
         )
         print(echoed)
         chat.ledger.note_printed(echoed + "\n")  # printed past the ledger: the flow's tail
@@ -158,10 +158,10 @@ def run(session: Session) -> None:
         # The marker carries the cloud, not the hint: the hint goes at
         # the first keystroke, which is exactly when the text is being
         # written to leave the machine.
-        is_canvas = session.layout.is_canvas
+        is_canvas = session.layout.mode is StoryMode.STORY
         if assembler.in_block:
             prefix = PROMPT_CONTINUATION
-        elif is_canvas:
+        elif is_canvas and not carry.command_paragraph:
             prefix = ""  # PROTOTYPE: the canvas is one text, no prompt marker in it
         elif session.on_cloud:
             prefix = CLOUD_PROMPT_PREFIX
@@ -177,7 +177,7 @@ def run(session: Session) -> None:
         # the answers to a pending question, as rows over the prefix
         message = functools.partial(answers.message, prefix)
         # PROTOTYPE: in the canvas the prompt stands in the story's own text
-        # — its last line drawn again as the prompt's message, the seam's
+        # — its last line drawn again as the prompt's message, the join's
         # space after it — wherever the text is the last thing on screen
         in_text = (
             is_canvas
@@ -302,26 +302,18 @@ def run(session: Session) -> None:
                 chat.ledger.resume_tail()
             else:
                 chat.ledger.typed(prefix + line + "\n")
-            # in the canvas the line plays as typed, the whitespace at its
-            # edges its seams (`api.play.submit`); every other line is trimmed
+            # in the canvas the line plays as typed, the breaks at its edges
+            # its paragraphs (`api.play.submit`); every other line is trimmed
             result = assembler.feed(line, verbatim=is_canvas)
             if result is None:
                 if in_text:
                     chat.ledger.below_text(prefix + line)
                 continue  # inside an open """ block — keep collecting lines
             submission = result
-            if in_text:
+            if in_text and commands.is_command(submission):
                 # PROTOTYPE: a command shows under the text as a prompt there
-                # would have; a story line takes the seam's space it was
-                # typed after, unless it opens with whitespace of its own
-                if commands.is_command(submission):
-                    chat.ledger.below_text(prefix + submission)
-                elif seam and submission[:1] not in ("", "/") and not submission[0].isspace():
-                    submission = seam + submission
-            elif is_canvas and submission[:1] not in ("", "/") and not submission[0].isspace():
-                # PROTOTYPE: typed under the text (after a command), a line
-                # still goes on in the story's paragraph, as one typed in it
-                submission = _seam_after(session) + submission
+                # would have
+                chat.ledger.below_text(prefix + submission)
             if not submission.strip() and not is_canvas:
                 # A bare Enter leaves its prompt row on screen; its rows
                 # stay counted so the next submission's erase takes it
@@ -387,7 +379,7 @@ def submit(chat: Chat, line: str) -> None:
 
 def _in_text_message(tail: str, seam: str) -> StyleAndTextTuples:
     """PROTOTYPE: the prompt's message in the story's text — its last line
-    as printed, escapes and all, and the seam's space after it."""
+    as printed, escapes and all, and the join's space after it."""
     return [*to_formatted_text(ANSI(tail)), ("", seam)]
 
 
@@ -396,16 +388,6 @@ _ESCAPE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
 def _plain(text: str) -> str:
     return _ESCAPE.sub("", text)
-
-
-def _seam_after(session: Session) -> str:
-    """PROTOTYPE: the space a line typed under the text owes the story's
-    last row to go on in its paragraph — none after a tool's turn, none
-    where the row ends in whitespace already, none with no row at all."""
-    last = session.messages[-1] if session.messages else None
-    if last is None or last.role == "tool" or not last.body or last.body[-1].isspace():
-        return ""
-    return " "
 
 
 def _opening(answers: AnswerMenu, prompt_session: PromptSession[str], *, command: bool) -> None:

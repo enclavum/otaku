@@ -109,6 +109,7 @@ export function facts(version) {
   const canCompleteText = Boolean(
     model?.capabilities.text_completion && model?.text_template === "plain",
   );
+  const completionType = layout === "novel" && canCompleteText ? "text" : "chat";
   return {
     version,
     model: state.model,
@@ -118,14 +119,16 @@ export function facts(version) {
     story: story ? label(story) : "",
     story_id: state.open,
     turns: story ? story.turns.length : 0,
-    // The demo's model cannot see: no attach button, no pictures anywhere.
-    can_attach: false,
+    // As the backend derives it (`Session.can_attach`): the model sees, and
+    // the wire has room for a picture, which one text has not. The demo's
+    // model cannot see, so no attach button shows.
+    can_attach: Boolean(model?.capabilities.vision) && completionType === "chat",
     // The wire and the look, derived from the story's layout as the
     // backend derives them (`schema.Layout`): the novel is drawn as
     // the canvas, and goes over the text wire only on a model that
     // continues a bare text — its engine's text completion and a `plain`
     // template (`Session.can_complete_text`) — which the demo's is not.
-    completion_type: layout === "novel" && canCompleteText ? "text" : "chat",
+    completion_type: completionType,
     layout: layout === "novel" ? "canvas" : layout,
     can_complete_text: canCompleteText,
   };
@@ -878,7 +881,7 @@ export function recordTurn(role, body) {
     // records is one prose segment (`backend.api.play.segments`).
     segments: [{ kind: "prose", text: body }],
     // the demo's model completes chat, so a turn joins as a paragraph (`web.api.play.turn`)
-    join_kind: "paragraph",
+    join_type: "paragraph",
   };
   story.turns.push(turn);
   touch(state.open);
@@ -910,7 +913,7 @@ export function importCard(landed) {
     template: null,
     attachments: [],
     segments: [{ kind: "prose", text: landed.line }],
-    join_kind: "paragraph",
+    join_type: "paragraph",
   });
   const memory = memoryOf(state.open);
   const characterId = memory.characters.reduce((top, c) => Math.max(top, c.id), 0) + 1;
@@ -940,7 +943,7 @@ export function importCard(landed) {
       template: null,
       attachments: [],
       segments: [{ kind: "prose", text: landed.greeting }],
-      join_kind: "paragraph",
+      join_type: "paragraph",
     attachments: [],
     });
   }

@@ -3,7 +3,7 @@
 [![PyPI](https://img.shields.io/pypi/v/otaku.svg)](https://pypi.org/project/otaku/)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](https://github.com/enclavum/otaku/blob/main/LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://github.com/enclavum/otaku/blob/main/pyproject.toml)
-[![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)](https://github.com/enclavum/otaku#requirements)
+[![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](https://github.com/enclavum/otaku#requirements)
 
 ![otaku web](https://raw.githubusercontent.com/enclavum/otaku/main/images/capture-web.png?v=0.7.0)
 
@@ -77,7 +77,7 @@ Planned (a release every one to two weeks):
 
 ## Requirements
 
-- Platform: macOS / Linux / Windows.
+- Platform: Windows / macOS / Linux.
 - Local LLM provider(s) **or** an API key for cloud provider(s).
 
 Providers supported: llama.cpp, KoboldCpp, Ollama, oMLX, LM Studio; OpenRouter and
@@ -276,8 +276,10 @@ design. The custom properties it can set are listed in
 ## Storage and privacy
 
 Stories live in a local SQLite database; the database is snapshotted daily into the state dir,
-the last seven kept (configurable). Pictures attached to a turn are kept beside the database,
-downsized and stripped of their metadata; they are not part of the daily snapshot.
+the last seven kept (configurable).
+
+Pictures attached to a turn are kept beside the database, downsized and stripped of their metadata;
+they are not part of the daily snapshot.
 
 Encryption at rest is disabled by default but is one config switch away (AES-256-GCM, sealed
 client-side): the key can live in your OS keychain, come from a command of your choice (a

@@ -46,6 +46,7 @@ from otaku.store.schema import (
     Layout,
     Message,
     Scene,
+    StoryMode,
 )
 
 __all__ = [
@@ -66,6 +67,7 @@ __all__ = [
     "ProviderInfo",
     "Scene",
     "StoryListing",
+    "StoryMode",
     "TerminalSettings",
     "WebSettings",
 ]

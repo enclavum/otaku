@@ -587,7 +587,7 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
       The transcript IS the text: block flow rather than a column of blocks,
       every turn INLINE in it, so a turn that continues the one before runs
       on in the same paragraph. The seam between two turns is data
-      (`data-join`, the backend's `join_of`): a paragraph join stands a blank
+      (`data-join`, the backend's `get_join_type`): a paragraph join stands a blank
       line before the turn, an inline one nothing — the turn's own text
       carries its space or its break. */
 .otk-transcript[data-transcript="canvas"] { display: block; }
@@ -739,6 +739,13 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 .otk-transcript[data-transcript="chat"] .otk-turn {
   width: fit-content; max-width: 75%; margin-left: auto; align-items: stretch; gap: 7px;
   padding-right: 22px;
+}
+/* a phone's column is too narrow to give a quarter of it away: the two
+   sides keep apart by their edges and rules, at nearly the full width */
+@media (max-width: 600px) {
+  .otk-transcript[data-transcript="chat"] .otk-reply,
+  .otk-transcript[data-transcript="chat"] .otk-tool,
+  .otk-transcript[data-transcript="chat"] .otk-turn { max-width: 90%; }
 }
 .otk-transcript[data-transcript="chat"] .otk-reply::before,
 .otk-transcript[data-transcript="chat"] .otk-tool::before,
@@ -1287,6 +1294,11 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
   .otk-feature__text { flex: 1 1 0; }
   .otk-feature__title { flex-wrap: wrap; gap: 10px 24px; }
   .otk-feature__control { flex: 0 0 100%; margin-left: 0; padding-left: 48px; }
+  /* a button keeps its words on one line, and the depth takes a line of
+     its own under the buttons, as it does where it stands alone */
+  .otk-feature__knobs { flex-wrap: wrap; row-gap: 10px; }
+  .otk-feature__knobs .otk-btn { white-space: nowrap; }
+  .otk-feature__knobs > .otk-depth { flex: 0 0 100%; margin-left: 0; padding-left: 0; border-left: 0; align-items: flex-start; text-align: left; }
   /* the depth's hairline parts it from a knob before it; first on its line,
      there is nothing to part it from */
   .otk-feature__knobs > .otk-depth:first-child { margin-left: 0; padding-left: 0; border-left: 0; align-items: flex-start; text-align: left; }
@@ -1472,6 +1484,11 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 .otk-docket__body:focus { outline: none; }
 .otk-docket__foot { flex: 0 0 auto; display: flex; align-items: center; gap: 12px; margin: 0 34px; padding: 14px 0; border-top: var(--otk-hair) solid var(--otk-line); }
 .otk-docket__foot .otk-btn:last-child { margin-left: auto; }
+/* two buttons stand together at the right: the first takes the push */
+.otk-docket__foot .otk-btn:nth-last-child(2) { margin-left: auto; }
+.otk-docket__foot .otk-btn + .otk-btn { margin-left: 0; }
+/* a multi-line field: same box as .otk-field, sized in lines, grows by hand */
+.otk-field--area { min-height: 140px; max-height: 320px; resize: vertical; line-height: 1.5; font-family: var(--otk-font-prose); font-size: var(--otk-size-read); }
 .otk-docket__note { font-family: var(--otk-font-mono); font-size: var(--otk-size-foot); letter-spacing: var(--otk-track-foot); text-transform: uppercase; color: var(--otk-faint); }
 .otk-docket__row { display: flex; align-items: baseline; gap: 10px; }
 .otk-docket__name { flex: 1; min-width: 0; overflow-wrap: anywhere; font-family: var(--otk-font-display); font-size: var(--otk-size-note); font-weight: 600; color: var(--otk-ink); }
@@ -1664,6 +1681,10 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
   .otk-col, .otk-col--messages, .otk-reading, .otk-detail, .otk-detail--reader { flex: 0 0 auto; min-height: 0; overflow: visible; }
   .otk-col__scroll, .otk-detail__scroll { flex: 0 0 auto; overflow: visible; }
   .otk-margin { display: none; }
+  /* the facts stay off a narrow screen; what is done TO a character does
+     not: its buttons stand under the reading */
+  .otk-margin:has(.otk-manage) { display: flex; flex: 0 0 auto; min-width: 0; overflow: visible; padding: 0 30px 20px; border-left: 0; }
+  .otk-margin:has(.otk-manage) > :not(.otk-manage) { display: none; }
 }
 @media (max-width: 720px), (pointer: coarse) and (max-height: 540px) {
   .otk-spine { display: flex; flex-direction: row; align-items: center; gap: 14px; height: 48px; padding: 0 14px; border-right: 0; border-bottom: var(--otk-hair) solid var(--otk-line); }

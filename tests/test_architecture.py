@@ -240,8 +240,11 @@ _ON_THE_PAGE = {
     "/set autocorrect": "screen:/set",
     "/set notification": "screen:/set",
     "/set max_context": "screen:/set",
-    # the transcript switch in the contents rail writes the same setting
-    "/set transcript": "PATCH /api/stories/{story}/settings/{setting}",
+    # the layout switch in the contents rail writes the setting the
+    # terminal's two modes store
+    "/set mode": "PATCH /api/stories/{story}/settings/{setting}",
+    # the Support request button in the Help docket's footer opens it
+    "/support": "screen:/support",
     "/help": "screen:/help",
     # The one gap that can never be filled: this command's whole purpose
     # is to reach the page, and the reader of the page is already there.
@@ -392,13 +395,16 @@ _PAGE = {
     # included. The kit is below the frame, so this is not a cycle.
     "shell": {"api", "browser", "dom", "format", "layout", "status", "transcript"},
     "help": {"browser", "dom", "table"},
+    # The support docket: the reader's request, sent to the site.
+    "support": {"api", "browser", "dom"},
     # `story` is the dossier under the browser: the browser reaches into
     # it (Open story), never the other way — its route back is a command.
     "story": {"api", "browser", "dom", "format", "pictures", "prose", "shell", "tools"},
     # The dossier's fifth tab in a module of its own, built from `story`
     # and handed the dossier's footnote helper — so it reaches nothing
     # of the tabs beside it.
-    "tools": {"api", "browser", "dom", "shell"},
+    # `models` for the mask a set key reads behind, as a provider's does.
+    "tools": {"api", "browser", "dom", "models", "shell"},
     "stories": {"api", "browser", "dom", "format", "shell", "story", "transfer"},
     "models": {"api", "browser", "dom", "shell"},
     "settings": {"api", "browser", "dom", "table"},
@@ -420,6 +426,7 @@ _PAGE = {
         "status",
         "stories",
         "story",
+        "support",
         "table",
         "transcript",
         "transfer",

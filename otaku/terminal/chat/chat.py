@@ -8,6 +8,7 @@ the bindings — whoever routes cannot live beside this class.
 
 import sys
 
+from otaku.backend import StoryMode
 from otaku.backend.api import stories as api_stories
 from otaku.backend.session import Session
 from otaku.terminal.chat.ledger import ScreenLedger
@@ -95,7 +96,7 @@ class Chat:
             groups.append((prompt, reply))
         drawn = self.shown_tools
         ordered = list(reversed(groups))
-        if self.session.layout.is_canvas:
+        if self.session.layout.mode is StoryMode.STORY:
             text, starts = flow_offsets(shown, shown=drawn)
             for n, (prompt, reply) in enumerate(ordered):
                 first = prompt if prompt is not None else reply

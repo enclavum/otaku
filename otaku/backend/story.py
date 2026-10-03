@@ -31,6 +31,7 @@ from otaku.store.schema import (
     CompletionType,
     InjectionPosition,
     Layout,
+    StoryMode,
     StorySettingDB,
 )
 
@@ -347,7 +348,7 @@ class StorySettingEmulateTextCompletion(InjectingSetting):
     ) -> None:
         super().__init__(from_db)
         self.prompt = getattr(prompts, self.prompt_name)
-        self._applies = layout.is_canvas and completion_type is CompletionType.CHAT
+        self._applies = layout.mode is StoryMode.STORY and completion_type is CompletionType.CHAT
 
     @property
     def injection(self) -> Injection | None:

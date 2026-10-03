@@ -11,7 +11,6 @@ close handling; Ctrl+R closes it and reports `regen` so the caller runs
 
 import contextlib
 import os
-import re
 import select
 import signal
 import sys
@@ -20,6 +19,7 @@ import time
 from collections.abc import Iterator
 from typing import Any, Self
 
+from otaku.backend import StoryMode
 from otaku.backend.api.play import (
     AssistantReasoning,
     AssistantText,
@@ -68,11 +68,7 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
     session = chat.session
     # The canvas: the one text — no block for the reader's line, the
     # reply going on where the text ended (`ledger.echo_flow`).
-    is_canvas = session.layout.is_canvas
-    # The text the reply goes on from, for its seam (`before`): the last
-    # row's, until a played line lands and is the text instead.
-    before = session.messages[-1].body if session.messages else ""
-    prose_begun = False  # the reply's first prose piece places its seam
+    is_canvas = session.layout.mode is StoryMode.STORY
     streamed = False  # anything shown yet (the error line's lead blank, the line to end)
     chars = 0
     interrupted = False
@@ -131,23 +127,19 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                     if is_canvas:
                         # The canvas: the played line is prose in the one
                         # text, no block. The ledger places the cursor by the
-                        # line's seam (the event's `join_type`: under the standing
-                        # blank, or on where the text ended) and the line is
-                        # typeset through the reply's own streamer, so a quote
-                        # it opens and the reply closes reads as one.
+                        # line's join (the event's `join_type`: under the
+                        # standing blank, or on where the text ended, one
+                        # space after it) and the line is typeset through the
+                        # reply's own streamer, so a quote it opens and the
+                        # reply closes reads as one.
                         inline = chat.ledger.echo_flow(inline=event.join_type.value == "inline")
-                        # PROTOTYPE: a paragraph's lead and a break the line
-                        # ends on are the joins' to draw, not drawn twice; a
-                        # line placed on a row of its own (under a command's
-                        # output) drops the seam's space it goes on with
-                        body = event.message.body.rstrip("\n")
-                        if not inline:
-                            body = re.sub(r"^\s*\n", "", body).lstrip(" ")
-                        streamer.feed(body)
+                        # the breaks at its edges are the joins' to draw, not
+                        # drawn twice
+                        body = event.message.body.strip("\n")
+                        streamer.feed(" " + body if inline else body)
                         streamer.flush()
                         chat.ledger.reply_begins()
                         fed += event.message.body
-                        before = event.message.body
                         streamed = True
                     else:
                         # The played turn echoes as the grey block; the reply
@@ -178,15 +170,14 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                     if block_name == "thinking":
                         close_block()  # one blank line to the prose, as after any block
                     text = event.text
-                    # The seam, as the backend reads it when the row lands
-                    # (`assembler.join_of`, the rule copied as the page's
-                    # `seamJoin`): a flush first piece after a text that does
-                    # not end in a space opens a paragraph, and the model
-                    # wrote none of the break — so the drawer does.
-                    flush = not text[:1].isspace() and not before.endswith(" ")
-                    if is_canvas and not prose_begun and not after_call and flush:
-                        text = "\n\n" + text
-                    prose_begun = True
+                    # The reply's first piece says how it joins the text
+                    # before it (`join_type`): one space, or a paragraph —
+                    # its own breaks the join's to draw.
+                    join = event.join_type.value if event.join_type is not None else None
+                    if is_canvas and join == "inline":
+                        text = " " + text
+                    elif is_canvas and join == "paragraph":
+                        text = "\n\n" + text.lstrip("\n")
                     if after_call:
                         if not text.strip():
                             continue  # the model's newlines after a block: drawn once, below

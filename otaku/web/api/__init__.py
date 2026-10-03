@@ -13,7 +13,7 @@ this table and carries the result, and nothing else.
 
 The package mirrors `backend.api`: one module per twin — `play`,
 `stories`, `lore`, `cards`, `providers`, `integrations`, `settings`,
-`reports`, `transfer` — each translating its twin's answers into the page's shapes
+`reports`, `support`, `transfer` — each translating its twin's answers into the page's shapes
 and holding its own rows, and `request` for what every row is handed
 and hands back. A module calls its own twin and nothing else of
 `backend.api`; what it needs of another twin it takes from that twin's
@@ -49,6 +49,7 @@ from otaku.web.api import (
     reports,
     settings,
     stories,
+    support,
     transfer,
 )
 from otaku.web.api.play import event, files_from, regenerate, syntax
@@ -83,6 +84,7 @@ __all__ = [
     "stories",
     "story",
     "story_settings",
+    "support",
     "syntax",
     "transfer",
 ]
@@ -122,6 +124,7 @@ ROUTES: dict[tuple[str, str], Route] = _merged(
     integrations.ROUTES,
     settings.ROUTES,
     reports.ROUTES,
+    support.ROUTES,
     transfer.ROUTES,
 )
 

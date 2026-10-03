@@ -67,7 +67,7 @@ for _sequence in _CONTROL_ENTER:
     ANSI_SEQUENCES[_sequence] = (Keys.Escape, Keys.ControlJ)
 
 CHAT_PLACEHOLDER = FormattedText([("class:placeholder", "Send a message")])
-# The same hint on the canvas (`Layout.is_canvas`), where a line continues
+# The same hint in story mode (`Layout.mode`), where a line continues
 # the story rather than being sent to it.
 # the canvas's, in the story's text or under it — an empty story is begun
 CANVAS_PLACEHOLDER = FormattedText([("class:placeholder", "Continue…")])
@@ -320,7 +320,6 @@ def build_prompt(
         shortcuts={token: caption for token, (_key, caption) in shortcuts.items()},
         levels=lambda: api_settings.think_choices(session).levels,
         parameters=lambda: api_settings.parameter_names(session),
-        layouts=lambda: api_settings.layout_choices(session),
     )
     menu_line = Condition(
         lambda: completer.partial(get_app().current_buffer.document.text_before_cursor) is not None

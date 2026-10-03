@@ -21,7 +21,7 @@ import { isPlaying, keepingPlace, showTail } from "./transcript.js";
 
 const SETTING = "layout";
 const DEFAULT = "manuscript"; // the backend's, for a story with no settings yet
-// The look each layout is drawn in — `Layout.is_canvas`'s rule, copied:
+// The look each layout is drawn in — `Layout.mode`'s rule, copied:
 // the novel is drawn as the canvas.
 const LAYOUT_OF = { novel: "canvas", canvas: "canvas", manuscript: "manuscript", chat: "chat" };
 

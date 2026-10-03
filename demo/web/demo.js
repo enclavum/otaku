@@ -166,6 +166,12 @@ const ROUTES = {
   "PATCH /api/integrations/web_search": () => ({
     notice: `The web search key is not saved in the demo — ${store.INSTALL}.`,
   }),
+  // A support request is not sent from the demo: a refusal, the product's
+  // shape, so the docket keeps what was typed.
+  "POST /api/support": () => ({
+    notice: `A support request is not sent from the demo — ${store.INSTALL}.`,
+    refused: true,
+  }),
   "GET /api/shared_reminder": () => store.sharedReminder(),
   "PUT /api/shared_reminder": (p, q, b) => store.setSharedReminder(String(b.text)),
   "GET /api/prompts/{tool}": (p) => store.prompt(p.tool),
@@ -585,8 +591,13 @@ function play(body, regenerate, signal) {
         }
         const chunk = words.slice(at, at + 3).join("");
         at += 3;
+        // the first piece says how the reply joins the text (`join_type`):
+        // after the line just played, inline on the canvas, a paragraph
+        // everywhere else; null on every piece after it
+        const canvas = store.facts(version).layout === "canvas";
+        const join = streamed ? null : canvas ? "inline" : "paragraph";
         streamed += chunk;
-        frame(controller, { type: "assistant_text", text: chunk });
+        frame(controller, { type: "assistant_text", text: chunk, join_type: join });
         timer = setTimeout(tick, 24);
       };
       timer = setTimeout(tick, regenerate ? 350 : 650); // the wait before the first token

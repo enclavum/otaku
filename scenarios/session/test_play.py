@@ -15,12 +15,11 @@ from prompt_toolkit.input import create_pipe_input
 from prompt_toolkit.output import DummyOutput
 from prompt_toolkit.shortcuts import PromptSession
 
-from otaku.backend import CompletionType, InjectionPosition, Layout, Transcript
+from otaku.backend import CompletionType, InjectionPosition, Layout, StoryMode
 from otaku.backend.api import lore as api_lore
 from otaku.backend.api import play as api_play
 from otaku.backend.api import providers as api_providers
 from otaku.backend.api import reports
-from otaku.backend.api import settings as api_settings
 from otaku.backend.api import stories as api_stories
 from otaku.backend.api.play import (
     AssistantText,
@@ -652,7 +651,7 @@ class TestToolCalls:
             {
                 "kind": "tool_call",
                 "tool": "question",
-                "label": "",
+                "label": "Questions",
                 "actor": "user",
                 "text": "Go in?\n1. Yes\n2. No",
                 "question": "Go in?",
@@ -668,15 +667,13 @@ class TestToolCalls:
         sent = app.server.requests[-1]["messages"]
         assert sent[-2]["content"] == "The hall glows.\n\n```otk-note\na plan\n```"
 
-    def test_a_call_of_a_tool_that_is_off_goes_back_as_prose(self, app: App) -> None:
-        # The question alone: the reader's answer that follows still has
-        # something to answer, and the menu is what the model must not
-        # learn from a tool it is no longer told about.
+    def test_a_call_of_a_tool_that_is_off_leaves_the_wire(self, app: App) -> None:
+        # Off, a tool does not exist for the model: not even its question.
         app.server.script = lambda body: self.ASKED
         app.play("I enter the hall.")
         app.play("Yes")
         sent = app.server.requests[-1]["messages"]
-        assert sent[-2]["content"] == "The door creaks.\n\nGo in?"
+        assert sent[-2]["content"] == "The door creaks."
 
     def test_a_call_of_a_tool_this_build_does_not_know_leaves_the_wire(self, app: App) -> None:
         app.server.script = lambda body: "The hall glows.\n\n```otk-plan\nlater\n```"
@@ -726,7 +723,7 @@ class TestCallsOnScreen:
             app.server.script = lambda _line, body=body: body
             app.play("Next.")
             streamed = capsys.readouterr().out.split("> Next.", 1)[1]
-            echoed = render.message(body, "assistant", notes=True)
+            echoed = render.message(body, "assistant", shown=frozenset({"note", "question"}))
             assert echoed in streamed, body
 
 
@@ -1010,8 +1007,18 @@ def _continuing(*texts: str) -> Callable[[dict], str]:
 def _novel(tmp_path: Path, *, framing: str | None = None) -> Iterator[App]:
     """The app on a plain model, the open story read as the novel."""
     with _continuing_omlx(tmp_path, framing=framing, template_line="plain") as app:
-        api_settings.set_transcript(app.session, "novel")
+        _layout(app, Layout.NOVEL)
         yield app
+
+
+def _layout(app: App, layout: Layout) -> None:
+    """The open story read in `layout`, as either frontend sets it."""
+    api_stories.update_setting(app.session, "layout", layout=layout)
+
+
+def _emulating(app: App) -> None:
+    """The emulation setting switched on for the open story."""
+    api_stories.update_setting(app.session, "emulate_text_completion", enabled=True)
 
 
 def _after_the_tool(then: str, *, first: str, marker: str = "Time: ") -> Callable[[dict], str]:
@@ -1048,36 +1055,27 @@ def _cloud(server: scripted.ModelServer, tmp_path: Path, *, prompt_cache: str = 
 
 
 class TestTheNovel:
-    """The novel: the canvas over the engine's text wire, offered on a
+    """The novel: the canvas over the engine's text wire, played so on a
     model that can complete text alone — its engine serves the wire and
     a `plain` template names it a model that continues a bare text; an
     instruct model has a template too, and fights a bare text — the
     story going as ONE TEXT the model continues, and what comes back
-    recorded as it stands."""
+    recorded in story mode, the spaces at its edges dropped."""
 
-    def test_the_novel_is_offered_on_a_plain_model_alone(self, tmp_path) -> None:
+    def test_the_novel_goes_over_the_text_wire_on_a_plain_model_alone(self, tmp_path) -> None:
         with _continuing_omlx(tmp_path) as app:
             found = app.session.text_template
             assert found is not None and (found.name, found.source) == ("gemma4", "engine")
             assert not app.session.can_complete_text
-            assert api_settings.transcript_choices(app.session) == ("canvas", "manuscript", "chat")
-            with pytest.raises(Refused, match="text_template") as caught:
-                api_settings.set_transcript(app.session, "novel")
-            assert str(caught.value).startswith("The novel needs a model that continues a bare")
-            assert app.session.transcript is Transcript.MANUSCRIPT
+            _layout(app, Layout.NOVEL)
+            assert app.session.completion_type is CompletionType.CHAT
         with _continuing_omlx(tmp_path / "plain", template_line="plain") as app:
             found = app.session.text_template
             assert found is not None and (found.name, found.source) == ("plain", "override")
             assert app.session.can_complete_text
-            assert api_settings.transcript_choices(app.session) == (
-                "novel",
-                "canvas",
-                "manuscript",
-                "chat",
-            )
-            assert api_settings.set_transcript(app.session, "novel") == "Transcript: novel"
-            assert (app.session.layout, app.session.completion_type) == (
-                Layout.CANVAS,
+            _layout(app, Layout.NOVEL)
+            assert (app.session.layout.mode, app.session.completion_type) == (
+                StoryMode.STORY,
                 CompletionType.TEXT,
             )
 
@@ -1094,29 +1092,39 @@ class TestTheNovel:
             assert sent.get("stop") in (None, [])
             assert not any(key.startswith(("thinking", "reasoning")) for key in sent)
 
-    def test_the_reply_is_recorded_verbatim_and_joins_as_it_stands(self, tmp_path) -> None:
+    def test_the_reply_is_recorded_in_story_mode_and_goes_on_in_the_paragraph(
+        self, tmp_path
+    ) -> None:
         with _novel(tmp_path, framing="<<frame {premise}>>") as app:
             app.server.script = _continuing(" the bus.")
             app.play("I was waiting for")
             reply = app.store.stories.get_messages(app.session.story_id)[-1]
-            assert (reply.role, reply.body, reply.completion) == ("assistant", " the bus.", "text")
-            # the next request reads the story with that seam, and a typed
-            # line after it as a paragraph of its own
+            assert (reply.role, reply.body, reply.mode) == (
+                "assistant",
+                "the bus.",
+                StoryMode.STORY,
+            )
+            # the next request reads the story joined by the rule: a typed
+            # line goes on in the paragraph, one space between
             app.play("Then?")
             assert app.server.requests[-1]["prompt"] == (
-                "<<frame >>\n\nI was waiting for the bus.\n\nThen?"
+                "<<frame >>\n\nI was waiting for the bus. Then?"
             )
 
-    def test_a_line_opened_with_whitespace_goes_on_with_the_models_sentence(self, tmp_path) -> None:
+    def test_a_break_at_a_lines_start_opens_a_paragraph(self, tmp_path) -> None:
         with _novel(tmp_path, framing="<<frame {premise}>>") as app:
             app.server.script = _continuing(" the bus", " swung open.")
             app.play("I was waiting for")
-            list(api_play.submit(app.session, " and the door"))
+            list(api_play.submit(app.session, " and the door "))
             assert app.server.requests[-1]["prompt"].endswith(
                 "I was waiting for the bus and the door"
             )
             typed = app.store.stories.get_messages(app.session.story_id)[-2]
-            assert (typed.role, typed.body) == ("user", " and the door")
+            assert (typed.role, typed.body) == ("user", "and the door")
+            list(api_play.submit(app.session, "\n\nIt rained."))
+            assert app.server.requests[-1]["prompt"].endswith(
+                "the bus and the door swung open.\n\nIt rained."
+            )
 
     def test_an_empty_line_continues_the_story_and_records_no_turn(self, tmp_path) -> None:
         with _novel(tmp_path, framing="<<frame {premise}>>") as app:
@@ -1126,8 +1134,8 @@ class TestTheNovel:
             chain = app.store.stories.get_messages(app.session.story_id)
             assert [(m.role, m.body) for m in chain] == [
                 ("user", "I was waiting for"),
-                ("assistant", " the bus."),
-                ("assistant", " It was late."),
+                ("assistant", "the bus."),
+                ("assistant", "It was late."),
             ]
             assert app.server.requests[-1]["prompt"].endswith("I was waiting for the bus.")
 
@@ -1143,16 +1151,20 @@ class TestTheNovel:
             app.play("It was late.")
             first, second = app.server.requests[-2:]
             assert second["prompt"] == first["prompt"] + "\n\n"
-            # the break is the reply's own seam, so the story renders again
+            # the break is the reply's own lead, so the story renders again
             # exactly as it was continued
             reply = app.store.stories.get_messages(app.session.story_id)[-1]
             assert reply.body == "\n\nThe rain fell."
-            assert app.server.requests[-1]["prompt"] == second["prompt"]
+            assert (
+                app.session.assemble(None)
+                .as_story_text()
+                .endswith("It was late.\n\nThe rain fell.")
+            )
 
     def test_no_picture_rides_the_text_wire(self, tmp_path) -> None:
         with _continuing_omlx(tmp_path, template_line="plain") as app:
             assert app.session.can_attach  # the model sees, and the chat wire carries one
-            api_settings.set_transcript(app.session, "novel")
+            _layout(app, Layout.NOVEL)
             assert not app.session.can_attach
             with pytest.raises(Refused) as caught:
                 api_play.submit(app.session, "look", [RawFile(b"x", "x.png")])
@@ -1163,16 +1175,16 @@ class TestTheNovel:
         # a story that chose the novel, reopened on an instruct model: the
         # stored value stands, the wire is the chat's
         with _continuing_omlx(tmp_path) as app:
-            api_stories.update_setting(app.session, "transcript", transcript=Transcript.NOVEL)
-            assert app.session.transcript is Transcript.NOVEL
-            assert (app.session.layout, app.session.completion_type) == (
-                Layout.CANVAS,
+            _layout(app, Layout.NOVEL)
+            assert app.session.layout is Layout.NOVEL
+            assert (app.session.layout.mode, app.session.completion_type) == (
+                StoryMode.STORY,
                 CompletionType.CHAT,
             )
             app.play("I was waiting for")
             assert "messages" in app.server.requests[-1]
             reply = app.store.stories.get_messages(app.session.story_id)[-1]
-            assert reply.completion == "chat"
+            assert reply.mode is StoryMode.STORY
 
     def test_the_context_preview_is_the_text_the_wire_sends(self, tmp_path, capsys) -> None:
         with _novel(tmp_path, framing="<<frame {premise}>>") as app:
@@ -1186,29 +1198,30 @@ class TestTheNovel:
             assert report.total_tokens == estimate_tokens(report.wire)
             # the next request IS the preview, the typed line after it
             app.play("Then?")
-            assert app.server.requests[-1]["prompt"] == report.wire + "\n\nThen?"
-            # and the terminal prints the text as sent, its paragraph seam
-            # a blank line, under the one marker that stands for the field
+            assert app.server.requests[-1]["prompt"] == report.wire + " Then?"
+            # and the terminal prints the text as sent, under the one
+            # marker that stands for the field
             report = reports.context(app.session)
             capsys.readouterr()
             app.play("/context")
             printed = capsys.readouterr().out
             assert "[prompt]" in printed and printed.endswith(report.wire + "\n")
-            assert "\n\nThen?" in report.wire
+            assert " Then?" in report.wire
 
-    def test_a_chat_completions_reply_says_so(self, app: App) -> None:
+    def test_a_reply_outside_story_mode_is_recorded_in_chat_mode(self, app: App) -> None:
         app.play("I open the door.")
-        reply = app.store.stories.get_messages(app.session.story_id)[-1]
-        assert reply.completion == "chat"
+        rows = app.store.stories.get_messages(app.session.story_id)
+        assert [row.mode for row in rows] == [StoryMode.CHAT, StoryMode.CHAT]
 
 
 class TestTheCanvasOverTheChatWire:
     """The canvas on a model that cannot complete text — every instruct
     model: the story is one text to the reader, the request the chat as
-    ever with the emulation setting's prompt in the system message; a
-    line is recorded as typed, a flush reply after an unfinished sentence
-    is handed its space, every row joins the text before it by the seam
-    rule, and an empty line asks the model to go on."""
+    ever, with the emulation setting's prompt in the system message while
+    it is on; a line and a reply are recorded in story mode, the breaks
+    at their edges kept and the spaces dropped, every row joins the text
+    before it by the join rule, and an empty line asks the model to go
+    on."""
 
     def test_the_emulation_prompt_rides_the_system_message_on_the_canvas_alone(
         self, server, tmp_path
@@ -1223,68 +1236,89 @@ class TestTheCanvasOverTheChatWire:
             app.play("/system Be terse.")
             app.play("One.")
             assert _system_of(app, "One.") == "Be terse."
-            api_settings.set_transcript(app.session, "canvas")
+            # off until switched on, as every switch is
+            _layout(app, Layout.CANVAS)
             app.play("Two.")
-            assert _system_of(app, "Two.") == "Be terse.\n\nCONTINUE HOW"
+            assert _system_of(app, "Two.") == "Be terse."
+            _emulating(app)
+            app.play("Three.")
+            assert _system_of(app, "Three.") == "Be terse.\n\nCONTINUE HOW"
             # listed by /context as the setting names what it injects
             report = reports.context(app.session)
             assert [(i.label, i.position_text) for i in report.injections] == [
                 ("text completion emulation", "system")
             ]
-            # switched off, gone; in another layout, gone though on
-            api_stories.update_setting(app.session, "emulate_text_completion", enabled=False)
-            app.play("Three.")
-            assert _system_of(app, "Three.") == "Be terse."
-            api_stories.update_setting(app.session, "emulate_text_completion", enabled=True)
-            api_settings.set_transcript(app.session, "manuscript")
+            # in a chat-mode layout, gone though on
+            _layout(app, Layout.MANUSCRIPT)
             app.play("Four.")
             assert _system_of(app, "Four.") == "Be terse."
         finally:
             app.close()
 
     def test_the_warm_up_rebuilds_the_prefix_the_turn_sends(self, app: App) -> None:
-        api_settings.set_transcript(app.session, "canvas")
+        _layout(app, Layout.CANVAS)
+        _emulating(app)
         app.play("One.")
         turn = [i.owner for i in app.session.assemble(None).injections]
         job = [i.owner for i in api_lore.build_job(app.session).injections]
         assert turn == job == ["emulate_text_completion"]
 
-    def test_a_flush_reply_after_an_unfinished_sentence_is_handed_its_space(self, app) -> None:
-        api_settings.set_transcript(app.session, "canvas")
-        app.server.script = lambda body: "the bus. It was late."
+    def test_a_reply_goes_on_in_the_paragraph_it_follows(self, app: App) -> None:
+        _layout(app, Layout.CANVAS)
+        app.server.script = lambda body: " the bus. It was late."
         events = list(api_play.submit(app.session, "She waited for"))
         landed = next(e for e in events if isinstance(e, AssistantTurn))
-        assert landed.message.body == " the bus. It was late."
+        assert landed.message.body == "the bus. It was late."
         assert landed.join_type is JoinType.INLINE
-        # the first piece shown carries it too, so both frontends draw it
+        # the first piece shown carries the join, so both frontends draw it
         first = next(e for e in events if isinstance(e, AssistantText))
-        assert first.text.startswith(" ")
+        assert first.join_type is JoinType.INLINE
         assert app.store.stories.get_messages(app.session.story_id)[-1].body == landed.message.body
 
-    def test_a_reply_after_a_finished_sentence_opens_a_paragraph(self, app: App) -> None:
-        api_settings.set_transcript(app.session, "canvas")
+    def test_a_line_break_at_the_edge_opens_a_paragraph(self, app: App) -> None:
+        _layout(app, Layout.CANVAS)
         app.server.script = lambda body: "It rained."
-        events = list(api_play.submit(app.session, "She waited."))
+        events = list(api_play.submit(app.session, "She waited.\n"))
         typed = next(e for e in events if isinstance(e, UserTurn))
         landed = next(e for e in events if isinstance(e, AssistantTurn))
-        assert typed.join_type is JoinType.PARAGRAPH
-        assert (landed.message.body, landed.join_type) == ("It rained.", JoinType.PARAGRAPH)
+        assert (typed.message.body, typed.join_type) == ("She waited.\n", JoinType.PARAGRAPH)
+        assert landed.join_type is JoinType.PARAGRAPH
+        # the model's own break the same
+        app.server.script = lambda body: "\n\nThe end."
+        events = list(api_play.submit(app.session, "And then"))
+        landed = next(e for e in events if isinstance(e, AssistantTurn))
+        assert (landed.message.body, landed.join_type) == ("\n\nThe end.", JoinType.PARAGRAPH)
 
-    def test_a_line_is_recorded_as_typed_in_the_canvas_and_trimmed_elsewhere(self, app) -> None:
+    def test_each_row_records_its_mode_and_a_line_its_edges_by_it(self, app: App) -> None:
         list(api_play.submit(app.session, "  One.  "))
         assert app.session.messages[0].body == "One."
-        api_settings.set_transcript(app.session, "canvas")
+        _layout(app, Layout.CANVAS)
         events = list(api_play.submit(app.session, " and two "))
         typed = next(e for e in events if isinstance(e, UserTurn))
-        assert typed.message.body == " and two "
-        assert typed.join_type is JoinType.INLINE
-        # the reply after a trailing space comes flush and reads inline off it
+        assert typed.message.body == "and two"
+        # after a chat row, a paragraph; the reply after it goes on inline
+        assert typed.join_type is JoinType.PARAGRAPH
         landed = next(e for e in events if isinstance(e, AssistantTurn))
         assert landed.join_type is JoinType.INLINE
-        assert not landed.message.body.startswith(" ")
+        rows = app.store.stories.get_messages(app.session.story_id)
+        assert [row.mode for row in rows] == [
+            StoryMode.CHAT,
+            StoryMode.CHAT,
+            StoryMode.STORY,
+            StoryMode.STORY,
+        ]
+
+    def test_a_fork_keeps_each_rows_mode(self, app: App) -> None:
+        app.play("One.")
+        _layout(app, Layout.CANVAS)
+        app.play("Two.")
+        origin = [row.mode for row in app.store.stories.get_messages(app.session.story_id)]
+        app.play("/fork")
+        forked = [row.mode for row in app.store.stories.get_messages(app.session.story_id)]
+        assert forked == origin == [StoryMode.CHAT] * 2 + [StoryMode.STORY] * 2
 
     def test_an_empty_line_continues_over_the_chat_wire_and_undo_takes_it_alone(self, app) -> None:
-        api_settings.set_transcript(app.session, "canvas")
+        _layout(app, Layout.CANVAS)
         app.play("She waited.")
         app.server.script = lambda body: "Nobody came."
         events = list(api_play.submit(app.session, ""))
@@ -1300,7 +1334,7 @@ class TestTheCanvasOverTheChatWire:
 
 
 class TestToolsOtakuRuns:
-    """A tool otaku runs — the system tool, a fixture for the loop — ends
+    """A tool otaku runs — the system info tool, a fixture for the loop — ends
     the reply where its call does; the result is recorded as a TOOL turn,
     nobody's line, the tool's name its provider, and the model is asked
     again over the story as it now stands, the result framed as
@@ -1308,7 +1342,7 @@ class TestToolsOtakuRuns:
     but not asked about. Undo and regenerate take a reply with its tool
     chain as one unit, and a tool's turn counts as none of the reader's."""
 
-    CALL = "Let me check.\n```otk-system\n```"
+    CALL = "Let me check.\n```otk-system-info\n```"
 
     def test_the_result_is_a_tool_turn_and_the_model_goes_on(self, server, tmp_path) -> None:
         # the framing comes FROM prompts.toml, so the file is edited
@@ -1318,7 +1352,7 @@ class TestToolsOtakuRuns:
         paths.prompts_file.write_text('tool_framing = "<<{tool}: {body}>>"\n')
         app = launch(root, server)
         try:
-            api_stories.update_setting(app.session, "allow_system_tool", enabled=True)
+            api_stories.update_setting(app.session, "allow_system_info", enabled=True)
             app.server.script = _after_the_tool("It is late.", first=self.CALL)
             events = list(api_play.submit(app.session, "What time is it?"))
             kinds = [type(e).__name__ for e in events]
@@ -1333,19 +1367,19 @@ class TestToolsOtakuRuns:
                 ("assistant", "dialogue"),
             ]
             assert rows[1].body == self.CALL  # cut where the call closes
-            assert rows[2].provider == "system" and rows[2].body.startswith("Time: ")
+            assert rows[2].provider == "system-info" and rows[2].body.startswith("Time: ")
             assert rows[3].body == "It is late."
             told = next(e for e in events if isinstance(e, ToolTurn))
             assert told.message == rows[2] and told.join_type is JoinType.PARAGRAPH
             # the result is what the model is told: the reader's turn, framed
             second = app.server.requests[-1]["messages"]
-            assert second[-1] == {"role": "user", "content": f"<<system: {rows[2].body}>>"}
+            assert second[-1] == {"role": "user", "content": f"<<system-info: {rows[2].body}>>"}
             assert second[-2]["content"] == self.CALL
         finally:
             app.close()
 
     def test_the_loop_stops_after_three_rounds_the_last_result_not_asked_about(self, app) -> None:
-        api_stories.update_setting(app.session, "allow_system_tool", enabled=True)
+        api_stories.update_setting(app.session, "allow_system_info", enabled=True)
         app.server.script = lambda body: self.CALL
         app.play("What time is it?")
         rows = app.session.messages
@@ -1354,7 +1388,7 @@ class TestToolsOtakuRuns:
         assert len(asked) == 4
 
     def test_undo_and_regenerate_take_a_reply_with_its_tool_chain_as_one_unit(self, app) -> None:
-        api_stories.update_setting(app.session, "allow_system_tool", enabled=True)
+        api_stories.update_setting(app.session, "allow_system_info", enabled=True)
         app.server.script = _after_the_tool("It is late.", first=self.CALL)
         app.play("What time is it?")
         assert [m.role for m in app.session.messages] == ["user", "assistant", "tool", "assistant"]
@@ -1368,7 +1402,7 @@ class TestToolsOtakuRuns:
         assert app.session.messages == []
 
     def test_a_tool_turn_counts_as_none_of_the_readers_messages(self, app: App) -> None:
-        api_stories.update_setting(app.session, "allow_system_tool", enabled=True)
+        api_stories.update_setting(app.session, "allow_system_info", enabled=True)
         api_stories.update_setting(
             app.session,
             "use_story_reminder",
@@ -1382,18 +1416,18 @@ class TestToolsOtakuRuns:
         # the reminder (and the tool's own prompt) ride before the reader's
         # newest message — the typed line, never the tool's turn after it
         assert "((OOC: Rain.))" in second[-3] and second[-3].endswith("What time is it?")
-        assert second[-1].startswith("((OOC: system result:\nTime: ")
+        assert second[-1].startswith("((OOC: system-info result:\nTime: ")
         assert "Rain." not in second[-1]
 
     def test_web_search_without_a_key_answers_the_sentence(self, app: App) -> None:
         api_stories.update_setting(app.session, "allow_web_search", enabled=True)
-        call = "```otk-search\ntide tables\n```"
+        call = "```otk-web-search\ntide tables\n```"
         app.server.script = _after_the_tool("Nothing to find.", first=call, marker="Web search")
         app.play("Look it up.")
         rows = app.session.messages
         assert [m.role for m in rows] == ["user", "assistant", "tool", "assistant"]
-        assert rows[2].provider == "search"
-        assert rows[2].body == "Web search is not set up: no API key."
+        assert rows[2].provider == "web-search"
+        assert rows[2].body == "Web search failed: the key is missing."
         assert rows[3].body == "Nothing to find."
 
 

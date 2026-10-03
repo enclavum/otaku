@@ -15,8 +15,6 @@ Refused for what it declines.
 import json
 from dataclasses import dataclass, replace
 
-from otaku.backend import Layout
-from otaku.backend.api import stories as api_stories
 from otaku.backend.session import (
     EFFORT_LEVELS,
     NO_MODEL_HINT,
@@ -26,7 +24,6 @@ from otaku.backend.session import (
     Refused,
     Session,
 )
-from otaku.backend.story import StorySettingLayout
 from otaku.backend.tools import TOOLS
 from otaku.providers import reasoning
 from otaku.settings import row
@@ -208,51 +205,6 @@ def set_verbose(session: Session, raw: str) -> str:
         else:
             raise Refused("Usage: /set verbose on|off")
     return f"Verbose: {'on' if session.verbose else 'off'}."
-
-
-def layout_choices(session: Session) -> tuple[str, ...]:
-    """What /set layout takes on the model in use: the four layouts, the
-    novel among them only where the model can complete text
-    (`Session.can_complete_text`). The terminal's menu reads this; typed
-    by hand, the novel is refused the same way (`set_layout`)."""
-    return tuple(
-        each.value for each in Layout if each is not Layout.NOVEL or session.can_complete_text
-    )
-
-
-def set_layout(session: Session, raw: str) -> str:
-    """The story's layout by name — novel, canvas, manuscript, chat — the
-    novel refused, with the reason, on a model that cannot complete text
-    (`layout_choices`). The confirmation is the setting's standing, as
-    the page's rail answers; "" reports it. The STORY's, unlike the rest
-    of the family: it forks and dies with it
-    (`backend.story.StorySettingLayout`)."""
-    value = raw.strip().lower()
-    if value:
-        chosen = Layout.from_value(value)
-        if chosen is None:
-            raise Refused("Usage: /set layout novel|canvas|manuscript|chat")
-        if value not in layout_choices(session):
-            raise Refused(_no_novel(session))
-        return api_stories.update_setting(session, StorySettingLayout.name, layout=chosen)
-    return f"{StorySettingLayout.label}: {session.layout.value}"
-
-
-def _no_novel(session: Session) -> str:
-    """Why the novel is not offered on the model in use — the refusal's
-    sentence: no model, no text wire, or no `plain` template naming it a
-    model that continues a bare text (`Session.can_complete_text`)."""
-    if session.model is None:
-        return NO_MODEL_HINT
-    if not session.text_completion:
-        return (
-            f"The novel needs a model that continues a bare text: "
-            f"{session.model} has no text completion."
-        )
-    return (
-        f"The novel needs a model that continues a bare text: "
-        f'name {session.model} one with a text_template = "plain" line in models.toml.'
-    )
 
 
 def set_autocorrect(session: Session, raw: str) -> str:

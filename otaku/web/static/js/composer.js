@@ -86,7 +86,9 @@ export function draft(line) {
 
 export function focusComposer() {
   if (focusTail()) return; // the canvas is typed in where the story is
-  if (!composer.disabled) composer.focus();
+  // no scroll: the box is always on screen here, and a page embedding this
+  // one (the site's demo) would be scrolled to it
+  if (!composer.disabled) composer.focus({ preventScroll: true });
 }
 
 /** The store's recent lines, most recent first — called at every boot,
@@ -122,9 +124,9 @@ export async function submit(line) {
   // Everything typed here is STORY: the framing words ride inside the
   // line and `context.syntax` reads them at the far end. A line opening
   // with an unknown slash word is prose that starts with a slash. On
-  // the canvas a line plays AS TYPED, the whitespace at both its edges
-  // its seams — to the text before it and to the model's continuation
-  // (`api.play.submit` records it so); a command never does.
+  // the canvas a line plays AS TYPED, the breaks at its edges its
+  // paragraphs — from the text before it and to the model's continuation
+  // (`api.play.submit` records them so); a command never does.
   const verbatim = continuing() && said && !said.startsWith("/");
   playLine(verbatim ? line : said, files);
 }

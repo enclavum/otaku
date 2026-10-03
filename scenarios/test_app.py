@@ -40,7 +40,7 @@ from otaku.store.migrations import v3 as store_v3
 from otaku.store.migrations import v4 as store_v4
 from otaku.store.migrations import v5 as store_v5
 from otaku.store.migrations import v6 as store_v6
-from otaku.store.schema import SCHEMA_DDL, Attachment, Message, StorySettingDB
+from otaku.store.schema import SCHEMA_DDL, Attachment, Message, StoryMode, StorySettingDB
 from otaku.terminal.tty import BOLD, RESET
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch, run_otaku, set_config, set_config_provider
@@ -281,9 +281,9 @@ class TestSchemaMigration:
             # The row carries them, as a message carries its attachments.
             assert store.stories.get(1).settings == (asking,)
             assert store.settings.get("shared_reminder") == ""
-            # The v7 `completion` column trails the row: a v1 row reads
-            # NULL there, a turn no completion made.
-            assert message.completion is None
+            # The v7 `mode` column trails the row: a v1 row reads its
+            # DEFAULT there, a turn written in chat mode.
+            assert message.mode is StoryMode.CHAT
             # The v9 `provider` and `model` columns trail the three
             # derivatives: a v1 row reads NULL there — nothing recorded
             # which model made it.
@@ -292,15 +292,15 @@ class TestSchemaMigration:
                 assert (row.provider, row.model) == (None, None)
         finally:
             store.close()
-        # Step 7 filled the column on the rows it found: the reply a
-        # provider generated came over the chat wire, the only one there
-        # was; the reader's row and the card's greeting were made by none.
+        # Step 7 wrote nothing into the rows it found: a record shorter
+        # than the schema reads the column's DEFAULT, and no build before
+        # it had a story mode.
         conn = sqlite3.connect(paths.database_file)
         try:
-            filled = conn.execute("SELECT id, completion FROM messages ORDER BY id").fetchall()
+            read = conn.execute("SELECT id, mode FROM messages ORDER BY id").fetchall()
         finally:
             conn.close()
-        assert filled == [(1, None), (2, "chat"), (3, None)]
+        assert read == [(1, "chat"), (2, "chat"), (3, "chat")]
         assert _meta_version(paths) == "9"
 
     def test_a_migration_that_ran_is_reported_at_launch(

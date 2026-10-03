@@ -19,8 +19,7 @@ _V7_MESSAGES = """CREATE TABLE messages (
     story_id    INTEGER NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
     parent_id   INTEGER,
     role        TEXT NOT NULL CHECK (role IN ('user','assistant')),
-    kind        TEXT NOT NULL DEFAULT 'dialogue'
-                  CHECK (kind IN ('dialogue','narration','ooc','card')),
+    kind        TEXT NOT NULL DEFAULT 'dialogue' CHECK (kind IN ('dialogue','narration','ooc','card')),
     speaker_id  INTEGER REFERENCES characters(id) ON DELETE SET NULL,  -- extracted automatically
     speaker     BLOB,                    -- extracted automatically; name-at-the-time snapshot
     body        BLOB NOT NULL,           -- exactly what was typed/generated
@@ -30,7 +29,7 @@ _V7_MESSAGES = """CREATE TABLE messages (
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL,
     attachments TEXT,                    -- the turn's pictures as a JSON list, see Attachment; NULL when none
-    completion  TEXT,                    -- 'chat' or 'text': the completion that made an assistant turn; NULL on the reader's rows and on rows no completion made
+    mode        TEXT NOT NULL DEFAULT 'chat' CHECK (mode IN ('story','chat')),  -- the mode it was written in
     UNIQUE (story_id, id),               -- composite-FK target: same-story references only
     FOREIGN KEY (story_id, parent_id) REFERENCES messages(story_id, id),
     CHECK (parent_id IS NULL OR parent_id < id)
@@ -42,8 +41,7 @@ _V8_MESSAGES = """CREATE TABLE messages (
     story_id    INTEGER NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
     parent_id   INTEGER,
     role        TEXT NOT NULL CHECK (role IN ('user','assistant','tool')),
-    kind        TEXT NOT NULL DEFAULT 'dialogue'
-                  CHECK (kind IN ('dialogue','narration','ooc','card','tool')),
+    kind        TEXT NOT NULL DEFAULT 'dialogue' CHECK (kind IN ('dialogue','narration','ooc','card','tool')),
     speaker_id  INTEGER REFERENCES characters(id) ON DELETE SET NULL,  -- extracted automatically
     speaker     BLOB,                    -- extracted automatically; name-at-the-time snapshot
     body        BLOB NOT NULL,           -- exactly what was typed/generated
@@ -53,7 +51,7 @@ _V8_MESSAGES = """CREATE TABLE messages (
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL,
     attachments TEXT,                    -- the turn's pictures as a JSON list, see Attachment; NULL when none
-    completion  TEXT,                    -- 'chat' or 'text': the completion that made an assistant turn; NULL on the reader's rows and on rows no completion made
+    mode        TEXT NOT NULL DEFAULT 'chat' CHECK (mode IN ('story','chat')),  -- the mode it was written in
     UNIQUE (story_id, id),               -- composite-FK target: same-story references only
     FOREIGN KEY (story_id, parent_id) REFERENCES messages(story_id, id),
     CHECK (parent_id IS NULL OR parent_id < id)

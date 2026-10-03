@@ -4,16 +4,16 @@ Every setting answers the same questions — the switch, where it
 injects (None for one that injects nothing), the positions it may take
 (none for a value), the story's own reminder (None for every setting but
 the story reminder's), whether the notes are displayed (None for every
-setting but the notes tool's), the transcript the story is read in
-(None for every setting but the transcript's) — so a frontend draws
+setting but the notes tool's), the layout the story is read in
+(None for every setting but the layout's) — so a frontend draws
 them alike. A stored position off the closed list reads as the default.
 `to_db` is the row to store, what is given laid over the setting as it
 stands, and refuses what the setting does not take. `injection` is what
 a switched-on setting sends: a tool's prompt and a reminder alike
 enclosed out of character in chat and bare in the system message,
-nothing while off or empty. The emulation setting is the one switch ON
-until a story says otherwise, and gated: it injects in the canvas
-layout over the chat wire alone.
+nothing while off or empty. The emulation setting is off until a story
+switches it on, as every switch is, and gated: it injects in story mode
+over the chat wire alone.
 """
 
 from dataclasses import replace
@@ -25,13 +25,13 @@ from otaku.backend.story import (
     StorySetting,
     StorySettingAssistantNotes,
     StorySettingEmulateTextCompletion,
+    StorySettingLayout,
     StorySettingQuestions,
     StorySettingReminder,
     StorySettingSharedReminder,
-    StorySettingTranscript,
 )
 from otaku.settings.prompts import Prompts
-from otaku.store.schema import CompletionType, InjectionPosition, Layout, StorySettingDB, Transcript
+from otaku.store.schema import CompletionType, InjectionPosition, Layout, StorySettingDB
 
 PROMPTS = replace(
     Prompts(),
@@ -42,6 +42,7 @@ PROMPTS = replace(
 FROM_THE_END = tuple(InjectionPosition(depth) for depth in range(1, 9))
 SYSTEM = InjectionPosition()
 EMULATION = "emulate_text_completion"
+EMULATING = StorySettingDB(EMULATION, enabled=True)
 
 
 class TestAsItStands:
@@ -52,11 +53,12 @@ class TestAsItStands:
         assert reminder().reminder_text == ""
         assert notes().display_notes is True
 
-    def test_the_emulation_is_the_one_switch_on_until_the_story_says_otherwise(self) -> None:
-        assert emulation().enabled
+    def test_the_emulation_starts_off_at_the_system_message_as_every_switch_starts_off(
+        self,
+    ) -> None:
+        assert not emulation().enabled
         assert emulation().injection_position == SYSTEM
-        assert not emulation(StorySettingDB(EMULATION, enabled=False)).enabled
-        # every other switch starts off
+        assert emulation(EMULATING).enabled
         for setting in (questions(), notes(), reminder(), shared("Stay grim.")):
             assert not setting.enabled, setting.name
 
@@ -86,7 +88,7 @@ class TestAsItStands:
         assert StorySettingEmulateTextCompletion.allowed_positions == (SYSTEM, *FROM_THE_END)
         assert StorySettingReminder.allowed_positions == FROM_THE_END
         assert StorySettingSharedReminder.allowed_positions == FROM_THE_END
-        assert StorySettingTranscript.allowed_positions == ()
+        assert StorySettingLayout.allowed_positions == ()
 
     def test_only_the_story_reminder_has_a_reminder_of_its_own(self) -> None:
         assert questions().reminder_text is None
@@ -100,10 +102,10 @@ class TestAsItStands:
         assert emulation().display_notes is None
         assert notes().display_notes is True
 
-    def test_only_the_transcript_setting_has_a_transcript(self) -> None:
+    def test_only_the_layout_setting_has_a_layout(self) -> None:
         for setting in (questions(), notes(), reminder(), shared("Stay grim."), emulation()):
-            assert setting.transcript is None, setting.name
-        assert transcript().transcript is Transcript.MANUSCRIPT
+            assert setting.layout is None, setting.name
+        assert layout().layout is Layout.MANUSCRIPT
 
     def test_a_tool_setting_names_its_tool(self) -> None:
         assert StorySettingQuestions.tool is not None
@@ -135,8 +137,7 @@ class TestToDb:
         assert notes().to_db() == StorySettingDB(
             "allow_assistant_notes", position=InjectionPosition(1), display_notes=True
         )
-        # on by default, so the row as it stands says so
-        assert emulation().to_db() == StorySettingDB(EMULATION, enabled=True, position=SYSTEM)
+        assert emulation().to_db() == StorySettingDB(EMULATION, position=SYSTEM)
 
     def test_what_is_given_is_laid_over_it(self) -> None:
         row = questions(StorySettingDB("allow_questions", position=InjectionPosition(2))).to_db(
@@ -182,10 +183,10 @@ class TestToDb:
             emulation().to_db(display_notes=False)
 
 
-class TestTranscriptSetting:
+class TestLayoutSetting:
     def test_a_story_that_stored_nothing_is_read_in_the_manuscript(self) -> None:
-        found = StorySettingTranscript()
-        assert (found.enabled, found.transcript) == (True, Transcript.MANUSCRIPT)
+        found = StorySettingLayout()
+        assert (found.enabled, found.layout) == (True, Layout.MANUSCRIPT)
         # a value, not a switch: it injects nothing and displays nothing
         assert found.allowed_positions == ()
         assert (found.injection_position, found.reminder_text, found.display_notes) == (
@@ -195,19 +196,19 @@ class TestTranscriptSetting:
         )
 
     def test_what_the_story_stored_stands_and_is_always_in_force(self) -> None:
-        stored = StorySettingDB("transcript", enabled=False, transcript=Transcript.CHAT)
-        found = StorySettingTranscript(stored)
-        assert (found.enabled, found.transcript) == (True, Transcript.CHAT)
-        # a row that names no transcript reads as the default
-        assert transcript(StorySettingDB("transcript")).transcript is Transcript.MANUSCRIPT
+        stored = StorySettingDB("layout", enabled=False, layout=Layout.CHAT)
+        found = StorySettingLayout(stored)
+        assert (found.enabled, found.layout) == (True, Layout.CHAT)
+        # a row that names no layout reads as the default
+        assert layout(StorySettingDB("layout")).layout is Layout.MANUSCRIPT
 
-    def test_the_row_to_store_carries_the_transcript_given_or_standing(self) -> None:
-        assert StorySettingTranscript().to_db() == StorySettingDB(
-            "transcript", enabled=True, transcript=Transcript.MANUSCRIPT
+    def test_the_row_to_store_carries_the_layout_given_or_standing(self) -> None:
+        assert StorySettingLayout().to_db() == StorySettingDB(
+            "layout", enabled=True, layout=Layout.MANUSCRIPT
         )
-        stored = StorySettingDB("transcript", transcript=Transcript.CHAT)
-        assert transcript(stored).to_db(transcript=Transcript.NOVEL) == StorySettingDB(
-            "transcript", enabled=True, transcript=Transcript.NOVEL
+        stored = StorySettingDB("layout", layout=Layout.CHAT)
+        assert layout(stored).to_db(layout=Layout.NOVEL) == StorySettingDB(
+            "layout", enabled=True, layout=Layout.NOVEL
         )
 
     def test_it_has_no_switch_and_takes_nothing_else(self) -> None:
@@ -219,12 +220,12 @@ class TestTranscriptSetting:
             {"display_notes": False},
         ):
             with pytest.raises(Refused):
-                StorySettingTranscript().to_db(**asked)  # type: ignore[arg-type]
+                StorySettingLayout().to_db(**asked)  # type: ignore[arg-type]
 
-    def test_a_switch_takes_no_transcript(self) -> None:
+    def test_a_switch_takes_no_layout(self) -> None:
         for setting in (questions(), reminder(), notes(), shared("Stay grim."), emulation()):
             with pytest.raises(Refused):
-                setting.to_db(transcript=Transcript.CANVAS)
+                setting.to_db(layout=Layout.CANVAS)
 
 
 class TestInjection:
@@ -232,7 +233,7 @@ class TestInjection:
         assert questions().injection is None
         stored = StorySettingDB("use_story_reminder", reminder_text="Rain.")
         assert reminder(stored).injection is None
-        assert emulation(StorySettingDB(EMULATION, enabled=False)).injection is None
+        assert emulation().injection is None
 
     def test_a_tool_in_chat_is_enclosed_out_of_character(self) -> None:
         found = questions(StorySettingDB("allow_questions", enabled=True)).injection
@@ -274,8 +275,8 @@ class TestInjection:
         assert reminder(StorySettingDB("use_story_reminder", enabled=True)).injection is None
         assert shared("  ", StorySettingDB("use_shared_reminder", enabled=True)).injection is None
 
-    def test_the_emulation_sends_its_prompt_in_the_canvas_over_the_chat_wire(self) -> None:
-        found = emulation().injection
+    def test_the_emulation_sends_its_prompt_in_story_mode_over_the_chat_wire(self) -> None:
+        found = emulation(EMULATING).injection
         assert found is not None
         # bare at its default place, the system message
         assert (found.owner, found.text, found.position) == (EMULATION, "CONTINUE HOW", SYSTEM)
@@ -284,13 +285,18 @@ class TestInjection:
         assert deeper.injection is not None
         assert deeper.injection.text == "((OOC: CONTINUE HOW))"
 
-    def test_the_emulation_is_gated_by_the_transcript(self) -> None:
-        # the novel's model continues by nature; no other layout is one text
-        assert emulation(completion_type=CompletionType.TEXT).injection is None
-        assert emulation(layout=Layout.MANUSCRIPT).injection is None
-        assert emulation(layout=Layout.CHAT).injection is None
+    def test_the_emulation_is_gated_by_the_layout(self) -> None:
+        # the novel's model continues by nature; no chat-mode layout is one text
+        assert (
+            emulation(EMULATING, layout=Layout.NOVEL, completion_type=CompletionType.TEXT).injection
+            is None
+        )
+        assert emulation(EMULATING, layout=Layout.MANUSCRIPT).injection is None
+        assert emulation(EMULATING, layout=Layout.CHAT).injection is None
         # gated, the switch still stands
-        assert emulation(layout=Layout.CHAT).enabled
+        assert emulation(EMULATING, layout=Layout.CHAT).enabled
+        # a novel on a model that cannot complete text is played as a canvas
+        assert emulation(EMULATING, layout=Layout.NOVEL).injection is not None
 
 
 def questions(from_db: StorySettingDB | None = None) -> StorySettingQuestions:
@@ -309,8 +315,8 @@ def shared(text: str, from_db: StorySettingDB | None = None) -> StorySettingShar
     return StorySettingSharedReminder(from_db, text)
 
 
-def transcript(from_db: StorySettingDB | None = None) -> StorySettingTranscript:
-    return StorySettingTranscript(from_db)
+def layout(from_db: StorySettingDB | None = None) -> StorySettingLayout:
+    return StorySettingLayout(from_db)
 
 
 def emulation(

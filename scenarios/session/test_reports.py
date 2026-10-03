@@ -5,9 +5,8 @@ import re
 
 import pytest
 
-from otaku.backend import InjectionPosition
+from otaku.backend import InjectionPosition, Layout
 from otaku.backend.api import reports
-from otaku.backend.api import settings as api_settings
 from otaku.backend.api import stories as api_stories
 from otaku.backend.session import Refused
 from otaku.formatting import format_context
@@ -114,11 +113,12 @@ class TestContextInjections:
         assert report.prompt.system_tokens >= report.injections[0].tokens
 
     def test_the_emulation_is_listed_on_the_canvas_over_the_chat_wire(self, app: App) -> None:
-        # on by default, and gated: nothing in the manuscript, the system
+        # switched on, and gated: nothing in the manuscript, the system
         # message's text on the canvas, named as the setting names it
         app.play("I enter the hall.")
+        api_stories.update_setting(app.session, "emulate_text_completion", enabled=True)
         assert reports.context(app.session).injections == ()
-        api_settings.set_transcript(app.session, "canvas")
+        api_stories.update_setting(app.session, "layout", layout=Layout.CANVAS)
         (found,) = reports.context(app.session).injections
         assert (found.label, found.position, found.position_text) == (
             "text completion emulation",

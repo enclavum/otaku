@@ -7,12 +7,13 @@ this file and the product design disagree, the product design wins.
 
 ## What otaku is
 
-An LLM frontend for roleplay, talking to OpenAI-compatible servers (Ollama,
-omlx, KoboldCpp, and others). Chats are stories that can be
-branched from any message. A background pass extracts lore from played
-messages — scenes, characters, journals — and the context sent to the model
-keeps the opening and the recent tail verbatim with scene summaries in
-between. Database encryption is opt-in — plain text is the default.
+An LLM frontend for creative writing and roleplay, talking to
+OpenAI-compatible servers (Ollama, omlx, KoboldCpp, and others). Chats
+are stories that can be branched from any message. A background pass
+extracts lore from played messages — scenes, characters, journals — and
+the context sent to the model keeps the opening and the recent tail
+verbatim with scene summaries in between. Database encryption is opt-in
+— plain text is the default.
 
 ## Environment and commands
 
@@ -388,9 +389,9 @@ until the story says otherwise, `Session.layout`; `enabled` is always
 true and refused as a write). Two facts derive from it, and the
 frontends read the facts, never the value, except to show and set it:
 
-- `is_canvas` (`Layout.is_canvas`): the LOOK — the canvas, one text,
-  for the canvas and the novel; manuscript or chat otherwise (the page's
-  facts carry the look as `layout`, one of the three).
+- `mode` (`Layout.mode`, a `schema.StoryMode`): the LOOK — STORY, one
+  text, for the canvas and the novel; CHAT for the manuscript and the
+  chat (the page's facts carry the look as `layout`, one of the three).
   The page draws it off the `data-transcript` attribute (`layout.js`,
   the manuscript and the chat one structure under two stylesheets, the
   canvas block flow with inline turns); the terminal draws the canvas as
@@ -406,40 +407,47 @@ frontends read the facts, never the value, except to show and set it:
   text, so the novel is kept from it), CHAT for everything else, a novel
   reopened on a model that cannot included. The novel glyph on the
   page's rail (left of the canvas, hidden while `facts.can_complete_text`
-  is false) and `/set layout novel` in the terminal (offered by
-  `api.settings.layout_choices`, the completer's `LAYOUT_LEAF`,
-  refused with the reason otherwise, `_no_novel`) are the two doors to
-  it; `/set layout` takes all four words and answers the setting's
-  `standing`, "Layout: canvas", no full stop. There is no "story
-  mode": every behaviour is the layout's or the wire's.
+  is false) is the one door to it. The terminal draws two looks, so its
+  `/set mode` names two, a command of the terminal's alone, nothing in
+  the api (`bindings._set_mode`, writing the layout setting through
+  `api.stories.update_setting`): `story` stores the canvas, `chat` the
+  manuscript, and "" answers the layout's mode, "Mode: story" or "Mode:
+  chat", no full stop; a switch that changes the mode shows the last
+  turns in it, as `/last` does. The mode is the layout's, never a
+  setting of its own: every behaviour is the layout's, its mode's or
+  the wire's.
 
-THE CANVAS, on either wire, is the story as one text. A line is
-recorded AS TYPED (`api.play.submit`), the whitespace at both edges its
-seams — the leading to the text it goes on from, the trailing to the
-model's continuation — and every other layout's line is trimmed there,
-whatever a frontend sent (both pass a canvas line through:
-`composer.submit`, the terminal's `LineAssembler.feed(verbatim=)`). A
-reply is recorded VERBATIM in the canvas, its leading space or break
-kept (`_drain(verbatim=)`), and a reply that comes flush after a text
-not ending in whitespace is handed the one space the model left out
-before its first piece streams (`assembler.seam_of`, the rule's write
-side; `_reply_events` decides only when): a reply goes on in the
-paragraph it follows unless the reader's line ended on a break, and a
-word is never completed across rows. The SEAM RULE is `assembler.join_of(previous,
-message)`, ONE rule for the wire and both canvases, read off the two
-texts and nothing else: INLINE when the row opens with whitespace
-holding no newline, or when the text before ends with a space; PARAGRAPH
-otherwise — a lead with a newline in it, a flush row after a text not ending in a space,
-the first row, a tool's turn and the row after it, an imported row, a
-plain line. Nothing is stored for it; `messages.completion` stays as a
-record of which wire made a row and decides nothing (migration v7 adds
-it, 'chat' on the replies before it). `as_story_text` and `_wire_turns`
-join by it (a paragraph's blank-line lead is not drawn twice), the row
-events carry it (`UserTurn.join_type`, `AssistantTurn.join_type`, `ToolTurn.join_type`,
-the wire's `join_kind`), and the page settles the arriving reply's join
-at its first piece (`transcript.seamJoin`, the rule copied), the
-terminal drawing the paragraph break a flush chat reply owes
-(`chat.stream`). An EMPTY line is the CONTINUE in the canvas
+THE CANVAS, on either wire, is the story as one text. Every row
+stores the mode it was written in, `messages.mode` (`schema.StoryMode`),
+a fact about the row and no decision: the layout's when the session
+records it — the reader's line, the model's reply, a tool's turn, a
+card's line and greeting alike — and CHAT for an imported row
+(migration v7 adds it, every older row reading 'chat'). A story-mode
+line or reply keeps the line breaks at its edges and drops the spaces
+there (`api.play._edge_breaks`): a line typed in the canvas
+(`api.play.submit`; both frontends pass it through as typed,
+`composer.submit`, the terminal's `LineAssembler.feed(verbatim=)`) and
+a reply alike (`_drain`: its first piece's start, `_lead_breaks`, its
+end the stream's hold-back's); a chat-mode one is trimmed. The JOIN RULE is
+`assembler.get_join_type(previous, next)`, ONE rule for the wire and
+both canvases, and the one place a row's mode decides anything: INLINE
+where both rows were written in story mode, neither stands alone (a
+tool's turn, a card's line or greeting: nobody wrote them into the
+text), and no line break stands at the end of the one or the start of
+the other — one space between them, never stored, so a word is never
+completed across rows; PARAGRAPH otherwise — the first row, a chat row
+or a row standing alone on either side, a break the reader typed
+(Enter at the line's start or end) or the model wrote. A reply goes on
+in the paragraph it follows by default. `as_story_text` and
+`_wire_turns` write it (`assembler.join(previous, join_type, next)`),
+the row events carry
+it (`UserTurn.join_type`, `AssistantTurn.join_type`,
+`ToolTurn.join_type`, the wire's `join_type`), and so does the reply's
+FIRST piece (`AssistantText.join_type`, the wire's `join_type`, null on
+every later piece), so neither frontend keeps a rule of its own: each
+draws the join it is told — the space as its own span on the page
+(`.otk-seam`), a blank line or a space in the terminal (`chat.stream`,
+`render.flow`). An EMPTY line is the CONTINUE in the canvas
 (`api.play.submit`): no user row is recorded, no `UserTurn` event, the
 reply is another of the model's rows, and undo takes it alone — over
 the text wire plain generation from the text's end, over the chat wire
@@ -464,22 +472,22 @@ away (it is never stored) — the page's stylesheet hides it, the
 terminal's stream skips it and keeps the spinner turning.
 
 The page's canvas is TYPED IN where the story is: its end is editable,
-the TAIL (`transcript.showTail`, a `plaintext-only` span after the text),
-the composer's box standing disabled below, its placeholder saying where
-to type (`shell.showFacts`, kept shut through `disconnected`). The tail
-goes on in the paragraph by default: the seam's one space is DRAWN before
-it, outside it (`.otk-tail-seam`), so no caret stands before it, and is
-added on send unless the line opens with whitespace of its own. Enter
-opens a paragraph — a block of the tail's (`.otk-tail__p`), spaced as the
-story's, no empty line to step onto — sent as the blank line the story
-stores; Shift+Enter a line break (a single newline); Ctrl/⌘+Enter or Send
-sends; Esc clears; ↑/↓ stop at its first and last lines. What it holds
-is what is sent (`tailText`), drawn as the played line will be: a line's
-edge breaks are drawn once (`drawTurn`), a paragraph's blank line being
-the join's own. A reply under way takes the tail down, its space held
-(`holdSpace`), and the landing puts it back, focused without the
-browser's scroll. Positions on the page count tool turns as the store
-does (`storedTurns`).
+the TAIL (`transcript.showTail`, a `plaintext-only` span after the
+text), the composer's box standing disabled below, its placeholder
+saying where to type (`shell.showFacts`, kept shut through
+`disconnected`). The tail goes on in the paragraph by default: the
+join's one space is DRAWN before it, outside it (`.otk-tail-seam`), so
+no caret stands before it, and is never sent — the join is the
+backend's. Enter opens a paragraph — a block of the tail's
+(`.otk-tail__p`), spaced as the story's, no empty line to step onto —
+sent as the blank line the story stores; Shift+Enter a line break (a
+single newline); Ctrl/⌘+Enter or Send sends; Esc clears; ↑/↓ stop at its
+first and last lines. What it holds is what is sent (`tailText`), drawn
+as the played line will be: a line's edge breaks are drawn once
+(`drawTurn`), a paragraph's blank line being the join's own. A reply
+under way takes the tail down, its space held (`holdSpace`), and the
+landing puts it back, focused without the browser's scroll. Positions on
+the page count tool turns as the store does (`storedTurns`).
 
 THE TEXT WIRE (`CompletionType.TEXT`) is the novel's alone: the request is
 one text — `AssembledPrompt.as_text`, the story rendered in the model's
@@ -501,7 +509,7 @@ word (`ModelInfo.text_template`), else the model's name
 the model listing carries `text_template` per model. No thinking knob
 rides the request (`level=None`), a text completion that comes back
 EMPTY with its stream ending clean is asked ONCE more with a paragraph
-break appended and the break recorded as the reply's seam
+break appended and the break recorded as the reply's lead
 (`_reply_events`' `openers`), pictures never ride it (`Session.assemble`
 passes `PicturesRide.NONE`, `can_attach` false), and `/context`
 previews the TEXT as sent — `ContextReport.wire`, one part `[prompt]`,
@@ -696,6 +704,22 @@ solstice or equinox from the instant alone (`moon_phase`,
 `turning_point`), no place given and none told — what the `system-info`
 tool reports of the sky.
 
+otaku's own support desk is a service with no key, so no section and no
+place in the registry: `integrations.support` posts a reader's request
+to the site (`SUPPORT_ENDPOINT`, the Worker in the otaku.sh repository,
+which mails it on through Resend and answers 204, read by
+`integrations.base.post_json` as no answer).
+The operation is `backend.api.support.send_support_request(session,
+body, email="")`: an empty or too long body (`MAX_SUPPORT_MESSAGE`, the
+endpoint's limit) and an address that is none (the endpoint's rule,
+copied) are refused before anything leaves, a failure to send is a
+`Refused` sentence. The terminal's `/support TEXT` sends the line whole,
+an address in it included; the page's support docket (`support.js`,
+`POST /api/support`, opened by the Support request button in the Help
+docket's footer, which closes Help) sends its message and email fields
+apart, keeps what was typed when it is refused, and stays open on a
+request sent, the confirmation in its footer and Send become Close.
+
 A client declares where its server runs as `providers.Locality`:
 `LOCAL` (the engines on this machine), `REMOTE` (the hosted catalogs)
 or `UNKNOWN` — the generic provider (`clients/generic.py`, the
@@ -798,24 +822,25 @@ may be asked, as data), `server` (HOW it arrives). `thread` imports only
 HTTP; `server` is the only one that knows both. The two big ones are
 packages: `api` mirrors `backend.api` — one module per twin (`play`,
 `stories`, `lore`, `cards`, `providers`, `integrations`, `settings`,
-`reports`, `transfer`), each holding its own rows, merged into the one
-`ROUTES`/`FLOWS` in `api/__init__` (a path in two modules fails at
-import), and `request` for what every row is handed (`Ask`, `Pending`)
-and hands back (`Created`, `Blob`, `NotFound`, `landed_story`). A
-module CALLS its own twin and nothing else of `backend.api`; what it
-needs of another twin it takes from that twin's sibling (`stories.story`
-takes the lore half of its answer from `lore.memory`, the picker's
-model words come through `reports.model_words`, the document half of
-the new-story flow is `transfer.imported`) — so every translation of
-one twin is in one module. `tests/test_architecture.py` holds the rule;
-`request` is its one declared exception, importing two twins' TYPES
-for `Pending` and calling neither. `server` is the dispatcher
-(`server/__init__`: `bind`, the route table, `Handler`) over `base`
-(the hooks, the socket `Server`, `Wire` — the handler methods that
-read a request and write an answer), with the handler's two halves as
-mixins — `guards` (who may ask) and `streams` (the two answers that
-stream) — beside `assets` (the closed table) and `watch` (the poller).
-The medium's own rules are under Web conventions below.
+`reports`, `support`, `transfer`), each holding its own rows, merged
+into the one `ROUTES`/`FLOWS` in `api/__init__` (a path in two modules
+fails at import), and `request` for what every row is handed (`Ask`,
+`Pending`) and hands back (`Created`, `Blob`, `NotFound`,
+`landed_story`). A module CALLS its own twin and nothing else of
+`backend.api`; what it needs of another twin it takes from that twin's
+sibling (`stories.story` takes the lore half of its answer from
+`lore.memory`, the picker's model words come through
+`reports.model_words`, the document half of the new-story flow is
+`transfer.imported`) — so every translation of one twin is in one
+module. `tests/test_architecture.py` holds the rule; `request` is its
+one declared exception, importing two twins' TYPES for `Pending` and
+calling neither. `server` is the dispatcher (`server/__init__`: `bind`,
+the route table, `Handler`) over `base` (the hooks, the socket `Server`,
+`Wire` — the handler methods that read a request and write an answer),
+with the handler's two halves as mixins — `guards` (who may ask) and
+`streams` (the two answers that stream) — beside `assets` (the closed
+table) and `watch` (the poller). The medium's own rules are under Web
+conventions below.
 
 ## Configuration files
 

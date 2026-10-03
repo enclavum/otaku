@@ -6,7 +6,7 @@ title or an uploaded document."""
 from typing import Any
 
 from otaku import __version__
-from otaku.backend import InjectionPosition, Layout
+from otaku.backend import InjectionPosition, Layout, StoryMode
 from otaku.backend.api import stories as api_stories
 from otaku.backend.session import Session
 from otaku.backend.story import InjectingSetting
@@ -43,13 +43,15 @@ def facts(session: Session) -> dict[str, Any]:
         # the backend refuses a picture regardless.
         "can_attach": session.can_attach,
         # The wire the next request goes over and the look the story is
-        # drawn in (`Session.completion_type`, `Layout.is_canvas` — the
+        # drawn in (`Session.completion_type`, `Layout.mode` — the
         # novel drawn as the canvas, so `layout` here is one of three): what the send
         # button is captioned, whether an empty line continues, whether
         # the pictures show — and whether the novel is offered at all
         # (`Session.can_complete_text`), which shows its glyph.
         "completion_type": session.completion_type.value,
-        "layout": Layout.CANVAS.value if session.layout.is_canvas else session.layout.value,
+        "layout": Layout.CANVAS.value
+        if session.layout.mode is StoryMode.STORY
+        else session.layout.value,
         "can_complete_text": session.can_complete_text,
     }
 

@@ -14,7 +14,18 @@ from otaku.backend.api import (
     reports,
     settings,
     stories,
+    support,
     transfer,
 )
 
-__all__ = ["cards", "lore", "play", "providers", "reports", "settings", "stories", "transfer"]
+__all__ = [
+    "cards",
+    "lore",
+    "play",
+    "providers",
+    "reports",
+    "settings",
+    "stories",
+    "support",
+    "transfer",
+]

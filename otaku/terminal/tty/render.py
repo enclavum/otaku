@@ -25,6 +25,7 @@ is decided.
 
 import io
 import re
+from dataclasses import replace
 from typing import TextIO
 
 from prompt_toolkit.utils import get_cwidth
@@ -377,11 +378,13 @@ def turn(item: Message, *, shown: frozenset[str] = frozenset()) -> str:
     """One turn exactly as the echoes print it: a user turn as the grey
     block, a model turn as it streamed, the calls of the tools `shown` — the
     trailing newline normalized away, the caller joining and terminating
-    lines."""
+    lines. The breaks at an inline row's edges are its joins in the
+    canvas, and a block stands alone: nothing of them is drawn."""
+    body = item.body.strip()
     if item.role == "user":
-        return user_block(message(item.body, "user", pictures=len(item.attachments)))
+        return user_block(message(body, "user", pictures=len(item.attachments)))
     label = get_tool_label(item.provider, item.body) if item.role == "tool" else ""
-    return "\n".join(message(item.body, item.role, shown=shown, label=label).splitlines())
+    return "\n".join(message(body, item.role, shown=shown, label=label).splitlines())
 
 
 def last_turns(
@@ -405,12 +408,11 @@ def last_turns(
 
 def flow(items: list[Message], *, shown: frozenset[str] = frozenset()) -> str:
     """The turns as ONE text — the canvas's echo in this medium: a user
-    row as prose, no block, typeset as the text is;
-    every row joined to the text before it by its seam
-    (`api.play.join_kind`) — a paragraph after one blank line, an inline
-    row as it stands, its own leading whitespace the seam; a tool turn
-    a block apart, and the row after it a paragraph, since a block ends
-    its line. No trailing newline, like `turn`."""
+    row as prose, no block, typeset as the text is; every row joined to
+    the text before it as `api.play.join_type` says — a paragraph after
+    one blank line, an inline row after one space; a tool turn a block
+    apart, and the row after it a paragraph, since a block ends its
+    line. No trailing newline, like `turn`."""
     return flow_offsets(items, shown=shown)[0]
 
 
@@ -424,17 +426,20 @@ def flow_offsets(
     starts: list[int] = []
     previous: Message | None = None
     for item in items:
-        piece = prose(item.body) if item.role == "user" else turn(item, shown=shown)
+        # the spaces at a row's edges decide nothing: the join draws its own
+        body = replace(item, body=item.body.strip(" \t"))
+        piece = prose(body.body) if item.role == "user" else turn(body, shown=shown)
         if not out:
             starts.append(0)
             out = piece
-        elif api_play.join_kind(previous, item) == "paragraph":
+        elif api_play.join_type(previous, item) == "paragraph":
             out = out.rstrip("\n") + "\n\n"
             starts.append(len(out))
             out += piece.lstrip("\n")
         else:
+            # the space is the turn's, so an erase of it takes the join too
             starts.append(len(out))
-            out += piece
+            out += " " + piece
         previous = item
     return out, starts
 

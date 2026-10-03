@@ -138,9 +138,9 @@ COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("/export", "[FILE]", "Export the whole story to Markdown (memory + messages)", "transfer", CommandType.INTERACTIVE),
     # Models and settings
     CommandSpec("/model", "[PROVIDER/MODEL]", "Switch model", "settings", CommandType.INTERACTIVE),
-    CommandSpec("/set layout", "<type>", "Read the story as a novel the model continues, as one text, as a manuscript, or as a chat", "settings", CommandType.OPERATION),
-    CommandSpec("/set think", "<level>", "Set the thinking effort for the model, or a thinking budget in tokens where supported", "settings", CommandType.OPERATION),
     CommandSpec("/set parameter", "<name> <val>", "Set an inference parameter for the model", "settings", CommandType.OPERATION),
+    CommandSpec("/set mode", "story|chat", "Read the story as one text, or as a chat", "settings", CommandType.OPERATION),
+    CommandSpec("/set think", "<level>", "Set the thinking effort for the model, or a thinking budget in tokens where supported", "settings", CommandType.OPERATION),
     CommandSpec("/set verbose", "on|off", "Show the stats line after each reply", "settings", CommandType.OPERATION),
     CommandSpec("/set autocorrect", "on|off", "Settle a character name you type in /you and /me commands to the cast's own spelling", "settings", CommandType.OPERATION),
     CommandSpec("/set notification", "on|off", "Play a sound when a reply lands (the sound is configs/config.toml's notification_sound)", "settings", CommandType.OPERATION),
@@ -149,6 +149,7 @@ COMMANDS: tuple[CommandSpec, ...] = (
     _direction("/roll", "Roll real dice (1d20+5, 3d6, 2d20kh1) — the model narrates exactly what fell", group="special"),
     # Meta
     CommandSpec("/web", "", "Open this session in a browser", "web", CommandType.INTERACTIVE),
+    CommandSpec("/support", "TEXT", "Send feedback or a support request — leave your email to get an answer", "meta", CommandType.OPERATION),
     CommandSpec("/help", "", "Show this help", "meta", CommandType.INTERACTIVE),
     CommandSpec("/bye", "", "Exit", "meta", CommandType.INTERACTIVE),
 )

@@ -61,7 +61,7 @@ from otaku.providers import PicturesRide
 from otaku.providers.openai.templates import TextTemplate
 from otaku.store import Store
 from otaku.store.files import FileStore
-from otaku.store.schema import InjectionPosition, Message, Scene
+from otaku.store.schema import InjectionPosition, Message, Scene, StoryMode
 
 _DEFAULT_CONTEXT = 8_192  # when the provider states no max context
 # The kind of a recap row: wire-only, its body already wire text — as
@@ -133,8 +133,9 @@ class WirePicture:
 
 class JoinType(Enum):
     """How a row joins the text before it — the ONE seam vocabulary, on
-    the wire turn and on the wire to a frontend (`value`): INLINE, as it
-    stands; PARAGRAPH, a blank line before it. `join_of` decides."""
+    the wire turn and on the wire to a frontend (`value`): INLINE, one
+    space before it; PARAGRAPH, a blank line. `get_join_type` decides,
+    and `join` writes it."""
 
     INLINE = "inline"
     PARAGRAPH = "paragraph"
@@ -155,7 +156,7 @@ class WireTurn:
     # Reads differently next request: an injection that moves with the
     # end landed in it, or above it. A prompt-cache mark belongs before.
     volatile: bool = False
-    # How it joins the text before it: its first row's seam (`join_of`).
+    # How it joins the text before it: its first row's seam (`get_join_type`).
     join_type: JoinType = JoinType.PARAGRAPH
 
 
@@ -228,64 +229,47 @@ class AssembledPrompt:
 
     def as_story_text(self) -> str:
         """The story as ONE TEXT, for the text wire: the turns' bodies in
-        order, the system's aside; no roles, no labels. The seam between
-        two turns is `join_of`'s, read off the texts: an inline turn goes
-        on as it stands, carrying its own space, and a paragraph gets its
-        blank line. The pictures do not ride it (the caller holds
-        them: `pictures_held`)."""
+        order, the system's aside; no roles, no labels, each seam
+        `get_join_type`'s (`join`). The text keeps the last turn's trailing
+        break, a paragraph the reader opened for the model to write in.
+        The pictures do not ride it (the caller holds them:
+        `pictures_held`)."""
         out = ""
         for turn in self.messages:
             if turn.role == "system":
                 continue
-            if out and turn.join_type is JoinType.PARAGRAPH:
-                # the break is the join's; a blank-line lead on the body
-                # said the same thing once, and is not drawn twice
-                out += "\n\n" + turn.body.lstrip("\n")
-            else:
-                out += turn.body
+            out = join(out, turn.join_type, turn.body) if out else turn.body.lstrip()
         return out
 
 
-def join_of(previous: Message | None, message: Message) -> JoinType:
-    """How a row joins the text before it — the READ side of the seam
-    rule (`seam_of` is the write side), the wire's and the canvas's,
-    read off the two texts at the seam and nothing else: INLINE when the
-    row opens with whitespace holding no newline (a space is the seam —
-    a completion's own, kept by the canvas's verbatim recording, or the
-    reader's, typed to go on with the model's sentence), or when the
-    text before ends with a space (the reader left the sentence open and
-    the reply came flush); PARAGRAPH otherwise — a row whose lead holds
-    a newline, a row flush after a text that ended, the first row, a
-    tool's turn and the row after it, an imported row, the reader's
-    plain line."""
-    if previous is None or message.role == "tool" or previous.role == "tool":
+def get_join_type(previous: Message | None, next: Message) -> JoinType:
+    """How `next` joins `previous`, the row before it — the wire's and
+    the canvas's one rule, read off the two rows and the newlines at the
+    boundary: INLINE where both were written in story mode, neither
+    stands alone, and no newline stands at the end of the one or the
+    start of the other; PARAGRAPH otherwise — the first row, a chat row
+    or a row standing alone on either side, a break the reader typed or
+    the model wrote at the edge. Spaces at the edges decide nothing."""
+    if previous is None:
         return JoinType.PARAGRAPH
-    lead = message.body[: len(message.body) - len(message.body.lstrip())]
-    if "\n" in lead:
+    rows = (previous, next)
+    if any(row.mode is not StoryMode.STORY for row in rows):
         return JoinType.PARAGRAPH
-    if lead:
-        return JoinType.INLINE
-    if previous.body[-1:] == " ":
-        return JoinType.INLINE
-    return JoinType.PARAGRAPH
+    # A tool's result and a card's line and greeting stand alone in any
+    # mode: nobody wrote them into the text.
+    if any(row.role == "tool" or row.kind == "card" or row.provider == "card" for row in rows):
+        return JoinType.PARAGRAPH
+    if previous.body.rstrip(" \t").endswith("\n") or next.body.lstrip(" \t").startswith("\n"):
+        return JoinType.PARAGRAPH
+    return JoinType.INLINE
 
 
-def seam_of(previous: Message | None) -> str:
-    """The space a reply that comes FLUSH after `previous` is owed — the
-    WRITE side of the seam rule, what the recorder puts before the
-    reply's first piece in the canvas (`api.play`) so that `join_of`
-    then reads the seam off the text: a reply goes on in the paragraph
-    it follows, and a word is never completed across rows. Nothing
-    wherever the read side already has its answer — no row or a tool's
-    before it (a paragraph), a text ending in whitespace (a space is the
-    seam as it stands, a break — the reader's Enter at a line's end —
-    makes a paragraph) — and one space otherwise, the one the model left
-    out of its continuation."""
-    if previous is None or previous.role == "tool" or not previous.body:
-        return ""
-    if previous.body[-1].isspace():
-        return ""
-    return " "
+def join(previous: str, join_type: JoinType, next: str) -> str:
+    """`next` after `previous` across a seam `join_type` decided: one
+    space inline, a blank line for a paragraph — the whitespace at the
+    two edges given up for it, so the space is never stored and a word
+    is never completed across rows."""
+    return previous.rstrip() + (" " if join_type is JoinType.INLINE else "\n\n") + next.lstrip()
 
 
 def estimate_tokens(text: str) -> int:
@@ -626,8 +610,7 @@ class _Assembly:
             return self.tool_framing.replace("{tool}", name).replace("{body}", body)
         if message.role == "assistant":
             # The model's row is not a typed line — no direction to read
-            # off it — and goes as it stands: its lead is its seam
-            # (`join_of`), recorded verbatim in the canvas for this.
+            # off it — and goes as it stands.
             return body
         return syntax.to_wire(replace(message, body=body), is_last=is_last)
 
@@ -649,8 +632,7 @@ class _Assembly:
         prompt per exchange. A tool turn goes as the reader's — the chat
         wire has two sides, and a tool's answer is what the model is told
         — framed by `_wire_text`. The seam between two rows is
-        `join_of`'s, as `as_story_text` joins turns: an inline row as it
-        stands, a paragraph after a blank line."""
+        `get_join_type`'s, written as `as_story_text` writes it (`join`)."""
         out: list[WireTurn] = []
         volatile = False  # from the first injected row on: it moves with the end
         for position, message in enumerate(rows):
@@ -660,22 +642,19 @@ class _Assembly:
             text = self._wire_text(message, is_last=position == len(rows) - 1)
             images = pictures_of.get(message, ())
             volatile = volatile or message.kind == ROW_KIND
-            join = join_of(rows[position - 1] if position else None, message)
-            if join is JoinType.PARAGRAPH:
-                text = text.lstrip("\n")  # the break is the join's, not drawn twice
+            join_type = get_join_type(rows[position - 1] if position else None, message)
             role = "user" if message.role == "tool" else message.role
             if out and out[-1].role == role:
                 out[-1] = WireTurn(
                     role=role,
-                    body=out[-1].body + ("\n\n" if join is JoinType.PARAGRAPH else "") + text,
+                    body=join(out[-1].body, join_type, text),
                     images=out[-1].images + images,
                     volatile=volatile,
                     join_type=out[-1].join_type,
                 )
             else:
-                out.append(
-                    WireTurn(role=role, body=text, images=images, volatile=volatile, join_type=join)
-                )
+                turn = WireTurn(role, text.lstrip(), images, volatile=volatile, join_type=join_type)
+                out.append(turn)
         return out
 
 

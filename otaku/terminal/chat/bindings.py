@@ -19,7 +19,7 @@ from typing import NamedTuple
 import click
 
 from otaku import web as web_frontend
-from otaku.backend import commands
+from otaku.backend import Layout, StoryMode, commands
 from otaku.backend.api import cards as api_cards
 from otaku.backend.api import lore as api_lore
 from otaku.backend.api import play as api_play
@@ -27,9 +27,11 @@ from otaku.backend.api import providers as api_providers
 from otaku.backend.api import reports as api_reports
 from otaku.backend.api import settings as api_settings
 from otaku.backend.api import stories as api_stories
+from otaku.backend.api import support as api_support
 from otaku.backend.api import transfer as api_transfer
 from otaku.backend.api.lore import WorkerRun
 from otaku.backend.session import NO_STORY_HINT, Refused, Session
+from otaku.backend.story import StorySettingLayout
 from otaku.terminal.chat import help as help_page
 from otaku.terminal.chat import stream
 from otaku.terminal.chat.chat import RESUME_TURNS, Chat
@@ -61,7 +63,8 @@ OPERATIONS: dict[str, Operation] = {
     "/set autocorrect": api_settings.set_autocorrect,
     "/set notification": api_settings.set_notification,
     "/set max_context": api_settings.set_max_context,
-    "/set layout": api_settings.set_layout,
+    # the whole line is the request, an address to answer at included
+    "/support": api_support.send_support_request,
 }
 
 
@@ -140,7 +143,7 @@ def _undo(chat: Chat, raw: str) -> None:
 def _is_canvas(chat: Chat) -> bool:
     """Whether the open story is read on the canvas — echoed as one text
     then (`render.flow`), the played turns' blocks otherwise."""
-    return chat.session.layout.is_canvas
+    return chat.session.layout.mode is StoryMode.STORY
 
 
 def _report_undo_ending(chat: Chat) -> None:
@@ -198,7 +201,9 @@ def _regen(chat: Chat, raw: str) -> None:
             chat.ledger.reply_begins()
         else:
             chat.ledger.echo_block(
-                message(prompt.body, "user", pictures=len(prompt.attachments)) if prompt else "",
+                message(prompt.body.strip(), "user", pictures=len(prompt.attachments))
+                if prompt
+                else "",
                 above=marker,
             )
     while stream.show(chat, events):
@@ -233,6 +238,30 @@ def _last(chat: Chat, raw: str) -> None:
 # Turns /last shows when called bare — a turn being an exchange, the
 # prompt and its reply (two message rows).
 _LAST_TURNS_DEFAULT = 5
+
+# The words /set mode takes and the layout each stores: the terminal draws
+# a story as one text or as turns, so it names two of the four the story's
+# layout setting holds (the page sets all four).
+_MODES = {"story": Layout.CANVAS, "chat": Layout.MANUSCRIPT}
+
+
+def _set_mode(chat: Chat, raw: str) -> None:
+    """`/set mode` — the terminal's own word for its two looks, written as
+    the story's layout setting (`StorySettingLayout`), so it forks and
+    dies with the story; "" reports it: story for a layout drawn as one
+    text, chat otherwise. A switch that changed the look shows the last
+    turns in the new one, as `/last` does."""
+    value = raw.strip().lower()
+    before = chat.session.layout.mode
+    if value:
+        chosen = _MODES.get(value)
+        if chosen is None:
+            chat.say("Usage: /set mode story|chat")
+            return
+        api_stories.update_setting(chat.session, StorySettingLayout.name, layout=chosen)
+    chat.say(f"Mode: {chat.session.layout.mode.value}")
+    if chat.session.layout.mode is not before and chat.session.messages:
+        _last(chat, "")
 
 
 def _clear(chat: Chat, raw: str) -> None:
@@ -536,6 +565,7 @@ _INTERACTIVE: dict[str, Callable[[Chat, str], None]] = {
     "/undo": _undo,
     "/regen": _regen,
     "/last": _last,
+    "/set mode": _set_mode,
     "/clear": _clear,
     "/stories": _stories,
     "/system": _system,

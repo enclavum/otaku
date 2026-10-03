@@ -15,7 +15,7 @@ config file's otherwise.
 
 import json
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Self
 
@@ -43,8 +43,7 @@ CREATE TABLE messages (
     story_id    INTEGER NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
     parent_id   INTEGER,
     role        TEXT NOT NULL CHECK (role IN ('user','assistant','tool')),
-    kind        TEXT NOT NULL DEFAULT 'dialogue'
-                  CHECK (kind IN ('dialogue','narration','ooc','card','tool')),
+    kind        TEXT NOT NULL DEFAULT 'dialogue' CHECK (kind IN ('dialogue','narration','ooc','card','tool')),
     speaker_id  INTEGER REFERENCES characters(id) ON DELETE SET NULL,  -- extracted automatically
     speaker     BLOB,                    -- extracted automatically; name-at-the-time snapshot
     body        BLOB NOT NULL,           -- exactly what was typed/generated
@@ -54,7 +53,7 @@ CREATE TABLE messages (
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL,
     attachments TEXT,                    -- the turn's pictures as a JSON list, see Attachment; NULL when none
-    completion  TEXT,                    -- 'chat' or 'text': the completion that made an assistant turn; NULL on the reader's rows and on rows no completion made
+    mode        TEXT NOT NULL DEFAULT 'chat' CHECK (mode IN ('story','chat')),  -- the mode it was written in
     UNIQUE (story_id, id),               -- composite-FK target: same-story references only
     FOREIGN KEY (story_id, parent_id) REFERENCES messages(story_id, id),
     CHECK (parent_id IS NULL OR parent_id < id)
@@ -167,60 +166,6 @@ class Story:
 
 
 @dataclass(frozen=True)
-class Attachment:
-    """One picture on a turn, as the `attachments` column records it: the
-    app's facts about a file in the folder beside the database, none of
-    the reader's words — which is why the column is plain where the file
-    is sealed. `file` is the file's name in the folder, extension
-    included (`store.files` draws it; the extension says the type), the
-    rest their measure as the model sees them — recorded here so that no
-    reader has to open a sealed file to describe a picture. The reader's
-    original file name is not kept: nothing needs it once the picture
-    is in."""
-
-    file: str
-    width: int
-    height: int
-    size: int
-
-    @classmethod
-    def from_json(cls, text: str | None) -> tuple[Self, ...]:
-        """The column read back; NULL → no pictures, which is also what a
-        row written before the column existed reads as."""
-        if not text:
-            return ()
-        return tuple(
-            cls(
-                file=str(item["file"]),
-                width=int(item["width"]),
-                height=int(item["height"]),
-                size=int(item["size"]),
-            )
-            for item in json.loads(text)
-        )
-
-    @classmethod
-    def to_json(cls, attachments: Sequence[Self]) -> str | None:
-        """The column's text for these pictures: a JSON list, or NULL (None)
-        for a turn without any — the column never holds an empty list
-        pretending to be absent. The keys are a contract with the SQL that
-        reads the column back (`$.file` is what the sweep extracts)."""
-        if not attachments:
-            return None
-        return json.dumps(
-            [
-                {
-                    "file": a.file,
-                    "width": a.width,
-                    "height": a.height,
-                    "size": a.size,
-                }
-                for a in attachments
-            ]
-        )
-
-
-@dataclass(frozen=True)
 class Message:
     """One turn of a story. `id` is 0 on a turn not yet stored; `append`
     assigns the real one. `kind` is 'dialogue' | 'narration' | 'ooc' |
@@ -242,14 +187,13 @@ class Message:
     provider: str | None = None
     model: str | None = None
     attachments: tuple[
-        Attachment, ...
+        "Attachment", ...
     ] = ()  # the turn's pictures; the files folder holds the bytes
-    # The completion that made an assistant turn — 'chat' or 'text', the
-    # wire it came over; None on the reader's rows and on rows no
-    # completion made (imported, a card's). A text completion's body is
-    # verbatim, its leading whitespace the seam with the text before it
-    # (`context.assembler.join_of`).
-    completion: str | None = None
+    # The mode it was written in, the layout's in force when it was
+    # recorded; CHAT on an imported row. `context.assembler.get_join_type`
+    # reads it.
+    # a factory: StoryMode is defined below, and a default is read at once
+    mode: "StoryMode" = field(default_factory=lambda: StoryMode.CHAT)
     id: int = 0
 
 
@@ -291,6 +235,9 @@ class Journal:
     updated_at: str = ""  # audit column, surfaced for display alone
     provider: str | None = None  # who made the row (see the DDL)
     model: str | None = None
+
+
+# ---------- what the rows carry, in the order the rows reference it ----------
 
 
 @dataclass(frozen=True)
@@ -409,10 +356,10 @@ class Layout(Enum):
     over the TEXT wire, the model continuing the text itself; CANVAS one
     continuous text over the chat wire; MANUSCRIPT the played lines as
     interjections among the prose; CHAT the turns as alternating blocks.
-    Two facts derive from it, and the frontends read the facts: whether
-    it is drawn as the canvas (`is_canvas`) and the wire
-    (`completion_type`). `value` is the plain form the column and the
-    wire hold, and `from_value` reads one back."""
+    Two facts derive from it, and the frontends read the facts: the
+    mode it is written in (`mode`) and the wire (`completion_type`).
+    `value` is the plain form the column and the wire hold, and
+    `from_value` reads one back."""
 
     NOVEL = "novel"
     CANVAS = "canvas"
@@ -425,10 +372,10 @@ class Layout(Enum):
         return next((each for each in cls if each.value == value), None)
 
     @property
-    def is_canvas(self) -> bool:
-        """Whether it is drawn as the canvas, one text: the canvas, and
-        the novel, which is drawn as the canvas."""
-        return self in (Layout.CANVAS, Layout.NOVEL)
+    def mode(self) -> "StoryMode":
+        """STORY for the canvas, one text, and the novel, which is drawn
+        as the canvas; CHAT for the manuscript and the chat."""
+        return StoryMode.STORY if self in (Layout.CANVAS, Layout.NOVEL) else StoryMode.CHAT
 
     def completion_type(self, can_complete_text: bool) -> "CompletionType":
         """The wire alone: TEXT for the novel where the model in use can
@@ -439,10 +386,79 @@ class Layout(Enum):
         return CompletionType.CHAT
 
 
+class StoryMode(Enum):
+    """The mode a story is written in: STORY one text, the reader's lines
+    and the model's replies running on into each other; CHAT turns, each
+    a paragraph of its own. A layout has one (`Layout.mode`), and
+    `messages.mode` holds the one a row was written in — how it joins
+    the text is decided off that (`context.assembler.get_join_type`)."""
+
+    STORY = "story"
+    CHAT = "chat"
+
+    @classmethod
+    def from_value(cls, value: object) -> "StoryMode":
+        """The stored word; CHAT for anything this build does not know."""
+        return next((each for each in cls if each.value == value), cls.CHAT)
+
+
 class CompletionType(Enum):
     """The wire a request goes over — CHAT the message list, TEXT the raw
-    text — and `messages.completion`'s word for the one that made a row,
-    kept for the record."""
+    text."""
 
     CHAT = "chat"
     TEXT = "text"
+
+
+@dataclass(frozen=True)
+class Attachment:
+    """One picture on a turn, as the `attachments` column records it: the
+    app's facts about a file in the folder beside the database, none of
+    the reader's words — which is why the column is plain where the file
+    is sealed. `file` is the file's name in the folder, extension
+    included (`store.files` draws it; the extension says the type), the
+    rest their measure as the model sees them — recorded here so that no
+    reader has to open a sealed file to describe a picture. The reader's
+    original file name is not kept: nothing needs it once the picture
+    is in."""
+
+    file: str
+    width: int
+    height: int
+    size: int
+
+    @classmethod
+    def from_json(cls, text: str | None) -> tuple[Self, ...]:
+        """The column read back; NULL → no pictures, which is also what a
+        row written before the column existed reads as."""
+        if not text:
+            return ()
+        return tuple(
+            cls(
+                file=str(item["file"]),
+                width=int(item["width"]),
+                height=int(item["height"]),
+                size=int(item["size"]),
+            )
+            for item in json.loads(text)
+        )
+
+    @classmethod
+    def to_json(cls, attachments: Sequence[Self]) -> str | None:
+        """The column's text for these pictures: a JSON list, or NULL (None)
+        for a turn without any — the column never holds an empty list
+        pretending to be absent. The keys are a contract with the SQL that
+        reads the column back (`$.file` is what the sweep extracts)."""
+        if not attachments:
+            return None
+        return json.dumps(
+            [
+                {
+                    "file": a.file,
+                    "width": a.width,
+                    "height": a.height,
+                    "size": a.size,
+                }
+                for a in attachments
+            ]
+        )

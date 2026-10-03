@@ -25,7 +25,7 @@ from otaku.backend.api.play import (
     UserTurn,
 )
 from otaku.context.assembler import JoinType
-from otaku.store.schema import Message
+from otaku.store.schema import Message, StoryMode
 from otaku.web import api
 from otaku.web.api import play as web_play
 
@@ -70,9 +70,9 @@ class TestEvent:
     def test_a_tool_call_carries_the_tool_its_piece_and_whether_it_closed(self) -> None:
         # the tool's label and who acts on it ride along where the tool
         # is known, so the page draws a call otaku runs as it streams
-        assert api.event(AssistantToolCall("search", "tides", closed=False)) == {
+        assert api.event(AssistantToolCall("web-search", "tides", closed=False)) == {
             "type": "assistant_tool_call",
-            "tool": "search",
+            "tool": "web-search",
             "label": "Web search",
             "actor": "system",
             "text": "tides",
@@ -97,7 +97,7 @@ class TestEvent:
             "attachments": [],
             "tool_label": None,
             "segments": [{"kind": "prose", "text": "I listen."}],
-            "join_kind": "inline",
+            "join_type": "inline",
         }
         assert api.event(UserTurn(line, JoinType.PARAGRAPH))["note"] == ""
 
@@ -112,21 +112,21 @@ class TestEvent:
             {
                 "kind": "tool_call",
                 "tool": "question",
-                "label": "",
+                "label": "Questions",
                 "actor": "user",
                 "text": "Go in?\n1. Yes",
                 "question": "Go in?",
                 "options": ["Yes"],
             },
         ]
-        assert turn["join_kind"] == "paragraph"
+        assert turn["join_type"] == "paragraph"
 
     def test_a_tool_turn_carries_the_tools_label_and_its_result_verbatim(self) -> None:
-        result = Message(id=6, role="tool", kind="tool", body="Tides: high.", provider="search")
+        result = Message(id=6, role="tool", kind="tool", body="Tides: high.", provider="web-search")
         turn = api.event(ToolTurn(result, JoinType.PARAGRAPH))["turn"]
         assert (turn["role"], turn["kind"], turn["body"]) == ("tool", "tool", "Tides: high.")
         assert turn["tool_label"] == "Web search"
-        assert turn["provider"] == "search"
+        assert turn["provider"] == "web-search"
 
     def test_done_carries_the_report_and_its_notice_and_no_reply(self) -> None:
         # every row landed before it, each told by its own event
@@ -144,16 +144,17 @@ class TestEvent:
 
 class TestRows:
     """`web.api.play.rows` — the stored turns as the page reads them,
-    each joined to the one before it by the seam rule."""
+    each joined to the one before it by the join rule."""
 
     def test_each_row_carries_how_it_joins_the_one_before(self) -> None:
+        story = StoryMode.STORY
         chain = [
-            Message(id=1, role="user", body="She waited for"),
-            Message(id=2, role="assistant", body=" the bus."),
+            Message(id=1, role="user", body="She waited for", mode=story),
+            Message(id=2, role="assistant", body="the bus.", mode=story),
             Message(id=3, role="user", body="Then?"),
-            Message(id=4, role="assistant", body="\n\nNothing."),
+            Message(id=4, role="assistant", body="\n\nNothing.", mode=story),
         ]
-        assert [row["join_kind"] for row in web_play.rows(chain)] == [
+        assert [row["join_type"] for row in web_play.rows(chain)] == [
             "paragraph",
             "inline",
             "paragraph",
@@ -162,10 +163,10 @@ class TestRows:
 
     def test_a_tool_row_is_named_for_the_reader_and_every_other_row_is_not(self) -> None:
         chain = [
-            Message(id=1, role="assistant", body="```otk-system\n```"),
-            Message(id=2, role="tool", kind="tool", body="Time: now", provider="system"),
+            Message(id=1, role="assistant", body="```otk-system-info\n```"),
+            Message(id=2, role="tool", kind="tool", body="Time: now", provider="system-info"),
         ]
-        assert [row["tool_label"] for row in web_play.rows(chain)] == [None, "System"]
+        assert [row["tool_label"] for row in web_play.rows(chain)] == [None, "System info"]
 
 
 class TestSyntax:

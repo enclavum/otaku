@@ -1,7 +1,8 @@
 """The integrations: the services otaku asks for something other than a
 completion — the web search engines, one module each — and the one
-registry; beside them, the sky's own facts, asked of no service
-(`astronomy`: the moon's phase, the nearest solstice or equinox).
+registry; beside them, otaku's own support desk, a service with no key
+and so no section (`support`), and the sky's own facts, asked of no
+service (`astronomy`: the moon's phase, the nearest solstice or equinox).
 
 A section of integrations.toml IS its integration
 (`ALL_INTEGRATIONS`, keyed by section name, as the providers' sections
@@ -25,6 +26,7 @@ from otaku.integrations.base import (
     SearchResult,
 )
 from otaku.integrations.exa import Exa
+from otaku.integrations.support import MAX_SUPPORT_MESSAGE, post_support_request
 from otaku.integrations.tavily import Tavily
 from otaku.settings.integrations import IntegrationConfig, IntegrationSettings
 
@@ -32,6 +34,7 @@ ALL_INTEGRATIONS: dict[str, type[Integration]] = {Tavily.id: Tavily, Exa.id: Exa
 
 __all__ = [
     "ALL_INTEGRATIONS",
+    "MAX_SUPPORT_MESSAGE",
     "Integration",
     "IntegrationConfig",
     "IntegrationError",
@@ -40,6 +43,7 @@ __all__ = [
     "SearchResult",
     "default_sections",
     "moon_phase",
+    "post_support_request",
     "search_engine_of_key",
     "turning_point",
 ]

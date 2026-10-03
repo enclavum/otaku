@@ -24,14 +24,14 @@ from collections.abc import Callable
 
 import pytest
 
-from otaku.backend import InjectionPosition, Transcript
+from otaku.backend import InjectionPosition, Layout
 from otaku.backend.api import integrations as api_integrations
 from otaku.backend.api import settings as api_settings
 from otaku.backend.api import stories as api_stories
 from otaku.backend.api.integrations import WebSearch
 from otaku.backend.paths import Paths
 from otaku.backend.session import Refused, Session
-from otaku.backend.story import StorySetting, StorySettingTranscript
+from otaku.backend.story import StorySetting, StorySettingLayout
 from otaku.settings.prompts import Prompts
 from otaku.store.schema import StorySettingDB
 from otaku.terminal.screens import stories as screen_stories
@@ -659,9 +659,9 @@ class TestToolsTab:
 
     def test_the_emulation_is_the_last_row_its_depth_its_one_field(self, app: App) -> None:
         app.play("I push the door.")
-        # seventh row, after the reminders: on until unchecked
+        # seventh row, after the reminders: off until checked
         self.tools(app, DOWN * 6 + SPACE + ESC)
-        assert not self.setting(app, EMULATION).enabled
+        assert self.setting(app, EMULATION).enabled
         # its one field is the depth: the dropdown's next place after the
         # system message is before the reader's latest message
         self.tools(app, DOWN * 6 + ENTER + ENTER + DOWN + ENTER + ESC + ESC)
@@ -727,27 +727,25 @@ class TestSettingsAreTheStorys:
         finally:
             app.close()
 
-    def test_a_new_story_starts_with_every_switch_off_but_the_emulation(self, app: App) -> None:
+    def test_a_new_story_starts_with_every_switch_off(self, app: App) -> None:
         api_stories.update_setting(app.session, "allow_questions", enabled=True)
-        api_stories.update_setting(app.session, EMULATION, enabled=False)
+        api_stories.update_setting(app.session, EMULATION, enabled=True)
         app.play("I push the door.")
         app.play("/new")
-        assert not any(each.enabled for each in switches(app) if each.name != EMULATION)
-        # the one switch on until a story says otherwise
-        assert setting(app, EMULATION).enabled
+        assert not any(each.enabled for each in switches(app))
         # the one value among them starts at its default: a story is
-        # always read in a transcript
-        assert setting(app, "transcript").transcript is Transcript.MANUSCRIPT
+        # always read in a layout
+        assert setting(app, "layout").layout is Layout.MANUSCRIPT
 
-    def test_the_transcript_is_the_storys_and_reads_back(self, app: App) -> None:
-        api_stories.update_setting(app.session, "transcript", transcript=Transcript.CANVAS)
+    def test_the_layout_is_the_storys_and_reads_back(self, app: App) -> None:
+        api_stories.update_setting(app.session, "layout", layout=Layout.CANVAS)
         app.play("I push the door.")
         assert app.store.stories.get_settings(app.session.story_id) == (
-            StorySettingDB("transcript", enabled=True, transcript=Transcript.CANVAS),
+            StorySettingDB("layout", enabled=True, layout=Layout.CANVAS),
         )
-        assert setting(app, "transcript").transcript is Transcript.CANVAS
+        assert setting(app, "layout").layout is Layout.CANVAS
         app.play("/new")
-        assert setting(app, "transcript").transcript is Transcript.MANUSCRIPT
+        assert setting(app, "layout").layout is Layout.MANUSCRIPT
 
     def test_a_fork_plays_the_way_its_origin_does(self, app: App) -> None:
         api_stories.update_setting(
@@ -834,9 +832,9 @@ class TestSettingsRefused:
             {"name": "use_shared_reminder", "position": InjectionPosition()},
             # The shared reminder's text is no one story's.
             {"name": "use_shared_reminder", "reminder_text": "Stay grim."},
-            # The transcript has no switch, and a switch has no transcript.
-            {"name": "transcript", "enabled": True},
-            {"name": "allow_questions", "transcript": Transcript.CANVAS},
+            # The layout has no switch, and a switch has no layout.
+            {"name": "layout", "enabled": True},
+            {"name": "allow_questions", "layout": Layout.CANVAS},
             # The emulation takes neither a reminder nor a display.
             {"name": EMULATION, "reminder_text": "Go on."},
             {"name": EMULATION, "display_notes": False},
@@ -844,16 +842,16 @@ class TestSettingsRefused:
             with pytest.raises(Refused):
                 api_stories.update_setting(app.session, **asked)  # type: ignore[arg-type]
         # Nothing was written by a refusal.
-        assert not any(each.enabled for each in switches(app) if each.name != EMULATION)
+        assert not any(each.enabled for each in switches(app))
 
 
 def switches(app: App) -> list[StorySetting]:
     """The story's settings that are switches — every one but the
-    transcript, which is a value and always in force."""
+    layout, which is a value and always in force."""
     return [
         each
         for each in api_stories.get_settings(app.session)
-        if not isinstance(each, StorySettingTranscript)
+        if not isinstance(each, StorySettingLayout)
     ]
 
 

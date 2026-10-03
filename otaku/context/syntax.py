@@ -305,11 +305,11 @@ def to_wire(message: Message, *, is_last: bool, card_block: str | None = None) -
     # decided the lifetime of.
     if frame.tail and (frame.inliner == "/ooc" or (frame.inliner == "/cue" and is_last)):
         parts.append(OOC_FRAME.replace("{body}", frame.tail))
-    # The whitespace at a line's edges is its seams (`assembler.join_of`,
-    # `api.play.submit`): the leading to the text it goes on from, the
-    # trailing to the model's continuation, both typed so on the canvas
-    # and riding the wire as they stand — the reader trims them off the
-    # line's text, so they are put back here. A chat-mode line has none.
+    # The breaks at a line's edges are its paragraph breaks
+    # (`assembler.get_join_type`, `api.play.submit`): the leading from the text
+    # before, the trailing to the model's continuation, both typed so in
+    # the canvas and riding the wire as they stand — the reader trims them
+    # off the line's text, so they are put back here. A block line has none.
     lead = body[: len(body) - len(body.lstrip())]
     tail = body[len(body.rstrip()) :]
     return lead + " ".join(part for part in parts if part) + tail

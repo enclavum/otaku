@@ -159,7 +159,10 @@ def event(happened: PlayEvent) -> dict[str, Any]:
         case AssistantReasoning():
             return {"type": "assistant_reasoning", "text": happened.text}
         case AssistantText():
-            return {"type": "assistant_text", "text": happened.text}
+            # `join_type` on the reply's first piece alone, null after: how
+            # the arriving reply joins the text before it, on the canvas.
+            join = happened.join_type.value if happened.join_type is not None else None
+            return {"type": "assistant_text", "text": happened.text, "join_type": join}
         case AssistantToolCall():
             # A piece of a tool call, the tool's name and its inside;
             # `closed` marks the piece the closing fence ended. The tool's
@@ -213,11 +216,11 @@ def event(happened: PlayEvent) -> dict[str, Any]:
 
 def rows(messages: Sequence[Message]) -> list[dict[str, Any]]:
     """Stored turns in order, each with how it joins the one before it
-    (`api.play.join_kind`, read off the two texts at the seam)."""
+    (`api.play.join_type`, the join rule, read off the two rows)."""
     out: list[dict[str, Any]] = []
     previous: Message | None = None
     for message in messages:
-        out.append(turn(message, join=api_play.join_kind(previous, message)))
+        out.append(turn(message, join=api_play.join_type(previous, message)))
         previous = message
     return out
 
@@ -253,7 +256,7 @@ def turn(message: Message, *, join: str) -> dict[str, Any]:
         "segments": api_play.segments(message.body),
         # How it joins the turn before it, for the canvas: "inline", as it
         # stands, or "paragraph", a blank line before it.
-        "join_kind": join,
+        "join_type": join,
     }
 
 

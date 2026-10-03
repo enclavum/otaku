@@ -10,6 +10,7 @@ import * as api from "./api.js";
 import { ask, closeAll, popups } from "./browser.js";
 import { $ } from "./dom.js";
 import { openHelp } from "./help.js";
+import { openSupport } from "./support.js";
 import { openSettings } from "./settings.js";
 import { openModels } from "./models.js";
 import { openBalance, openContext, openInfo, openUsage } from "./reports.js";
@@ -46,6 +47,7 @@ const SCREENS = {
   "/usage": openUsage,
   "/balance": openBalance,
   "/info": openInfo,
+  "/support": openSupport,
   "/help": () => openHelp(),
   "/import": importStory,
   "/card": importCard,

@@ -254,24 +254,22 @@ function readAsk(text, closed) {
 // ---------- the canvas typed in: its own end, editable ----------
 
 /* The canvas's own end, editable: the reader's next line typed where it
-   lands. It goes on in the paragraph by default — the one space the text
-   needs is DRAWN (`data-seam`, `app.css`), so no caret can stand before it,
-   and added on send unless the line opens with whitespace of its own.
+   lands. It goes on in the paragraph by default — the one space the join
+   draws is DRAWN here too (`data-seam`, `app.css`), so no caret can stand
+   before it; nothing of it is sent, the join is the backend's.
    Enter opens a PARAGRAPH: a block of its own (`.otk-tail__p`), spaced as
    the story's paragraphs are, with no empty line between to step onto; on
    send each is the blank line the story stores. Ctrl/⌘+Enter (or the
    Send button) sends. A reply under way takes it down; the next
    landing puts it back. */
 let tail = null;
-// the seam's one space, drawn just before the tail and outside it, so the
+// the join's one space, drawn just before the tail and outside it, so the
 // caret always stands after it — where the typed text will
 let seam = null;
 
 export function tailText() {
   if (!tail?.isConnected) return null;
-  let text = tailParagraphs().join("\n\n");
-  if (text && tail.hasAttribute("data-seam") && !/^\s/.test(text)) text = ` ${text}`;
-  return text;
+  return tailParagraphs().join("\n\n");
 }
 
 /** The tail's paragraphs as typed: the part that goes on from the text,
@@ -794,39 +792,23 @@ function follow() {
     (`shell.showFacts`): where a reply arriving now joins the text. */
 const canvas = () => $(".otk-app")?.dataset.layout === "canvas";
 
-function seamJoin(before, piece) {
-  /* How the reply arriving joins the text before it, read off the seam
-     as the backend reads it when the row lands (`context.assembler.join_of`,
-     copied): a lead holding a newline is a paragraph, other leading
-     whitespace inline, a flush first piece inline only after a text
-     ending in a space. `before` is the reader's line when there was one,
-     "" else. */
-  const lead = piece.match(/^\s*/)[0];
-  if (lead.includes("\n")) return "paragraph";
-  if (lead) return "inline";
-  return before.endsWith(" ") ? "inline" : "paragraph";
-}
-
 function drawTurn(turn, position, { posed = false } = {}) {
-  // How the turn joins the one before it — the backend's seam rule
-  // (`join`), drawn by the canvas: inline, as it stands, or a paragraph.
+  // How the turn joins the one before it — the backend's join rule
+  // (`join_type`), drawn by the canvas: inline after one space, or a
+  // paragraph.
   const joined = (article) => {
-    article.dataset.join = turn.join_kind ?? "paragraph";
+    article.dataset.join = turn.join_type ?? "paragraph";
     return article;
   };
   if (turn.role === "user") {
     const article = joined(element("article", "otk-turn"));
     const rubric = element("span", "otk-turn__rubric", `${position} · you`);
-    // A line the reader opened with whitespace joins the text before it
-    // as it stands (`join`): that whitespace is its seam, drawn as the
-    // reply's is. A paragraph's blank line is the join's own, so a lead
-    // holding a break is not drawn a second time — nor a break the line
-    // ends on, which the next row's paragraph join draws.
+    // The whitespace at a line's edges is the joins' to draw: an inline
+    // line gets the join's one space before it, drawn as a reply's is
+    // (`.otk-seam`), and a paragraph's blank line is the article's own.
     const drawn = (line) => {
-      const body = line.replace(/\s*\n\s*$/, "");
-      return turn.join_kind === "inline"
-        ? withSeam(body, withSlashTokens)
-        : withSlashTokens(body.replace(/^\s*\n/, ""));
+      const body = withSlashTokens(line.trim());
+      return turn.join_type === "inline" ? [joinSpace(), ...body] : body;
     };
     article.append(rubric, correctable("otk-turn__body", turn.body, drawn));
     // The pictures that rode the line, under it: the row's own facts,
@@ -868,13 +850,13 @@ function replyReader(turn, { posed = false } = {}) {
      whole, fences and all: what is corrected is what was stored. A save
      reads the turn again for the same reason. */
   const parts = turn.segments ?? [];
-  // A row that joins the text before it as it stands keeps the
-  // whitespace it opens with: that is the seam (`turn.join_kind`).
-  const verbatim = turn.join_kind === "inline";
+  // A row that joins the text before it inline gets the join's one space
+  // before it (`turn.join_type`).
+  const inline = turn.join_type === "inline";
   return correctable(
     "otk-prose",
     turn.body,
-    () => replyNodes(parts, storedCall(parts, posed), { verbatim }),
+    () => replyNodes(parts, storedCall(parts, posed), { inline }),
     { saved: (position) => redrawReply(position) },
   );
 }
@@ -899,7 +881,7 @@ function storedCall(segments, posed) {
   };
 }
 
-function replyNodes(segments, callNode, { verbatim = false } = {}) {
+function replyNodes(segments, callNode, { inline = false } = {}) {
   /* The reply's nodes from its segments in order — prose typeset as
      prose, each tool call as `callNode` draws it, null drawing nothing —
      for the landed reply and the streaming one alike, so nothing moves
@@ -907,11 +889,11 @@ function replyNodes(segments, callNode, { verbatim = false } = {}) {
      prose's: a run of prose is trimmed at its edges, and two runs a
      call that draws nothing stood between rejoin as paragraphs — else
      the blank lines that wrapped the call would print as a gap where
-     nothing is drawn. `verbatim`: the reply joins the text before it as
-     it stands (a text completion's, `turn.join_kind`), so what its first run
-     opens with — a space, a blank line — is the SEAM: drawn first as its
-     own span, which the canvas shows and every other layout hides
-     (`.otk-seam`), each turn being a block of its own there. */
+     nothing is drawn. `inline`: the reply joins the text before it
+     inline (`turn.join_type`), so a reply opening with prose gets the
+     join's one space first, as its own span, which the canvas shows and
+     every other layout hides (`.otk-seam`), each turn being a block of
+     its own there. */
   const out = [];
   let prose = "";
   const flush = () => {
@@ -920,10 +902,7 @@ function replyNodes(segments, callNode, { verbatim = false } = {}) {
   };
   segments.forEach((segment, i) => {
     if (segment.kind === "prose") {
-      if (verbatim && !prose && !out.length) {
-        const lead = segment.text.match(/^\s*/)[0];
-        if (lead) out.push(span("otk-seam", lead));
-      }
+      if (inline && !prose && !out.length && segment.text.trim()) out.push(joinSpace());
       const text = segment.text.trim();
       if (text) prose = prose ? `${prose}\n\n${text}` : text;
       return;
@@ -1087,12 +1066,10 @@ function holdToSpan(field, event) {
   if (crossing) event.preventDefault();
 }
 
-/** `text` drawn by `draw` behind its leading whitespace as a `.otk-seam`
-    span — the seam the canvas shows and the other layouts hide. */
-function withSeam(text, draw) {
-  const lead = text.match(/^\s*/)[0];
-  const rest = text.slice(lead.length);
-  return [...(lead ? [span("otk-seam", lead)] : []), ...draw(rest)];
+/** The one space an inline join draws, as a `.otk-seam` span — the
+    canvas shows it and the other layouts hide it; never stored. */
+function joinSpace() {
+  return span("otk-seam", " ");
 }
 
 function withSlashTokens(line) {
@@ -1243,7 +1220,6 @@ function beginTurn(regenerate, { continues = false } = {}) {
   working(true);
   showTurnBar();
   const turn = openArticle();
-  turn.before = ""; // the text the reply will go on from, once a line lands
   const { article } = turn;
   /* A regenerate takes the standing reply off the screen before the
      request is away: the take being replaced must not sit there while
@@ -1276,10 +1252,10 @@ function openArticle() {
      (`DRAW.tool_turn`): the article, its caret and status row, and the
      rubric numbered as the next drawn turn. */
   const article = element("article", "otk-reply otk-generating is-streaming");
-  /* The reply arriving joins as the landed one will (`turn.join_kind`):
-     on the canvas by its seam, settled at the first piece (`seamJoin`)
-     and by the landed row; a paragraph everywhere else, where the join
-     is not drawn. */
+  /* The reply arriving joins as the landed one will (`turn.join_type`):
+     on the canvas as its first piece says (`join_type`) and then the
+     landed row; a paragraph everywhere else, where the join is not
+     drawn. */
   article.dataset.join = canvas() ? "inline" : "paragraph";
   /* The transcript is a polite live region and a reply rewrites its text
      several times a second: `aria-busy` holds the subtree, so a screen
@@ -1336,7 +1312,7 @@ function streamed(turn) {
      would point at where nothing is happening. */
   const boxes = turn.pieces.map((piece) => piece.box).filter(Boolean);
   const nodes = replyNodes(turn.pieces, (piece) => piece.box, {
-    verbatim: turn.article.dataset.join === "inline",
+    inline: turn.article.dataset.join === "inline",
   });
   if (turn.pieces.at(-1)?.kind === "prose") {
     const lastProse = nodes.findLastIndex((node) => !boxes.includes(node));
@@ -1360,7 +1336,6 @@ function draw(turn, happened) {
 // One drawer per event kind — `web.api.event`'s closed union, drawn.
 const DRAW = {
   user_turn(turn, happened) {
-    turn.before = happened.turn.body; // what the reply's seam is read against
     ordinal += 1;
     turn.rubric.textContent = _replyRubric(ordinal + 1); // the reply follows the line
     retireAsk(); // the line that landed is the answer: the options go, the question stays
@@ -1387,10 +1362,8 @@ const DRAW = {
   },
   assistant_text(turn, happened) {
     turn.state.textContent = "writing";
-    // the first piece tells the seam: how the reply joins, on the canvas
-    if (canvas() && !turn.pieces.some((piece) => piece.kind === "prose")) {
-      turn.article.dataset.join = seamJoin(turn.before ?? "", happened.text);
-    }
+    // the reply's first piece says how it joins the text, on the canvas
+    if (canvas() && happened.join_type) turn.article.dataset.join = happened.join_type;
     // prose grows the run it is in; after a call it starts a new one
     const last = turn.pieces.at(-1);
     if (last?.kind === "prose") last.text += happened.text;
@@ -1541,8 +1514,8 @@ function endTurn(turn) {
         ? {
             body: prose,
             segments: turn.pieces.filter((piece) => piece.kind === "prose" || piece.box),
-            // the join it streamed with: the stand-in must not lose the seam
-            join_kind: turn.article.dataset.join,
+            // the join it streamed with: the stand-in must not lose it
+            join_type: turn.article.dataset.join,
           }
         : null);
     if (landed) turn.block.replaceWith(replyReader(landed, { posed: Boolean(turn.call) }));

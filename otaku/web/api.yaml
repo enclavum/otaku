@@ -180,6 +180,8 @@ tags:
     description: What otaku is reading, what it will send next, and what it has spent.
   - name: Settings
     description: The knobs, one door each.
+  - name: Support
+    description: A request to otaku's author, sent on through otaku.sh.
   - name: Signing in
     description: The password, where one is set — neither lane, and the one door that is slow on purpose.
   - name: Server
@@ -1444,6 +1446,31 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "403": { $ref: "#/components/responses/CrossOrigin" }
 
+  /api/support:
+    post:
+      operationId: sendSupportRequest
+      tags: [Support]
+      summary: Send a support request to otaku's author
+      description: |
+        The message, and where one is given the address to answer at,
+        posted on to otaku.sh, which mails it to the author. Nothing of
+        the story rides. Checked before it leaves: an empty message, one
+        over 5000 characters, an address that is none, and a send that
+        failed come back as a refusal, in words.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message: { type: string, description: "The request as typed." }
+                email: { type: [string, "null"], description: "The address to answer at; empty or null when none is given." }
+      responses:
+        "200": { $ref: "#/components/responses/Answered" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+
   /api/prompts/{tool}:
     parameters:
       - name: tool
@@ -1835,6 +1862,7 @@ components:
           properties:
             type: { const: assistant_text }
             text: { type: string }
+            join_type: { type: [string, "null"], enum: [inline, paragraph, null], description: "How the arriving reply joins the text before it, on the canvas — on the reply's first piece alone, when that piece is prose; null on every other piece." }
         - type: object
           description: A piece of a tool call — the tool's name and its inside, never a fence; the deltas are parsed for the page, which parses nothing.
           properties:
@@ -2266,10 +2294,10 @@ components:
           type: array
           description: "The turn's pictures; [] when none."
           items: { $ref: "#/components/schemas/Attachment" }
-        join_kind:
+        join_type:
           type: string
           enum: [inline, paragraph]
-          description: "How the turn joins the one before it, the wire's own seam rule (context.assembler.join_of): inline — as it stands, a text completion's row recorded verbatim, or a line the reader opened with whitespace to go on with the model's sentence, the leading whitespace the seam either way; paragraph — a blank line before it, every other row. What the canvas layout draws by."
+          description: "How the turn joins the one before it, the wire's own rule (context.assembler.get_join_type): inline — one space before it, where both rows were written in story mode, neither a tool's result nor a card's, and no break stands at the boundary; paragraph — a blank line before it, every other row. What the canvas layout draws by."
         segments:
           type: array
           description: The body split in order — prose, and each tool call as its tool's facts — so the page draws a turn without parsing it. The body itself stays whole above, for the editor.
