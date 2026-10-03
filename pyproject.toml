@@ -5,11 +5,11 @@ build-backend = "hatchling.build"
 [project]
 name = "otaku"
 dynamic = ["version"]
-description = "LLM frontend for roleplay"
+description = "LLM frontend for creative writing and roleplay"
 readme = "README.md"
 license = "AGPL-3.0-only"
 license-files = ["LICENSE"]
-authors = [{ name = "enclavum", email = "feedback@otaku.sh" }]
+authors = [{ name = "enclavum", email = "support@otaku.sh" }]
 requires-python = ">=3.11"
 # The GitHub repository topics, kept in step with them — one discovery
 # vocabulary, whichever index a reader arrives from. `omlx`, `story` and `lore`

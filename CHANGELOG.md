@@ -2,12 +2,51 @@
 
 See also the tentative roadmap: [ROADMAP.md](https://github.com/enclavum/otaku/blob/main/ROADMAP.md)
 
+## [0.7.0] - ...
+
+General:
+
+- Lore:
+  - Separate model for lore extraction. In both the terminal and the web interface, lore extraction
+    can use a model other than the one you write with.
+  - A character the extractor made by mistake can be deleted, with their journals, in both
+    frontends.
+- Tools:
+  - Web search tool. Enable it in your story on the Tools tab, set an API key
+    ([Tavily](https://app.tavily.com) or [Exa](https://dashboard.exa.ai/api-keys)) and the model can
+    search the web.
+  - System info tool. When enabled, the model can ask for the current date, time, moon phase, etc.
+- Frontends:
+  - How full the context is ("85% of 128K"), shown in both frontends after every turn and story
+    switch.
+  - Integrated feedback and support requests — send one from the terminal (`/support`) or the web
+    interface (the Help window).
+
+Web interface:
+
+- Three transcript layouts: canvas, manuscript and chat. The canvas layout reads the story as one
+  text — you can write it directly in the transcript and press Ctrl+Enter for the model to
+  continue.
+- Merge one character into another (in case lore extraction created a new character by mistake),
+  as `/merge` already does in the terminal.
+
+Terminal:
+
+- Two modes, chat and story (`/set mode`). As in the canvas layout on the web, you can write your
+  story directly in the transcript.
+
+In alpha:
+
+- Text completion. Can be enabled by adding `text_template = "plain"` under the model's section in
+  `~/.otaku/configs/models.toml`. When turned on, adds a fourth layout similar to the canvas, but
+  the story is sent to the engine's OpenAI-compatible text completion endpoint.
+
 ## [0.6.0] - 2026-09-26
 
 General:
 
 - Vision. If the selected model supports vision, you can attach images to your messages — in the
-  terminal after the `@` sign, with the paperclip button in the web UI.
+  terminal after the `@` sign, with the paperclip button in the web interface.
 - Story tools. A new tab is added to the story dossier, featuring four tools:
   - Questions — when turned on, the model will be instructed how to ask you a question. This also
     makes an assisted roleplay possible: instead of typing a prompt, you pick one of the suggested
@@ -19,7 +58,7 @@ General:
     a depth you choose.
   - Shared reminder — the same but shared between stories.
 
-Web UI:
+Web interface:
 
 - The import card action is moved from the main menu to the story dossier.
 
@@ -33,7 +72,7 @@ License:
 
 ## [0.5.0] - 2026-09-17
 
-Web UI:
+Web interface:
 
 - The web interface can now serve over HTTPS. Turn on `https` in
   `~/.otaku/configs/config.toml` and otaku generates a self-signed certificate, which you can
@@ -80,12 +119,12 @@ Bug fixes.
 ## [0.4.1] - 2026-09-03
 
 - A Generic OpenAI provider - any OpenAI-compatible server should work with it.
-- The web UI gets a dark theme switch.
+- The web interface gets a dark theme switch.
 
 ## [0.4.0] - 2026-09-02
 
-- Added web UI: `otaku web` opens the same session in a browser — the second frontend, over the
-  same stories, the same lore and the same commands.
+- Added web interface: `otaku web` opens the same session in a browser — the second frontend, over
+  the same stories, the same lore and the same commands.
 - Added native Windows support (10 and 11, 64-bit only).
 - The context builder is reworked from the ground up, after `docs/context_design.md`; the new
   `max_context` setting keeps the prompt inside the window models still handle well for roleplay.
