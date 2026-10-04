@@ -1,7 +1,7 @@
 /* The dossier's Tools tab: the story's settings, one switch each — a
    tool the model may use, a reminder the context carries — with the
    one control each governs (where its text rides, on the depth ruler;
-   a tool's prompt in its dialog; the notes' display switch) and the
+   the prompt a setting sends, in its dialog; the notes' display switch) and the
    reminders' texts under their rows. Built by `story` as its fifth tab
    and handed the dossier's `tabNote`, so this module stays below it.
 
@@ -31,13 +31,13 @@ const _ABOUT = {
   use_story_reminder: "Injected into this story with every reply.",
   use_shared_reminder: "Injected into the story with every reply, common across stories.",
   emulate_text_completion:
-    "Only in the canvas layout. The narrator is told to continue the text from where it ends, " +
+    "Only in the story mode. The narrator is told to continue the text from where it ends, " +
     "as a text completion would, instead of answering it.",
 };
 
 /* A caption's bold opening, where it has one: the words the caption
    starts with, drawn strong. */
-const _LEAD = { emulate_text_completion: "Only in the canvas layout." };
+const _LEAD = { emulate_text_completion: "Only in the story mode." };
 
 /* The settings that open a group: a rule stands before each, after the
    first row — the tools, then the reminders, then the canvas's own. */
@@ -118,11 +118,11 @@ function feature(view, setting, sharedText, openPlacement) {
   if (setting.display_notes !== null) title.append(shownSwitch(view, setting));
   text.append(title, caption(setting.name));
   head.append(toggle, text);
-  if (setting.tool || setting.allowed_positions.length) {
+  if (setting.prompt_name || setting.allowed_positions.length) {
     const control = element("span", "otk-feature__control");
     const knobs = element("span", "otk-feature__knobs");
     if (setting.name === _WEB_SEARCH) knobs.append(keyButton(view));
-    if (setting.tool) knobs.append(instructionsButton(view, setting));
+    if (setting.prompt_name) knobs.append(instructionsButton(view, setting));
     if (setting.allowed_positions.length) knobs.append(depthButton(setting, openPlacement));
     control.append(knobs);
     head.append(control);
@@ -315,13 +315,13 @@ function shownSwitch(view, setting) {
 }
 
 function instructionsButton(view, setting) {
-  /* The tool's prompt — "Prompt" on the page's button too — edited whole in a
+  /* The setting's prompt — "Prompt" on the page's button too — edited whole in a
      dialog: one text for every story, read fresh when the dialog opens
      so a hand edit of prompts.toml shows, and written back on Save. */
   const button = element("button", "otk-btn", "Prompt");
   button.type = "button";
   button.onclick = guard(async () => {
-    const { text } = await api.prompt(setting.tool);
+    const { text } = await api.prompt(setting.name);
     const dialog = $('dialog[data-dialog="instruction"]');
     const field = $("textarea", dialog);
     pagingCaret(field);
@@ -334,7 +334,7 @@ function instructionsButton(view, setting) {
       field.scrollTop = 0;
     });
     if (choice !== "save") return;
-    const answer = await api.setPrompt(setting.tool, field.value);
+    const answer = await api.setPrompt(setting.name, field.value);
     footnote(view.popup, answer.notice);
   });
   return button;

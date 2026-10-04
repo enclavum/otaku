@@ -99,19 +99,7 @@ def open_session(root: str | Path | None = None, *, ask_secret: AskSecret | None
         f"Ignoring provider section [{name}]: no supported provider is named so."
         for name in registry.ignored
     ]
-    # The integrations the same way: the package binds the settings and
-    # reports what it could not — a section no integration answers to,
-    # a web search choice naming no search engine — and the launch says so.
-    integrations = Integrations.from_settings(integration_settings)
-    notices += [
-        f"Ignoring integration section [{name}]: no supported integration is named so."
-        for name in integrations.ignored
-    ]
-    if integrations.unknown_web_search_engine:
-        notices.append(
-            f"Ignoring web search engine {integrations.unknown_web_search_engine!r}: "
-            "no search engine is named so."
-        )
+    integrations = Integrations.bind(integration_settings)
     # A remembered model whose provider is still configured resumes; a
     # stale one is reported and skipped — the session opens modelless
     # and every model-facing door says so until a pick.

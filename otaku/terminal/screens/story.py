@@ -19,7 +19,7 @@ entry through the other tab. Del on a cast row deletes the character
 after a y/n confirm. The tools tab is the story's settings
 (`backend.story`), one row each — a checkbox and the name; Space
 checks and unchecks it — with the setting's fields in the panel beside:
-the notes' display, a reminder's text, a tool's instructions (its
+the notes' display, a reminder's text, a setting's instructions (its
 prompt, `backend.api.settings`), the web search key
 (`backend.api.integrations`), and last where its text rides. Enter
 or Tab moves into the panel, where ↑/↓ walk the fields and Enter acts
@@ -78,8 +78,8 @@ from otaku.backend.api import settings as api_settings
 from otaku.backend.api import stories as api_stories
 from otaku.backend.api.lore import Field, LoreView
 from otaku.backend.session import Refused, Session
-from otaku.backend.story import StorySetting
-from otaku.formatting import flatten, truncate
+from otaku.backend.story import InjectingSetting, StorySetting
+from otaku.formatting import flatten, printable, truncate
 from otaku.terminal.screens.base import (
     ListScreen,
     ansi_fragments,
@@ -123,14 +123,14 @@ _ABOUT: dict[str, str] = {
     "use_story_reminder": "Injected into this story with every reply.",
     "use_shared_reminder": "Injected into the story with every reply, common across stories.",
     "emulate_text_completion": (
-        "Only in the canvas layout. The narrator is told to continue the text from where it "
+        "Only in the story mode. The narrator is told to continue the text from where it "
         "ends, as a text completion would, instead of answering it."
     ),
 }
 
 # A caption's bold opening, where it has one: the words the caption
 # starts with, drawn bold.
-_LEAD: dict[str, str] = {"emulate_text_completion": "Only in the canvas layout."}
+_LEAD: dict[str, str] = {"emulate_text_completion": "Only in the story mode."}
 
 # The settings that open a group: the list draws a blank row before
 # each, after the first row — the tools, then the reminders, then the
@@ -195,7 +195,7 @@ _TEXT_KINDS: frozenset[ToolFieldKind] = frozenset({"reminder", "prompt", "key"})
 @dataclass(frozen=True)
 class _ToolField:
     """One field of a setting, as the panel walks them: the notes'
-    display, a reminder's text, a tool's instructions (its prompt), the
+    display, a reminder's text, a setting's instructions (its prompt), the
     web search key, where its text rides. `text` is the field as read;
     a reminder edits in place, the key is typed in place over where it
     stands (never shown), the instructions open the prompt over the
@@ -262,8 +262,8 @@ class Dossier(ListScreen):
         self.settings: list[StorySetting] = []
         self.shared_text: str = ""
         # where web search stands: its engine, and whether it holds a key
-        self.web_search = api_integrations.WebSearch("", "", False)
-        self.prompts: dict[str, str] = {}  # each tool's prompt, by the tool's name
+        self.web_search = api_integrations.WebSearchState(False)
+        self.prompts: dict[str, str] = {}  # each injection setting's prompt, by its name
         self.shown_tools: frozenset[str] = frozenset()
         self.in_panel: bool = False
         self.field: int = 0
@@ -333,16 +333,16 @@ class Dossier(ListScreen):
     def _reload_settings(self) -> None:
         """The story's settings again — after every write, since the
         backend lays what was stored over the defaults — and with them
-        the shared reminder's text and each tool's prompt, read once here
-        rather than per redraw."""
+        the shared reminder's text and each injection setting's prompt,
+        read once here rather than per redraw."""
         held = api_stories.get_settings(self.session, self.story_id)
         self.settings = [setting for name in _ABOUT if (setting := held.get(name)) is not None]
         self.shared_text = api_stories.get_shared_reminder(self.session)
         self.web_search = api_integrations.web_search(self.session)
         self.prompts = {
-            setting.tool.name: api_settings.get_tool_prompt(self.session, setting.tool.name)
+            setting.name: api_settings.get_prompt(self.session, setting.name)
             for setting in self.settings
-            if setting.tool is not None
+            if isinstance(setting, InjectingSetting) and setting.prompt_name is not None
         }
         self.shown_tools = shown_tools(held)
 
@@ -391,8 +391,8 @@ class Dossier(ListScreen):
     def _tool_fields(self, setting: StorySetting) -> list[_ToolField]:
         """A setting's fields as the panel walks them: the notes' display,
         for the one with something to display; the reminder's text, for
-        the story's own and the shared one; a tool's instructions, a
-        row that opens the prompt; and last, for one that injects, where
+        the story's own and the shared one; the instructions of one that
+        sends a prompt, a row that opens it; and last, for one that injects, where
         its text rides — each reading as the setting stands now."""
         rows: list[_ToolField] = []
         if setting.display_notes is not None:
@@ -401,8 +401,8 @@ class Dossier(ListScreen):
             rows.append(_ToolField("reminder", "shared text", self.shared_text))
         elif setting.reminder_text is not None:
             rows.append(_ToolField("reminder", "reminder text", setting.reminder_text))
-        if setting.tool is not None:
-            rows.append(_ToolField("prompt", "instructions", self.prompts[setting.tool.name]))
+        if setting.name in self.prompts:
+            rows.append(_ToolField("prompt", "instructions", self.prompts[setting.name]))
         if setting.name == _WEB_SEARCH:
             rows.append(_ToolField("key", "web search key", self._key_text()))
         if setting.injection_position is not None:
@@ -410,10 +410,9 @@ class Dossier(ListScreen):
         return rows
 
     def _key_text(self) -> str:
-        """Where the web search key stands, as its field reads: the
-        engine it belongs to, or none — never the key."""
-        standing = self.web_search
-        return f"{standing.label} (key set)" if standing.has_key else "(none)"
+        """Where the web search key stands, as its field reads — never
+        the key."""
+        return "(key set)" if self.web_search.has_key else "(none)"
 
     def _tool_field(self) -> _ToolField | None:
         """The field the panel's cursor is on; None off the tab or with
@@ -563,7 +562,15 @@ class Dossier(ListScreen):
             # line again: a reply's calls are drawn as blocks, on rows of
             # their own, and a row has no rows. Never longer than the cut:
             # the tags the drawing drops outweigh the bar it adds.
-            head = flatten(self._render(head, m.role, pictures=pictures, shown=self.shown_tools))
+            # A tool's turn is its result as stored — a search's is the
+            # internet's text, so made printable: the transcript draws the
+            # tool's label alone, but here the row is read for itself.
+            if m.role == "tool":
+                head = printable(head)
+            else:
+                head = flatten(
+                    self._render(head, m.role, pictures=pictures, shown=self.shown_tools)
+                )
             # The original message number, so a filtered row still reads
             # as its true position in the story.
             row = f"{orig + 1:>4} · {m.role:<{role_w}} · {head}"
@@ -696,12 +703,17 @@ class Dossier(ListScreen):
             # the window's own wrapping carries styles across wrapped
             # rows. Editing swaps this window out, so the buffer stays
             # raw text.
-            body = self._render(
-                m.body,
-                m.role,
-                pictures=len(m.attachments),
-                shown=self.shown_tools,
-                width=max(10, self._preview_inner_width()),
+            # a tool's turn as its result, plain, as the list row reads it
+            body = (
+                printable(m.body)
+                if m.role == "tool"
+                else self._render(
+                    m.body,
+                    m.role,
+                    pictures=len(m.attachments),
+                    shown=self.shown_tools,
+                    width=max(10, self._preview_inner_width()),
+                )
             )
             if not body.endswith("\n"):
                 body += "\n"
@@ -820,7 +832,7 @@ class Dossier(ListScreen):
         if f.kind == "display":
             return [(style, f"{f.text} {f.label}")]
         if f.kind == "prompt":
-            return [(style, f.label)]  # a row to press: its text is shown only to edit
+            return [(style, f"[ {f.label} ]")]  # a row to press: its text is shown only to edit
         if f.kind != "position":
             return [(style, f"{f.label}:")]
         if not self.choosing:
@@ -1358,8 +1370,8 @@ class Dossier(ListScreen):
             if self.tab == "tools":
                 setting = self.settings[self.cursor]
                 focused = self._tool_field()
-                if prompt_edited and setting.tool is not None:
-                    self.notice = api_settings.set_tool_prompt(self.session, setting.tool.name, new)
+                if prompt_edited and setting.name in self.prompts:
+                    self.notice = api_settings.set_prompt(self.session, setting.name, new)
                     self._reload_settings()
                 elif focused is not None and focused.kind == "key":
                     self.notice = api_integrations.set_web_search_key(self.session, new)

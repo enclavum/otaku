@@ -5,6 +5,7 @@
    "label": "Use shared reminder",
    "injection_label": "shared reminder",
    "tool": null,
+   "prompt_name": null,
    "allowed_positions": [
     1,
     2,
@@ -26,6 +27,7 @@
    "label": "Set story reminder",
    "injection_label": "story reminder",
    "tool": null,
+   "prompt_name": null,
    "allowed_positions": [
     1,
     2,
@@ -47,6 +49,7 @@
    "label": "Allow assistant notes",
    "injection_label": "assistant notes",
    "tool": "note",
+   "prompt_name": "tool_assistant_notes_prompt",
    "allowed_positions": [
     "system",
     1,
@@ -69,6 +72,7 @@
    "label": "Allow questions",
    "injection_label": "questions",
    "tool": "question",
+   "prompt_name": "tool_questions_prompt",
    "allowed_positions": [
     "system",
     1,
@@ -91,6 +95,7 @@
    "label": "Allow system info",
    "injection_label": "system info",
    "tool": "system-info",
+   "prompt_name": "tool_system_info_prompt",
    "allowed_positions": [
     "system",
     1,
@@ -113,6 +118,7 @@
    "label": "Allow web search",
    "injection_label": "web search",
    "tool": "web-search",
+   "prompt_name": "tool_web_search_prompt",
    "allowed_positions": [
     "system",
     1,
@@ -132,9 +138,10 @@
   },
   {
    "name": "emulate_text_completion",
-   "label": "Emulate text completion on canvas",
+   "label": "Emulate text completion",
    "injection_label": "text completion emulation",
    "tool": null,
+   "prompt_name": "emulate_text_completion_prompt",
    "allowed_positions": [
     "system",
     1,
@@ -157,6 +164,7 @@
    "label": "Layout",
    "injection_label": null,
    "tool": null,
+   "prompt_name": null,
    "allowed_positions": [],
    "enabled": true,
    "position": null,

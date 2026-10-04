@@ -37,9 +37,10 @@ only what talks to the terminal is.
 server) answers as llama.cpp on llama.cpp's own port, so the default
 `[llamacpp]` section reaches it: two models as its router serves them,
 `otaku-test-chat` and `otaku-test-text` (the novel's, once models.toml
-names it `plain` by hand), whose replies a line's leading digits
-choose — thinking, a note, a question, the two tools, a long reply, the
-canvas's three openings, or everything; `-1` a failure — for looking at
+names it `plain` by hand), whose replies the first number in a line
+chooses, or a list of them separated by commas alone — thinking, a
+note, a question, the two tools, a long reply, the canvas's two
+openings, or everything; `-1` a failure — for looking at
 every block in every layout by hand.
 
 The state dir defaults to `~/.otaku` (`DEFAULT_ROOT` in
@@ -202,12 +203,13 @@ WHICH tools there are is `backend.tools`: one class per tool, declaring
 its `name` (`question` for `otk-question`), its `label` (what a
 frontend calls it where one names it), who acts on its call (`Actor`:
 nobody for `note`, the user for `question`, `SYSTEM` — otaku — for
-`system-info` and `web-search`) and its prompt's key in prompts.toml
-(`prompt_name`); an instance is one call READ, and a tool otaku RUNS
+`system-info` and `web-search`) — the prompt that tells the model how
+to use it is its story setting's, not the tool's; an instance is one
+call READ, and a tool otaku RUNS
 has `run(session)`, yielding the RESULT that is the TOOL TURN's
 text, handed the whole session so a tool to come finds what it needs,
 read and never written — the web search tool takes its
-`integrations.web_search_engine`, the system info tool its `model`. "Answer" is the
+`WebSearch` integration, the system info tool its `model`. "Answer" is the
 question tool's word alone: the user's. The registry is `TOOLS`; a new tool is a subclass and its name there, and
 the story setting that switches it on is the setting's to declare
 (`backend.story`), not the tool's. One pattern names every tool: what is ONE
@@ -237,7 +239,7 @@ on the chat wire as the reader's turn — the wire has two sides, and
 the result is what the model is told — enclosed by prompts.toml's
 `tool_framing` (`{tool}` the name the model called it by,
 `{body}` the text), on the
-text wire as a paragraph the same; it counts as none of the reader's
+text wire the same, joined by the join rule — in story mode inline; it counts as none of the reader's
 messages (an injection's depth, undo's one line), the lore pass leaves
 it out as the calls are, and the export leaves it out until the format
 decides its place. Undo and regenerate take a reply as ONE UNIT with its
@@ -251,9 +253,9 @@ moon's phase, the nearest solstice or equinox and the model's name —
 nothing that tells where the machine is or what it runs — a fixture
 for the loop; `web-search` (`otk-web-search`, the query inside) answers the
 top results' snippets — "title: snippet" paragraphs cut to a
-character budget, the tool's own constants — through the search engine
-the web search key chose (`Integrations.web_search_engine`;
-`otaku.integrations`, below), a failure a sentence the model reads. The page draws a tool turn as the
+character budget, the tool's own constants — through the web search
+integration (`integrations.WebSearch`, below), a failure a sentence the
+model reads. The page draws a tool turn as the
 notes block with the label ALONE, the result its hover hint — the
 result is the model's to read, not the story's — (`article.otk-tool`,
 never editable), and a call otaku runs draws nothing there, the status
@@ -371,16 +373,15 @@ use the tool and injects its prompt; a reminder's injects the user's
 own text — the SHARED reminder (`StorySettingSharedReminder`, one text
 every story that switched it on is sent) and the STORY reminder
 (`StorySettingReminder`); the canvas's (`StorySettingEmulateTextCompletion`,
-"Emulate text completion on canvas") injects prompts.toml's
+"Emulate text completion") injects prompts.toml's
 `emulate_text_completion_prompt`, what makes an instruct model
 continue one text where it ends rather than answer it — off until a
 story switches it on, as every switch is, and GATED by the layout:
 it injects in the canvas over the chat wire alone (the novel's
 model continues by nature, no other layout is one text), the switch
 standing and sending nothing elsewhere; `StorySettings` is handed the
-model's `can_complete_text` for that gate, and the setting's prompt
-is edited by hand in the file — no frontend offers it a prompt button
-yet. Every text injected into the chat is out of
+model's `can_complete_text` for that gate; its prompt is edited as a
+tool's is. Every text injected into the chat is out of
 character, enclosed `((OOC: …))`; the system message takes it bare.
 One setting is a VALUE rather than a switch: the LAYOUT the story is
 read in, and for one value written (`StorySettingLayout`, a
@@ -432,13 +433,15 @@ end the stream's hold-back's); a chat-mode one is trimmed. The JOIN RULE is
 `assembler.get_join_type(previous, next)`, ONE rule for the wire and
 both canvases, and the one place a row's mode decides anything: INLINE
 where both rows were written in story mode, neither stands alone (a
-tool's turn, a card's line or greeting: nobody wrote them into the
-text), and no line break stands at the end of the one or the start of
-the other — one space between them, never stored, so a word is never
-completed across rows; PARAGRAPH otherwise — the first row, a chat row
-or a row standing alone on either side, a break the reader typed
-(Enter at the line's start or end) or the model wrote. A reply goes on
-in the paragraph it follows by default. `as_story_text` and
+card's line or greeting: nobody wrote them into the text), and no line
+break stands at the end of the one or the start of the other — one
+space between them, never stored, so a word is never completed across
+rows; PARAGRAPH otherwise — the first row, a chat row or a row standing
+alone on either side, a break the reader typed (Enter at the line's
+start or end) or the model wrote. A reply goes on in the paragraph it
+follows by default. A tool's turn runs on as any story-mode row does:
+story mode draws no tool's block (`render.flow`, `chat.stream`), so the
+reply after it goes on in the paragraph the call interrupted. `as_story_text` and
 `_wire_turns` write it (`assembler.join(previous, join_type, next)`),
 the row events carry
 it (`UserTurn.join_type`, `AssistantTurn.join_type`,
@@ -517,7 +520,7 @@ its tokens at the text's estimate. The play path
 (`api.play._reply_events`) picks the wire off `Session.completion_type`:
 `completion.text` with the rendered text, or `completion.chat` with the
 messages; the recap, the injected rows and the framing templates ride
-the text as they ride the chat, a tool's turn as a paragraph.
+the text as they ride the chat, a tool's turn joined as any row is.
 
 Every setting answers the same questions, so a frontend draws them
 alike: `name` (the stored key — `use_shared_reminder`,
@@ -529,6 +532,10 @@ stored settings), `label`,
 `questions`, `assistant notes`, `story reminder`, `shared reminder`,
 `text completion emulation`;
 None for the layout setting; the page capitalises it and keeps no name table),
+`prompt_name` (an injection setting's, the prompts.toml key of the
+PROMPT it sends — `tool_questions_prompt`, `emulate_text_completion_prompt`;
+None where the text is the reader's own, a reminder's, and for the
+layout setting — what both frontends show the prompt button off),
 `enabled`, `injection_position`, `allowed_positions` (a closed list a
 frontend offers and decides nothing about: "system" and 1 … 8 for a
 tool and the emulation, the numbers alone for a reminder, empty for the
@@ -565,15 +572,15 @@ groups in one order — the tools, the two reminders, the emulation — a
 blank row between them in the terminal (`_OPENS_GROUP`, `_gaps`) and
 a rule on the page; each setting's caption is the frontend's own
 (`_ABOUT`, the same table twice), the emulation's opening "Only in the
-canvas layout." in bold (`_LEAD`; the terminal's `_caption`). `Refused` lives in
+story mode." in bold (`_LEAD`; the terminal's `_caption`). `Refused` lives in
 `backend.errors`, a leaf, and `backend.session` re-exports it;
 `backend` re-exports `InjectionPosition`, `Layout` and
-`CompletionType`. A
-tool's PROMPT is
-prompts.toml's, edited in place — "prompt" on the backend and the
-wire, whatever a frontend calls it (the page's button says
-"Prompt", the terminal's row "instructions"): `api.settings.get_tool_prompt`/`set_tool_prompt`
-(`/api/prompts/{tool}`) write that one key with
+`CompletionType`. An injection setting's PROMPT is prompts.toml's,
+edited in place — "prompt" on the backend and the wire, whatever a
+frontend calls it (the page's button says "Prompt", the terminal's row
+"[ instructions ]"): `api.settings.get_prompt`/`set_prompt`
+(`/api/prompts/{setting}`, by the setting's name; refused for one with
+no `prompt_name`) write that one key with
 `settings.prompts.set_prompt`, backed up by the write every settings
 edit rides (`settings.commit`), read back and refused unless the file
 holds what was saved; an emptied text drops the key, so the shipped
@@ -651,67 +658,64 @@ feature not built).
 
 ### Integrations
 
-The services otaku asks for something other than a completion — the
-web search engines, so far — are the `integrations` package, the
-providers' shape over: one module per service, one class each
-(`Integration`: `id`, `label`, its fixed `endpoint`, the `key_prefix`
-its keys carry where they carry a mark, and bound as an instance to
-its section's `url` and `api_key`; `SearchEngine` adds `search(query,
-max_results)` answering `SearchResult`s or raising `IntegrationError`),
-the one registry `ALL_INTEGRATIONS` keyed by section name, and their
-own file, `configs/integrations.toml`, whose types live in
-`settings.integrations` as the providers' do: `IntegrationConfig`
-(name, url, sealed `api_key`) per integration, and
-`IntegrationSettings` — those by name, and the one CHOICE the file
-holds besides them, the `[web_search] engine` row naming the engine
-web search asks (`WEB_SEARCH_SECTION`; "" while none). First run
-writes every known
-integration's section on its endpoint with no key and the choice
-empty, every launch ensures them (`migrations.ensure_integrations`)
+What otaku asks for something other than a completion — web search,
+the support desk, the sky's facts — is the `integrations` package, the
+providers' shape over: one module per integration, one class each
+(`Integration`: `id`, `label`, its fixed `endpoint`, bound as an
+instance to its section's `url` and `api_key`, and `balance()`, what
+the account behind it has left — declared for a report to come, None
+everywhere yet), the one registry `ALL_INTEGRATIONS`, and their own file, `configs/integrations.toml`,
+whose types live in `settings.integrations` as the providers' do:
+`IntegrationConfig` (name, url — optional, the endpoint where none —
+sealed `api_key`) per integration, and `IntegrationSettings`, those by
+name. First run writes every configurable integration's section with
+no key, every launch ensures them (`migrations.ensure_integrations`)
 and seals a plain key, so the file shows where a key goes; the launch
 resolves the keys as the providers' (`launch._resolve_api_keys`,
 generic over the two), and the package binds them into ONE value,
-`integrations.Integrations.from_settings` — the instances `bound` by
-id, `web_search_engine` the chosen engine bound or None, and what could
-not be bound reported as facts, `ignored` and
-`unknown_web_search_engine`, which the launch turns into notices as it
-does the registry's `ignored` — handed to the session
-(`Session.integrations`): the session never reads a section, and
-`WEB_SEARCH_SECTION` is the file's word, read by its loader and by the
-key save that writes it, nowhere else.
+`integrations.Integrations.bind` — every integration `by_id`, each on
+its section (its id the section's name) or the one it is founded with
+where the file has none, `get(cls)` answering one by its class; a
+section no integration is named for is passed over in silence —
+handed to the session (`Session.integrations`): the session never
+reads a section.
 
-A frontend shows ONE box for the web search key, no engine named,
-on the Tools tab's web search row (the page's "API key" button,
-`tools.keyButton`, opening a dialog that says which engines' keys it
-takes and where to get one, a key that is set masked in it as a
-provider's is; the terminal's `key` field, typed in place
-over where it stands and forgotten with Delete): `backend.api.integrations` — `web_search` (the engine chosen
-and whether it holds a key, never the key), `set_web_search_key` —
-tells the engine from the key's own shape
-(`integrations.search_engine_of_key`: the engine whose `key_prefix`
-it starts with, Tavily's `tvly`, else the one whose keys carry no
-mark, Exa), seals the key into that engine's section (founded keyless
-where a hand edit dropped it), writes the section's name as the
-choice, and binds both in the session at once; "" forgets the chosen
-engine's key and the choice. The page reaches it at
+WEB SEARCH is one integration under ONE key (`WebSearch`, the
+`[web_search]` section): `search(query, max_results)` answers
+`SearchResult`s or raises `IntegrationError`, and asks the engine the
+key belongs to, told from the key's own shape at the call
+(`_get_search_engine`: Tavily's start with `tvly`, any other is Exa's)
+— each engine a protected function of the module, and no engine named
+anywhere outside it, in the file, the api or a frontend's facts.
+
+A frontend shows ONE box for the web search key on the Tools tab's web
+search row (the page's "API key" button, `tools.keyButton`, opening a
+dialog that says which engines' keys it takes and where to get one, a
+key that is set masked in it as a provider's is; the terminal's `key`
+field, typed in place over where it stands and forgotten with Delete):
+`backend.api.integrations` — `web_search` (whether a key is held, never
+the key), `set_web_search_key` — seals the key into the web search
+section (founded where a hand edit dropped it) and binds it in the
+session at once; "" forgets it. The page reaches it at
 `/api/integrations/web_search`. What is asked of an integration and
 what is made of the answer is the asker's: the web search tool
 composes the text the model reads.
 
-Beside the services, and asked of none, the sky's own facts:
-`integrations.astronomy` works out the moon's phase and the nearest
-solstice or equinox from the instant alone (`moon_phase`,
-`turning_point`), no place given and none told — what the `system-info`
-tool reports of the sky.
+Two integrations get no section in the file (`configurable` false),
+bound all the same, to the section they are founded with
+(`default_section`): `Astronomy` and `SupportDesk`. The sky's own facts, asked of no service:
+`Astronomy` works out the moon's phase and the nearest solstice or
+equinox from the instant alone (`moon_phase`, `turning_point`), no
+place given and none told — what the `system-info` tool reports of the
+sky.
 
-otaku's own support desk is a service with no key, so no section and no
-place in the registry: `integrations.support` posts a reader's request
-to the site (`SUPPORT_ENDPOINT`, the Worker in the otaku.sh repository,
-which mails it on through Resend and answers 204, read by
-`integrations.base.post_json` as no answer).
+otaku's own support desk is a service with no key: `SupportDesk.send`
+posts a reader's request to the site (its `url`, the `endpoint`, the
+Worker in the otaku.sh repository, which mails it on through Resend and
+answers 204, read by `integrations.base.post_json` as no answer).
 The operation is `backend.api.support.send_support_request(session,
-body, email="")`: an empty or too long body (`MAX_SUPPORT_MESSAGE`, the
-endpoint's limit) and an address that is none (the endpoint's rule,
+body, email="")`: an empty or too long body (`SupportDesk.max_message`,
+the endpoint's limit) and an address that is none (the endpoint's rule,
 copied) are refused before anything leaves, a failure to send is a
 `Refused` sentence. The terminal's `/support TEXT` sends the line whole,
 an address in it included; the page's support docket (`support.js`,

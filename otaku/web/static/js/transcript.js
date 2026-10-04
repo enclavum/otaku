@@ -29,7 +29,8 @@ import { isToken } from "./table.js";
 
 const transcript = $(".otk-transcript");
 // What the status row says while a tool call streams, the tool named by
-// its short name — `note`, `question` — as the event carries it.
+// its label, lowercase — its name where this build has none. The
+// terminal's status row says the same (`chat.stream._calling`).
 const _calling = (tool) => `calling the ${tool} tool`;
 // A reply's rubric, worded as the played turn's is: the page's own word
 // for the model's voice, the one its question panel uses.
@@ -1441,8 +1442,12 @@ const DRAW = {
        unless the reader asked for it (`/set verbose`). It goes BEFORE
        the status row, which stays and keeps its height once a reply
        lands: appended after it, the line would sit against the row
-       rather than against the answer it reports on. */
-    if (happened.stats) {
+       rather than against the answer it reports on. On the canvas a
+       line would break the one text: the stats are the reply's hover
+       hint there, as the terminal puts them on its status row. */
+    if (happened.stats && canvas()) {
+      turn.article.title = happened.stats;
+    } else if (happened.stats) {
       turn.article.insertBefore(
         element("p", "otk-verbose", happened.stats),
         $(".otk-generating__status", turn.article),

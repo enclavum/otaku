@@ -127,10 +127,11 @@ def _head(session: Session, ask: Ask) -> str:
 def story_settings(session: Session, story_id: int) -> dict[str, Any]:
     """A story's settings as they stand, in the order they are sent: the
     switch, where it injects (null for one that injects nothing) and the
-    positions it may take, the story's own text (null for one with
-    none), and the layout the story is read in (null for every
-    setting but the layout's). Any story's; a story that is not there is the
-    spec's 404."""
+    positions it may take, the prompts.toml key of the prompt it sends
+    (null where the text is the reader's, or none), the story's own text
+    (null for one with none), and the layout the story is read in (null
+    for every setting but the layout's). Any story's; a story that is
+    not there is the spec's 404."""
     if all(row.id != story_id for row in api_stories.listing(session)):
         raise NotFound(f"no story {story_id}")
     return {
@@ -142,6 +143,9 @@ def story_settings(session: Session, story_id: int) -> dict[str, Any]:
                     setting.injection_label if isinstance(setting, InjectingSetting) else None
                 ),
                 "tool": setting.tool.name if setting.tool else None,
+                "prompt_name": (
+                    setting.prompt_name if isinstance(setting, InjectingSetting) else None
+                ),
                 "allowed_positions": [each.value for each in setting.allowed_positions],
                 "enabled": setting.enabled,
                 "position": (

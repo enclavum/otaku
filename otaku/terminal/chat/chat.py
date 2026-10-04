@@ -36,6 +36,18 @@ class Chat:
     # reply where the text ended (`stream.show`). Set by the loop for
     # the one submission, cleared with it.
     continuing: bool
+    # A reply streamed this submission (`stream.show`), or an undo left
+    # the story on the question a reply ended on (`bindings._pose_again`):
+    # the prompt after it may offer the answers, where one after any other
+    # command, its output standing between, offers none. Cleared by the
+    # loop with each submission.
+    replied: bool
+    # In story mode, what the last reply ended on that chat mode prints
+    # under it — its verbose stats, the failure that stopped it, or why
+    # none was asked for: shown
+    # on the status row, where a line would break the one text, until the
+    # next line is sent. "" elsewhere.
+    status_note: str
     # How full the next request is, as the status row shows it on its
     # right ("85% of 128K"); "" while the window is not known.
     # Read again by the loop before every prompt.
@@ -45,6 +57,8 @@ class Chat:
         self.session = session
         self.quit = False
         self.continuing = False
+        self.replied = False
+        self.status_note = ""
         self.context_use = ""
         # One renderer for the prompt's toolbar and the pinned row, both
         # reading the same channels, so the line never twitches at the

@@ -6,6 +6,8 @@ asker is goes into them or comes out.
 
 from datetime import UTC, date, datetime
 
+from otaku.integrations.base import Integration
+
 # The moon's mean month, new moon to new moon, from one known new moon.
 _SYNODIC_MONTH = 29.530588853  # days
 _NEW_MOON = datetime(2000, 1, 6, 18, 14, tzinfo=UTC)
@@ -31,33 +33,41 @@ _TURNING_POINTS = (
 _JD_UNIX_EPOCH = 2440587.5  # the Julian Day of 1970-01-01 00:00 UTC
 
 
-def moon_phase(at: datetime) -> str:
-    """The moon's phase at the aware instant `at`, one of the eight
-    named, read off the mean month — up to half a day out at a phase's
-    edge, which no story notices."""
-    age = (at - _NEW_MOON).total_seconds() / 86400 % _SYNODIC_MONTH
-    return _MOON_PHASES[round(age / _SYNODIC_MONTH * 8) % 8]
+class Astronomy(Integration):
+    """The sky as an integration: no service, no key, no section — the
+    facts worked out here, the system info tool's to report."""
 
+    id = "astronomy"
+    label = "Astronomy"
+    configurable = False
 
-def turning_point(at: datetime) -> str:
-    """The solstice or equinox nearest the aware instant `at`, counted in
-    days of `at`'s own calendar: "September equinox 8 days ago", "June
-    solstice today", "December solstice in 81 days"."""
-    today = at.date()
-    nearest = min(
-        (
-            (_turning_day(coefficients, year, at), name)
-            for year in (today.year - 1, today.year, today.year + 1)
-            for name, coefficients in _TURNING_POINTS
-        ),
-        key=lambda point: abs((point[0] - today).days),
-    )
-    day, name = nearest
-    days = (day - today).days
-    if days == 0:
-        return f"{name} today"
-    count = f"{abs(days)} day{'' if abs(days) == 1 else 's'}"
-    return f"{name} in {count}" if days > 0 else f"{name} {count} ago"
+    def moon_phase(self, at: datetime) -> str:
+        """The moon's phase at the aware instant `at`, one of the eight
+        named, read off the mean month — up to half a day out at a
+        phase's edge, which no story notices."""
+        age = (at - _NEW_MOON).total_seconds() / 86400 % _SYNODIC_MONTH
+        return _MOON_PHASES[round(age / _SYNODIC_MONTH * 8) % 8]
+
+    def turning_point(self, at: datetime) -> str:
+        """The solstice or equinox nearest the aware instant `at`,
+        counted in days of `at`'s own calendar: "September equinox 8
+        days ago", "June solstice today", "December solstice in 81
+        days"."""
+        today = at.date()
+        nearest = min(
+            (
+                (_turning_day(coefficients, year, at), name)
+                for year in (today.year - 1, today.year, today.year + 1)
+                for name, coefficients in _TURNING_POINTS
+            ),
+            key=lambda point: abs((point[0] - today).days),
+        )
+        day, name = nearest
+        days = (day - today).days
+        if days == 0:
+            return f"{name} today"
+        count = f"{abs(days)} day{'' if abs(days) == 1 else 's'}"
+        return f"{name} in {count}" if days > 0 else f"{name} {count} ago"
 
 
 def _turning_day(coefficients: tuple[float, ...], year: int, at: datetime) -> date:

@@ -99,7 +99,12 @@ def run(session: Session) -> None:
     carry = Carry()
     assembler = LineAssembler()
     prompt_session, answers = build_prompt(
-        session, carry, assembler, shortcuts=bindings.SHORTCUTS, aside=lambda: chat.context_use
+        session,
+        carry,
+        assembler,
+        shortcuts=bindings.SHORTCUTS,
+        aside=lambda: chat.context_use,
+        note=lambda: chat.status_note,
     )
 
     if session.notice:
@@ -239,6 +244,7 @@ def run(session: Session) -> None:
                 chat.ledger.invalidate()
                 answers.top_row = False
             assembler.reset()
+            carry.end_walk()
             chat.ledger.typed_gone()
             continue
         finally:
@@ -257,10 +263,16 @@ def run(session: Session) -> None:
         # the story typed so far with it
         if carry.to_command:
             carry.to_command = False
-            chat.ledger.resume_tail()
-            chat.ledger.below_text()
+            if in_text:
+                chat.ledger.resume_tail()
+                chat.ledger.below_text()
+            else:
+                # the prompt erased its own row: nothing to put back
+                prompt_session.app.erase_when_done = False
             carry.command_paragraph = True
-            carry.text = "/"
+            # the slash typed, or the command a history walk recalled
+            carry.text = carry.recall if carry.recall is not None else "/"
+            carry.recall = None
             continue
         was_command = carry.command_paragraph
         carry.command_paragraph = False
@@ -269,7 +281,12 @@ def run(session: Session) -> None:
             # stands where the command paragraph began, under the text
             carry.from_command = False
             prompt_session.app.erase_when_done = False
-            carry.text, carry.draft = carry.draft, ""
+            if carry.recall is not None:
+                # a history walk crossed back into the story's text
+                carry.text, carry.recall = carry.recall, None
+                carry.draft = ""
+            else:
+                carry.text, carry.draft = carry.draft, ""
             continue
         if was_command and carry.draft:
             # the story typed before the command waits at the next prompt
@@ -322,7 +339,10 @@ def run(session: Session) -> None:
 
         # the continue: the canvas's empty line, which the stream places
         # where the text ended rather than echoing (`stream.show`)
+        carry.end_walk()
         chat.continuing = is_canvas and not submission.strip()
+        chat.replied = False
+        chat.status_note = ""  # the last reply's, shown until a line is sent
         try:
             submit(chat, submission)
         except KeyboardInterrupt:
@@ -332,6 +352,9 @@ def run(session: Session) -> None:
             chat.ledger.invalidate()
         finally:
             chat.continuing = False
+        # The answers are offered after a reply alone: a command's output
+        # stands between the question and where the rows would be.
+        answers.offered = chat.replied
         # The systematic blank before the next prompt — the prompt's own
         # to draw when it opens on a question's answers, so the question's
         # block runs on into them.
@@ -366,6 +389,9 @@ def submit(chat: Chat, line: str) -> None:
             chat.ledger.invalidate()
             chat.say(str(e))
             return
+        # in story mode the question this line answers leaves the text
+        # before the stream takes the terminal
+        stream.drop_past_question(chat)
         while stream.show(chat, events):
             events = api_play.regenerate(session)
     except KeyboardInterrupt:

@@ -1,15 +1,14 @@
 """The model's language: the tools it may use by writing a call in its
 reply — one class each, and the one registry.
 
-A class declares a tool: its name, who acts on its call, and the key of
-its prompt in prompts.toml. An instance is one call of it, read at
-construction — what the play stream makes of a reply. WHAT a call is —
-a fenced block marked `otk-NAME`, whatever the name — is
-`context.tool_calls`' business, which knows no tool: a body keeps its
-fences for good, and a call must stay one in a build that never heard
-of its tool. Whether a
-story lets the model use a tool, and where its prompt rides, is the
-story's setting (`backend.story`).
+A class declares a tool: its name, and who acts on its call. An
+instance is one call of it, read at construction — what the play stream
+makes of a reply. WHAT a call is — a fenced block marked `otk-NAME`,
+whatever the name — is `context.tool_calls`' business, which knows no
+tool: a body keeps its fences for good, and a call must stay one in a
+build that never heard of its tool. Whether a story lets the model use
+a tool, the prompt that tells the model how, and where it rides, are
+the story's setting's (`backend.story`).
 
 A tool otaku RUNS (`Actor.SYSTEM`) ends the reply as a question does,
 and its `run` yields the RESULT otaku records as the TOOL turn the
@@ -24,7 +23,7 @@ import re
 from datetime import datetime
 from typing import TYPE_CHECKING, ClassVar
 
-from otaku.integrations import IntegrationError, SearchResult, moon_phase, turning_point
+from otaku.integrations import Astronomy, IntegrationError, SearchResult, WebSearch
 
 if TYPE_CHECKING:
     # the session imports the stories' settings, which import these tools
@@ -46,9 +45,6 @@ class Tool:
     name: ClassVar[str] = ""  # its name in the namespace: a fenced block marked otk-NAME
     label: ClassVar[str] = ""  # what a frontend calls it, where one names it
     actor: ClassVar[Actor] = Actor.NOBODY
-    # The prompts.toml key of its prompt — what tells the model how the
-    # tool is used. The story's setting reads the text under it.
-    prompt_name: ClassVar[str] = ""
 
     text: str  # the call's inside, as written
 
@@ -90,7 +86,6 @@ class ToolQuestion(Tool):
     name = "question"
     label = "Questions"
     actor = Actor.USER
-    prompt_name = "tool_questions_prompt"
     # An answer line: `1.` `1)` `a.` `a)` at the head of a line, then the
     # answer itself.
     _OPTION: ClassVar[re.Pattern[str]] = re.compile(r"\s*(?:\d{1,2}|[A-Za-z])[.)]\s+(\S.*)")
@@ -130,7 +125,6 @@ class ToolAssistantNote(Tool):
 
     name = "note"
     label = "Notes"
-    prompt_name = "tool_assistant_notes_prompt"
 
 
 class ToolSystemInfo(Tool):
@@ -144,15 +138,15 @@ class ToolSystemInfo(Tool):
     name = "system-info"
     label = "System info"
     actor = Actor.SYSTEM
-    prompt_name = "tool_system_info_prompt"
 
     def run(self, session: "Session") -> str:
         now = datetime.now().astimezone()
+        sky = session.integrations.get(Astronomy)
         return "\n".join(
             (
                 f"Time: {now:%Y-%m-%d %H:%M (%A)}",
-                f"Moon: {moon_phase(now)}",
-                f"Sun: {turning_point(now)}",
+                f"Moon: {sky.moon_phase(now)}",
+                f"Sun: {sky.turning_point(now)}",
                 f"Model: {session.model}",
             )
         )
@@ -163,13 +157,12 @@ class ToolWebSearch(Tool):
     inside is the query, and the result is the top results' snippets as
     "title: snippet" paragraphs, cut to a character budget so the
     result's cost is bounded whatever comes back — or the sentence for
-    why there are none. The engine asked is the one the web search key
-    chose (`Integrations.web_search_engine`)."""
+    why there are none. Asked of the web search integration, whose key
+    says which engine answers (`integrations.WebSearch`)."""
 
     name = "web-search"
     label = "Web search"
     actor = Actor.SYSTEM
-    prompt_name = "tool_web_search_prompt"
     MAX_RESULTS: ClassVar[int] = 4
     CHAR_BUDGET: ClassVar[int] = 1500  # characters of snippets at most
     # What a failure's sentence opens with, and what its turn is called.
@@ -179,15 +172,11 @@ class ToolWebSearch(Tool):
         query = " ".join(self.text.split())
         if not query:
             return "No query was given."
-        engine = session.integrations.web_search_engine
-        # No key, no request: no engine is asked without one.
-        if engine is None or not engine.api_key:
-            return f"{self._FAILED}: the key is missing."
         try:
-            results = engine.search(query, max_results=self.MAX_RESULTS)
+            results = session.integrations.get(WebSearch).search(
+                query, max_results=self.MAX_RESULTS
+            )
         except IntegrationError as e:
-            # No engine named: the model reads this, and which service
-            # the key chose is the reader's business, not the story's.
             return f"{self._FAILED}: {e}."
         return self._render(results)
 

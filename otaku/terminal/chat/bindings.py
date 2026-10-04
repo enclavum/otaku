@@ -39,7 +39,15 @@ from otaku.terminal.screens import models as screen_models
 from otaku.terminal.screens import stories as screen_stories
 from otaku.terminal.screens import story as screen_story
 from otaku.terminal.tty import BOLD, DIM, ERASE_LINE, RESET, YES_ANSWERS, error_line, latin_key
-from otaku.terminal.tty.render import command_tokens, last_turns, message, prose
+from otaku.terminal.tty.cursor import terminal_width
+from otaku.terminal.tty.render import (
+    asked,
+    command_tokens,
+    last_turns,
+    message,
+    prose,
+    question_block,
+)
 from otaku.terminal.tty.typography import highlight_commands
 
 # One OPERATION command: the raw argument text in, the sentence out.
@@ -135,9 +143,26 @@ def _undo(chat: Chat, raw: str) -> None:
     if chat.ledger.erase_exchange():
         if refreshing:
             _report_undo_ending(chat)
+        else:
+            _pose_again(chat, drawn=False)
         return  # otherwise the ending is still on screen — say nothing
     chat.ledger.invalidate()
     _report_undo_ending(chat)
+
+
+def _pose_again(chat: Chat, *, drawn: bool) -> None:
+    """An undo that leaves the story on a question offers its answers
+    again (`Chat.replied`): the story is back where it was asked. In
+    story mode an in-place undo draws the question back too — answering
+    took it out of the text (`stream.drop_past_question`); `drawn` says
+    the screen shows it already (a re-echo)."""
+    newest = chat.session.messages[-1] if chat.session.messages else None
+    question = asked(newest, chat.shown_tools)
+    if question is None:
+        return
+    if _is_canvas(chat) and not drawn:
+        chat.ledger.extend_reply(question_block(question.text, terminal_width()) + "\n")
+    chat.replied = True
 
 
 def _is_canvas(chat: Chat) -> bool:
@@ -160,6 +185,7 @@ def _report_undo_ending(chat: Chat) -> None:
     )
     chat.say(f"{report}\n\n{turns}")
     chat.restore_tail(2, above=report)
+    _pose_again(chat, drawn=True)
 
 
 def _regen(chat: Chat, raw: str) -> None:
@@ -256,7 +282,7 @@ def _set_mode(chat: Chat, raw: str) -> None:
     if value:
         chosen = _MODES.get(value)
         if chosen is None:
-            chat.say("Usage: /set mode story|chat")
+            chat.say("Usage: /set mode chat|story")
             return
         api_stories.update_setting(chat.session, StorySettingLayout.name, layout=chosen)
     chat.say(f"Mode: {chat.session.layout.mode.value}")

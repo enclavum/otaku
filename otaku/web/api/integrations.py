@@ -1,5 +1,5 @@
 """Web search as the page asks for it: where it stands, and its key
-saved — one box on the Tools tab, no engine named."""
+saved — one box on the Tools tab."""
 
 from typing import Any
 
@@ -9,14 +9,8 @@ from otaku.web.api.request import Ask, Route
 
 
 def _web_search(session: Session) -> dict[str, Any]:
-    """The engine chosen (null while none) and whether it holds a key;
-    the key's value is never sent."""
-    standing = api_integrations.web_search(session)
-    return {
-        "engine": standing.engine or None,
-        "label": standing.label or None,
-        "has_key": standing.has_key,
-    }
+    """Whether web search holds a key; the key's value is never sent."""
+    return {"has_key": api_integrations.web_search(session).has_key}
 
 
 def _save_web_search_key(session: Session, ask: Ask) -> str:

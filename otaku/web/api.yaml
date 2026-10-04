@@ -1414,12 +1414,12 @@ paths:
       tags: [Settings]
       summary: Where web search stands
       description: |
-        The search engine chosen for the web search tool, and whether it
-        holds a key. The key's value never comes back out.
+        Whether the web search tool holds a key. The key's value never
+        comes back out.
       responses:
         default: { $ref: "#/components/responses/Failed" }
         "200":
-          description: The engine chosen (null while none) and whether it holds a key.
+          description: Whether a key is held.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/WebSearch" }
@@ -1428,11 +1428,10 @@ paths:
       tags: [Settings]
       summary: Save the web search key, or clear it
       description: |
-        ONE key, no engine named: its shape says which engine it belongs
-        to (Tavily's start with `tvly`; any other is Exa's). Sealed into
-        that engine's section of integrations.toml, the engine made the
-        choice, live in the session at once. An empty string CLEARS the
-        chosen engine's key and the choice.
+        ONE key, Tavily's or Exa's — which engine it belongs to is told
+        from its shape when a search is asked. Sealed into the web search
+        section of integrations.toml, live in the session at once. An
+        empty string CLEARS it.
       requestBody:
         content:
           application/json:
@@ -1471,19 +1470,22 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "403": { $ref: "#/components/responses/CrossOrigin" }
 
-  /api/prompts/{tool}:
+  /api/prompts/{setting}:
     parameters:
-      - name: tool
+      - name: setting
         in: path
         required: true
-        schema: { type: string, enum: [question, note, system, search] }
+        description: An injection setting that sends a prompt — one whose settings row names its `prompt_name`.
+        schema: { type: string, enum: [allow_questions, allow_assistant_notes, allow_system_info, allow_web_search, emulate_text_completion] }
     get:
       operationId: getPrompt
       tags: [Settings]
-      summary: A tool's prompt
+      summary: An injection setting's prompt
       description: |
-        What the model is told about the tool — prompts.toml's text, read
-        fresh, which every story with the tool switched on is sent.
+        The text the setting injects — prompts.toml's, read fresh, which
+        every story with the setting switched on is sent. Refused, with
+        the sentence, for a setting that sends no prompt (a reminder's
+        text is the reader's own).
       responses:
         default: { $ref: "#/components/responses/Failed" }
         "200":
@@ -1494,7 +1496,7 @@ paths:
     put:
       operationId: putPrompt
       tags: [Settings]
-      summary: Set a tool's prompt
+      summary: Set an injection setting's prompt
       description: |
         Written into prompts.toml, that key alone, the pre-edit file
         backed up; "" drops the key and the shipped text stands again.
@@ -2138,17 +2140,11 @@ components:
 
     WebSearch:
       type: object
-      required: [engine, label, has_key]
+      required: [has_key]
       properties:
-        engine:
-          type: [string, "null"]
-          description: The chosen engine's section name — "tavily", "exa"; null while none is chosen.
-        label:
-          type: [string, "null"]
-          description: The engine's name as shown; null with `engine`.
         has_key:
           type: boolean
-          description: Whether the chosen engine holds a key.
+          description: Whether web search holds a key.
 
     Status:
       type: object
@@ -2228,7 +2224,8 @@ components:
               name: { type: string, description: What the story stores it under — the path segment a PATCH takes. }
               label: { type: string, description: "The switch's label, as the Tools tab shows it." }
               injection_label: { type: string, nullable: true, description: "The name of the TEXT the setting injects — what a depth ruler places and /context lists — lowercase (questions, assistant notes, story reminder, shared reminder, text completion emulation); null for a setting that injects nothing." }
-              tool: { type: string, nullable: true, description: "The name of the tool this setting switches (question, note) — its prompt is /api/prompts/{tool}'s; null for a setting that is no tool's." }
+              tool: { type: string, nullable: true, description: "The name of the tool this setting switches (question, note, system-info, web-search); null for a setting that is no tool's." }
+              prompt_name: { type: string, nullable: true, description: "The prompts.toml key of the prompt it injects — otaku's text, edited at /api/prompts/{setting}; null where the text is the reader's own (a reminder) or none is injected (the layout)." }
               allowed_positions:
                 type: array
                 description: Every position it may take, as a menu offers them; empty for a setting that injects nothing.

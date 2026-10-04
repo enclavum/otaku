@@ -62,8 +62,8 @@ const state = {
   storySettingDefaults: null, // every story's settings as a fresh story reads them
   storySettings: new Map(), // id → the settings a story changed, in the read's shape
   sharedReminder: "", // the text every story with use_shared_reminder on is sent
-  shipped: null, // every tool's prompt as shipped, by name — what an emptied one restores
-  prompts: null, // every tool's prompt as it stands, by name
+  shipped: null, // every injection setting's prompt as shipped, by its name — what an emptied one restores
+  prompts: null, // every injection setting's prompt as it stands, by its name
   history: [], // the composer's ↑/↓ lines, most recent first
   usage: [], // one row per completed reply: {story, prompt, completion, seconds}
   syntax: null, // the story's typed language, for the menu and the sheet
@@ -580,22 +580,25 @@ export function setSharedReminder(text) {
   return say(text.trim() ? "Shared reminder saved." : "Shared reminder cleared.");
 }
 
-export function prompt(tool) {
-  // The refusal is `backend.api.settings._tool_prompt_name`'s sentence, copied.
-  if (!(tool in state.prompts)) return _unknownTool(tool);
-  return { text: state.prompts[tool] };
+export function prompt(setting) {
+  // The refusals are `backend.api.settings._prompt_name`'s sentences, copied.
+  if (!(setting in state.prompts)) return _noPrompt(setting);
+  return { text: state.prompts[setting] };
 }
 
-export function setPrompt(tool, text) {
-  // The sentences are `backend.api.settings.set_tool_prompt`'s.
-  if (!(tool in state.prompts)) return _unknownTool(tool);
+export function setPrompt(setting, text) {
+  // The sentences are `backend.api.settings.set_prompt`'s.
+  if (!(setting in state.prompts)) return _noPrompt(setting);
   const typed = text.trim();
-  state.prompts[tool] = typed || state.shipped[tool];
+  state.prompts[setting] = typed || state.shipped[setting];
   return say(typed ? "Prompt saved." : "Prompt restored to the built-in.");
 }
 
-function _unknownTool(tool) {
-  return refuse(`Unknown tool '${tool}'. Tools: ${Object.keys(state.prompts).join(", ")}.`);
+function _noPrompt(name) {
+  const found = state.storySettingDefaults.find((row) => row.name === name);
+  if (found) return refuse(`${found.label} has no prompt.`);
+  const known = state.storySettingDefaults.map((row) => row.name).join(", ");
+  return refuse(`Unknown setting '${name}'. Settings: ${known}.`);
 }
 
 function _settingsOf(storyId) {

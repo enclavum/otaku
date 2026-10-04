@@ -34,7 +34,7 @@ from otaku.backend import Message
 from otaku.backend.api import play as api_play
 from otaku.backend.commands import COMMANDS
 from otaku.backend.story import StorySettingAssistantNotes, StorySettingQuestions, StorySettings
-from otaku.backend.tools import ToolQuestion, get_tool_label
+from otaku.backend.tools import TOOLS, ToolQuestion, get_tool_label
 from otaku.formatting import printable
 from otaku.terminal.tty import DIM, user_block
 from otaku.terminal.tty.cursor import terminal_width
@@ -225,6 +225,7 @@ def message(
     shown: frozenset[str] = frozenset(),
     width: int | None = None,
     label: str = "",
+    story: bool = False,
 ) -> str:
     """One body styled for display: highlighted (user) or typeset
     (assistant) — and, for a turn that carried pictures, the dim
@@ -233,7 +234,8 @@ def message(
     (`QuestionStream`) and its notes dim (`BlockStream`), each while
     `shown` holds its tool (`shown_tools`), else left out — blocks behind the bar,
     wrapped at `width`, the terminal's unless the caller draws into a
-    narrower place. Takes no settings besides that — the
+    narrower place. In story mode's one text (`story`) a call of a tool
+    this build does not know is left out too. Takes no settings besides that — the
     user's colors reached the theme at launch, so a caller only has to
     say WHAT it is drawing.
     The one renderer for showing AND measuring, so the ledger can never
@@ -254,7 +256,7 @@ def message(
         # the two cannot differ.
         result = BlockStream(out, width or terminal_width(), dim=True)
         result.open(streamer, "")
-        result.feed(label or "Tool")
+        result.feed(label or "Tool call")
         result.close()
         streamer.flush()
         return out.getvalue()
@@ -289,6 +291,9 @@ def message(
             # its result follows as a turn of its own
             after_call = True
             continue
+        elif story:
+            after_call = True  # story mode's text draws no call but a question
+            continue
         else:
             # the calls with no look yet print as they streamed, in the
             # language's canonical form (`context.tool_calls`), which the
@@ -306,6 +311,28 @@ def block(text: str, width: int) -> str:
     itself: the prompt's answers under a question."""
     out = io.StringIO()
     stream = BlockStream(out, width)
+    stream.begin()
+    stream.feed(text)
+    stream.close()
+    return out.getvalue()
+
+
+def tool_turn_label(name: str | None, result: str) -> str:
+    """What the block of a tool's turn says: the tool's label and "call",
+    "Web search call", whatever the tool — or, where the result names the
+    turn otherwise (`Tool.label_of`), that name alone: "Web search failed"."""
+    label = get_tool_label(name, result)
+    tool = TOOLS.get(name or "")
+    said = label if tool is not None and label != tool.label else f"{label} call"
+    return said[:1].upper() + said[1:] if label else "Tool call"
+
+
+def question_block(text: str, width: int) -> str:
+    """A question call's inside as `QuestionStream` draws it at `width`:
+    the question alone behind the bar — for a caller drawing it again
+    where it is not streaming (an undo that left the story on it)."""
+    out = io.StringIO()
+    stream = QuestionStream(out, width)
     stream.begin()
     stream.feed(text)
     stream.close()
@@ -374,7 +401,7 @@ def pictures_note(count: int) -> str:
     return f"[ {count} picture{'s' if count != 1 else ''} ]"
 
 
-def turn(item: Message, *, shown: frozenset[str] = frozenset()) -> str:
+def turn(item: Message, *, shown: frozenset[str] = frozenset(), story: bool = False) -> str:
     """One turn exactly as the echoes print it: a user turn as the grey
     block, a model turn as it streamed, the calls of the tools `shown` — the
     trailing newline normalized away, the caller joining and terminating
@@ -383,8 +410,8 @@ def turn(item: Message, *, shown: frozenset[str] = frozenset()) -> str:
     body = item.body.strip()
     if item.role == "user":
         return user_block(message(body, "user", pictures=len(item.attachments)))
-    label = get_tool_label(item.provider, item.body) if item.role == "tool" else ""
-    return "\n".join(message(body, item.role, shown=shown, label=label).splitlines())
+    label = tool_turn_label(item.provider, item.body) if item.role == "tool" else ""
+    return "\n".join(message(body, item.role, shown=shown, label=label, story=story).splitlines())
 
 
 def last_turns(
@@ -421,14 +448,28 @@ def flow_offsets(
 ) -> tuple[str, list[int]]:
     """`flow`'s text, and where each turn's own text begins in it — a
     paragraph join's blank counted with the turn BEFORE it — so the
-    ledger can place echoed turns for erasing (`Chat.restore_tail`)."""
+    ledger can place echoed turns for erasing (`Chat.restore_tail`). No
+    tool's block is drawn in story mode's text — a note, a tool's turn,
+    a call — but the question the story stands on: answered, its answer
+    is the text's. A tool's turn left out still parts the reply after it
+    as a paragraph, as its join says."""
     out = ""
     starts: list[int] = []
     previous: Message | None = None
-    for item in items:
+    for index, item in enumerate(items):
+        if item.role == "tool":
+            # the result is the model's to read: nothing drawn, its place
+            # in the text kept for the turn after it to join from
+            starts.append(len(out))
+            previous = item
+            continue
         # the spaces at a row's edges decide nothing: the join draws its own
         body = replace(item, body=item.body.strip(" \t"))
-        piece = prose(body.body) if item.role == "user" else turn(body, shown=shown)
+        # a past question is no part of the one text — its answer stands
+        # there as the reader's line; the one the story stands on is drawn
+        posed = index == len(items) - 1 and asked(item, shown) is not None
+        seen = shown & {"question"} if posed else frozenset()
+        piece = prose(body.body) if item.role == "user" else turn(body, shown=seen, story=True)
         if not out:
             starts.append(0)
             out = piece

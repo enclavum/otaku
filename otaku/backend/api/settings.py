@@ -15,6 +15,7 @@ Refused for what it declines.
 import json
 from dataclasses import dataclass, replace
 
+from otaku.backend.api import stories as api_stories
 from otaku.backend.session import (
     EFFORT_LEVELS,
     NO_MODEL_HINT,
@@ -24,13 +25,11 @@ from otaku.backend.session import (
     Refused,
     Session,
 )
-from otaku.backend.tools import TOOLS
+from otaku.backend.story import InjectingSetting
 from otaku.providers import reasoning
-from otaku.settings import row
+from otaku.settings import prompts, row
 from otaku.settings.migrations import surgery
 from otaku.settings.models import THINK_UNSET
-from otaku.settings.prompts import Prompts, set_prompt
-from otaku.settings.prompts import load as load_prompts
 
 _ON = ("on", "true", "yes")
 _OFF = ("off", "false", "no")
@@ -273,38 +272,46 @@ def set_max_context(session: Session, raw: str) -> str:
     return f"Max context: {_stands(session.max_context_setting)}."
 
 
-def get_tool_prompt(session: Session, tool: str) -> str:
-    """A tool's prompt as prompts.toml holds it now — the file read
-    fresh, as an assembly reads it (`backend.story`), so a hand edit
-    shows too. Raises Refused for a name no tool owns."""
-    prompts, _ = load_prompts(session._paths.prompts_file)
-    return str(getattr(prompts, _tool_prompt_name(tool)))
+def get_prompt(session: Session, setting: str) -> str:
+    """An injection setting's prompt as prompts.toml holds it now — the
+    file read fresh, as an assembly reads it (`backend.story`), so a
+    hand edit shows too. Raises Refused for a name no setting owns, and
+    for a setting that sends no prompt (`_prompt_name`)."""
+    loaded, _ = prompts.load(session._paths.prompts_file)
+    return str(getattr(loaded, _prompt_name(session, setting)))
 
 
-def set_tool_prompt(session: Session, tool: str, text: str) -> str:
-    """Write a tool's prompt into prompts.toml — that key alone, the
-    pre-edit file backed up (`prompts.set_prompt`) — and read the file
-    back: what the next assembly injects is what was saved, or the
-    write is refused. An empty text drops the key, and the built-in
+def set_prompt(session: Session, setting: str, text: str) -> str:
+    """Write an injection setting's prompt into prompts.toml — that key
+    alone, the pre-edit file backed up (`prompts.set_prompt`) — and read
+    the file back: what the next assembly injects is what was saved, or
+    the write is refused. An empty text drops the key, and the built-in
     stands again. Returns the confirmation."""
-    key = _tool_prompt_name(tool)
+    key = _prompt_name(session, setting)
     text = text.strip()
     paths = session._paths
-    set_prompt(paths.prompts_file, paths.config_backups_dir, key, text)
-    prompts, _ = load_prompts(paths.prompts_file)
-    if str(getattr(prompts, key)) != (text or str(getattr(Prompts(), key))):
+    prompts.set_prompt(paths.prompts_file, paths.config_backups_dir, key, text)
+    loaded, _ = prompts.load(paths.prompts_file)
+    if str(getattr(loaded, key)) != (text or str(getattr(prompts.Prompts(), key))):
         raise Refused("Prompt not saved — prompts.toml could not be edited.")
-    session._prompts = prompts  # the lore prompts follow the same file
+    session._prompts = loaded  # the lore prompts follow the same file
     return "Prompt saved." if text else "Prompt restored to the built-in."
 
 
-def _tool_prompt_name(tool: str) -> str:
-    """The prompts.toml key of the tool's prompt. Raises Refused for a
-    name no tool owns."""
-    found = TOOLS.get(tool)
+def _prompt_name(session: Session, name: str) -> str:
+    """The prompts.toml key of the prompt the setting `name` injects.
+    Raises Refused for a name no setting owns, and for a setting whose
+    text is no prompt — a reminder's is the reader's own, the layout
+    injects nothing."""
+    settings = api_stories.get_settings(session)
+    found = settings.get(name)
     if found is None:
-        raise Refused(f"Unknown tool {tool!r}. Tools: {', '.join(TOOLS)}.")
-    return found.prompt_name
+        known = ", ".join(each.name for each in settings)
+        raise Refused(f"Unknown setting {name!r}. Settings: {known}.")
+    key = found.prompt_name if isinstance(found, InjectingSetting) else None
+    if key is None:
+        raise Refused(f"{found.label} has no prompt.")
+    return key
 
 
 def _stands(tokens: int) -> str:

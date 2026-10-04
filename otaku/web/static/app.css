@@ -550,6 +550,9 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
    look inside it, the tool's label over its text */
 .otk-tool { display: flex; flex-direction: column; gap: 8px; }
 .otk-turn__rubric { font-family: var(--otk-font-mono); font-size: var(--otk-size-tag); letter-spacing: 0.26em; text-transform: uppercase; color: var(--otk-accent); }
+/* the manuscript's mark before a played line's rubric, decoration alone;
+   the chat's rubrics go without it */
+.otk-transcript[data-transcript="manuscript"] .otk-turn__rubric::before { content: "◆ "; content: "◆ " / ""; }
 .otk-turn__body { margin: 0; max-width: 430px; text-align: center; font-family: var(--otk-font-prose); font-size: var(--otk-size-page); font-style: italic; font-weight: 500; line-height: 1.6; color: var(--otk-ink); overflow-wrap: anywhere; }
 .otk-slash { font-family: var(--otk-font-mono); font-size: 0.82em; font-style: normal; color: var(--otk-accent-ink); }
 /* the record's own dim line — the dice a /roll rolled: the stats line's
@@ -694,7 +697,6 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
    paragraph gap (`::before`) here. A reply joined inline has neither, so its
    opening block stands its own gap off the text — as the live question does. */
 .otk-transcript[data-transcript="canvas"] [data-join="inline"] .otk-typeset > .otk-ask--first { margin-top: var(--otk-block-gap); }
-.otk-transcript[data-transcript="canvas"] .otk-verbose { margin: 4px 0 0; }
 /* No thinking in the one text: it would split the line the reply goes on
    from, and leave a hole when a redraw takes it away (it is never stored).
    The status row says the model is reasoning. */

@@ -127,6 +127,10 @@ class InjectingSetting(StorySetting):
     a name; a frontend capitalises where its medium wants."""
 
     injection_label: ClassVar[str] = ""
+    # The prompts.toml key of the PROMPT it injects, otaku's text edited
+    # in place (`api.settings.get_prompt`); None where the text
+    # is the reader's own, a reminder's.
+    prompt_name: ClassVar[str | None] = None
     default_position: ClassVar[InjectionPosition] = InjectionPosition(1)
 
     injection_position: InjectionPosition
@@ -181,9 +185,10 @@ class ToolSetting(InjectingSetting):
     """A tool's switch: while on, the model may use the tool, and its
     prompt rides where the story put it — enclosed out of character in
     chat, bare in the system message. The prompt is read off the
-    prompts under the tool's `prompt_name`."""
+    prompts under the setting's `prompt_name`."""
 
     tool: ClassVar[type[Tool]] = Tool  # narrowed: a tool's switch always has one
+    prompt_name: ClassVar[str] = ""  # narrowed: a tool's switch always sends one
     # Before the reader's newest message: all the recency, and nothing to
     # re-read.
     default_position = InjectionPosition(1)
@@ -193,7 +198,7 @@ class ToolSetting(InjectingSetting):
 
     def __init__(self, from_db: StorySettingDB | None, prompts: Prompts) -> None:
         super().__init__(from_db)
-        self.prompt = getattr(prompts, self.tool.prompt_name)
+        self.prompt = getattr(prompts, self.prompt_name)
 
     def _injection_text(self) -> str:
         return self.prompt
@@ -203,6 +208,7 @@ class StorySettingQuestions(ToolSetting):
     name = "allow_questions"
     label = "Allow questions"
     injection_label = "questions"
+    prompt_name = "tool_questions_prompt"
     tool = ToolQuestion
 
 
@@ -213,6 +219,7 @@ class StorySettingAssistantNotes(ToolSetting):
     name = "allow_assistant_notes"
     label = "Allow assistant notes"
     injection_label = "assistant notes"
+    prompt_name = "tool_assistant_notes_prompt"
     tool = ToolAssistantNote
 
     display_notes: bool
@@ -245,6 +252,7 @@ class StorySettingSystemInfo(ToolSetting):
     name = "allow_system_info"
     label = "Allow system info"
     injection_label = "system info"
+    prompt_name = "tool_system_info_prompt"
     tool = ToolSystemInfo
 
 
@@ -255,6 +263,7 @@ class StorySettingWebSearch(ToolSetting):
     name = "allow_web_search"
     label = "Allow web search"
     injection_label = "web search"
+    prompt_name = "tool_web_search_prompt"
     tool = ToolWebSearch
 
 
@@ -329,7 +338,7 @@ class StorySettingEmulateTextCompletion(InjectingSetting):
     nothing."""
 
     name = "emulate_text_completion"
-    label = "Emulate text completion on canvas"
+    label = "Emulate text completion"
     injection_label = "text completion emulation"
     prompt_name: ClassVar[str] = "emulate_text_completion_prompt"
     # The system message: a standing instruction, not a reminder.

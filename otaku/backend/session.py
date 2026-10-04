@@ -156,7 +156,7 @@ class Session:
     _paths: Paths
     _store: Store
     _providers: Registry
-    _integrations: Integrations  # the services as bound, and the engine web search asks
+    _integrations: Integrations  # the integrations as bound
     _worker: Worker
     _closed: bool
 
@@ -552,9 +552,8 @@ class Session:
 
     @property
     def integrations(self) -> Integrations:
-        """The integrations as bound, with the engine web search asks
-        (`otaku.integrations.Integrations`) — what a tool otaku runs is
-        handed, and all it sees of the session."""
+        """The integrations as bound (`otaku.integrations.Integrations`) —
+        what a tool otaku runs is handed, and all it sees of the session."""
         return self._integrations
 
     def assemble(self, max_context: int | None) -> AssembledPrompt:

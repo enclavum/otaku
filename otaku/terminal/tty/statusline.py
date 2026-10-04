@@ -28,6 +28,7 @@ import os
 import shutil
 import sys
 import threading
+import time
 from collections.abc import Callable, Iterator
 from typing import TextIO
 
@@ -56,17 +57,22 @@ def _terminal() -> TextIO:
 
 
 LABEL = " background task: "
+# How long a note stands at least once shown: a call that ends at once —
+# a tool otaku runs in no time — still reads.
+_NOTE_SECONDS = 1.0
 
 
-def render(status: str, aside: str = "", width: int = 0) -> str:
-    """The line's text: what the background worker is doing — blank when
-    idle — and `aside` against the right edge of `width` columns, the
-    worker's words giving way where both do not fit. The last column
+def render(status: str, aside: str = "", width: int = 0, note: str = "") -> str:
+    """The line's text: `note`, what the reply streaming is doing — a tool
+    call — then what the background worker is doing, either blank when
+    idle, and `aside` against the right edge of `width` columns, the
+    words on the left giving way where both do not fit. The last column
     stays empty, so the row never wraps. ONE owner, because the prompt
     toolbar and this pinned row draw the same line on the same terminal
     row, and any difference between them shows up as the line twitching
     the moment a reply starts streaming."""
-    left = f"{LABEL}{status}" if status else ""
+    worker = f"{LABEL}{status}" if status else ""
+    left = f" {note}" + (f" ·{worker}" if worker else "") if note else worker
     room = width - 1
     if not aside or room <= len(aside):
         return left[: max(0, room)] if width else left
@@ -86,6 +92,9 @@ class StatusLine:
     def __init__(self, read: Callable[[], str], aside: Callable[[], str]) -> None:
         self._read = read
         self._aside = aside
+        self._note = ""  # what the reply streaming is doing, while it streams
+        self._noted_at = 0.0  # when the note standing was shown
+        self._clearing: threading.Timer | None = None  # a clear waiting out the minimum
         self._lock = threading.Lock()
         self._rows = 0
         self._open = False
@@ -127,6 +136,8 @@ class StatusLine:
 
     def close(self) -> None:
         with self._lock:
+            self._note = ""  # the reply's own doing ends with its window
+            self._cancel_clearing()
             if not self._open:
                 return
             self._open = False
@@ -138,6 +149,44 @@ class StatusLine:
             )
             _terminal().flush()
         atexit.unregister(self.close)
+
+    def set_note(self, note: str) -> None:
+        """Say what the reply streaming is doing — a tool being called —
+        ahead of the worker's words, "" for nothing; repainted when it
+        changes. A note stands `_NOTE_SECONDS` at least: cleared sooner,
+        it goes when they are out, on a timer, the stream never held; a
+        new note takes over at once, and the row's release clears it."""
+        with self._lock:
+            self._cancel_clearing()
+            if note == self._note:
+                return
+            if not note:
+                left = self._noted_at + _NOTE_SECONDS - time.monotonic()
+                if left > 0:
+                    self._clearing = threading.Timer(left, self._clear_note)
+                    self._clearing.daemon = True
+                    self._clearing.start()
+                    return
+            else:
+                self._noted_at = time.monotonic()
+            self._note = note
+        self.refresh()
+
+    def _clear_note(self) -> None:
+        """The waiting clear, on its timer's thread — unless a note set
+        since, or the row's release, took it over."""
+        with self._lock:
+            if self._clearing is None or self._clearing is not threading.current_thread():
+                return
+            self._clearing = None
+            self._note = ""
+        self.refresh()
+
+    def _cancel_clearing(self) -> None:
+        """Drop a waiting clear; the caller holds the lock."""
+        if self._clearing is not None:
+            self._clearing.cancel()
+            self._clearing = None
 
     def refresh(self) -> None:
         """Repaint. Safe to call from the worker thread, and a no-op when
@@ -152,7 +201,7 @@ class StatusLine:
                 _terminal().write(
                     f"{SAVE_CURSOR}{SCROLL_ABOVE.format(self._rows - 1)}{RESTORE_CURSOR}"
                 )
-            body = render(self._read(), self._aside(), size.columns)
+            body = render(self._read(), self._aside(), size.columns, self._note)
             _terminal().write(
                 f"{SAVE_CURSOR}{GOTO_ROW.format(self._rows)}{ERASE_LINE}{DIM}{body}{RESET}{RESTORE_CURSOR}"
             )

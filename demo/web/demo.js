@@ -160,9 +160,8 @@ const ROUTES = {
   // Settings
   "GET /api/settings": () => store.settings(),
   "PUT /api/settings/{setting}": (p, q, b) => store.setKnob(p.setting, b.value),
-  // Web search: no key is held or saved in the demo — the product's shape,
-  // the engine null while none is chosen.
-  "GET /api/integrations/web_search": () => ({ engine: null, label: null, has_key: false }),
+  // Web search: no key is held or saved in the demo — the product's shape.
+  "GET /api/integrations/web_search": () => ({ has_key: false }),
   "PATCH /api/integrations/web_search": () => ({
     notice: `The web search key is not saved in the demo — ${store.INSTALL}.`,
   }),
@@ -174,8 +173,8 @@ const ROUTES = {
   }),
   "GET /api/shared_reminder": () => store.sharedReminder(),
   "PUT /api/shared_reminder": (p, q, b) => store.setSharedReminder(String(b.text)),
-  "GET /api/prompts/{tool}": (p) => store.prompt(p.tool),
-  "PUT /api/prompts/{tool}": (p, q, b) => store.setPrompt(p.tool, String(b.text)),
+  "GET /api/prompts/{setting}": (p) => store.prompt(p.setting),
+  "PUT /api/prompts/{setting}": (p, q, b) => store.setPrompt(p.setting, String(b.text)),
 };
 
 // The path parameters that are row ids, as `web/server.py` declares

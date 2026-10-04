@@ -640,6 +640,24 @@ class ScreenLedger:
         self._repaint()
         return True
 
+    def extend_reply(self, text: str) -> None:
+        """Draw `text` more of the reply on top, in place, once an undo
+        took the exchange under it off (`erase_exchange`): one blank line
+        under the reply's text — a paragraph's standing blank becomes that
+        line, the reply's own row now — and `text` ending its row as a
+        reply does. What an undo that left the story on a question draws
+        the question back with (`bindings._pose_again`)."""
+        entry = self._top()
+        lead = "\n"
+        if self._pending >= 2:
+            # the blank stands already: counted with the reply from now on
+            lead = ""
+            if entry is not None:
+                entry.tracker.feed("\n")
+            self._pending = 1
+        self.reply.write(lead + text)
+        self._suppress_gap = False
+
     def _rewound(self, entry: "_Exchange") -> None:
         """The screen after a flow exchange is erased: the text above
         stands as it was, its tail put back. Mid-line, the row is ended

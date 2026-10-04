@@ -242,8 +242,8 @@ export const settings = () => get("/api/settings");
 export const sharedReminder = () => get("/api/shared_reminder");
 export const setSharedReminder = (text) => put("/api/shared_reminder", { text });
 // A tool's prompt: prompts.toml's text, edited in place.
-export const prompt = (tool) => get(`/api/prompts/${tool}`);
-export const setPrompt = (tool, text) => put(`/api/prompts/${tool}`, { text });
+export const prompt = (setting) => get(`/api/prompts/${setting}`);
+export const setPrompt = (setting, text) => put(`/api/prompts/${setting}`, { text });
 // Web search: where it stands, and its one key — which engine is told from the key.
 export const webSearch = () => get("/api/integrations/web_search");
 export const sendSupport = (message, email) => post("/api/support", { message, email });
