@@ -20,6 +20,7 @@ import pytest
 
 from otaku.backend import Layout
 from scenarios.support.emulator import (
+    COLS,
     CTRL_C,
     CTRL_D,
     CTRL_ENTER,
@@ -29,6 +30,7 @@ from scenarios.support.emulator import (
     DOWN,
     ENTER,
     RIGHT,
+    ROWS,
     Emulated,
     jumps,
     mismatch,
@@ -40,8 +42,10 @@ from scenarios.support.harness import read_store
 
 pytestmark = [pytest.mark.cli, pytest.mark.slow]
 
-# A step: what a failure calls it, and what it does to the terminal.
-Step = tuple[str, Callable[[Emulated], None]]
+# A step: what a failure calls it, what it does to the terminal, and
+# whether it erases what stood drawn by design — an undo, a regenerate, an
+# answer taking the question's menu away — so no row's moving is judged.
+Step = tuple[str, Callable[[Emulated], None], bool]
 
 
 class TestChatMode:
@@ -57,7 +61,7 @@ class TestChatMode:
                 line("5 Look up the river."),  # web search
                 line("6 Tell me about the town."),  # a long reply
                 line("3 Which way now?"),  # a question
-                key("the first answer", ENTER),
+                key("the first answer", ENTER, erases=True),
                 line("0 Everything at once."),
                 line("I take the left path."),  # an answer typed
             ],
@@ -69,12 +73,12 @@ class TestChatMode:
         problems = run(
             term,
             [
+                # judged once sent: the menu walked and an answer taken into
+                # the line are the prompt's, which no echo shows
                 line("3 Which way?"),
-                key("down the answers", DOWN),
-                key("the second answer", ENTER),
+                keys("the second answer", DOWN, ENTER, erases=True),
                 line("3 Again?"),
-                key("an answer into the line", RIGHT),
-                key("the line sent", ENTER),
+                keys("an answer taken into the line, sent", RIGHT, ENTER, erases=True),
             ],
         )
         assert not problems, "\n".join(problems)
@@ -86,9 +90,9 @@ class TestChatMode:
             [
                 line("Go on."),
                 line("-1 Fail."),
-                key("regenerate, failing again", CTRL_R),
-                key("undo the failed line", CTRL_U),
-                key("undo the turn before", CTRL_U),
+                key("regenerate, failing again", CTRL_R, erases=True),
+                key("undo the failed line", CTRL_U, erases=True),
+                key("undo the turn before", CTRL_U, erases=True),
                 line("Short again."),
             ],
         )
@@ -98,7 +102,11 @@ class TestChatMode:
         term = played(Layout.MANUSCRIPT, verbose=True)
         problems = run(
             term,
-            [line("2,4 With stats."), line("3 Which one?"), key("the first answer", ENTER)],
+            [
+                line("2,4 With stats."),
+                line("3 Which one?"),
+                key("the first answer", ENTER, erases=True),
+            ],
         )
         assert not problems, "\n".join(problems)
 
@@ -109,7 +117,7 @@ class TestChatMode:
             [
                 midway("6 Long.", CTRL_C),
                 midway("6 Long again.", CTRL_R),
-                key("undo", CTRL_U),
+                key("undo", CTRL_U, erases=True),
                 line("Short."),
             ],
         )
@@ -120,7 +128,7 @@ class TestChatMode:
         regenerate redraws every round, and an undo takes every round off
         the screen, as the backend takes every row."""
         term = played(Layout.MANUSCRIPT, ("The ferry left.", "4 What time is it?"))
-        problems = run(term, [key("regenerate", CTRL_R)])
+        problems = run(term, [key("regenerate", CTRL_R, erases=True)])
         assert not problems, "\n".join(problems)
         term.settle(0.4)
         term.send(CTRL_U, 0.2)
@@ -145,7 +153,7 @@ class TestStoryMode:
                 line("8 Later."),  # a reply opening a paragraph
                 key("the empty line, a continue", ENTER),
                 line("3 Which way?"),
-                key("the first answer", ENTER),
+                key("the first answer", ENTER, erases=True),
                 line("0 All at once."),
                 line("She went left."),  # answering a reply with tool rounds
             ],
@@ -182,21 +190,54 @@ class TestStoryMode:
             [
                 line("Go on."),
                 line("-1 Maybe fail."),
-                key("regenerate, failing again", CTRL_R),
+                key("regenerate, failing again", CTRL_R, erases=True),
                 line("And on."),
-                key("undo", CTRL_U),
-                key("regenerate, failing again", CTRL_R),
+                key("undo", CTRL_U, erases=True),
+                key("regenerate, failing again", CTRL_R, erases=True),
             ],
             story_mode=True,
         )
         assert not problems, "\n".join(problems)
+
+    def test_a_question_after_a_reply_taller_than_the_screen_goes(self, played: "Played") -> None:
+        """The question alone is taken off — where its block began, always
+        in view — when the reply asking it ran up past the screen's top."""
+        term = played(Layout.CANVAS, rows=14)
+        problems = run(
+            term, [line("36 Which way, long?"), line("I take the hill.")], story_mode=True
+        )
+        assert not problems, "\n".join(problems)
+        assert not [row for row in term.lines() if row.startswith("│")]
+
+    def test_a_line_of_one_row_keeps_the_paragraph_after_it(self, played: "Played") -> None:
+        """On a screen wide enough for the text's last line to be one row,
+        going back into the text climbs no row: the blank line a typed
+        paragraph opened stays between the line and the reply."""
+        term = played(Layout.CANVAS, cols=200)
+        problems = run(
+            term, [keys("8, a paragraph, sent", b"8", CTRL_ENTER, ENTER)], story_mode=True
+        )
+        assert not problems, "\n".join(problems)
+
+    def test_the_text_ends_on_the_row_above_the_status_row(self, played: "Played") -> None:
+        """A reply ending in the text leaves its row open: at the screen's
+        foot nothing scrolls the text up under the prompt standing in it."""
+        term = played(Layout.CANVAS, rows=12)
+        for n in range(4):
+            term.send(f"6 Longer {n}.", 0.3)
+            term.send(ENTER, 0.2)
+            term.quiet()
+            if term.lines()[0].strip():  # the text fills the screen
+                assert term.cursor[0] == term.rows - 2, f"turn {n}: {term.lines()}"
 
     def test_a_resumed_question_answered_and_undone(self, played: "Played") -> None:
         """The launch echo cuts a reply of five rows to the part it shows:
         that part is what an answer draws again and an undo takes back to
         the question."""
         term = played(Layout.CANVAS, ("The ferry left.", "0 All at once."))
-        problems = run(term, [line("She went left."), key("undo", CTRL_U)], story_mode=True)
+        problems = run(
+            term, [line("She went left."), key("undo", CTRL_U, erases=True)], story_mode=True
+        )
         assert not problems, "\n".join(problems)
 
     def test_a_reply_cut_or_regenerated_mid_stream(self, played: "Played") -> None:
@@ -206,7 +247,7 @@ class TestStoryMode:
             [
                 midway("6 Long.", CTRL_C),
                 midway("6 Long again.", CTRL_R),
-                key("undo", CTRL_U),
+                key("undo", CTRL_U, erases=True),
                 line("Short."),
             ],
             story_mode=True,
@@ -220,7 +261,8 @@ class TestStoryMode:
         term = played(Layout.CANVAS)
         rows = term.lines()
         opening = rows[next(i for i, row in enumerate(rows) if "Resumed at message" in row) + 2]
-        for n in range(4):
+        # no digits: the test model reads a line's number as the blocks to send
+        for n in ("one", "two", "three", "four"):
             term.send(f"Line {n}.", 0.4)
             with term.recording() as frames:
                 term.send(ENTER, 0.1)
@@ -230,7 +272,11 @@ class TestStoryMode:
             landed = next(i for i, (rows, *_) in enumerate(frames) if any(end in r for r in rows))
             assert not vanished(frames, opening[:30]), f"line {n}: the paragraph went"
             assert not vanished(frames, end, after=landed), f"line {n}: the text's end went"
-            below = [where for *_, where in frames if where is not None and where[0] > cursor_row]
+            below = [
+                where
+                for *_, where in frames[landed:]
+                if where is not None and where[0] > cursor_row
+            ]
             assert not below, f"line {n}: the cursor showed under the text at {below[:3]}"
 
 
@@ -291,10 +337,12 @@ class Played:
         lines: tuple[str, ...] = ("The ferry left at dawn.",),
         *,
         verbose: bool = False,
+        rows: int = ROWS,
+        cols: int = COLS,
     ) -> Emulated:
         root = self._tmp_path / f"state{len(self._terms)}"
         story(root, self.server, layout, lines, verbose=verbose)
-        term = Emulated(root)
+        term = Emulated(root, rows=rows, cols=cols)
         term.quiet(still=1.5)
         self._terms.append(term)
         return term
@@ -320,17 +368,27 @@ def line(text: str) -> Step:
         term.send(text, 0.3)
         term.send(ENTER, 0.2)
 
-    return text, act
+    return text, act, False
 
 
-def key(name: str, data: bytes) -> Step:
+def keys(name: str, *presses: bytes, erases: bool = False) -> Step:
+    """Keys pressed one after another, typing included."""
+
+    def act(term: Emulated) -> None:
+        for data in presses:
+            term.send(data, 0.3)
+
+    return name, act, erases
+
+
+def key(name: str, data: bytes, *, erases: bool = False) -> Step:
     """A key, pressed once the prompt has settled."""
 
     def act(term: Emulated) -> None:
         term.settle(0.4)
         term.send(data, 0.2)
 
-    return name, act
+    return name, act, erases
 
 
 def midway(text: str, data: bytes) -> Step:
@@ -341,19 +399,18 @@ def midway(text: str, data: bytes) -> Step:
         term.send(ENTER, 0.5)
         term.send(data, 0.2)
 
-    return f"{text} then {data!r} mid-stream", act
+    return f"{text} then {data!r} mid-stream", act, False
 
 
 def run(term: Emulated, steps: list[Step], *, story_mode: bool = False) -> list[str]:
     """Each step played and judged: the rows that moved while it drew —
-    not for an undo or a regenerate, which erase by design — and the
-    screen against a fresh launch's echo."""
+    not for a step that erases by design (`Step`) — and the screen against
+    a fresh launch's echo."""
     problems = []
-    for name, act in steps:
+    for name, act, erasing in steps:
         with term.recording() as frames:
             act(term)
             term.quiet()
-        erasing = name.startswith(("undo", "regenerate"))
         found = ([] if erasing else jumps(frames)) + mismatch(term, story_mode=story_mode)
         problems += [f"{name}: {problem}" for problem in found[:6]]
     return problems

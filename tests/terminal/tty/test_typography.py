@@ -7,7 +7,11 @@ and that how the input is split into chunks changes nothing.
 
 The highlighter's contract is the vocabulary: it colours the words it is
 GIVEN and nothing else, so which `/word` is a command is the caller's
-answer, never a guess from the slash. Both are checked by structure — the
+answer, never a guess from the slash — the same boundaries cut a text
+into its commands and the rest (`command_pieces`), whole. An aside is
+written beside the typesetting: its text in its own style, the
+typesetter's state untouched — a quote open around it stays open, a
+line's held opening resolves as the text it was. Both are checked by structure — the
 escapes that open and close a span — never by which shade the terminal
 running the tests happens to pick.
 """
@@ -20,7 +24,12 @@ import pytest
 
 from otaku.settings.config import TerminalSettings
 from otaku.terminal.tty.theme import _CURRENT, color, theme, use
-from otaku.terminal.tty.typography import Streamer, highlight_commands, highlight_toml
+from otaku.terminal.tty.typography import (
+    Streamer,
+    command_pieces,
+    highlight_commands,
+    highlight_toml,
+)
 
 
 def escape(spec: str) -> str:
@@ -311,6 +320,41 @@ class TestHighlightCommands:
         assert highlight_commands("", _COMMANDS) == ""
 
 
+class TestCommandPieces:
+    def test_the_pieces_are_the_text_exactly(self) -> None:
+        for text in ("/me Elara: I step in. /ooc hi", "and/or", "", "/merge A into B /bye"):
+            assert "".join(piece for piece, _ in command_pieces(text, _COMMANDS)) == text
+
+    def test_the_commands_are_the_highlighters(self) -> None:
+        text = "/me I wait. and/or /mention /ooc who?"
+        picked = [piece for piece, command in command_pieces(text, _COMMANDS) if command]
+        assert picked == ["/me", "/ooc"] == highlighted(text, _COMMANDS)
+
+    def test_no_vocabulary_leaves_one_piece(self) -> None:
+        assert command_pieces("/me hi", ()) == [("/me hi", False)]
+        assert command_pieces("", _COMMANDS) == []
+
+
+class TestAside:
+    def test_the_visible_text_keeps_its_order(self) -> None:
+        assert _ANSI.sub("", aside("She said ", "/cue", " go.")) == "She said /cue go."
+
+    def test_a_quote_open_around_it_stays_open(self) -> None:
+        rendered = aside('"Wait ', "/cue", ' here," she said.')
+        spans = re.findall(f"{re.escape(_SPEECH)}(.*?){re.escape(_RESET)}", rendered, re.S)
+        assert [_ANSI.sub("", span) for span in spans] == ['"Wait ', ' here,"']
+
+    def test_a_held_line_opening_resolves_as_the_text_it_was(self) -> None:
+        # a lone dash could still open a list or a rule: written as itself
+        assert _ANSI.sub("", aside("-", "/x", "- y")) == "-/x- y"
+
+    def test_its_style_closes_behind_it(self) -> None:
+        rendered = aside("a ", "aside", " b", style=_ITALIC)
+        styled, behind = rendered.split("aside")
+        assert styled.endswith(_ITALIC) and behind.startswith(_RESET)
+        assert not _open_style(rendered)
+
+
 class TestHighlightToml:
     """The card archive's view: keys and macros light up, key-agnostic;
     value text stays prose, block bodies included."""
@@ -344,6 +388,18 @@ def typeset(text: str, *, chunk: int = 0) -> str:
             streamer.feed(text[i : i + chunk])
     else:
         streamer.feed(text)
+    streamer.flush()
+    return out.getvalue()
+
+
+def aside(before: str, text: str, after: str, *, style: str = "\x1b[2m") -> str:
+    """`before` typeset, `text` written beside it in `style`, `after`
+    typeset on — one typesetter throughout."""
+    out = io.StringIO()
+    streamer = Streamer(out)
+    streamer.feed(before)
+    streamer.aside(text, style)
+    streamer.feed(after)
     streamer.flush()
     return out.getvalue()
 

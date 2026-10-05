@@ -97,10 +97,11 @@ class Emulated(Terminal):
     answers the app's cursor-position queries from where its cursor is.
     `recording` keeps every distinct frame the screen passed through."""
 
-    def __init__(self, root: Path) -> None:
-        super().__init__(str(root), rows=ROWS, cols=COLS)
+    def __init__(self, root: Path, *, rows: int = ROWS, cols: int = COLS) -> None:
+        super().__init__(str(root), rows=rows, cols=cols)
         self.root = root
-        self.screen = XtermScreen(COLS, ROWS)
+        self.rows, self.cols = rows, cols
+        self.screen = XtermScreen(cols, rows)
         self._stream = pyte.ByteStream(self.screen)
         self._frames: list[Frame] | None = None
         self._last_byte = time.time()
@@ -227,9 +228,10 @@ def fresh_root() -> Path:
     return Path(tempfile.mkdtemp()) / "state"
 
 
-def echo(root: Path) -> tuple[list[str], tuple[int, int]]:
-    """What a fresh launch shows of the story: its rows and its cursor."""
-    other = Emulated(root)
+def echo(root: Path, *, rows: int = ROWS, cols: int = COLS) -> tuple[list[str], tuple[int, int]]:
+    """What a fresh launch shows of the story, on a screen of the size
+    given: its rows and its cursor."""
+    other = Emulated(root, rows=rows, cols=cols)
     try:
         other.quiet(still=1.5)
         return other.lines(), other.cursor
@@ -243,16 +245,19 @@ def mismatch(live: Emulated, *, story_mode: bool) -> list[str]:
     row in chat mode, the rows the store never holds left out of the live
     screen; word by word in story mode, whose one text wraps wherever its
     echo began."""
-    rows, (ey, ex) = echo(live.root)
+    rows, (ey, ex) = echo(live.root, rows=live.rows, cols=live.cols)
     start = next((i for i, row in enumerate(rows) if "Resumed at message" in row), -1) + 2
     lines, (ly, lx) = live.lines(), live.cursor
     if story_mode:
-        theirs = _words([*rows[start:ey], rows[ey][:ex]])
-        ours = _words([*lines[:ly], lines[ly][:lx]])
-        if ours[-len(theirs) :] == theirs:
+        theirs = _words([*rows[start:ey], rows[ey][:ex]], live.cols)
+        ours = _words([*lines[:ly], lines[ly][:lx]], live.cols)
+        # their common tail: either screen may be cut at its top, the first
+        # word of the shorter one maybe a word's end
+        common = min(len(theirs), len(ours)) - 1
+        if common <= 0 or ours[-common:] == theirs[-common:]:
             return []
         k = 1
-        while k <= min(len(theirs), len(ours)) and ours[-k] == theirs[-k]:
+        while k <= common and ours[-k] == theirs[-k]:
             k += 1
         return [
             f"word {k} from the end: live {' '.join(ours[-k - 6 : len(ours) - k + 3])!r}"
@@ -294,12 +299,18 @@ def _stored_rows(lines: list[str], cursor_row: int) -> tuple[list[str], int]:
     return kept, cursor_row - cut
 
 
-def _words(lines: list[str]) -> list[str]:
-    """The text the rows hold: a full row read as wrapped onto the next,
-    a blank row as a paragraph mark."""
+def _words(lines: list[str], cols: int) -> list[str]:
+    """The text the rows hold: a full row read as wrapped onto the next —
+    what follows it is the same line, even a row holding nothing yet but
+    the seam the prompt stands after — and a blank row as a paragraph mark."""
     text = ""
+    wrapped = False
     for line in lines:
-        text += " ¶ " if not line.strip() else line + ("" if len(line) >= COLS else " ")
+        if not line.strip() and not wrapped:
+            text += " ¶ "
+        else:
+            text += line + ("" if len(line) >= cols else " ")
+        wrapped = len(line) >= cols
     return text.split()
 
 
@@ -318,7 +329,7 @@ def jumps(frames: list[Frame]) -> list[str]:
 
 def _kept(a: tuple[str, ...], b: tuple[str, ...], shift: int) -> int:
     """How many rows of text `a` holds that `b` holds `shift` rows up."""
-    return sum(1 for i in range(ROWS - shift) if a[i + shift].strip() and a[i + shift] == b[i])
+    return sum(1 for i in range(len(a) - shift) if a[i + shift].strip() and a[i + shift] == b[i])
 
 
 def vanished(frames: list[Frame], text: str, *, after: int = 0) -> list[int]:

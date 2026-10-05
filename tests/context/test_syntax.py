@@ -7,7 +7,10 @@ to test for its absence; `request_kind` and `reply_kind` mark the two
 rows — disagreeing for `/you`, which instructs out of character but
 asks for the scene in character. `is_command` is the other side of the
 same coin: a slash word that is not a direction belongs to the command
-table.
+table. `spans` reads a line as its story and its words with the model:
+runs that join back into the line exactly, out of character all of a
+/you or /ooc line after its token and whatever follows an inliner, the
+tokens themselves story, the breaks at the line's edges read past.
 
 `to_wire` composes what a stored turn sends. Two shapes reach it: a
 turn stored before the syntax existed, whose prose was already stripped
@@ -19,7 +22,7 @@ turn is the newest.
 
 import random
 
-from otaku.context.syntax import DIRECTIONS, is_command, read, roll_dice, to_wire
+from otaku.context.syntax import DIRECTIONS, is_command, read, roll_dice, spans, to_wire
 from otaku.store.schema import Message
 
 # What a v2 turn stores: the template, placeholders intact.
@@ -108,6 +111,54 @@ class TestIsCommand:
     def test_prose_is_never_a_command(self) -> None:
         assert is_command("She looks up.") is False
         assert is_command("and/or") is False
+
+
+class TestSpans:
+    def test_the_runs_are_the_line_exactly(self) -> None:
+        for line in (
+            "/you Mara: be terse",
+            "I open the door /cue make it quiet",
+            "/me Mara: Hello /ooc keep it short",
+            "\n\n/ooc after a break\n\n",
+            "plain  spaced   prose",
+            "",
+        ):
+            assert "".join(text for text, _ in spans(line)) == line
+
+    def test_a_you_or_ooc_line_is_out_of_character_after_its_token(self) -> None:
+        assert spans("/you Mara: be terse") == [("/you", False), (" Mara: be terse", True)]
+        assert spans("/ooc slow down") == [("/ooc", False), (" slow down", True)]
+
+    def test_what_follows_an_inliner_is_out_of_character(self) -> None:
+        assert spans("I open the door /cue make it quiet") == [
+            ("I open the door /cue", False),
+            (" make it quiet", True),
+        ]
+        assert spans("/me Mara: Hello /ooc short") == [
+            ("/me Mara: Hello /ooc", False),
+            (" short", True),
+        ]
+
+    def test_a_you_line_with_an_inliner_is_one_aside_after_its_token(self) -> None:
+        assert spans("/you Mara /cue be quick") == [("/you", False), (" Mara /cue be quick", True)]
+
+    def test_me_and_roll_are_story(self) -> None:
+        assert spans("/me Mara: Hello") == [("/me Mara: Hello", False)]
+        assert spans("/roll 1d20 I jump") == [("/roll 1d20 I jump", False)]
+
+    def test_a_token_with_nothing_after_it_is_story_alone(self) -> None:
+        assert spans("/you") == [("/you", False)]
+        assert spans("I go /cue") == [("I go /cue", False)]
+        assert spans("I go /cue   ") == [("I go /cue   ", False)]
+
+    def test_a_slash_inside_a_word_is_prose(self) -> None:
+        assert spans("and/or https://x.co/cue now") == [("and/or https://x.co/cue now", False)]
+
+    def test_the_breaks_at_a_lines_edges_are_read_past(self) -> None:
+        assert spans("\n\n/ooc after a break") == [
+            ("\n\n/ooc", False),
+            (" after a break", True),
+        ]
 
 
 class TestDirections:

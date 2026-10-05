@@ -82,6 +82,7 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
     # reply going on where the text ended (`ledger.echo_flow`).
     is_story_mode = session.layout.mode is StoryMode.STORY
     streamed = False  # anything shown yet (the error line's lead blank, the line to end)
+    in_text = True  # the story's text drawn last, not a block: where a row may stay open
     chars = 0
     interrupted = False
     call_open = False  # inside a tool call, its opening tag already printed
@@ -193,6 +194,7 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                         block = BlockStream(out, terminal_width(), dim=True)
                         block_name = "thinking"
                         fed += block.open(streamer, fed)
+                        in_text = False
                     written = block.feed(event.text)
                     fed += written
                     streamed = streamed or bool(written)
@@ -219,6 +221,7 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                         text = spaced(fed) + text.lstrip("\n")
                         after_call = False
                     streamer.feed(text)
+                    in_text = True
                     fed += text
                     streamed = True
                     chars += len(event.text)
@@ -261,6 +264,7 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                                 block = BlockStream(out, width, dim=True)
                             block_name = event.name
                             fed += block.open(streamer, fed)
+                            in_text = False
                         written = block.feed(event.text)
                         fed += written
                         streamed = streamed or bool(written)
@@ -299,6 +303,7 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                     block = BlockStream(out, terminal_width(), dim=True)
                     block_name = "tool"
                     fed += block.open(streamer, fed)
+                    in_text = False
                     label = get_tool_label(event.message.provider, event.message.body)
                     written = block.feed(label)
                     fed += written
@@ -332,7 +337,7 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                     close_block()  # a reply cut inside its call still shows it
                     streamer.flush()
                     if streamed:
-                        _end_row(chat, out, story_mode=is_story_mode)
+                        _end_row(chat, out, story_mode=is_story_mode and in_text)
                     if event.stats and is_story_mode:
                         chat.status_note = _unbracketed(
                             event.stats
@@ -352,7 +357,7 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                 close()
 
     if end_row:
-        _end_row(chat, out, story_mode=is_story_mode)
+        _end_row(chat, out, story_mode=is_story_mode and in_text)
 
     if interrupted:
         # The cut line is ended — the prose, a block or the thinking
@@ -360,7 +365,9 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
         # to end: the echo's blank stands as the gap, and a newline here
         # would be a second blank, with the loop's gap making a third.
         if streamed:
-            _end_row(chat, out, story_mode=is_story_mode)
+            # a Ctrl+R's erase counts the row ended (`erase_reply_tail`)
+            open_row = in_text and not watcher.regen_requested
+            _end_row(chat, out, story_mode=is_story_mode and open_row)
         if session.verbose:
             elapsed = time.monotonic() - start
             rate = chars / elapsed if elapsed > 0 else 0.0
@@ -478,10 +485,10 @@ def _unbracketed(stats: str) -> str:
 
 def _end_row(chat: Chat, out: TextIO, *, story_mode: bool) -> None:
     """End the row the stream stopped on — but where it stopped mid-row
-    in story mode's text, leave the row open: the next prompt stands
-    there, back in the text, and a newline would scroll the text up a row
-    at the screen's foot, and show the cursor dropping under it and back
-    (`ledger.hold_at_tail`)."""
+    in story mode's text (`story_mode`: the text drawn last, no block),
+    leave the row open: the next prompt stands there, back in the text,
+    and a newline would scroll the text up a row at the screen's foot,
+    and show the cursor dropping under it and back (`ledger.hold_at_tail`)."""
     if story_mode and chat.ledger.mid_row:
         chat.ledger.hold_at_tail()
     else:

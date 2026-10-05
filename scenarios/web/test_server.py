@@ -428,6 +428,18 @@ class TestPlaying:
         assert set(played) == {"messages"}
         assert played["messages"][-1]["segments"] == landed["segments"]
 
+    def test_a_lines_words_with_the_model_reach_the_page_apart(self, page: Page) -> None:
+        # A played line is split by the backend too: its story, and what
+        # follows an inliner as words with the model — in the landing and
+        # in the play read alike, so the page parses nothing.
+        events = page.play("I wait at the gate. /cue make it rain")
+        landed = next(e for e in events if e["type"] == "user_turn")["turn"]
+        assert landed["segments"] == [
+            {"kind": "prose", "text": "I wait at the gate. /cue"},
+            {"kind": "ooc", "text": " make it rain"},
+        ]
+        assert page.get("/api/play")["messages"][-2]["segments"] == landed["segments"]
+
     def test_the_wire_carries_what_the_page_typed(self, page: Page, server: ModelServer) -> None:
         page.play("I mark the river's true course.")
         assert server.requests[-1]["messages"][-1]["content"] == "I mark the river's true course."

@@ -5,15 +5,17 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://github.com/enclavum/otaku/blob/main/pyproject.toml)
 [![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](https://github.com/enclavum/otaku#requirements)
 
+Otaku is free and open source, runs on your own computer, needs no infrastructure, installs in one
+command, and requires minimal configuration. LLMs can be local (via llama.cpp, KoboldCpp, Ollama,
+and others) or accessed via an API service (OpenRouter, NanoGPT).
+
+The three pillars of otaku:
+
+- **maintain writing quality** as the story grows;
+- **keep the context small**, even for long stories, without losing the details that matter;
+- **high-quality interfaces**, in the browser and in the terminal.
+
 ![otaku web](https://raw.githubusercontent.com/enclavum/otaku/main/images/capture-web.png?v=0.7.0)
-
-Otaku is an LLM frontend for creative writing (like NovelAI) and roleplay (similar to SillyTavern,
-Janitor AI, etc.).
-
-It's free, works on your machine, and lets you play either in a web interface or in the terminal.
-LLMs can be local (via llama.cpp, KoboldCpp, Ollama, and others) or accessed via an API service
-(OpenRouter, NanoGPT). Otaku needs no infrastructure — no Docker, no database server — installs
-in one command, and requires minimal configuration.
 
 ## Demo
 

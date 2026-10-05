@@ -3,11 +3,14 @@ command vocabulary the highlighter picks by; the blocks a reply's calls
 and the thinking are drawn as — behind the bar, wrapped at the width by
 the terminal's own rule, the same whole or in pieces; the question
 parted from its options as the tool reads them; what `message` makes of
-a reply and of a tool's turn; the canvas's echo as one text joined by
-the join rule; and the two readings off the story — which tools' calls
-are shown, and the question it stands on."""
+a reply and of a tool's turn — and of a user's line, its commands
+picked out and its words with the model dim; the canvas's echo as one
+text joined by the join rule, a line's text whole in it; where a reply's
+unit begins; and the two readings off the story — which tools' calls are
+shown, and the question it stands on."""
 
 import io
+import re
 from collections.abc import Callable
 from dataclasses import replace
 from types import SimpleNamespace
@@ -31,10 +34,12 @@ from otaku.terminal.tty.render import (
     message,
     shown_tools,
     spaced,
+    unit_start,
     user_block,
 )
 
 NORMAL = "\x1b[22m"  # intensity back to normal: what closes a dim block
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
 QUESTIONS = frozenset({"question"})
 NOTES = frozenset({"note"})
 
@@ -213,7 +218,15 @@ class TestBlock:
 class TestMessage:
     """`message` over a reply: prose through the typesetter, each call a
     block set apart by a blank line before it and one after where prose
-    goes on — each while `shown` holds its tool, left out otherwise."""
+    goes on — each while `shown` holds its tool, left out otherwise. Over
+    a user's line: the commands picked out, the words with the model dim
+    to the line's end, the text whole."""
+
+    def test_a_users_words_with_the_model_are_dim_to_the_lines_end(self) -> None:
+        drawn = message("I go /cue make it rain", "user")
+        assert _ANSI.sub("", drawn) == "I go /cue make it rain"
+        assert drawn.endswith(f"{DIM} make it rain{NORMAL}")
+        assert DIM not in message("I go and rain", "user")
 
     def test_a_question_is_its_question_alone_as_a_block(self) -> None:
         body = "The door creaks.\n```otk-question\nGo in?\n1. Yes\n2. No\n```"
@@ -297,6 +310,15 @@ class TestFlow:
         # a paragraph join's blank goes with the turn BEFORE it
         assert text[starts[2] - 2 : starts[2]] == "\n\n"
 
+    def test_a_lines_commands_and_words_with_the_model_keep_its_text(self) -> None:
+        line = '/me Mara: "Wait" /cue keep it quiet'
+        drawn = flow([story("user", line)])
+        assert _ANSI.sub("", drawn) == line
+        # the commands open on an escape of their own; the words after the
+        # inliner are dim, and the line's speech is typeset as story
+        assert re.search(r"\x1b\[[0-9;]*m/me", drawn) and re.search(r"\x1b\[[0-9;]*m/cue", drawn)
+        assert f"{DIM} keep it quiet" in drawn
+
     def test_a_tool_turn_draws_nothing_and_the_row_after_it_joins_from_it(self) -> None:
         def rows(make: Callable[[str, str], Message]) -> list[Message]:
             result = replace(make("tool", "Tides: high."), kind="tool", provider="web-search")
@@ -314,6 +336,37 @@ class TestFlow:
         ]
         assert flow(rows) == "One.\n\nTwo."
         assert flow(rows, shown=NOTES) == "One.\n\nTwo."
+
+
+class TestUnitStart:
+    """`unit_start` — where the reply ending a list of rows begins as ONE
+    unit: the reply, and where a tool turn stands right before it, that
+    turn and the reply holding its call, again and again
+    (`Session._pop_reply`'s rule)."""
+
+    def test_a_reply_alone_is_its_own_unit(self) -> None:
+        rows = [chat("user", "Go."), chat("assistant", "Gone.")]
+        assert unit_start(rows, 2) == 1
+
+    def test_a_reply_takes_its_tool_chain(self) -> None:
+        rows = [
+            chat("user", "Look it up."),
+            chat("assistant", "Let me look."),
+            tool_turn("Tides: high."),
+            chat("assistant", "And the time."),
+            tool_turn("Six."),
+            chat("assistant", "High at six."),
+        ]
+        assert unit_start(rows, 6) == 1
+        assert unit_start(rows, 4) == 1
+
+    def test_two_replies_side_by_side_are_two_units(self) -> None:
+        rows = [chat("user", "Go."), chat("assistant", "One."), chat("assistant", "Two.")]
+        assert unit_start(rows, 3) == 2
+
+    def test_a_chain_that_opens_the_rows_starts_at_the_first(self) -> None:
+        rows = [tool_turn("Tides."), chat("assistant", "High.")]
+        assert unit_start(rows, 2) == 0
 
 
 class TestLastTurns:
@@ -397,6 +450,11 @@ def asked_block(text: str, *, width: int) -> str:
     stream.feed(text)
     stream.close()
     return out.getvalue()
+
+
+def tool_turn(body: str) -> Message:
+    """A tool's result, as the session records it."""
+    return Message(role="tool", body=body, kind="tool", provider="web-search")
 
 
 def reply(body: str) -> Message:

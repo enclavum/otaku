@@ -2,7 +2,9 @@
 as a frontend drawing the canvas reads it (`join_type`, the join rule's
 word), how a line typed now would join the newest row (`next_join`, the
 same rule, a line with no break of its own in the layout's mode), and a
-stored body split for a frontend that parses nothing (`segments`)."""
+stored body split for a frontend that parses nothing (`segments`) — a
+reply into prose and its calls, a user's line into its story and its
+words with the model."""
 
 from types import SimpleNamespace
 from typing import cast
@@ -103,6 +105,20 @@ class TestSegments:
     def test_plain_prose_is_one_segment_and_an_empty_body_none(self) -> None:
         assert segments("The hall glows.") == [{"kind": "prose", "text": "The hall glows."}]
         assert segments("") == []
+
+    def test_a_users_line_splits_into_its_story_and_its_words_with_the_model(self) -> None:
+        assert segments("I wait /cue make it rain", "user") == [
+            {"kind": "prose", "text": "I wait /cue"},
+            {"kind": "ooc", "text": " make it rain"},
+        ]
+        assert segments("/you Mara", "user") == [
+            {"kind": "prose", "text": "/you"},
+            {"kind": "ooc", "text": " Mara"},
+        ]
+        # a fence in a line is no call: a line is not a reply
+        assert segments("```otk-note\nx\n```", "user") == [
+            {"kind": "prose", "text": "```otk-note\nx\n```"}
+        ]
 
 
 def session(rows: list[Message], layout: Layout) -> Session:

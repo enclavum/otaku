@@ -773,6 +773,10 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 /* while a paragraph is open, the tail's space would stand on a line of its
    own under the field — the last paragraph open, the flow a line longer */
 .otk-transcript[data-transcript="canvas"]:has(.otk-edit[data-editing]) > .otk-tail-seam { display: none; }
+/* nor while a question stands between the text and the typing place: the
+   answer is typed at the panel's left edge, under it, and runs on in the
+   text once it lands and the panel goes */
+.otk-transcript[data-transcript="canvas"]:has(.otk-ask--live) > .otk-tail-seam { display: none; }
 /* the field held to the paragraph's height scrolls, and the mirror with it
    (`transcript.holdHeight`); its bar stands outside the text's measure
    (`hangScrollbar`), so both wrap at one width */
