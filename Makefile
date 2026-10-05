@@ -2,7 +2,7 @@
 # activated venv, or point it at any other environment runner).
 RUN ?= uv run
 
-.PHONY: lint format typecheck test scenarios test-model
+.PHONY: lint format typecheck test scenarios regression test-model
 
 lint:
 	$(RUN) ruff check otaku/ tests/ scenarios/
@@ -18,6 +18,11 @@ test:
 
 scenarios:
 	$(RUN) pytest scenarios/
+
+# The terminal's screen played turn by turn against its own echo
+# (scenarios/cli/test_screen.py): minutes, so left out of `scenarios`.
+regression:
+	$(RUN) pytest scenarios/ --slow -m slow
 
 # A fake llama.cpp on llama.cpp's own port, for looking at the transcript
 # by hand: its lines' leading digits choose the blocks (scripts/test_model.py).

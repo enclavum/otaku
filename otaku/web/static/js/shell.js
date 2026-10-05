@@ -12,7 +12,7 @@ import { $, $$ } from "./dom.js";
 import { label } from "./format.js";
 import { offerNovel, showLayout } from "./layout.js";
 import { offline, reached, tell, told, working } from "./status.js";
-import { displayTools, isPlaying, showCorrected, showPlayed } from "./transcript.js";
+import { displayTools, isPlaying, joinNext, showCorrected, showPlayed } from "./transcript.js";
 
 const app = $(".otk-app");
 const icon = $('link[rel="icon"]');
@@ -65,7 +65,11 @@ export function showFacts(facts) {
     box.dataset.placeholder ??= box.placeholder;
     const was = box.disabled;
     box.disabled = facts.layout === "canvas";
-    box.placeholder = box.disabled ? "Type your turn in the story above" : box.dataset.placeholder;
+    box.dataset.standing = box.disabled ? "Type your turn in the story above" : box.dataset.placeholder;
+    // a refusal of the line typed on the canvas reads in the box until it
+    // settles (`status.complain`)
+    const refused = box.disabled ? box.dataset.refused : undefined;
+    box.placeholder = refused ?? box.dataset.standing;
     // opened again — a layout switched away from the canvas — it takes the
     // caret the click could not give it while it was shut
     const idle = document.activeElement === document.body;
@@ -75,6 +79,8 @@ export function showFacts(facts) {
     app.dataset.completion = facts.completion_type;
     app.dataset.layout = facts.layout;
   }
+  // where the canvas's typing place draws its space or opens a paragraph
+  joinNext(facts.next_join);
   // the novel is offered only where the model can complete text
   offerNovel(facts.can_complete_text);
   drawn = facts.story_id;

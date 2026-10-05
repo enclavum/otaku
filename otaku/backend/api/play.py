@@ -329,11 +329,29 @@ def join_type(previous: Message | None, next: Message) -> str:
     return get_join_type(previous, next).value
 
 
-def segments(body: str) -> list[dict[str, object]]:
+def next_join(session: Session) -> str | None:
+    """How a line typed now, opening with no break of its own, would join
+    the newest row (`assembler.get_join_type`, the line in the layout's
+    mode) — "inline" or "paragraph", what the canvas draws where it is
+    typed in; None with no row, the story to be begun."""
+    rows = session._messages
+    if not rows:
+        return None
+    line = Message(role="user", body="-", mode=session.layout.mode)
+    return get_join_type(rows[-1], line).value
+
+
+def segments(body: str, role: str = "assistant") -> list[dict[str, object]]:
     """A stored body split for a frontend that parses nothing: prose
     (`{"kind": "prose", "text"}`) and each tool call as its tool's facts
     (`{"kind": "tool_call", …}` — a name no tool owns is a call all the
-    same, with its tool and text alone), in order."""
+    same, with its tool and text alone), in order. A user's line splits
+    instead into its story and its words with the model (`syntax.spans`):
+    `{"kind": "prose"}` and `{"kind": "ooc"}` runs."""
+    if role == "user":
+        return [
+            {"kind": "ooc" if ooc else "prose", "text": text} for text, ooc in syntax.spans(body)
+        ]
     out: list[dict[str, object]] = []
     for part in tool_calls.parse_reply(body):
         if isinstance(part, Prose):

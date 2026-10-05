@@ -8,6 +8,8 @@ the join rule; and the two readings off the story — which tools' calls
 are shown, and the question it stands on."""
 
 import io
+from collections.abc import Callable
+from dataclasses import replace
 from types import SimpleNamespace
 
 from prompt_toolkit.utils import get_cwidth
@@ -254,8 +256,8 @@ class TestToolTurn:
         assert drawn == f"{DIM}{BAR}System info{NORMAL}"
         assert "12:00" not in drawn
 
-    def test_a_tool_without_a_label_is_called_tool(self) -> None:
-        assert message("x", "tool") == f"{DIM}{BAR}Tool{NORMAL}"
+    def test_a_tool_without_a_label_is_called_a_tool_call(self) -> None:
+        assert message("x", "tool") == f"{DIM}{BAR}Tool call{NORMAL}"
 
 
 class TestFlow:
@@ -295,21 +297,23 @@ class TestFlow:
         # a paragraph join's blank goes with the turn BEFORE it
         assert text[starts[2] - 2 : starts[2]] == "\n\n"
 
-    def test_a_tool_turn_is_a_block_apart_and_the_row_after_it_a_paragraph(self) -> None:
-        rows = [
-            Message(role="user", body="Look it up."),
-            Message(role="tool", kind="tool", body="Tides: high.", provider="web-search"),
-            Message(role="assistant", body="High at six."),
-        ]
-        assert flow(rows) == f"Look it up.\n\n{DIM}{BAR}Web search{NORMAL}\n\nHigh at six."
+    def test_a_tool_turn_draws_nothing_and_the_row_after_it_joins_from_it(self) -> None:
+        def rows(make: Callable[[str, str], Message]) -> list[Message]:
+            result = replace(make("tool", "Tides: high."), kind="tool", provider="web-search")
+            return [make("user", "Look it up."), result, make("assistant", "High at six.")]
 
-    def test_a_note_rides_the_flow_only_while_displayed(self) -> None:
+        # in story mode the reply goes on in the paragraph the call interrupted
+        assert flow(rows(story)) == "Look it up. High at six."
+        # chat rows, read in the one text, are paragraphs
+        assert flow(rows(chat)) == "Look it up.\n\nHigh at six."
+
+    def test_no_note_rides_the_flow_even_while_displayed(self) -> None:
         rows = [
             Message(role="user", body="One."),
             Message(role="assistant", body="Two.\n```otk-note\nKey.\n```"),
         ]
         assert flow(rows) == "One.\n\nTwo."
-        assert flow(rows, shown=NOTES) == f"One.\n\nTwo.\n\n{DIM}{BAR}Key.{NORMAL}"
+        assert flow(rows, shown=NOTES) == "One.\n\nTwo."
 
 
 class TestLastTurns:
@@ -326,8 +330,8 @@ class TestLastTurns:
 
     def test_on_the_canvas_the_one_text(self) -> None:
         rows = [story("user", "She waited for"), story("assistant", "the bus.")]
-        assert last_turns(rows, 2, is_canvas=True) == "She waited for the bus."
-        assert last_turns(rows, 1, is_canvas=True) == "the bus."
+        assert last_turns(rows, 2, is_story_mode=True) == "She waited for the bus."
+        assert last_turns(rows, 1, is_story_mode=True) == "the bus."
 
 
 class TestShownTools:
@@ -402,6 +406,11 @@ def reply(body: str) -> Message:
 def story(role: str, body: str) -> Message:
     """A row written in story mode."""
     return Message(role=role, body=body, mode=StoryMode.STORY)
+
+
+def chat(role: str, body: str) -> Message:
+    """A row written in chat mode, as every row before story mode was."""
+    return Message(role=role, body=body)
 
 
 def _columns(row: str) -> int:

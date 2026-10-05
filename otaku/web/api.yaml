@@ -2095,6 +2095,10 @@ components:
         completion_type: { type: string, enum: [chat, text], description: "The wire the next request goes over (Session.completion_type): text for a novel on a model that can complete text, chat otherwise." }
         layout: { type: string, enum: [canvas, manuscript, chat], description: "The look the open story is drawn in (Transcript.layout) — the canvas for a novel and a canvas alike. On the canvas the send button reads Continue and an empty line continues the text." }
         can_complete_text: { type: boolean, description: "Whether the novel is offered on the model in use: its engine serves the text wire and a plain template is in force (a text_template = \"plain\" line in models.toml). What shows the novel glyph." }
+        next_join:
+          type: [string, "null"]
+          enum: [inline, paragraph, null]
+          description: How a line typed now, opening with no break of its own, would join the newest row (the backend's join rule) — where the canvas's typing place draws its one space or opens a paragraph; null while the story has no row.
 
     Settings:
       type: object
@@ -2282,7 +2286,7 @@ components:
           description: "Who generated the turn: an engine, 'card' on a card greeting, or a tool's name on a tool turn."
         tool_label:
           type: [string, "null"]
-          description: "A tool turn's tool as the page names it for the result it holds ('Web search failed' for a search that failed); null on every other turn."
+          description: "A tool turn's tool as the page names it for the result it holds ('Web search call'; 'Web search failed' for a search that failed); null on every other turn."
         model: { type: [string, "null"] }
         template:
           type: [string, "null"]
@@ -2297,12 +2301,17 @@ components:
           description: "How the turn joins the one before it, the wire's own rule (context.assembler.get_join_type): inline — one space before it, where both rows were written in story mode, neither a tool's result nor a card's, and no break stands at the boundary; paragraph — a blank line before it, every other row. What the canvas layout draws by."
         segments:
           type: array
-          description: The body split in order — prose, and each tool call as its tool's facts — so the page draws a turn without parsing it. The body itself stays whole above, for the editor.
+          description: The body split in order — prose, and each tool call as its tool's facts; a user's line, its story and its words with the model (context.syntax.spans) — so the page draws a turn without parsing it. The body itself stays whole above, for the editor.
           items:
             oneOf:
               - type: object
                 properties:
                   kind: { const: prose }
+                  text: { type: string }
+              - type: object
+                description: "A user's line's words with the model: all of a /you or /ooc line after its token, whatever follows a /ooc or /cue inliner. Out of character, never story."
+                properties:
+                  kind: { const: ooc }
                   text: { type: string }
               - type: object
                 description: A tool call; a tool's carries what it read (backend.tools.Tool.to_json), one of a name no tool owns its text alone.

@@ -72,8 +72,9 @@ class Tool:
     @classmethod
     def label_of(cls, result: str) -> str:
         """What a frontend calls a TOOL turn of this tool holding `result`
-        — the tool's label, unless the result says it is something else."""
-        return cls.label
+        — the tool's label and "call", "Web search call", unless the
+        result says it is something else."""
+        return f"{cls.label} call"
 
 
 class ToolQuestion(Tool):
@@ -198,7 +199,7 @@ class ToolWebSearch(Tool):
     @classmethod
     def label_of(cls, result: str) -> str:
         # a search that failed is called so, in both frontends
-        return cls._FAILED if result.startswith(f"{cls._FAILED}:") else cls.label
+        return cls._FAILED if result.startswith(f"{cls._FAILED}:") else super().label_of(result)
 
 
 # Every tool, keyed by its name — the one registry.
@@ -216,9 +217,10 @@ def read_call(name: str, text: str) -> Tool:
 def get_tool_label(name: str | None, result: str) -> str:
     """What a frontend calls a tool turn: the label of the tool its
     `provider` names, for the `result` it holds (`Tool.label_of` — "Web
-    search failed" for a search that failed); the name itself for a tool
-    this build does not have, "" for none."""
-    if not name:
-        return ""
-    found = TOOLS.get(name)
-    return found.label_of(result) if found is not None else name
+    search call", "Web search failed" for a search that failed); the name
+    itself and "call" for a tool this build does not have, "Tool call"
+    for none."""
+    found = TOOLS.get(name or "")
+    if found is not None:
+        return found.label_of(result)
+    return f"{name[:1].upper()}{name[1:]} call" if name else "Tool call"

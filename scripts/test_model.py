@@ -4,7 +4,7 @@
 It answers as llama.cpp does, on llama.cpp's default port, so the
 `[llamacpp]` section a first run writes points here with nothing changed:
 two models, as llama.cpp's router serves several, both loaded, each a 32K
-window — `otaku-test-chat`, an instruct model as most are, and
+window and seeing pictures — `otaku-test-chat`, an instruct model as most are, and
 `otaku-test-text`, the base model the novel's text wire is for once one
 hand line says so: `text_template = "plain"` under `[otaku-test-text]` in
 configs/models.toml. Pick one in the model picker, switch on the story's
@@ -28,8 +28,9 @@ the paragraph before it, as every reply that opens without a break does:
     8  an opening with a paragraph break
     0  everything: thinking, prose, a note, both tools, then a question
 
-A line whose number is `-1` fails instead: the engine answers 500 before
-a word arrives, and the reply stops on the failure.
+A line whose number is `-1` fails half the time: the engine answers 500
+before a word arrives, and the reply stops on the failure; the other half,
+and so a retry may, it gets a paragraph of prose.
 
 On the text wire a line runs on in the paragraph before it, so the line
 read there is what the story gained after the fake's own last reply. The
@@ -115,6 +116,9 @@ def main() -> None:
     server.loaded = {CHAT_MODEL, TEXT_MODEL}
     server.window = WINDOW
     server.contexts.update({CHAT_MODEL: WINDOW, TEXT_MODEL: WINDOW})
+    # Both see: the router lists each with the image modality, so a picture
+    # may be attached wherever the wire carries one (the text wire never does).
+    server.capabilities.update({CHAT_MODEL: ["vision"], TEXT_MODEL: ["vision"]})
     # The template probe (`/apply-template`) answered at once, by a template
     # that reads no thinking switch: the client learns "unknown" and keeps
     # it. Unanswered, each probe fell through to a reply, streamed at the
@@ -134,7 +138,7 @@ def main() -> None:
     print("A number in a line: 1 think · 2 note · 3 question · 4 system info · 5 search")
     print(
         "  6 long · 7 continuation · 8 paragraph · 0 everything — combine them: 13 or 1,3 …"
-        " · -1 a failure",
+        " · -1 a failure, half the time",
         flush=True,
     )
     restore = _quiet_interrupt()
@@ -197,7 +201,8 @@ def reply(body: dict[str, Any]) -> str | tuple[str, str]:
 
 def refuse(body: dict[str, Any]) -> int | None:
     """The status a request is refused with, or None to serve it: 500 for
-    a line whose number is -1, before any word of a reply."""
+    a line whose number is -1, half the time, before any word of a reply —
+    so a retry may get through."""
     if "messages" in body:
         last = body["messages"][-1]
         line = content_text(last) if last.get("role") == "user" else ""
@@ -207,7 +212,8 @@ def refuse(body: dict[str, Any]) -> int | None:
     else:
         line = _text_line(str(body.get("prompt", "")))
     found = _NUMBERS.search(line)
-    return 500 if found is not None and re.match(r"-1(?!\d)", found.group(0)) else None
+    failing = found is not None and re.match(r"-1(?!\d)", found.group(0))
+    return 500 if failing and random.random() < 0.5 else None
 
 
 # The fake's last reply over the text wire: the newest line is what follows it.

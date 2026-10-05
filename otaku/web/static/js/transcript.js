@@ -32,6 +32,9 @@ const transcript = $(".otk-transcript");
 // its label, lowercase — its name where this build has none. The
 // terminal's status row says the same (`chat.stream._calling`).
 const _calling = (tool) => `calling the ${tool} tool`;
+// How long a word stands on the status row at least, so a quick one is read
+// rather than flashed.
+const _SAY_MS = 250;
 // A reply's rubric, worded as the played turn's is: the page's own word
 // for the model's voice, the one its question panel uses.
 const _replyRubric = (position) => `${position} · narrator`;
@@ -108,6 +111,7 @@ export function displayTools(settings) {
 }
 
 export function showTurns(turns, { keepPlace = false, posed = false } = {}) {
+  shelved = null;
   /* `keepPlace` is for a redraw the reader did not ask to be moved by —
      a refused regenerate: the turns change, the scroll does not.
      `posed`: the newest reply's question is the live one, posed in its
@@ -135,12 +139,17 @@ export function showTurns(turns, { keepPlace = false, posed = false } = {}) {
     stats line, a roll's dice. A page that is not the store's turns with
     the end cut off is drawn again instead. */
 export function takeBack(turns) {
+  shelved = null;
+  // the question the story stands on again once its answer is taken back:
+  // posed anew, as the terminal poses it (`chat.bindings._pose_again`)
+  const call = questionPosed(turns.at(-1));
   const drawn = storedTurns();
   const same = turns.every(
     (turn, i) => drawn[i] && (turn.role === "user") === drawn[i].classList.contains("otk-turn"),
   );
   if (!same) {
-    showTurns(turns, { keepPlace: true });
+    showTurns(turns, { keepPlace: true, posed: Boolean(call) });
+    if (call) showAsk(call);
     return;
   }
   const kept = drawn[turns.length - 1];
@@ -150,7 +159,14 @@ export function takeBack(turns) {
     if (!node.classList.contains("otk-gap")) gone.push(node);
   }
   ordinal = turns.length;
-  holdSpace(() => gone.forEach((each) => each.remove()));
+  holdSpace(() => {
+    gone.forEach((each) => each.remove());
+    if (call) {
+      // drawn again without the past question the answer left in it
+      kept.replaceWith(drawTurn(turns.at(-1), turns.length, { posed: true }));
+      showAsk(call);
+    }
+  });
   showTurnBar();
   showTail();
 }
@@ -159,6 +175,7 @@ export function takeBack(turns) {
     question, and the answers to pick from — none for a free-form one.
     Any earlier one goes; a typed line or a redraw takes it down too. */
 export function showAsk(call) {
+  shelved = null;
   clearAsk();
   // A reader at the end before the panel goes in is carried down to it:
   // `following` alone would miss a fresh draw, whose own scroll to the
@@ -258,15 +275,26 @@ function readAsk(text, closed) {
    lands. It goes on in the paragraph by default — the one space the join
    draws is DRAWN here too (`data-seam`, `app.css`), so no caret can stand
    before it; nothing of it is sent, the join is the backend's.
-   Enter opens a PARAGRAPH: a block of its own (`.otk-tail__p`), spaced as
-   the story's paragraphs are, with no empty line between to step onto; on
-   send each is the blank line the story stores. Ctrl/⌘+Enter (or the
-   Send button) sends. A reply under way takes it down; the next
-   landing puts it back. */
+   Enter (or the Send button) sends — on a touch screen the Send button
+   alone, Enter there being the keyboard's only way to a new paragraph.
+   Ctrl/⌘+Enter opens a PARAGRAPH: a block of its own (`.otk-tail__p`),
+   spaced as the story's paragraphs are, with no empty line between to
+   step onto; on send each is the blank line the story stores. A reply
+   under way takes it down; the next landing puts it back. */
 let tail = null;
 // the join's one space, drawn just before the tail and outside it, so the
 // caret always stands after it — where the typed text will
 let seam = null;
+// when Ctrl/⌘+Enter last opened a paragraph in the tail, so a menu the
+// same key asked for does not open another
+let openedAt = -Infinity;
+// how a line typed now would join the newest row, as the backend says
+// (`facts.next_join`): "inline", "paragraph", null in a story not begun
+let nextJoin = null;
+// the question an option was taken from to be edited in the tail
+// (`draftTail`): posed again once the tail is empty, as the terminal's
+// empty line brings its menu back; forgotten when the story moves on
+let shelved = null;
 
 export function tailText() {
   if (!tail?.isConnected) return null;
@@ -274,7 +302,7 @@ export function tailText() {
 }
 
 /** The tail's paragraphs as typed: the part that goes on from the text,
-    then one per block Enter opened. */
+    then one per paragraph opened. */
 function tailParagraphs() {
   const out = [""];
   for (const node of tail.childNodes) {
@@ -305,6 +333,7 @@ export function showTail() {
         tail.replaceChildren();
         markBlank();
         focusTail();
+        poseShelved();
         return;
       }
       if (event.key === "Backspace" && joinParagraph()) {
@@ -324,9 +353,36 @@ export function showTail() {
       }
       if (event.key !== "Enter") return;
       event.preventDefault();
-      if (event.ctrlKey || event.metaKey) $(".otk-composer [data-send]")?.click();
-      else if (event.shiftKey) breakLine();
-      else openParagraph();
+      if (event.shiftKey) breakLine();
+      else if (event.ctrlKey || event.metaKey) {
+        openedAt = event.timeStamp;
+        openParagraph();
+      } else if (window.matchMedia("(pointer: coarse)").matches) openParagraph();
+      else $(".otk-composer [data-send]")?.click();
+    });
+    /* Firefox on a Mac takes Control+Return for the context menu before
+       the Enter reaches the page: a menu asked for with Control held and
+       no pointer pressed for it is that key, and opens a paragraph — once,
+       should the Enter have come through too. A click's menu stands.
+       Control is tracked here, as the menu's own event may not carry it. */
+    let control = false;
+    let pressedAt = -Infinity;
+    tail.addEventListener("keydown", (event) => {
+      if (event.key === "Control") control = true;
+    });
+    tail.addEventListener("keyup", (event) => {
+      if (event.key === "Control") control = false;
+    });
+    tail.addEventListener("blur", () => {
+      control = false;
+    });
+    tail.addEventListener("pointerdown", (event) => {
+      pressedAt = event.timeStamp;
+    });
+    tail.addEventListener("contextmenu", (event) => {
+      if (!(event.ctrlKey || control) || event.timeStamp - pressedAt < 500) return;
+      event.preventDefault();
+      if (event.timeStamp - openedAt > 500) openParagraph();
     });
     tail.addEventListener("input", () => {
       // a break the browser leaves in the text that goes on from the
@@ -334,6 +390,7 @@ export function showTail() {
       for (const br of tail.querySelectorAll(":scope > br")) br.remove();
       markBlank();
       revealTail();
+      poseShelved();
     });
     // entered blank, the caret goes where the text goes on: after the seam
     tail.addEventListener("focus", () => {
@@ -344,29 +401,73 @@ export function showTail() {
       if (event.target === transcript || event.target.matches(".otk-gap, .otk-tail-seam")) focusTail();
     });
   }
-  // the text it goes on from: a space where the text does not end in one,
-  // nothing after a tool's turn or with no row at all (a paragraph anyway)
-  const newest = $$(".otk-turn, .otk-reply, .otk-tool", transcript)
-    .filter((row) => !row.dataset.unstored)
-    .at(-1);
-  const before =
-    newest && !newest.matches(".otk-tool") ? $(".otk-reader > textarea", newest)?.value : undefined;
+  // a blank tail shows the caret a reply streams behind until something is
+  // typed (`app.css`)
   tail.replaceChildren();
-  // what a blank tail shows until something is typed, so there is
-  // something to click (`app.css`): an empty story is begun, not continued
-  tail.dataset.placeholder = newest ? "Continue…" : "Start here…";
-  tail.toggleAttribute("data-seam", before !== undefined && !/\s$/.test(before));
-  markBlank();
+  placeTail();
   transcript.insertBefore(seam, $(".otk-gap", transcript));
   transcript.insertBefore(tail, $(".otk-gap", transcript));
   // the caret back where the story is written, when nothing else holds it
-  const idle = document.activeElement === document.body || document.activeElement?.id === "otk-msg";
+  // — the composer's own controls included: a regenerate clicked on the
+  // canvas leaves the focus on its button, the tail being down meanwhile
+  const active = document.activeElement;
+  const idle = active === document.body || Boolean(active?.closest(".otk-composer"));
   if (idle && !window.matchMedia("(pointer: coarse)").matches) focusTail();
 }
 
 const isParagraph = (node) => node?.nodeType === Node.ELEMENT_NODE && node.matches(".otk-tail__p");
 
-/** The paragraph a point stands in — a block Enter opened, or the tail
+/** The canvas's own end as a place a line is typed, for the prefix menu
+    (`composer.js`), as the box is one: the text before the caret in its
+    paragraph, whether what is typed is one line yet, the whole of it, the
+    `count` characters before the caret replaced — the slash word, a name
+    begun — and where the caret stands, the menu's anchor. Null while the
+    canvas is not typed in. */
+export function tailHost() {
+  if (!tail?.isConnected) return null;
+  const point = () => {
+    const selection = getSelection();
+    return selection.rangeCount && tail.contains(selection.anchorNode) ? selection.getRangeAt(0) : null;
+  };
+  return {
+    before() {
+      const at = point();
+      if (!at) return "";
+      const range = document.createRange();
+      range.setStart(paragraphAt(at.startContainer, at.startOffset).own, 0);
+      range.setEnd(at.startContainer, at.startOffset);
+      return range.toString().replaceAll("\u200b", "");
+    },
+    oneLine: () => !(tailText() ?? "").includes("\n"),
+    text: () => tailText() ?? "",
+    replace(count, text) {
+      const at = point();
+      if (!at) return;
+      const range = at.cloneRange();
+      range.collapse(true);
+      if (count && range.startContainer.nodeType === Node.TEXT_NODE && range.startOffset >= count) {
+        range.setStart(range.startContainer, range.startOffset - count);
+      }
+      range.deleteContents();
+      const written = document.createTextNode(text);
+      range.insertNode(written);
+      const caret = document.createRange();
+      caret.setStart(written, text.length);
+      const selection = getSelection();
+      selection.removeAllRanges();
+      selection.addRange(caret);
+      markBlank();
+      revealTail();
+    },
+    anchor() {
+      const at = point();
+      const rect = at?.getClientRects()[0];
+      return rect?.height ? rect : tail.getBoundingClientRect();
+    },
+  };
+}
+
+/** The paragraph a point stands in — a block opened by its key, or the tail
     itself for the part that goes on from the story, which runs up to the
     first block — and the range from the point to that paragraph's end. */
 function paragraphAt(container, offset) {
@@ -383,8 +484,9 @@ function paragraphAt(container, offset) {
   return { own, rest };
 }
 
-/** Enter: the paragraph the caret is in splits there, what follows the
-    caret opening a new block, the caret at its start. */
+/** Ctrl/⌘+Enter (Enter on a touch screen): the paragraph the caret is in
+    splits there, what follows the caret opening a new block, the caret at
+    its start. */
 function openParagraph() {
   const selection = getSelection();
   if (!selection.rangeCount) return;
@@ -442,9 +544,47 @@ function joinParagraph() {
   return true;
 }
 
+/** An option taken to be edited, on the canvas: the tail holds it, the
+    caret at its end, and the question goes — as the terminal's → takes
+    an answer into the line and dismisses the menu. False off the canvas,
+    where the box takes it (`composer.draft`). */
+export function draftTail(line) {
+  if (!tail?.isConnected) return false;
+  shelved = $(".otk-ask--live", transcript)?._call ?? null;
+  holdSpace(clearAsk);
+  tail.replaceChildren(line);
+  markBlank();
+  focusTail();
+  revealTail();
+  return true;
+}
+
+function poseShelved() {
+  if (!shelved || !tail.hasAttribute("data-blank")) return;
+  const call = shelved;
+  shelved = null;
+  showAsk(call);
+}
+
+/** How a line typed now would join the story, as the backend says
+    (`facts.next_join`, read after every write): the tail placed again. */
+export function joinNext(join) {
+  nextJoin = join ?? null;
+  if (tail?.isConnected) placeTail();
+}
+
+function placeTail() {
+  // the join is the backend's: the one space drawn before the tail, or a
+  // paragraph it opens — neither in a story not begun
+  tail.toggleAttribute("data-seam", nextJoin === "inline");
+  if (nextJoin === "paragraph") tail.dataset.join = "paragraph";
+  else delete tail.dataset.join;
+  markBlank();
+}
+
 function markBlank() {
   const text = tailParagraphs().join("\n\n");
-  // the placeholder stands until something is typed — a caret is not typing
+  // the drawn caret stands until something is typed — the browser's is not typing
   tail.toggleAttribute("data-blank", !tail.textContent && !tail.querySelector(".otk-tail__p"));
   // a line that opens with whitespace — or a paragraph — needs no drawn seam
   if (seam) seam.hidden = !tail.hasAttribute("data-seam") || /^\s/.test(text);
@@ -598,14 +738,15 @@ export async function showCorrected(position, text) {
   const turn = storedTurns()[position - 1];
   const field = turn && $("textarea.otk-editable", turn);
   if (!field) return;
-  field._settle(text);
-  if (turn.matches(".otk-reply")) await redrawReply(position);
-  else $(".otk-reader", turn)._repaint();
+  field._settle(text.trim()); // the field holds no edges (`correctable`)
+  await redrawTurn(position);
 }
 
-async function redrawReply(position) {
-  /* Read whole: a corrected newest reply may have changed the question
-     the story stands on, and the panel follows it. */
+async function redrawTurn(position) {
+  /* Read whole: a turn is drawn from what the store splits it into (a
+     reply's calls, a line's words with the model), and a corrected newest
+     reply may have changed the question the story stands on, and the
+     panel follows it. */
   const { messages } = await api.played();
   const stored = messages[position - 1];
   const drawn = storedTurns()[position - 1];
@@ -685,7 +826,9 @@ function reserve(top = transcript.scrollTop) {
   const story =
     gap.getBoundingClientRect().top - view.top - transcript.clientTop + transcript.scrollTop +
     parseFloat(getComputedStyle(transcript).paddingBottom);
-  const needed = Math.max(0, top + transcript.clientHeight - story);
+  // At the top any position is legal: nothing to keep, and a block filling
+  // the view only brings a scrollbar a story that fits never needed.
+  const needed = top > 0 ? Math.max(0, top + transcript.clientHeight - story) : 0;
   gap.style.height = `${needed}px`;
   // caught up: holding now only keeps a scrollbar longer than the story
   if (!needed) release();
@@ -807,11 +950,16 @@ function drawTurn(turn, position, { posed = false } = {}) {
     // The whitespace at a line's edges is the joins' to draw: an inline
     // line gets the join's one space before it, drawn as a reply's is
     // (`.otk-seam`), and a paragraph's blank line is the article's own.
+    // The stored line is drawn from its segments; a text not stored yet —
+    // an edit settling — plain, until the store's redraw (`redrawTurn`).
     const drawn = (line) => {
-      const body = withSlashTokens(line.trim());
+      const body = line === turn.body.trim() ? lineNodes(turn.segments) : withSlashTokens(line.trim());
       return turn.join_type === "inline" ? [joinSpace(), ...body] : body;
     };
-    article.append(rubric, correctable("otk-turn__body", turn.body, drawn));
+    article.append(
+      rubric,
+      correctable("otk-turn__body", turn.body, drawn, { saved: (position) => redrawTurn(position) }),
+    );
     // The pictures that rode the line, under it: the row's own facts,
     // the tiles asked for by address ([] on a turn without any).
     if (turn.attachments?.length) article.append(thumbs(turn.attachments));
@@ -854,12 +1002,21 @@ function replyReader(turn, { posed = false } = {}) {
   // A row that joins the text before it inline gets the join's one space
   // before it (`turn.join_type`).
   const inline = turn.join_type === "inline";
-  return correctable(
+  const box = correctable(
     "otk-prose",
     turn.body,
     () => replyNodes(parts, storedCall(parts, posed), { inline }),
-    { saved: (position) => redrawReply(position) },
+    { saved: (position) => redrawTurn(position) },
   );
+  // its text as the canvas draws it: the prose, each call left out and the
+  // paragraph break it stood for drawn (`replyNodes`, `blockGap`)
+  box._shown = () =>
+    parts
+      .filter((part) => part.kind === "prose")
+      .map((part) => part.text.trim())
+      .filter(Boolean)
+      .join("\n\n");
+  return box;
 }
 
 function storedCall(segments, posed) {
@@ -894,12 +1051,20 @@ function replyNodes(segments, callNode, { inline = false } = {}) {
      inline (`turn.join_type`), so a reply opening with prose gets the
      join's one space first, as its own span, which the canvas shows and
      every other layout hides (`.otk-seam`), each turn being a block of
-     its own there. */
+     its own there. Two runs a DRAWN block stands between get the
+     paragraph break it stands for as well (`blockGap`), for the canvas,
+     which hides the block. */
   const out = [];
   let prose = "";
+  let sawProse = false; // whether a run of prose is drawn yet
+  let between = false; // whether a block stands since the last run
   const flush = () => {
-    if (prose) out.push(...typesetBody(prose));
+    if (!prose) return;
+    if (between) out.push(blockGap());
+    out.push(...typesetBody(prose));
     prose = "";
+    sawProse = true;
+    between = false;
   };
   segments.forEach((segment, i) => {
     if (segment.kind === "prose") {
@@ -912,6 +1077,7 @@ function replyNodes(segments, callNode, { inline = false } = {}) {
     if (!drawn) return;
     flush();
     out.push(drawn);
+    between = sawProse;
   });
   flush();
   /* A block among the text stands the one gap from whatever is on either
@@ -967,18 +1133,25 @@ function correctable(className, body, nodesOf, { saved = null } = {}) {
      wear one class in one box, both keeping the text's own line breaks,
      so opening it moves nothing but what the marks and faces change.
      `saved` runs after a write that landed, for a turn whose reading
-     is not the words' own. */
+     is not the words' own. The field holds the text without the
+     whitespace at its edges: a break there is the row's join, which the
+     canvas draws as the paragraph gap and the other layouts leave out,
+     so in the field it would read as blank lines. Kept beside it
+     (`bodyOf`), and the save keeps it (`stories.edit_message`). */
   const read = element("div", `otk-editable ${className} otk-typeset`);
   const both = element("div", "otk-reader");
+  const core = body.trim();
+  const lead = body.slice(0, body.indexOf(core));
   const field = editable(className, {
-    text: body,
+    text: core,
     save: async (text) => {
       const position = storedTurns().indexOf(both.closest("article"));
-      const answer = await saveEdit(position, field._stored(), text);
+      const answer = await saveEdit(position, bodyOf(field), text);
       if (!answer.refused && saved) await saved(position + 1);
       return answer;
     },
   });
+  field._edges = [lead, body.slice(lead.length + core.length)];
   both._repaint = () => read.replaceChildren(...nodesOf(field._typed()));
   both.append(read, field);
   /* In the canvas a paragraph of several rows opens as ONE field holding
@@ -989,13 +1162,34 @@ function correctable(className, body, nodesOf, { saved = null } = {}) {
      span, so the save writes that row and nothing else. */
   const box = edited(both, "", "otk-edit--turn", {
     opening: () => frame(both, field, read),
-    closing: () => unframe(both, field),
+    opened: (height) => holdHeight(both, field, read, height),
+    closing: () => {
+      unframe(both, field);
+      releaseHeight(field, read);
+    },
   });
+  // the text as drawn, for a paragraph edited as one field (`frame`); a
+  // reply's leaves its calls out (`replyReader`)
+  box._shown = () => field._stored().trim();
   field.addEventListener("input", () => {
     if (field._frame) mirror(read, field);
+    // typing may make the text outgrow the held height, and bring a bar
+    if (field.style.height) hangScrollbar(field);
+  });
+  // a mirror behind the field scrolls with it (`holdHeight`)
+  field.addEventListener("scroll", () => {
+    if (field._frame) read.scrollTop = field.scrollTop;
   });
   field.addEventListener("beforeinput", (event) => holdToSpan(field, event));
   return box;
+}
+
+/** A turn's whole text as the store holds it: the field's words between
+    the edges it keeps aside (`correctable`) — the words trimmed, as the
+    store trims a correction; what a save proves the page still draws. */
+function bodyOf(field) {
+  const [lead, trail] = field._edges ?? ["", ""];
+  return lead + field._stored().trim() + trail;
 }
 
 /** The rows drawn as one paragraph with `article`: from the row that
@@ -1015,12 +1209,17 @@ function frame(both, field, read) {
   if (transcript.dataset.transcript !== "canvas") return;
   const article = both.closest("article");
   const group = paragraphOf(article);
-  if (group.length < 2) return;
-  const textOf = (row) => $("textarea.otk-editable", row)._stored();
-  const at = group.indexOf(article);
+  // the rows' text as the canvas draws it: one space at each join, drawn
+  // and never stored (`joinSpace`) — every row after the first joins
+  // inline — and nothing of a tool's turn, which it hides
+  const shown = group.filter((row) => !row.matches(".otk-tool"));
+  if (shown.length < 2) return;
+  // as drawn: a row not edited shows no call's fences, nobody types in it
+  const textOf = (row) => $(".otk-edit", row)._shown();
+  const at = shown.indexOf(article);
   field._frame = {
-    prefix: group.slice(0, at).map(textOf).join(""),
-    suffix: group.slice(at + 1).map(textOf).join(""),
+    prefix: shown.slice(0, at).map((row) => `${textOf(row)} `).join(""),
+    suffix: shown.slice(at + 1).map((row) => ` ${textOf(row)}`).join(""),
   };
   field.value = field._frame.prefix + field._stored() + field._frame.suffix;
   // the other rows step out of the flow while the one field stands for
@@ -1036,6 +1235,46 @@ function unframe(both, field) {
   for (const other of $$("[data-framed]", transcript)) delete other.dataset.framed;
   delete both.closest(".otk-edit").dataset.framing;
   field.value = field._stored();
+}
+
+function holdHeight(both, field, read, height) {
+  /* The field takes the height of what it stands in for and scrolls
+     inside it, so opening moves nothing below: the reading's, as it stood
+     — a reply's calls drawn as blocks, not their raw fences. On the canvas
+     the paragraph is text alone: the field's own text with its row as
+     drawn (`_shown`), measured in the field's own metrics. */
+  if (canvas()) {
+    const raw = field.value;
+    const own = both.closest(".otk-edit")._shown();
+    field.style.height = "auto";
+    field.value = (field._frame?.prefix ?? "") + own + (field._frame?.suffix ?? "");
+    height = field.scrollHeight;
+    field.value = raw;
+  }
+  if (!height) return;
+  field.style.height = `${height}px`;
+  field.style.overflowY = "auto";
+  hangScrollbar(field);
+}
+
+function hangScrollbar(field) {
+  /* A scrollbar takes its width out of the text's and rewraps it: the
+     field is widened by it instead, the bar standing outside the text's
+     measure. An overlay scrollbar takes none, and nothing changes. */
+  field.style.width = "";
+  field.style.marginRight = "";
+  const bar = field.offsetWidth - field.clientWidth;
+  if (bar <= 0) return;
+  field.style.width = `calc(100% + ${bar}px)`;
+  field.style.marginRight = `-${bar}px`;
+}
+
+function releaseHeight(field, read) {
+  field.style.height = "";
+  field.style.overflowY = "";
+  field.style.width = "";
+  field.style.marginRight = "";
+  read.scrollTop = 0;
 }
 
 /** The mirror behind the framed field: the same text, raw — what wraps
@@ -1067,10 +1306,36 @@ function holdToSpan(field, event) {
   if (crossing) event.preventDefault();
 }
 
+/** The paragraph break a block among the prose stands for, as a
+    `.otk-blockgap` span — shown on the canvas alone, which hides the
+    blocks (`app.css`), so the runs either side read as two paragraphs
+    rather than one line glued at the seam. */
+function blockGap() {
+  return span("otk-blockgap", "\n\n");
+}
+
 /** The one space an inline join draws, as a `.otk-seam` span — the
     canvas shows it and the other layouts hide it; never stored. */
 function joinSpace() {
   return span("otk-seam", " ");
+}
+
+function lineNodes(segments) {
+  /* The reader's line from the store's split (`segments`): its commands
+     picked out, its words with the model faint — all of a /you or /ooc
+     line after the token, whatever follows a /ooc or /cue to its end —
+     in every layout; the edges trimmed, as the line is (`drawTurn`). */
+  const last = segments.length - 1;
+  return segments.flatMap((segment, i) => {
+    let text = segment.text;
+    if (i === 0) text = text.trimStart();
+    if (i === last) text = text.trimEnd();
+    const nodes = withSlashTokens(text);
+    if (segment.kind !== "ooc") return nodes;
+    const ooc = span("otk-ooc");
+    ooc.append(...nodes);
+    return [ooc];
+  });
 }
 
 function withSlashTokens(line) {
@@ -1197,6 +1462,7 @@ async function settleFromStore(turn) {
 }
 
 function beginTurn(regenerate, { continues = false } = {}) {
+  shelved = null;
   /* The reply follows only a reader who was at the tail. A regenerate
      also redraws into the space the old take was read in, and follows
      only once that space is filled. Measured before anything moves. */
@@ -1284,7 +1550,40 @@ function openArticle() {
   // `pieces`: what has arrived, in order — prose runs and tool calls, the
   // segments a stored turn carries, kept as they stream so each call
   // draws in its place
-  return { article, block, status, state, rubric, ticking, over: null, reasoning: null, ask: null, pieces: [] };
+  // `said`, `saidAt`: the status row's word and when it went up (`sayDoing`)
+  return { article, block, status, state, rubric, ticking, said: "waiting", saidAt: started, over: null, reasoning: null, ask: null, pieces: [] };
+}
+
+function sayDoing(turn, text, { call = false } = {}) {
+  /* What the reply is doing, on its status row. Every word stands a moment
+     at least (`_SAY_MS`), so a quick one — a call otaku runs at once, a
+     moment of reasoning — is read rather than flashed. A word that comes
+     sooner waits its turn: a call's is kept, any other is replaced by the
+     next, which says the same moment better. */
+  const queue = (turn.waiting ??= []);
+  const last = queue.at(-1);
+  if (text === (last?.text ?? turn.said)) return;
+  if (last && !last.call) queue.pop();
+  if (text !== (queue.at(-1)?.text ?? turn.said)) queue.push({ text, call });
+  showDoing(turn);
+}
+
+function showDoing(turn) {
+  // the next waiting word, once the one up has stood its time
+  if (turn.deferred || !turn.waiting?.length) return;
+  const left = turn.saidAt + _SAY_MS - Date.now();
+  if (left > 0) {
+    turn.deferred = setTimeout(() => {
+      turn.deferred = null;
+      showDoing(turn);
+    }, left);
+    return;
+  }
+  const { text } = turn.waiting.shift();
+  turn.state.textContent = text;
+  turn.said = text;
+  turn.saidAt = Date.now();
+  showDoing(turn);
 }
 
 function streamAsk(turn, call) {
@@ -1359,10 +1658,10 @@ const DRAW = {
       turn.rubric.after(turn.reasoning);
     }
     turn.reasoning.textContent += happened.text;
-    turn.state.textContent = "reasoning";
+    sayDoing(turn, "reasoning");
   },
   assistant_text(turn, happened) {
-    turn.state.textContent = "writing";
+    sayDoing(turn, "writing");
     // the reply's first piece says how it joins the text, on the canvas
     if (canvas() && happened.join_type) turn.article.dataset.join = happened.join_type;
     // prose grows the run it is in; after a call it starts a new one
@@ -1388,7 +1687,7 @@ const DRAW = {
        own. */
     // named as a frontend names the tool — its label — the name where
     // the tool is one this build does not have
-    turn.state.textContent = _calling((happened.label || happened.tool).toLowerCase());
+    sayDoing(turn, _calling((happened.label || happened.tool).toLowerCase()), { call: true });
     let call = turn.pieces.at(-1);
     if (call?.kind !== "tool_call" || call.tool !== happened.tool || call.closed) {
       // a question never takes a notes box: it is the live panel's
@@ -1428,14 +1727,27 @@ const DRAW = {
     landed.after(result);
     const fresh = openArticle();
     result.after(fresh.article);
-    Object.assign(turn, fresh, { over: turn.over, reply: null, call: null });
+    // the block that goes on says what the row said until its time is out
+    const { said, saidAt } = turn;
+    Object.assign(turn, fresh, { over: turn.over, reply: null, call: null, said, saidAt });
+    turn.state.textContent = said;
+    sayDoing(turn, "waiting");
     follow();
   },
+  /* A failure goes BEFORE the status row, as the stats line does
+     (`done`): the row stays, hidden, until the next line, and after it
+     its room would stand above the box. */
   declined(turn, happened) {
-    turn.article.append(failure("The model declined", happened.reason));
+    turn.article.insertBefore(
+      failure("The model declined", happened.reason),
+      $(".otk-generating__status", turn.article),
+    );
   },
   failed(turn, happened) {
-    turn.article.append(failure("The reply stopped", happened.reason));
+    turn.article.insertBefore(
+      failure("The reply stopped", happened.reason),
+      $(".otk-generating__status", turn.article),
+    );
   },
   done(turn, happened) {
     /* The stats line the terminal prints after a reply, verbatim — off
@@ -1448,10 +1760,10 @@ const DRAW = {
     if (happened.stats && canvas()) {
       turn.article.title = happened.stats;
     } else if (happened.stats) {
-      turn.article.insertBefore(
-        element("p", "otk-verbose", happened.stats),
-        $(".otk-generating__status", turn.article),
-      );
+      // one line, cut where the column ends (`.otk-verbose`): whole in its hover hint
+      const line = element("p", "otk-verbose", happened.stats);
+      line.title = happened.stats;
+      turn.article.insertBefore(line, $(".otk-generating__status", turn.article));
     }
   },
 };
@@ -1483,6 +1795,9 @@ function endTurn(turn) {
   playing = false;
   arriving = null;
   clearInterval(turn.ticking);
+  // a word still waiting its turn has nothing left to say
+  clearTimeout(turn.deferred);
+  turn.waiting = [];
   turn.over();
   turnOver(false);
   working(false);
@@ -1543,9 +1858,11 @@ function endTurn(turn) {
       turn.article.dataset.unstored = "true";
       turn.rubric.remove();
     }
+    // the canvas's typing place back in the flow takes the room the row
+    // kept there (`app.css`), so it goes back inside the held change
+    showTail();
   });
   showTurnBar();
-  showTail();
   follow();
 }
 

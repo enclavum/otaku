@@ -13,7 +13,7 @@ from otaku.backend.story import InjectingSetting
 from otaku.formatting import format_context
 from otaku.web.api import transfer
 from otaku.web.api.lore import memory
-from otaku.web.api.play import rows
+from otaku.web.api.play import next_join, rows
 from otaku.web.api.request import Ask, Created, Flow, NotFound, Pending, Route, landed_story
 
 
@@ -53,6 +53,11 @@ def facts(session: Session) -> dict[str, Any]:
         if session.layout.mode is StoryMode.STORY
         else session.layout.value,
         "can_complete_text": session.can_complete_text,
+        # How a line typed now would join the newest row ("inline",
+        # "paragraph"; null with none): where the canvas's typing place
+        # draws its one space or opens a paragraph — the join the
+        # backend's, never the page's to work out.
+        "next_join": next_join(session),
     }
 
 

@@ -11,8 +11,7 @@ import pytest
 from otaku import __version__
 from otaku.backend.api import support as api_support
 from otaku.backend.session import Refused
-from otaku.integrations import MAX_SUPPORT_MESSAGE
-from otaku.integrations import support as desk
+from otaku.integrations import SupportDesk
 from scenarios.support.harness import App
 from scenarios.support.server import ModelServer
 
@@ -21,8 +20,9 @@ DESK = "/api/support"
 
 @pytest.fixture(autouse=True)
 def _desk_at_the_scripted_server(server: ModelServer, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The support desk at the scripted server's door, never the site's."""
-    monkeypatch.setattr(desk, "SUPPORT_ENDPOINT", server.url.removesuffix("/v1") + DESK)
+    """The support desk at the scripted server's door, never the site's —
+    set before the session binds the desk to its endpoint."""
+    monkeypatch.setattr(SupportDesk, "endpoint", server.url.removesuffix("/v1") + DESK)
 
 
 class TestSupport:
@@ -43,7 +43,7 @@ class TestSupport:
         for body, email in (
             ("", ""),
             ("   \n", ""),
-            ("x" * (MAX_SUPPORT_MESSAGE + 1), ""),
+            ("x" * (SupportDesk.max_message + 1), ""),
             ("Hi", "me@localhost"),
             ("Hi", "me"),
             ("Hi", "a b@c.de"),
@@ -53,7 +53,7 @@ class TestSupport:
                 api_support.send_support_request(app.session, body, email)
         assert DESK not in app.server.posts
         # at the limit, it goes
-        api_support.send_support_request(app.session, "x" * MAX_SUPPORT_MESSAGE)
+        api_support.send_support_request(app.session, "x" * SupportDesk.max_message)
         assert app.server.posts[-1] == DESK
 
     def test_a_desk_that_fails_is_a_refusal(self, app: App) -> None:

@@ -1,133 +1,147 @@
 """The integrations, where the answer is pure.
 
-A section of integrations.toml IS its integration: `Integrations.from_settings`
-binds each configured section the registry knows to an instance holding
-its url and key, passes the rest over as `ignored`, and resolves the
-file's one choice — which engine web search asks — to its bound engine,
-or reports the word it could not resolve. `search_engine_of_key` tells
-an engine from a key's own shape: the one whose prefix it starts with,
-else the one whose keys carry no mark. Each engine declares its fixed
-endpoint, which `default_sections` founds a keyless section on. The
-transport's `results_of` reads an engine's answer and refuses one
-without results.
+Every integration is in the one registry, under its id — its section's
+name; `default_sections` founds a keyless section for each one a section
+configures, and none for those that are not configurable (the sky's
+facts, the support desk). `Integrations.bind` binds EVERY integration:
+a configurable one to its section in the file, or to the one it is
+founded with where the file has none; a section no configurable
+integration is named for is passed over. `get` answers one by its class.
+
+Web search is one integration under ONE key: `search` asks no engine
+without a key, and asks the engine the key belongs to — Tavily's keys
+start with "tvly", any other is Exa's — refusing an answer without
+results. The transport is stubbed: nothing leaves the machine.
 """
 
 import re
+from typing import Any
 
 import pytest
 
 from otaku.integrations import (
     ALL_INTEGRATIONS,
+    Astronomy,
     Integration,
     IntegrationConfig,
     IntegrationError,
     Integrations,
-    SearchEngine,
+    SearchResult,
+    SupportDesk,
+    WebSearch,
     default_sections,
-    search_engine_of_key,
 )
-from otaku.integrations.base import results_of
-from otaku.integrations.exa import Exa
-from otaku.integrations.tavily import Tavily
+from otaku.integrations import web_search as web_search_module
 from otaku.settings.integrations import IntegrationSettings
 
 
 class TestRegistry:
     def test_every_integration_is_registered_under_its_own_id(self) -> None:
-        # the package's own classes: a test's stand-in engine is no integration
         for cls in every_integration(Integration):
-            if cls.id and cls.__module__.startswith("otaku.integrations"):
-                assert ALL_INTEGRATIONS.get(cls.id) is cls, cls.__name__
+            if cls.__module__.startswith("otaku.integrations"):
+                assert cls in ALL_INTEGRATIONS, cls.__name__
+        assert len({cls.id for cls in ALL_INTEGRATIONS}) == len(ALL_INTEGRATIONS)
 
-    def test_an_id_is_one_lowercase_word(self) -> None:
-        for name in ALL_INTEGRATIONS:
-            assert re.fullmatch(r"[a-z]+", name), name
+    def test_an_id_is_a_section_name(self) -> None:
+        for cls in ALL_INTEGRATIONS:
+            assert re.fullmatch(r"[a-z]+(_[a-z]+)*", cls.id), cls.id
 
-    def test_the_two_search_engines_and_their_endpoints(self) -> None:
-        assert set(ALL_INTEGRATIONS) == {"tavily", "exa"}
-        assert Tavily.endpoint.startswith("https://") and Exa.endpoint.startswith("https://")
-        assert (Tavily.label, Exa.label) == ("Tavily", "Exa")
-        for cls in ALL_INTEGRATIONS.values():
-            assert issubclass(cls, SearchEngine), cls.__name__
+    def test_only_web_search_is_configured_by_a_section(self) -> None:
+        assert {cls.id for cls in ALL_INTEGRATIONS if cls.configurable} == {"web_search"}
+        assert not Astronomy.configurable and not SupportDesk.configurable
 
-    def test_a_default_section_is_the_endpoint_with_no_key(self) -> None:
-        assert default_sections() == {
-            "tavily": IntegrationConfig("tavily", Tavily.endpoint),
-            "exa": IntegrationConfig("exa", Exa.endpoint),
-        }
+    def test_a_default_section_has_no_key(self) -> None:
+        assert set(default_sections()) == {"web_search"}
         assert all(not config.api_key for config in default_sections().values())
 
 
 class TestBinding:
     def test_an_instance_holds_its_sections_url_and_key(self) -> None:
-        bound = Tavily(IntegrationConfig("tavily", "https://proxy.test/search", "tvly-1"))
-        assert (bound.url, bound.api_key) == ("https://proxy.test/search", "tvly-1")
+        bound = SupportDesk(IntegrationConfig("support", "https://proxy.test/support", "k"))
+        assert (bound.url, bound.api_key) == ("https://proxy.test/support", "k")
         # a section with no url in force falls back to the fixed endpoint
-        assert Exa(IntegrationConfig("exa", "", "k")).url == Exa.endpoint
+        assert SupportDesk(IntegrationConfig("support", "")).url == SupportDesk.endpoint
 
-    def test_the_settings_bind_to_one_value(self) -> None:
+    def test_every_integration_is_bound_whatever_the_file_holds(self) -> None:
+        found = Integrations.bind(IntegrationSettings())
+        assert set(found.by_id) == {cls.id for cls in ALL_INTEGRATIONS}
+        assert found.get(WebSearch).api_key == ""
+        assert isinstance(found.get(Astronomy), Astronomy)
+
+    def test_a_section_binds_its_integration(self) -> None:
+        settings = IntegrationSettings(
+            {"web_search": IntegrationConfig("web_search", "", "tvly-1")}
+        )
+        assert Integrations.bind(settings).get(WebSearch).api_key == "tvly-1"
+
+    def test_a_section_no_configurable_integration_is_named_for_is_passed_over(self) -> None:
         settings = IntegrationSettings(
             {
-                "tavily": IntegrationConfig("tavily", Tavily.endpoint, "tvly-1"),
-                "exa": IntegrationConfig("exa", Exa.endpoint),
-            },
-            web_search_engine="tavily",
+                "bing": IntegrationConfig("bing", "https://x", "k"),
+                "tavily": IntegrationConfig("tavily", "https://y", "tvly-old"),
+            }
         )
-        found = Integrations.from_settings(settings)
-        assert set(found.bound) == {"tavily", "exa"}
-        assert isinstance(found.bound["tavily"], Tavily)
-        assert found.web_search_engine is found.bound["tavily"]
-        assert found.ignored == () and found.unknown_web_search_engine == ""
+        found = Integrations.bind(settings)
+        assert "bing" not in found.by_id and "tavily" not in found.by_id
+        assert found.get(WebSearch).api_key == ""
 
-    def test_a_section_no_integration_answers_to_is_reported_not_dropped_in_silence(self) -> None:
-        settings = IntegrationSettings(
-            {"bing": IntegrationConfig("bing", "https://x"), "exa": IntegrationConfig("exa", "u")}
-        )
-        found = Integrations.from_settings(settings)
-        assert found.ignored == ("bing",)
-        assert set(found.bound) == {"exa"}
-
-    def test_no_choice_means_no_engine_and_a_bad_choice_is_reported_as_written(self) -> None:
-        sections = {"exa": IntegrationConfig("exa", "u", "k")}
-        none = Integrations.from_settings(IntegrationSettings(sections))
-        assert none.web_search_engine is None and none.unknown_web_search_engine == ""
-        wrong = Integrations.from_settings(IntegrationSettings(sections, web_search_engine="bing"))
-        assert wrong.web_search_engine is None and wrong.unknown_web_search_engine == "bing"
-        # a choice naming a section the file lacks is a choice of nothing bound
-        unbound = Integrations.from_settings(
-            IntegrationSettings(sections, web_search_engine="tavily")
-        )
-        assert unbound.web_search_engine is None
-        assert unbound.unknown_web_search_engine == "tavily"
-
-    def test_nothing_configured_binds_nothing(self) -> None:
-        found = Integrations.from_settings(IntegrationSettings())
-        assert (dict(found.bound), found.web_search_engine, found.ignored) == ({}, None, ())
-        assert Integrations() == found
+    def test_get_answers_by_class(self) -> None:
+        found = Integrations.bind(IntegrationSettings())
+        for cls in ALL_INTEGRATIONS:
+            assert isinstance(found.get(cls), cls)
 
 
-class TestSearchEngineOfKey:
-    def test_a_key_carrying_tavilys_mark_is_tavilys(self) -> None:
-        assert Tavily.key_prefix == "tvly"
-        assert search_engine_of_key("tvly-dev-abc") is Tavily
-        assert search_engine_of_key("tvly") is Tavily
+class TestWebSearch:
+    def test_no_key_asks_nothing(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        asked = stub_transport(monkeypatch, {"results": []})
+        with pytest.raises(IntegrationError):
+            web_search("").search("river", max_results=3)
+        assert asked == []
 
-    def test_any_other_key_is_the_engine_whose_keys_carry_no_mark(self) -> None:
-        assert Exa.key_prefix == ""
-        for key in ("0f3a-2b", "exa-xyz", "TVLY-uppercase-is-no-mark", "k"):
-            assert search_engine_of_key(key) is Exa, key
+    def test_a_key_with_tavilys_mark_asks_tavily(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        asked = stub_transport(monkeypatch, {"results": [{"title": "T", "content": "snip"}]})
+        found = web_search("tvly-dev-abc").search("river", max_results=3)
+        assert found == [SearchResult("T", "snip")]
+        url, headers, body = asked[0]
+        assert "tavily" in url and headers == {"Authorization": "Bearer tvly-dev-abc"}
+        assert (body["query"], body["max_results"]) == ("river", 3)
 
+    def test_any_other_key_asks_exa(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        answer = {"results": [{"title": "E", "highlights": ["one", "two"]}]}
+        for key in ("0f3a-2b", "exa-xyz", "TVLY-uppercase-is-no-mark"):
+            asked = stub_transport(monkeypatch, answer)
+            found = web_search(key).search("river", max_results=2)
+            assert found == [SearchResult("E", "one … two")], key
+            url, headers, body = asked[0]
+            assert "exa" in url and headers == {"x-api-key": key}, key
+            assert body["numResults"] == 2
 
-class TestResultsOf:
-    def test_the_results_list_is_read_dicts_alone(self) -> None:
-        data = {"results": [{"title": "A"}, "junk", {"title": "B"}]}
-        assert results_of(data) == [{"title": "A"}, {"title": "B"}]
-        assert results_of({"results": []}) == []
-
-    def test_an_answer_without_results_is_refused(self) -> None:
+    def test_an_answer_without_results_is_refused(self, monkeypatch: pytest.MonkeyPatch) -> None:
         for data in ({}, {"results": "none"}, [], None, "text"):
+            stub_transport(monkeypatch, data)
             with pytest.raises(IntegrationError):
-                results_of(data)
+                web_search("tvly-1").search("river", max_results=1)
+
+    def test_results_are_read_dicts_alone(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        stub_transport(monkeypatch, {"results": [{"title": "A", "content": "a"}, "junk"]})
+        assert web_search("tvly-1").search("q", max_results=2) == [SearchResult("A", "a")]
+
+
+def web_search(key: str) -> WebSearch:
+    """Web search bound to `key`."""
+    return WebSearch(IntegrationConfig("web_search", "", key))
+
+
+def stub_transport(monkeypatch: pytest.MonkeyPatch, answer: Any) -> list[tuple[str, Any, Any]]:
+    """The transport answering `answer` to every request, each recorded."""
+    asked: list[tuple[str, Any, Any]] = []
+
+    def post_json(url: str, headers: dict[str, str], body: dict[str, Any]) -> Any:
+        asked.append((url, headers, body))
+        return answer
+
+    monkeypatch.setattr(web_search_module, "post_json", post_json)
+    return asked
 
 
 def every_integration(base: type[Integration]) -> list[type[Integration]]:

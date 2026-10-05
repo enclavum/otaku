@@ -12,7 +12,7 @@ from otaku.backend import StoryMode
 from otaku.backend.api import stories as api_stories
 from otaku.backend.session import Session
 from otaku.terminal.chat.ledger import ScreenLedger
-from otaku.terminal.tty.render import flow_offsets, shown_tools, turn
+from otaku.terminal.tty.render import flow_offsets, shown_tools, turn, unit_start
 from otaku.terminal.tty.statusline import StatusLine
 
 # Turns echoed when a story (re)opens (the launch, a browser pick, an
@@ -85,8 +85,9 @@ class Chat:
 
     def restore_tail(self, count: int, above: str = "") -> None:
         """Hand the just-echoed tail (`render.last_turns(…, count)`) to
-        the ledger, grouped the way /undo pops — a reply plus the one
-        user row before it, either alone when the other is missing — so
+        the ledger, grouped the way /undo pops — a reply with its tool
+        chain (`render.unit_start`) plus the one user row before it,
+        either alone when the other is missing — so
         the shown turns can be taken back off the screen without having
         been played. `above` names the report line printed (with its
         blank) right over the echo: it joins the oldest restored exchange
@@ -95,49 +96,61 @@ class Chat:
         output. In the canvas the echo is one text (`render.flow`), and
         each exchange is placed in it by its offsets
         (`ledger.restore_flow`)."""
-        shown = list(self.session.messages)[-count:]
-        groups: list[tuple[int | None, int | None]] = []  # indexes into `shown`
+        messages = list(self.session.messages)
+        shown = messages[-count:]
+        offset = len(messages) - len(shown)
+        # indexes into `shown`: the prompt, and the reply's unit — its first
+        # row and the row after its last — and whether the echo cut the unit
+        groups: list[tuple[int | None, int | None, int, bool]] = []
         i = len(shown)
         while i > 0:
-            reply = i - 1 if shown[i - 1].role == "assistant" else None
-            if reply is not None:
-                i -= 1
+            end, reply, cut = i, None, False
+            if shown[i - 1].role == "assistant":
+                # the reply with its tool chain, as /undo pops it — the part
+                # the echo shows, where it cut the chain
+                begins = unit_start(messages, offset + i)
+                cut = begins < offset
+                reply = i = max(begins, offset) - offset
             prompt = i - 1 if i > 0 and shown[i - 1].role == "user" else None
             if prompt is not None:
                 i -= 1
             if reply is None and prompt is None:
                 break  # an unexpected role — better unerasable than wrong
-            groups.append((prompt, reply))
+            groups.append((prompt, reply, end, cut))
         drawn = self.shown_tools
         ordered = list(reversed(groups))
         if self.session.layout.mode is StoryMode.STORY:
             text, starts = flow_offsets(shown, shown=drawn)
-            for n, (prompt, reply) in enumerate(ordered):
+            for n, (prompt, reply, end, cut) in enumerate(ordered):
                 first = prompt if prompt is not None else reply
                 assert first is not None
                 start = starts[first]
                 following = ordered[n + 1] if n + 1 < len(ordered) else None
-                end = len(text)
+                stop = len(text)
                 if following is not None:
                     opener = following[0] if following[0] is not None else following[1]
                     assert opener is not None
-                    end = starts[opener]
+                    stop = starts[opener]
                 reply_offset = None
                 if reply is not None:
                     reply_offset = starts[reply] - start
                 self.ledger.restore_flow(
                     text[:start],
-                    text[start:end],
+                    text[start:stop],
                     reply_offset,
                     last=following is None,
                     above=above,
+                    shown_turns=end - reply if cut and reply is not None else None,
                 )
                 above = ""
             return
-        for prompt, reply in ordered:
+        for prompt, reply, end, _ in ordered:
             self.ledger.restore_exchange(
                 turn(shown[prompt]) if prompt is not None else None,
-                turn(shown[reply], shown=drawn) if reply is not None else None,
+                # the unit's turns as the echo printed them, a blank between
+                "\n\n".join(turn(row, shown=drawn) for row in shown[reply:end])
+                if reply is not None
+                else None,
                 above=above,
             )
             above = ""  # the report belongs to the oldest exchange only

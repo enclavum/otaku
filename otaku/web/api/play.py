@@ -107,6 +107,12 @@ def play(session: Session, line: str, files: Sequence[RawFile] = ()) -> Iterator
     return api_play.submit(session, line, files)
 
 
+def next_join(session: Session) -> str | None:
+    """How a line typed now would join the newest row — a fact of the
+    session's (`stories.facts`) that the play twin answers."""
+    return api_play.next_join(session)
+
+
 def files_from(body: Mapping[str, Any]) -> list[RawFile]:
     """The pictures a play body carries: `files`, each a name and its
     bytes as base64 — decoded here, on the handler's thread, so a body
@@ -253,7 +259,7 @@ def turn(message: Message, *, join: str) -> dict[str, Any]:
         # The body split: prose, and each block as its tool's facts — the
         # page draws from these and parses nothing. A block of a tag no
         # tool owns is a block all the same, with its text alone.
-        "segments": api_play.segments(message.body),
+        "segments": api_play.segments(message.body, message.role),
         # How it joins the turn before it, for the canvas: "inline", as it
         # stands, or "paragraph", a blank line before it.
         "join_type": join,

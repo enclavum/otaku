@@ -190,6 +190,7 @@ function buildMessages(view, pane) {
     haystack: `${message.body} ${message.speaker ?? ""}`.toLowerCase(),
   }));
   tabNote(view, "messages", `${rows.length} ${rows.length === 1 ? "message" : "messages"}`);
+  padScrollbar($("[data-detail]", pane));
   if (!rows.length) $("[data-actions]", pane).replaceChildren();
   // `e` is the keyboard's way to the same verb the pointer takes.
   const edit = () => $("[data-detail] .otk-edit__verb--edit", pane)?.click();
@@ -233,6 +234,20 @@ function buildMessages(view, pane) {
   view.select.messages = (id) => list.select((message) => message.id === id);
 }
 
+function padScrollbar(scroll) {
+  /* A scrollbar that takes room in the reader stands 10px off the text,
+     whenever it comes and goes: a message drawn, its editor grown, the
+     window resized. Watched once: the pane serves every story. */
+  if (scroll._padded) return;
+  scroll._padded = true;
+  const check = () => {
+    const pad = scroll.offsetWidth > scroll.clientWidth ? "10px" : "";
+    if (scroll.style.paddingRight !== pad) scroll.style.paddingRight = pad;
+  };
+  new ResizeObserver(check).observe(scroll);
+  new MutationObserver(check).observe(scroll, { childList: true, subtree: true, attributes: true, characterData: true });
+}
+
 /** The id of a scene's first message on the current chain — null when
     its span fell off it (an edit moved the head past the scene). */
 function sceneStart(view, scene) {
@@ -270,9 +285,11 @@ function drawReader(view, pane, message, edit) {
   head.append(span("otk-label otk-label--ink", `Message ${message.position}`));
   if (message.kind) head.append(span("otk-tag", message.kind));
 
-  // The message is corrected where it is read: the reader IS the field.
+  // The message is corrected where it is read: the reader IS the field —
+  // without the whitespace at its edges, the row's join, which the save
+  // keeps (`stories.edit_message`), as the transcript's field does.
   const body = element("div", "otk-detail__section");
-  body.append(edited(reader(message.body, (text) => saveMessage(view, message, text)), "message"));
+  body.append(edited(reader(message.body.trim(), (text) => saveMessage(view, message, text)), "message"));
 
   const out = [head, body];
 

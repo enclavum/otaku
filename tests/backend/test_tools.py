@@ -1,9 +1,9 @@
 """The tools a model may use by writing a call in its reply.
 
-A tool is declared by its class — its name, who acts on its call, the
-prompts key of its prompt — and registered under its name; `read_call`
-binds one call to the tool its name says, in any case, and
-`get_tool_label` names a tool for a reader. `ToolQuestion` reads
+A tool is declared by its class — its name, who acts on its call —
+and registered under its name; `read_call` binds one call to the tool
+its name says, in any case, and `get_tool_label` names a tool's turn
+for a reader: its label and "call", or what the result says it is. `ToolQuestion` reads
 its call as a question and the answers to pick from: the question is
 everything before the first answer line; an answer line opens `1.`,
 `1)`, `a.` or `a)`; none makes the question free-form; whatever follows
@@ -11,13 +11,13 @@ the answers that is not one is no answer; nine at most. `to_json` is
 the call as a frontend draws it. A tool otaku RUNS answers its call
 with `run(session)`, reading the session and never writing it: the
 system info tool the local time, the sky and the model's name, the web
-search tool the top results' snippets through the engine the key chose,
-cut to a budget, or the sentence for why there are none — and a failed
-search's turn is called so (`label_of`).
+search tool the top results' snippets through the web search
+integration, cut to a budget, or the sentence for why there are none —
+and a failed search's turn is called so (`label_of`).
 """
 
 import re
-from dataclasses import fields
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import cast
 
@@ -35,9 +35,14 @@ from otaku.backend.tools import (
     get_tool_label,
     read_call,
 )
-from otaku.integrations import IntegrationConfig, IntegrationError, Integrations, SearchResult
-from otaku.integrations.base import SearchEngine
-from otaku.settings.prompts import Prompts
+from otaku.integrations import (
+    IntegrationConfig,
+    IntegrationError,
+    Integrations,
+    SearchResult,
+    WebSearch,
+)
+from otaku.settings.integrations import IntegrationSettings
 
 
 class TestAsk:
@@ -146,22 +151,22 @@ class TestLabel:
     """`get_tool_label` — what a frontend calls the tool a tool turn's
     `provider` names."""
 
-    def test_a_known_tool_is_called_by_its_label(self) -> None:
-        assert get_tool_label("web-search", "Tides: High water.") == "Web search"
-        assert get_tool_label("system-info", "Time: …") == "System info"
-        assert get_tool_label("note", "") == "Notes"
+    def test_a_known_tool_is_called_by_its_label_and_call(self) -> None:
+        assert get_tool_label("web-search", "Tides: High water.") == "Web search call"
+        assert get_tool_label("system-info", "Time: …") == "System info call"
+        assert get_tool_label("note", "") == "Notes call"
 
     def test_a_search_that_failed_is_called_so(self) -> None:
         failed = "Web search failed: the key is missing."
         assert get_tool_label("web-search", failed) == "Web search failed"
         assert ToolWebSearch.label_of(failed) == "Web search failed"
         # a result that merely mentions a failure is a result
-        assert get_tool_label("web-search", "News: Web search failed again") == "Web search"
+        assert get_tool_label("web-search", "News: Web search failed again") == "Web search call"
 
-    def test_a_tool_this_build_does_not_have_keeps_its_name_and_none_is_nothing(self) -> None:
-        assert get_tool_label("plan", "x") == "plan"
-        assert get_tool_label(None, "x") == ""
-        assert get_tool_label("", "x") == ""
+    def test_a_tool_this_build_does_not_have_is_called_by_its_name_and_none_a_tool(self) -> None:
+        assert get_tool_label("plan", "x") == "Plan call"
+        assert get_tool_label(None, "x") == "Tool call"
+        assert get_tool_label("", "x") == "Tool call"
 
 
 class TestRun:
@@ -171,19 +176,19 @@ class TestRun:
     def test_only_a_tool_otaku_runs_has_a_result(self) -> None:
         for tool in TOOLS.values():
             if tool.actor is Actor.SYSTEM:
-                assert isinstance(tool("").run(_session(Integrations())), str), tool.name
+                assert isinstance(tool("").run(_session(_founded())), str), tool.name
             else:
                 with pytest.raises(NotImplementedError):
-                    tool("x").run(_session(Integrations()))
+                    tool("x").run(_session(_founded()))
 
     def test_the_system_info_tool_answers_the_hour_the_sky_and_the_model(self) -> None:
-        lines = ToolSystemInfo("").run(_session(Integrations(), model="gemma-4")).splitlines()
+        lines = ToolSystemInfo("").run(_session(_founded(), model="gemma-4")).splitlines()
         assert [line.split(": ", 1)[0] for line in lines] == ["Time", "Moon", "Sun", "Model"]
         # the local time and weekday, no zone: nothing that tells where the machine is
         assert re.fullmatch(r"Time: \d{4}-\d{2}-\d{2} \d{2}:\d{2} \([A-Z][a-z]+\)", lines[0])
         assert lines[3] == "Model: gemma-4"
 
-    def test_the_search_asks_the_chosen_engine_with_the_query_collapsed(self) -> None:
+    def test_the_search_asks_web_search_with_the_query_collapsed(self) -> None:
         engine = _Engine([SearchResult("Tides", "High water at six.")])
         result = ToolWebSearch("  tide\n tables  ").run(_session(_bound(engine)))
         assert engine.asked == [("tide tables", ToolWebSearch.MAX_RESULTS)]
@@ -212,16 +217,14 @@ class TestRun:
     def test_no_results_no_query_and_no_key_each_answer_a_sentence(self) -> None:
         assert ToolWebSearch("q").run(_session(_bound(_Engine([])))) == "No results found."
         assert ToolWebSearch("   ").run(_session(_bound(_Engine([])))) == "No query was given."
+        # the integration with no key, which asks nothing
         missing = "Web search failed: the key is missing."
-        assert ToolWebSearch("q").run(_session(Integrations())) == missing
-        keyless = _Engine([], key="")
-        assert ToolWebSearch("q").run(_session(_bound(keyless))) == missing
-        assert keyless.asked == []
+        assert ToolWebSearch("q").run(_session(_founded())) == missing
 
     def test_a_failing_engine_answers_the_sentence_the_model_reads(self) -> None:
         engine = _Engine(IntegrationError("the service answered 500"))
         result = ToolWebSearch("q").run(_session(_bound(engine)))
-        # no engine named: which service the key chose is the reader's business
+        # no engine named: which service the key is for is the reader's business
         assert result == "Web search failed: the service answered 500."
 
 
@@ -236,11 +239,6 @@ class TestRegistry:
         for name in TOOLS:
             assert re.fullmatch(r"[a-z]+(-[a-z]+)*", name), name
 
-    def test_every_tool_names_a_prompt_the_prompts_hold(self) -> None:
-        held = {field.name for field in fields(Prompts)}
-        for tool in TOOLS.values():
-            assert tool.prompt_name in held, tool.__name__
-
     def test_a_call_has_its_actor_and_an_aside_has_none(self) -> None:
         assert ToolQuestion.actor is Actor.USER
         assert ToolAssistantNote.actor is Actor.NOBODY
@@ -251,16 +249,12 @@ class TestRegistry:
         assert set(TOOLS) == {"question", "note", "system-info", "web-search"}
 
 
-class _Engine(SearchEngine):
-    """A search engine answering canned results, or raising — and
-    recording what it was asked."""
+class _Engine(WebSearch):
+    """Web search answering canned results, or raising — and recording
+    what it was asked."""
 
-    id = "stub"
-    label = "Stub"
-    endpoint = "https://stub.test/search"
-
-    def __init__(self, answer: list[SearchResult] | IntegrationError, *, key: str = "k") -> None:
-        super().__init__(IntegrationConfig("stub", self.endpoint, key))
+    def __init__(self, answer: list[SearchResult] | IntegrationError) -> None:
+        super().__init__(IntegrationConfig(WebSearch.id, "", "k"))
         self._answer = answer
         self.asked: list[tuple[str, int]] = []
 
@@ -271,8 +265,14 @@ class _Engine(SearchEngine):
         return self._answer
 
 
-def _bound(engine: SearchEngine) -> Integrations:
-    return Integrations(bound={engine.id: engine}, web_search_engine=engine)
+def _founded() -> Integrations:
+    """Every integration bound as an empty file founds it: web search with no key."""
+    return Integrations.bind(IntegrationSettings())
+
+
+def _bound(engine: WebSearch) -> Integrations:
+    founded = _founded()
+    return replace(founded, by_id={**founded.by_id, WebSearch.id: engine})
 
 
 def _session(integrations: Integrations, *, model: str = "m") -> Session:

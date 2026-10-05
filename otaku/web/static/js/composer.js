@@ -22,10 +22,30 @@ import { midReply, playLine, run } from "./commands.js";
 import { $, $$, element, encodeFile, pickFiles, setValue, span } from "./dom.js";
 import { rows as syntaxRows } from "./table.js";
 import { settle, tell } from "./status.js";
-import { focusTail, stopPlaying, tailText } from "./transcript.js";
+import { draftTail, focusTail, stopPlaying, tailHost, tailText } from "./transcript.js";
 
 const composer = $(".otk-composer__input textarea");
 const menu = $(".otk-prefixes");
+
+/* The place a line is typed, as the prefix menu reads and writes it — the
+   box, or the canvas's own end (`transcript.tailHost`): the text before
+   the caret, whether what is typed is one line yet, the whole of it, the
+   `count` characters before the caret replaced, and where the menu stands
+   (null: where the stylesheet puts it, over the box). */
+const box = {
+  before: () => composer.value.slice(0, composer.selectionStart ?? composer.value.length),
+  oneLine: () => !composer.value.includes("\n"),
+  text: () => composer.value,
+  replace(count, text) {
+    const caret = composer.selectionStart ?? composer.value.length;
+    setValue(composer, composer.value.slice(0, caret - count) + text + composer.value.slice(caret));
+    composer.focus();
+    const at = caret - count + text.length;
+    composer.setSelectionRange(at, at);
+  },
+  anchor: () => null,
+};
+let place = box;
 const attach = $(".otk-attach");
 
 // HEIC named outright, or Safari converts an iPhone's picture to a JPEG
@@ -79,6 +99,7 @@ let at = null;
 /** A line put in the box to be edited before it is sent — an option
     of the model's question, copied rather than picked. */
 export function draft(line) {
+  if (draftTail(line)) return; // the canvas is typed in where the story is
   setValue(composer, line);
   typed = composer.value;
   focusComposer();
@@ -149,10 +170,36 @@ export function wire() {
     tell("");
     if (composer.value !== typed) settle();
     typed = composer.value;
+    place = box;
     updateMenu();
   });
   composer.addEventListener("blur", hideMenu);
   composer.addEventListener("keydown", onKey);
+  /* The canvas is typed in at the story's own end (`transcript.showTail`):
+     the same menu, at its caret. Its keys reach the menu first, as the
+     box's do — while it is up, Enter takes a row and Esc closes it. */
+  const flow = $(".otk-transcript");
+  flow.addEventListener("input", (event) => {
+    if (!event.target.closest?.(".otk-tail")) return;
+    settle(); // the words changed: a refusal of the last ones is over
+    place = tailHost() ?? box;
+    updateMenu();
+  });
+  flow.addEventListener(
+    "keydown",
+    (event) => {
+      if (place !== box && event.target.closest?.(".otk-tail") && menuKey(event)) {
+        event.stopPropagation();
+      }
+    },
+    true,
+  );
+  flow.addEventListener("focusout", (event) => {
+    if (event.target.closest?.(".otk-tail")) hideMenu();
+  });
+  flow.addEventListener("scroll", () => {
+    if (place !== box && !menu.hidden) placeMenu();
+  });
   // A picture on the clipboard, pasted while the box has the focus (a
   // paste lands where the focus is, so no other paste is touched), is
   // staged as if picked; only the image items are taken, and a paste
@@ -184,6 +231,7 @@ export function wire() {
   $(".otk-composer [data-prefixes]")?.addEventListener("click", () => {
     if (menu.hidden) {
       composer.focus();
+      place = box;
       updateMenu({ everything: true });
     } else {
       hideMenu();
@@ -245,44 +293,8 @@ function paintStaged() {
 }
 
 function onKey(event) {
-  // While the menu is up it owns Enter, the arrows and the page keys.
-  if (!menu.hidden && offered.length) {
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      picked = (picked + (event.key === "ArrowDown" ? 1 : offered.length - 1)) % offered.length;
-      paintMenu();
-      return;
-    }
-    if (event.key === "PageDown" || event.key === "PageUp") {
-      // A page is what the box shows; the jump clamps at the ends
-      // rather than wrapping, as page keys do everywhere.
-      event.preventDefault();
-      const row = $(".otk-prefix", menu);
-      const step = row ? Math.max(1, Math.floor(menu.clientHeight / row.offsetHeight) - 1) : 1;
-      picked =
-        event.key === "PageDown"
-          ? Math.min(offered.length - 1, picked + step)
-          : Math.max(0, picked - step);
-      paintMenu();
-      return;
-    }
-    /* Enter takes the highlighted row unless the line already IS that
-       row — a fully typed `/me` sends rather than re-completing. An
-       inline word never claims Enter: the reader is mid-sentence, and
-       Enter there is how the sentence is sent. */
-    const typed = composer.value.trim();
-    const settled = offered[picked]?.token === typed;
-    if (event.key === "Tab" || (event.key === "Enter" && !settled && typed.startsWith("/"))) {
-      event.preventDefault();
-      accept(offered[picked]);
-      return;
-    }
-    if (event.key === "Escape") {
-      event.preventDefault();
-      hideMenu();
-      return;
-    }
-  }
+  place = box;
+  if (menuKey(event)) return;
   if (event.key === "Escape") {
     // Clear is the whole line: the words, and the pictures staged with them.
     setValue(composer, "");
@@ -311,6 +323,50 @@ function onKey(event) {
     event.preventDefault();
     submit(composer.value);
   }
+}
+
+function menuKey(event) {
+  /* While the menu is up it owns Enter, the arrows and the page keys —
+     where the line is typed, the box or the canvas's own end. True when
+     it took the key. */
+  if (!menu.hidden && offered.length) {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      picked = (picked + (event.key === "ArrowDown" ? 1 : offered.length - 1)) % offered.length;
+      paintMenu();
+      return true;
+    }
+    if (event.key === "PageDown" || event.key === "PageUp") {
+      // A page is what the box shows; the jump clamps at the ends
+      // rather than wrapping, as page keys do everywhere.
+      event.preventDefault();
+      const row = $(".otk-prefix", menu);
+      const step = row ? Math.max(1, Math.floor(menu.clientHeight / row.offsetHeight) - 1) : 1;
+      picked =
+        event.key === "PageDown"
+          ? Math.min(offered.length - 1, picked + step)
+          : Math.max(0, picked - step);
+      paintMenu();
+      return true;
+    }
+    /* Enter takes the highlighted row unless the line already IS that
+       row — a fully typed `/me` sends rather than re-completing. An
+       inline word never claims Enter: the reader is mid-sentence, and
+       Enter there is how the sentence is sent. */
+    const typed = place.text().trim();
+    const settled = offered[picked]?.token === typed;
+    if (event.key === "Tab" || (event.key === "Enter" && !settled && typed.startsWith("/"))) {
+      event.preventDefault();
+      accept(offered[picked]);
+      return true;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      hideMenu();
+      return true;
+    }
+  }
+  return false;
 }
 
 // ---------- what was sent before ----------
@@ -372,16 +428,15 @@ function nameSlot() {
   /* The opener taking a NAME and the partial before the caret — null
      when the caret is anywhere else. One-line lines only, like the
      opener menu itself. */
-  if (composer.value.includes("\n")) return null;
-  const before = composer.value.slice(0, composer.selectionStart ?? composer.value.length);
-  const m = before.match(/^\s*(\/[a-z]+)\s+([^:]*)$/);
+  if (!place.oneLine()) return null;
+  const m = place.before().match(/^\s*(\/[a-z]+)\s+([^:]*)$/);
   if (!m) return null;
   const spec = _prefixes().find((row) => !row.inline && row.token === m[1]);
   if (!spec || !spec.args.startsWith("NAME")) return null;
-  return { token: m[1], partial: m[2], start: before.length - m[2].length };
+  return { token: m[1], partial: m[2] };
 }
 
-async function offerNames({ token, partial, start }) {
+async function offerNames({ token, partial }) {
   /* Per keystroke, answered out of order like the browser's filter:
      only the newest paints. The cast is read once per menu visit —
      `hideMenu` drops it, so a `/merge` a moment ago is not stale. */
@@ -406,7 +461,6 @@ async function offerNames({ token, partial, start }) {
     token: row.name,
     caption,
     insert: insert(row.name),
-    start,
   }));
   if (offered.map((spec) => spec.token).join(" ") !== was) picked = 0;
   picked = Math.min(picked, Math.max(0, offered.length - 1));
@@ -417,10 +471,10 @@ async function offerNames({ token, partial, start }) {
 function typing() {
   /* The slash word the caret is in, and whether it opens the line. "" if
      the caret is not in one — the menu has nothing to offer then. */
-  const before = composer.value.slice(0, composer.selectionStart ?? composer.value.length);
+  const before = place.before();
   const word = before.split(/\s/).pop() ?? "";
   if (!word.startsWith("/")) return { word: "", opens: false };
-  return { word, opens: before.trimStart() === word && !composer.value.includes("\n") };
+  return { word, opens: before.trimStart() === word && place.oneLine() };
 }
 
 function updateMenu({ everything = false } = {}) {
@@ -443,8 +497,7 @@ function updateMenu({ everything = false } = {}) {
   const { word, opens } = typing();
   const was = offered.map((spec) => spec.token).join(" ");
   if (everything) {
-    const before = composer.value.slice(0, composer.selectionStart ?? composer.value.length);
-    const opening = !before.trim();
+    const opening = !place.before().trim();
     offered = _prefixes().filter((spec) => spec.inline !== opening);
   } else {
     offered = !word
@@ -495,17 +548,32 @@ function paintMenu() {
     rows.push(option);
   });
   menu.replaceChildren(...rows);
+  placeMenu();
+}
+
+function placeMenu() {
+  /* Over the box, where the stylesheet puts it; at the caret where the
+     line is typed in the story's own text — below it while there is room,
+     above it otherwise. */
+  const caret = menu.hidden ? null : place.anchor();
+  if (!caret) {
+    menu.removeAttribute("style");
+    return;
+  }
+  const gap = 6;
+  Object.assign(menu.style, { position: "fixed", bottom: "auto", marginBottom: "0" });
+  const left = Math.min(caret.left, innerWidth - menu.offsetWidth - 8);
+  const below = caret.bottom + gap;
+  const room = below + menu.offsetHeight <= innerHeight - 8;
+  menu.style.left = `${Math.max(8, left)}px`;
+  menu.style.top = `${room ? below : Math.max(8, caret.top - gap - menu.offsetHeight)}px`;
 }
 
 function accept(spec) {
   if (spec.isName) {
     // The name replaces the argument typed so far; what follows it is
     // the rule's (`Name: ` after /me, the bare name elsewhere).
-    const caret = composer.selectionStart ?? composer.value.length;
-    setValue(composer, composer.value.slice(0, spec.start) + spec.insert + composer.value.slice(caret));
-    composer.focus();
-    const at = spec.start + spec.insert.length;
-    composer.setSelectionRange(at, at);
+    place.replace(nameSlot()?.partial.length ?? 0, spec.insert);
     hideMenu();
     return;
   }
@@ -514,13 +582,8 @@ function accept(spec) {
      when the menu was opened by the hint — and leaves the prompt around
      it alone. */
   const taken = `${spec.token} `;
-  const caret = composer.selectionStart ?? composer.value.length;
-  const before = composer.value.slice(0, caret);
-  const word = before.split(/\s/).pop() ?? "";
-  const opened = word.startsWith("/") ? before.length - word.length : caret;
-  setValue(composer, composer.value.slice(0, opened) + taken + composer.value.slice(caret));
-  composer.focus();
-  composer.setSelectionRange(opened + taken.length, opened + taken.length);
+  const word = place.before().split(/\s/).pop() ?? "";
+  place.replace(word.startsWith("/") ? word.length : 0, taken);
   hideMenu();
   // A framing word that takes a name continues straight into the cast:
   // the menu follows the caret rather than waiting for a keystroke.
@@ -529,6 +592,7 @@ function accept(spec) {
 
 function hideMenu() {
   menu.hidden = true;
+  menu.removeAttribute("style");
   offered = [];
   _cast = null;
 }

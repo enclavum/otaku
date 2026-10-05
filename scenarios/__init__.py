@@ -8,7 +8,9 @@ The layout follows the app's own seams:
 - `cli/` — one module per top-level command: `test_main.py` (the bare
   invocation, driven in a pty), `test_logs.py`, `test_update.py`. All of
   it carries the `cli` marker, because driving the real binary costs
-  seconds where the in-process kind costs milliseconds.
+  seconds where the in-process kind costs milliseconds. `test_screen.py`
+  is the terminal's screen itself, emulated and held against its own
+  echo turn by turn: minutes, so `slow` too, run only with `--slow`.
 - `web/` — the page over a real session. Its `page` fixture serves on a
   thread and speaks HTTP; the session is opened on THAT thread, because
   a sqlite connection answers only the one that opened it, and the test
@@ -19,6 +21,6 @@ The layout follows the app's own seams:
 - `fixtures/` — the artifacts a synthetic string cannot stand in for: a
   real SillyTavern chat, a character card PNG, prose with real
   typography, a photograph of a cat for the vision smokes.
-- `support/` — the harness, the scripted OpenAI-compatible server, and
-  the pty driver.
+- `support/` — the harness, the scripted OpenAI-compatible server, the
+  pty driver, and the emulated screen over it.
 """

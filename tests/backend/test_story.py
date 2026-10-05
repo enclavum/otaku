@@ -5,8 +5,9 @@ injects (None for one that injects nothing), the positions it may take
 (none for a value), the story's own reminder (None for every setting but
 the story reminder's), whether the notes are displayed (None for every
 setting but the notes tool's), the layout the story is read in
-(None for every setting but the layout's) — so a frontend draws
-them alike. A stored position off the closed list reads as the default.
+(None for every setting but the layout's), the prompts key of the prompt
+it sends (None where the text is the reader's own, or nothing is sent) —
+so a frontend draws them alike. A stored position off the closed list reads as the default.
 `to_db` is the row to store, what is given laid over the setting as it
 stands, and refuses what the setting does not take. `injection` is what
 a switched-on setting sends: a tool's prompt and a reminder alike
@@ -16,7 +17,7 @@ switches it on, as every switch is, and gated: it injects in story mode
 over the chat wire alone.
 """
 
-from dataclasses import replace
+from dataclasses import fields, replace
 
 import pytest
 
@@ -119,6 +120,17 @@ class TestAsItStands:
         for cls in every_setting(StorySetting):
             if cls.__name__.startswith("StorySetting"):
                 assert cls.name and cls.label, cls.__name__
+
+    def test_a_setting_that_sends_a_prompt_names_one_the_prompts_hold(self) -> None:
+        held = {field.name for field in fields(Prompts)}
+        for cls in every_setting(StorySetting):
+            name = getattr(cls, "prompt_name", None)
+            concrete = cls.__name__.startswith("StorySetting")
+            if concrete and (cls.tool is not None or cls is StorySettingEmulateTextCompletion):
+                assert name in held, cls.__name__
+        # the reader's own text, and a value, send no prompt of the file's
+        for cls in (StorySettingReminder, StorySettingSharedReminder, StorySettingLayout):
+            assert getattr(cls, "prompt_name", None) is None, cls.__name__
 
     def test_the_emulation_reads_its_prompt_off_the_prompts(self) -> None:
         # the key is a Prompts field, so an edit in prompts.toml reaches it

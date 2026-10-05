@@ -55,6 +55,12 @@ CURSOR_BLINK_ON = "\x1b[?12h"  # DECSET 12: ask the terminal to blink the cursor
 # Enter (`ESC[27;5;13~`) where the terminal can; ignored where it cannot
 MODIFY_OTHER_KEYS_ON = "\x1b[>4;1m"
 MODIFY_OTHER_KEYS_OFF = "\x1b[>4;0m"
+HIDE_CURSOR = "\x1b[?25l"
+SHOW_CURSOR = "\x1b[?25h"
+# OSC 12: the cursor's colour, `rgb:rr/gg/bb`; OSC 112 the terminal's own back.
+# A terminal that cannot ignores both.
+CURSOR_COLOR = "\x1b]12;{}\x07"
+CURSOR_COLOR_RESET = "\x1b]112\x07"
 
 # Confirm-prompt answers, matched after `latin_key` folds the typed layout.
 # A site with a yes-default accepts the empty answer explicitly.

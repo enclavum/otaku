@@ -116,6 +116,7 @@ class Theme:
     # Inline, over the terminal's own background.
     band: Color  # the played turn's block, drawn across the row
     placeholder: Color  # the empty prompt's hint
+    caret: Color  # the block an empty line in story mode stands on, hex alone
     dialogue: Color  # spoken lines
     dialogue_bold: bool  # weight, not color — but the look is one thing
     command: Color  # a slash command, wherever one is shown
@@ -160,6 +161,7 @@ LIGHT = Theme(
     ok=color("#2f9e44"),
     band=color("#f0f0f0"),
     placeholder=color("#8a8a8a"),
+    caret=color("#aa5910"),
     dialogue=color("#427AB2"),
     dialogue_bold=False,
     command=color("#8A648E"),
@@ -179,6 +181,7 @@ DARK = Theme(
     # A mid grey reads as a hint against either background, so the hint is
     # the one slot that does not turn over.
     placeholder=color("#8a8a8a"),
+    caret=color("#d58042"),
     dialogue=color("#A4A8EE"),
     dialogue_bold=False,
     command=color("#E17DE1"),

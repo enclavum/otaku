@@ -22,7 +22,7 @@ import sys
 from dataclasses import dataclass
 
 from otaku.context import syntax
-from otaku.context.syntax import is_command
+from otaku.context.syntax import is_command, spans
 
 __all__ = [
     "COMMANDS",
@@ -35,6 +35,7 @@ __all__ = [
     "find",
     "is_command",
     "raw_argument",
+    "spans",
     "unknown_notice",
 ]
 

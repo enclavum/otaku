@@ -278,20 +278,35 @@ def edit_message(session: Session, message_id: int, body: str, story_id: int | N
     copy follows the store. `story_id` is the story the caller believes
     the message belongs to, and is CHECKED: a browser addresses any
     story, and a correction that landed on a message of another one
-    would rewrite a story nobody was looking at. Raises Refused on an
-    empty body, or on a message that is not that story's."""
+    would rewrite a story nobody was looking at. The whitespace at the
+    message's edges stays the stored one, whatever the edit's: a break
+    there is how the row joins its neighbours (`assembler.get_join_type`),
+    which an editor does not show — a correction changes the words, never
+    the join. Raises Refused on an empty body, or on a message that is
+    not that story's."""
     if not body.strip():
         raise Refused("A message cannot be emptied — undo the exchange instead.")
+    chain = session._messages
     if story_id is not None:
         chain = session._store.stories.get_messages(story_id)
         if not any(message.id == message_id for message in chain):
             raise Refused("That message is not on the story's current chain.")
+    stored = next((message.body for message in chain if message.id == message_id), "")
+    body = _with_edges_of(stored, body)
     session._store.messages.update(message_id, body)
     session._search_index = None
     for i, m in enumerate(session._messages):
         if m.id == message_id:
             session._messages[i] = replace(m, body=body)
             break
+
+
+def _with_edges_of(stored: str, text: str) -> str:
+    """`text` with `stored`'s edge whitespace in place of its own."""
+    core = stored.strip()
+    lead = stored[: stored.index(core)] if core else ""
+    trail = stored[len(lead) + len(core) :] if core else ""
+    return lead + text.strip() + trail
 
 
 def headline(session: Session) -> str:

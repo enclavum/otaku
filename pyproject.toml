@@ -66,6 +66,7 @@ otaku = "otaku.cli:main"
 [dependency-groups]
 dev = [
     "mypy>=2.3,<3",
+    "pyte>=0.8.2,<0.9",
     "pytest>=9.1,<10",
     "ruff>=0.16,<0.17",
 ]
@@ -117,5 +118,6 @@ testpaths = ["tests"]
 markers = [
     "live: talks to a real provider (each smoke skips itself when its server or api key is absent)",
     "cli: drives the real binary in a subprocess or a pty — the slow end of the suite",
+    "slow: minutes, not seconds — deselected unless `--slow` is given (`make regression`)",
 ]
 addopts = "-q"

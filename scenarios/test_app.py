@@ -632,12 +632,10 @@ class TestConfigMigration:
         paths.ensure_tree()
         paths.config_key_file.write_bytes(secrets.token_bytes(32))
         load_config(paths)
-        # every known integration's section on its endpoint with no key,
-        # and the one choice the file holds besides them, empty
+        # every configurable integration's section with no key: web
+        # search's, one key and no engine named
         assert tomllib.loads(paths.integrations_file.read_text()) == {
-            "tavily": {"url": "https://api.tavily.com/search", "api_key": ""},
-            "exa": {"url": "https://api.exa.ai/search", "api_key": ""},
-            "web_search": {"engine": ""},
+            "web_search": {"api_key": ""},
         }
 
     def test_a_missing_integration_section_is_founded_and_a_plain_key_sealed(
@@ -648,15 +646,14 @@ class TestConfigMigration:
         paths.config_key_file.write_bytes(secrets.token_bytes(32))
         paths.config_file.write_text("[settings]\nshow_banner = false\n")
         paths.integrations_file.write_text(
-            '[exa]\nurl = "https://api.exa.ai/search"\napi_key = "plain-exa"\n'
+            '[proxy]\nurl = "https://x.test/api"\napi_key = "plain-k"\n'
         )
         load_config(paths)
         raw = paths.integrations_file.read_text()
-        assert "plain-exa" not in raw
+        assert "plain-k" not in raw
         file = tomllib.loads(raw)
-        assert file["tavily"] == {"url": "https://api.tavily.com/search", "api_key": ""}
-        assert file["web_search"] == {"engine": ""}
-        assert _unsealed(paths, file["exa"]["api_key"]) == "plain-exa"
+        assert file["web_search"] == {"api_key": ""}
+        assert _unsealed(paths, file["proxy"]["api_key"]) == "plain-k"
 
     def test_a_catalog_whose_key_the_shell_carries_is_founded_at_launch(
         self, tmp_path, monkeypatch

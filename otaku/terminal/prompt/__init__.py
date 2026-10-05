@@ -19,20 +19,24 @@ between the delimiters (newlines preserved) is sent as a single message.
 `LineAssembler` implements the state machine.
 """
 
+import atexit
+import sys
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from prompt_toolkit import PromptSession
+from prompt_toolkit.application import Application
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completion
-from prompt_toolkit.cursor_shapes import CursorShape
+from prompt_toolkit.cursor_shapes import CursorShape, CursorShapeConfig
 from prompt_toolkit.document import Document
 from prompt_toolkit.filters import Condition, completion_is_selected, has_completions
 from prompt_toolkit.formatted_text import (
     ANSI,
     FormattedText,
     StyleAndTextTuples,
+    split_lines,
     to_formatted_text,
 )
 from prompt_toolkit.history import History
@@ -42,6 +46,8 @@ from prompt_toolkit.keys import Keys
 from prompt_toolkit.layout import menus as _ptk_menus
 from prompt_toolkit.layout.controls import BufferControl
 from prompt_toolkit.lexers import Lexer
+from prompt_toolkit.output.vt100 import Vt100_Output
+from prompt_toolkit.renderer import Renderer
 from prompt_toolkit.styles import Style
 
 from otaku.backend.api import lore
@@ -50,7 +56,7 @@ from otaku.backend.api import stories as api_stories
 from otaku.backend.session import Session
 from otaku.formatting import flatten, truncate
 from otaku.terminal.prompt.completion import SlashCompleter
-from otaku.terminal.tty import statusline
+from otaku.terminal.tty import CURSOR_COLOR, CURSOR_COLOR_RESET, HIDE_CURSOR, statusline
 from otaku.terminal.tty.render import BAR, asked, block, command_tokens, message, shown_tools
 from otaku.terminal.tty.theme import theme
 
@@ -61,17 +67,15 @@ _BARRED = BAR.rstrip()
 # PROTOTYPE: Ctrl+Enter told from Enter where the terminal reports it —
 # xterm's modifyOtherKeys form and the CSI u form, which prompt_toolkit
 # reads as Enter — spelled as Windows' console input spells it (Esc, then
-# Ctrl+J), so one binding sends on every platform (`_make_bindings`)
+# Ctrl+J), so one binding opens a paragraph on every platform
+# (`_make_bindings`)
 _CONTROL_ENTER = ("\x1b[27;5;13~", "\x1b[13;5u")
 for _sequence in _CONTROL_ENTER:
     ANSI_SEQUENCES[_sequence] = (Keys.Escape, Keys.ControlJ)
 
+# The empty line's hint in chat mode; story mode shows its caret instead
+# (`_Caret`).
 CHAT_PLACEHOLDER = FormattedText([("class:placeholder", "Send a message")])
-# The same hint in story mode (`Layout.mode`), where a line continues
-# the story rather than being sent to it.
-# the canvas's, in the story's text or under it — an empty story is begun
-CANVAS_PLACEHOLDER = FormattedText([("class:placeholder", "Continue…")])
-START_PLACEHOLDER = FormattedText([("class:placeholder", "Start the story")])
 
 # Ctrl+D submits /bye only on an empty line — the terminal convention.
 # With a draft on the line it falls through to delete-forward, so readline
@@ -91,8 +95,8 @@ class Carry:
     def __init__(self) -> None:
         self.text = ""
         self.shortcut = False
-        # PROTOTYPE: the canvas's keys are in force — Enter a paragraph,
-        # Ctrl+Enter (or Ctrl+S) the send (`_make_bindings`)
+        # PROTOTYPE: the canvas's keys are in force — Ctrl+Enter (or Ctrl+J)
+        # a paragraph, Enter the send as everywhere (`_make_bindings`)
         self.canvas_keys = False
         # PROTOTYPE: the prompt stands in the story's text; `/` at the start
         # of an empty paragraph there leaves it for the COMMAND PARAGRAPH,
@@ -305,8 +309,12 @@ class _CommandLexer(Lexer):
     between being typed and being answered."""
 
     def lex_document(self, document: Document) -> Callable[[int], StyleAndTextTuples]:
+        # coloured whole, then cut into lines: a word with the model runs
+        # on to the end of what is typed, across its line breaks
+        lines = list(split_lines(to_formatted_text(ANSI(message(document.text, "user")))))
+
         def line(number: int) -> StyleAndTextTuples:
-            return to_formatted_text(ANSI(message(document.lines[number], "user")))
+            return lines[number] if number < len(lines) else []
 
         return line
 
@@ -360,9 +368,26 @@ def build_prompt(
         complete_while_typing=menu_line,
         enable_history_search=False,
         style=_prompt_style(),
-        cursor=CursorShape.BLINKING_BEAM,
+        cursor=_Caret(carry),
         bottom_toolbar=_activity_toolbar(session, aside, note),
     )
+    # A prompt standing in the story's text (`Carry.in_text`) ends leaving
+    # what it drew, the caret back where its drawing began: the ledger
+    # writes the text's last line over itself and erases what follows in
+    # one write (`ledger.resume_tail`), where the renderer's own erase,
+    # written apart, would show the text gone a moment. Any other prompt
+    # that erases when done erases as ever.
+    renderer = prompt_session.app.renderer
+    erase = renderer.erase
+
+    def _erase(leave_alternate_screen: bool = True) -> None:
+        if carry.in_text:
+            _back_to_start(renderer)
+        else:
+            erase(leave_alternate_screen)
+
+    renderer.erase = _erase  # type: ignore[method-assign]
+    prompt_session.app.after_render += _caret_painter(carry)
     # Snappy Esc for closing the command menu — the 0.5s default delay makes
     # the close feel broken.
     prompt_session.app.timeoutlen = 0.05
@@ -379,6 +404,80 @@ def build_prompt(
     # Pre-select the first row whenever the menu (re)populates.
     prompt_session.default_buffer.on_completions_changed += lambda buf: _preselect_first(buf)
     return prompt_session, answers
+
+
+class _Caret(CursorShapeConfig):
+    """The cursor the prompt shows: in story mode an empty line is where
+    the story goes on, said by a blinking block in the caret's colour
+    (`_caret_painter`), as the page draws its caret on an empty canvas
+    tail; a blinking beam once anything is typed, and everywhere else."""
+
+    def __init__(self, carry: Carry) -> None:
+        self._carry = carry
+
+    def get_cursor_shape(self, application: Application[Any]) -> CursorShape:
+        if _caret_shown(self._carry, application):
+            return CursorShape.BLINKING_BLOCK
+        return CursorShape.BLINKING_BEAM
+
+
+def _caret_shown(carry: Carry, app: Application[Any]) -> bool:
+    """Whether the story-mode caret stands: the canvas's keys in force and
+    nothing typed."""
+    return carry.canvas_keys and not app.current_buffer.text
+
+
+def _caret_painter(carry: Carry) -> Callable[[Application[Any]], None]:
+    """After each frame: the caret's block painted in the theme's colour
+    (OSC 12) while it stands, the terminal's own colour handed back
+    (OSC 112) once anything is typed and as the prompt ends — on whatever
+    output the session draws on, a VT one alone. The colour is restored at
+    exit too, should the process end with it painted."""
+    painted = False
+
+    def reset() -> None:
+        terminal = sys.__stdout__
+        if terminal is not None:
+            terminal.write(CURSOR_COLOR_RESET)
+            terminal.flush()
+
+    def paint(app: Application[Any]) -> None:
+        nonlocal painted
+        wanted = _caret_shown(carry, app) and not app.is_done
+        caret = theme().caret.style
+        if (
+            wanted == painted
+            or not isinstance(app.output, Vt100_Output)
+            or not caret.startswith("#")
+        ):
+            return
+        if wanted:
+            app.output.write_raw(CURSOR_COLOR.format(f"rgb:{caret[1:3]}/{caret[3:5]}/{caret[5:7]}"))
+            atexit.register(reset)
+        else:
+            app.output.write_raw(CURSOR_COLOR_RESET)
+            atexit.unregister(reset)
+        app.output.flush()
+        painted = wanted
+
+    return paint
+
+
+def _back_to_start(renderer: Renderer) -> None:
+    """`Renderer.erase` without the erase: the caret back where the
+    drawing began, the drawing left standing. The cursor's place in it is
+    the renderer's own record (`_cursor_pos`). Hidden on the way and until
+    the ledger shows it at the text's end (`ledger.resume_tail`) — written
+    past the renderer's record of it, which goes on believing it shown, so
+    its next frame hides it first as ever."""
+    output = renderer.output
+    output.write_raw(HIDE_CURSOR)
+    output.cursor_backward(renderer._cursor_pos.x)
+    output.cursor_up(renderer._cursor_pos.y)
+    output.reset_attributes()
+    output.enable_autowrap()
+    renderer.reset()
+    output.flush()
 
 
 def _answers(session: Session) -> Sequence[str]:
@@ -467,16 +566,16 @@ def _make_bindings(
     history: Callable[[], Sequence[str]],
 ) -> KeyBindings:
     kb = KeyBindings()
-    # PROTOTYPE: in the canvas Enter opens a paragraph — the blank line the
-    # story stores — and the line is sent by Ctrl+Enter where the terminal
-    # tells it from Enter (Windows always; elsewhere where it honours
-    # modifyOtherKeys, `_CONTROL_ENTER`), by Ctrl+S on every terminal, and
-    # by Ctrl+J, which some send for Ctrl+Enter. A line of a command or a
-    # direction is one line: Enter sends it; a question's answer rows,
-    # while they show, take Enter as everywhere.
+    # PROTOTYPE: in the canvas Enter sends, as everywhere, and Ctrl+Enter
+    # opens a paragraph — the blank line the story stores — where the
+    # terminal tells it from Enter (Windows always; elsewhere where it
+    # honours modifyOtherKeys, `_CONTROL_ENTER`), as does Ctrl+J on every
+    # terminal, which some send for Ctrl+Enter. A line of a command or a
+    # direction is one line: the paragraph key sends it.
     canvas_keys = Condition(lambda: carry.canvas_keys)
 
-    @kb.add("enter", filter=canvas_keys & ~completion_is_selected & ~Condition(answers.shown))
+    @kb.add("escape", "c-j", filter=canvas_keys)
+    @kb.add("c-j", filter=canvas_keys)
     def _paragraph(event: Any) -> None:
         buffer = event.current_buffer
         if buffer.text.lstrip().startswith("/") and "\n" not in buffer.text:
@@ -484,14 +583,8 @@ def _make_bindings(
         else:
             buffer.insert_text("\n\n")
 
-    @kb.add("escape", "c-j", filter=canvas_keys)
-    @kb.add("c-j", filter=canvas_keys)
-    @kb.add("c-s", filter=canvas_keys)
-    def _send(event: Any) -> None:
-        event.current_buffer.validate_and_handle()
-
-    # The paragraph Enter opened is one keystroke, so one Backspace takes
-    # it back: right after a blank line, both its newlines go.
+    # The paragraph Ctrl+Enter opened is one keystroke, so one Backspace
+    # takes it back: right after a blank line, both its newlines go.
     @kb.add(
         "backspace",
         filter=canvas_keys

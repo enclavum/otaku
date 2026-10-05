@@ -131,6 +131,9 @@ export function facts(version) {
     completion_type: completionType,
     layout: layout === "novel" ? "canvas" : layout,
     can_complete_text: canCompleteText,
+    // How a line typed now would join the newest row: as every turn the
+    // demo records joins, a paragraph (`recordTurn`); null with none
+    next_join: story?.turns.length ? "paragraph" : null,
   };
 }
 

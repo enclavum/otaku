@@ -36,7 +36,6 @@ from otaku.providers import (
     ModelInfo,
     ModelState,
     reasoning,
-    templates,
 )
 from otaku.store.schema import CompletionType, InjectionPosition
 
@@ -612,9 +611,6 @@ def _model_info(session: Session) -> tuple[tuple[str, str], ...]:
     caps = row.capabilities if row is not None else None
     out.append(("Reasoning", reasoning_words(caps)))
     out.append(("Capabilities", capability_words(caps)))
-    # the text template the text wire wraps the story in, and where the word
-    # came from; "unknown", and canvas is a layout alone on it
-    out.append(("Text template", _text_template_words(session.text_template)))
     if config.keep_alive:
         out.append(("Keep-alive", str(config.keep_alive)))
     if client.capabilities.prompt_cache:
@@ -622,15 +618,6 @@ def _model_info(session: Session) -> tuple[tuple[str, str], ...]:
         # pattern: behaviour keys are read in /info, edited in the file.
         out.append(("Prompt cache", config.prompt_cache or "5m"))
     return tuple(out)
-
-
-def _text_template_words(template: templates.TextTemplate | None) -> str:
-    """The Text template row: the template and where the word came from
-    (`TextTemplate.source`: override, engine, model); "unknown" for a
-    model without one, which the text wire cannot serve."""
-    if template is None:
-        return "unknown"
-    return f"{template.name} (from {template.source})"
 
 
 # How the Capabilities row spells a field where the dataclass's own name

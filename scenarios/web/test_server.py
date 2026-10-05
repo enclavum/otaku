@@ -23,7 +23,7 @@ import pytest
 from otaku.backend import Layout
 from otaku.backend.paths import Paths
 from otaku.backend.session import PARAMETERS, THINK_MENU
-from otaku.integrations import support as desk
+from otaku.integrations import SupportDesk
 from otaku.settings import models as models_file
 from scenarios.support import server as scripted
 from scenarios.support.harness import MODEL, set_config, set_config_provider
@@ -607,6 +607,7 @@ class TestStorySettings:
         "label",
         "injection_label",
         "tool",
+        "prompt_name",
         "allowed_positions",
         "enabled",
         "position",
@@ -677,6 +678,19 @@ class TestStorySettings:
         assert "refused" not in answer
         facts = page.get("/api/session")
         assert (facts["layout"], facts["completion_type"]) == ("canvas", "chat")
+
+    def test_the_facts_say_how_a_line_typed_now_would_join(self, page: Page) -> None:
+        # nothing played: the story is begun
+        assert page.get("/api/session")["next_join"] is None
+        page.play("I listen at the culvert mouth.")
+        story = page.get("/api/session")["story_id"]
+        assert page.get("/api/session")["next_join"] == "paragraph"
+        # read as the canvas, the rows played in the manuscript still stand apart
+        page.patch(f"/api/stories/{story}/settings/layout", {"layout": "canvas"})
+        assert page.get("/api/session")["next_join"] == "paragraph"
+        # a row played in the canvas: the next line runs on from it
+        page.play("I wade in.")
+        assert page.get("/api/session")["next_join"] == "inline"
 
     def test_a_patch_moves_one_field_and_the_store_follows(self, page: Page) -> None:
         page.play("I listen at the culvert mouth.")
@@ -757,17 +771,19 @@ class TestStorySettings:
         assert page.get("/api/shared_reminder") == {"text": "Stay grim."}
         assert page.store.settings.get_shared_reminder() == "Stay grim."
 
-    def test_a_tools_prompt_is_read_and_written_at_its_path(self, page: Page) -> None:
-        shipped = page.get("/api/prompts/question")["text"]
+    def test_a_settings_prompt_is_read_and_written_at_its_path(self, page: Page) -> None:
+        shipped = page.get("/api/prompts/allow_questions")["text"]
         assert shipped
-        answer = page.put("/api/prompts/question", {"text": "ASK ANEW"})
+        answer = page.put("/api/prompts/allow_questions", {"text": "ASK ANEW"})
         assert answer["notice"] and "refused" not in answer
-        assert page.get("/api/prompts/question") == {"text": "ASK ANEW"}
+        assert page.get("/api/prompts/allow_questions") == {"text": "ASK ANEW"}
         assert "ASK ANEW" in Paths.resolve(page.root).prompts_file.read_text()
-        answer = page.put("/api/prompts/question", {"text": ""})
+        answer = page.put("/api/prompts/allow_questions", {"text": ""})
         assert "refused" not in answer
-        assert page.get("/api/prompts/question") == {"text": shipped}
+        assert page.get("/api/prompts/allow_questions") == {"text": shipped}
+        # a name no setting owns, and a setting whose text is the reader's own
         assert page.get("/api/prompts/plan")["refused"] is True
+        assert page.get("/api/prompts/use_story_reminder")["refused"] is True
 
 
 class TestTheFlows:
@@ -1146,32 +1162,23 @@ class TestWebSearchKeyOverTheWire:
     the key a PATCH, the engine told from its shape; "" forgets it."""
 
     def test_the_key_goes_in_and_never_comes_back_out(self, page: Page) -> None:
-        # null while none is chosen, as the wire spells an absent value
-        assert page.get("/api/integrations/web_search") == {
-            "engine": None,
-            "label": None,
-            "has_key": False,
-        }
+        # whether a key is held, and nothing else: no engine named
+        assert page.get("/api/integrations/web_search") == {"has_key": False}
         answer = page.patch("/api/integrations/web_search", {"api_key": "tvly-abc"})
-        assert answer["notice"] == "Saved web search key for Tavily." and "refused" not in answer
-        assert page.get("/api/integrations/web_search") == {
-            "engine": "tavily",
-            "label": "Tavily",
-            "has_key": True,
-        }
+        assert answer["notice"] and "refused" not in answer
+        assert page.get("/api/integrations/web_search") == {"has_key": True}
         raw = Paths.resolve(page.root).integrations_file.read_text()
-        assert "tvly-abc" not in raw and 'engine = "tavily"' in raw
+        assert "tvly-abc" not in raw and "tavily" not in raw
         answer = page.patch("/api/integrations/web_search", {"api_key": "any-other"})
-        assert answer["notice"] == "Saved web search key for Exa."
-        assert page.get("/api/integrations/web_search")["engine"] == "exa"
+        assert page.get("/api/integrations/web_search") == {"has_key": True}
         answer = page.patch("/api/integrations/web_search", {"api_key": ""})
-        assert answer["notice"] == "Cleared web search key for Exa."
-        assert page.get("/api/integrations/web_search")["has_key"] is False
+        assert "refused" not in answer
+        assert page.get("/api/integrations/web_search") == {"has_key": False}
         assert page.patch("/api/integrations/web_search", {"api_key": ""})["refused"] is True
 
     def test_the_prompts_of_the_tools_otaku_runs_are_read_at_their_paths(self, page: Page) -> None:
-        for tool in ("system-info", "web-search"):
-            assert page.get(f"/api/prompts/{tool}")["text"]
+        for setting in ("allow_system_info", "allow_web_search"):
+            assert page.get(f"/api/prompts/{setting}")["text"]
 
 
 class TestToolTurnsOverTheWire:
@@ -1207,13 +1214,17 @@ class TestToolTurnsOverTheWire:
             "system",
         )
         told = next(e for e in events if e["type"] == "tool_turn")["turn"]
-        assert (told["role"], told["kind"], told["tool_label"]) == ("tool", "tool", "System info")
+        assert (told["role"], told["kind"], told["tool_label"]) == (
+            "tool",
+            "tool",
+            "System info call",
+        )
         assert told["body"].startswith("Time: ") and told["join_type"] == "paragraph"
         rows = page.get("/api/play")["messages"]
         assert [(r["role"], r["tool_label"]) for r in rows[-4:]] == [
             ("user", None),
             ("assistant", None),
-            ("tool", "System info"),
+            ("tool", "System info call"),
             ("assistant", None),
         ]
         assert rows[-1]["body"] == "It is late."
@@ -1260,12 +1271,19 @@ class TestSupportOverTheWire:
     posted to the desk; a refusal is an answer, and a body without a
     message is a bad request."""
 
-    def test_a_request_reaches_the_desk_and_a_refusal_is_an_answer(
-        self, page: Page, server: ModelServer, monkeypatch: pytest.MonkeyPatch
+    @pytest.fixture(autouse=True)
+    def _desk_at_the_scripted_server(
+        self, server: ModelServer, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """The desk at the scripted server's door — set before the page's
+        session binds it to its endpoint."""
         monkeypatch.setattr(
-            desk, "SUPPORT_ENDPOINT", server.url.removesuffix("/v1") + "/api/support"
+            SupportDesk, "endpoint", server.url.removesuffix("/v1") + "/api/support"
         )
+
+    def test_a_request_reaches_the_desk_and_a_refusal_is_an_answer(
+        self, page: Page, server: ModelServer
+    ) -> None:
         answer = page.post(
             "/api/support", {"message": "The canvas froze.", "email": "me@example.com"}
         )

@@ -125,7 +125,7 @@ class TestEvent:
         result = Message(id=6, role="tool", kind="tool", body="Tides: high.", provider="web-search")
         turn = api.event(ToolTurn(result, JoinType.PARAGRAPH))["turn"]
         assert (turn["role"], turn["kind"], turn["body"]) == ("tool", "tool", "Tides: high.")
-        assert turn["tool_label"] == "Web search"
+        assert turn["tool_label"] == "Web search call"
         assert turn["provider"] == "web-search"
 
     def test_done_carries_the_report_and_its_notice_and_no_reply(self) -> None:
@@ -166,7 +166,7 @@ class TestRows:
             Message(id=1, role="assistant", body="```otk-system-info\n```"),
             Message(id=2, role="tool", kind="tool", body="Time: now", provider="system-info"),
         ]
-        assert [row["tool_label"] for row in web_play.rows(chain)] == [None, "System info"]
+        assert [row["tool_label"] for row in web_play.rows(chain)] == [None, "System info call"]
 
 
 class TestSyntax:

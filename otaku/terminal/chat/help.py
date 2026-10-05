@@ -42,6 +42,7 @@ _KEY_ROWS: tuple[tuple[str, str], ...] = (
     ("@", "In a FILE argument: enable path autocompletion"),
     ("Up / Down", "Walk your recent prompt history"),
     ("Ctrl+C", "Clear the current line; cancel an in-flight reply"),
+    ("Ctrl+J", "Story mode: a new paragraph (Ctrl+Enter too, where it works)"),
 )
 # fmt: on
 

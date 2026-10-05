@@ -36,11 +36,11 @@ only what talks to the terminal is.
 `make test-model` (`scripts/test_model.py`, over the suite's scripted
 server) answers as llama.cpp on llama.cpp's own port, so the default
 `[llamacpp]` section reaches it: two models as its router serves them,
-`otaku-test-chat` and `otaku-test-text` (the novel's, once models.toml
+both seeing pictures, `otaku-test-chat` and `otaku-test-text` (the novel's, once models.toml
 names it `plain` by hand), whose replies the first number in a line
 chooses, or a list of them separated by commas alone — thinking, a
 note, a question, the two tools, a long reply, the canvas's two
-openings, or everything; `-1` a failure — for looking at
+openings, or everything; `-1` a failure, half the time — for looking at
 every block in every layout by hand.
 
 The state dir defaults to `~/.otaku` (`DEFAULT_ROOT` in
@@ -143,6 +143,20 @@ re-exported to the frontends for their menus. It lives in `context`, not
 `backend`, because the wire side is consumed BELOW backend; reading and
 writing are one vocabulary, so the language has one home.
 
+A played line reads in both frontends, in both modes, as its two kinds
+of text: the story, its commands (`/me`, `/you`, `/ooc`, `/cue`,
+`/roll`) picked out as commands, and its WORDS WITH THE MODEL drawn faint
+— all of a `/you` or `/ooc` line after its token, whatever follows a
+`/ooc` or `/cue` inliner to the line's end. Which is which is the
+language's (`syntax.spans`, re-exported by `backend.commands`), never a
+frontend's: a user row's `segments` carry it as `prose` and `ooc` runs
+(`api.play.segments`), the page drawing the latter `.otk-ooc`
+(`transcript.lineNodes`), the terminal dim — in chat mode's block and
+the prompt as typed (`render.message`), and in story mode's one text
+beside the typesetting, so a quote the line opens and the reply closes
+still reads as one (`render.typeset_line`, `Streamer.aside`). The
+dossier shows a turn as stored.
+
 The shared command surface is `backend.commands`: one table declaring
 every command once, its SYNTAX rows derived from `context.syntax`. The
 terminal answers each token in `chat.bindings.OPERATIONS` and
@@ -230,7 +244,9 @@ kind `tool` —
 nobody's line, no reply: the tool's NAME its `provider` (as `card`
 names a greeting's), its label a display matter the registry answers by
 that name and the result it holds (`tools.get_tool_label`,
-`Tool.label_of`: "Web search failed" for a search that failed; the
+`Tool.label_of`: the label and "call", "Web search call", or "Web
+search failed" for a search that failed — both frontends draw it as
+given; the
 web row carries `tool_label`) —
 and told (`ToolTurn`); the model is asked
 again over the story as it now stands, `_MAX_TOOL_ROUNDS` times at
@@ -467,25 +483,41 @@ what makes an instruct model continue one text; the novel needs none.
 The page says the canvas in its words — the app root's `data-layout`
 and `data-completion`,
 the tiles hidden over the text wire — and the terminal in its: the
-prompt placeholder "Continue…" ("Start the story" while it has no turns), the one-text look, in-place
-undo and regen (`ledger.echo_flow`, `_ERASE_FROM`, `reply_begins`,
-`restore_flow`, `render.flow_offsets`). Neither draws the thinking there: it
-would split the line the reply goes on from, and a redraw would take it
-away (it is never stored) — the page's stylesheet hides it, the
-terminal's stream skips it and keeps the spinner turning.
+empty line's caret, a blinking block in the theme's `caret` colour where the
+page draws its own (`prompt._Caret`, the colour by OSC 12, no placeholder), the one-text look, in-place
+undo and regen (`ledger.echo_flow`, `_erase_from`, `reply_begins`,
+`restore_flow`, `render.flow_offsets`). Neither draws a block there — the
+thinking (it would split the line the reply goes on from, and a redraw
+would take it away: it is never stored), the notes, a past question, a
+tool's turn; only the question waiting to be answered — the page's
+stylesheet hides them, drawing instead the paragraph break a hidden block
+stood for between two runs of prose (`transcript.blockGap`), and the
+terminal's stream skips them and keeps the spinner turning; a call is
+said on the status row while it is made.
 
 The page's canvas is TYPED IN where the story is: its end is editable,
 the TAIL (`transcript.showTail`, a `plaintext-only` span after the
 text), the composer's box standing disabled below, its placeholder
 saying where to type (`shell.showFacts`, kept shut through
-`disconnected`). The tail goes on in the paragraph by default: the
-join's one space is DRAWN before it, outside it (`.otk-tail-seam`), so
-no caret stands before it, and is never sent — the join is the
-backend's. Enter opens a paragraph — a block of the tail's
+`disconnected`). Where the tail stands is the backend's to say: the
+facts' `next_join` (`api.play.next_join`, the join rule applied to the
+newest row and a line opening with no break of its own, in the layout's
+mode). Inline, the join's one space is DRAWN before it, outside it
+(`.otk-tail-seam`), so no caret stands before it, and is never sent;
+paragraph, it opens one (`data-join`), as a row joined so does; null, the
+story is begun. Empty and focused, it shows where the line goes by the
+caret a reply streams behind, the browser's own once a word is typed. Enter or Send
+sends — on a touch screen Send alone, Enter there opening a paragraph;
+Ctrl/⌘+Enter opens a paragraph — a block of the tail's
 (`.otk-tail__p`), spaced as the story's, no empty line to step onto —
 sent as the blank line the story stores; Shift+Enter a line break (a
-single newline); Ctrl/⌘+Enter or Send sends; Esc clears; ↑/↓ stop at its
-first and last lines. What it holds is what is sent (`tailText`), drawn
+single newline); Esc clears; ↑/↓ stop at its first and last lines. The
+prefix menu serves it as it serves the box (`composer.js`, through the
+place a line is typed, `transcript.tailHost`): a slash opens it, standing
+at the caret, its keys taken first while it is up. The
+terminal's story mode keeps the same keys: Enter sends, Ctrl+Enter opens
+a paragraph where the terminal tells it from Enter, Ctrl+J on every
+terminal (`prompt._make_bindings`). What it holds is what is sent (`tailText`), drawn
 as the played line will be: a line's edge breaks are drawn once
 (`drawTurn`), a paragraph's blank line being the join's own. A reply
 under way takes the tail down, its space held (`holdSpace`), and the
@@ -508,8 +540,8 @@ model gets is `templates.resolve` (a `TextTemplate` with its `source`):
 the model's `text_template` line in models.toml (`settings.models.TEMPLATE_KEY`,
 written by hand; an unknown word is a launch notice), else the engine's
 word (`ModelInfo.text_template`), else the model's name
-(`family_of_name`), else NONE; `/info` says so as a "Text template" row,
-the model listing carries `text_template` per model. No thinking knob
+(`family_of_name`), else NONE; the model listing carries `text_template`
+per model. No thinking knob
 rides the request (`level=None`), a text completion that comes back
 EMPTY with its stream ending clean is asked ONCE more with a paragraph
 break appended and the break recorded as the reply's lead
@@ -976,7 +1008,7 @@ units included — the test classes come first (one class per command or
 group) and helper functions after them; within a class, tests follow the
 story's logical order.
 
-Two markers name the slow ends of the suite, so either can be deselected.
+Three markers name the slow ends of the suite, so each can be deselected.
 The `live` smokes talk to real providers and each skips itself when its
 server or api key is absent (`scripts/live-providers.sh` launches the
 local engines; the cloud smokes read OPENROUTER_API_KEY / NANOGPT_API_KEY
@@ -984,7 +1016,13 @@ and send one short prompt to a cheap model). The `cli` ones are all of
 `scenarios/cli/`: they drive the real binary in a subprocess or a pty,
 which costs seconds per test where the in-process kind costs
 milliseconds. The fast offline suite is therefore
-`-m "not live and not cli"`.
+`-m "not live and not cli"`. The `slow` ones take minutes:
+`scenarios/cli/test_screen.py` plays the terminal turn by turn in a pty,
+its screen emulated (`support.emulator`, pyte, a dev dependency), and
+holds every step against a fresh launch's echo of the same story and every
+frame against rows moving or the text blinking. They run only with
+`--slow` (`scenarios/conftest.py` deselects them otherwise, whatever `-m`
+says): `make regression`.
 
 ## Documentation rules
 

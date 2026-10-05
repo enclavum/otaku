@@ -28,9 +28,7 @@ from otaku.console import banner
 from otaku.terminal.chat import bindings, stream
 from otaku.terminal.chat.chat import RESUME_TURNS, Chat
 from otaku.terminal.prompt import (
-    CANVAS_PLACEHOLDER,
     CHAT_PLACEHOLDER,
-    START_PLACEHOLDER,
     AnswerMenu,
     Carry,
     LineAssembler,
@@ -126,7 +124,7 @@ def run(session: Session) -> None:
             list(session.messages),
             RESUME_TURNS,
             shown=chat.shown_tools,
-            is_canvas=session.layout.mode is StoryMode.STORY,
+            is_story_mode=session.layout.mode is StoryMode.STORY,
         )
         print(echoed)
         chat.ledger.note_printed(echoed + "\n")  # printed past the ledger: the flow's tail
@@ -163,49 +161,50 @@ def run(session: Session) -> None:
         # The marker carries the cloud, not the hint: the hint goes at
         # the first keystroke, which is exactly when the text is being
         # written to leave the machine.
-        is_canvas = session.layout.mode is StoryMode.STORY
+        is_story_mode = session.layout.mode is StoryMode.STORY
         if assembler.in_block:
             prefix = PROMPT_CONTINUATION
-        elif is_canvas and not carry.command_paragraph:
+        elif is_story_mode and not carry.command_paragraph:
             prefix = ""  # PROTOTYPE: the canvas is one text, no prompt marker in it
         elif session.on_cloud:
             prefix = CLOUD_PROMPT_PREFIX
         else:
             prefix = PROMPT_PREFIX
-        # the hint is the layout's: a story on the canvas is continued
-        if assembler.in_block:
-            placeholder = None
-        elif is_canvas:
-            placeholder = CANVAS_PLACEHOLDER if session.messages else START_PLACEHOLDER
-        else:
-            placeholder = CHAT_PLACEHOLDER
+        # chat mode's hint; story mode's empty line shows its caret instead
+        # (`prompt._Caret`) — "", as None would keep the last prompt's hint
+        placeholder = "" if assembler.in_block or is_story_mode else CHAT_PLACEHOLDER
         # the answers to a pending question, as rows over the prefix
         message = functools.partial(answers.message, prefix)
         # PROTOTYPE: in the canvas the prompt stands in the story's own text
         # — its last line drawn again as the prompt's message, the join's
         # space after it — wherever the text is the last thing on screen
         in_text = (
-            is_canvas
+            is_story_mode
             and not assembler.in_block
             and not answers.posed
             and not carry.command_paragraph
             and chat.ledger.can_type_in_text()
         )
         carry.in_text = in_text
+        if not in_text and chat.ledger.at_text_end:
+            # the reply left the text's row open (`ledger.hold_at_tail`): a
+            # prompt under the text ends it, the blank under it as ever
+            chat.ledger.below_text()
         # PROTOTYPE: the canvas's keys in every canvas prompt but a block's
-        carry.canvas_keys = is_canvas and not assembler.in_block
+        carry.canvas_keys = is_story_mode and not assembler.in_block
         seam = ""
         if in_text:
             tail = chat.ledger.tail
             seam = "" if _plain(tail)[-1:].isspace() else " "
             chat.ledger.lift_to_tail()
             message = functools.partial(_in_text_message, tail, seam)
-        # PROTOTYPE: a prompt in the text erases all it drew as it ends — its
-        # message, the text's last line, too — and the ledger writes that line
-        # again (`resume_tail`): no row is counted after it
+        # PROTOTYPE: a prompt in the text ends leaving what it drew, the caret
+        # back where its drawing began (`prompt.build_prompt`), and the ledger
+        # writes the text's last line over itself and erases what follows
+        # (`resume_tail`): no row is counted after it
         prompt_session.app.erase_when_done = in_text
         if carry.canvas_keys:
-            # PROTOTYPE: Ctrl+Enter, the send, told from Enter where it can be
+            # PROTOTYPE: Ctrl+Enter, the paragraph, told from Enter where it can be
             sys.stdout.write(MODIFY_OTHER_KEYS_ON)
             sys.stdout.flush()
         try:
@@ -218,6 +217,10 @@ def run(session: Session) -> None:
                 ),
             )
         except EOFError:
+            if in_text:
+                # the text back as it stood, the cursor shown after it
+                chat.ledger.resume_tail()
+                chat.ledger.below_text()
             break
         except KeyboardInterrupt:
             if in_text:
@@ -321,7 +324,7 @@ def run(session: Session) -> None:
                 chat.ledger.typed(prefix + line + "\n")
             # in the canvas the line plays as typed, the breaks at its edges
             # its paragraphs (`api.play.submit`); every other line is trimmed
-            result = assembler.feed(line, verbatim=is_canvas)
+            result = assembler.feed(line, verbatim=is_story_mode)
             if result is None:
                 if in_text:
                     chat.ledger.below_text(prefix + line)
@@ -331,7 +334,7 @@ def run(session: Session) -> None:
                 # PROTOTYPE: a command shows under the text as a prompt there
                 # would have
                 chat.ledger.below_text(prefix + submission)
-            if not submission.strip() and not is_canvas:
+            if not submission.strip() and not is_story_mode:
                 # A bare Enter leaves its prompt row on screen; its rows
                 # stay counted so the next submission's erase takes it
                 # too. In the canvas it is the continue: it plays.
@@ -340,7 +343,7 @@ def run(session: Session) -> None:
         # the continue: the canvas's empty line, which the stream places
         # where the text ended rather than echoing (`stream.show`)
         carry.end_walk()
-        chat.continuing = is_canvas and not submission.strip()
+        chat.continuing = is_story_mode and not submission.strip()
         chat.replied = False
         chat.status_note = ""  # the last reply's, shown until a line is sent
         try:

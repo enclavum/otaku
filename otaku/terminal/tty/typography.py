@@ -114,6 +114,25 @@ class Streamer:
             self._consume(ch)
         self._out.flush()
 
+    def aside(self, text: str, style: str) -> None:
+        """Write `text` beside the typesetting, in `style` — a command word,
+        a word with the model: none of it is story, so none of the
+        streamer's state reads it, and a quote open around it stays open.
+        What is held back resolves first as the text it was (a line's
+        opening, a lone `*`), and the span's own style is restored after."""
+        if self._at_bol:
+            pending, self._pending = self._pending, ""
+            self._at_bol = False
+            self._flush_text(pending)
+        if self._pending_star:
+            self._pending_star = False
+            self._write("*")
+        self._out.write(f"{RESET}{style}{text}")
+        if text.strip():
+            self._col0 = False
+        self._restyle()
+        self._out.flush()
+
     def flush(self) -> None:
         if self._in_fence:
             if self._code_line:
@@ -423,9 +442,21 @@ def highlight_commands(text: str, commands: tuple[str, ...]) -> str:
     counts as a command belongs to the chat layer, not to the terminal.
     Nothing else lights up: prose keeps its slashes, and a line that only
     looks like a command reads as the prose it is."""
-    if not commands:
-        return text
     escape = theme().command.fg
+    # Default FOREGROUND, not a full reset: the grey played block paints a
+    # background band per line, and a reset would knock it out mid-line.
+    return "".join(
+        f"{escape}{piece}{_DEFAULT_FG}" if command else piece
+        for piece, command in command_pieces(text, commands)
+    )
+
+
+def command_pieces(text: str, commands: tuple[str, ...]) -> list[tuple[str, bool]]:
+    """`text` cut at its commands, in order and whole: (piece, whether it
+    is one of `commands`) — what `highlight_commands` colours, and what
+    story mode's line is typeset around (`render.typeset_line`)."""
+    if not commands:
+        return [(text, False)] if text else []
     # A command opens a line or follows whitespace and does not run on into
     # a longer word — the same boundaries the parser reads one by, so
     # `and/or`, `https://x.co` and `/mention` stay prose. Longest first, so
@@ -434,9 +465,16 @@ def highlight_commands(text: str, commands: tuple[str, ...]) -> str:
         re.escape(command) for command in sorted(commands, key=len, reverse=True)
     )
     pattern = re.compile(rf"(?m)(?:^|(?<=\s))(?:{alternatives})(?!\w)")
-    # Default FOREGROUND, not a full reset: the grey played block paints a
-    # background band per line, and a reset would knock it out mid-line.
-    return pattern.sub(lambda m: f"{escape}{m.group(0)}{_DEFAULT_FG}", text)
+    pieces: list[tuple[str, bool]] = []
+    at = 0
+    for found in pattern.finditer(text):
+        if found.start() > at:
+            pieces.append((text[at : found.start()], False))
+        pieces.append((found.group(0), True))
+        at = found.end()
+    if at < len(text):
+        pieces.append((text[at:], False))
+    return pieces
 
 
 def highlight_toml(text: str) -> str:

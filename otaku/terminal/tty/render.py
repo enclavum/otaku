@@ -32,13 +32,14 @@ from prompt_toolkit.utils import get_cwidth
 
 from otaku.backend import Message
 from otaku.backend.api import play as api_play
-from otaku.backend.commands import COMMANDS
+from otaku.backend.commands import COMMANDS, spans
 from otaku.backend.story import StorySettingAssistantNotes, StorySettingQuestions, StorySettings
-from otaku.backend.tools import TOOLS, ToolQuestion, get_tool_label
+from otaku.backend.tools import ToolQuestion, get_tool_label
 from otaku.formatting import printable
 from otaku.terminal.tty import DIM, user_block
 from otaku.terminal.tty.cursor import terminal_width
-from otaku.terminal.tty.typography import Streamer, highlight_commands
+from otaku.terminal.tty.theme import theme
+from otaku.terminal.tty.typography import Streamer, command_pieces, highlight_commands
 
 # A command as a spec's token writes it: a slash and a word, nothing
 # else — rules out the `…` the inliner rows ride behind.
@@ -241,7 +242,14 @@ def message(
     The one renderer for showing AND measuring, so the ledger can never
     disagree with an echo."""
     if role == "user":
-        styled = highlight_commands(text, command_tokens())
+        # the commands picked out; a word with the model dim to the line's end
+        tokens = command_tokens()
+        styled = "".join(
+            f"{DIM}{highlight_commands(run, tokens)}{_NORMAL}"
+            if ooc
+            else highlight_commands(run, tokens)
+            for run, ooc in spans(text)
+        )
         if pictures:
             marker = f"{DIM}{pictures_note(pictures)}{_NORMAL}"
             styled = f"{styled} {marker}" if styled else marker
@@ -315,16 +323,6 @@ def block(text: str, width: int) -> str:
     stream.feed(text)
     stream.close()
     return out.getvalue()
-
-
-def tool_turn_label(name: str | None, result: str) -> str:
-    """What the block of a tool's turn says: the tool's label and "call",
-    "Web search call", whatever the tool — or, where the result names the
-    turn otherwise (`Tool.label_of`), that name alone: "Web search failed"."""
-    label = get_tool_label(name, result)
-    tool = TOOLS.get(name or "")
-    said = label if tool is not None and label != tool.label else f"{label} call"
-    return said[:1].upper() + said[1:] if label else "Tool call"
 
 
 def question_block(text: str, width: int) -> str:
@@ -410,7 +408,7 @@ def turn(item: Message, *, shown: frozenset[str] = frozenset(), story: bool = Fa
     body = item.body.strip()
     if item.role == "user":
         return user_block(message(body, "user", pictures=len(item.attachments)))
-    label = tool_turn_label(item.provider, item.body) if item.role == "tool" else ""
+    label = get_tool_label(item.provider, item.body) if item.role == "tool" else ""
     return "\n".join(message(body, item.role, shown=shown, label=label, story=story).splitlines())
 
 
@@ -419,12 +417,12 @@ def last_turns(
     count: int,
     *,
     shown: frozenset[str] = frozenset(),
-    is_canvas: bool = False,
+    is_story_mode: bool = False,
 ) -> str:
     """The last `count` turns, echoed the way they played: one blank line
     between turns, bodies verbatim, the calls of the tools `shown` —
-    or, on the canvas (`is_canvas`), as the one text they are (`flow`)."""
-    if is_canvas:
+    or, in story mode (`is_story_mode`), as the one text they are (`flow`)."""
+    if is_story_mode:
         return flow(messages[-count:], shown=shown)
     out: list[str] = []
     for item in messages[-count:]:
@@ -433,13 +431,23 @@ def last_turns(
     return "\n".join(out).lstrip("\n")
 
 
+def unit_start(items: list[Message], end: int) -> int:
+    """Where the reply ending at `items[end - 1]` begins as ONE unit: the
+    reply, and where a tool turn stands right before it, that turn and
+    the reply holding its call, again and again — what /undo and /regen
+    take (`Session._pop_reply`, the rule copied)."""
+    at = end - 1
+    while at > 0 and (items[at].role == "tool" or items[at - 1].role == "tool"):
+        at -= 1
+    return at
+
+
 def flow(items: list[Message], *, shown: frozenset[str] = frozenset()) -> str:
     """The turns as ONE text — the canvas's echo in this medium: a user
     row as prose, no block, typeset as the text is; every row joined to
     the text before it as `api.play.join_type` says — a paragraph after
-    one blank line, an inline row after one space; a tool turn a block
-    apart, and the row after it a paragraph, since a block ends its
-    line. No trailing newline, like `turn`."""
+    one blank line, an inline row after one space; no tool's block drawn
+    (`flow_offsets`). No trailing newline, like `turn`."""
     return flow_offsets(items, shown=shown)[0]
 
 
@@ -451,8 +459,8 @@ def flow_offsets(
     ledger can place echoed turns for erasing (`Chat.restore_tail`). No
     tool's block is drawn in story mode's text — a note, a tool's turn,
     a call — but the question the story stands on: answered, its answer
-    is the text's. A tool's turn left out still parts the reply after it
-    as a paragraph, as its join says."""
+    is the text's. The row after a tool's turn left out joins from it as
+    its join says: on, in story mode, the paragraph the call interrupted."""
     out = ""
     starts: list[int] = []
     previous: Message | None = None
@@ -486,14 +494,39 @@ def flow_offsets(
 
 
 def prose(text: str) -> str:
-    """`text` typeset as a reply's prose is — the reader's line on the
-    canvas, which reads as the text does: dialogue takes its accent, and
-    no command is picked out, since none is played there."""
+    """The reader's line as story mode's one text draws it
+    (`typeset_line`), alone."""
     out = io.StringIO()
     streamer = Streamer(out)
-    streamer.feed(text)
+    typeset_line(streamer, text)
     streamer.flush()
     return out.getvalue()
+
+
+def typeset_line(streamer: Streamer, text: str) -> None:
+    """The reader's line into story mode's one text: its story typeset as
+    a reply's prose is, through `streamer` — the reply's own, live, so a
+    quote it opens and the reply closes reads as one — its commands
+    picked out as chat mode picks them out, and its words with the model
+    dim (`commands.spans`), both beside the typesetting (`Streamer.aside`):
+    neither is story. The breaks at its edges are the streamer's, the
+    joins they draw collapsing as ever."""
+    core = text.strip("\n")
+    lead = text[: text.index(core)] if core else text
+    streamer.feed(lead)
+    tokens = command_tokens()
+    command = theme().command.fg
+    for run, ooc in spans(core):
+        if ooc:
+            streamer.aside(run, DIM)
+            continue
+        for piece, is_command in command_pieces(run, tokens):
+            if is_command:
+                streamer.aside(piece, command)
+            else:
+                streamer.feed(piece)
+    if core:
+        streamer.feed(text[len(lead) + len(core) :])
 
 
 def command_tokens() -> tuple[str, ...]:

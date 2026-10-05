@@ -140,7 +140,8 @@ function start() {
     }
     // The model's question: an option picked is the line, sent, and the
     // caret comes back to the box for the next; copied, it lands in the
-    // box to be edited first.
+    // box to be edited first — on the canvas in the text, the question
+    // going (`transcript.draftTail`).
     const pick = event.target.closest("[data-ask-send]");
     if (pick) {
       submit(pick.dataset.askSend);

@@ -1312,7 +1312,9 @@ class Dossier(ListScreen):
         if self.tab == "premise":
             return self.premise
         if self.tab == "messages":
-            return self.msgs[self.turn_filtered[self.cursor]].body
+            # without the whitespace at its edges, the row's join, which the
+            # save keeps (`stories.edit_message`) — as the page's field does
+            return self.msgs[self.turn_filtered[self.cursor]].body.strip()
         if self.tab == "tools":
             focused = self._tool_field()
             # the key's field shows where it stands, never the key: a new

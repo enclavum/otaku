@@ -538,19 +538,21 @@ class TestTheJoin:
             got = get_join_type(story(user(before)), story(assistant(after)))
             assert got is JoinType.PARAGRAPH, (before, after)
 
-    def test_the_first_row_a_tool_turn_and_a_cards_rows_stand_alone_in_any_mode(self) -> None:
+    def test_the_first_row_and_a_cards_rows_stand_alone_in_any_mode(self) -> None:
         assert get_join_type(None, story(user("the bus."))) is JoinType.PARAGRAPH
-        assert get_join_type(story(assistant("Look")), story(tool("Tides."))) is (
-            JoinType.PARAGRAPH
-        )
-        assert get_join_type(story(tool("Tides.")), story(assistant("Six."))) is (
-            JoinType.PARAGRAPH
-        )
         # a card's line, and the greeting its card made
         assert get_join_type(story(user("One")), story(card(1, "Mara"))) is JoinType.PARAGRAPH
         greeting = story(replace(assistant("Welcome."), provider="card"))
         assert get_join_type(story(user("One")), greeting) is JoinType.PARAGRAPH
         assert get_join_type(greeting, story(user("I nod."))) is JoinType.PARAGRAPH
+
+    def test_a_tool_turn_runs_on_in_story_mode_as_any_row(self) -> None:
+        # story mode draws no tool's turn, so the reply after it goes on in
+        # the paragraph the call interrupted
+        assert get_join_type(story(assistant("Look")), story(tool("Tides."))) is JoinType.INLINE
+        assert get_join_type(story(tool("Tides.")), story(assistant("Six."))) is JoinType.INLINE
+        # in chat mode, a paragraph as every chat row
+        assert get_join_type(tool("Tides."), story(assistant("Six."))) is JoinType.PARAGRAPH
 
     def test_the_wire_joins_consecutive_rows_by_it(self) -> None:
         prompt = assemble(

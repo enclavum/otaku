@@ -160,13 +160,13 @@ def _pose_again(chat: Chat, *, drawn: bool) -> None:
     question = asked(newest, chat.shown_tools)
     if question is None:
         return
-    if _is_canvas(chat) and not drawn:
+    if _is_story_mode(chat) and not drawn:
         chat.ledger.extend_reply(question_block(question.text, terminal_width()) + "\n")
     chat.replied = True
 
 
-def _is_canvas(chat: Chat) -> bool:
-    """Whether the open story is read on the canvas — echoed as one text
+def _is_story_mode(chat: Chat) -> bool:
+    """Whether the open story is read in story mode — echoed as one text
     then (`render.flow`), the played turns' blocks otherwise."""
     return chat.session.layout.mode is StoryMode.STORY
 
@@ -181,7 +181,7 @@ def _report_undo_ending(chat: Chat) -> None:
         return
     report = f"{DIM}[ undone. the story now ends with: ]{RESET}"
     turns = last_turns(
-        list(chat.session.messages), 2, shown=chat.shown_tools, is_canvas=_is_canvas(chat)
+        list(chat.session.messages), 2, shown=chat.shown_tools, is_story_mode=_is_story_mode(chat)
     )
     chat.say(f"{report}\n\n{turns}")
     chat.restore_tail(2, above=report)
@@ -218,7 +218,7 @@ def _regen(chat: Chat, raw: str) -> None:
         chat.say(marker + "\n")
         # The typed line stays above the marker — nothing of it to erase.
         chat.ledger.typed_gone()
-        if _is_canvas(chat):
+        if _is_story_mode(chat):
             # the prompt re-run reads as prose under the marker, and the
             # fresh take goes on from it (`ledger.echo_flow`)
             chat.ledger.echo_flow(inline=False, above=marker)
@@ -255,7 +255,7 @@ def _last(chat: Chat, raw: str) -> None:
     shown = (len(list(session.messages)[-rows:]) + 1) // 2
     report = f"The last {shown} turns of this story:"
     turns = last_turns(
-        list(session.messages), rows, shown=chat.shown_tools, is_canvas=_is_canvas(chat)
+        list(session.messages), rows, shown=chat.shown_tools, is_story_mode=_is_story_mode(chat)
     )
     chat.say(f"{report}\n\n{turns}")
     chat.restore_tail(rows, above=report)
@@ -341,7 +341,7 @@ def _landed(chat: Chat, landed: str | None) -> None:
         list(chat.session.messages),
         RESUME_TURNS,
         shown=chat.shown_tools,
-        is_canvas=_is_canvas(chat),
+        is_story_mode=_is_story_mode(chat),
     )
     # A story with nothing played echoes no turns, and no blank for them.
     chat.say(f"{landed}\n\n{turns}" if turns else landed)
@@ -494,7 +494,7 @@ def _import(chat: Chat, raw: str) -> None:
         list(chat.session.messages),
         RESUME_TURNS,
         shown=chat.shown_tools,
-        is_canvas=_is_canvas(chat),
+        is_story_mode=_is_story_mode(chat),
     )
     chat.say(f"The last turns of this story:\n\n{turns}")
     chat.restore_tail(RESUME_TURNS)
