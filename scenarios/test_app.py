@@ -989,9 +989,14 @@ class TestFirstLaunch:
             # with its own story-so-far, nothing left for a first pass
             # (and no model on a fresh install) to rebuild.
             assert all(s.history for s in app.store.scenes.get_current(story_id, ids))
+            # The river ends on a question, and an off tool's calls are
+            # neither drawn nor sent: it lands with the questions tool on.
+            assert [s.name for s in story.settings if s.enabled] == ["allow_questions"]
             # The second sample landed whole: the long play, memory and all.
             others = [s for s in app.store.stories.list() if s.id != story_id]
             assert [s.title for s in others] == ["The Vermilion Tour"]
+            tour = app.store.stories.get(others[0].id)
+            assert not [s.name for s in tour.settings if s.enabled]
             tour_ids = app.store.stories.get_messages_ids(others[0].id)
             assert len(tour_ids) == 318
             tour_scenes = app.store.scenes.get_current(others[0].id, tour_ids)

@@ -940,6 +940,10 @@ story's number, `messages.set_attachments`), best effort per picture.
 The demo carries them as fixtures: `capture_fixtures_web.py` copies the
 stored file and its thumbnail into `demo/web/fixtures/files/` with the
 day in the name pinned, and `demo.js` serves them under `/api/files`.
+Nor does the format carry a story's settings: river.md ends on a
+question, and an off tool's calls are neither drawn nor sent, so the
+seed switches its questions tool on as it lands (`launch._ASKING_SAMPLE`,
+hardcoded for that one sample).
 
 `cert/` holds the TLS pair the web frontend serves under (`web.cert`):
 the app writes it only into an empty directory, and a pair already there

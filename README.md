@@ -31,10 +31,9 @@ and see how the UI works.
 
 Writing features:
 
-- **two modes** with alternative UI layouts:
-  - _chat mode_ (the manuscript or chat layout in the web interface), when your story is
-    dialogue-based;
-  - _story mode_ (the canvas layout in the web interface), when you write the story as a novel
+- **chat and story modes**, with alternative UI layouts:
+  - _chat mode_ (the manuscript or chat layout in the web interface), for a dialogue-based story;
+  - _story mode_ (the canvas layout in the web interface), for writing the story as a novel
     directly in the transcript;
 - **consistent prose**: the first 20 and the last 150 messages are always sent to the model as
   they are, to make it maintain the style;
@@ -179,8 +178,15 @@ same roll rather than re-rolling it. Dice examples: `2d6+3`, `d20`, `2d20kh1`/`2
 
 During play, you can `/undo` (Ctrl+U) the last exchange and `/regen` (Ctrl+R) the last reply.
 
-Switch between chat and story mode with `/set mode chat` or `/set mode story`; in the web
+### Story mode
+
+You can switch between chat and story modes with `/set mode chat` or `/set mode story`; in the web
 interface, use the layout buttons in the contents.
+
+In story mode, you write text directly in the transcript. After you press Enter, the model
+continues the story. If you want to add a new paragraph, press Ctrl+Enter (or Ctrl+J if that
+doesn't work). You can just hit Enter without adding your text, and the model will continue. As in
+chat mode, you can use the helper commands `/ooc` and `/cue` to steer the story.
 
 ### Importing character cards
 

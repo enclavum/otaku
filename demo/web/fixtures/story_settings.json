@@ -84,7 +84,7 @@
     7,
     8
    ],
-   "enabled": false,
+   "enabled": true,
    "position": 1,
    "reminder_text": null,
    "display_notes": null,

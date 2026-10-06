@@ -11,7 +11,8 @@
   "can_attach": false,
   "completion_type": "chat",
   "layout": "manuscript",
-  "can_complete_text": false
+  "can_complete_text": false,
+  "next_join": "paragraph"
  },
  "story": {
   "id": 1,
@@ -507,18 +508,25 @@
    "tail_target": 150,
    "tail_setting": 150,
    "system_tokens": 73,
-   "transcript_tokens": 1346,
+   "transcript_tokens": 1568,
    "limit": 32574,
    "pictures_sent": 0,
    "pictures_omitted": 2,
    "pictures_held": 0,
    "kept": 16,
-   "total_tokens": 1419,
-   "used": 4
+   "total_tokens": 1641,
+   "used": 5
   },
-  "lede": "Context preview — the exact request to be sent. Context summary:\n\n  ~1,419 tokens projected · 4% of the 32,574 limit\n  system 73 · transcript 1,346\n  16 messages verbatim\n  2 pictures on the verbatim messages not sent: the model cannot see, or the file is gone",
+  "lede": "Context preview — the exact request to be sent. Context summary:\n\n  ~1,641 tokens projected · 5% of the 32,574 limit\n  system 73 · transcript 1,568\n  16 messages verbatim\n  2 pictures on the verbatim messages not sent: the model cannot see, or the file is gone\n  injected:\n  - questions (2nd last, ~180 tokens)",
   "note": "",
-  "injections": [],
+  "injections": [
+   {
+    "label": "questions",
+    "position": 1,
+    "position_text": "2nd last",
+    "tokens": 180
+   }
+  ],
   "parts": [
    {
     "role": "system",
@@ -597,12 +605,12 @@
    },
    {
     "role": "user",
-    "body": "I hold the lantern over my map, then over the chamber floor, and look from one to the other.",
+    "body": "((OOC: You may ask the reader ONE question when a choice is theirs to make rather than\nyours. Write it as the last thing in your reply, in a fenced code block marked\notk-question: the question on the first line, then the answers for the reader\nto pick from as numbered lines, at least two. Like this, from an unrelated\nstory:\n```otk-question\nDoes Mara confess tonight, or wait for the ball?\n1. She confesses tonight\n2. She waits for the ball\n3. She confesses, but to the wrong person\n```\nThe reader's next message is the answer.\nClose the block before anything else follows, never put a block inside another,\nand stop after the closing fence. Never mention the block's marker. Never write\nit outside the block itself.))\nI hold the lantern over my map, then over the chamber floor, and look from one to the other.",
     "pictures": 0
    },
    {
     "role": "assistant",
-    "body": "The lantern shows what the dark would not. On the map, the red line you drew runs on past the lock and up the hill, into country you have never surveyed. On the floor, the water runs the same way.\n\"Well?\" says the voice from the culvert. \"Are you coming?\"",
+    "body": "The lantern shows what the dark would not. On the map, the red line you drew runs on past the lock and up the hill, into country you have never surveyed. On the floor, the water runs the same way.\n\"Well?\" says the voice from the culvert. \"Are you coming?\"\n```otk-question\nDo you follow the water into the culvert?\n1. I go in, lantern first\n2. I ask the voice its name before I move\n3. I climb out and go back for Tallis\n```",
     "pictures": 0
    }
   ]

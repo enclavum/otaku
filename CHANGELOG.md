@@ -2,7 +2,7 @@
 
 See also the tentative roadmap: [ROADMAP.md](https://github.com/enclavum/otaku/blob/main/ROADMAP.md)
 
-## [0.7.0] - ...
+## [0.7.0] - 2026-10-06
 
 General:
 

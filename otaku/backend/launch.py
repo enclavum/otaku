@@ -18,10 +18,11 @@ from typing import TypeVar
 
 from otaku import encryption
 from otaku.backend import passwords
-from otaku.backend.api import transfer
+from otaku.backend.api import stories, transfer
 from otaku.backend.files import RawFile, read_picture, save
 from otaku.backend.paths import Paths
 from otaku.backend.session import NO_MODEL_HINT, Refused, Session
+from otaku.backend.story import StorySettingQuestions
 from otaku.encryption import AskSecret, Cipher, EncryptionError, SealedError
 from otaku.formatting import pretty_path
 from otaku.integrations import Integrations, default_sections
@@ -45,6 +46,9 @@ from otaku.worker import Worker
 # format never does — so the first launch puts them on the message
 # through the app's own intake, as a reader's attachment would land.
 _SAMPLE_PICTURE = re.compile(r"^(?P<stem>.+)\.(?P<message>\d+)\.(?P<order>\d+)\.[A-Za-z0-9]+$")
+# The river sample ends on a question, and a tool that is off has its
+# calls neither drawn nor sent: it lands with the questions tool on.
+_ASKING_SAMPLE = "river.md"
 _SAMPLES_NOTICE = (
     "Sample stories were imported so you can look around — type to play on, "
     "/stories switches between them, or see every command with /help · "
@@ -339,6 +343,8 @@ def _seed_samples(session: Session) -> None:
             if session.story_id is not None:
                 landed.append(session.story_id)
                 _seed_pictures(session, session.story_id, file)
+                if file.name == _ASKING_SAMPLE:
+                    stories.update_setting(session, StorySettingQuestions.name, enabled=True)
     if not landed:
         return
     session._switch_to(landed[0])
