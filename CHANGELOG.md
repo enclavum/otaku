@@ -4,36 +4,38 @@ See also the tentative roadmap: [ROADMAP.md](https://github.com/enclavum/otaku/b
 
 ## [0.7.0] - 2026-10-06
 
-General:
+Story mode:
 
-- Lore:
-  - Separate model for lore extraction. In both the terminal and the web interface, lore extraction
-    can use a model other than the one you write with.
-  - A character the extractor made by mistake can be deleted, with their journals, in both
-    frontends.
-- Tools:
-  - Web search tool. Enable it in your story on the Tools tab, set an API key
-    ([Tavily](https://app.tavily.com) or [Exa](https://dashboard.exa.ai/api-keys)) and the model can
-    search the web.
-  - System info tool. When enabled, the model can ask for the current date, time, moon phase, etc.
-- Frontends:
-  - How full the context is ("85% of 128K"), shown in both frontends after every turn and story
-    switch.
-  - Integrated feedback and support requests — send one from the terminal (`/support`) or the web
-    interface (the Help window).
+- Added in both the web interface and the terminal. In the web interface, choose the canvas layout;
+  in the terminal, use the new `/set mode` command.
+- In story mode, you write not in the prompt box but directly in the transcript, and the model
+  continues when you press Enter. To add a new paragraph, press Ctrl+Enter (in the terminal, Ctrl+J
+  if that doesn't work).
 
 Web interface:
 
-- Three transcript layouts: canvas, manuscript and chat. The canvas layout reads the story as one
-  text — you can write it directly in the transcript and press Ctrl+Enter for the model to
-  continue.
+- Three transcript layouts: canvas, manuscript and chat. The canvas layout switches to story mode,
+  the other two are alternative ways to structure the story in chat mode.
 - Merge one character into another (in case lore extraction created a new character by mistake),
   as `/merge` already does in the terminal.
 
-Terminal:
+Web interface and terminal:
 
-- Two modes, chat and story (`/set mode`). As in the canvas layout on the web, you can write your
-  story directly in the transcript.
+- How full the context is ("85% of 128K"), shown in both frontends after every turn and story
+  switch.
+- Integrated feedback and support requests — send one from the terminal (`/support`) or the web
+  interface (the Help window).
+
+General:
+
+- Separate model for lore extraction. In both the terminal and the web interface, lore extraction
+  can use a model other than the one you write with.
+- A character the extractor made by mistake can be deleted, with their journals, in both
+  frontends.
+- Web search tool. Enable it in your story on the Tools tab, set an API key
+  ([Tavily](https://app.tavily.com) or [Exa](https://dashboard.exa.ai/api-keys)) and the model can
+  search the web.
+- System info tool. When enabled, the model can ask for the current date, time, moon phase, etc.
 
 In alpha:
 
