@@ -30,6 +30,8 @@ class TestImport:
         assert row.body == f"/card {SERAPHINA}" and row.template is None
         (character,) = app.store.characters.list(app.session.story_id)
         assert character.name == "Seraphina"
+        # Made by the card, spelled as the greeting spells its source.
+        assert (character.provider, character.model) == ("card", "seraphina.png")
         # Both rows carry the speaker link; the card row's is the compose key.
         assert (row.speaker, row.speaker_id) == ("Seraphina", character.id)
         assert (greeting.speaker, greeting.speaker_id) == ("Seraphina", character.id)

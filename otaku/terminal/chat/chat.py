@@ -8,11 +8,11 @@ the bindings — whoever routes cannot live beside this class.
 
 import sys
 
-from otaku.backend import Message
+from otaku.backend import StoryMode
 from otaku.backend.api import stories as api_stories
 from otaku.backend.session import Session
 from otaku.terminal.chat.ledger import ScreenLedger
-from otaku.terminal.tty.render import notes_displayed, turn
+from otaku.terminal.tty.render import flow_offsets, shown_tools, turn, unit_start
 from otaku.terminal.tty.statusline import StatusLine
 
 # Turns echoed when a story (re)opens (the launch, a browser pick, an
@@ -31,22 +31,48 @@ class Chat:
     # The loop's exit flag: /bye (and Ctrl+D) raise it, and the run loop
     # leaves after the current submission instead of unwinding mid-command.
     quit: bool
+    # The submission being played is the canvas's CONTINUE — an empty
+    # line, no row of the reader's to echo — so the stream places the
+    # reply where the text ended (`stream.show`). Set by the loop for
+    # the one submission, cleared with it.
+    continuing: bool
+    # A reply streamed this submission (`stream.show`), or an undo left
+    # the story on the question a reply ended on (`bindings._pose_again`):
+    # the prompt after it may offer the answers, where one after any other
+    # command, its output standing between, offers none. Cleared by the
+    # loop with each submission.
+    replied: bool
+    # In story mode, what the last reply ended on that chat mode prints
+    # under it — its verbose stats, the failure that stopped it, or why
+    # none was asked for: shown
+    # on the status row, where a line would break the one text, until the
+    # next line is sent. "" elsewhere.
+    status_note: str
+    # How full the next request is, as the status row shows it on its
+    # right ("85% of 128K"); "" while the window is not known.
+    # Read again by the loop before every prompt.
+    context_use: str
 
     def __init__(self, session: Session) -> None:
         self.session = session
-        self.ledger = ScreenLedger()
         self.quit = False
+        self.continuing = False
+        self.replied = False
+        self.status_note = ""
+        self.context_use = ""
         # One renderer for the prompt's toolbar and the pinned row, both
-        # reading the same channel, so the line never twitches at the
+        # reading the same channels, so the line never twitches at the
         # streaming handoff.
-        self.status_line = StatusLine(session.status)
+        self.status_line = StatusLine(session.status, lambda: self.context_use)
+        # An erase the ledger makes mid-stream takes the pinned row with it.
+        self.ledger = ScreenLedger(repaint=self.status_line.refresh)
 
     @property
-    def notes_displayed(self) -> bool:
-        """Whether the open story displays the model's notes
-        (`render.notes_displayed` over its settings) — read as each echo
-        draws, so an echo and the ledger's measure of it agree."""
-        return notes_displayed(api_stories.get_settings(self.session))
+    def shown_tools(self) -> frozenset[str]:
+        """The tools whose calls the open story shows (`render.shown_tools`
+        over its settings) — read as each echo draws, so an echo and the
+        ledger's measure of it agree."""
+        return shown_tools(api_stories.get_settings(self.session))
 
     def say(self, text: str) -> None:
         """Print command output below the typed line: the lead blank on
@@ -55,35 +81,76 @@ class Chat:
         Multi-line text is one answer: the bookkeeping runs once."""
         sys.stdout.write(self.ledger.said() + text + "\n")
         sys.stdout.flush()
+        self.ledger.note_printed(text + "\n")
 
     def restore_tail(self, count: int, above: str = "") -> None:
         """Hand the just-echoed tail (`render.last_turns(…, count)`) to
-        the ledger, grouped the way /undo pops — a reply plus the one
-        user row before it, either alone when the other is missing — so
+        the ledger, grouped the way /undo pops — a reply with its tool
+        chain (`render.unit_start`) plus the one user row before it,
+        either alone when the other is missing — so
         the shown turns can be taken back off the screen without having
         been played. `above` names the report line printed (with its
         blank) right over the echo: it joins the oldest restored exchange
         and refreshes with it instead of going stale. Call right after
         the echo prints, and only when the echo is the flow's last
-        output."""
-        shown = list(self.session.messages)[-count:]
-        groups: list[tuple[Message | None, Message | None]] = []
+        output. In the canvas the echo is one text (`render.flow`), and
+        each exchange is placed in it by its offsets
+        (`ledger.restore_flow`)."""
+        messages = list(self.session.messages)
+        shown = messages[-count:]
+        offset = len(messages) - len(shown)
+        # indexes into `shown`: the prompt, and the reply's unit — its first
+        # row and the row after its last — and whether the echo cut the unit
+        groups: list[tuple[int | None, int | None, int, bool]] = []
         i = len(shown)
         while i > 0:
-            reply = shown[i - 1] if shown[i - 1].role == "assistant" else None
-            if reply is not None:
-                i -= 1
-            prompt = shown[i - 1] if i > 0 and shown[i - 1].role == "user" else None
+            end, reply, cut = i, None, False
+            if shown[i - 1].role == "assistant":
+                # the reply with its tool chain, as /undo pops it — the part
+                # the echo shows, where it cut the chain
+                begins = unit_start(messages, offset + i)
+                cut = begins < offset
+                reply = i = max(begins, offset) - offset
+            prompt = i - 1 if i > 0 and shown[i - 1].role == "user" else None
             if prompt is not None:
                 i -= 1
             if reply is None and prompt is None:
                 break  # an unexpected role — better unerasable than wrong
-            groups.append((prompt, reply))
-        notes = self.notes_displayed
-        for prompt, reply in reversed(groups):
+            groups.append((prompt, reply, end, cut))
+        drawn = self.shown_tools
+        ordered = list(reversed(groups))
+        if self.session.layout.mode is StoryMode.STORY:
+            text, starts = flow_offsets(shown, shown=drawn)
+            for n, (prompt, reply, end, cut) in enumerate(ordered):
+                first = prompt if prompt is not None else reply
+                assert first is not None
+                start = starts[first]
+                following = ordered[n + 1] if n + 1 < len(ordered) else None
+                stop = len(text)
+                if following is not None:
+                    opener = following[0] if following[0] is not None else following[1]
+                    assert opener is not None
+                    stop = starts[opener]
+                reply_offset = None
+                if reply is not None:
+                    reply_offset = starts[reply] - start
+                self.ledger.restore_flow(
+                    text[:start],
+                    text[start:stop],
+                    reply_offset,
+                    last=following is None,
+                    above=above,
+                    shown_turns=end - reply if cut and reply is not None else None,
+                )
+                above = ""
+            return
+        for prompt, reply, end, _ in ordered:
             self.ledger.restore_exchange(
-                turn(prompt) if prompt else None,
-                turn(reply, notes=notes) if reply is not None else None,
+                turn(shown[prompt]) if prompt is not None else None,
+                # the unit's turns as the echo printed them, a blank between
+                "\n\n".join(turn(row, shown=drawn) for row in shown[reply:end])
+                if reply is not None
+                else None,
                 above=above,
             )
             above = ""  # the report belongs to the oldest exchange only

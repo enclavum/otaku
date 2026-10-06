@@ -34,7 +34,7 @@ stylesheet that reaches past the contract accepts the breakage itself.
 | `--otk-ink` | titles, the primary button, hard rules |
 | `--otk-body` | running prose, list rows |
 | `--otk-muted` | labels, secondary text |
-| `--otk-faint` | read-only values, hints, absent values |
+| `--otk-faint` | read-only values, hints, absent values, a line's words with the model (`.otk-ooc`) |
 
 ## Rules
 
@@ -55,6 +55,8 @@ stylesheet that reaches past the contract accepts the breakage itself.
 | `--otk-accent-tint` | the ground of a selected row |
 | `--otk-ok` | answering, resident, loaded |
 | `--otk-danger` | delete, stop, and failures — nothing else |
+| `--otk-chat-story` | the rule on the story's side in the chat layout |
+| `--otk-chat-you` | the rule on the reader's side in the chat layout |
 
 The tab icon is the one accent a stylesheet cannot reach: a favicon is
 markup, so `index.html` carries the square as a hard-coded copy of the
@@ -245,16 +247,31 @@ in classes, so a stylesheet can name it the same way the scripts do.
 | Hook | On | Meaning |
 |---|---|---|
 | `aria-selected="true"` | `.otk-row`, `.otk-tab`, `.otk-index__item`, `.otk-prefix` | the current one |
-| `aria-checked="true"` | `.otk-choice`, `.otk-step`, `.otk-toggle` | the one in force |
-| `aria-disabled="true"` | `.otk-btn` | out of reach for now |
+| `aria-checked="true"` / `"false"` | `.otk-choice`, `.otk-switch`, `.otk-toggle` | the one in force; a switch on or off |
+| `aria-pressed="true"` | `.otk-mode`, `.otk-ruler__cell` | the layout in force; the depth a tool's text goes in at |
+| `aria-disabled="true"` | `.otk-btn`, `.otk-mode`, `.otk-lightbox__arrow` | out of reach for now |
+| `aria-current="true"` | `.otk-spine__dot` | the lit one of the spine's dots |
 | `hidden` | any pane or menu | not mounted |
 | `data-popup="/model"` | a `<dialog>` | which command opens it |
 | `data-theme="dark"` / `"light"` | `<html>` | the token set pinned; absent, the OS decides |
+| `data-booting` | `<html>` | the shell unseen until the page knows whether a sign-in comes first |
+| `data-transcript="canvas"` / `"manuscript"` / `"chat"` | `.otk-transcript` | which of the three layouts the same turns are read in |
+| `data-completion="chat"` / `"text"` | `.otk-app` | the wire the next request goes over; over the text wire the flow shows no picture tiles |
+| `data-layout="canvas"` / `"manuscript"` / `"chat"` | `.otk-app` | the look the open story is drawn in; on the canvas the story is typed in at its end, the composer standing below |
+| `data-playing` | `.otk-app` | a reply is arriving; the layout glyphs are inert meanwhile |
 | `data-open="true"` | `.otk-rail` | the contents, on a narrow window |
 | `data-editing` | `.otk-edit` | the field editor is open |
+| `data-framing` / `data-framed` | `.otk-edit` / a turn in the canvas | a paragraph of several rows is open as one field: the editor holding it, and the rows standing aside for it |
+| `data-join="inline"` / `"paragraph"` | a turn in the transcript; `.otk-tail` | how it joins the turn before it: as it stands, or after a blank line — what the canvas layout draws by; on the typing place, `"paragraph"` alone, where the line typed will open one |
+| `data-blank` | `.otk-tail` | the canvas's typing place holds nothing yet, so it shows the caret where the line goes |
+| `data-refused` | the composer's box | on the canvas, where the box stands disabled, it holds the refusal of the line typed in the story, in place of its placeholder |
+| `data-on="false"` | `.otk-feature`, `.otk-ruler__row` | the setting is off: its row on the Tools tab, and the depth ruler belonging to it |
+| `data-dragging` | `.otk-ruler__row` | the depth mark is being dragged |
 | `.is-offline` | `.otk-app` | the server stopped answering |
 | `.is-loaded` / `.is-dim` | `.otk-row` | a model resident in memory, or not |
 | `.is-dragover` / `.is-filled` | `.otk-dropzone` | a file over the drop zone, and one dropped |
+| `.is-out` | `.otk-editable` | a value outside its bounds, while typed |
+| `.is-waiting` | `.otk-docket` | a report's slip with nothing to show yet |
 | `.otk-generating--idle` | the generating block | the reply landed; the slot keeps its height |
 | `.otk-status--working` / `--offline` / `--idle` | `.otk-status` | which of the three the one status line shows |
 | `.otk-status--said` / `--error` | `.otk-status` | the sentence on it is news, or a failure |

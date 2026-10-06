@@ -27,7 +27,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from otaku.backend.api import settings as api_settings
 from otaku.backend.api import stories as api_stories
-from otaku.backend.tools import TOOLS
 from otaku.web import api as web_api
 from scenarios.support.harness import launch, set_config, set_config_provider
 from scenarios.support.server import ModelServer
@@ -116,9 +115,12 @@ def main() -> None:
                     # What every story's settings read as until it changes
                     # one: the defaults, which the demo copies per story.
                     "story_settings": web_api.story_settings(session, river_id),
-                    # Every tool's prompt as shipped, by name.
+                    # Every injection setting's prompt as shipped, by the
+                    # setting's name — those whose row names a prompt.
                     "prompts": {
-                        name: api_settings.get_tool_prompt(session, name) for name in TOOLS
+                        row["name"]: api_settings.get_prompt(session, row["name"])
+                        for row in web_api.story_settings(session, river_id)["settings"]
+                        if row["prompt_name"]
                     },
                     "river": {
                         "facts": facts,

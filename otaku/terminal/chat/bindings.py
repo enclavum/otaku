@@ -19,7 +19,7 @@ from typing import NamedTuple
 import click
 
 from otaku import web as web_frontend
-from otaku.backend import commands
+from otaku.backend import Layout, StoryMode, commands
 from otaku.backend.api import cards as api_cards
 from otaku.backend.api import lore as api_lore
 from otaku.backend.api import play as api_play
@@ -27,9 +27,11 @@ from otaku.backend.api import providers as api_providers
 from otaku.backend.api import reports as api_reports
 from otaku.backend.api import settings as api_settings
 from otaku.backend.api import stories as api_stories
+from otaku.backend.api import support as api_support
 from otaku.backend.api import transfer as api_transfer
 from otaku.backend.api.lore import WorkerRun
 from otaku.backend.session import NO_STORY_HINT, Refused, Session
+from otaku.backend.story import StorySettingLayout
 from otaku.terminal.chat import help as help_page
 from otaku.terminal.chat import stream
 from otaku.terminal.chat.chat import RESUME_TURNS, Chat
@@ -37,7 +39,15 @@ from otaku.terminal.screens import models as screen_models
 from otaku.terminal.screens import stories as screen_stories
 from otaku.terminal.screens import story as screen_story
 from otaku.terminal.tty import BOLD, DIM, ERASE_LINE, RESET, YES_ANSWERS, error_line, latin_key
-from otaku.terminal.tty.render import command_tokens, last_turns, message
+from otaku.terminal.tty.cursor import terminal_width
+from otaku.terminal.tty.render import (
+    asked,
+    command_tokens,
+    last_turns,
+    message,
+    prose,
+    question_block,
+)
 from otaku.terminal.tty.typography import highlight_commands
 
 # One OPERATION command: the raw argument text in, the sentence out.
@@ -61,6 +71,8 @@ OPERATIONS: dict[str, Operation] = {
     "/set autocorrect": api_settings.set_autocorrect,
     "/set notification": api_settings.set_notification,
     "/set max_context": api_settings.set_max_context,
+    # the whole line is the request, an address to answer at included
+    "/support": api_support.send_support_request,
 }
 
 
@@ -131,9 +143,32 @@ def _undo(chat: Chat, raw: str) -> None:
     if chat.ledger.erase_exchange():
         if refreshing:
             _report_undo_ending(chat)
+        else:
+            _pose_again(chat, drawn=False)
         return  # otherwise the ending is still on screen — say nothing
     chat.ledger.invalidate()
     _report_undo_ending(chat)
+
+
+def _pose_again(chat: Chat, *, drawn: bool) -> None:
+    """An undo that leaves the story on a question offers its answers
+    again (`Chat.replied`): the story is back where it was asked. In
+    story mode an in-place undo draws the question back too — answering
+    took it out of the text (`stream.drop_past_question`); `drawn` says
+    the screen shows it already (a re-echo)."""
+    newest = chat.session.messages[-1] if chat.session.messages else None
+    question = asked(newest, chat.shown_tools)
+    if question is None:
+        return
+    if _is_story_mode(chat) and not drawn:
+        chat.ledger.extend_reply(question_block(question.text, terminal_width()) + "\n")
+    chat.replied = True
+
+
+def _is_story_mode(chat: Chat) -> bool:
+    """Whether the open story is read in story mode — echoed as one text
+    then (`render.flow`), the played turns' blocks otherwise."""
+    return chat.session.layout.mode is StoryMode.STORY
 
 
 def _report_undo_ending(chat: Chat) -> None:
@@ -145,9 +180,12 @@ def _report_undo_ending(chat: Chat) -> None:
         chat.say("Undone. The story is now empty (its turns stay in the tree).")
         return
     report = f"{DIM}[ undone. the story now ends with: ]{RESET}"
-    turns = last_turns(list(chat.session.messages), 2, notes=chat.notes_displayed)
+    turns = last_turns(
+        list(chat.session.messages), 2, shown=chat.shown_tools, is_story_mode=_is_story_mode(chat)
+    )
     chat.say(f"{report}\n\n{turns}")
     chat.restore_tail(2, above=report)
+    _pose_again(chat, drawn=True)
 
 
 def _regen(chat: Chat, raw: str) -> None:
@@ -180,10 +218,20 @@ def _regen(chat: Chat, raw: str) -> None:
         chat.say(marker + "\n")
         # The typed line stays above the marker — nothing of it to erase.
         chat.ledger.typed_gone()
-        chat.ledger.echo_block(
-            message(prompt.body, "user", pictures=len(prompt.attachments)) if prompt else "",
-            above=marker,
-        )
+        if _is_story_mode(chat):
+            # the prompt re-run reads as prose under the marker, and the
+            # fresh take goes on from it (`ledger.echo_flow`)
+            chat.ledger.echo_flow(inline=False, above=marker)
+            if prompt is not None:
+                chat.ledger.reply.write(prose(prompt.body))
+            chat.ledger.reply_begins()
+        else:
+            chat.ledger.echo_block(
+                message(prompt.body.strip(), "user", pictures=len(prompt.attachments))
+                if prompt
+                else "",
+                above=marker,
+            )
     while stream.show(chat, events):
         events = api_play.regenerate(session)
 
@@ -206,13 +254,40 @@ def _last(chat: Chat, raw: str) -> None:
     # story shows everything it has, and the report must not over-claim.
     shown = (len(list(session.messages)[-rows:]) + 1) // 2
     report = f"The last {shown} turns of this story:"
-    chat.say(f"{report}\n\n{last_turns(list(session.messages), rows, notes=chat.notes_displayed)}")
+    turns = last_turns(
+        list(session.messages), rows, shown=chat.shown_tools, is_story_mode=_is_story_mode(chat)
+    )
+    chat.say(f"{report}\n\n{turns}")
     chat.restore_tail(rows, above=report)
 
 
 # Turns /last shows when called bare — a turn being an exchange, the
 # prompt and its reply (two message rows).
 _LAST_TURNS_DEFAULT = 5
+
+# The words /set mode takes and the layout each stores: the terminal draws
+# a story as one text or as turns, so it names two of the four the story's
+# layout setting holds (the page sets all four).
+_MODES = {"story": Layout.CANVAS, "chat": Layout.MANUSCRIPT}
+
+
+def _set_mode(chat: Chat, raw: str) -> None:
+    """`/set mode` — the terminal's own word for its two looks, written as
+    the story's layout setting (`StorySettingLayout`), so it forks and
+    dies with the story; "" reports it: story for a layout drawn as one
+    text, chat otherwise. A switch that changed the look shows the last
+    turns in the new one, as `/last` does."""
+    value = raw.strip().lower()
+    before = chat.session.layout.mode
+    if value:
+        chosen = _MODES.get(value)
+        if chosen is None:
+            chat.say("Usage: /set mode chat|story")
+            return
+        api_stories.update_setting(chat.session, StorySettingLayout.name, layout=chosen)
+    chat.say(f"Mode: {chat.session.layout.mode.value}")
+    if chat.session.layout.mode is not before and chat.session.messages:
+        _last(chat, "")
 
 
 def _clear(chat: Chat, raw: str) -> None:
@@ -262,7 +337,12 @@ def _landed(chat: Chat, landed: str | None) -> None:
     if landed is None:
         return
     chat.ledger.rule()
-    turns = last_turns(list(chat.session.messages), RESUME_TURNS, notes=chat.notes_displayed)
+    turns = last_turns(
+        list(chat.session.messages),
+        RESUME_TURNS,
+        shown=chat.shown_tools,
+        is_story_mode=_is_story_mode(chat),
+    )
     # A story with nothing played echoes no turns, and no blank for them.
     chat.say(f"{landed}\n\n{turns}" if turns else landed)
     if turns:
@@ -298,7 +378,8 @@ def _extract(chat: Chat, raw: str) -> None:
     """Schedule the forced pass, echo the worker's status on one updating
     line, Ctrl+C cancels; the report prints when the WorkerRun returns."""
     run = api_lore.extract(chat.session)
-    report = _wait_run(chat, run, opening="Closing a scene…")
+    model = chat.session.full_extraction_model_name
+    report = _wait_run(chat, run, opening=f"Closing a scene with {model}…")
     if report is not None:
         chat.say(error_line(report) if run.failed else report)
 
@@ -381,7 +462,7 @@ def _card(chat: Chat, raw: str) -> None:
     print(f"{DIM}[ {landed.report} ]{RESET}", file=out)
     if landed.greeting is not None:
         print(file=out)
-        print(message(landed.greeting.body, "assistant", notes=chat.notes_displayed), file=out)
+        print(message(landed.greeting.body, "assistant", shown=chat.shown_tools), file=out)
 
 
 def _import(chat: Chat, raw: str) -> None:
@@ -404,11 +485,17 @@ def _import(chat: Chat, raw: str) -> None:
         chat.say(notice)
     if result.extraction is not None:
         sys.stdout.write("\n")  # the import's counts, then its extraction, apart
-        report = _wait_run(chat, result.extraction, opening="Closing a scene…")
+        model = chat.session.full_extraction_model_name
+        report = _wait_run(chat, result.extraction, opening=f"Closing a scene with {model}…")
         if report is not None:
             chat.say(report)
     chat.ledger.rule()
-    turns = last_turns(list(chat.session.messages), RESUME_TURNS, notes=chat.notes_displayed)
+    turns = last_turns(
+        list(chat.session.messages),
+        RESUME_TURNS,
+        shown=chat.shown_tools,
+        is_story_mode=_is_story_mode(chat),
+    )
     chat.say(f"The last turns of this story:\n\n{turns}")
     chat.restore_tail(RESUME_TURNS)
 
@@ -449,10 +536,10 @@ def _export(chat: Chat, raw: str) -> None:
 
 def _model(chat: Chat, raw: str) -> None:
     """Bare: the picker screen (which executes a confirmed switch and
-    returns the notice); with an argument: api.providers.switch_spec
+    returns the notice); with an argument: api.providers.set_model_raw
     (the split rule lives there)."""
     if raw.strip():
-        chat.say(_bold_switch(api_providers.switch_spec(chat.session, raw)))
+        chat.say(_bold_switch(api_providers.set_model_raw(chat.session, raw)))
         return
     notice = screen_models.pick(chat.session, initial_spec=api_providers.listed_spec(chat.session))
     if notice:
@@ -504,6 +591,7 @@ _INTERACTIVE: dict[str, Callable[[Chat, str], None]] = {
     "/undo": _undo,
     "/regen": _regen,
     "/last": _last,
+    "/set mode": _set_mode,
     "/clear": _clear,
     "/stories": _stories,
     "/system": _system,

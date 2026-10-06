@@ -149,6 +149,19 @@ function buildModels(state, notice) {
     state.build("models", answer.notice);
   };
 
+  /* Lore extraction pinned to this model, or — on the model pinned —
+     back to the one played with. One mark moves, so that is what changes
+     here, as a load's lamp does. */
+  const extractWith = async (entry) => {
+    const spec = `${entry.provider.id}/${entry.model.name}`;
+    const pinned = spec === state.panel.extraction;
+    const answer = pinned
+      ? await api.clearExtractionModel()
+      : await api.setExtractionModel(entry.provider.id, entry.model.name);
+    if (!answer.refused) state.panel = { ...state.panel, extraction: pinned ? "" : spec };
+    state.build("models", answer.notice);
+  };
+
   if (!offered.length) $("[data-actions]", pane).replaceChildren();
   /* Read BEFORE the browser paints: its first paint moves the cursor to
      row 0 and `onMove` would overwrite what the reader was on. And only
@@ -167,8 +180,8 @@ function buildModels(state, notice) {
        rather than captioning an empty stretch. */
     groupOf: (entry) => entry.provider,
     drawGroup: providerHeading,
-    drawRow: (entry) => modelRow(entry, panel.current),
-    drawPreview: (entry) => modelDetail(pane, entry, panel.current, { use, setLoaded }),
+    drawRow: (entry) => modelRow(entry, panel),
+    drawPreview: (entry) => modelDetail(pane, entry, panel, { use, setLoaded, extractWith }),
     onOpen: use,
     onMove: (entry) => {
       if (settled) state.picked = `${entry.provider.id}/${entry.model.name}`;
@@ -191,17 +204,20 @@ function buildModels(state, notice) {
   settled = true;
 }
 
-function modelRow(entry, current) {
+function modelRow(entry, { current, extraction }) {
   const lamp = span("otk-row__lamp", "");
   const managed = entry.provider.capabilities?.model_management;
   if (managed && entry.model.loaded) lamp.append(span("otk-dot otk-dot--sm", ""));
-  // The chosen model wears its tag right after its name, where the eye
-  // reads the name, not out past the figures.
-  const title = span("otk-row__title", entry.model.name);
-  if (`${entry.provider.id}/${entry.model.name}` === current) title.append(" ", span("otk-tag", "chosen"));
+  // What the model is to the session — the story's, the one saved for
+  // extraction — as tags against the figures, beside the size.
+  const spec = `${entry.provider.id}/${entry.model.name}`;
+  const tags = [];
+  if (spec === current) tags.push(span("otk-tag otk-tag--role", "writing"));
+  if (spec === extraction) tags.push(span("otk-tag otk-tag--role", "extraction"));
   const button = row(
     lamp,
-    title,
+    span("otk-row__title", entry.model.name),
+    ...tags,
     span("otk-row__num otk-row__num--size", entry.model.size),
     // what a request would get: the running instance's size while one
     // runs, the model's own otherwise
@@ -219,11 +235,13 @@ function modelRow(entry, current) {
   return button;
 }
 
-function modelDetail(pane, entry, current, { use, setLoaded }) {
+function modelDetail(pane, entry, { current, extraction }, { use, setLoaded, extractWith }) {
   const managed = entry.provider.capabilities?.model_management;
   const where = whereItRuns(entry.provider);
   const state = !managed ? "" : entry.model.loaded ? " · loaded" : " · not loaded";
-  const chosen = `${entry.provider.id}/${entry.model.name}` === current;
+  const spec = `${entry.provider.id}/${entry.model.name}`;
+  const chosen = spec === current;
+  const extracting = spec === extraction;
 
   const facts = element("div", "otk-detail__section");
   if (entry.model.size) facts.append(fact("size", entry.model.size));
@@ -245,6 +263,9 @@ function modelDetail(pane, entry, current, { use, setLoaded }) {
       kind: "otk-btn--primary",
       onclick: guard(() => use(entry)),
     }),
+    actionButton(extracting ? "Unset extraction model" : "Use for extraction", {
+      onclick: guard(() => extractWith(entry)),
+    }),
   ];
   if (managed) {
     verbs.push(
@@ -264,6 +285,7 @@ function modelDetail(pane, entry, current, { use, setLoaded }) {
     span("otk-label otk-label--accent", `${where}${state}`),
     element("h3", "otk-detail__title", entry.model.name),
     chosen && element("p", "otk-note otk-accent-ink", "chosen for this story"),
+    extracting && element("p", "otk-note otk-accent-ink", "used for lore extraction"),
     facts,
   ].filter(Boolean);
 }
@@ -408,8 +430,8 @@ function whereItRuns(provider) {
 
 // What a key that is SET looks like. The value never arrives on this
 // side, so these stand for it: cleared when the field is entered, and
-// never saved back.
-const _MASK = "••••••";
+// never saved back. The web search key's dialog wears it too (`tools.keyButton`).
+export const KEY_MASK = "••••••";
 
 // How long "Checking" stands before it is allowed to become the answer.
 // A reader who pressed Test has to see that the question was asked.
@@ -439,7 +461,7 @@ function keyField(state, provider) {
   }
   if (provider.key_source === "config") {
     const mask = () => {
-      input.value = _MASK;
+      input.value = KEY_MASK;
       input.dataset.mask = "yes";
     };
     mask();

@@ -2,8 +2,9 @@
 
 A model uses a tool by writing a block in its reply. otaku owns the convention: the block is a
 fenced code block whose info string names the tool, the reply is read by otaku's own parser, and
-the API's `tools` field is never sent. Two tools exist: a question the reader answers and a note
-the model keeps for itself.
+the API's `tools` field is never sent. Four tools exist: a question the reader answers, a note
+the model keeps for itself, and two that otaku runs and answers itself, system info and web
+search.
 
 ## The decision
 
@@ -50,8 +51,8 @@ no, and that is the population the product serves.
 
 ## The syntax
 
-A call is a fenced code block whose info string is `otk-` and the tool's name. A question,
-always the last thing in the reply:
+A call is a fenced code block whose info string is `otk-` and the tool's name, words of letters
+joined by single hyphens (`otk-web-search`). A question, always the last thing in the reply:
 
 ````
 The door creaks on its hinges, and the hall beyond is dark.
@@ -86,7 +87,13 @@ The info string carries the namespace: what makes a block a call is the `otk-` p
 nothing else, no list of tools consulted, so a call stays one in a build that never heard of its
 tool, and a body keeps its fences for good while the tools come and go between builds. Which
 tools there are, who answers each, and how its inside is read is the backend's
-(`backend.tools`); what a call is, is `context`'s.
+(`backend.tools`); what a call is, is `context`'s. Whether a tool is on, and the prompt that
+teaches the model to use it, is a story setting's (`backend.story`).
+
+A tool that is off does not exist for the model: its prompt is not injected, and every call of
+it leaves the wire, past ones included — the wire carries the calls of the tools that are on and
+nothing else, while the stored body keeps them all. otaku neither poses nor runs a call of a tool
+that is off, and the reply does not end at one.
 
 A fence is only a fence at the start of a line, and the closing one stands alone on its line, so
 the parser is line-based: a line still arriving is held until its newline decides it. A model
@@ -104,27 +111,38 @@ wire for it: no stop parameter, no cap on how many tools may end a reply, and a 
 reasoning cannot trip it, since the parser reads content deltas alone.
 
 The cost is the usage. It arrives in the stream's final chunk, which a cut never sees, so a reply
-that ended on a question has no token counts and no stats line, as a reply cut by Ctrl+C has
-none. A few tokens are generated before the abort lands, and the engine must honour a
-disconnect, which the Ctrl+C path already relies on.
+that ended on a question has no token counts: its stats line carries the time alone, as a reply
+cut by Ctrl+C does. A few tokens are generated before the abort lands, and the engine must honour
+a disconnect, which the Ctrl+C path already relies on.
 
-A tool otaku answers ends the reply the same way: the call closes, the stream is cut, otaku
-answers, and a fresh request continues the scene.
+## Tools otaku runs
 
-## The next tool
+System info and web search are `Actor.SYSTEM` tools: otaku answers the call itself. A system info
+call is empty, and answers the local time and weekday, the moon's phase, the nearest solstice or
+equinox and the model's name — nothing that tells where the machine is or what it runs. A web
+search call holds the query, and answers the top results' snippets, cut to a character budget,
+from the engine the one web search key belongs to; a search that fails answers the sentence that
+says why, and the model reads it.
 
-Web search is a tool, `Actor.SYSTEM`, on the same convention: prose, a search call, the cut,
-otaku fetches, the results ride back as an OOC row, a fresh request continues. What the code
-lacks is the loop in the reply stream, which makes one request per turn today, and a decision on
-where the result is stored so a regenerate or a later turn sees what the model saw: a user row of
-a new kind, OOC-framed, left out of the lore pass as the calls are.
+Such a call ends the reply as a question does, and then the play goes on. The reply is recorded
+as it stands, ending at the call with its closing fence; otaku runs the tool; the result is
+recorded as a turn of its own, role and kind `tool`, the tool's name its provider; and the model
+is asked again over the story as it now stands. Three rounds at most: the last result is recorded
+but not asked about. A regenerate or a later turn sees what the model saw, because the result is
+stored.
 
-It does not use the API's `tools` field, for four reasons. On omlx it silently does nothing for
-every model whose template has no tool branch, and Ollama refuses the request for the same, so a
-reader would switch on a feature that works on half their models. A `tool` role row exists in none of the store, the
-assembler's merge, or the templates: Nemo's raises on a non-alternating role, the ChatML
-fine-tunes have no such role. The tool schemas render into the head of the prompt, so toggling a
-tool per story invalidates the prefix cache where a depth-1 injection costs nothing. And two
-parsers with two wire shapes for one feature set is a feature the reader cannot reason about.
-What the native field buys is that Gemma 4 has seen its own format in training; the trial showed
-roleplay models follow a prompted end-of-reply block already, so it buys nothing even there.
+On the wire a tool turn is the reader's turn — the wire has two sides, and the result is what the
+model is told — enclosed by prompts.toml's `tool_framing`, an OOC frame as shipped. It counts as
+none of the reader's messages, the lore pass leaves it out as it leaves the calls out, and the
+export leaves it out. Undo and regenerate take a reply together with its tool chain, as one unit.
+
+The loop does not use the API's `tools` field, for four reasons. On omlx it silently does nothing
+for every model whose template has no tool branch, and Ollama refuses the request for the same, so a
+reader would switch on a feature that works on half their models. A `tool` role exists in neither
+the assembler's merge nor the templates: Nemo's raises on a non-alternating role, the ChatML
+fine-tunes have no such role — so the stored tool turn rides as the reader's. The tool schemas
+render into the head of the prompt, so toggling a tool per story invalidates the prefix cache where
+a depth-1 injection costs nothing. And two parsers with two wire shapes for one feature set is a
+feature the reader cannot reason about. What the native field buys is that Gemma 4 has seen its own
+format in training; the trial showed roleplay models follow a prompted end-of-reply block already,
+so it buys nothing even there.

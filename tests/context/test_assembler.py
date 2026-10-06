@@ -10,7 +10,10 @@ steps down to its floor; past the floor the assembly refuses. Across all
 of them the wire promise holds: the model sees the stored messages and
 nothing the code invented but the recap — and the injections it was
 handed, each where it was told to go, a stored reply's tool calls as the
-story's tool set has them.
+story's tool set has them, a tool's turn as the reader's, framed. The
+join rule (`get_join_type`, its write side `join`) decides how a row
+joins the text before it — off the two rows' modes and the line breaks
+at their edges — on the wire and in the canvas alike.
 """
 
 from dataclasses import dataclass, replace
@@ -21,14 +24,18 @@ from otaku.context.assembler import (
     IMAGE_TOKENS,
     ContextOverflowError,
     ContextShape,
+    JoinType,
     WirePicture,
     assemble_story,
     context_in_force,
+    get_join_type,
+    join,
 )
 from otaku.context.injections import Injection
 from otaku.context.tool_calls import ToolSet
 from otaku.providers import PicturesRide
-from otaku.store.schema import Attachment, InjectionPosition, Message, Scene
+from otaku.providers.openai.templates import PLAIN, TEXT_TEMPLATES
+from otaku.store.schema import Attachment, InjectionPosition, Message, Scene, StoryMode
 
 CAT = Attachment(file="pic-0001-20260918-a3f9c1e2.jpg", width=2, height=2, size=3)
 CAT_PICTURE = WirePicture(b"cat", "image/jpeg")
@@ -338,6 +345,17 @@ class TestRejected:
         with pytest.raises(ContextOverflowError):
             assemble("", rows, 2048, head_messages=5, min_tail_messages=10)
 
+    def test_the_refusal_carries_the_figures_that_did_not_meet(self) -> None:
+        # The smallest the story gets, the limit it had to fit and the
+        # window — numbers a status can show as a percent over 100.
+        rows = [user(f"turn {i}. " + "x" * 400, message_id=i) for i in range(1, 41)]
+        with pytest.raises(ContextOverflowError) as caught:
+            assemble("", rows, 2048, head_messages=5, min_tail_messages=10)
+        refusal = caught.value
+        assert refusal.context == 2048
+        assert 0 < refusal.limit < refusal.context
+        assert refusal.tokens > refusal.limit
+
 
 class TestWirePromise:
     """Cross-case: the model sees the stored messages and nothing the
@@ -486,24 +504,196 @@ class TestInjections:
         assert not any(m.volatile for m in prompt.messages)
 
 
+class TestTheJoin:
+    """`get_join_type`, the one join rule for the text wire and the
+    canvas — read off the two rows: their modes, and the line breaks at
+    the boundary. Spaces at the edges decide nothing."""
+
+    def test_two_story_rows_join_inline_whatever_the_spaces_at_their_edges(self) -> None:
+        for before, after in (
+            ("She waited", "for the bus."),
+            ("She waited ", "for the bus."),
+            ("She waited", "  for the bus."),
+            ("She waited\t", " for the bus."),
+        ):
+            got = get_join_type(story(user(before)), story(assistant(after)))
+            assert got is JoinType.INLINE, (before, after)
+        # the reader's line after a reply the same
+        assert get_join_type(story(assistant("Rain.")), story(user("And the door"))) is (
+            JoinType.INLINE
+        )
+
+    def test_a_chat_row_on_either_side_is_a_paragraph(self) -> None:
+        assert get_join_type(user("One"), story(assistant("Two"))) is JoinType.PARAGRAPH
+        assert get_join_type(story(user("One")), assistant("Two")) is JoinType.PARAGRAPH
+        assert get_join_type(user("One "), assistant(" Two")) is JoinType.PARAGRAPH
+
+    def test_a_line_break_at_the_boundary_is_a_paragraph(self) -> None:
+        for before, after in (
+            ("She waited\n", "The bus."),
+            ("She waited\n ", "The bus."),
+            ("She waited", "\n\nThe bus."),
+            ("She waited", " \n The bus."),
+        ):
+            got = get_join_type(story(user(before)), story(assistant(after)))
+            assert got is JoinType.PARAGRAPH, (before, after)
+
+    def test_the_first_row_and_a_cards_rows_stand_alone_in_any_mode(self) -> None:
+        assert get_join_type(None, story(user("the bus."))) is JoinType.PARAGRAPH
+        # a card's line, and the greeting its card made
+        assert get_join_type(story(user("One")), story(card(1, "Mara"))) is JoinType.PARAGRAPH
+        greeting = story(replace(assistant("Welcome."), provider="card"))
+        assert get_join_type(story(user("One")), greeting) is JoinType.PARAGRAPH
+        assert get_join_type(greeting, story(user("I nod."))) is JoinType.PARAGRAPH
+
+    def test_a_tool_turn_runs_on_in_story_mode_as_any_row(self) -> None:
+        # story mode draws no tool's turn, so the reply after it goes on in
+        # the paragraph the call interrupted
+        assert get_join_type(story(assistant("Look")), story(tool("Tides."))) is JoinType.INLINE
+        assert get_join_type(story(tool("Tides.")), story(assistant("Six."))) is JoinType.INLINE
+        # in chat mode, a paragraph as every chat row
+        assert get_join_type(tool("Tides."), story(assistant("Six."))) is JoinType.PARAGRAPH
+
+    def test_the_wire_joins_consecutive_rows_by_it(self) -> None:
+        prompt = assemble(
+            "",
+            [
+                story(user("I was waiting")),
+                story(assistant("for the bus.")),
+                story(assistant("\n\nIt rained.")),
+                story(user("and the door")),
+                story(assistant("swung open.")),
+                user("Then?"),
+            ],
+            None,
+        )
+        assert [(t.role, t.body, t.join_type) for t in prompt.messages] == [
+            ("user", "I was waiting", JoinType.PARAGRAPH),
+            ("assistant", "for the bus.\n\nIt rained.", JoinType.INLINE),
+            ("user", "and the door", JoinType.INLINE),
+            ("assistant", "swung open.", JoinType.INLINE),
+            ("user", "Then?", JoinType.PARAGRAPH),
+        ]
+
+    def test_a_paragraphs_rows_join_after_a_blank_line(self) -> None:
+        rows = [user("One."), assistant("Two."), assistant("\n\n\nThree."), user("Four.")]
+        prompt = assemble("", rows, None)
+        assert [(t.body, t.join_type) for t in prompt.messages] == [
+            ("One.", JoinType.PARAGRAPH),
+            ("Two.\n\nThree.", JoinType.PARAGRAPH),
+            ("Four.", JoinType.PARAGRAPH),
+        ]
+
+
+class TestJoin:
+    """`join`, the join rule's write side: one space inline, a blank line
+    for a paragraph, the whitespace at the two edges given up for it."""
+
+    def test_inline_is_one_space(self) -> None:
+        assert join("She waited  ", JoinType.INLINE, "\tfor the bus.") == (
+            "She waited for the bus."
+        )
+
+    def test_a_paragraph_is_one_blank_line(self) -> None:
+        assert join("One.\n", JoinType.PARAGRAPH, "\n\n\nTwo.") == "One.\n\nTwo."
+        assert join("One.", JoinType.PARAGRAPH, "Two.") == "One.\n\nTwo."
+
+
+class TestTheStoryAsOneText:
+    def test_the_turns_read_as_one_text_with_their_seams(self) -> None:
+        prompt = assemble(
+            "Be brief.",
+            [
+                story(user("I was waiting")),
+                story(assistant("for the bus.")),
+                user("Then?"),
+                assistant("Nothing came."),
+                story(user("said no one")),
+                story(assistant("and left.")),
+            ],
+            None,
+        )
+        assert prompt.as_story_text() == (
+            "I was waiting for the bus.\n\nThen?\n\nNothing came.\n\nsaid no one and left."
+        )
+
+    def test_a_paragraphs_blank_line_lead_is_not_drawn_twice(self) -> None:
+        rows = [story(user("One.")), story(assistant("\n\nTwo.")), story(assistant("\n\n\nThree."))]
+        assert assemble("", rows, None).as_story_text() == "One.\n\nTwo.\n\nThree."
+
+    def test_a_tool_turn_is_a_paragraph_of_its_own_framed_as_the_model_reads_it(self) -> None:
+        rows = [
+            user("Look it up."),
+            assistant("```otk-search\ntides\n```"),
+            tool("Tides: high at six."),
+            assistant(" It is six."),
+        ]
+        prompt = assemble("", rows, None, tool_set=ToolSet(on=frozenset({"search"})))
+        assert prompt.as_story_text() == (
+            "Look it up.\n\n```otk-search\ntides\n```\n\n"
+            "<<search: Tides: high at six.>>\n\nIt is six."
+        )
+
+    def test_the_system_text_is_the_premise_and_what_was_injected_after_it(self) -> None:
+        prompt = assemble("Be brief.", exchange(), None, injections=(system("ASK HOW"),))
+        assert prompt.system == "Be brief.\n\nASK HOW"
+        assert prompt.system == next(t.body for t in prompt.messages if t.role == "system")
+        assert "Be brief." not in prompt.as_story_text()
+
+    def test_without_a_premise_there_is_no_system_turn_and_the_text_is_empty(self) -> None:
+        prompt = assemble("", exchange(), None)
+        assert prompt.system == ""
+        assert all(t.role != "system" for t in prompt.messages)
+
+    def test_the_text_wires_system_is_the_framing_around_the_premise(self) -> None:
+        # the standing instruction stands even where the premise is empty:
+        # a model turn needs a turn before it
+        assert assemble("Be brief.", exchange(), None).story_system == "<<frame Be brief.>>"
+        assert assemble("", exchange(), None).story_system == "<<frame >>"
+        injected = assemble("Be brief.", exchange(), None, injections=(system("ASK HOW"),))
+        assert injected.story_system == "<<frame Be brief.\n\nASK HOW>>"
+
+    def test_as_text_renders_the_framed_premise_and_the_story_in_the_template(self) -> None:
+        rows = [story(user("I was waiting")), story(assistant("for the bus."))]
+        prompt = assemble("Be brief.", rows, None)
+        assert prompt.as_text(PLAIN) == "<<frame Be brief.>>\n\nI was waiting for the bus."
+        assert prompt.as_text(TEXT_TEMPLATES["gemma4"], "\n\n") == (
+            "<bos><|turn>system\n<<frame Be brief.>><turn|>\n"
+            "<|turn>model\nI was waiting for the bus.\n\n"
+        )
+
+
 class TestToolCalls:
     """A stored reply's tool calls go on the wire as the story's tool set
-    has them: a call of a tool that is on as written, one of a tool that
-    is off as what its rule makes of it, one of any other tool gone —
-    the reader's rows untouched."""
+    has them: a call of a tool that is on as written, one of any other
+    tool — switched off, or one this build does not have — gone, the
+    reader's rows untouched."""
 
     def test_a_call_of_a_tool_that_is_on_goes_as_written(self) -> None:
         prompt = assemble("", noted(), 8192, tool_set=ToolSet(on=frozenset({"note"})))
         assert prompt.messages[1].body == "Two.\n\n```otk-note\nthe seal\n```"
 
-    def test_a_call_of_a_tool_that_is_off_becomes_its_rule_text(self) -> None:
-        tools = ToolSet(off={"note": lambda inside: f"({inside})"})
-        prompt = assemble("", noted(), 8192, tool_set=tools)
-        assert prompt.messages[1].body == "Two.\n\n(the seal)"
-
     def test_a_call_of_any_other_tool_leaves_the_wire(self) -> None:
         prompt = assemble("", noted(), 8192, tool_set=NO_TOOLS)
         assert [m.body for m in prompt.messages] == ["One.", "Two.", "Three."]
+
+    def test_a_tool_turn_goes_as_the_readers_turn_framed_by_the_prompts(self) -> None:
+        # the wire has two sides, and the result is what the model is
+        # told: the tool named as the row's `provider` names it, the
+        # framing prompts.toml's
+        rows = [
+            user("Look it up."),
+            assistant("```otk-search\ntides\n```"),
+            tool("Tides: high at six."),
+            assistant("It is six."),
+        ]
+        prompt = assemble("", rows, 8192, tool_set=ToolSet(on=frozenset({"search"})))
+        assert [(m.role, m.body) for m in prompt.messages] == [
+            ("user", "Look it up."),
+            ("assistant", "```otk-search\ntides\n```"),
+            ("user", "<<search: Tides: high at six.>>"),
+            ("assistant", "It is six."),
+        ]
 
 
 # ---------- fixtures ----------
@@ -517,8 +707,18 @@ def assistant(body: str) -> Message:
     return Message(role="assistant", body=body)
 
 
+def story(row: Message) -> Message:
+    """The row as written in story mode."""
+    return replace(row, mode=StoryMode.STORY)
+
+
 def card(message_id: int, body: str) -> Message:
     return Message(id=message_id, role="user", body=body, kind="card")
+
+
+def tool(body: str, name: str = "search") -> Message:
+    """A tool's turn: its result, the tool's name its provider."""
+    return Message(role="tool", kind="tool", body=body, provider=name)
 
 
 def exchange() -> list[Message]:
@@ -691,3 +891,5 @@ class _Prompts:
 
     recap_header: str
     card_framing: str = ""
+    story_framing: str = "<<frame {premise}>>"
+    tool_framing: str = "<<{tool}: {body}>>"

@@ -17,23 +17,37 @@ import sys
 import threading
 import time
 from collections.abc import Iterator
-from typing import Any, Self
+from typing import Any, Self, TextIO
 
+from otaku.backend import StoryMode
 from otaku.backend.api.play import (
+    AssistantReasoning,
+    AssistantText,
+    AssistantToolCall,
+    AssistantTurn,
     Declined,
     Done,
     Failed,
     PlayEvent,
-    Reasoning,
-    Recorded,
-    Text,
-    ToolCall,
+    ToolTurn,
+    UserTurn,
+    join_type,
 )
+from otaku.backend.tools import TOOLS, Actor, get_tool_label
 from otaku.console.sound import ring
 from otaku.terminal.chat.chat import Chat
 from otaku.terminal.tty import DIM, RESET, error_line
 from otaku.terminal.tty.cursor import terminal_width
-from otaku.terminal.tty.render import BlockStream, QuestionStream, message, spaced
+from otaku.terminal.tty.render import (
+    BlockStream,
+    QuestionStream,
+    asked,
+    flow,
+    message,
+    spaced,
+    typeset_line,
+    unit_start,
+)
 from otaku.terminal.tty.spinner import Spinner
 from otaku.terminal.tty.typography import Streamer
 
@@ -54,15 +68,21 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
     """Drive one stream onto the screen. True when Ctrl+R asked for a
     fresh take — the caller regenerates and calls back in; the erase (or
     the regenerating marker) is handled here. Ctrl+C closes the stream
-    (the backend records the partial) and returns to the prompt.
+    (the backend records the partial) and returns to the prompt. Marks
+    the submission as one that streamed a reply (`Chat.replied`).
 
     Everything shown inline — the echoed block, thinking, prose, error
     and stats lines — prints through the ledger, so the exchange's row
     count can never drift from the screen (the spinner and the pinned
     status row erase themselves and stay outside)."""
+    chat.replied = True
     out = chat.ledger.reply
     session = chat.session
+    # The canvas: the one text — no block for the reader's line, the
+    # reply going on where the text ended (`ledger.echo_flow`).
+    is_story_mode = session.layout.mode is StoryMode.STORY
     streamed = False  # anything shown yet (the error line's lead blank, the line to end)
+    in_text = True  # the story's text drawn last, not a block: where a row may stay open
     chars = 0
     interrupted = False
     call_open = False  # inside a tool call, its opening tag already printed
@@ -73,7 +93,7 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
     # else, a call's its closing fence.
     block: BlockStream | None = None
     block_name = ""
-    notes = chat.notes_displayed  # a story's switch, read once: it cannot move mid-stream
+    shown = chat.shown_tools  # a story's switches, read once: they cannot move mid-stream
     start = time.monotonic()
 
     def close_block() -> None:
@@ -90,6 +110,21 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
         block, block_name = None, ""
         after_call = True
 
+    # A continue: no line of the reader's to echo, so the reply goes on
+    # where the text ended — placed NOW, before the wait, so the spinner
+    # spins there as it does after an echoed line; a stream that then
+    # declines or fails before a word says so on a row of its own
+    # (`placed`), not mid-line.
+    placed = False
+    if is_story_mode and chat.continuing and not chat.ledger.flow_open:
+        chat.ledger.echo_flow(inline=True)
+        chat.ledger.reply_begins()
+        fed = chat.ledger.tail  # what a block's spacing is measured against
+        placed = True
+    elif is_story_mode:
+        # a regenerate's take goes on where the reply it replaces began,
+        # mid-row after the reader's words: placed there by its erase
+        placed = chat.ledger.mid_row
     spinner = Spinner()
     spinner.start()
     streamer = Streamer(out)
@@ -97,23 +132,61 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
     # The activity line survives the prompt's absence: entering `pinned`
     # reserves the bottom terminal row and paints the worker's status
     # there for the whole stream; leaving it releases the row.
+    # A failure or a refusal in story mode ends the row it broke off,
+    # after every last write of the stream's own — a style reset among
+    # them — has landed.
+    end_row = False
     with chat.status_line.pinned(), watcher:
         try:
             for event in events:
+                # No thinking in the canvas: the one text has no place for
+                # it, and it is never stored — the spinner turns on through it.
+                if is_story_mode and isinstance(event, AssistantReasoning):
+                    continue
                 spinner.stop()  # idempotent — the first real signal clears it
-                if isinstance(event, Recorded):
-                    # The played turn echoes as the grey block; the reply
-                    # streams under it. The wait resumes, so the spinner
-                    # comes back until the first delta. The record's own
-                    # note (a /roll's dice) prints dim under the block —
-                    # the card import's report line is the family.
-                    chat.ledger.echo_block(
-                        message(event.message.body, "user", pictures=len(event.message.attachments))
-                    )
-                    if event.note:
+                # The status row names a call while its pieces stream, any
+                # tool's, and while a tool otaku runs works after the reply
+                # holding the call landed — gone with whatever comes next.
+                if isinstance(event, AssistantToolCall):
+                    chat.status_line.set_note(_calling(event.name))
+                elif not isinstance(event, AssistantTurn):
+                    chat.status_line.set_note("")
+                if isinstance(event, UserTurn):
+                    if is_story_mode:
+                        # The canvas: the played line is prose in the one
+                        # text, no block. The ledger places the cursor by the
+                        # line's join (the event's `join_type`: under the
+                        # standing blank, or on where the text ended, one
+                        # space after it) and the line is typeset through the
+                        # reply's own streamer, so a quote it opens and the
+                        # reply closes reads as one.
+                        inline = chat.ledger.echo_flow(inline=event.join_type.value == "inline")
+                        # the breaks at its edges are the joins' to draw, not
+                        # drawn twice
+                        body = event.message.body.strip("\n")
+                        if inline:
+                            streamer.feed(" ")
+                        typeset_line(streamer, body)
+                        streamer.flush()
+                        chat.ledger.reply_begins()
+                        fed += event.message.body
+                        streamed = True
+                    else:
+                        # The played turn echoes as the grey block; the reply
+                        # streams under it. The wait resumes, so the spinner
+                        # comes back until the first delta. The record's own
+                        # note (a /roll's dice) prints dim under the block —
+                        # the card import's report line is the family.
+                        chat.ledger.echo_block(
+                            message(
+                                event.message.body, "user", pictures=len(event.message.attachments)
+                            )
+                        )
+                    # not in story mode's one text, which the reply goes on in
+                    if event.note and not is_story_mode:
                         out.write(f"{DIM}[ {event.note} ]{RESET}\n\n")
                     spinner.start()
-                elif isinstance(event, Reasoning):
+                elif isinstance(event, AssistantReasoning):
                     # The thinking streams as a dim block behind the bar
                     # (`render`), as a note does.
                     if block is None or block_name != "thinking":
@@ -121,29 +194,58 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                         block = BlockStream(out, terminal_width(), dim=True)
                         block_name = "thinking"
                         fed += block.open(streamer, fed)
+                        in_text = False
                     written = block.feed(event.text)
                     fed += written
                     streamed = streamed or bool(written)
-                elif isinstance(event, Text):
+                elif isinstance(event, AssistantText):
                     if block_name == "thinking":
                         close_block()  # one blank line to the prose, as after any block
                     text = event.text
+                    # The reply's first piece says how it joins the text
+                    # before it (`join_type`): one space, or a paragraph —
+                    # its own breaks the join's to draw.
+                    join = event.join_type.value if event.join_type is not None else None
+                    if is_story_mode and join == "inline":
+                        text = " " + text
+                    elif is_story_mode and join == "paragraph":
+                        text = "\n\n" + text.lstrip("\n")
+                    if is_story_mode and join is not None:
+                        # a reply's first piece is set apart by its join
+                        # alone — not by a block the reply before ended on,
+                        # which story mode does not draw
+                        after_call = False
                     if after_call:
                         if not text.strip():
                             continue  # the model's newlines after a block: drawn once, below
                         text = spaced(fed) + text.lstrip("\n")
                         after_call = False
                     streamer.feed(text)
+                    in_text = True
                     fed += text
                     streamed = True
                     chars += len(event.text)
-                elif isinstance(event, ToolCall):
+                elif isinstance(event, AssistantToolCall):
                     if block_name == "thinking":
                         close_block()
+                    if is_story_mode and event.name != "question":
+                        # story mode's text draws no tool's block but the
+                        # question it is asked (`render.flow`)
+                        after_call = True
+                        continue
+                    tool = TOOLS.get(event.name)
+                    if tool is not None and tool.actor is Actor.SYSTEM:
+                        # A call otaku runs — the search's query — is the
+                        # model's, not the story's: nothing drawn, as
+                        # `render.message` draws nothing for it; the result
+                        # follows as a block of its own (`ToolTurn`).
+                        after_call = True
+                        continue
                     if event.name in ("question", "note"):
-                        if event.name == "note" and not notes:
-                            # Written for the wire alone — and the prose goes on
-                            # as after any block, so no hole marks the place.
+                        if event.name not in shown:
+                            # A tool the story does not show — the notes' display
+                            # off, or the tool itself — and the prose goes on as
+                            # after any block, so no hole marks the place.
                             after_call = True
                             continue
                         # Streamed as it arrives, a block behind the bar
@@ -151,12 +253,18 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                         # options parting from it line by line; a note dim.
                         if block is None:
                             width = terminal_width()
+                            if event.name == "question" and is_story_mode:
+                                # where the prose ends, for the answer to take
+                                # the question back to (`drop_past_question`)
+                                streamer.flush()
+                                chat.ledger.question_begins()
                             if event.name == "question":
                                 block = QuestionStream(out, width)
                             else:
                                 block = BlockStream(out, width, dim=True)
                             block_name = event.name
                             fed += block.open(streamer, fed)
+                            in_text = False
                         written = block.feed(event.text)
                         fed += written
                         streamed = streamed or bool(written)
@@ -175,22 +283,66 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                     streamer.feed(opening + event.text + closing)
                     fed += opening + event.text + closing
                     streamed = True
+                elif isinstance(event, AssistantTurn):
+                    # The row as recorded is what the screen already shows,
+                    # drawn as it streamed: nothing to draw.
+                    continue
+                elif isinstance(event, ToolTurn):
+                    # The reply holding the call ended at it; the tool turn
+                    # is drawn as its own dim block behind the bar, the label
+                    # alone — the result is the model's to read, not the
+                    # story's — as `render.message` draws it again on a
+                    # resume; the reply that continues streams under it, set
+                    # apart as after any block. Story mode's text draws none:
+                    # the reply that continues opens a paragraph, as its
+                    # join says (`render.flow`).
+                    if is_story_mode:
+                        continue
+                    close_block()
+                    call_open = False
+                    block = BlockStream(out, terminal_width(), dim=True)
+                    block_name = "tool"
+                    fed += block.open(streamer, fed)
+                    in_text = False
+                    label = get_tool_label(event.message.provider, event.message.body)
+                    written = block.feed(label)
+                    fed += written
+                    streamed = streamed or bool(written)
+                    close_block()
                 elif isinstance(event, Declined):
-                    out.write(event.reason + "\n")
+                    if is_story_mode:
+                        # on the status row, as a failure is: the text whole
+                        chat.status_note = event.reason
+                        end_row = streamed or placed
+                    else:
+                        lead = "\n" if placed and not streamed else ""
+                        out.write(lead + event.reason + "\n")
                 elif isinstance(event, Failed):
                     close_block()
                     streamer.flush()
                     # What streamed is already on the screen, so the story
                     # keeps it — exactly as a Ctrl+C does. A failure before
-                    # any output starts at the margin — no stray blank.
-                    lead = "\n" if streamed else ""
-                    out.write(lead + error_line(f"[ error: {event.reason} ]") + "\n")
+                    # any output starts at the margin — no stray blank —
+                    # unless the cursor was placed mid-line for a continue.
+                    lead = "\n" if streamed or placed else ""
+                    if is_story_mode:
+                        # story mode's text takes no line of the medium's:
+                        # the failure stands on the status row, the row it
+                        # broke off ended as a reply's would be
+                        chat.status_note = f"error: {event.reason}"
+                        end_row = bool(lead)
+                    else:
+                        out.write(lead + error_line(f"[ error: {event.reason} ]") + "\n")
                 elif isinstance(event, Done):
                     close_block()  # a reply cut inside its call still shows it
                     streamer.flush()
                     if streamed:
-                        out.write("\n")
-                    if event.stats:
+                        _end_row(chat, out, story_mode=is_story_mode and in_text)
+                    if event.stats and is_story_mode:
+                        chat.status_note = _unbracketed(
+                            event.stats
+                        )  # on the status row, the text whole
+                    elif event.stats:
                         out.write(DIM + event.stats + RESET + "\n")
         except KeyboardInterrupt:
             interrupted = True
@@ -204,20 +356,28 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
             if callable(close):
                 close()
 
+    if end_row:
+        _end_row(chat, out, story_mode=is_story_mode and in_text)
+
     if interrupted:
         # The cut line is ended — the prose, a block or the thinking
         # stopped mid-line. A wait cut before anything showed has no line
         # to end: the echo's blank stands as the gap, and a newline here
         # would be a second blank, with the loop's gap making a third.
         if streamed:
-            out.write("\n")
+            # a Ctrl+R's erase counts the row ended (`erase_reply_tail`)
+            open_row = in_text and not watcher.regen_requested
+            _end_row(chat, out, story_mode=is_story_mode and open_row)
         if session.verbose:
             elapsed = time.monotonic() - start
             rate = chars / elapsed if elapsed > 0 else 0.0
-            out.write(
-                f"{DIM}[ total {elapsed:.1f}s, "
-                f"eval {chars} chars @ {rate:.0f} chars/s, interrupted ]{RESET}\n"
+            stats = (
+                f"[ total {elapsed:.1f}s, eval {chars} chars @ {rate:.0f} chars/s, interrupted ]"
             )
+            if is_story_mode:
+                chat.status_note = _unbracketed(stats)
+            else:
+                out.write(f"{DIM}{stats}{RESET}\n")
 
     if watcher.regen_requested:
         # Ctrl+R during the stream: the partial is recorded like any
@@ -230,6 +390,11 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
             out.write("\n")
             chat.ledger.rule()
             out.write(f"{DIM}[ regenerating ]{RESET}\n\n")
+            if is_story_mode:
+                # the fresh take is a paragraph under the marker, placed
+                # here so the next stream does not place it again
+                chat.ledger.echo_flow(inline=False)
+                chat.ledger.reply_begins()
         return True
     if session.notification and not interrupted:
         # The turn is over and the screen wants its reader back. Not
@@ -300,3 +465,76 @@ class _StreamWatcher:
                 self.regen_requested = True
                 os.kill(os.getpid(), signal.SIGINT)
                 return
+
+
+def _calling(name: str) -> str:
+    """What the status row says while a call of the tool `name` streams —
+    the page's words (`transcript.js _calling`), copied: the tool named
+    by its label, lowercase, or by its name where this build has none."""
+    tool = TOOLS.get(name)
+    return f"calling the {(tool.label if tool is not None else name).lower()} tool"
+
+
+def _unbracketed(stats: str) -> str:
+    """The stats line without the `[ … ]` it is framed in under a reply:
+    on the status row, a row of its own, the frame is not needed."""
+    if stats.startswith("[ ") and stats.endswith(" ]"):
+        return stats[2:-2]
+    return stats
+
+
+def _end_row(chat: Chat, out: TextIO, *, story_mode: bool) -> None:
+    """End the row the stream stopped on — but where it stopped mid-row
+    in story mode's text (`story_mode`: the text drawn last, no block),
+    leave the row open: the next prompt stands there, back in the text,
+    and a newline would scroll the text up a row at the screen's foot,
+    and show the cursor dropping under it and back (`ledger.hold_at_tail`)."""
+    if story_mode and chat.ledger.mid_row:
+        chat.ledger.hold_at_tail()
+    else:
+        out.write("\n")
+
+
+def drop_past_question(chat: Chat) -> None:
+    """In story mode the question a line is about to answer — or a
+    continue to go past — is past, and a past question is no part of the
+    one text (`render.flow`): the reply that asked it, with its tool
+    chain, is taken off the screen (/regen's erase) and drawn again
+    without it, ended as a
+    finished reply ends — its newline, the blank under it — so what
+    comes next goes on from the reply's prose. Called before the stream
+    starts: inside it the key watcher owns the terminal's answers, which
+    the erase asks for. Where the erase cannot be proven, the question
+    stays."""
+    session = chat.session
+    rows = session.messages
+    shown = chat.shown_tools
+    if session.layout.mode is not StoryMode.STORY or not rows or asked(rows[-1], shown) is None:
+        return
+    # the question alone, where the stream noted its start: the prose above
+    # it stands as it is, the answer going on from its end
+    if chat.ledger.take_question():
+        return
+    shown_turns = chat.ledger.reply_turns
+    if not chat.ledger.erase_reply():
+        # the question stands; the answer goes under it, not on after it
+        chat.ledger.invalidate()
+        return
+    # the reply with its tool chain — as much of it as the screen showed:
+    # the erase took that
+    items = list(rows)
+    first = unit_start(items, len(items)) if shown_turns is None else len(items) - shown_turns
+    # a cut unit opened the echo: nothing on screen before it to join
+    before = items[first - 1] if first and shown_turns is None else None
+    piece = flow(items[first:])
+    if before is None:
+        lead = ""
+    elif join_type(before, items[first]) == "inline":
+        lead = " "
+    else:
+        lead, piece = "\n\n", piece.lstrip("\n")
+    chat.ledger.reply.write(lead + piece + "\n")
+    chat.ledger.reply_turns = shown_turns  # the same part drawn again
+    # the blank a finished reply stands over, as the loop's gap prints it
+    print()
+    chat.ledger.note_printed("\n")

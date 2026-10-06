@@ -198,6 +198,37 @@ Close the block before anything else follows, never put a block inside another,
 and stop after the closing fence. Never mention the block's marker. Never write
 it outside the block itself."""
 
+TOOL_SYSTEM_INFO_DEFAULT = """\
+You may ask the time, the phase of the moon, the nearest solstice or
+equinox, and which model you are, when the story needs it: end your reply
+with an empty fenced code block marked otk-system-info, like this:
+
+```otk-system-info
+```
+
+The answer arrives as the next message, out of character."""
+
+TOOL_WEB_SEARCH_DEFAULT = """\
+You may look something up on the internet when a character would, or when
+the story needs a real fact: end your reply with a fenced code block marked
+otk-web-search holding the query alone, like this, from an unrelated story:
+
+```otk-web-search
+Lisbon tram routes 1930s
+```
+
+The results arrive as the next message, out of character: short snippets
+from the top pages."""
+
+# The canvas over the chat wire: the story is one text the model goes on
+# with, the instruct model told to behave as a text completion would
+# (`StorySettingEmulateTextCompletion`).
+EMULATE_TEXT_COMPLETION_PROMPT = """Behave as a text completion: the story is one continuous text,
+and you continue it exactly from where it ends. When the last sentence is
+unfinished, finish it without repeating any of its words; when it is
+finished, begin the next paragraph. Take over the turn wherever the text
+stops."""
+
 _DEFAULTS = {
     "me_framing": "((OOC: The user writes as {name}.))\n{body}",
     "you_framing": (
@@ -223,12 +254,27 @@ _DEFAULTS = {
         "Example dialogue (voice reference only, never story events): {examples}\n"
         "Standing note: {depth_note}))"
     ),
+    # The text wire's standing instruction, before the premise in the turn
+    # that precedes the story: the model turn must follow SOME turn — alone
+    # it degenerates — and a premise may be empty.
+    "story_framing": (
+        "Continue the story below exactly where the text ends, in its voice and "
+        "tense. Write only the story.\n\n{premise}"
+    ),
     "extract_prompt": EXTRACT_DEFAULT,
     "scene_history_prompt": SCENE_HISTORY_DEFAULT,
     "journal_history_prompt": JOURNAL_HISTORY_DEFAULT,
     "recap_header": "[The story so far — the scenes between these moments:]",
     "tool_questions_prompt": TOOL_QUESTIONS_DEFAULT,
     "tool_assistant_notes_prompt": TOOL_ASSISTANT_NOTES_DEFAULT,
+    "tool_system_info_prompt": TOOL_SYSTEM_INFO_DEFAULT,
+    "tool_web_search_prompt": TOOL_WEB_SEARCH_DEFAULT,
+    # What a tool's RESULT is framed as, as the model reads it: the tool
+    # turn's text, out of character, the tool named.
+    "tool_framing": "((OOC: {tool} result:\n{body}))",
+    # The canvas's standing instruction on the chat wire: what makes an
+    # instruct model continue one text, mid-sentence where it stops.
+    "emulate_text_completion_prompt": EMULATE_TEXT_COMPLETION_PROMPT,
 }
 
 # Placeholders a template cannot do without: every one its built-in text
@@ -249,6 +295,12 @@ _REQUIRED = {
     "extract_prompt": ("cast", "journals", "chunk"),
     "scene_history_prompt": ("summaries",),
     "journal_history_prompt": ("name", "entries"),
+    # {premise} is the story's own text — without it the premise never
+    # reaches the model over the text wire.
+    "story_framing": ("premise",),
+    # {body} is the tool's result — without it the model reads a label
+    # and nothing more.
+    "tool_framing": ("body",),
 }
 
 _HEADER = [
@@ -272,6 +324,11 @@ class Prompts:
     recap_header: str = _DEFAULTS["recap_header"]
     tool_questions_prompt: str = _DEFAULTS["tool_questions_prompt"]
     tool_assistant_notes_prompt: str = _DEFAULTS["tool_assistant_notes_prompt"]
+    tool_system_info_prompt: str = _DEFAULTS["tool_system_info_prompt"]
+    tool_web_search_prompt: str = _DEFAULTS["tool_web_search_prompt"]
+    tool_framing: str = _DEFAULTS["tool_framing"]
+    story_framing: str = _DEFAULTS["story_framing"]
+    emulate_text_completion_prompt: str = _DEFAULTS["emulate_text_completion_prompt"]
 
 
 def load(path: Path) -> tuple[Prompts, list[str]]:

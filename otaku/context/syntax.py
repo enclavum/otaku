@@ -23,8 +23,9 @@ on the wire, and the worker's extraction composes rows the same way
 reading and writing are one vocabulary — the same Line classes that
 parse a typed line define how its stored turn composes — so splitting
 them across packages would put one language in two homes. `backend.commands`
-re-exports `is_command` — the one piece of this module frontends may
-call; the language itself lives at the lowest package everything that
+re-exports the two pieces of this module frontends may call: `is_command`,
+and `spans`, a line's story and out-of-character runs, which they draw
+apart; the language itself lives at the lowest package everything that
 speaks it can reach.
 
 Vocabulary: syntax = this language; directions (/me /you /ooc) OPEN a
@@ -269,6 +270,27 @@ def read(line: str) -> Line:
     return DIRECTIONS.get(line.split(" ", 1)[0], Line)(line)
 
 
+def spans(line: str) -> list[tuple[str, bool]]:
+    """The typed line as runs of story and of words with the model, in
+    order and exactly as typed — joined, they are the line — each with
+    whether it is out of character: all of a /you or /ooc line after its
+    token (both send an out-of-character request), and whatever follows
+    an inliner to the line's end; the rest is story, the tokens
+    themselves included. The breaks a line keeps at its edges are read
+    past (`api.play.submit`)."""
+    lead = len(line) - len(line.lstrip())
+    words = line[lead:].split(None, 1)
+    direction = DIRECTIONS.get(words[0]) if words else None
+    if direction is not None and direction.request_kind == "ooc":
+        at = lead + len(words[0])
+    else:
+        found = _INLINERS_REGEX.search(line)
+        at = found.end() if found is not None else len(line)
+    if not line[at:].strip():
+        return [(line, False)]
+    return [(line[:at], False), (line[at:], True)]
+
+
 def is_command(line: str) -> bool:
     """Whether the line belongs to the command table instead of the
     story: it opens with a slash word that is not a direction."""
@@ -305,7 +327,14 @@ def to_wire(message: Message, *, is_last: bool, card_block: str | None = None) -
     # decided the lifetime of.
     if frame.tail and (frame.inliner == "/ooc" or (frame.inliner == "/cue" and is_last)):
         parts.append(OOC_FRAME.replace("{body}", frame.tail))
-    return " ".join(part for part in parts if part)
+    # The breaks at a line's edges are its paragraph breaks
+    # (`assembler.get_join_type`, `api.play.submit`): the leading from the text
+    # before, the trailing to the model's continuation, both typed so in
+    # the canvas and riding the wire as they stand — the reader trims them
+    # off the line's text, so they are put back here. A block line has none.
+    lead = body[: len(body) - len(body.lstrip())]
+    tail = body[len(body.rstrip()) :]
+    return lead + " ".join(part for part in parts if part) + tail
 
 
 # ---------- dice ----------

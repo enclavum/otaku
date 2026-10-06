@@ -6,14 +6,14 @@ title or an uploaded document."""
 from typing import Any
 
 from otaku import __version__
-from otaku.backend import InjectionPosition
+from otaku.backend import InjectionPosition, Layout, StoryMode
 from otaku.backend.api import stories as api_stories
 from otaku.backend.session import Session
 from otaku.backend.story import InjectingSetting
 from otaku.formatting import format_context
 from otaku.web.api import transfer
 from otaku.web.api.lore import memory
-from otaku.web.api.play import turn
+from otaku.web.api.play import next_join, rows
 from otaku.web.api.request import Ask, Created, Flow, NotFound, Pending, Route, landed_story
 
 
@@ -30,14 +30,34 @@ def facts(session: Session) -> dict[str, Any]:
         "version": __version__,
         "model": session.model or "(no model)",
         "provider": session.provider,
+        # "provider/model" lore extraction asks — its own pinned, or the
+        # one played with; "" with neither. What the extract dialog names.
+        "extraction_model": session.full_extraction_model_name,
         "max_context": format_context(max_context) if max_context else "",
         "story": api_stories.headline(session),
         "story_id": session.story_id,
         # How many, so the runhead needs no chain.
         "turns": len(session.messages),
-        # Whether the model in use takes pictures — what shows the attach
-        # button; the backend refuses a picture regardless.
-        "vision": session.vision,
+        # Whether a picture may ride the next request — the model sees,
+        # and the mode's wire carries one — what shows the attach button;
+        # the backend refuses a picture regardless.
+        "can_attach": session.can_attach,
+        # The wire the next request goes over and the look the story is
+        # drawn in (`Session.completion_type`, `Layout.mode` — the
+        # novel drawn as the canvas, so `layout` here is one of three): what the send
+        # button is captioned, whether an empty line continues, whether
+        # the pictures show — and whether the novel is offered at all
+        # (`Session.can_complete_text`), which shows its glyph.
+        "completion_type": session.completion_type.value,
+        "layout": Layout.CANVAS.value
+        if session.layout.mode is StoryMode.STORY
+        else session.layout.value,
+        "can_complete_text": session.can_complete_text,
+        # How a line typed now would join the newest row ("inline",
+        # "paragraph"; null with none): where the canvas's typing place
+        # draws its one space or opens a paragraph — the join the
+        # backend's, never the page's to work out.
+        "next_join": next_join(session),
     }
 
 
@@ -91,7 +111,7 @@ def story(session: Session, story_id: int) -> dict[str, Any]:
         "title": listing.title,
         "updated_at": listing.updated_at.isoformat(),
         "premise": api_stories.get_system(session, story_id),
-        "messages": [turn(message) for message in api_stories.messages_of(session, story_id)],
+        "messages": rows(api_stories.messages_of(session, story_id)),
         # the lore half — scenes, characters, how far the pass has read
         **memory(session, story_id),
     }
@@ -112,8 +132,11 @@ def _head(session: Session, ask: Ask) -> str:
 def story_settings(session: Session, story_id: int) -> dict[str, Any]:
     """A story's settings as they stand, in the order they are sent: the
     switch, where it injects (null for one that injects nothing) and the
-    positions it may take, and the story's own text (null for one with
-    none). Any story's; a story that is not there is the spec's 404."""
+    positions it may take, the prompts.toml key of the prompt it sends
+    (null where the text is the reader's, or none), the story's own text
+    (null for one with none), and the layout the story is read in (null
+    for every setting but the layout's). Any story's; a story that is
+    not there is the spec's 404."""
     if all(row.id != story_id for row in api_stories.listing(session)):
         raise NotFound(f"no story {story_id}")
     return {
@@ -125,6 +148,9 @@ def story_settings(session: Session, story_id: int) -> dict[str, Any]:
                     setting.injection_label if isinstance(setting, InjectingSetting) else None
                 ),
                 "tool": setting.tool.name if setting.tool else None,
+                "prompt_name": (
+                    setting.prompt_name if isinstance(setting, InjectingSetting) else None
+                ),
                 "allowed_positions": [each.value for each in setting.allowed_positions],
                 "enabled": setting.enabled,
                 "position": (
@@ -134,6 +160,7 @@ def story_settings(session: Session, story_id: int) -> dict[str, Any]:
                 ),
                 "reminder_text": setting.reminder_text,
                 "display_notes": setting.display_notes,
+                "layout": setting.layout.value if setting.layout is not None else None,
             }
             for setting in api_stories.get_settings(session, story_id)
         ]
@@ -160,6 +187,13 @@ def _update_setting(session: Session, ask: Ask) -> str:
         position = InjectionPosition.from_value(raw)
         if position is None:
             raise TypeError('position is not "system" or a count from 1')
+    # One of the four names is a layout (which the setting may still
+    # refuse); anything else is not one, a malformed request.
+    layout = None
+    if (raw := ask.body.get("layout")) is not None:
+        layout = Layout.from_value(raw)
+        if layout is None:
+            raise TypeError("layout is not one of novel, canvas, manuscript, chat")
     return api_stories.update_setting(
         session,
         ask.params["setting"],
@@ -168,6 +202,7 @@ def _update_setting(session: Session, ask: Ask) -> str:
         position=position,
         reminder_text=reminder_text,
         display_notes=flags["display_notes"],
+        layout=layout,
     )
 
 

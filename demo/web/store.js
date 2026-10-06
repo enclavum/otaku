@@ -26,8 +26,8 @@ const MODEL_CAPABILITIES = {
 };
 const MODEL_WORDS = { locality: "local", reasoning_words: "not supported", capability_words: "none" };
 const MODELS = [
-  { name: "demo-model", loaded: true, size: "4.7 GB", max_context_catalogue: "32K", max_context_loaded: "", capabilities: { ...MODEL_CAPABILITIES }, ...MODEL_WORDS },
-  { name: "demo-model-mini", loaded: false, size: "1.9 GB", max_context_catalogue: "8K", max_context_loaded: "", capabilities: { ...MODEL_CAPABILITIES }, ...MODEL_WORDS },
+  { name: "demo-model", loaded: true, size: "4.7 GB", max_context_catalogue: "32K", max_context_loaded: "", capabilities: { ...MODEL_CAPABILITIES }, text_template: null, ...MODEL_WORDS },
+  { name: "demo-model-mini", loaded: false, size: "1.9 GB", max_context_catalogue: "8K", max_context_loaded: "", capabilities: { ...MODEL_CAPABILITIES }, text_template: null, ...MODEL_WORDS },
 ];
 // What the demo's provider can do: it manages models, counts nothing
 // exactly, marks no cache, and reads the protocol's own parameters and
@@ -57,12 +57,13 @@ const state = {
   nextStory: 1,
   nextMessage: 1,
   model: "demo-model",
+  extraction: "", // "provider/model" pinned for lore extraction; "" = the model above
   settings: null, // seeded from the settings fixture; values live here
   storySettingDefaults: null, // every story's settings as a fresh story reads them
   storySettings: new Map(), // id → the settings a story changed, in the read's shape
   sharedReminder: "", // the text every story with use_shared_reminder on is sent
-  shipped: null, // every tool's prompt as shipped, by name — what an emptied one restores
-  prompts: null, // every tool's prompt as it stands, by name
+  shipped: null, // every injection setting's prompt as shipped, by its name — what an emptied one restores
+  prompts: null, // every injection setting's prompt as it stands, by its name
   history: [], // the composer's ↑/↓ lines, most recent first
   usage: [], // one row per completed reply: {story, prompt, completion, seconds}
   syntax: null, // the story's typed language, for the menu and the sheet
@@ -102,16 +103,37 @@ export function seed(fixtures) {
 export function facts(version) {
   const story = state.stories.get(state.open);
   const model = MODELS.find((m) => m.name === state.model);
+  // With no story open, the settings a first turn would make it with.
+  const held = story ? _settingsOf(state.open) : state.storySettingDefaults;
+  const layout = held?.find((s) => s.name === "layout")?.layout ?? "manuscript";
+  const canCompleteText = Boolean(
+    model?.capabilities.text_completion && model?.text_template === "plain",
+  );
+  const completionType = layout === "novel" && canCompleteText ? "text" : "chat";
   return {
     version,
     model: state.model,
     provider: "demo",
+    extraction_model: state.extraction || `${PROVIDER}/${state.model}`,
     max_context: model ? model.max_context_catalogue : "",
     story: story ? label(story) : "",
     story_id: state.open,
     turns: story ? story.turns.length : 0,
-    // The demo's model cannot see: no attach button, no pictures anywhere.
-    vision: false,
+    // As the backend derives it (`Session.can_attach`): the model sees, and
+    // the wire has room for a picture, which one text has not. The demo's
+    // model cannot see, so no attach button shows.
+    can_attach: Boolean(model?.capabilities.vision) && completionType === "chat",
+    // The wire and the look, derived from the story's layout as the
+    // backend derives them (`schema.Layout`): the novel is drawn as
+    // the canvas, and goes over the text wire only on a model that
+    // continues a bare text — its engine's text completion and a `plain`
+    // template (`Session.can_complete_text`) — which the demo's is not.
+    completion_type: completionType,
+    layout: layout === "novel" ? "canvas" : layout,
+    can_complete_text: canCompleteText,
+    // How a line typed now would join the newest row: as every turn the
+    // demo records joins, a paragraph (`recordTurn`); null with none
+    next_join: story?.turns.length ? "paragraph" : null,
   };
 }
 
@@ -190,7 +212,12 @@ export function providers(scope = "") {
   // now, the cloud catalogs after. The demo has no cloud half, and says
   // so with an empty second phase rather than doubled providers.
   if (scope === "cloud") {
-    return { current: `${PROVIDER}/${state.model}`, memory: memory().memory, providers: [] };
+    return {
+      current: `${PROVIDER}/${state.model}`,
+      extraction: state.extraction,
+      memory: memory().memory,
+      providers: [],
+    };
   }
   const all = allProviders();
   if (scope && scope !== "local") {
@@ -205,6 +232,7 @@ export function providers(scope = "") {
 function allProviders() {
   return {
     current: `${PROVIDER}/${state.model}`,
+    extraction: state.extraction,
     memory: memory().memory,
     providers: [
       {
@@ -276,7 +304,7 @@ export function context() {
   const used = Math.round((100 * total) / LIMIT);
   const lede =
     "Context preview — the exact request to be sent. Context summary:\n\n" +
-    `  ~${total.toLocaleString("en-US")} tokens · ${used}% of the ${LIMIT.toLocaleString("en-US")} limit\n` +
+    `  ~${total.toLocaleString("en-US")} tokens projected · ${used}% of the ${LIMIT.toLocaleString("en-US")} limit\n` +
     (systemTokens ? `  system ${systemTokens.toLocaleString("en-US")} · transcript ${transcript.toLocaleString("en-US")}\n` : "") +
     `  ${bodies.length} messages verbatim`;
   return {
@@ -306,6 +334,14 @@ export function context() {
       ...bodies.map((t) => ({ role: t.role, body: t.body })),
     ],
   };
+}
+
+// How full the next request is: the preview's own figure over the
+// demo model's window, and the sentence (`reports.ContextUse.text`).
+export function contextUse() {
+  const { shape } = context();
+  const size = WINDOW >= 1024 ? `${Math.round(WINDOW / 1024)}K` : String(WINDOW);
+  return { used: shape.used, context: WINDOW, text: `${shape.used}% of ${size}` };
 }
 
 export function usage(scope) {
@@ -492,6 +528,12 @@ export function updateSetting(storyId, name, body) {
     const known = settings.map((s) => s.name).join(", ");
     return refuse(`Unknown setting '${name}'. Settings: ${known}.`);
   }
+  // the layout setting is the one that holds a layout: a value, not a
+  // switch — its switch refused before anything else, as there
+  const holdsLayout = setting.layout != null;
+  if (holdsLayout && body.enabled != null) {
+    return refuse(`${setting.label} has no switch: a story is always read in one.`);
+  }
   if (body.position != null) {
     if (!setting.allowed_positions.length) {
       return refuse(`${setting.label} has no position: it injects nothing.`);
@@ -508,6 +550,14 @@ export function updateSetting(storyId, name, body) {
   if (body.display_notes != null && setting.display_notes === null) {
     return refuse(`${setting.label} has nothing to display.`);
   }
+  if (body.layout != null && !holdsLayout) {
+    return refuse(`${setting.label} has no layout.`);
+  }
+  if (holdsLayout) {
+    if (body.layout != null) setting.layout = body.layout;
+    // `StorySettingLayout.standing`: a caption, no full stop
+    return say(`${setting.label}: ${setting.layout}`);
+  }
   if (body.display_notes != null) setting.display_notes = body.display_notes;
   if (body.enabled != null) setting.enabled = body.enabled;
   if (body.position != null) setting.position = body.position;
@@ -515,8 +565,12 @@ export function updateSetting(storyId, name, body) {
   if (!setting.enabled) return say(`${setting.label}: off.`);
   if (setting.position === null) return say(`${setting.label}: on.`);
   if (setting.position === "system") return say(`${setting.label}: on, in the system message.`);
-  const back = -setting.position;
-  return say(`${setting.label}: on, ${back} message${back === 1 ? "" : "s"} from the end.`);
+  // before which of the reader's messages, counted from the end
+  // (`StorySetting.standing`)
+  const depth = setting.position;
+  if (depth === 1) return say(`${setting.label}: on, before your latest message.`);
+  if (depth === 2) return say(`${setting.label}: on, before your previous message.`);
+  return say(`${setting.label}: on, before your ${depth}${depth === 3 ? "rd" : "th"}-last message.`);
 }
 
 export function sharedReminder() {
@@ -529,22 +583,25 @@ export function setSharedReminder(text) {
   return say(text.trim() ? "Shared reminder saved." : "Shared reminder cleared.");
 }
 
-export function prompt(tool) {
-  // The refusal is `backend.api.settings._tool_prompt_name`'s sentence, copied.
-  if (!(tool in state.prompts)) return _unknownTool(tool);
-  return { text: state.prompts[tool] };
+export function prompt(setting) {
+  // The refusals are `backend.api.settings._prompt_name`'s sentences, copied.
+  if (!(setting in state.prompts)) return _noPrompt(setting);
+  return { text: state.prompts[setting] };
 }
 
-export function setPrompt(tool, text) {
-  // The sentences are `backend.api.settings.set_tool_prompt`'s.
-  if (!(tool in state.prompts)) return _unknownTool(tool);
+export function setPrompt(setting, text) {
+  // The sentences are `backend.api.settings.set_prompt`'s.
+  if (!(setting in state.prompts)) return _noPrompt(setting);
   const typed = text.trim();
-  state.prompts[tool] = typed || state.shipped[tool];
+  state.prompts[setting] = typed || state.shipped[setting];
   return say(typed ? "Prompt saved." : "Prompt restored to the built-in.");
 }
 
-function _unknownTool(tool) {
-  return refuse(`Unknown tool '${tool}'. Tools: ${Object.keys(state.prompts).join(", ")}.`);
+function _noPrompt(name) {
+  const found = state.storySettingDefaults.find((row) => row.name === name);
+  if (found) return refuse(`${found.label} has no prompt.`);
+  const known = state.storySettingDefaults.map((row) => row.name).join(", ");
+  return refuse(`Unknown setting '${name}'. Settings: ${known}.`);
 }
 
 function _settingsOf(storyId) {
@@ -639,6 +696,22 @@ export function switchModel(provider, model) {
   }
   state.model = model;
   return say(`Switched to ${PROVIDER}/${state.model}.`);
+}
+
+// The model lore extraction uses, pinned or back to the model above —
+// the product's refusals and sentences (`backend.api.providers`).
+export function setExtractionModel(provider, model) {
+  if (provider !== PROVIDER) return refuse(`Unknown provider '${provider}'.`);
+  const spec = `${provider}/${model}`;
+  if (spec === state.extraction) return refuse(`Lore extraction already uses ${spec}.`);
+  state.extraction = spec;
+  return say(`Lore extraction uses ${spec}.`);
+}
+
+export function clearExtractionModel() {
+  if (!state.extraction) return refuse("Lore extraction already uses the model you play with.");
+  state.extraction = "";
+  return say("Lore extraction uses the model you play with.");
 }
 
 export function loadModel(model, wanted) {
@@ -813,6 +886,8 @@ export function recordTurn(role, body) {
     // The demo's model writes prose and no tagged block, so a turn it
     // records is one prose segment (`backend.api.play.segments`).
     segments: [{ kind: "prose", text: body }],
+    // the demo's model completes chat, so a turn joins as a paragraph (`web.api.play.turn`)
+    join_type: "paragraph",
   };
   story.turns.push(turn);
   touch(state.open);
@@ -844,6 +919,7 @@ export function importCard(landed) {
     template: null,
     attachments: [],
     segments: [{ kind: "prose", text: landed.line }],
+    join_type: "paragraph",
   });
   const memory = memoryOf(state.open);
   const characterId = memory.characters.reduce((top, c) => Math.max(top, c.id), 0) + 1;
@@ -855,6 +931,9 @@ export function importCard(landed) {
     card: landed.card,
     history: "",
     updated_at: new Date().toISOString(),
+    // made by the card, as the product records it (`api.cards`)
+    provider: "card",
+    model: landed.fileName,
     journals: [],
   });
   story.persona = landed.persona;
@@ -870,6 +949,7 @@ export function importCard(landed) {
       template: null,
       attachments: [],
       segments: [{ kind: "prose", text: landed.greeting }],
+      join_type: "paragraph",
     attachments: [],
     });
   }

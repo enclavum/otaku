@@ -49,6 +49,12 @@ class Paths:
         return self.configs_dir / "providers.toml"
 
     @property
+    def integrations_file(self) -> Path:
+        """integrations.toml — one [name] section per service otaku asks
+        for something other than a completion (`otaku.integrations`)."""
+        return self.configs_dir / "integrations.toml"
+
+    @property
     def config_backups_dir(self) -> Path:
         """Pre-migration snapshots of the config files, dated like the
         database backups."""
@@ -137,6 +143,7 @@ class Paths:
         return SettingsFiles(
             config=self.config_file,
             providers=self.providers_file,
+            integrations=self.integrations_file,
             prompts=self.prompts_file,
             state=self.state_file,
             models=self.models_file,

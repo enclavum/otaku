@@ -15,7 +15,10 @@ import contextlib
 from collections.abc import Callable
 
 from otaku.settings import Secrets, SettingsFiles, row, write_atomic
+from otaku.settings.integrations import IntegrationConfig
+from otaku.settings.integrations import render as render_integrations
 from otaku.settings.migrations.config_file import hash_plain_password
+from otaku.settings.migrations.integrations_file import ensure_integrations
 from otaku.settings.migrations.prompt_texts import (
     EXTRACT_0_2_2,
     EXTRACT_0_3_0,
@@ -43,6 +46,7 @@ from otaku.settings.migrations.surgery import (
     set_key,
     update_config,
     update_providers,
+    update_settings_file,
 )
 from otaku.settings.prompts import (
     EXTRACT_DEFAULT,
@@ -239,7 +243,10 @@ def _provider_migrations(
 
 
 def migrate(
-    files: SettingsFiles, secrets: Secrets, provider_defaults: dict[str, ProviderConfig]
+    files: SettingsFiles,
+    secrets: Secrets,
+    provider_defaults: dict[str, ProviderConfig],
+    integration_defaults: dict[str, IntegrationConfig] | None = None,
 ) -> None:
     """The whole launch step over the settings files, in order: the
     config table (a typed web password replaced by its hash last), the
@@ -269,6 +276,16 @@ def migrate(
         files.providers,
         files.backups_dir,
         _provider_migrations(secrets.seal, secrets.is_sealed),
+    )
+    # integrations.toml the same way: written WHOLE where missing (a
+    # config from before it, or a deleted file — no backup of nothing),
+    # every known integration's section ensured, plain api keys sealed.
+    if files.config.exists() and not files.integrations.exists():
+        with contextlib.suppress(OSError):
+            write_atomic(files.integrations, render_integrations(integration_defaults or {}))
+    ensure_integrations(files.integrations, files.backups_dir, integration_defaults or {})
+    update_settings_file(
+        files.integrations, files.backups_dir, [seal_api_keys(secrets.seal, secrets.is_sealed)]
     )
     update_prompts(files.prompts, files.backups_dir, _PROMPT_MIGRATIONS)
     move_think(files.state, files.models)

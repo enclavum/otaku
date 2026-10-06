@@ -77,10 +77,13 @@ def run(
     if full:
         # The launch's own reports have nowhere to go in a browser that
         # is not open yet, so they go where the reader is: the terminal
-        # they typed in. A chat handing its session over has none left —
-        # it printed them when it opened.
+        # they typed in, one blank line after the lot, as the terminal's
+        # launch does. A chat handing its session over has none left — it
+        # printed them when it opened.
         for report in session.notices:
             print(report)
+        if session.notices:
+            print()
         session.notices.clear()
     # Said before the socket is bound, because the address is the
     # configuration's and not the socket's answer: a reader can be

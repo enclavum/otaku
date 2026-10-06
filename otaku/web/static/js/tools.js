@@ -1,7 +1,7 @@
 /* The dossier's Tools tab: the story's settings, one switch each — a
    tool the model may use, a reminder the context carries — with the
    one control each governs (where its text rides, on the depth ruler;
-   a tool's prompt in its dialog; the notes' display switch) and the
+   the prompt a setting sends, in its dialog; the notes' display switch) and the
    reminders' texts under their rows. Built by `story` as its fifth tab
    and handed the dossier's `tabNote`, so this module stays below it.
 
@@ -12,6 +12,7 @@
 import * as api from "./api.js";
 import { ask, edited, editable, footnote, guard } from "./browser.js";
 import { $, element, span } from "./dom.js";
+import { KEY_MASK } from "./models.js";
 import { landed } from "./shell.js";
 
 /* What each story setting does, under its name — in the order the
@@ -23,15 +24,32 @@ import { landed } from "./shell.js";
 const _ABOUT = {
   allow_questions:
     "The narrator may ask you something directly and wait for an answer before going on.",
+  allow_web_search: "The narrator may look something up on the internet.",
+  allow_system_info: "The narrator may ask for local system facts.",
   allow_assistant_notes:
     "The narrator may keep a short note to itself between turns, never played into the story.",
-  use_story_reminder: "Sent with every reply in this story, wherever you place it.",
-  use_shared_reminder: "Sent with every reply in every story.",
+  use_story_reminder: "Injected into this story with every reply.",
+  use_shared_reminder: "Injected into the story with every reply, common across stories.",
+  emulate_text_completion:
+    "Only in the story mode. The narrator is told to continue the text from where it ends, " +
+    "as a text completion would, instead of answering it.",
 };
+
+/* A caption's bold opening, where it has one: the words the caption
+   starts with, drawn strong. */
+const _LEAD = { emulate_text_completion: "Only in the story mode." };
+
+/* The settings that open a group: a rule stands before each, after the
+   first row — the tools, then the reminders, then the canvas's own. */
+const _OPENS_GROUP = new Set(["use_story_reminder", "emulate_text_completion"]);
 
 /* The one setting whose text is not the story's: every story is sent
    the same reminder, read and written at its own endpoint. */
 const _SHARED_REMINDER = "use_shared_reminder";
+
+/* The one setting with a key behind it: the web search key, every
+   story's, read and written at its own endpoint. */
+const _WEB_SEARCH = "allow_web_search";
 
 /* What a setting injects is named by the backend (`injection_label`,
    lowercase): the ruler's row and the prompt dialog's title capitalise
@@ -60,14 +78,20 @@ export async function buildTools(view, pane, tabNote) {
   tabNote(view, "tools", `${on} of ${drawn.length} on`);
   // every row's depth opens the one ruler, which places them all
   const open = () => placement(view, drawn, box);
-  box.replaceChildren(...drawn.map((setting) => feature(view, setting, shared.text, open)));
+  const rows = [];
+  drawn.forEach((setting, i) => {
+    if (i && _OPENS_GROUP.has(setting.name)) rows.push(element("hr", "otk-features__rule"));
+    rows.push(feature(view, setting, shared.text, open));
+  });
+  box.replaceChildren(...rows);
 }
 
 function feature(view, setting, sharedText, openPlacement) {
   /* One setting: the switch, its name and what it does, and the one
      control it governs — where its text rides. A reminder carries the
      text itself under the row, a field like every other on this
-     dossier. Off, what the switch governs steps back. */
+     dossier; web search has its key behind a button. Off, what the
+     switch governs steps back. */
   const box = element("div", "otk-feature");
   box.dataset.on = String(setting.enabled);
   box.dataset.setting = setting.name;
@@ -92,12 +116,13 @@ function feature(view, setting, sharedText, openPlacement) {
   title.append(span("otk-feature__name", setting.label));
   // A second switch the row may carry sits on the name's line, after it.
   if (setting.display_notes !== null) title.append(shownSwitch(view, setting));
-  text.append(title, element("p", "otk-feature__note", _ABOUT[setting.name]));
+  text.append(title, caption(setting.name));
   head.append(toggle, text);
-  if (setting.tool || setting.allowed_positions.length) {
+  if (setting.prompt_name || setting.allowed_positions.length) {
     const control = element("span", "otk-feature__control");
     const knobs = element("span", "otk-feature__knobs");
-    if (setting.tool) knobs.append(instructionsButton(view, setting));
+    if (setting.name === _WEB_SEARCH) knobs.append(keyButton(view));
+    if (setting.prompt_name) knobs.append(instructionsButton(view, setting));
     if (setting.allowed_positions.length) knobs.append(depthButton(setting, openPlacement));
     control.append(knobs);
     head.append(control);
@@ -115,6 +140,16 @@ function feature(view, setting, sharedText, openPlacement) {
     );
   }
   return box;
+}
+
+function caption(name) {
+  /* What the setting does, under its name — its opening in bold where
+     the table gives it one. */
+  const note = element("p", "otk-feature__note");
+  const lead = _LEAD[name];
+  if (lead) note.append(element("strong", "", lead), _ABOUT[name].slice(lead.length));
+  else note.textContent = _ABOUT[name];
+  return note;
 }
 
 function depthButton(setting, openPlacement) {
@@ -280,13 +315,13 @@ function shownSwitch(view, setting) {
 }
 
 function instructionsButton(view, setting) {
-  /* The tool's prompt — "Instructions" on the page — edited whole in a
+  /* The setting's prompt — "Prompt" on the page's button too — edited whole in a
      dialog: one text for every story, read fresh when the dialog opens
      so a hand edit of prompts.toml shows, and written back on Save. */
-  const button = element("button", "otk-btn", "Instructions");
+  const button = element("button", "otk-btn", "Prompt");
   button.type = "button";
   button.onclick = guard(async () => {
-    const { text } = await api.prompt(setting.tool);
+    const { text } = await api.prompt(setting.name);
     const dialog = $('dialog[data-dialog="instruction"]');
     const field = $("textarea", dialog);
     pagingCaret(field);
@@ -299,7 +334,7 @@ function instructionsButton(view, setting) {
       field.scrollTop = 0;
     });
     if (choice !== "save") return;
-    const answer = await api.setPrompt(setting.tool, field.value);
+    const answer = await api.setPrompt(setting.name, field.value);
     footnote(view.popup, answer.notice);
   });
   return button;
@@ -367,6 +402,104 @@ function reminderBody(view, text, write) {
   field.placeholder = "(nothing yet)";
   body.append(edited(field, ""));
   return body;
+}
+
+function keyButton(view) {
+  /* The web search key — "Search API key" on the page — in a dialog: ONE box,
+     no engine named; the backend tells the engine from the key's shape
+     and says which it chose (`backend.api.integrations`). A key that is
+     set shows masked, as a provider's does (`models.keyField`); Save
+     writes what was typed, and a box emptied of a key forgets it — the
+     backend's sentence says which. */
+  const button = element("button", "otk-btn", "Search API key");
+  button.type = "button";
+  button.onclick = guard(async () => {
+    const dialog = $('dialog[data-dialog="web-search-key"]');
+    const field = $("input", dialog);
+    const { has_key: set } = await api.webSearch();
+    const key = maskedKey(field, set);
+    const choice = await ask("web-search-key", () => {
+      key.arm();
+      // A key that is set opens on Cancel, its mask standing: the box is
+      // entered to replace the key, not on the way in. With none, the
+      // box has the focus, for the key to be pasted.
+      field.autofocus = !set;
+      $('[data-choice="cancel"]', dialog).autofocus = set;
+    });
+    key.disarm();
+    if (choice !== "save") return;
+    const typed = key.pending();
+    if (typed === null) return; // the key stands as it was
+    const answer = await api.setWebSearchKey(typed);
+    footnote(view.popup, answer.notice);
+  });
+  return button;
+}
+
+function maskedKey(input, set) {
+  /* The dialog's box over a key that may be set, as a provider's key
+     field is (`models.keyField`): masked while a key is set, the mask
+     cleared on entering the box so a new key can be typed, and put back
+     on leaving it with none typed. Delete or Backspace on the bare box
+     marks the key to be FORGOTTEN, the box captioned so; typing a key
+     instead replaces it. */
+  const wired = new AbortController();
+  const on = (type, handler) => input.addEventListener(type, handler, { signal: wired.signal });
+  // the markup's own placeholder, which a forgotten key's caption stands in for
+  input.dataset.rest ??= input.placeholder;
+  const mask = () => {
+    input.value = KEY_MASK;
+    input.dataset.mask = "yes";
+  };
+  const forget = () => {
+    delete input.dataset.mask;
+    input.value = "";
+    input.dataset.forget = "yes";
+    input.placeholder = "cleared";
+  };
+  const keep = () => {
+    delete input.dataset.forget;
+    input.placeholder = input.dataset.rest;
+  };
+  return {
+    arm() {
+      delete input.dataset.mask;
+      input.value = "";
+      keep();
+      if (!set) return;
+      mask();
+      on("focus", () => {
+        if (!input.dataset.mask) return;
+        delete input.dataset.mask;
+        input.value = "";
+      });
+      on("blur", () => {
+        if (!input.value && !input.dataset.forget) mask();
+      });
+      on("keydown", (event) => {
+        if (event.key !== "Delete" && event.key !== "Backspace") return;
+        // erasing typed characters is ordinary editing; the bare box is
+        // where the key itself is meant
+        if (input.value && !input.dataset.mask) return;
+        event.preventDefault();
+        forget();
+      });
+      on("input", () => {
+        if (input.value) keep();
+      });
+    },
+    disarm() {
+      wired.abort();
+    },
+    /** What Save writes: the key typed, "" for one forgotten — or for an
+        empty box over no key, as before — and null while the key stands. */
+    pending() {
+      if (input.dataset.forget) return "";
+      if (input.dataset.mask) return null;
+      if (set && !input.value.trim()) return null;
+      return input.value;
+    },
+  };
 }
 
 async function saveSetting(view, setting, fields) {

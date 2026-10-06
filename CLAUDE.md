@@ -7,12 +7,13 @@ this file and the product design disagree, the product design wins.
 
 ## What otaku is
 
-An LLM frontend for roleplay, talking to OpenAI-compatible servers (Ollama,
-omlx, KoboldCpp, and others). Chats are stories that can be
-branched from any message. A background pass extracts lore from played
-messages — scenes, characters, journals — and the context sent to the model
-keeps the opening and the recent tail verbatim with scene summaries in
-between. Database encryption is opt-in — plain text is the default.
+An LLM frontend for creative writing and roleplay, talking to
+OpenAI-compatible servers (Ollama, omlx, KoboldCpp, and others). Chats
+are stories that can be branched from any message. A background pass
+extracts lore from played messages — scenes, characters, journals — and
+the context sent to the model keeps the opening and the recent tail
+verbatim with scene summaries in between. Database encryption is opt-in
+— plain text is the default.
 
 ## Environment and commands
 
@@ -23,6 +24,7 @@ Python 3.11 in the `otaku` conda environment:
     make format RUN=...                  # ruff format
     make typecheck RUN=...               # mypy (strict)
     make test RUN=...                    # pytest
+    make test-model                      # a fake llama.cpp on :8080, in the conda env — see below
 
 The app must NOT be launched through a bare `conda run`: it pipes stdin
 and stdout, and a terminal that cannot be reached answers nothing — no
@@ -30,6 +32,16 @@ cursor position (the screen-erasing paths give up) and no background (every
 adaptive color falls back). `conda activate` first, or pass
 `--no-capture-output`. Lint, typecheck and the test suites are unaffected;
 only what talks to the terminal is.
+
+`make test-model` (`scripts/test_model.py`, over the suite's scripted
+server) answers as llama.cpp on llama.cpp's own port, so the default
+`[llamacpp]` section reaches it: two models as its router serves them,
+both seeing pictures, `otaku-test-chat` and `otaku-test-text` (the novel's, once models.toml
+names it `plain` by hand), whose replies the first number in a line
+chooses, or a list of them separated by commas alone — thinking, a
+note, a question, the two tools, a long reply, the canvas's two
+openings, or everything; `-1` a failure, half the time — for looking at
+every block in every layout by hand.
 
 The state dir defaults to `~/.otaku` (`DEFAULT_ROOT` in
 `otaku/backend/paths.py`), relocatable via the `OTAKU_CONFIG_DIR` env var
@@ -50,9 +62,10 @@ review:
     web        → console, backend, formatting
     console    → formatting
     worker     → context, providers, store, logging, formatting
-    backend    → worker, context, providers, store, settings, encryption, logging, formatting
+    backend    → worker, context, providers, integrations, store, settings, encryption, logging, formatting
     context    → store (reads only), providers (its wire vocabulary)
     providers  → settings (its ProviderConfig and sections live there), formatting
+    integrations → settings (its IntegrationConfig and sections live there), formatting
     store      → encryption
     settings   → formatting
     logging    → providers (the request log's Stats), encryption, formatting
@@ -96,6 +109,19 @@ the same rows — `text()` is what a terminal shows, not a summary of the
 object. A frontend that parses a report's text back into fields has
 taken the wrong half.
 
+How full the next request is — `reports.context_use`, `/context`'s own
+`used` figure, over 100 where the story cannot fit (the overflow refusal,
+`ContextOverflowError`, carries its figures) — is shown by both frontends
+after every landing: on the terminal's status row, against the right
+edge (read again before each prompt), and on the page's provider line
+in place of the window (`GET /api/session/context_use`, read with every
+`landed`; one line, cut with an ellipsis). It
+never asks across the internet, and shows nothing while the model's
+window is not known. It is the PROJECTED figure, and `/context` says so;
+the verbose line's `actual ctx` is the engine's own count of the request
+just sent (`ReplyReport.context_used`), against the same context — the
+model's window under the configured cap.
+
 A frontend reads ONE settings slice and only its own, and reads it off
 the SESSION rather than the file. Every setting is cut into a typed slice
 in `settings.config`: the terminal's looks arrive as `session.terminal`,
@@ -117,13 +143,27 @@ re-exported to the frontends for their menus. It lives in `context`, not
 `backend`, because the wire side is consumed BELOW backend; reading and
 writing are one vocabulary, so the language has one home.
 
+A played line reads in both frontends, in both modes, as its two kinds
+of text: the story, its commands (`/me`, `/you`, `/ooc`, `/cue`,
+`/roll`) picked out as commands, and its WORDS WITH THE MODEL drawn faint
+— all of a `/you` or `/ooc` line after its token, whatever follows a
+`/ooc` or `/cue` inliner to the line's end. Which is which is the
+language's (`syntax.spans`, re-exported by `backend.commands`), never a
+frontend's: a user row's `segments` carry it as `prose` and `ooc` runs
+(`api.play.segments`), the page drawing the latter `.otk-ooc`
+(`transcript.lineNodes`), the terminal dim — in chat mode's block and
+the prompt as typed (`render.message`), and in story mode's one text
+beside the typesetting, so a quote the line opens and the reply closes
+still reads as one (`render.typeset_line`, `Streamer.aside`). The
+dossier shows a turn as stored.
+
 The shared command surface is `backend.commands`: one table declaring
 every command once, its SYNTAX rows derived from `context.syntax`. The
 terminal answers each token in `chat.bindings.OPERATIONS` and
 `_INTERACTIVE`. The page does NOT dispatch by token — a button calls an
 endpoint — so how it reaches each command is HAND-KEPT in `_ON_THE_PAGE`
 (`tests/test_architecture.py`): a screen, an endpoint, or a deliberate
-gap with the reason it is one (`/merge` has no UI). Nothing in the
+gap with the reason it is one (`/web`: the page is already there). Nothing in the
 source can say that Rename stands for `/title`, and a gap must be
 written down rather than going quiet. A new command is a row in the
 shared table, a row in the terminal's, and a decision recorded there —
@@ -153,8 +193,8 @@ list of tools consulted): a call stays one in a build that never heard
 of its tool, nothing outside the namespace is ever one, and the inside
 — the lines between the fences, no trailing blank line — goes with the
 call. Three rules, one
-piece of state (the open call): a fence line marked `otk-NAME` opens a
-call, ending the one open, so calls never nest; a bare fence line ends
+piece of state (the open call): a fence line marked `otk-NAME` (words of
+letters joined by single hyphens, `web-search`) opens a call, ending the one open, so calls never nest; a bare fence line ends
 the open call, and is prose when none is; any other line is prose
 outside a call and the call's own inside one, a fence with another
 info string included, as a markdown viewer reads it. A fence is one
@@ -163,23 +203,91 @@ included, as do the blank lines before an opening fence (a call left
 out leaves no hole), and plain fences are never tracked — a forgotten
 one costs nothing. A call is not story: the lore pass leaves it out, fences and
 all (`tool_calls.strip`). A stored reply goes back on the wire under
-the story's `ToolSet(on, off)` (`tool_calls.to_wire`): a call of a
-tool that is on goes as its canonical self (the opening fence, the
-inside, the bare `FENCE`), one of a tool that is off becomes its `to_prose` (a
-question alone; nothing for a note), any other name leaves the wire —
-a white list. `tool_calls` lives in `context` because the worker and
+the story's `ToolSet` of the tools that are on (`tool_calls.to_wire`):
+a call of such a tool goes as its canonical self (the opening fence,
+the inside, the bare `FENCE`), and every other leaves the wire, fences,
+inside and all — a white list. A tool that is OFF does not exist for
+the model: its prompt is not injected, its calls are left off the wire
+(past ones included), the reply does not stop at one, otaku neither
+poses nor runs it, and neither frontend draws it — the reader sees what
+the model reads. `tool_calls` lives in `context` because the worker and
 the assembler read it below the backend.
 
 WHICH tools there are is `backend.tools`: one class per tool, declaring
-its `name` (`question` for `otk-question`), who answers its call
-(`Actor`: nobody for `note`, the user for `question`, `SYSTEM` not
-supported yet) and its prompt's key in prompts.toml (`prompt_name`);
-an instance is one call READ. The registry is `TOOLS`; a new tool is a
-subclass and its name there, and the story setting that switches it on
-is the setting's to declare (`backend.story`), not the tool's.
+its `name` (`question` for `otk-question`), its `label` (what a
+frontend calls it where one names it), who acts on its call (`Actor`:
+nobody for `note`, the user for `question`, `SYSTEM` — otaku — for
+`system-info` and `web-search`) — the prompt that tells the model how
+to use it is its story setting's, not the tool's; an instance is one
+call READ, and a tool otaku RUNS
+has `run(session)`, yielding the RESULT that is the TOOL TURN's
+text, handed the whole session so a tool to come finds what it needs,
+read and never written — the web search tool takes its
+`WebSearch` integration, the system info tool its `model`. "Answer" is the
+question tool's word alone: the user's. The registry is `TOOLS`; a new tool is a subclass and its name there, and
+the story setting that switches it on is the setting's to declare
+(`backend.story`), not the tool's. One pattern names every tool: what is ONE
+call is singular — the block, the name, the class (`otk-question`,
+`question`, `ToolQuestion`) — and what names the feature is plural —
+the label, the setting, its injection and its prompt key (Questions,
+`allow_questions`, "questions", `tool_questions_prompt`); an
+uncountable one reads the same in both (`otk-web-search`, Web search).
+The notes are the one exception, kept as shipped: `otk-note`, Notes,
+`allow_assistant_notes`.
+
+A tool otaku runs ends the reply as a question does, and then the
+play stream RUNS IT and GOES ON (`_reply_events`' rounds): the reply
+holding the call is recorded as it stands, ending at the call, its
+closing fence there whether or not the model wrote one, and told
+(`AssistantTurn`); the tool's result is recorded as a turn of role and
+kind `tool` —
+nobody's line, no reply: the tool's NAME its `provider` (as `card`
+names a greeting's), its label a display matter the registry answers by
+that name and the result it holds (`tools.get_tool_label`,
+`Tool.label_of`: the label and "call", "Web search call", or "Web
+search failed" for a search that failed — both frontends draw it as
+given; the
+web row carries `tool_label`) —
+and told (`ToolTurn`); the model is asked
+again over the story as it now stands, `_MAX_TOOL_ROUNDS` times at
+most, the last result recorded but not asked about. A tool turn goes
+on the chat wire as the reader's turn — the wire has two sides, and
+the result is what the model is told — enclosed by prompts.toml's
+`tool_framing` (`{tool}` the name the model called it by,
+`{body}` the text), on the
+text wire the same, joined by the join rule — in story mode inline; it counts as none of the reader's
+messages (an injection's depth, undo's one line), the lore pass leaves
+it out as the calls are, and the export leaves it out until the format
+decides its place. Undo and regenerate take a reply as ONE UNIT with its
+tool chain (`Session._pop_reply`: the reply, and where a tool turn
+stands right before it, that turn and the reply holding its call,
+again and again), never the mode: two replies side by side — a continue's
+after the one it went on from — are two units, so a continue is
+undone and regenerated alone, as before. The `system-info` tool (an empty
+`otk-system-info` block) answers the local time and weekday (no zone), the
+moon's phase, the nearest solstice or equinox and the model's name —
+nothing that tells where the machine is or what it runs — a fixture
+for the loop; `web-search` (`otk-web-search`, the query inside) answers the
+top results' snippets — "title: snippet" paragraphs cut to a
+character budget, the tool's own constants — through the web search
+integration (`integrations.WebSearch`, below), a failure a sentence the
+model reads. The page draws a tool turn as the
+notes block with the label ALONE, the result its hover hint — the
+result is the model's to read, not the story's — (`article.otk-tool`,
+never editable), and a call otaku runs draws nothing there, the status
+row saying it is being called; the terminal the same, its block one
+dim row of the label behind the bar (`render.message(role="tool")`,
+streamed the same by `chat.stream` on `ToolTurn`) and nothing for the
+call — it has no hover, so the result shows nowhere there. The stream's events are named by the
+row's role and what arrived — `UserTurn`, `AssistantText`,
+`AssistantReasoning`, `AssistantToolCall`, `AssistantTurn`,
+`ToolTurn` — and end on one of `Declined`, `Failed`, `Done`; every
+row that lands is told by its own `*Turn` event, the row as recorded,
+and the wire names them the same (`web.api.play.event`).
 
 The play stream (`backend.api.play`) runs the deltas through a
-`ReplyParser`: prose as `Text`, a call's inside as `ToolCall` pieces
+`ReplyParser`: prose as `AssistantText`, a call's inside as
+`AssistantToolCall` pieces
 (`closed` on the piece its closing fence ended), never a fence —
 neither frontend parses; everything that arrived is recorded, fences
 included. A call of a tool the user answers ENDS THE REPLY: nothing
@@ -197,21 +305,25 @@ its call open. A stored turn reaches a frontend split
 `tool_call`), so a frontend keeps no parser. Which question the story
 STANDS on is each frontend's own reading of the newest reply's
 segments — the page's `transcript.questionPosed`, the terminal's
-`render.asked`, each naming the other: a reply whose last call is a
-question, nothing after it but notes and whitespace — nothing is
-stored or reported for it, and answering is an ordinary line. A PAST
-question shows the question alone in both frontends. Whether notes are
-shown is the conjunction of two facts the setting reports — the tool
-on, its display switch on — read the same way in both
-(`transcript.displayTools`, `render.notes_displayed`); a one-line
-conjunction earns no backend property.
+`render.asked`, each naming the other: the questions tool on, and a
+reply whose last call is a question, nothing after it but notes and
+whitespace — nothing is stored or reported for it, and answering is an
+ordinary line. A PAST question shows the question alone in both
+frontends, the page's hover hint listing its options. Which tools'
+calls are drawn at all is read the same way in both
+(`transcript.displayTools`, `render.shown_tools`) off facts the settings
+report: a question while its tool is on, the notes while theirs is on —
+open while the display switch is; off, the page folds them to their
+label with the text as the hover hint, as it draws a tool turn, and the
+terminal, with no hover, leaves them out. A rule that short earns no
+backend property.
 
 The page draws a question as the ask panel, grown as it streams
-(`transcript.streamAsk`, `ToolQuestions._OPTION`'s rule copied as
+(`transcript.streamAsk`, `ToolQuestion._OPTION`'s rule copied as
 `readAsk`), and a note as the notes block, each in its place among the
 prose. The terminal draws every call as a BLOCK behind a bar
 (`render.BlockStream`; `QuestionStream` draws the question alone,
-parted from its options by `ToolQuestions.is_option`; a note is dim
+parted from its options by `ToolQuestion.is_option`; a note is dim
 and a hidden one left out, fences and all; thinking is dim with no
 label; one blank line before and after, `render.spaced`), streamed and
 echoed through the same object so the two cannot differ. A question's
@@ -271,37 +383,215 @@ match nothing from one turn to the next. A "system" one costs nothing.
 
 What a user sees as features are, below the frontends, a STORY's
 settings: one switch each, one class each in `backend.story`. A tool's
-(`StorySettingQuestions`, `StorySettingAssistantNotes`) lets the model
+(`StorySettingQuestions`, `StorySettingAssistantNotes`,
+`StorySettingSystemInfo`, `StorySettingWebSearch`) lets the model
 use the tool and injects its prompt; a reminder's injects the user's
 own text — the SHARED reminder (`StorySettingSharedReminder`, one text
 every story that switched it on is sent) and the STORY reminder
-(`StorySettingReminder`); a flag (`StorySettingMode`, not built yet)
-injects nothing. Every text injected into the chat is out of
+(`StorySettingReminder`); the canvas's (`StorySettingEmulateTextCompletion`,
+"Emulate text completion") injects prompts.toml's
+`emulate_text_completion_prompt`, what makes an instruct model
+continue one text where it ends rather than answer it — off until a
+story switches it on, as every switch is, and GATED by the layout:
+it injects in the canvas over the chat wire alone (the novel's
+model continues by nature, no other layout is one text), the switch
+standing and sending nothing elsewhere; `StorySettings` is handed the
+model's `can_complete_text` for that gate; its prompt is edited as a
+tool's is. Every text injected into the chat is out of
 character, enclosed `((OOC: …))`; the system message takes it bare.
+One setting is a VALUE rather than a switch: the LAYOUT the story is
+read in, and for one value written (`StorySettingLayout`, a
+`schema.Layout` — `novel`, `canvas`, `manuscript`, `chat` — MANUSCRIPT
+until the story says otherwise, `Session.layout`; `enabled` is always
+true and refused as a write). Two facts derive from it, and the
+frontends read the facts, never the value, except to show and set it:
+
+- `mode` (`Layout.mode`, a `schema.StoryMode`): the LOOK — STORY, one
+  text, for the canvas and the novel; CHAT for the manuscript and the
+  chat (the page's facts carry the look as `layout`, one of the three).
+  The page draws it off the `data-transcript` attribute (`layout.js`,
+  the manuscript and the chat one structure under two stylesheets, the
+  canvas block flow with inline turns); the terminal draws the canvas as
+  ONE TEXT (`render.flow`) and the other two as its blocks, which it
+  cannot tell apart.
+- `completion_type` (`schema.CompletionType`, `Layout.completion_type(can_complete_text)`,
+  `Session.completion_type`): the WIRE —
+  TEXT for a novel on a model that can complete text
+  (`Session.can_complete_text`: its engine reports
+  `ModelCapabilities.text_completion` AND the template in force is
+  `plain`, a base or story-trained model named so by hand in
+  models.toml — an instruct model has a template too, but fights a bare
+  text, so the novel is kept from it), CHAT for everything else, a novel
+  reopened on a model that cannot included. The novel glyph on the
+  page's rail (left of the canvas, hidden while `facts.can_complete_text`
+  is false) is the one door to it. The terminal draws two looks, so its
+  `/set mode` names two, a command of the terminal's alone, nothing in
+  the api (`bindings._set_mode`, writing the layout setting through
+  `api.stories.update_setting`): `story` stores the canvas, `chat` the
+  manuscript, and "" answers the layout's mode, "Mode: story" or "Mode:
+  chat", no full stop; a switch that changes the mode shows the last
+  turns in it, as `/last` does. The mode is the layout's, never a
+  setting of its own: every behaviour is the layout's, its mode's or
+  the wire's.
+
+THE CANVAS, on either wire, is the story as one text. Every row
+stores the mode it was written in, `messages.mode` (`schema.StoryMode`),
+a fact about the row and no decision: the layout's when the session
+records it — the reader's line, the model's reply, a tool's turn, a
+card's line and greeting alike — and CHAT for an imported row
+(migration v7 adds it, every older row reading 'chat'). A story-mode
+line or reply keeps the line breaks at its edges and drops the spaces
+there (`api.play._edge_breaks`): a line typed in the canvas
+(`api.play.submit`; both frontends pass it through as typed,
+`composer.submit`, the terminal's `LineAssembler.feed(verbatim=)`) and
+a reply alike (`_drain`: its first piece's start, `_lead_breaks`, its
+end the stream's hold-back's); a chat-mode one is trimmed. The JOIN RULE is
+`assembler.get_join_type(previous, next)`, ONE rule for the wire and
+both canvases, and the one place a row's mode decides anything: INLINE
+where both rows were written in story mode, neither stands alone (a
+card's line or greeting: nobody wrote them into the text), and no line
+break stands at the end of the one or the start of the other — one
+space between them, never stored, so a word is never completed across
+rows; PARAGRAPH otherwise — the first row, a chat row or a row standing
+alone on either side, a break the reader typed (Enter at the line's
+start or end) or the model wrote. A reply goes on in the paragraph it
+follows by default. A tool's turn runs on as any story-mode row does:
+story mode draws no tool's block (`render.flow`, `chat.stream`), so the
+reply after it goes on in the paragraph the call interrupted. `as_story_text` and
+`_wire_turns` write it (`assembler.join(previous, join_type, next)`),
+the row events carry
+it (`UserTurn.join_type`, `AssistantTurn.join_type`,
+`ToolTurn.join_type`, the wire's `join_type`), and so does the reply's
+FIRST piece (`AssistantText.join_type`, the wire's `join_type`, null on
+every later piece), so neither frontend keeps a rule of its own: each
+draws the join it is told — the space as its own span on the page
+(`.otk-seam`), a blank line or a space in the terminal (`chat.stream`,
+`render.flow`). An EMPTY line is the CONTINUE in the canvas
+(`api.play.submit`): no user row is recorded, no `UserTurn` event, the
+reply is another of the model's rows, and undo takes it alone — over
+the text wire plain generation from the text's end, over the chat wire
+an ask with no new line, the standing instruction carrying it (the page
+puts the reply's waiting block into the flow at once,
+`beginTurn(continues)`; the terminal places the cursor at the text's
+end before the wait, `Chat.continuing`, `ledger.echo_flow`); both
+frontends let the empty line through in the canvas and the backend
+refuses it elsewhere. The canvas over the CHAT wire carries its standing
+instruction as the emulation setting's injection
+(`StorySettingEmulateTextCompletion`, above: the system position by
+default, `/context` listing it under "text completion emulation"),
+what makes an instruct model continue one text; the novel needs none.
+The page says the canvas in its words — the app root's `data-layout`
+and `data-completion`,
+the tiles hidden over the text wire — and the terminal in its: the
+empty line's caret, a blinking block in the theme's `caret` colour where the
+page draws its own (`prompt._Caret`, the colour by OSC 12, no placeholder), the one-text look, in-place
+undo and regen (`ledger.echo_flow`, `_erase_from`, `reply_begins`,
+`restore_flow`, `render.flow_offsets`). Neither draws a block there — the
+thinking (it would split the line the reply goes on from, and a redraw
+would take it away: it is never stored), the notes, a past question, a
+tool's turn; only the question waiting to be answered — the page's
+stylesheet hides them, drawing instead the paragraph break a hidden block
+stood for between two runs of prose (`transcript.blockGap`), and the
+terminal's stream skips them and keeps the spinner turning; a call is
+said on the status row while it is made.
+
+The page's canvas is TYPED IN where the story is: its end is editable,
+the TAIL (`transcript.showTail`, a `plaintext-only` span after the
+text), the composer's box standing disabled below, its placeholder
+saying where to type (`shell.showFacts`, kept shut through
+`disconnected`). Where the tail stands is the backend's to say: the
+facts' `next_join` (`api.play.next_join`, the join rule applied to the
+newest row and a line opening with no break of its own, in the layout's
+mode). Inline, the join's one space is DRAWN before it, outside it
+(`.otk-tail-seam`), so no caret stands before it, and is never sent;
+paragraph, it opens one (`data-join`), as a row joined so does; null, the
+story is begun. Empty and focused, it shows where the line goes by the
+caret a reply streams behind, the browser's own once a word is typed. Enter or Send
+sends — on a touch screen Send alone, Enter there opening a paragraph;
+Ctrl/⌘+Enter opens a paragraph — a block of the tail's
+(`.otk-tail__p`), spaced as the story's, no empty line to step onto —
+sent as the blank line the story stores; Shift+Enter a line break (a
+single newline); Esc clears; ↑/↓ stop at its first and last lines. The
+prefix menu serves it as it serves the box (`composer.js`, through the
+place a line is typed, `transcript.tailHost`): a slash opens it, standing
+at the caret, its keys taken first while it is up. The
+terminal's story mode keeps the same keys: Enter sends, Ctrl+Enter opens
+a paragraph where the terminal tells it from Enter, Ctrl+J on every
+terminal (`prompt._make_bindings`). What it holds is what is sent (`tailText`), drawn
+as the played line will be: a line's edge breaks are drawn once
+(`drawTurn`), a paragraph's blank line being the join's own. A reply
+under way takes the tail down, its space held (`holdSpace`), and the
+landing puts it back, focused without the browser's scroll. Positions on
+the page count tool turns as the store does (`storedTurns`).
+
+THE TEXT WIRE (`CompletionType.TEXT`) is the novel's alone: the request is
+one text — `AssembledPrompt.as_text`, the story rendered in the model's
+own turn markers by its `TextTemplate` (`providers.openai.templates`:
+one frozen template per family, `gemma4`, `gemma`, `mistral-tekken`,
+`chatml`, `llama3`, and `plain` for a base model; `render(premise,
+story)` puts the premise in the system turn where the family has one
+and in a user turn otherwise, then the MODEL TURN OPENED and the story
+inside it, unclosed, so the model continues where the story ends), the
+premise FRAMED by prompts.toml's `story_framing` (`{premise}` required:
+a model turn with no turn before it degenerates, and a new story's
+premise is empty), the turn markers riding as stops, BOS spelled in the
+text (`TextTemplate.bos`) because omlx adds none. WHICH template a
+model gets is `templates.resolve` (a `TextTemplate` with its `source`):
+the model's `text_template` line in models.toml (`settings.models.TEMPLATE_KEY`,
+written by hand; an unknown word is a launch notice), else the engine's
+word (`ModelInfo.text_template`), else the model's name
+(`family_of_name`), else NONE; the model listing carries `text_template`
+per model. No thinking knob
+rides the request (`level=None`), a text completion that comes back
+EMPTY with its stream ending clean is asked ONCE more with a paragraph
+break appended and the break recorded as the reply's lead
+(`_reply_events`' `openers`), pictures never ride it (`Session.assemble`
+passes `PicturesRide.NONE`, `can_attach` false), and `/context`
+previews the TEXT as sent — `ContextReport.wire`, one part `[prompt]`,
+its tokens at the text's estimate. The play path
+(`api.play._reply_events`) picks the wire off `Session.completion_type`:
+`completion.text` with the rendered text, or `completion.chat` with the
+messages; the recap, the injected rows and the framing templates ride
+the text as they ride the chat, a tool's turn joined as any row is.
 
 Every setting answers the same questions, so a frontend draws them
 alike: `name` (the stored key — `use_shared_reminder`,
 `use_story_reminder`, `allow_assistant_notes`, `allow_questions`,
-`story_mode`; a rename orphans stored settings), `label`,
+`allow_system_info`, `allow_web_search`, `emulate_text_completion`,
+`layout`; a rename orphans
+stored settings), `label`,
 `injection_label` (the TEXT it injects — lowercase, the backend's:
-`questions`, `assistant notes`, `story reminder`, `shared reminder`;
-None for a flag; the page capitalises it and keeps no name table),
+`questions`, `assistant notes`, `story reminder`, `shared reminder`,
+`text completion emulation`;
+None for the layout setting; the page capitalises it and keeps no name table),
+`prompt_name` (an injection setting's, the prompts.toml key of the
+PROMPT it sends — `tool_questions_prompt`, `emulate_text_completion_prompt`;
+None where the text is the reader's own, a reminder's, and for the
+layout setting — what both frontends show the prompt button off),
 `enabled`, `injection_position`, `allowed_positions` (a closed list a
 frontend offers and decides nothing about: "system" and 1 … 8 for a
-tool, the numbers alone for a reminder, empty for a flag; a stored
+tool and the emulation, the numbers alone for a reminder, empty for the
+layout setting; a stored
 position off the list reads as the default, 1 for a tool, 2 for a
-reminder), `reminder_text` (the story reminder's alone) and
-`display_notes` (the notes tool's alone). `to_db(…)` is the row to
+reminder, "system" for the emulation), `reminder_text` (the story reminder's alone),
+`display_notes` (the notes tool's alone) and `layout` (the layout
+setting's alone). `to_db(…)` is the row to
 store, raising `Refused` for what the setting does not take;
-`injection` is what a switched-on one sends. `StorySettings(from_db,
-store, prompts_file)` is one story's settings as they stand — it reads
-the prompts file and the shared reminder itself — with `injections` in
-the order they share a place (the shared reminder, the story's, then
-the tools) and `tool_set` for the wire.
+`standing(row)` the confirmation a write answers with; `injection`
+is what a switched-on one sends. `StorySettings(from_db,
+store, prompts_file, can_complete_text=)` is one story's settings as
+they stand — it reads the prompts file and the shared reminder itself
+— with `injections` in the order they share a place (the shared
+reminder, the story's, then the tools — notes, questions, system, web
+search — then the emulation; a frontend draws them in its own caption
+table's order, never this one) and `tool_set` for the wire. Every
+injection a request carries is a setting's, so the warm-up's job
+(`lore.build_job`) rebuilds the same prefix as the turn.
 
 What a story STORES is `schema.StorySettingDB` (name, `enabled`,
-position, `reminder_text`, `display_notes` — the last two written only
-when said) with its JSON codec, carried by `Story.settings`; the store
+position, `reminder_text`, `display_notes`, `layout` — the last three
+written only when said) with its JSON codec, carried by
+`Story.settings`; the store
 merges a write into the column and keeps every key it does not know.
 The operations are `backend.api.stories`' `get_settings`,
 `update_setting`, `get_shared_reminder`, `set_shared_reminder`; the
@@ -309,13 +599,20 @@ page reaches them at `/api/stories/{story}/settings` and
 `/api/shared_reminder`, the terminal on the dossier's Tools tab
 (`screens.story`: a checkbox row per setting, its fields in the panel
 beside — the depth a dropdown in place, a text the editor in place,
-`base._preview_panel`'s `alternate` body). `Refused` lives in
+`base._preview_panel`'s `alternate` body). Both Tools tabs draw three
+groups in one order — the tools, the two reminders, the emulation — a
+blank row between them in the terminal (`_OPENS_GROUP`, `_gaps`) and
+a rule on the page; each setting's caption is the frontend's own
+(`_ABOUT`, the same table twice), the emulation's opening "Only in the
+story mode." in bold (`_LEAD`; the terminal's `_caption`). `Refused` lives in
 `backend.errors`, a leaf, and `backend.session` re-exports it;
-`backend` re-exports `InjectionPosition`. A tool's PROMPT is
-prompts.toml's, edited in place — "prompt" on the backend and the
-wire, whatever a frontend calls it (the page's button says
-"Instructions"): `api.settings.get_tool_prompt`/`set_tool_prompt`
-(`/api/prompts/{tool}`) write that one key with
+`backend` re-exports `InjectionPosition`, `Layout` and
+`CompletionType`. An injection setting's PROMPT is prompts.toml's,
+edited in place — "prompt" on the backend and the wire, whatever a
+frontend calls it (the page's button says "Prompt", the terminal's row
+"[ instructions ]"): `api.settings.get_prompt`/`set_prompt`
+(`/api/prompts/{setting}`, by the setting's name; refused for one with
+no `prompt_name`) write that one key with
 `settings.prompts.set_prompt`, backed up by the write every settings
 edit rides (`settings.commit`), read back and refused unless the file
 holds what was saved; an emptied text drops the key, so the shipped
@@ -336,7 +633,7 @@ The data model lives in `otaku/store/schema.py` (the DDL, its
 semantics, and the row types) — always the CURRENT shape: a fresh
 database is created from it directly, and `store/migrations` — a
 versioned ladder over `meta.schema_version` — brings old databases to
-it. Each step is a FROZEN module per version (`v2.py` … `v6.py`):
+it. Each step is a FROZEN module per version (`v2.py` … `v9.py`):
 a step writes what its target version WAS, never what schema.py says now
 (backup-first, unharmed-on-failure, newer-refused). The invariant: a
 migrated database equals a fresh one, `sqlite_master` row for row.
@@ -344,6 +641,14 @@ migrated database equals a fresh one, `sqlite_master` row for row.
 `created_at` / `updated_at` columns are audit fields: no business logic
 may ever rely on them. UI display use (e.g. ordering the story list by
 recency, "extracted 4m ago") is allowed.
+
+`provider` and `model` name who MADE a row, on messages and on the
+three derivatives alike (scenes, characters, journals): the engine and
+model of the pass that wrote it, or `card` and the card's file for an
+imported character. An edit or a later rollup never changes them; NULL
+where no pass made the row (an imported story's) or before schema 9.
+Both frontends show a scene's and a character's where they show a
+turn's: the page's margin, the terminal's preview.
 
 A turn's pictures are the one thing the database only NAMES:
 `messages.attachments` is a plain JSON list (`schema.Attachment` — the
@@ -370,7 +675,9 @@ kept as PNG and everything else made JPEG, a 512 px thumbnail cut from
 the same image, then into the folder. Its limits are its own module
 constants (10 MB a file, 40 megapixels, 8 pictures a turn); every refusal
 is a `Refused` sentence. A model without vision is never sent a picture,
-and the attach affordances exist only while the model in use has it.
+and the attach affordances exist only while one may ride the next
+request (`Session.can_attach`: the model in use sees, and the wire
+carries one — the text wire's one text never does).
 
 ### Providers
 
@@ -380,6 +687,74 @@ A provider section's name IS its engine: `[generic]`, `[llamacpp]`,
 name is not served; the registry lists it in `ignored` and the launch
 says so. One section per engine (a second server of one kind is a
 feature not built).
+
+### Integrations
+
+What otaku asks for something other than a completion — web search,
+the support desk, the sky's facts — is the `integrations` package, the
+providers' shape over: one module per integration, one class each
+(`Integration`: `id`, `label`, its fixed `endpoint`, bound as an
+instance to its section's `url` and `api_key`, and `balance()`, what
+the account behind it has left — declared for a report to come, None
+everywhere yet), the one registry `ALL_INTEGRATIONS`, and their own file, `configs/integrations.toml`,
+whose types live in `settings.integrations` as the providers' do:
+`IntegrationConfig` (name, url — optional, the endpoint where none —
+sealed `api_key`) per integration, and `IntegrationSettings`, those by
+name. First run writes every configurable integration's section with
+no key, every launch ensures them (`migrations.ensure_integrations`)
+and seals a plain key, so the file shows where a key goes; the launch
+resolves the keys as the providers' (`launch._resolve_api_keys`,
+generic over the two), and the package binds them into ONE value,
+`integrations.Integrations.bind` — every integration `by_id`, each on
+its section (its id the section's name) or the one it is founded with
+where the file has none, `get(cls)` answering one by its class; a
+section no integration is named for is passed over in silence —
+handed to the session (`Session.integrations`): the session never
+reads a section.
+
+WEB SEARCH is one integration under ONE key (`WebSearch`, the
+`[web_search]` section): `search(query, max_results)` answers
+`SearchResult`s or raises `IntegrationError`, and asks the engine the
+key belongs to, told from the key's own shape at the call
+(`_get_search_engine`: Tavily's start with `tvly`, any other is Exa's)
+— each engine a protected function of the module, and no engine named
+anywhere outside it, in the file, the api or a frontend's facts.
+
+A frontend shows ONE box for the web search key on the Tools tab's web
+search row (the page's "API key" button, `tools.keyButton`, opening a
+dialog that says which engines' keys it takes and where to get one, a
+key that is set masked in it as a provider's is; the terminal's `key`
+field, typed in place over where it stands and forgotten with Delete):
+`backend.api.integrations` — `web_search` (whether a key is held, never
+the key), `set_web_search_key` — seals the key into the web search
+section (founded where a hand edit dropped it) and binds it in the
+session at once; "" forgets it. The page reaches it at
+`/api/integrations/web_search`. What is asked of an integration and
+what is made of the answer is the asker's: the web search tool
+composes the text the model reads.
+
+Two integrations get no section in the file (`configurable` false),
+bound all the same, to the section they are founded with
+(`default_section`): `Astronomy` and `SupportDesk`. The sky's own facts, asked of no service:
+`Astronomy` works out the moon's phase and the nearest solstice or
+equinox from the instant alone (`moon_phase`, `turning_point`), no
+place given and none told — what the `system-info` tool reports of the
+sky.
+
+otaku's own support desk is a service with no key: `SupportDesk.send`
+posts a reader's request to the site (its `url`, the `endpoint`, the
+Worker in the otaku.sh repository, which mails it on through Resend and
+answers 204, read by `integrations.base.post_json` as no answer).
+The operation is `backend.api.support.send_support_request(session,
+body, email="")`: an empty or too long body (`SupportDesk.max_message`,
+the endpoint's limit) and an address that is none (the endpoint's rule,
+copied) are refused before anything leaves, a failure to send is a
+`Refused` sentence. The terminal's `/support TEXT` sends the line whole,
+an address in it included; the page's support docket (`support.js`,
+`POST /api/support`, opened by the Support request button in the Help
+docket's footer, which closes Help) sends its message and email fields
+apart, keeps what was typed when it is refused, and stays open on a
+request sent, the confirmation in its footer and Send become Close.
 
 A client declares where its server runs as `providers.Locality`:
 `LOCAL` (the engines on this machine), `REMOTE` (the hosted catalogs)
@@ -482,25 +857,26 @@ may be asked, as data), `server` (HOW it arrives). `thread` imports only
 `Session` and has never heard of `api`; `api` knows no thread and no
 HTTP; `server` is the only one that knows both. The two big ones are
 packages: `api` mirrors `backend.api` — one module per twin (`play`,
-`stories`, `lore`, `cards`, `providers`, `settings`, `reports`,
-`transfer`), each holding its own rows, merged into the one
-`ROUTES`/`FLOWS` in `api/__init__` (a path in two modules fails at
-import), and `request` for what every row is handed (`Ask`, `Pending`)
-and hands back (`Created`, `Blob`, `NotFound`, `landed_story`). A
-module CALLS its own twin and nothing else of `backend.api`; what it
-needs of another twin it takes from that twin's sibling (`stories.story`
-takes the lore half of its answer from `lore.memory`, the picker's
-model words come through `reports.model_words`, the document half of
-the new-story flow is `transfer.imported`) — so every translation of
-one twin is in one module. `tests/test_architecture.py` holds the rule;
-`request` is its one declared exception, importing two twins' TYPES
-for `Pending` and calling neither. `server` is the dispatcher
-(`server/__init__`: `bind`, the route table, `Handler`) over `base`
-(the hooks, the socket `Server`, `Wire` — the handler methods that
-read a request and write an answer), with the handler's two halves as
-mixins — `guards` (who may ask) and `streams` (the two answers that
-stream) — beside `assets` (the closed table) and `watch` (the poller).
-The medium's own rules are under Web conventions below.
+`stories`, `lore`, `cards`, `providers`, `integrations`, `settings`,
+`reports`, `support`, `transfer`), each holding its own rows, merged
+into the one `ROUTES`/`FLOWS` in `api/__init__` (a path in two modules
+fails at import), and `request` for what every row is handed (`Ask`,
+`Pending`) and hands back (`Created`, `Blob`, `NotFound`,
+`landed_story`). A module CALLS its own twin and nothing else of
+`backend.api`; what it needs of another twin it takes from that twin's
+sibling (`stories.story` takes the lore half of its answer from
+`lore.memory`, the picker's model words come through
+`reports.model_words`, the document half of the new-story flow is
+`transfer.imported`) — so every translation of one twin is in one
+module. `tests/test_architecture.py` holds the rule; `request` is its
+one declared exception, importing two twins' TYPES for `Pending` and
+calling neither. `server` is the dispatcher (`server/__init__`: `bind`,
+the route table, `Handler`) over `base` (the hooks, the socket `Server`,
+`Wire` — the handler methods that read a request and write an answer),
+with the handler's two halves as mixins — `guards` (who may ask) and
+`streams` (the two answers that stream) — beside `assets` (the closed
+table) and `watch` (the poller). The medium's own rules are under Web
+conventions below.
 
 ## Configuration files
 
@@ -531,6 +907,22 @@ model the provider cannot describe (a hosted catalog at launch, an
 engine that is down) gets no row until it can, at a later launch or
 switch.
 
+Lore extraction asks the model played with unless one is PINNED for it:
+state.toml's `extraction_model` ("" follows), set by either picker (the
+page's "Use for extraction", the terminal's `x`) through
+`api.providers.set_extraction_model` / `clear_extraction_model`, and
+kept when the play model changes. A pin naming a provider no longer
+configured is dropped at launch with a notice; a pinned model the
+engine no longer serves fails the pass and holds the status — never a
+quiet fall back to the play model. The worker's `Job` carries both, by
+the session's convention: the pass asks `extraction_model`, the warm-up
+the story's `model`, and the warm-up also runs after any pass that
+asked a model other than the story's (on one engine it may have pushed
+the story's model out of memory). The cloud prompt marker
+(`Session.on_cloud`) lights for either model on a hosted catalog — the
+extraction model's only while idle extraction is on, since otherwise the
+story leaves only when a pass is asked for.
+
 One state-dir DIRECTORY is the user's alone and the app never writes in
 it: `web/`, holding `custom.css` (loaded last by the web frontend, so
 anything in it wins) and `fonts/` (typefaces of their own, asked for
@@ -548,6 +940,10 @@ story's number, `messages.set_attachments`), best effort per picture.
 The demo carries them as fixtures: `capture_fixtures_web.py` copies the
 stored file and its thumbnail into `demo/web/fixtures/files/` with the
 day in the name pinned, and `demo.js` serves them under `/api/files`.
+Nor does the format carry a story's settings: river.md ends on a
+question, and an off tool's calls are neither drawn nor sent, so the
+seed switches its questions tool on as it lands (`launch._ASKING_SAMPLE`,
+hardcoded for that one sample).
 
 `cert/` holds the TLS pair the web frontend serves under (`web.cert`):
 the app writes it only into an empty directory, and a pair already there
@@ -616,7 +1012,7 @@ units included — the test classes come first (one class per command or
 group) and helper functions after them; within a class, tests follow the
 story's logical order.
 
-Two markers name the slow ends of the suite, so either can be deselected.
+Three markers name the slow ends of the suite, so each can be deselected.
 The `live` smokes talk to real providers and each skips itself when its
 server or api key is absent (`scripts/live-providers.sh` launches the
 local engines; the cloud smokes read OPENROUTER_API_KEY / NANOGPT_API_KEY
@@ -624,7 +1020,13 @@ and send one short prompt to a cheap model). The `cli` ones are all of
 `scenarios/cli/`: they drive the real binary in a subprocess or a pty,
 which costs seconds per test where the in-process kind costs
 milliseconds. The fast offline suite is therefore
-`-m "not live and not cli"`.
+`-m "not live and not cli"`. The `slow` ones take minutes:
+`scenarios/cli/test_screen.py` plays the terminal turn by turn in a pty,
+its screen emulated (`support.emulator`, pyte, a dev dependency), and
+holds every step against a fresh launch's echo of the same story and every
+frame against rows moving or the text blinking. They run only with
+`--slow` (`scenarios/conftest.py` deselects them otherwise, whatever `-m`
+says): `make regression`.
 
 ## Documentation rules
 
@@ -655,7 +1057,7 @@ the way `/system FILE` is read there): the token leaves the line, one
 adjacent space with it, and the bytes ride `play.submit(files=)`; a token
 naming nothing stays prose ("@Mara"). The stored body never holds the
 token. The menu behind it lists directories and picture files, and pops
-only while the model in use can see (`session.vision`); the backend
+only while a picture may ride (`session.can_attach`); the backend
 refuses a picture regardless when it cannot.
 
 ## Web conventions
@@ -706,7 +1108,7 @@ mechanics live in the module docstrings:
   handler's thread so a body that is not what it claims is a 400 before
   the session is asked; the backend's refusals (cannot see, too many,
   not a picture) come back as a Notice. A turn's row carries
-  `attachments` ([] when none) and the session facts `vision`, which is
+  `attachments` ([] when none) and the session facts `can_attach`, which is
   what shows the attach button. The page stages a picture two ways, the
   attach button's picker and a paste into the composer (`composer.js`,
   the textarea's own `paste` event, image items only); both reach the

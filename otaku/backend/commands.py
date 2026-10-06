@@ -22,7 +22,7 @@ import sys
 from dataclasses import dataclass
 
 from otaku.context import syntax
-from otaku.context.syntax import is_command
+from otaku.context.syntax import is_command, spans
 
 __all__ = [
     "COMMANDS",
@@ -30,11 +30,12 @@ __all__ = [
     "PROSE_DESCRIPTION",
     "PROSE_GROUP",
     "PROSE_LABEL",
-    "CommandKind",
     "CommandSpec",
+    "CommandType",
     "find",
     "is_command",
     "raw_argument",
+    "spans",
     "unknown_notice",
 ]
 
@@ -65,7 +66,7 @@ GROUP_LABELS: dict[str, str] = {
 }
 
 
-class CommandKind(enum.Enum):
+class CommandType(enum.Enum):
     """The separation the frontends route by (see the module docstring)."""
 
     OPERATION = "operation"
@@ -83,13 +84,13 @@ class CommandSpec:
     args: str
     description: str
     group: str
-    kind: CommandKind
+    kind: CommandType
 
 
 def _direction(token: str, description: str, group: str = "playing") -> CommandSpec:
     """A direction's row: token and argument shape read off the Line
     class that owns them — one declaration, in `context.syntax`."""
-    return CommandSpec(token, syntax.DIRECTIONS[token].args, description, group, CommandKind.SYNTAX)
+    return CommandSpec(token, syntax.DIRECTIONS[token].args, description, group, CommandType.SYNTAX)
 
 
 def _inliner(token: str, description: str) -> CommandSpec:
@@ -98,7 +99,7 @@ def _inliner(token: str, description: str) -> CommandSpec:
     line AND closes one, and the two surfaces must not collide in
     `find` — the ellipsis is how the old help kept them apart too."""
     assert token in syntax.INLINERS
-    return CommandSpec(f"… {token}", "TEXT", description, "inline", CommandKind.SYNTAX)
+    return CommandSpec(f"… {token}", "TEXT", description, "inline", CommandType.SYNTAX)
 
 
 # fmt: off
@@ -107,49 +108,51 @@ COMMANDS: tuple[CommandSpec, ...] = (
     _direction("/me", "Send PROMPT, hinting the model that you write as NAME"),
     _direction("/you", "Tell the model to play NAME; optional HINT rides the turn"),
     _direction("/ooc", "Talk to the model out of character"),
-    CommandSpec("/undo", "", "Discard the last turn", "playing", CommandKind.INTERACTIVE),
+    CommandSpec("/undo", "", "Discard the last turn", "playing", CommandType.INTERACTIVE),
     # The mid-stream take is the terminal's POSIX-only watcher — the
     # Windows consoles have no termios, so there the row must not say more.
-    CommandSpec("/regen", "", "Re-run the last prompt" + ("" if sys.platform == "win32" else " (mid-stream: cancel + regen)"), "playing", CommandKind.INTERACTIVE),
-    CommandSpec("/last", "[N]", "Show the last N turns (default 5)", "playing", CommandKind.INTERACTIVE),
-    CommandSpec("/clear", "", "Clear the screen", "playing", CommandKind.INTERACTIVE),
+    CommandSpec("/regen", "", "Re-run the last prompt" + ("" if sys.platform == "win32" else " (mid-stream: cancel + regen)"), "playing", CommandType.INTERACTIVE),
+    CommandSpec("/last", "[N]", "Show the last N turns (default 5)", "playing", CommandType.INTERACTIVE),
+    CommandSpec("/clear", "", "Clear the screen", "playing", CommandType.INTERACTIVE),
     # Inside a prompt
     _inliner("/ooc", "An aside out of character"),
     _inliner("/cue", "Steer just the next reply — not kept in context afterwards"),
     # Stories
-    CommandSpec("/stories", "", "Browse stories, resume an old one", "stories", CommandKind.INTERACTIVE),
-    CommandSpec("/fork", "[TITLE]", "Continue in a copy of this story; the original stays", "stories", CommandKind.OPERATION),
-    CommandSpec("/system", "<text | FILE>", "Set the system prompt for this story — from text or a file; - clears it", "stories", CommandKind.INTERACTIVE),
-    CommandSpec("/title", "NEW", "Set the story title", "stories", CommandKind.OPERATION),
-    CommandSpec("/new", "[TITLE]", "Clear context and start a new story", "stories", CommandKind.OPERATION),
+    CommandSpec("/stories", "", "Browse stories, resume an old one", "stories", CommandType.INTERACTIVE),
+    CommandSpec("/fork", "[TITLE]", "Continue in a copy of this story; the original stays", "stories", CommandType.OPERATION),
+    CommandSpec("/system", "<text | FILE>", "Set the system prompt for this story — from text or a file; - clears it", "stories", CommandType.INTERACTIVE),
+    CommandSpec("/title", "NEW", "Set the story title", "stories", CommandType.OPERATION),
+    CommandSpec("/new", "[TITLE]", "Clear context and start a new story", "stories", CommandType.OPERATION),
     # Lore
-    CommandSpec("/lore", "", "Browse and edit the story — premise, messages, scenes, cast", "lore", CommandKind.INTERACTIVE),
-    CommandSpec("/cast", "", "The same browser, opened directly on the cast", "lore", CommandKind.INTERACTIVE),
-    CommandSpec("/extract", "", "Extract lore from the recent messages now; triggered automatically after 5 minutes of inactivity", "lore", CommandKind.INTERACTIVE),
-    CommandSpec("/merge", "A into B", "Fold a duplicate character into the real one", "lore", CommandKind.OPERATION),
+    CommandSpec("/lore", "", "Browse and edit the story — premise, messages, scenes, cast", "lore", CommandType.INTERACTIVE),
+    CommandSpec("/cast", "", "The same browser, opened directly on the cast", "lore", CommandType.INTERACTIVE),
+    CommandSpec("/extract", "", "Extract lore from the recent messages now; triggered automatically after 5 minutes of inactivity", "lore", CommandType.INTERACTIVE),
+    CommandSpec("/merge", "A into B", "Fold a duplicate character into the real one", "lore", CommandType.OPERATION),
     # Inspect
-    CommandSpec("/context", "", "Preview the next request (assembled prompt + budgets)", "inspect", CommandKind.INTERACTIVE),
-    CommandSpec("/balance", "", "Account balance of cloud providers", "inspect", CommandKind.OPERATION),
-    CommandSpec("/usage", "[all]", "Tokens spent on this story (or everything)", "inspect", CommandKind.OPERATION),
-    CommandSpec("/info", "", "Show details about the current model + session", "inspect", CommandKind.OPERATION),
+    CommandSpec("/context", "", "Preview the next request (assembled prompt + budgets)", "inspect", CommandType.INTERACTIVE),
+    CommandSpec("/balance", "", "Account balance of cloud providers", "inspect", CommandType.OPERATION),
+    CommandSpec("/usage", "[all]", "Tokens spent on this story (or everything)", "inspect", CommandType.OPERATION),
+    CommandSpec("/info", "", "Show details about the current model + session", "inspect", CommandType.OPERATION),
     # Import/export
-    CommandSpec("/card", "FILE [NAME]", "Import a character card (PNG or JSON) into this story", "transfer", CommandKind.INTERACTIVE),
-    CommandSpec("/import", "FILE", "Import a story: an otaku export, SillyTavern chat (.jsonl), or plain text", "transfer", CommandKind.INTERACTIVE),
-    CommandSpec("/export", "[FILE]", "Export the whole story to Markdown (memory + messages)", "transfer", CommandKind.INTERACTIVE),
+    CommandSpec("/card", "FILE [NAME]", "Import a character card (PNG or JSON) into this story", "transfer", CommandType.INTERACTIVE),
+    CommandSpec("/import", "FILE", "Import a story: an otaku export, SillyTavern chat (.jsonl), or plain text", "transfer", CommandType.INTERACTIVE),
+    CommandSpec("/export", "[FILE]", "Export the whole story to Markdown (memory + messages)", "transfer", CommandType.INTERACTIVE),
     # Models and settings
-    CommandSpec("/model", "[PROVIDER/MODEL]", "Switch model", "settings", CommandKind.INTERACTIVE),
-    CommandSpec("/set think", "<level>", "Set the thinking effort for the model, or a thinking budget in tokens where supported", "settings", CommandKind.OPERATION),
-    CommandSpec("/set parameter", "<name> <val>", "Set an inference parameter for the model", "settings", CommandKind.OPERATION),
-    CommandSpec("/set verbose", "on|off", "Show the stats line after each reply", "settings", CommandKind.OPERATION),
-    CommandSpec("/set autocorrect", "on|off", "Settle a character name you type in /you and /me commands to the cast's own spelling", "settings", CommandKind.OPERATION),
-    CommandSpec("/set notification", "on|off", "Play a sound when a reply lands (the sound is configs/config.toml's notification_sound)", "settings", CommandKind.OPERATION),
-    CommandSpec("/set max_context", "<tokens>", "Cap the prompt at this many tokens; 0 = the model's own max context", "settings", CommandKind.OPERATION),
+    CommandSpec("/model", "[PROVIDER/MODEL]", "Switch model", "settings", CommandType.INTERACTIVE),
+    CommandSpec("/set parameter", "<name> <val>", "Set an inference parameter for the model", "settings", CommandType.OPERATION),
+    CommandSpec("/set mode", "chat|story", "Read the story as a chat, or as one text", "settings", CommandType.OPERATION),
+    CommandSpec("/set think", "<level>", "Set the thinking effort for the model, or a thinking budget in tokens where supported", "settings", CommandType.OPERATION),
+    CommandSpec("/set verbose", "on|off", "Show the stats line after each reply", "settings", CommandType.OPERATION),
+    CommandSpec("/set autocorrect", "on|off", "Settle a character name you type in /you and /me commands to the cast's own spelling", "settings", CommandType.OPERATION),
+    CommandSpec("/set notification", "on|off", "Play a sound when a reply lands (the sound is configs/config.toml's notification_sound)", "settings", CommandType.OPERATION),
+    CommandSpec("/set max_context", "<tokens>", "Cap the prompt at this many tokens; 0 = the model's own max context", "settings", CommandType.OPERATION),
     # Special
     _direction("/roll", "Roll real dice (1d20+5, 3d6, 2d20kh1) — the model narrates exactly what fell", group="special"),
     # Meta
-    CommandSpec("/web", "", "Open this session in a browser", "web", CommandKind.INTERACTIVE),
-    CommandSpec("/help", "", "Show this help", "meta", CommandKind.INTERACTIVE),
-    CommandSpec("/bye", "", "Exit", "meta", CommandKind.INTERACTIVE),
+    CommandSpec("/web", "", "Open this session in a browser", "web", CommandType.INTERACTIVE),
+    CommandSpec("/support", "TEXT", "Send feedback or a support request — leave your email to get an answer", "meta", CommandType.OPERATION),
+    CommandSpec("/help", "", "Show this help", "meta", CommandType.INTERACTIVE),
+    CommandSpec("/bye", "", "Exit", "meta", CommandType.INTERACTIVE),
 )
 # fmt: on
 

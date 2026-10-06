@@ -40,7 +40,9 @@ RESET = "\x1b[0m"
 # Erasing and cursor motion
 CLEAR_SCREEN = "\x1b[H\x1b[2J"  # wipe the visible screen, cursor home; scrollback stays
 ERASE_LINE = "\x1b[2K"  # clear the row the cursor is on
+ERASE_TO_END = "\x1b[K"  # clear from the cursor to the row's end, the cursor unmoved
 UP_ONE = "\x1b[1A"
+INDEX = "\x1bD"  # down one row, the screen scrolling at the bottom, the column KEPT
 GOTO_ROW = "\x1b[{};1H"  # CUP to column 1 of the given row
 SAVE_CURSOR = "\x1b7"  # DECSC
 RESTORE_CURSOR = "\x1b8"  # DECRC
@@ -49,6 +51,16 @@ RESTORE_CURSOR = "\x1b8"  # DECRC
 SCROLL_ABOVE = "\x1b[1;{}r"  # DECSTBM: scrolling confined to rows 1..N
 SCROLL_ALL = "\x1b[r"  # DECSTBM reset: the whole screen scrolls again
 CURSOR_BLINK_ON = "\x1b[?12h"  # DECSET 12: ask the terminal to blink the cursor
+# PROTOTYPE: xterm's modifyOtherKeys, level 1 — Ctrl+Enter reported apart from
+# Enter (`ESC[27;5;13~`) where the terminal can; ignored where it cannot
+MODIFY_OTHER_KEYS_ON = "\x1b[>4;1m"
+MODIFY_OTHER_KEYS_OFF = "\x1b[>4;0m"
+HIDE_CURSOR = "\x1b[?25l"
+SHOW_CURSOR = "\x1b[?25h"
+# OSC 12: the cursor's colour, `rgb:rr/gg/bb`; OSC 112 the terminal's own back.
+# A terminal that cannot ignores both.
+CURSOR_COLOR = "\x1b]12;{}\x07"
+CURSOR_COLOR_RESET = "\x1b]112\x07"
 
 # Confirm-prompt answers, matched after `latin_key` folds the typed layout.
 # A site with a yes-default accepts the empty answer explicitly.

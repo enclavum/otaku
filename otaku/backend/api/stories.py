@@ -14,7 +14,7 @@ from otaku.backend.session import Refused, Session
 from otaku.backend.story import StorySettings
 from otaku.formatting import flatten, truncate_label
 from otaku.store.ops.stories import StoryListing
-from otaku.store.schema import InjectionPosition, Message
+from otaku.store.schema import InjectionPosition, Layout, Message
 
 # What picking an earlier turn settles to: continue in a copy (the
 # default), rewind the head (later turns stay as siblings), or stay.
@@ -207,7 +207,12 @@ def get_settings(session: Session, story_id: int | None = None) -> StorySettings
         from_db = session._store.stories.get_settings(story_id)
     else:
         from_db = session._settings_db
-    return StorySettings(from_db, session._store, session._paths.prompts_file)
+    return StorySettings(
+        from_db,
+        session._store,
+        session._paths.prompts_file,
+        can_complete_text=session.can_complete_text,
+    )
 
 
 def update_setting(
@@ -219,11 +224,12 @@ def update_setting(
     position: InjectionPosition | None = None,
     reminder_text: str | None = None,
     display_notes: bool | None = None,
+    layout: Layout | None = None,
 ) -> str:
     """Change one setting of a story — the open one, or the one
-    `story_id` names; what is not given stays. Returns the confirmation.
-    Raises Refused for a setting that does not exist, and for what the
-    setting does not take (`StorySetting.to_db`)."""
+    `story_id` names; what is not given stays. Returns the confirmation
+    (`StorySetting.standing`). Raises Refused for a setting that does not
+    exist, and for what the setting does not take (`StorySetting.to_db`)."""
     settings = get_settings(session, story_id)
     setting = settings.get(name)
     if setting is None:
@@ -234,26 +240,13 @@ def update_setting(
         position=position,
         reminder_text=reminder_text,
         display_notes=display_notes,
+        layout=layout,
     )
     if story_id is not None and story_id != session.story_id:
         session._store.stories.set_setting(story_id, row)
     else:
         session._set_setting(row)
-    # Where it now stands, in words.
-    if not row.enabled:
-        return f"{setting.label}: off."
-    if row.position is None:
-        return f"{setting.label}: on."
-    if row.position.depth is None:
-        return f"{setting.label}: on, in the system message."
-    # before which of the reader's messages, counted from the end
-    depth = row.position.depth
-    if depth == 1:
-        return f"{setting.label}: on, before your latest message."
-    if depth == 2:
-        return f"{setting.label}: on, before your previous message."
-    suffix = "rd" if depth == 3 else "th"
-    return f"{setting.label}: on, before your {depth}{suffix}-last message."
+    return setting.standing(row)
 
 
 def get_shared_reminder(session: Session) -> str:
@@ -285,20 +278,35 @@ def edit_message(session: Session, message_id: int, body: str, story_id: int | N
     copy follows the store. `story_id` is the story the caller believes
     the message belongs to, and is CHECKED: a browser addresses any
     story, and a correction that landed on a message of another one
-    would rewrite a story nobody was looking at. Raises Refused on an
-    empty body, or on a message that is not that story's."""
+    would rewrite a story nobody was looking at. The whitespace at the
+    message's edges stays the stored one, whatever the edit's: a break
+    there is how the row joins its neighbours (`assembler.get_join_type`),
+    which an editor does not show — a correction changes the words, never
+    the join. Raises Refused on an empty body, or on a message that is
+    not that story's."""
     if not body.strip():
         raise Refused("A message cannot be emptied — undo the exchange instead.")
+    chain = session._messages
     if story_id is not None:
         chain = session._store.stories.get_messages(story_id)
         if not any(message.id == message_id for message in chain):
             raise Refused("That message is not on the story's current chain.")
+    stored = next((message.body for message in chain if message.id == message_id), "")
+    body = _with_edges_of(stored, body)
     session._store.messages.update(message_id, body)
     session._search_index = None
     for i, m in enumerate(session._messages):
         if m.id == message_id:
             session._messages[i] = replace(m, body=body)
             break
+
+
+def _with_edges_of(stored: str, text: str) -> str:
+    """`text` with `stored`'s edge whitespace in place of its own."""
+    core = stored.strip()
+    lead = stored[: stored.index(core)] if core else ""
+    trail = stored[len(lead) + len(core) :] if core else ""
+    return lead + text.strip() + trail
 
 
 def headline(session: Session) -> str:

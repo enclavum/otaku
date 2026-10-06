@@ -48,6 +48,16 @@ The request log seals its entries with the same cipher; with encryption off, it 
 text too: every prompt as sent, kept indefinitely — deleting a story does not delete its wire
 history. The log directory is yours to prune.
 
+## What leaves the machine
+
+Your stories go to the model you point otaku at, and nowhere else. Beyond that, otaku contacts two
+services, and only when you ask it to:
+
+- **Web search**, a tool a story switches on: the model's search queries — written from your
+  story — go to Tavily or Exa, whichever your key belongs to.
+- **A support request** sends what you typed, the email address you give, and the otaku version to
+  otaku.sh, which emails it on to the author through Resend.
+
 ## The web interface
 
 `otaku web` serves one open session to a browser. By default it listens on loopback, port 9600,
@@ -101,17 +111,18 @@ everything else. Two guards sit in front of every request:
 What may be served is a closed table of files, so no request can compose its way to
 `configs/providers.toml`, and the page is never sent an api key's value — only whether one is set.
 
-## Provider API keys
+## API keys
 
 Cloud provider API keys never sit in a config file as plain text. They are stored in
 `configs/providers.toml` sealed (AES-256-GCM) — a plane fully separate from the story encryption
-above, with its own key, and independent of `[encryption]` being enabled at all. The sealing key
-lives in the OS keychain (macOS `security`, Linux `secret-tool`), one item per state dir; on a
-machine without a keychain tool — every Windows machine, as above — it falls back to
-`configs/config.key` at mode `0600`, which Windows does not enforce. A key pasted into the file
-as plain text is sealed automatically at the next launch, and the dated backup that edit leaves
-in `configs/backups/` has the key replaced with `[REDACTED]`.
+above, with its own key, and independent of `[encryption]` being enabled at all. The web search key
+is kept the same way, sealed in `configs/integrations.toml`. The sealing key lives in the OS
+keychain (macOS `security`, Linux `secret-tool`), one item per state dir; on a machine without a
+keychain tool — every Windows machine, as above — it falls back to `configs/config.key` at mode
+`0600`, which Windows does not enforce. A key pasted into either file as plain text is sealed
+automatically at the next launch, and the dated backup that edit leaves in `configs/backups/` has
+the key replaced with `[REDACTED]`.
 
-Leaking `providers.toml` alone therefore leaks no credentials. The same limits as above apply:
-an attacker running as your logged-in user can read the keychain item, and a running process's
-memory holds the open keys.
+Leaking `providers.toml` or `integrations.toml` alone therefore leaks no credentials. The same
+limits as above apply: an attacker running as your logged-in user can read the keychain item, and a
+running process's memory holds the open keys.

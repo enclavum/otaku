@@ -1,11 +1,12 @@
 """A story's settings: one class per switch, and the set a story has.
 
 What a story STORES is the store's (`schema.StorySettingDB`: a name,
-a flag, a position, a reminder, a display flag). What a
+a flag, a position, a reminder, a display flag, a layout). What a
 setting IS is declared here, one class each: a tool's, which lets the
 model use it and injects its prompt; a reminder's, which injects
 the user's own text — the SHARED one, written once and switched on by
-each story that wants it, and the STORY's own; later a plain flag.
+each story that wants it, and the STORY's own; and the LAYOUT the
+story is read in, a value rather than a switch.
 `StorySettings` is every setting of one story as it stands, built from
 the rows the story holds, the prompts file and the store, and what the
 switched-on ones inject. The operations are `backend.api.stories`'.
@@ -19,14 +20,20 @@ from pathlib import Path
 from typing import ClassVar
 
 from otaku.backend.errors import Refused
-from otaku.backend.tools import Tool, ToolAssistantNotes, ToolQuestions
+from otaku.backend.tools import Tool, ToolAssistantNote, ToolQuestion, ToolSystemInfo, ToolWebSearch
 from otaku.context.injections import Injection
 from otaku.context.syntax import OOC_FRAME
 from otaku.context.tool_calls import ToolSet
 from otaku.settings.prompts import Prompts
 from otaku.settings.prompts import load as load_prompts
 from otaku.store import Store
-from otaku.store.schema import InjectionPosition, StorySettingDB
+from otaku.store.schema import (
+    CompletionType,
+    InjectionPosition,
+    Layout,
+    StoryMode,
+    StorySettingDB,
+)
 
 # The deepest a story may place what a setting injects — before which of
 # the reader's messages, counted from the end: deep enough for a reminder
@@ -52,20 +59,21 @@ class StorySetting:
     name: ClassVar[str] = ""  # what a story stores it under: a rename orphans stored settings
     label: ClassVar[str] = ""
     tool: ClassVar[type[Tool] | None] = None  # the tool it switches, if one
-    # Every position it may take, as a frontend offers them; none here:
-    # a flag injects nothing.
+    # Every position it may take, as a frontend offers them; none here.
     allowed_positions: ClassVar[tuple[InjectionPosition, ...]] = ()
 
     enabled: bool
     injection_position: InjectionPosition | None  # None: it injects nothing
     reminder_text: str | None  # the story's own reminder; None: the setting has none
     display_notes: bool | None  # whether the reader sees the notes; None: nothing to display
+    layout: Layout | None  # how the story is laid out; None: not this setting's to say
 
     def __init__(self, from_db: StorySettingDB | None = None) -> None:
         self.enabled = from_db is not None and from_db.enabled
         self.injection_position = None
         self.reminder_text = None
         self.display_notes = None
+        self.layout = None
 
     def to_db(
         self,
@@ -74,18 +82,40 @@ class StorySetting:
         position: InjectionPosition | None = None,
         reminder_text: str | None = None,
         display_notes: bool | None = None,
+        layout: Layout | None = None,
     ) -> StorySettingDB:
         """The row to store: the setting as it stands, what is given laid
         over it. Raises Refused for what the setting does not take — here
-        a position, a `reminder_text` and `display_notes`; a subclass that
-        takes one says so, and the shared reminder is `set_shared_reminder`'s."""
+        a position, a `reminder_text`, `display_notes` and a `layout`; a
+        subclass that takes one says so, and the shared reminder is
+        `set_shared_reminder`'s."""
         if position is not None:
             raise Refused(f"{self.label} has no position: it injects nothing.")
         if reminder_text is not None:
             raise Refused(f"{self.label} has no reminder of its own.")
         if display_notes is not None:
             raise Refused(f"{self.label} has nothing to display.")
+        if layout is not None:
+            raise Refused(f"{self.label} has no layout.")
         return StorySettingDB(self.name, enabled=self.enabled if enabled is None else enabled)
+
+    def standing(self, row: StorySettingDB) -> str:
+        """Where the setting stands once `row` is stored, in words — the
+        confirmation a write answers with."""
+        if not row.enabled:
+            return f"{self.label}: off."
+        if row.position is None:
+            return f"{self.label}: on."
+        if row.position.depth is None:
+            return f"{self.label}: on, in the system message."
+        # before which of the reader's messages, counted from the end
+        depth = row.position.depth
+        if depth == 1:
+            return f"{self.label}: on, before your latest message."
+        if depth == 2:
+            return f"{self.label}: on, before your previous message."
+        suffix = "rd" if depth == 3 else "th"
+        return f"{self.label}: on, before your {depth}{suffix}-last message."
 
 
 class InjectingSetting(StorySetting):
@@ -97,6 +127,10 @@ class InjectingSetting(StorySetting):
     a name; a frontend capitalises where its medium wants."""
 
     injection_label: ClassVar[str] = ""
+    # The prompts.toml key of the PROMPT it injects, otaku's text edited
+    # in place (`api.settings.get_prompt`); None where the text
+    # is the reader's own, a reminder's.
+    prompt_name: ClassVar[str | None] = None
     default_position: ClassVar[InjectionPosition] = InjectionPosition(1)
 
     injection_position: InjectionPosition
@@ -129,12 +163,16 @@ class InjectingSetting(StorySetting):
         position: InjectionPosition | None = None,
         reminder_text: str | None = None,
         display_notes: bool | None = None,
+        layout: Layout | None = None,
     ) -> StorySettingDB:
         if position is not None and position not in self.allowed_positions:
             allowed = ", ".join(str(each.value) for each in self.allowed_positions)
             raise Refused(f"{self.label} takes one of these positions: {allowed}.")
         row = super().to_db(
-            enabled=enabled, reminder_text=reminder_text, display_notes=display_notes
+            enabled=enabled,
+            reminder_text=reminder_text,
+            display_notes=display_notes,
+            layout=layout,
         )
         return replace(row, position=self.injection_position if position is None else position)
 
@@ -147,9 +185,10 @@ class ToolSetting(InjectingSetting):
     """A tool's switch: while on, the model may use the tool, and its
     prompt rides where the story put it — enclosed out of character in
     chat, bare in the system message. The prompt is read off the
-    prompts under the tool's `prompt_name`."""
+    prompts under the setting's `prompt_name`."""
 
     tool: ClassVar[type[Tool]] = Tool  # narrowed: a tool's switch always has one
+    prompt_name: ClassVar[str] = ""  # narrowed: a tool's switch always sends one
     # Before the reader's newest message: all the recency, and nothing to
     # re-read.
     default_position = InjectionPosition(1)
@@ -159,7 +198,7 @@ class ToolSetting(InjectingSetting):
 
     def __init__(self, from_db: StorySettingDB | None, prompts: Prompts) -> None:
         super().__init__(from_db)
-        self.prompt = getattr(prompts, self.tool.prompt_name)
+        self.prompt = getattr(prompts, self.prompt_name)
 
     def _injection_text(self) -> str:
         return self.prompt
@@ -169,7 +208,8 @@ class StorySettingQuestions(ToolSetting):
     name = "allow_questions"
     label = "Allow questions"
     injection_label = "questions"
-    tool = ToolQuestions
+    prompt_name = "tool_questions_prompt"
+    tool = ToolQuestion
 
 
 class StorySettingAssistantNotes(ToolSetting):
@@ -179,7 +219,8 @@ class StorySettingAssistantNotes(ToolSetting):
     name = "allow_assistant_notes"
     label = "Allow assistant notes"
     injection_label = "assistant notes"
-    tool = ToolAssistantNotes
+    prompt_name = "tool_assistant_notes_prompt"
+    tool = ToolAssistantNote
 
     display_notes: bool
 
@@ -194,11 +235,36 @@ class StorySettingAssistantNotes(ToolSetting):
         position: InjectionPosition | None = None,
         reminder_text: str | None = None,
         display_notes: bool | None = None,
+        layout: Layout | None = None,
     ) -> StorySettingDB:
-        row = super().to_db(enabled=enabled, position=position, reminder_text=reminder_text)
+        row = super().to_db(
+            enabled=enabled, position=position, reminder_text=reminder_text, layout=layout
+        )
         return replace(
             row, display_notes=self.display_notes if display_notes is None else display_notes
         )
+
+
+class StorySettingSystemInfo(ToolSetting):
+    """The system info tool's switch: the model may ask the time, the
+    sky and which model it is — otaku runs it."""
+
+    name = "allow_system_info"
+    label = "Allow system info"
+    injection_label = "system info"
+    prompt_name = "tool_system_info_prompt"
+    tool = ToolSystemInfo
+
+
+class StorySettingWebSearch(ToolSetting):
+    """The web search tool's switch: the model may look something up —
+    otaku runs it, through the engine the web search key chose."""
+
+    name = "allow_web_search"
+    label = "Allow web search"
+    injection_label = "web search"
+    prompt_name = "tool_web_search_prompt"
+    tool = ToolWebSearch
 
 
 class StorySettingReminder(InjectingSetting):
@@ -227,8 +293,11 @@ class StorySettingReminder(InjectingSetting):
         position: InjectionPosition | None = None,
         reminder_text: str | None = None,
         display_notes: bool | None = None,
+        layout: Layout | None = None,
     ) -> StorySettingDB:
-        row = super().to_db(enabled=enabled, position=position, display_notes=display_notes)
+        row = super().to_db(
+            enabled=enabled, position=position, display_notes=display_notes, layout=layout
+        )
         return replace(
             row, reminder_text=self.reminder_text if reminder_text is None else reminder_text
         )
@@ -258,25 +327,112 @@ class StorySettingSharedReminder(InjectingSetting):
         return self.shared_reminder_text
 
 
-class StorySettingMode(StorySetting):
-    """Story mode: the story sent as one text for the model to continue,
-    over a text-completion wire — a flag, injecting nothing. Not built
-    yet: nothing reads it."""
+class StorySettingEmulateTextCompletion(InjectingSetting):
+    """The canvas over the chat wire told to behave as a text completion:
+    the prompt (prompts.toml's `emulate_text_completion_prompt`) that
+    makes an instruct model continue the one text where it ends rather
+    than answer it. Off until a story switches it on, as every switch
+    is, and gated by the layout: it injects in the canvas over the chat
+    wire alone, the novel's model continuing by nature and no other
+    layout being one text; off that, the switch stands and sends
+    nothing."""
 
-    name = "story_mode"
-    label = "Story mode"
+    name = "emulate_text_completion"
+    label = "Emulate text completion"
+    injection_label = "text completion emulation"
+    prompt_name: ClassVar[str] = "emulate_text_completion_prompt"
+    # The system message: a standing instruction, not a reminder.
+    default_position = InjectionPosition()
+    allowed_positions = _TOOL_POSITIONS
+
+    prompt: str
+
+    def __init__(
+        self,
+        from_db: StorySettingDB | None,
+        prompts: Prompts,
+        *,
+        layout: Layout,
+        completion_type: CompletionType,
+    ) -> None:
+        super().__init__(from_db)
+        self.prompt = getattr(prompts, self.prompt_name)
+        self._applies = layout.mode is StoryMode.STORY and completion_type is CompletionType.CHAT
+
+    @property
+    def injection(self) -> Injection | None:
+        return super().injection if self._applies else None
+
+    def _injection_text(self) -> str:
+        return self.prompt
+
+
+class StorySettingLayout(StorySetting):
+    """The layout the story is read in, and written — a value, not a
+    switch: a story is always laid out one way, MANUSCRIPT until it says
+    otherwise (`schema.Layout`), and each frontend draws its look in its
+    own medium (the page's `layout.js`, the terminal's flow for the
+    canvas). Off the Tools tabs: no caption there names it."""
+
+    name = "layout"
+    label = "Layout"
+    default_layout: ClassVar[Layout] = Layout.MANUSCRIPT
+
+    layout: Layout
+
+    def __init__(self, from_db: StorySettingDB | None = None) -> None:
+        super().__init__(from_db)
+        self.enabled = True  # always in force: there is no reading in no layout
+        stored = from_db.layout if from_db is not None else None
+        # the codec reads only the four names; anything else is unsaid
+        self.layout = stored if stored is not None else self.default_layout
+
+    def to_db(
+        self,
+        *,
+        enabled: bool | None = None,
+        position: InjectionPosition | None = None,
+        reminder_text: str | None = None,
+        display_notes: bool | None = None,
+        layout: Layout | None = None,
+    ) -> StorySettingDB:
+        if enabled is not None:
+            raise Refused(f"{self.label} has no switch: a story is always read in one.")
+        row = super().to_db(
+            position=position, reminder_text=reminder_text, display_notes=display_notes
+        )
+        chosen = self.layout if layout is None else layout
+        return replace(row, enabled=True, layout=chosen)
+
+    def standing(self, row: StorySettingDB) -> str:
+        # a caption, not a sentence: the switches' confirmations end in a
+        # full stop, this one does not
+        return f"{self.label}: {(row.layout or self.layout).value}"
 
 
 class StorySettings:
     """Every setting of one story as it stands — the rows it stored laid
     over the defaults, a row this build does not know passed over — and
     what the switched-on ones inject. Reads the prompts file and the
-    shared reminder itself, so a caller hands over only what it holds."""
+    shared reminder itself, so a caller hands over only what it holds:
+    `can_complete_text`, the model's, which with the layout decides the
+    wire the emulation setting is gated on."""
 
-    def __init__(self, from_db: Sequence[StorySettingDB], store: Store, prompts_file: Path) -> None:
+    def __init__(
+        self,
+        from_db: Sequence[StorySettingDB],
+        store: Store,
+        prompts_file: Path,
+        *,
+        can_complete_text: bool,
+    ) -> None:
         prompts, _ = load_prompts(prompts_file)  # its warnings are the launch's to show
         by_name = {row.name: row for row in from_db}
-        # In the order they are sent where they share a place.
+        layout = StorySettingLayout(by_name.get(StorySettingLayout.name))
+        # In the order they are sent where they share a place: the shared
+        # reminder, the story's, then the tools, then the emulation. A
+        # frontend draws them in its own order (its caption table), never
+        # this one.
         settings: list[StorySetting] = [
             StorySettingSharedReminder(
                 by_name.get(StorySettingSharedReminder.name),
@@ -285,7 +441,15 @@ class StorySettings:
             StorySettingReminder(by_name.get(StorySettingReminder.name)),
             StorySettingAssistantNotes(by_name.get(StorySettingAssistantNotes.name), prompts),
             StorySettingQuestions(by_name.get(StorySettingQuestions.name), prompts),
-            StorySettingMode(by_name.get(StorySettingMode.name)),
+            StorySettingSystemInfo(by_name.get(StorySettingSystemInfo.name), prompts),
+            StorySettingWebSearch(by_name.get(StorySettingWebSearch.name), prompts),
+            StorySettingEmulateTextCompletion(
+                by_name.get(StorySettingEmulateTextCompletion.name),
+                prompts,
+                layout=layout.layout,
+                completion_type=layout.layout.completion_type(can_complete_text),
+            ),
+            layout,
         ]
         self._by_name = {setting.name: setting for setting in settings}
 
@@ -298,17 +462,11 @@ class StorySettings:
 
     @property
     def tool_set(self) -> ToolSet:
-        """The story's tools, each on or off — how their calls go on the
-        wire: a tool that is on sends its calls as written, one that is
-        off sends its `to_prose`; every other name (a tool this build no
-        longer has) is left out."""
+        """The story's tools that are on — how their calls go on the wire:
+        such a call is sent as written, and every other leaves (a tool
+        switched off, or one this build no longer has)."""
         tools = [setting for setting in self if isinstance(setting, ToolSetting)]
-        return ToolSet(
-            on=frozenset(setting.tool.name for setting in tools if setting.enabled),
-            off={
-                setting.tool.name: setting.tool.to_prose for setting in tools if not setting.enabled
-            },
-        )
+        return ToolSet(on=frozenset(setting.tool.name for setting in tools if setting.enabled))
 
     @property
     def injections(self) -> tuple[Injection, ...]:

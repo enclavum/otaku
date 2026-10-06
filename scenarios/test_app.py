@@ -21,6 +21,7 @@ from otaku import encryption
 from otaku import logging as otaku_logging
 from otaku.backend import files as backend_files
 from otaku.backend import launch as backend_launch
+from otaku.backend.api import providers as api_providers
 from otaku.backend.files import RawFile
 from otaku.backend.paths import Paths
 from otaku.encryption import Cipher, EncryptionError, PlainCipher
@@ -39,7 +40,7 @@ from otaku.store.migrations import v3 as store_v3
 from otaku.store.migrations import v4 as store_v4
 from otaku.store.migrations import v5 as store_v5
 from otaku.store.migrations import v6 as store_v6
-from otaku.store.schema import SCHEMA_DDL, Attachment, Message, StorySettingDB
+from otaku.store.schema import SCHEMA_DDL, Attachment, Message, StoryMode, StorySettingDB
 from otaku.terminal.tty import BOLD, RESET
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch, run_otaku, set_config, set_config_provider
@@ -250,7 +251,7 @@ class TestSchemaMigration:
         paths = _v1_database(tmp_path / "state")
         store = _open(paths)
         try:
-            assert any("Database migrated (v1 → v6)" in note.show for note in store.notes)
+            assert any("Database migrated (v1 → v9)" in note.show for note in store.notes)
             (message,) = store.stories.get_messages(1)
             # The v1 `framing` column reads back through the renamed one.
             assert (message.body, message.template) == ("I enter.", "TPL")
@@ -280,9 +281,27 @@ class TestSchemaMigration:
             # The row carries them, as a message carries its attachments.
             assert store.stories.get(1).settings == (asking,)
             assert store.settings.get("shared_reminder") == ""
+            # The v7 `mode` column trails the row: a v1 row reads its
+            # DEFAULT there, a turn written in chat mode.
+            assert message.mode is StoryMode.CHAT
+            # The v9 `provider` and `model` columns trail the three
+            # derivatives: a v1 row reads NULL there — nothing recorded
+            # which model made it.
+            (journal,) = store.journals.list(1)
+            for row in (scene, keeper, journal):
+                assert (row.provider, row.model) == (None, None)
         finally:
             store.close()
-        assert _meta_version(paths) == "6"
+        # Step 7 wrote nothing into the rows it found: a record shorter
+        # than the schema reads the column's DEFAULT, and no build before
+        # it had a story mode.
+        conn = sqlite3.connect(paths.database_file)
+        try:
+            read = conn.execute("SELECT id, mode FROM messages ORDER BY id").fetchall()
+        finally:
+            conn.close()
+        assert read == [(1, "chat"), (2, "chat"), (3, "chat")]
+        assert _meta_version(paths) == "9"
 
     def test_a_migration_that_ran_is_reported_at_launch(
         self, server: ModelServer, tmp_path
@@ -341,6 +360,19 @@ class TestSchemaMigration:
             _insert_kind(conn, "nonsense")  # the tripwire survives the widening
         conn.close()
 
+    def test_the_widened_checks_admit_a_tool_turn(self, tmp_path) -> None:
+        paths = _v1_database(tmp_path / "state")
+        conn = sqlite3.connect(paths.database_file)
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_row(conn, "tool", "tool")  # v1 refuses — the CHECKs are live
+        conn.close()
+        _open(paths).close()
+        conn = sqlite3.connect(paths.database_file)
+        _insert_row(conn, "tool", "tool")  # v8 admits the tool's turn, role and kind
+        with pytest.raises(sqlite3.IntegrityError):
+            _insert_row(conn, "narrator", "dialogue")  # the tripwire survives the widening
+        conn.close()
+
     def test_a_newer_database_is_refused(self, tmp_path) -> None:
         paths = Paths.resolve(tmp_path / "state")
         paths.ensure_tree()
@@ -363,7 +395,7 @@ class TestSchemaMigration:
             _open(paths)
         assert _meta_version(paths) == "1"
         conn = sqlite3.connect(paths.database_file)
-        assert conn.execute("SELECT count(*) FROM messages").fetchone()[0] == 1
+        assert conn.execute("SELECT count(*) FROM messages").fetchone()[0] == 3
         conn.close()
 
     def test_the_frozen_v1_is_what_the_release_shipped(self) -> None:
@@ -420,10 +452,10 @@ class TestSchemaMigration:
         monkeypatch.setitem(store_migrations._STEPS, 3, store_v3.to_3)
         resumed = _open(paths)
         try:
-            assert any("Database migrated (v2 → v6)" in note.show for note in resumed.notes)
+            assert any("Database migrated (v2 → v9)" in note.show for note in resumed.notes)
         finally:
             resumed.close()
-        assert _meta_version(paths) == "6"
+        assert _meta_version(paths) == "9"
 
 
 class TestFilesFolder:
@@ -594,6 +626,34 @@ class TestConfigMigration:
         for section in ("[llamacpp]", "[koboldcpp]", "[ollama]", "[omlx]", "[lmstudio]"):
             assert section in rendered
         assert set(providers) == {"llamacpp", "koboldcpp", "ollama", "omlx", "lmstudio"}
+
+    def test_a_first_run_writes_the_integrations_file_too(self, tmp_path) -> None:
+        paths = Paths.resolve(tmp_path / "state")
+        paths.ensure_tree()
+        paths.config_key_file.write_bytes(secrets.token_bytes(32))
+        load_config(paths)
+        # every configurable integration's section with no key: web
+        # search's, one key and no engine named
+        assert tomllib.loads(paths.integrations_file.read_text()) == {
+            "web_search": {"api_key": ""},
+        }
+
+    def test_a_missing_integration_section_is_founded_and_a_plain_key_sealed(
+        self, tmp_path
+    ) -> None:
+        paths = Paths.resolve(tmp_path / "state")
+        paths.ensure_tree()
+        paths.config_key_file.write_bytes(secrets.token_bytes(32))
+        paths.config_file.write_text("[settings]\nshow_banner = false\n")
+        paths.integrations_file.write_text(
+            '[proxy]\nurl = "https://x.test/api"\napi_key = "plain-k"\n'
+        )
+        load_config(paths)
+        raw = paths.integrations_file.read_text()
+        assert "plain-k" not in raw
+        file = tomllib.loads(raw)
+        assert file["web_search"] == {"api_key": ""}
+        assert _unsealed(paths, file["proxy"]["api_key"]) == "plain-k"
 
     def test_a_catalog_whose_key_the_shell_carries_is_founded_at_launch(
         self, tmp_path, monkeypatch
@@ -929,9 +989,14 @@ class TestFirstLaunch:
             # with its own story-so-far, nothing left for a first pass
             # (and no model on a fresh install) to rebuild.
             assert all(s.history for s in app.store.scenes.get_current(story_id, ids))
+            # The river ends on a question, and an off tool's calls are
+            # neither drawn nor sent: it lands with the questions tool on.
+            assert [s.name for s in story.settings if s.enabled] == ["allow_questions"]
             # The second sample landed whole: the long play, memory and all.
             others = [s for s in app.store.stories.list() if s.id != story_id]
             assert [s.title for s in others] == ["The Vermilion Tour"]
+            tour = app.store.stories.get(others[0].id)
+            assert not [s.name for s in tour.settings if s.enabled]
             tour_ids = app.store.stories.get_messages_ids(others[0].id)
             assert len(tour_ids) == 318
             tour_scenes = app.store.scenes.get_current(others[0].id, tour_ids)
@@ -1028,6 +1093,24 @@ class TestResume:
         finally:
             session.close()
 
+    def test_a_saved_extraction_model_of_a_deleted_provider_reports_and_goes(
+        self, app: App
+    ) -> None:
+        # The same promise for the model saved for extraction: reported,
+        # dropped, and extraction asks the story's model again.
+        api_providers.set_extraction_model(app.session, "generic", "extract-model")
+        state_file = app.paths.state_file
+        state_file.write_text(
+            state_file.read_text().replace('"generic/extract-model"', '"ghost/extract-model"')
+        )
+        session = backend_launch.open_session(app.paths.root)
+        try:
+            assert session.extraction_model == ""
+            assert session.full_extraction_model_name == session.full_model_name
+            assert any("ghost/extract-model" in notice for notice in session.notices)
+        finally:
+            session.close()
+
 
 def set_encryption(root, key: str) -> None:
     set_config(
@@ -1083,6 +1166,14 @@ def _v1_database(root) -> Paths:
     )
     # fmt: on
     conn.execute("UPDATE stories SET head_id = 1 WHERE id = 1")
+    # Two replies beside the chain, for step 7's fill: one a provider
+    # generated, one a card's greeting (its provider 'card').
+    conn.execute(
+        "INSERT INTO messages (id, story_id, role, kind, body, provider, created_at, updated_at)"
+        " VALUES (2, 1, 'assistant', 'dialogue', ?, 'scenario', ?, ?),"
+        " (3, 1, 'assistant', 'dialogue', ?, 'card', ?, ?)",
+        (b"The reply.", now, now, b"Greeting.", now, now),
+    )
     # A character at the v1 row shape: the added `card` column must land
     # BEHIND these values, or this row's timestamps would shift into it.
     # fmt: off
@@ -1150,12 +1241,16 @@ def _master(paths: Paths) -> list[tuple]:
 
 
 def _insert_kind(conn, kind: str) -> None:
+    _insert_row(conn, "user", kind)
+
+
+def _insert_row(conn, role: str, kind: str) -> None:
     now = datetime.now().astimezone().isoformat()
     # fmt: off
     conn.execute(
         "INSERT INTO messages (story_id, role, kind, body, created_at, updated_at)"
-        " VALUES (1, 'user', ?, ?, ?, ?)",
-        (kind, b"x", now, now),
+        " VALUES (1, ?, ?, ?, ?, ?)",
+        (role, kind, b"x", now, now),
     )
     # fmt: on
     conn.commit()

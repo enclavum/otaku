@@ -92,11 +92,11 @@ ROUTES: dict[tuple[str, str], Route] = {
     ("PUT", "/api/settings/{setting}"): _set_knob,
     ("PUT", "/api/session/model/parameters/{name}"): _set_param,
     ("DELETE", "/api/session/model/parameters/{name}"): _reset_param,
-    # A tool's prompt: prompts.toml's, edited in place.
-    ("GET", "/api/prompts/{tool}"): lambda session, ask: {
-        "text": api_settings.get_tool_prompt(session, ask.params["tool"])
+    # An injection setting's prompt: prompts.toml's, edited in place.
+    ("GET", "/api/prompts/{setting}"): lambda session, ask: {
+        "text": api_settings.get_prompt(session, ask.params["setting"])
     },
-    ("PUT", "/api/prompts/{tool}"): lambda session, ask: api_settings.set_tool_prompt(
-        session, ask.params["tool"], ask.need("text")
+    ("PUT", "/api/prompts/{setting}"): lambda session, ask: api_settings.set_prompt(
+        session, ask.params["setting"], ask.need("text")
     ),
 }

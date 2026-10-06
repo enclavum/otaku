@@ -233,6 +233,18 @@ class TestParameterMenu:
         assert _offered("/set parameter ") == list(PARAMETERS)
 
 
+class TestModeMenu:
+    """The /set mode menu: the terminal's two words for its two looks,
+    chat and story — nothing looked up, the same on every model."""
+
+    def test_the_two_modes(self) -> None:
+        assert _offered("/set mode ") == ["chat", "story"]
+        assert _offered("/set mode s") == ["story"]
+
+    def test_nothing_follows_a_mode(self) -> None:
+        assert _offered("/set mode story ") == []
+
+
 class TestCastSuggestions:
     """The commands whose argument is a character offer the cast, shaped
     per command: /me inserts `Name:` and the prompt follows, /you inserts

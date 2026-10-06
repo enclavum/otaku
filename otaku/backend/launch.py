@@ -14,23 +14,28 @@ import re
 from collections.abc import Callable, Iterable
 from dataclasses import replace
 from pathlib import Path
+from typing import TypeVar
 
 from otaku import encryption
 from otaku.backend import passwords
-from otaku.backend.api import transfer
+from otaku.backend.api import stories, transfer
 from otaku.backend.files import RawFile, read_picture, save
 from otaku.backend.paths import Paths
 from otaku.backend.session import NO_MODEL_HINT, Refused, Session
+from otaku.backend.story import StorySettingQuestions
 from otaku.encryption import AskSecret, Cipher, EncryptionError, SealedError
 from otaku.formatting import pretty_path
+from otaku.integrations import Integrations, default_sections
 from otaku.logging import ErrorLog, RequestLog, SystemLog
 from otaku.providers import ProviderConfig, Registry, autoconfigure
 from otaku.settings import Secrets, migrations, write_atomic
 from otaku.settings import config as config_file
+from otaku.settings import integrations as integrations_file
 from otaku.settings import prompts as prompts_file
 from otaku.settings import providers as providers_file
 from otaku.settings import state as state_file
 from otaku.settings.config import Config
+from otaku.settings.integrations import IntegrationConfig, IntegrationSettings
 from otaku.store import Store, is_encrypted
 from otaku.store.schema import Attachment
 from otaku.worker import Worker
@@ -41,6 +46,9 @@ from otaku.worker import Worker
 # format never does — so the first launch puts them on the message
 # through the app's own intake, as a reader's attachment would land.
 _SAMPLE_PICTURE = re.compile(r"^(?P<stem>.+)\.(?P<message>\d+)\.(?P<order>\d+)\.[A-Za-z0-9]+$")
+# The river sample ends on a question, and a tool that is off has its
+# calls neither drawn nor sent: it lands with the questions tool on.
+_ASKING_SAMPLE = "river.md"
 _SAMPLES_NOTICE = (
     "Sample stories were imported so you can look around — type to play on, "
     "/stories switches between them, or see every command with /help · "
@@ -70,7 +78,7 @@ def open_session(root: str | Path | None = None, *, ask_secret: AskSecret | None
     EncryptionError, or DatabaseError when a piece refuses; the caller ends
     with `session.close()`."""
     paths = Paths.resolve(root)
-    config, providers, notices = _load_config(paths)
+    config, providers, integration_settings, notices = _load_config(paths)
     prompts_file.write_stub(paths.prompts_file)
     prompts, prompt_warnings = prompts_file.load(paths.prompts_file)
     notices += prompt_warnings
@@ -95,6 +103,7 @@ def open_session(root: str | Path | None = None, *, ask_secret: AskSecret | None
         f"Ignoring provider section [{name}]: no supported provider is named so."
         for name in registry.ignored
     ]
+    integrations = Integrations.bind(integration_settings)
     # A remembered model whose provider is still configured resumes; a
     # stale one is reported and skipped — the session opens modelless
     # and every model-facing door says so until a pick.
@@ -104,6 +113,16 @@ def open_session(root: str | Path | None = None, *, ask_secret: AskSecret | None
             NO_MODEL_HINT,
         ]
         state = replace(state, model="")
+    # A pinned extraction model the same way — dropped with a notice, and
+    # extraction follows the model played with.
+    if state.extraction_model and (
+        state.extraction_provider not in providers or not state.extraction_bare_model
+    ):
+        notices.append(
+            f"The remembered extraction model ({state.extraction_model}) names no configured "
+            "provider; lore extraction uses the model you play with."
+        )
+        state = replace(state, extraction_model="")
 
     fresh = not paths.database_file.exists()
     store = Store.open(
@@ -140,7 +159,8 @@ def open_session(root: str | Path | None = None, *, ask_secret: AskSecret | None
             prompts=prompts,
             paths=paths,
             store=store,
-            registry=registry,
+            providers=registry,
+            integrations=integrations,
             worker=worker,
             state=state,
         )
@@ -161,7 +181,7 @@ def request_log(
     exactly as at launch: a sealed log stays readable to whoever can
     open the store. Raises ConfigError/EncryptionError."""
     paths = Paths.resolve(root)
-    config, _, _ = _load_config(paths)
+    config, _, _, _ = _load_config(paths)
     return RequestLog(paths.logs_dir, _unlock_cipher(config, paths, ask_secret=ask_secret))
 
 
@@ -176,21 +196,30 @@ def error_log(root: str | Path | None = None) -> ErrorLog:
 # ---------- launch internals ----------
 
 
-def _load_config(paths: Paths) -> tuple[Config, dict[str, ProviderConfig], list[str]]:
-    """The config, the providers (typed by `settings.providers` — no
-    conversion anywhere), and the notices to show: the files written at
-    first run, migrated to the current shape always — first run
-    included, so an autoconfigured plain api key (omlx's, say) is sealed
-    by the very launch that wrote it, and a typed web password replaced
-    by its hash — and sealed api keys resolved for the session (one
-    that will not open is warned about and its provider runs keyless).
-    Raises ConfigError when a file does not parse."""
+def _load_config(
+    paths: Paths,
+) -> tuple[Config, dict[str, ProviderConfig], IntegrationSettings, list[str]]:
+    """The config, the providers and the integrations (typed by
+    `settings.providers` and `settings.integrations` — no conversion
+    anywhere), and the notices to show: the files written at first run,
+    migrated to the current shape always — first run included, so an
+    autoconfigured plain api key (omlx's, say) is sealed by the very
+    launch that wrote it, and a typed web password replaced by its hash
+    — and sealed api keys resolved for the session, the providers' and
+    the integrations' alike (one that will not open is warned about and
+    its section runs keyless). Raises ConfigError when a file does not
+    parse."""
     paths.ensure_tree()
     notices: list[str] = []
     if not paths.config_file.exists():
         write_atomic(paths.config_file, Config().to_toml())
         if not paths.providers_file.exists():
             write_atomic(paths.providers_file, providers_file.render(autoconfigure()))
+        if not paths.integrations_file.exists():
+            write_atomic(
+                paths.integrations_file,
+                integrations_file.render(default_sections()),
+            )
         notices.append(f"Created {pretty_path(paths.config_file)}")
     secrets = Secrets(
         seal=_sealer(paths),
@@ -198,7 +227,7 @@ def _load_config(paths: Paths) -> tuple[Config, dict[str, ProviderConfig], list[
         hash=passwords.hash,
         is_hashed=passwords.is_hashed,
     )
-    migrations.migrate(paths.settings_files, secrets, autoconfigure())
+    migrations.migrate(paths.settings_files, secrets, autoconfigure(), default_sections())
     config = config_file.load(paths.config_file)
     if config.web_password and not passwords.is_hashed(config.web_password):
         # The migration left it plain — the file could not be written, or
@@ -206,9 +235,11 @@ def _load_config(paths: Paths) -> tuple[Config, dict[str, ProviderConfig], list[
         # in the file by the next launch that can. Nothing past this line
         # sees it typed.
         config = replace(config, web_password=passwords.hash(config.web_password))
-    providers = providers_file.load(paths.providers_file)
-    resolved, key_warnings = _resolve_api_keys(paths, providers)
-    return config, resolved, notices + key_warnings
+    providers, key_warnings = _resolve_api_keys(paths, providers_file.load(paths.providers_file))
+    integration_settings = integrations_file.load(paths.integrations_file)
+    integrations, more_warnings = _resolve_api_keys(paths, integration_settings.integrations)
+    integration_settings = replace(integration_settings, integrations=integrations)
+    return config, providers, integration_settings, notices + key_warnings + more_warnings
 
 
 def _unlock_cipher(config: Config, paths: Paths, *, ask_secret: AskSecret | None = None) -> Cipher:
@@ -258,15 +289,19 @@ def _sealer(paths: Paths) -> Callable[[str], str]:
     return best_effort
 
 
+# The two settings types that carry a sealed api key, resolved alike.
+_Keyed = TypeVar("_Keyed", ProviderConfig, IntegrationConfig)
+
+
 def _resolve_api_keys(
-    paths: Paths, providers: dict[str, ProviderConfig]
-) -> tuple[dict[str, ProviderConfig], list[str]]:
+    paths: Paths, providers: dict[str, _Keyed]
+) -> tuple[dict[str, _Keyed], list[str]]:
     """The providers with sealed api keys opened for the session, plus a
     warning line per key that would not open — its provider keeps an
     empty key, so requests go out unauthenticated rather than with a
     dead token. The sealing key is fetched once for the whole pass — a
     launch never asks the OS keychain per provider."""
-    resolved: dict[str, ProviderConfig] = {}
+    resolved: dict[str, _Keyed] = {}
     warnings: list[str] = []
     unseal = encryption.opener(key_file=paths.config_key_file, service=paths.keychain_service)
     for name, config in providers.items():
@@ -308,6 +343,8 @@ def _seed_samples(session: Session) -> None:
             if session.story_id is not None:
                 landed.append(session.story_id)
                 _seed_pictures(session, session.story_id, file)
+                if file.name == _ASKING_SAMPLE:
+                    stories.update_setting(session, StorySettingQuestions.name, enabled=True)
     if not landed:
         return
     session._switch_to(landed[0])

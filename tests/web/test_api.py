@@ -2,87 +2,90 @@
 
 Three promises `web.api` makes that running the app cannot show. Every
 play event has a name on the wire, with the union CLOSED — a new kind
-must fail here rather than arrive as a silence. The story's typed
-language reaches the page as two disjoint halves, so the composer's
-menu can offer the right one at the caret. And the route table's key
-says which lane a row takes, because the METHOD is the lane.
+must fail here rather than arrive as a silence — and every row that
+lands is told as the turn the page draws, its join to the row before it
+carried with it. The story's typed language reaches the page as two
+disjoint halves, so the composer's menu can offer the right one at the
+caret. And the route table's key says which lane a row takes, because
+the METHOD is the lane.
 """
 
 from typing import get_args
 
 from otaku.backend.api.play import (
+    AssistantReasoning,
+    AssistantText,
+    AssistantToolCall,
+    AssistantTurn,
     Declined,
     Done,
     Failed,
     PlayEvent,
-    Reasoning,
-    Recorded,
-    Text,
-    ToolCall,
+    ToolTurn,
+    UserTurn,
 )
-from otaku.store.schema import Message
+from otaku.context.assembler import JoinType
+from otaku.store.schema import Message, StoryMode
 from otaku.web import api
+from otaku.web.api import play as web_play
 
 
 class TestEvent:
     """`web.api.event` — one play event as the page reads it."""
 
     def test_every_kind_has_a_name_on_the_wire(self) -> None:
-        assert api.event(Recorded(Message(role="user", body="hi")))["type"] == "recorded"
-        assert api.event(Reasoning("hm"))["type"] == "reasoning"
-        assert api.event(Text("word"))["type"] == "text"
-        assert api.event(ToolCall("note", "a plan", closed=True))["type"] == "tool_call"
+        line = Message(role="user", body="hi")
+        assert api.event(UserTurn(line, JoinType.PARAGRAPH))["type"] == "user_turn"
+        assert api.event(AssistantReasoning("hm"))["type"] == "assistant_reasoning"
+        assert api.event(AssistantText("word"))["type"] == "assistant_text"
+        call = AssistantToolCall("note", "a plan", closed=True)
+        assert api.event(call)["type"] == "assistant_tool_call"
+        reply = Message(role="assistant", body="Creak.")
+        assert api.event(AssistantTurn(reply, JoinType.PARAGRAPH))["type"] == "assistant_turn"
+        result = Message(role="tool", kind="tool", body="Time: now", provider="system")
+        assert api.event(ToolTurn(result, JoinType.PARAGRAPH))["type"] == "tool_turn"
         assert api.event(Declined("no model"))["type"] == "declined"
         assert api.event(Failed("the provider hung up"))["type"] == "failed"
-        assert api.event(Done(reply=None, report=None, stats="7 tok/s"))["type"] == "done"
+        assert api.event(Done(report=None, stats="7 tok/s"))["type"] == "done"
 
     def test_the_union_is_covered(self) -> None:
         # The match is exhaustive by construction; this is what makes
         # ADDING a kind fail here instead of shipping as a silence.
         assert {kind.__name__ for kind in get_args(PlayEvent)} == {
-            "Recorded",
-            "Reasoning",
-            "Text",
-            "ToolCall",
+            "UserTurn",
+            "AssistantText",
+            "AssistantReasoning",
+            "AssistantToolCall",
+            "AssistantTurn",
+            "ToolTurn",
             "Declined",
             "Failed",
             "Done",
         }
 
     def test_a_text_event_carries_its_text(self) -> None:
-        assert api.event(Text("the light"))["text"] == "the light"
+        assert api.event(AssistantText("the light"))["text"] == "the light"
+        assert api.event(AssistantReasoning("hm"))["text"] == "hm"
 
     def test_a_tool_call_carries_the_tool_its_piece_and_whether_it_closed(self) -> None:
-        assert api.event(ToolCall("question", "Go in?", closed=False)) == {
-            "type": "tool_call",
-            "tool": "question",
-            "text": "Go in?",
+        # the tool's label and who acts on it ride along where the tool
+        # is known, so the page draws a call otaku runs as it streams
+        assert api.event(AssistantToolCall("web-search", "tides", closed=False)) == {
+            "type": "assistant_tool_call",
+            "tool": "web-search",
+            "label": "Web search",
+            "actor": "system",
+            "text": "tides",
             "closed": False,
         }
+        unknown = api.event(AssistantToolCall("plan", "x", closed=True))
+        assert (unknown["label"], unknown["actor"], unknown["closed"]) == ("", None, True)
 
-    def test_done_carries_the_reply_as_stored_split_into_segments(self) -> None:
-        # A question the reply ended on is in the segments, read: the
-        # page poses it from there, and nothing else says so.
-        body = "Creak.\n```otk-question\nGo in?\n1. Yes\n```"
-        done = api.event(
-            Done(reply=Message(id=5, role="assistant", body=body), report=None, stats="")
-        )
-        assert done["reply"]["segments"] == [
-            {"kind": "prose", "text": "Creak."},
-            {
-                "kind": "tool_call",
-                "tool": "question",
-                "text": "Go in?\n1. Yes",
-                "question": "Go in?",
-                "options": ["Yes"],
-            },
-        ]
-        assert "call" not in done
-        assert api.event(Done(reply=None, report=None, stats=""))["reply"] is None
-
-    def test_a_recorded_event_carries_the_turn(self) -> None:
-        turn = api.event(Recorded(Message(id=4, role="user", body="I listen.")))["turn"]
-        assert turn == {
+    def test_a_user_turn_carries_the_row_its_join_and_the_records_note(self) -> None:
+        line = Message(id=4, role="user", body="I listen.")
+        happened = api.event(UserTurn(line, JoinType.INLINE, note="1d20: 17"))
+        assert happened["note"] == "1d20: 17"
+        assert happened["turn"] == {
             "id": 4,
             "role": "user",
             "body": "I listen.",
@@ -92,8 +95,78 @@ class TestEvent:
             "model": None,
             "template": None,
             "attachments": [],
+            "tool_label": None,
             "segments": [{"kind": "prose", "text": "I listen."}],
+            "join_type": "inline",
         }
+        assert api.event(UserTurn(line, JoinType.PARAGRAPH))["note"] == ""
+
+    def test_an_assistant_turn_carries_the_row_as_stored_split_into_segments(self) -> None:
+        # A question the reply ended on is in the segments, read: the
+        # page poses it from there, and nothing else says so.
+        body = "Creak.\n```otk-question\nGo in?\n1. Yes\n```"
+        reply = Message(id=5, role="assistant", body=body)
+        turn = api.event(AssistantTurn(reply, JoinType.PARAGRAPH))["turn"]
+        assert turn["segments"] == [
+            {"kind": "prose", "text": "Creak."},
+            {
+                "kind": "tool_call",
+                "tool": "question",
+                "label": "Questions",
+                "actor": "user",
+                "text": "Go in?\n1. Yes",
+                "question": "Go in?",
+                "options": ["Yes"],
+            },
+        ]
+        assert turn["join_type"] == "paragraph"
+
+    def test_a_tool_turn_carries_the_tools_label_and_its_result_verbatim(self) -> None:
+        result = Message(id=6, role="tool", kind="tool", body="Tides: high.", provider="web-search")
+        turn = api.event(ToolTurn(result, JoinType.PARAGRAPH))["turn"]
+        assert (turn["role"], turn["kind"], turn["body"]) == ("tool", "tool", "Tides: high.")
+        assert turn["tool_label"] == "Web search call"
+        assert turn["provider"] == "web-search"
+
+    def test_done_carries_the_report_and_its_notice_and_no_reply(self) -> None:
+        # every row landed before it, each told by its own event
+        assert api.event(Done(report=None, stats="")) == {
+            "type": "done",
+            "stats": "",
+            "report": None,
+            "notice": "",
+        }
+
+    def test_declined_and_failed_carry_their_sentence(self) -> None:
+        assert api.event(Declined("no model"))["reason"] == "no model"
+        assert api.event(Failed("hung up"))["reason"] == "hung up"
+
+
+class TestRows:
+    """`web.api.play.rows` — the stored turns as the page reads them,
+    each joined to the one before it by the join rule."""
+
+    def test_each_row_carries_how_it_joins_the_one_before(self) -> None:
+        story = StoryMode.STORY
+        chain = [
+            Message(id=1, role="user", body="She waited for", mode=story),
+            Message(id=2, role="assistant", body="the bus.", mode=story),
+            Message(id=3, role="user", body="Then?"),
+            Message(id=4, role="assistant", body="\n\nNothing.", mode=story),
+        ]
+        assert [row["join_type"] for row in web_play.rows(chain)] == [
+            "paragraph",
+            "inline",
+            "paragraph",
+            "paragraph",
+        ]
+
+    def test_a_tool_row_is_named_for_the_reader_and_every_other_row_is_not(self) -> None:
+        chain = [
+            Message(id=1, role="assistant", body="```otk-system-info\n```"),
+            Message(id=2, role="tool", kind="tool", body="Time: now", provider="system-info"),
+        ]
+        assert [row["tool_label"] for row in web_play.rows(chain)] == [None, "System info call"]
 
 
 class TestSyntax:
@@ -152,6 +225,11 @@ class TestRoutes:
         # in both would let the compile order decide whether its handler
         # is handed `Pending` — a difference no request could show.
         assert set(api.ROUTES) & set(api.FLOWS) == set()
+
+    def test_the_web_search_key_has_its_read_and_its_write(self) -> None:
+        # one box in the page: what stands is a read, the key a PATCH
+        assert ("GET", "/api/integrations/web_search") in api.ROUTES
+        assert ("PATCH", "/api/integrations/web_search") in api.ROUTES
 
 
 def _surface() -> dict[tuple[str, str], object]:

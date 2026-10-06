@@ -10,8 +10,9 @@ import * as api from "./api.js";
 import { guard } from "./browser.js";
 import { $, $$ } from "./dom.js";
 import { label } from "./format.js";
+import { offerNovel, showLayout } from "./layout.js";
 import { offline, reached, tell, told, working } from "./status.js";
-import { displayTools, isPlaying, showCorrected, showPlayed } from "./transcript.js";
+import { displayTools, isPlaying, joinNext, showCorrected, showPlayed } from "./transcript.js";
 
 const app = $(".otk-app");
 const icon = $('link[rel="icon"]');
@@ -27,14 +28,18 @@ let drawn = null;
 // What the offline line says — needed in two places, so it is named once.
 const GONE = "otaku is down";
 
+// The provider line is drawn from two reads: the facts, and how full the
+// next request is ("85% of 64K", the backend's sentence; "" while
+// the window is not known) — each kept here, so either redraws the line.
+let providing = null;
+let fill = "";
+
 export function showFacts(facts) {
-  const provider = [facts.provider, facts.max_context && `${facts.max_context} context`]
-    .filter(Boolean)
-    .join(" · ");
+  providing = facts;
+  drawProvider();
   const fields = {
     version: `v${facts.version}`,
     model: facts.model,
-    provider: provider,
     story: label(facts.story) || "No story yet",
     turns: facts.turns ? `${facts.turns} messages` : "",
   };
@@ -45,9 +50,39 @@ export function showFacts(facts) {
   // to be somewhere: hovering the name is where.
   const named = $('[data-fact="model"]');
   if (named) named.title = fields.model;
-  // The attach hint is a fact of the model in use: there while it can
-  // see, gone otherwise. The backend refuses a picture regardless.
-  for (const button of $$("[data-attach]")) button.hidden = !facts.vision;
+  // The attach hint is there while a picture may ride the next request
+  // (`facts.can_attach`: the model sees, and the mode's wire carries one),
+  // gone otherwise. The backend refuses a picture regardless.
+  for (const button of $$("[data-attach]")) button.hidden = !facts.can_attach;
+  // The wire and the look on the app root, for the stylesheet and the
+  // composer: over the text wire no picture rides the request, so the flow
+  // shows none (docs/web_tokens.md); on the canvas an empty line continues.
+  // The canvas is typed in where the story is (`transcript.showTail`): the
+  // box stays, disabled, its placeholder saying so — the markup's own one
+  // in every other layout
+  const box = $("#otk-msg");
+  if (box) {
+    box.dataset.placeholder ??= box.placeholder;
+    const was = box.disabled;
+    box.disabled = facts.layout === "canvas";
+    box.dataset.standing = box.disabled ? "Type your turn in the story above" : box.dataset.placeholder;
+    // a refusal of the line typed on the canvas reads in the box until it
+    // settles (`status.complain`)
+    const refused = box.disabled ? box.dataset.refused : undefined;
+    box.placeholder = refused ?? box.dataset.standing;
+    // opened again — a layout switched away from the canvas — it takes the
+    // caret the click could not give it while it was shut
+    const idle = document.activeElement === document.body;
+    if (was && !box.disabled && idle && !window.matchMedia("(pointer: coarse)").matches) box.focus();
+  }
+  if (app) {
+    app.dataset.completion = facts.completion_type;
+    app.dataset.layout = facts.layout;
+  }
+  // where the canvas's typing place draws its space or opens a paragraph
+  joinNext(facts.next_join);
+  // the novel is offered only where the model can complete text
+  offerNovel(facts.can_complete_text);
   drawn = facts.story_id;
 }
 
@@ -55,35 +90,60 @@ export function showFacts(facts) {
 export async function refresh() {
   const facts = await api.facts();
   showFacts(facts);
-  await drawPlayed(facts.story_id);
+  await Promise.all([drawPlayed(facts.story_id), showContextUse()]);
+}
+
+/** How full the next request is, beside the provider — read again with
+    every landing, so after a turn, a switch, an undo. Its own read: the
+    facts stay cheap, and this one assembles the request. */
+export async function showContextUse() {
+  ({ text: fill } = await api.contextUse());
+  drawProvider();
+}
+
+function drawProvider() {
+  /* The provider, then how full the next request is — or, while that is
+     not known, the window alone, where the facts have it. */
+  if (!providing) return;
+  const text = [providing.provider, fill || providing.max_context].filter(Boolean).join(" · ");
+  for (const slot of $$('[data-fact="provider"]')) slot.textContent = text;
 }
 
 /** The transcript from the store: the turns, and — off the story's
     settings, which a story that does not exist yet has none of — which
-    tools' calls the reader is shown. */
-export async function drawPlayed(storyId) {
+    tools' calls the reader is shown, and which layout it is read in. */
+export async function drawPlayed(storyId, { keepPlace = false } = {}) {
   const [played, held] = await Promise.all([
     api.played(),
     storyId === null ? null : api.storySettings(storyId),
   ]);
   displayTools(held?.settings ?? []);
-  showPlayed(played);
+  showLayout(storyId, held?.settings ?? []);
+  showPlayed(played, { keepPlace });
 }
 
 /** What a write answered with, shown where it belongs. The facts are
     always asked again; the transcript is redrawn only when the story it
     draws is no longer the one that is open, because a redraw costs the
     reader their place. `corrected` — `[position, text]` — is one turn
-    corrected elsewhere, shown where the transcript draws it instead. */
-export async function landed(notice, { redraw = "if-moved", corrected = null, kind = "" } = {}) {
+    corrected elsewhere, shown where the transcript draws it instead.
+    `keepPlace`: what a redraw would draw is on the page already — a
+    played line's turns, its story made by that line — so it moves
+    nothing. */
+export async function landed(
+  notice,
+  { redraw = "if-moved", corrected = null, kind = "", keepPlace = false } = {},
+) {
   const facts = await api.facts();
   const moved = facts.story_id !== drawn;
   showFacts(facts);
+  const using = showContextUse();
   if (redraw === "always" || (redraw === "if-moved" && moved)) {
-    await drawPlayed(facts.story_id);
+    await drawPlayed(facts.story_id, { keepPlace });
   } else if (corrected) {
     await showCorrected(...corrected);
   }
+  await using;
   tell(notice, kind);
 }
 
@@ -275,13 +335,15 @@ export function disconnected(gone = true) {
     offline(false);
   }
   /* Every door that reaches the session is shut while there is none:
-     the contents, the model in the rail's foot, the box and the verbs
+     the contents and the layout glyphs, the model in the rail's foot, the box and the verbs
      beside it — Send, Regen, Undo — and the prefix menu, which has
      nothing to insert into. Stop is not one of them: it gives up a
      reply THIS page is holding, which is this side of the connection. */
   for (const control of $$(
-    ".otk-toc button, .otk-rail__foot, .otk-composer textarea, [data-send], [data-turn], [data-prefixes]",
+    ".otk-toc button, .otk-modes button, .otk-rail__foot, .otk-composer textarea, [data-send], [data-turn], [data-prefixes]",
   )) {
-    control.disabled = gone;
+    // the box stays shut in the canvas, which is typed in (`showFacts`)
+    const canvasBox = control.matches("#otk-msg") && $(".otk-app")?.dataset.layout === "canvas";
+    control.disabled = gone || canvasBox;
   }
 }

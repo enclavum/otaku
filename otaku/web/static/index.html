@@ -83,6 +83,20 @@
       <button type="button" class="otk-toc__row" data-sign-out hidden><span>Sign out</span></button>
     </div>
 
+    <!-- HOW THE TRANSCRIPT IS READ. The same turns, three layouts: a
+         continuous text, a manuscript, or a chat. The choice is the
+         story's; `layout.js` shows it and answers the glyphs. -->
+    <div class="otk-modes" role="group" aria-label="Transcript layout">
+      <span class="otk-modes__mark" aria-hidden="true">&#8942;</span>
+      <span class="otk-modes__label">Layout</span>
+      <span class="otk-modes__group">
+        <button type="button" class="otk-mode" data-transcript-mode="novel" aria-pressed="false" title="Novel" aria-label="Novel" hidden><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><g stroke="currentColor" stroke-width="1.5" stroke-linecap="square"><line x1="1.5" y1="2.5" x2="6.5" y2="2.5"></line><line x1="4" y1="2.5" x2="4" y2="8"></line><line x1="9" y1="4" x2="14.5" y2="4"></line><line x1="9" y1="8" x2="14.5" y2="8"></line><line x1="1.5" y1="12" x2="11" y2="12"></line></g></svg></button>
+        <button type="button" class="otk-mode" data-transcript-mode="canvas" aria-pressed="false" title="Canvas" aria-label="Canvas"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><g stroke="currentColor" stroke-width="1.5" stroke-linecap="square"><line x1="1.5" y1="4" x2="14.5" y2="4"></line><line x1="1.5" y1="8" x2="14.5" y2="8"></line><line x1="1.5" y1="12" x2="11" y2="12"></line></g></svg></button>
+        <button type="button" class="otk-mode" data-transcript-mode="manuscript" aria-pressed="true" title="Manuscript" aria-label="Manuscript"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><g stroke="currentColor" stroke-width="1.5" stroke-linecap="square"><line x1="1.5" y1="3.5" x2="14.5" y2="3.5"></line><line x1="5" y1="8" x2="11" y2="8"></line><line x1="1.5" y1="12.5" x2="14.5" y2="12.5"></line></g></svg></button>
+        <button type="button" class="otk-mode" data-transcript-mode="chat" aria-pressed="false" title="Chat" aria-label="Chat"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><g stroke="currentColor" stroke-width="1.5" stroke-linecap="square"><line x1="1.5" y1="3.5" x2="9.5" y2="3.5"></line><line x1="6.5" y1="8" x2="14.5" y2="8"></line><line x1="1.5" y1="12.5" x2="9.5" y2="12.5"></line></g></svg></button>
+      </span>
+    </div>
+
     <!-- STATUS. One reserved line: it holds its height when empty, so nothing
          jumps. The lamp says what the session is doing — answering, working,
          gone — and the text is whatever otaku last had to say. -->
@@ -113,7 +127,7 @@
            it; a played line is a .otk-turn interjection; a failure an
            .otk-error block; and .otk-gap is the space the flow holds open
            after an undo, so the page does not move under the reader. -->
-      <div class="otk-transcript" role="log" aria-live="polite">
+      <div class="otk-transcript" data-transcript="manuscript" role="log" aria-live="polite">
       </div>
 
       <footer class="otk-composer">
@@ -151,9 +165,9 @@
         </div>
 
         <p class="otk-hints">
-          <span>enter send</span><span>shift+enter newline</span><span>&uarr;/&darr; history</span>
+          <span data-hint-box>enter send</span><span data-hint-canvas>enter send</span><span data-hint-box>shift+enter new line</span><span data-hint-canvas>ctrl+enter new paragraph</span><span data-hint-box>&uarr;/&darr; history</span>
           <span>ctrl+r regenerate</span><span>ctrl+u undo</span>
-          <button type="button" data-prefixes>/ commands</button>
+          <button type="button" data-prefixes data-hint-box>/ commands</button>
           <span>esc clear</span>
         </p>
       </footer>
@@ -281,7 +295,7 @@
 <dialog class="otk-panel otk-panel--wide" data-popup="/model" aria-label="Models">
   <header class="otk-panel__head">
     <span class="otk-eyebrow">Models</span>
-    <span class="otk-memory"><span class="otk-label">memory</span><span class="otk-memory__value" data-memory></span></span>
+    <span class="otk-memory"><span class="otk-memory__value" data-memory></span></span>
     <button type="button" class="otk-btn otk-close">Close <span class="otk-btn__key">esc</span></button>
   </header>
 
@@ -363,6 +377,33 @@
   </section>
 </dialog>
 
+<!-- the support docket: a message to otaku's author, sent through
+     otaku.sh, and the address to answer at; nothing of the story rides -->
+<dialog data-popup="/support" aria-label="Feedback / support request">
+  <section class="otk-docket">
+    <div class="otk-docket__tear"></div>
+    <div class="otk-docket__body" tabindex="-1" autofocus>
+      <span class="otk-eyebrow">Feedback / support request</span>
+      <div class="otk-hr"></div>
+      <label class="otk-v otk-v--sm">
+        <span class="otk-label">email <span class="otk-faint">· optional, for a reply</span></span>
+        <input class="otk-field" type="email" placeholder="you@example.com" autocomplete="email" data-support-email>
+      </label>
+      <label class="otk-v otk-v--sm">
+        <span class="otk-label">message</span>
+        <textarea class="otk-field otk-field--area" rows="6" placeholder="What happened, or what you'd like to see" data-support-message></textarea>
+      </label>
+      <p class="otk-note">A bug, a question, or something you'd like otaku to do.</p>
+    </div>
+    <div class="otk-docket__foot">
+      <span class="otk-docket__note" data-note></span>
+      <button type="button" class="otk-btn otk-close">Cancel</button>
+      <button type="button" class="otk-btn otk-btn--primary" data-send>Send</button>
+    </div>
+    <div class="otk-docket__tear otk-docket__tear--bottom"></div>
+  </section>
+</dialog>
+
 <!-- the help docket: the keys, and the language they are typed in -->
 <dialog data-popup="/help" aria-label="Help">
   <section class="otk-docket otk-docket--wide">
@@ -373,6 +414,8 @@
       <div class="otk-slot" data-help-body></div>
     </div>
     <div class="otk-docket__foot">
+      <!-- a command button: the page closes this docket and opens the support one -->
+      <button type="button" class="otk-btn" data-command="/support">Support request</button>
       <span class="otk-docket__note" data-note></span>
       <button type="button" class="otk-btn otk-close">Close <span class="otk-btn__key">esc</span></button>
     </div>
@@ -415,6 +458,20 @@
   </div>
 </dialog>
 
+<!-- the same shape for a character the extractor should never have made -->
+<dialog class="otk-dialog" data-dialog="delete-character" aria-labelledby="otk-del-character-title">
+  <span class="otk-eyebrow" id="otk-del-character-title">Delete this character?</span>
+  <div class="otk-dialog__subject">
+    <span class="otk-dialog__name"></span>
+    <span class="otk-index__sub"></span>
+  </div>
+  <p class="otk-dialog__body">Their journals go with them. Scene summaries still mention them. This cannot be undone.</p>
+  <div class="otk-dialog__foot">
+    <button type="button" class="otk-btn" data-choice="cancel" autofocus>Cancel</button>
+    <button type="button" class="otk-btn otk-btn--danger" data-choice="delete">Delete</button>
+  </div>
+</dialog>
+
 <!-- the same shape with choices instead of a message: resume above the tail -->
 <dialog class="otk-dialog" data-dialog="landing" aria-labelledby="otk-resume-title">
   <span class="otk-eyebrow" data-title id="otk-resume-title"></span>
@@ -435,6 +492,18 @@
   </div>
 </dialog>
 
+<!-- the character this one really is: a list of the others, filled when it
+     opens (`story.askMerge`) -->
+<dialog class="otk-dialog" data-dialog="merge" aria-labelledby="otk-merge-title">
+  <span class="otk-eyebrow" data-title id="otk-merge-title"></span>
+  <p class="otk-dialog__body"></p>
+  <select class="otk-field" data-into aria-label="Merge into" autofocus></select>
+  <div class="otk-dialog__foot">
+    <button type="button" class="otk-btn" data-choice="cancel">Cancel</button>
+    <button type="button" class="otk-btn otk-btn--primary" data-choice="merge">Merge</button>
+  </div>
+</dialog>
+
 <!-- a story to start, and the one thing worth saying up front -->
 <!-- a tool's instruction, edited whole: what the model is told about the
      tool, one text for every story. Esc discards; Save writes prompts.toml. -->
@@ -444,6 +513,20 @@
   <textarea class="otk-field otk-field--mono otk-field--tall" aria-label="Instructions"></textarea>
   <div class="otk-dialog__foot">
     <button type="button" class="otk-btn" data-choice="cancel" autofocus>Cancel</button>
+    <button type="button" class="otk-btn otk-btn--primary" data-choice="save">Save</button>
+  </div>
+</dialog>
+
+<!-- the web search key: ONE key, Tavily's or Exa's — the backend tells them
+     apart by the key's shape and saves it under the engine it belongs to
+     (`backend.api.integrations`). Esc discards; Save writes integrations.toml;
+     saved empty, the key is forgotten. -->
+<dialog class="otk-dialog" data-dialog="web-search-key" aria-labelledby="otk-web-search-key-title">
+  <span class="otk-eyebrow" id="otk-web-search-key-title">Web search API key</span>
+  <p class="otk-dialog__body">Web search asks Tavily or Exa. Paste a key from either — get one at <a href="https://app.tavily.com" target="_blank" rel="noopener">app.tavily.com</a> or <a href="https://dashboard.exa.ai/api-keys" target="_blank" rel="noopener">dashboard.exa.ai</a>.</p>
+  <input class="otk-field otk-field--mono" type="password" autocomplete="off" aria-label="API key" placeholder="API key" autofocus>
+  <div class="otk-dialog__foot">
+    <button type="button" class="otk-btn" data-choice="cancel">Cancel</button>
     <button type="button" class="otk-btn otk-btn--primary" data-choice="save">Save</button>
   </div>
 </dialog>

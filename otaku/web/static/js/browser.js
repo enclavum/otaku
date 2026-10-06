@@ -333,15 +333,26 @@ export function editable(
     });
   }
 
+  /* A FRAME around the value: text before and after the field's own,
+     shown in the field but not its to change — a paragraph edited as
+     one text, the other rows' parts standing (`transcript.correctable`).
+     What the field holds is its value less the frame (`_typed`); the
+     frame is put on and taken off by whoever opens the editor. */
+  field._frame = null;
+  const framed = (own) => (field._frame ? field._frame.prefix + own + field._frame.suffix : own);
+  field._typed = () =>
+    field._frame
+      ? field.value.slice(field._frame.prefix.length, field.value.length - field._frame.suffix.length)
+      : field.value;
   field._restore = () => {
-    field.value = text ?? "";
+    field.value = framed(text ?? "");
   };
   /* What the store holds now, when a write settled on other words than
      were typed — a number normalised, a cleared value's default: the
      field shows them, and they are what Esc puts back from here on. */
   field._settle = (stored) => {
     text = stored ?? "";
-    field.value = text;
+    field.value = framed(text);
   };
   // what the store holds, as far as this field knows
   field._stored = () => text;
@@ -361,9 +372,10 @@ export function editable(
     return pending;
   };
   const commit = async () => {
-    if (field.value === text) return true;
+    const typed = field._typed();
+    if (typed === text) return true;
     try {
-      const answer = await write(field.value);
+      const answer = await write(typed);
       if (answer?.refused) {
         report(answer.notice, "");
         return false;
@@ -372,7 +384,7 @@ export function editable(
          finishing a field blurs it and puts back what it held before —
          the old value standing on screen until the screen the write
          asked for arrives to replace it. */
-      text = field.value;
+      text = typed;
       return true;
     } catch (e) {
       failed(e);
@@ -436,7 +448,12 @@ export function editable(
     that cannot be edited at all — then it takes the label line and no
     verbs, which is how a name only the extractor writes keeps the same
     box as the title beside it. */
-export function edited(field, name, extra = "") {
+export function edited(field, name, extra = "", { opening = null, opened = null, closing = null } = {}) {
+  /* `opening` runs as the editor opens, before the field is sized and
+     focused — where a frame is put on the value (`editable`'s `_frame`);
+     `opened` once it is sized, handed the reading's height as it stood
+     before the editor took its place; `closing` as it closes, before the
+     reading is painted again — where the frame comes off. */
   const box = element("div", `otk-edit ${extra}`.trim());
   const input = field.matches("textarea") ? field : $("textarea.otk-editable", field);
   if (!input) {
@@ -476,20 +493,31 @@ export function edited(field, name, extra = "") {
 
   box._close = () => {
     delete box.dataset.editing;
+    closing?.();
     input.readOnly = true;
     input.tabIndex = -1;
     input.blur();
     shown._repaint?.();
   };
   open.addEventListener("click", () => {
+    // measured while it still stands, before the field takes its place
+    const height = $(".otk-typeset", shown)?.getBoundingClientRect().height ?? 0;
     box.dataset.editing = "true";
+    opening?.();
     input.readOnly = false;
     input.tabIndex = 0;
     // shown only now, so a browser without `field-sizing` sizes it now
     autosize(input);
+    opened?.(height);
     input.focus();
-    // Opened to be continued, not retyped: the caret lands at the end.
-    input.setSelectionRange(input.value.length, input.value.length);
+    // Opened to be continued, not retyped: the caret lands at the end —
+    // of the field's own text, where a frame follows it — or where a
+    // double click asked (`_openAt`), placed first so no other scroll
+    // comes before it.
+    const end = input.value.length - (input._frame?.suffix.length ?? 0);
+    const at = input._openAt == null ? end : input._openAt + (input._frame?.prefix.length ?? 0);
+    input._openAt = null;
+    input.setSelectionRange(at, at);
   });
   save.addEventListener(
     "click",
@@ -513,10 +541,17 @@ export function edited(field, name, extra = "") {
   });
   read.addEventListener("dblclick", (event) => {
     const at = drawnOffset(read, event.clientX, event.clientY);
+    // measured against the stored text before the editor opens on it —
+    // opening may frame the value — and the clicked line's place on screen
+    const caret = at === null ? null : storedOffset(input._stored(), drawnText(read), at);
+    const line = at === null ? null : lineTopAt(event.clientX, event.clientY);
+    input._openAt = caret;
     open.click();
-    if (at === null) return;
-    const caret = storedOffset(input.value, read.textContent, at);
-    input.setSelectionRange(caret, caret);
+    // a field held to the reading's height scrolls: the clicked line kept
+    // where it stood, whatever the raw text puts above it
+    if (caret !== null && line !== null) {
+      keepLine(input, caret + (input._frame?.prefix.length ?? 0), line);
+    }
   });
 
   const verbs = element("span", "otk-edit__verbs");
@@ -528,6 +563,44 @@ export function edited(field, name, extra = "") {
   return box;
 }
 
+/** The top, on screen, of the line of text under the point; null where
+    no text is. */
+function lineTopAt(x, y) {
+  const position = document.caretPositionFromPoint?.(x, y);
+  const node = position?.offsetNode ?? document.caretRangeFromPoint?.(x, y)?.startContainer;
+  const offset = position?.offset ?? document.caretRangeFromPoint?.(x, y)?.startOffset ?? 0;
+  if (!node || node.nodeType !== Node.TEXT_NODE || !node.length) return null;
+  // one character's box: a collapsed range has none in every browser
+  const range = document.createRange();
+  const start = Math.min(offset, node.length - 1);
+  range.setStart(node, start);
+  range.setEnd(node, start + 1);
+  return range.getClientRects()[0]?.top ?? null;
+}
+
+/** Scroll `field` so the line holding `pos` stands at `top` on screen,
+    as near as its scrolling allows. The line is found in a hidden copy
+    of the field, laid out as it is. */
+function keepLine(field, pos, top) {
+  const style = getComputedStyle(field);
+  const copy = document.createElement("div");
+  for (const name of style) copy.style.setProperty(name, style.getPropertyValue(name));
+  const inner = field.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+  Object.assign(copy.style, {
+    position: "absolute", top: "0", left: "-9999px", visibility: "hidden",
+    boxSizing: "content-box", width: `${inner}px`, height: "auto",
+    minHeight: "0", maxHeight: "none", overflow: "hidden", whiteSpace: "pre-wrap",
+  });
+  copy.textContent = field.value.slice(0, pos);
+  const mark = span("", "\u200b");
+  copy.append(mark, field.value.slice(pos));
+  document.body.append(copy);
+  const at = mark.getClientRects()[0].top - copy.getBoundingClientRect().top;
+  copy.remove();
+  const wanted = field.getBoundingClientRect().top + at - top;
+  field.scrollTop = Math.max(0, Math.min(wanted, field.scrollHeight - field.clientHeight));
+}
+
 /** Where in a drawn paragraph the pointer is, as a count of the
     characters before it; null when it is not over the paragraph's text. */
 function drawnOffset(paragraph, x, y) {
@@ -535,10 +608,39 @@ function drawnOffset(paragraph, x, y) {
   const range = position ? null : document.caretRangeFromPoint?.(x, y);
   const node = position?.offsetNode ?? range?.startContainer;
   if (!node || !paragraph.contains(node)) return null;
-  const before = document.createRange();
-  before.setStart(paragraph, 0);
-  before.setEnd(node, position?.offset ?? range.startOffset);
-  return before.toString().length;
+  const offset = position?.offset ?? range.startOffset;
+  const point = document.createRange();
+  point.setStart(node, offset);
+  // the drawn text before the point — a part the walk leaves out (a label,
+  // the join's space) counts as the text after it
+  let count = 0;
+  for (const each of drawnNodes(paragraph)) {
+    if (each === node) return count + offset;
+    if (point.comparePoint(each, 0) > 0) break;
+    count += each.length;
+  }
+  return count;
+}
+
+/* What a drawing adds that the stored text does not hold — a block's label,
+   an option's number, its foot, the join's one space — left out of the
+   drawn text a place in it is mapped by (`storedOffset`). */
+const _DRAWN_ONLY = ".otk-seam, .otk-ask__label, .otk-ask__n, .otk-ask__foot";
+
+function drawnNodes(paragraph) {
+  const out = [];
+  const walker = document.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (!node.parentElement?.closest(_DRAWN_ONLY)) out.push(node);
+  }
+  return out;
+}
+
+/** The drawn text a place is counted in (`drawnOffset`). */
+function drawnText(paragraph) {
+  return drawnNodes(paragraph)
+    .map((node) => node.data)
+    .join("");
 }
 
 /** The place in the stored text of a place in the drawn one. What is drawn

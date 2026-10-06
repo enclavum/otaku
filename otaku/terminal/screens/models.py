@@ -11,14 +11,18 @@ panel naming what is still loading. The user can:
     - move the cursor (↑/↓/PgUp/PgDn/Home/End)
     - type-to-filter by pressing `/` first; Esc cancels the filter
     - toggle load state with `l`/`u` (a confirm dialog, then a spinner)
+    - pin lore extraction to the highlighted model with `x`, or on the
+      model pinned, unpin it; executed at once, the mark the answer
     - press Enter to pick the highlighted model — the switch is EXECUTED
-      here (`api.providers.switch_model`, the screens' one ownership
+      here (`api.providers.set_model`, the screens' one ownership
       rule) and its notice returned. A model that is not loaded yet is
       loaded first (same modal + spinner) and only switched on success.
     - press Esc to leave without picking.
 
-Loaded models render bold; not-loaded muted. The cursor restores to the
-last-used model on open. A provider without load/unload serves its models
+Loaded models render bold; not-loaded muted. The story's model reads
+"[ writing ]" against its figures and the one saved for extraction
+"[ extraction ]", both on a model that is both. The cursor restores to the last-used model
+on open. A provider without load/unload serves its models
 statically: they all show as loaded, Enter picks them directly, and the
 l/u keys (and their help entries) disappear on such a row.
 
@@ -100,7 +104,7 @@ def cursor_line(rows: Sequence[Any], cursor: int) -> int:
 
 def pick(session: Session, initial_spec: str | None = None) -> str | None:
     """Show the picker; a confirmed choice is EXECUTED here
-    (api.providers.switch_model — the screens' one ownership rule) and
+    (api.providers.set_model — the screens' one ownership rule) and
     the switch notice returned; None when the user leaves without
     choosing — silently: at launch the session opens model-less and the
     first turn explains itself, from /model everything stays as it was.
@@ -145,6 +149,11 @@ _KEY_CAPTIONS = {KeySource.CONFIG: "(set)", KeySource.ENV: "(from environment)",
 # to a stub on a pane too narrow to hold one, because a row wider than
 # the pane would wrap, and the scroll maths counts one line per model.
 _ROW_PREFIX = 4
+# The fewest columns a name keeps beside its marks ("[ writing ]"):
+# on a pane narrower than that the marks give way — the name is what
+# tells the row.
+_MIN_NAME = 8
+_MARK_GAP = 4
 _SIZE_COL = 8
 _CONTEXT_COL = 4
 _COL_GAP = 3
@@ -181,7 +190,6 @@ def _style() -> Style:
             # inverted — the one styling that needs no color at all.
             "field.cursor": "reverse",
             "tick": f"fg:{colors.ok.style} {panel}",
-            "notice": f"dim fg:{colors.muted.style} {panel}",
         }
     )
 
@@ -288,7 +296,7 @@ class ModelPicker(ListScreen):
             # rule), back on one thread — an "Already using" refusal is a
             # notice too: either way the session is on that model now.
             try:
-                self.result = api_providers.switch_model(
+                self.result = api_providers.set_model(
                     self.session, self._picked.provider_name, self._picked.model
                 )
             except Refused as e:
@@ -311,6 +319,17 @@ class ModelPicker(ListScreen):
         terminal and a late-arriving cloud catalog are absorbed."""
         tail = _COL_GAP + _SIZE_COL + _COL_GAP + _CONTEXT_COL
         return max(0, self._row_width() - _ROW_PREFIX - tail)
+
+    def _marks(self, entry: ModelEntry, story: str, pinned: str) -> str:
+        """What the model is to the session — "[ writing ]",
+        "[ extraction ]", or both — standing against the figures; "" for
+        neither."""
+        roles = [
+            role
+            for role, spec in (("writing", story), ("extraction", pinned))
+            if spec == entry.full_spec
+        ]
+        return " ".join(f"[ {role} ]" for role in roles)
 
     def _header_text(self) -> StyleAndTextTuples:
         n, total = len(self.filtered), len(self.all)
@@ -351,9 +370,23 @@ class ModelPicker(ListScreen):
         # Every row spans one width: the model name on the left, cut to
         # what the pane leaves it, then the two fixed columns at the
         # right edge — same place on every row, whatever arrives later.
-        labels = [truncate(e.model, self._name_width()) for e in rows]
+        # The marks stand against the figures, and the name gives way to
+        # them — down to `_MIN_NAME`, past which the marks give way.
+        story = api_providers.listed_spec(self.session)
+        pinned = api_providers.listed_extraction_spec(self.session)
+        marks = [self._marks(e, story, pinned) for e in rows]
         # A catalog row has no size at all — not even the unknown dash.
         sizes = ["" if e.cloud else format_size(e.size_bytes) for e in rows]
+        labels: list[str] = []
+        for i, entry in enumerate(rows):
+            # The marks sit `_MARK_GAP` before the size's own text, so what
+            # they take from the name is whatever overflows the size column.
+            marked = sizes[i] if not marks[i] else marks[i] + " " * _MARK_GAP + sizes[i]
+            room = self._name_width() - max(0, len(marked) - _SIZE_COL)
+            if marks[i] and room < min(len(entry.model), _MIN_NAME):
+                marked, room = sizes[i], self._name_width()
+            sizes[i] = marked
+            labels.append(truncate(entry.model, max(0, room)))
         # The context column says what a request would get: the running
         # instance's size while one runs, the model's own otherwise.
         contexts = [format_context(e.max_context_loaded or e.max_context_catalogue) for e in rows]
@@ -411,6 +444,14 @@ class ModelPicker(ListScreen):
             # supports them.
             if self.filtered and self.filtered[self.cursor].can_manage:
                 segments += ["l load", "u unload"]
+            if self.filtered:
+                # On the model pinned for extraction, the way back to the
+                # story's model; on any other, the pin.
+                pinned = api_providers.listed_extraction_spec(self.session)
+                if self.filtered[self.cursor].full_spec == pinned:
+                    segments.append("x unset extraction model")
+                else:
+                    segments.append("x use for extraction")
             segments += ["enter select", "tab providers", "esc quit"]
             txt = " " + " · ".join(segments)
         return [("class:help", txt)]
@@ -697,6 +738,26 @@ class ModelPicker(ListScreen):
             self._request_load()
         elif key == "u":
             self._request_unload()
+        elif key == "x":
+            self._toggle_extraction()
+
+    def _toggle_extraction(self) -> None:
+        """`x`: pin lore extraction to the highlighted model, or — on the
+        one pinned — back to the model played with, through `backend.api`
+        at once. The row's mark is the answer; a refusal is kept in
+        `notice`, drawn nowhere."""
+        if self.side != "models" or self.in_filter or self.confirming_action or not self.filtered:
+            return
+        entry = self.filtered[self.cursor]
+        try:
+            if entry.full_spec == api_providers.listed_extraction_spec(self.session):
+                self.notice = api_providers.clear_extraction_model(self.session)
+            else:
+                self.notice = api_providers.set_extraction_model(
+                    self.session, entry.provider_name, entry.model
+                )
+        except Refused as e:
+            self.notice = str(e)
 
     # ---------- provider field editing ----------
 
@@ -1031,10 +1092,6 @@ class ModelPicker(ListScreen):
                 text_line(self._header_text, style="class:header"),
                 Window(height=1, char=" ", always_hide_cursor=True),
                 items_window,
-                text_line(
-                    lambda: [("class:notice", "  " + self.notice if self.notice else "")],
-                    filter=Condition(lambda: bool(self.notice)),
-                ),
                 Window(height=1, char=" ", always_hide_cursor=True),
                 bottom_row,
             ],

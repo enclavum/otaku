@@ -56,6 +56,11 @@ const _WORD = /[\p{L}\p{N}]/u;
 // emphasis that opens and a dash that speaks.
 const _BREAK = /^\s*(?:\*\s*){3,}$|^\s*(?:-\s*){3,}$|^\s*(?:_\s*){3,}$/;
 
+// A fence line — three or more backticks at the head of a line, up to
+// three spaces in — is block structure: the characters typed, never
+// three code spans flipping. The rule is `context.tool_calls`' (`_BARE`).
+const _FENCE = /^ {0,3}`{3,}/;
+
 /** One paragraph as NODES, ready to put in a `<p>`: the runs above, each
     wrapped in what it is. `spoken` says the whole paragraph was speech,
     which the design draws on the paragraph rather than run by run.
@@ -244,7 +249,7 @@ export function runs(paragraph) {
 
   paragraph.split("\n").forEach((line, i) => {
     if (i) consume("\n");
-    if (_BREAK.test(line)) {
+    if (_BREAK.test(line) || _FENCE.test(line)) {
       cut();
       for (const ch of line) take(ch);
     } else {

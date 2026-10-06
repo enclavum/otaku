@@ -25,7 +25,7 @@ from typing import Any, Self
 from prompt_toolkit.completion import CompleteEvent, Completer, Completion
 from prompt_toolkit.document import Document
 
-from otaku.backend.commands import COMMANDS, CommandKind, CommandSpec
+from otaku.backend.commands import COMMANDS, CommandSpec, CommandType
 from otaku.backend.session import PARAMETERS, THINK_MENU
 from otaku.terminal.prompt import pictures
 from otaku.terminal.tty import latin_key
@@ -43,7 +43,7 @@ PATH_LEAF = "<path>"
 _DIRECTIONS = frozenset(
     spec.token
     for spec in COMMANDS
-    if spec.kind is CommandKind.SYNTAX and not spec.token.startswith("…")
+    if spec.kind is CommandType.SYNTAX and not spec.token.startswith("…")
 )
 
 # A leaf may instead be NAME_LEAF: "a character name goes here" — the
@@ -60,6 +60,7 @@ THINK_LEAF = "<level>"
 # provider in use reads, looked up live (`api.settings.parameter_names`),
 # each followed by its `reset`.
 PARAMETER_LEAF = "<parameter>"
+
 
 CompletionTree = dict[str, "CompletionTree | str | None"]
 
@@ -354,6 +355,8 @@ def _subcommand_leaf(name: str) -> "CompletionTree | str | None":
         return PARAMETER_LEAF
     if name in ("verbose", "autocorrect", "notification"):
         return {"on": None, "off": None}
+    if name == "mode":
+        return {"chat": None, "story": None}
     return None
 
 

@@ -114,6 +114,10 @@ class ModelInfo:
     # Where the model is served, when that is not where its provider's
     # server runs: None, and it is the provider's.
     locality: Locality | None = None
+    # The text template's family — the chat markers the model was trained
+    # on, as `templates.TEXT_TEMPLATES` names them — where the engine
+    # tells it; None where it cannot say.
+    text_template: str | None = None
 
     @property
     def max_context(self) -> int | None:
@@ -298,6 +302,7 @@ class OpenAIModels:
             max_output_tokens=fresh.max_output_tokens or cached.max_output_tokens,
             capabilities=fresh.capabilities or cached.capabilities,
             locality=fresh.locality or cached.locality,
+            text_template=fresh.text_template or cached.text_template,
         )
 
     # ---------- the hooks: each reads the engine and nothing else ----------

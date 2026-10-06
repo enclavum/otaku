@@ -5,7 +5,8 @@
    Scenes and cast are the same pane with the fields transposed: an
    index of one kind, a reading column at full measure, and the
    apparatus margin beside it holding everything the extractor wrote and
-   nobody may edit. What IS editable opens where it is read.
+   nobody may edit — a character's ending in the merge and the delete.
+   What IS editable opens where it is read.
 
    Any story opens whole, and any story EDITS: every write carries the
    story it belongs to, so a correction lands where it was read whether
@@ -189,6 +190,7 @@ function buildMessages(view, pane) {
     haystack: `${message.body} ${message.speaker ?? ""}`.toLowerCase(),
   }));
   tabNote(view, "messages", `${rows.length} ${rows.length === 1 ? "message" : "messages"}`);
+  padScrollbar($("[data-detail]", pane));
   if (!rows.length) $("[data-actions]", pane).replaceChildren();
   // `e` is the keyboard's way to the same verb the pointer takes.
   const edit = () => $("[data-detail] .otk-edit__verb--edit", pane)?.click();
@@ -196,21 +198,27 @@ function buildMessages(view, pane) {
     root: pane,
     rows,
     drawRow: (message) => {
-      const who = message.role === "user" ? "you" : message.speaker || "—";
+      // who the row is: a tool's result and a card's line by what they
+      // are, the reader's own line, or the speaker the pass named
+      const who =
+        message.kind === "tool" || message.kind === "card"
+          ? message.kind
+          : message.role === "user"
+            ? "you"
+            : message.speaker || "—";
       /* The words, and right after them the turn's pictures counted, as
          the terminal's list sets its note (`terminal.screens.story`): the
          count reads with the line, and stays in view when the line is
-         cut. The kind keeps the row's end. */
+         cut. */
       const title = element("span", "otk-row__title otk-row__title--noted");
       title.append(span("otk-row__text", excerpt(message.body, 300)));
       const pictures = message.attachments?.length ?? 0;
       if (pictures) title.append(span("otk-tag", `${pictures} picture${pictures === 1 ? "" : "s"}`));
       const drawn = row(
         span("otk-row__id", String(message.position)),
-        span(message.role === "user" ? "otk-row__who otk-row__who--you" : "otk-row__who", who),
+        span(who === "you" ? "otk-row__who otk-row__who--you" : "otk-row__who", who),
         title,
       );
-      if (message.kind && message.kind !== "dialogue") drawn.append(span("otk-tag", message.kind));
       // what a save finds its row by: the cursor may be elsewhere by then
       drawn.dataset.id = String(message.id);
       return drawn;
@@ -224,6 +232,20 @@ function buildMessages(view, pane) {
         : { line: "Nothing played yet.", hint: "continue this story to play into it" },
   });
   view.select.messages = (id) => list.select((message) => message.id === id);
+}
+
+function padScrollbar(scroll) {
+  /* A scrollbar that takes room in the reader stands 10px off the text,
+     whenever it comes and goes: a message drawn, its editor grown, the
+     window resized. Watched once: the pane serves every story. */
+  if (scroll._padded) return;
+  scroll._padded = true;
+  const check = () => {
+    const pad = scroll.offsetWidth > scroll.clientWidth ? "10px" : "";
+    if (scroll.style.paddingRight !== pad) scroll.style.paddingRight = pad;
+  };
+  new ResizeObserver(check).observe(scroll);
+  new MutationObserver(check).observe(scroll, { childList: true, subtree: true, attributes: true, characterData: true });
 }
 
 /** The id of a scene's first message on the current chain — null when
@@ -263,9 +285,11 @@ function drawReader(view, pane, message, edit) {
   head.append(span("otk-label otk-label--ink", `Message ${message.position}`));
   if (message.kind) head.append(span("otk-tag", message.kind));
 
-  // The message is corrected where it is read: the reader IS the field.
+  // The message is corrected where it is read: the reader IS the field —
+  // without the whitespace at its edges, the row's join, which the save
+  // keeps (`stories.edit_message`), as the transcript's field does.
   const body = element("div", "otk-detail__section");
-  body.append(edited(reader(message.body, (text) => saveMessage(view, message, text)), "message"));
+  body.append(edited(reader(message.body.trim(), (text) => saveMessage(view, message, text)), "message"));
 
   const out = [head, body];
 
@@ -441,6 +465,7 @@ function drawScene(view, pane, scene) {
       marginFact("extracted", element("p", "otk-margin__value otk-margin__value--mono", ago(scene.updated_at))),
     );
   }
+  if (scene.model) facts.push(madeBy(scene));
   if (scene.history) {
     facts.push(
       marginBlock(
@@ -449,7 +474,11 @@ function drawScene(view, pane, scene) {
       ),
     );
   }
-  margin.replaceChildren(span("otk-label", "Apparatus"), ...facts, marginFoot());
+  margin.replaceChildren(
+    span("otk-label", "Apparatus"),
+    ...facts,
+    marginFoot("Nothing in this column is rewritten by hand — the extractor writes it on every pass."),
+  );
 }
 
 function sceneIndex(view, rail, currentId, { onPick }) {
@@ -597,6 +626,7 @@ function drawCharacter(view, pane, character) {
       element("p", "otk-derived", character.aliases.join(" · ") || "none recorded"),
     ),
   );
+  if (character.model) facts.push(madeBy(character));
   /* Their arc so far, the counterpart of the scene's own: same block,
      same rule above it, so the two lenses read as one apparatus. */
   if (character.history) {
@@ -626,7 +656,90 @@ function drawCharacter(view, pane, character) {
           element("p", "otk-derived", "none — extracted from the story, not imported"),
         ),
   );
-  margin.replaceChildren(span("otk-label", "Apparatus"), ...facts, marginFoot());
+  margin.replaceChildren(
+    span("otk-label", "Apparatus"),
+    ...facts,
+    marginFoot("The facts above are rewritten on every pass."),
+    manageBlock(view, character),
+  );
+}
+
+function manageBlock(view, character) {
+  /* What is done TO the character, pinned under what is known about it.
+     A merge needs another character to fold into. */
+  const row = element("div", "otk-manage__row");
+  row.append(
+    actionButton("Merge into…", {
+      off: (view.memory?.characters ?? []).length < 2,
+      onclick: guard(() => askMerge(view, character)),
+    }),
+    actionButton("Delete", {
+      kind: "otk-btn--danger",
+      onclick: guard(() => askDelete(view, character)),
+    }),
+  );
+  const box = element("div", "otk-manage");
+  box.append(row);
+  return box;
+}
+
+async function askMerge(view, character) {
+  /* Which character this one really is, picked from the list; the
+     button applies. Nothing is picked up front, so a stray Enter merges
+     nobody. */
+  let into = null;
+  const others = (view.memory?.characters ?? []).filter((entry) => entry.id !== character.id);
+  const choice = await ask("merge", (dialog) => {
+    $("[data-title]", dialog).textContent = `Merge ${character.name} into…`;
+    $(".otk-dialog__body", dialog).textContent =
+      `Their journals move to the one you pick, and '${character.name}' becomes an alias.`;
+    const confirm = $('[data-choice="merge"]', dialog);
+    confirm.disabled = true;
+    const list = $("[data-into]", dialog);
+    // the unpicked state: shown empty, never offered again once left
+    const unpicked = element("option");
+    unpicked.value = "";
+    unpicked.disabled = unpicked.hidden = unpicked.selected = true;
+    const options = others.map((entry) => {
+      const option = element("option", "", entry.name);
+      option.value = String(entry.id);
+      return option;
+    });
+    list.replaceChildren(unpicked, ...options);
+    list.selectedIndex = 0;
+    list.onchange = () => {
+      into = list.value ? Number(list.value) : null;
+      confirm.disabled = into === null;
+    };
+  });
+  if (choice !== "merge" || into === null) return;
+  await recast(view, await api.mergeCharacter(view.subject.id, character.id, into), into);
+}
+
+async function askDelete(view, character) {
+  const choice = await ask("delete-character", (dialog) => {
+    $(".otk-dialog__name", dialog).textContent = character.name;
+    // what lets a reader catch a wrong selection, in a write with no undo
+    $(".otk-dialog__subject .otk-index__sub", dialog).textContent = inScenes(character);
+  });
+  if (choice !== "delete") return;
+  await recast(view, await api.deleteCharacter(view.subject.id, character.id), null);
+}
+
+async function recast(view, answer, selectId) {
+  /* A merge or a delete changes the cast itself and every tab that draws
+     it — a scene's "present", a message's speaker — so the story is read
+     again and those tabs are built anew, the cast at once. A refusal
+     changed nothing; either way the answer is the footnote. */
+  if (!answer.refused) {
+    const opened = await api.story(view.subject.id);
+    view.messages = opened.messages ?? [];
+    view.memory = opened.notice ? null : opened;
+    view.refused = opened.notice ?? "";
+    for (const tab of ["messages", "scenes", "cast"]) view.built.delete(tab);
+    show(view, "cast", selectId);
+  }
+  footnote(view.popup, answer.notice);
 }
 
 // ---------- the field shapes both lenses share ----------
@@ -778,18 +891,22 @@ function marginFact(key, valueNode) {
   return box;
 }
 
+/** Who made a scene or a character — the pass's engine and model, or
+    the card and its file — joined as the message detail joins a turn's
+    "answered by". Absent on a row no pass made, or an older one. */
+function madeBy(row) {
+  const value = [row.provider, row.model].filter(Boolean).join(" · ");
+  return marginFact("model", element("p", "otk-margin__value otk-margin__value--mono", value));
+}
+
 function marginBlock(key, valueNode) {
   const box = marginFact(key, valueNode);
   box.classList.add("otk-margin__block");
   return box;
 }
 
-function marginFoot() {
-  return element(
-    "p",
-    "otk-note otk-note--push",
-    "Nothing in this column is rewritten by hand — the extractor writes it on every pass.",
-  );
+function marginFoot(text) {
+  return element("p", "otk-note otk-note--push", text);
 }
 
 function derivedRow(key, flag, valueNode) {

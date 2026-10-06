@@ -5,11 +5,11 @@ build-backend = "hatchling.build"
 [project]
 name = "otaku"
 dynamic = ["version"]
-description = "LLM frontend for roleplay"
+description = "LLM frontend for creative writing and roleplay"
 readme = "README.md"
 license = "AGPL-3.0-only"
 license-files = ["LICENSE"]
-authors = [{ name = "enclavum", email = "feedback@otaku.sh" }]
+authors = [{ name = "enclavum", email = "support@otaku.sh" }]
 requires-python = ">=3.11"
 # The GitHub repository topics, kept in step with them — one discovery
 # vocabulary, whichever index a reader arrives from. `omlx`, `story` and `lore`
@@ -66,6 +66,7 @@ otaku = "otaku.cli:main"
 [dependency-groups]
 dev = [
     "mypy>=2.3,<3",
+    "pyte>=0.8.2,<0.9",
     "pytest>=9.1,<10",
     "ruff>=0.16,<0.17",
 ]
@@ -117,5 +118,6 @@ testpaths = ["tests"]
 markers = [
     "live: talks to a real provider (each smoke skips itself when its server or api key is absent)",
     "cli: drives the real binary in a subprocess or a pty — the slow end of the suite",
+    "slow: minutes, not seconds — deselected unless `--slow` is given (`make regression`)",
 ]
 addopts = "-q"

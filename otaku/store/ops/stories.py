@@ -25,7 +25,7 @@ from datetime import datetime
 
 from otaku.store.database import Database
 from otaku.store.files import FileStore
-from otaku.store.schema import Attachment, Message, Story, StorySettingDB
+from otaku.store.schema import Attachment, Message, Story, StoryMode, StorySettingDB
 
 # The numbered suffix a fork's title carries — every one it has collected,
 # so numbering works off the stem and the suffixes can never pile up
@@ -242,8 +242,8 @@ class StoryOps:
             head = self.get_head(story_id)
             # fmt: off
             cur = conn.execute(
-                "INSERT INTO messages (story_id, parent_id, role, kind, speaker_id, speaker, body, template, provider, model, created_at, updated_at, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (story_id, head, message.role, message.kind, message.speaker_id, self._db.seal_opt(message.speaker), self._db.seal(message.body), self._db.seal_opt(message.template), message.provider, message.model, now, now, Attachment.to_json(message.attachments)),
+                "INSERT INTO messages (story_id, parent_id, role, kind, speaker_id, speaker, body, template, provider, model, created_at, updated_at, attachments, mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (story_id, head, message.role, message.kind, message.speaker_id, self._db.seal_opt(message.speaker), self._db.seal(message.body), self._db.seal_opt(message.template), message.provider, message.model, now, now, Attachment.to_json(message.attachments), message.mode.value),
             )
             message_id = int(cur.lastrowid or 0)
             conn.execute(
@@ -265,7 +265,7 @@ class StoryOps:
             "    SELECT id, parent_id, 0 FROM messages WHERE id = ?"
             "    UNION ALL"
             "    SELECT m.id, m.parent_id, chain.depth + 1 FROM messages m JOIN chain ON m.id = chain.parent_id) "
-            "SELECT m.id, m.role, m.kind, m.speaker_id, m.speaker, m.body, m.template, m.provider, m.model, m.attachments "
+            "SELECT m.id, m.role, m.kind, m.speaker_id, m.speaker, m.body, m.template, m.provider, m.model, m.attachments, m.mode "
             "FROM chain JOIN messages m ON m.id = chain.id ORDER BY chain.depth DESC",
             (head,),
         ).fetchall()
@@ -282,8 +282,9 @@ class StoryOps:
                 provider=provider,
                 model=model,
                 attachments=Attachment.from_json(attachments),
+                mode=StoryMode.from_value(mode),
             )
-            for mid, role, kind, speaker_id, speaker, body, template, provider, model, attachments in rows
+            for mid, role, kind, speaker_id, speaker, body, template, provider, model, attachments, mode in rows
         ]
 
     def get_messages_ids(self, story_id: int) -> builtins.list[int]:
@@ -360,54 +361,54 @@ class StoryOps:
 
             character_map: dict[int, int] = {}
             rows = conn.execute(
-                "SELECT id, name, aliases, description, card FROM characters WHERE story_id = ?",
+                "SELECT id, name, aliases, description, card, provider, model FROM characters WHERE story_id = ?",
                 (story_id,),
             ).fetchall()
-            for cid, name, aliases, description, card in rows:
+            for cid, name, aliases, description, card, c_provider, c_model in rows:
                 cur = conn.execute(
-                    "INSERT INTO characters (story_id, name, aliases, description, card, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (new_story, name, aliases, description, card, now, now),
+                    "INSERT INTO characters (story_id, name, aliases, description, card, created_at, updated_at, provider, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (new_story, name, aliases, description, card, now, now, c_provider, c_model),
                 )
                 character_map[int(cid)] = int(cur.lastrowid or 0)
 
             message_map: dict[int, int] = {}
             for mid in chain:
                 row = conn.execute(
-                    "SELECT parent_id, role, kind, speaker_id, speaker, body, template, provider, model, created_at, attachments FROM messages WHERE id = ?",
+                    "SELECT parent_id, role, kind, speaker_id, speaker, body, template, provider, model, created_at, attachments, mode FROM messages WHERE id = ?",
                     (mid,),
                 ).fetchone()
                 parent, role, kind, speaker_id, speaker = row[:5]
-                body, template, provider, model, created, attachments = row[5:]
+                body, template, provider, model, created, attachments, mode = row[5:]
                 cur = conn.execute(
-                    "INSERT INTO messages (story_id, parent_id, role, kind, speaker_id, speaker, body, template, provider, model, created_at, updated_at, attachments) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (new_story, message_map.get(parent), role, kind, character_map.get(speaker_id), speaker, body, template, provider, model, created, now, attachments),
+                    "INSERT INTO messages (story_id, parent_id, role, kind, speaker_id, speaker, body, template, provider, model, created_at, updated_at, attachments, mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (new_story, message_map.get(parent), role, kind, character_map.get(speaker_id), speaker, body, template, provider, model, created, now, attachments, mode),
                 )
                 message_map[int(mid)] = int(cur.lastrowid or 0)
 
             scene_map: dict[int, int] = {}
             rows = conn.execute(
-                "SELECT id, start_message_id, end_message_id, title, summary, history, created_at FROM scenes WHERE story_id = ? ORDER BY id",
+                "SELECT id, start_message_id, end_message_id, title, summary, history, created_at, provider, model FROM scenes WHERE story_id = ? ORDER BY id",
                 (story_id,),
             ).fetchall()
-            for sid, start, end, s_title, summary, history, created in rows:
+            for sid, start, end, s_title, summary, history, created, s_provider, s_model in rows:
                 if start not in copied or end not in copied:
                     continue
                 cur = conn.execute(
-                    "INSERT INTO scenes (story_id, start_message_id, end_message_id, title, summary, history, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (new_story, message_map[start], message_map[end], s_title, summary, history, created, now),
+                    "INSERT INTO scenes (story_id, start_message_id, end_message_id, title, summary, history, created_at, updated_at, provider, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (new_story, message_map[start], message_map[end], s_title, summary, history, created, now, s_provider, s_model),
                 )
                 scene_map[int(sid)] = int(cur.lastrowid or 0)
 
             rows = conn.execute(
-                "SELECT scene_id, character_id, entry, state, history, created_at FROM journals WHERE story_id = ? ORDER BY id",
+                "SELECT scene_id, character_id, entry, state, history, created_at, provider, model FROM journals WHERE story_id = ? ORDER BY id",
                 (story_id,),
             ).fetchall()
-            for scene_id, character_id, entry, state, history, created in rows:
+            for scene_id, character_id, entry, state, history, created, j_provider, j_model in rows:
                 if scene_id not in scene_map:
                     continue
                 conn.execute(
-                    "INSERT INTO journals (story_id, scene_id, character_id, entry, state, history, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (new_story, scene_map[scene_id], character_map[character_id], entry, state, history, created, now),
+                    "INSERT INTO journals (story_id, scene_id, character_id, entry, state, history, created_at, updated_at, provider, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (new_story, scene_map[scene_id], character_map[character_id], entry, state, history, created, now, j_provider, j_model),
                 )
 
             new_head = message_map.get(cut) if cut is not None else None

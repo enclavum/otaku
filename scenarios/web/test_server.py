@@ -20,9 +20,13 @@ from urllib.parse import urlsplit
 
 import pytest
 
+from otaku.backend import Layout
 from otaku.backend.paths import Paths
 from otaku.backend.session import PARAMETERS, THINK_MENU
-from scenarios.support.harness import set_config, set_config_provider
+from otaku.integrations import SupportDesk
+from otaku.settings import models as models_file
+from scenarios.support import server as scripted
+from scenarios.support.harness import MODEL, set_config, set_config_provider
 from scenarios.support.server import ModelServer
 from scenarios.web.conftest import Page, serving
 
@@ -137,6 +141,50 @@ class TestReading:
         # banner's own split, which the page draws in two places.
         assert facts["model"] == "test-model"
         assert facts["provider"]
+
+    def test_the_extraction_model_is_saved_named_and_unset(self, page: Page) -> None:
+        # The session facts name the model extraction asks — the story's
+        # until one is saved — and the picker marks a saved one alone.
+        assert page.get("/api/session")["extraction_model"] == "generic/test-model"
+        assert page.get("/api/providers?scope=local")["extraction"] == ""
+        saved = page.put("/api/session/extraction_model", {"provider": "generic", "model": "x"})
+        assert saved["notice"] and not saved.get("refused")
+        assert page.get("/api/session")["extraction_model"] == "generic/x"
+        assert page.get("/api/providers?scope=local")["extraction"] == "generic/x"
+        assert not page.delete("/api/session/extraction_model").get("refused")
+        assert page.get("/api/session")["extraction_model"] == "generic/test-model"
+        assert page.delete("/api/session/extraction_model")["refused"] is True
+
+    def test_scenes_and_characters_say_who_made_them(self, page: Page) -> None:
+        page.play("I listen at the culvert mouth.")
+        story = page.get("/api/session")["story_id"]
+        ids = page.store.stories.get_messages_ids(story)
+        first, last = ids[0], ids[-1]
+        page.store.scenes.add(
+            story, start_message_id=first, end_message_id=last, summary="s", provider="p", model="m"
+        )
+        page.store.characters.add(story, "Maren", provider="card", model="maren.png")
+        page.store.characters.add(story, "Tallis")
+        memory = page.get(f"/api/stories/{story}")
+        assert [(s["provider"], s["model"]) for s in memory["scenes"]] == [("p", "m")]
+        made = [(c["provider"], c["model"]) for c in memory["characters"]]
+        assert made == [("card", "maren.png"), (None, None)]
+
+    def test_the_context_use_is_the_preview_s_own_figure(self, tmp_path: Path) -> None:
+        # Absent while the model is not loaded; once a turn loaded it, the
+        # figure /context reports, against the model's window.
+        engine = ModelServer(managed=True)
+        engine.contexts["test-model"] = 32768
+        try:
+            with serving(engine, tmp_path, provider="ollama") as page:
+                unknown = page.get("/api/session/context_use")
+                assert unknown == {"used": None, "context": None, "text": ""}
+                page.play("I listen at the culvert mouth.")
+                use = page.get("/api/session/context_use")
+                assert use["used"] == page.get("/api/session/context")["shape"]["used"]
+                assert use["context"] == 32768 and use["text"]
+        finally:
+            engine.close()
 
     def test_the_turns_are_the_story_as_the_store_has_it(self, page: Page) -> None:
         page.play("I listen at the culvert mouth.")
@@ -337,9 +385,10 @@ class TestPlaying:
     def test_a_line_plays_and_lands_in_the_store(self, page: Page) -> None:
         events = page.play("I unroll the county survey.")
         kinds = [event["type"] for event in events]
-        assert kinds[0] == "recorded"
-        assert "text" in kinds
-        assert kinds[-1] == "done"
+        assert kinds[0] == "user_turn"
+        assert "assistant_text" in kinds
+        # the model's row lands as its own event before the end
+        assert kinds.index("assistant_turn") < kinds.index("done") == len(kinds) - 1
         # The turn's end carries the reply's report as facts and its
         # notice — nothing to say of a reply the model finished.
         assert events[-1]["notice"] == ""
@@ -353,21 +402,23 @@ class TestPlaying:
     def test_a_tool_call_reaches_the_page_split_and_read(
         self, page: Page, server: ModelServer
     ) -> None:
-        # The page parses nothing: a call streams as `tool_call` pieces,
-        # the stored turn arrives in segments with the call read — and
-        # the play read carries the same, for a page opening on it.
+        # The page parses nothing: a call streams as `assistant_tool_call`
+        # pieces, the landed turn arrives in segments with the call read —
+        # and the play read carries the same, for a page opening on it.
         server.script = lambda body: "The door creaks.\n```otk-question\nGo in?\n1. Yes\n```"
         events = page.play("I enter the hall.")
-        calls = [event for event in events if event["type"] == "tool_call"]
+        calls = [event for event in events if event["type"] == "assistant_tool_call"]
         assert calls and all(event["tool"] == "question" for event in calls)
         assert "".join(event["text"] for event in calls) == "Go in?\n1. Yes"
-        assert all("```" not in e["text"] for e in events if e["type"] == "text")
-        done = events[-1]
-        assert done["reply"]["segments"] == [
+        assert all("```" not in e["text"] for e in events if e["type"] == "assistant_text")
+        landed = next(e for e in events if e["type"] == "assistant_turn")["turn"]
+        assert landed["segments"] == [
             {"kind": "prose", "text": "The door creaks."},
             {
                 "kind": "tool_call",
                 "tool": "question",
+                "label": "Questions",
+                "actor": "user",
                 "text": "Go in?\n1. Yes",
                 "question": "Go in?",
                 "options": ["Yes"],
@@ -375,7 +426,19 @@ class TestPlaying:
         ]
         played = page.get("/api/play")
         assert set(played) == {"messages"}
-        assert played["messages"][-1]["segments"] == done["reply"]["segments"]
+        assert played["messages"][-1]["segments"] == landed["segments"]
+
+    def test_a_lines_words_with_the_model_reach_the_page_apart(self, page: Page) -> None:
+        # A played line is split by the backend too: its story, and what
+        # follows an inliner as words with the model — in the landing and
+        # in the play read alike, so the page parses nothing.
+        events = page.play("I wait at the gate. /cue make it rain")
+        landed = next(e for e in events if e["type"] == "user_turn")["turn"]
+        assert landed["segments"] == [
+            {"kind": "prose", "text": "I wait at the gate. /cue"},
+            {"kind": "ooc", "text": " make it rain"},
+        ]
+        assert page.get("/api/play")["messages"][-2]["segments"] == landed["segments"]
 
     def test_the_wire_carries_what_the_page_typed(self, page: Page, server: ModelServer) -> None:
         page.play("I mark the river's true course.")
@@ -393,7 +456,7 @@ class TestPlaying:
         # event as its note — the page never rolls, and never parses the
         # frozen template to find out what fell.
         events = page.play("/roll 1d6 I duck behind the crates.")
-        assert events[0]["type"] == "recorded"
+        assert events[0]["type"] == "user_turn"
         assert "1d6 = " in events[0]["note"]
 
 
@@ -487,6 +550,17 @@ class TestWrites:
         assert answer["refused"] is True
         assert page.store.stories.get_messages(mine)[0].body == first.body
 
+    def test_a_character_is_deleted_only_under_its_own_story(self, page: Page) -> None:
+        page.play("I listen at the culvert mouth.")
+        mine = page.get("/api/session")["story_id"]
+        stranger = page.store.characters.add(mine, "Stranger")
+        other = page.sent("POST", "/api/stories", {"title": "Elsewhere"})[2]["story"]
+        assert page.delete(f"/api/stories/{other}/characters/{stranger}")["refused"] is True
+        assert [c.id for c in page.store.characters.list(mine)] == [stranger]
+        answer = page.delete(f"/api/stories/{mine}/characters/{stranger}")
+        assert answer["notice"] and not answer.get("refused")
+        assert page.store.characters.list(mine) == []
+
     def test_a_null_where_a_number_belongs_is_the_page_s_fault(self, page: Page) -> None:
         # Malformed, not broken: a 400 and no crash filed. Anything that
         # scans this port can send one.
@@ -545,11 +619,13 @@ class TestStorySettings:
         "label",
         "injection_label",
         "tool",
+        "prompt_name",
         "allowed_positions",
         "enabled",
         "position",
         "reminder_text",
         "display_notes",
+        "layout",
     )
 
     def test_every_setting_answers_the_same_questions(self, page: Page) -> None:
@@ -565,12 +641,68 @@ class TestStorySettings:
         assert by_name["allow_questions"]["display_notes"] is None
         assert by_name["allow_assistant_notes"]["display_notes"] is True
         assert by_name["use_story_reminder"]["tool"] is None
-        # what each injects is named, lowercase; a flag injects nothing
+        # what each injects is named, lowercase
         assert by_name["allow_assistant_notes"]["injection_label"] == "assistant notes"
         assert by_name["use_story_reminder"]["injection_label"] == "story reminder"
-        assert by_name["story_mode"]["injection_label"] is None
         assert by_name["use_story_reminder"]["reminder_text"] == ""
         assert by_name["use_story_reminder"]["allowed_positions"] == list(range(1, 9))
+        # the layout is a value, not a switch: always on, no position,
+        # the manuscript until the story says otherwise; a switch has none
+        assert by_name["layout"]["enabled"] is True
+        assert by_name["layout"]["allowed_positions"] == []
+        assert by_name["layout"]["layout"] == "manuscript"
+        assert by_name["allow_questions"]["layout"] is None
+        # the emulation is off until the story switches it on, as every
+        # switch is, in the system message by default, its text named
+        emulation = by_name["emulate_text_completion"]
+        assert (emulation["enabled"], emulation["position"], emulation["tool"]) == (
+            False,
+            "system",
+            None,
+        )
+        assert emulation["injection_label"] == "text completion emulation"
+        assert emulation["allowed_positions"] == ["system", *range(1, 9)]
+        assert (emulation["reminder_text"], emulation["display_notes"]) == (None, None)
+
+    def test_the_layout_is_patched_as_a_value_and_the_store_follows(self, page: Page) -> None:
+        page.play("I listen at the culvert mouth.")
+        story = page.get("/api/session")["story_id"]
+        answer = page.patch(f"/api/stories/{story}/settings/layout", {"layout": "canvas"})
+        assert answer["notice"] and "refused" not in answer
+        row = next(s for s in page.store.stories.get_settings(story) if s.name == "layout")
+        assert row.layout is Layout.CANVAS
+        # it has no switch to move, and takes the four names alone
+        answer = page.patch(f"/api/stories/{story}/settings/layout", {"enabled": False})
+        assert answer["refused"] is True
+        with pytest.raises(urllib.error.HTTPError) as caught:
+            page.patch(f"/api/stories/{story}/settings/layout", {"layout": "scroll"})
+        assert caught.value.code == 400
+        # the page's facts carry the two derived facts: the look, and the
+        # wire — the chat's, on a model that cannot complete text
+        facts = page.get("/api/session")
+        assert (facts["layout"], facts["completion_type"], facts["can_complete_text"]) == (
+            "canvas",
+            "chat",
+            False,
+        )
+        # the novel stored on such a model reads as the canvas over the chat
+        answer = page.patch(f"/api/stories/{story}/settings/layout", {"layout": "novel"})
+        assert "refused" not in answer
+        facts = page.get("/api/session")
+        assert (facts["layout"], facts["completion_type"]) == ("canvas", "chat")
+
+    def test_the_facts_say_how_a_line_typed_now_would_join(self, page: Page) -> None:
+        # nothing played: the story is begun
+        assert page.get("/api/session")["next_join"] is None
+        page.play("I listen at the culvert mouth.")
+        story = page.get("/api/session")["story_id"]
+        assert page.get("/api/session")["next_join"] == "paragraph"
+        # read as the canvas, the rows played in the manuscript still stand apart
+        page.patch(f"/api/stories/{story}/settings/layout", {"layout": "canvas"})
+        assert page.get("/api/session")["next_join"] == "paragraph"
+        # a row played in the canvas: the next line runs on from it
+        page.play("I wade in.")
+        assert page.get("/api/session")["next_join"] == "inline"
 
     def test_a_patch_moves_one_field_and_the_store_follows(self, page: Page) -> None:
         page.play("I listen at the culvert mouth.")
@@ -651,17 +783,19 @@ class TestStorySettings:
         assert page.get("/api/shared_reminder") == {"text": "Stay grim."}
         assert page.store.settings.get_shared_reminder() == "Stay grim."
 
-    def test_a_tools_prompt_is_read_and_written_at_its_path(self, page: Page) -> None:
-        shipped = page.get("/api/prompts/question")["text"]
+    def test_a_settings_prompt_is_read_and_written_at_its_path(self, page: Page) -> None:
+        shipped = page.get("/api/prompts/allow_questions")["text"]
         assert shipped
-        answer = page.put("/api/prompts/question", {"text": "ASK ANEW"})
+        answer = page.put("/api/prompts/allow_questions", {"text": "ASK ANEW"})
         assert answer["notice"] and "refused" not in answer
-        assert page.get("/api/prompts/question") == {"text": "ASK ANEW"}
+        assert page.get("/api/prompts/allow_questions") == {"text": "ASK ANEW"}
         assert "ASK ANEW" in Paths.resolve(page.root).prompts_file.read_text()
-        answer = page.put("/api/prompts/question", {"text": ""})
+        answer = page.put("/api/prompts/allow_questions", {"text": ""})
         assert "refused" not in answer
-        assert page.get("/api/prompts/question") == {"text": shipped}
+        assert page.get("/api/prompts/allow_questions") == {"text": shipped}
+        # a name no setting owns, and a setting whose text is the reader's own
         assert page.get("/api/prompts/plan")["refused"] is True
+        assert page.get("/api/prompts/use_story_reminder")["refused"] is True
 
 
 class TestTheFlows:
@@ -950,12 +1084,162 @@ class TestPictures:
     cannot see, which is what makes the refusal the sentence; the files
     themselves are put in the folder through the scenario's own store."""
 
-    def test_the_session_says_whether_the_model_has_vision(self, page: Page) -> None:
-        assert page.get("/api/session")["vision"] is False
+    def test_the_session_says_whether_a_picture_may_ride(self, page: Page) -> None:
+        assert page.get("/api/session")["can_attach"] is False
 
     def test_a_turn_without_pictures_carries_an_empty_list(self, page: Page) -> None:
         page.play("I listen.")
         assert [turn["attachments"] for turn in page.get("/api/play")["messages"]] == [[], []]
+
+    def test_a_turn_carries_how_it_joins_the_one_before(self, page: Page) -> None:
+        # a typed line and a chat completion's reply: paragraphs both
+        page.play("I listen.")
+        turns = page.get("/api/play")["messages"]
+        assert [turn["join_type"] for turn in turns] == ["paragraph"] * 2
+
+
+class TestTheNovelOverTheWire:
+    """The page's half of the novel, over a served omlx whose model is
+    named a plain-text model by hand: the facts that show the novel
+    glyph and caption the send button, the listing's template, the
+    preview as one text, and a continuation's join."""
+
+    def test_the_facts_the_listing_and_the_preview_say_the_novel(
+        self, server: ModelServer, tmp_path: Path
+    ) -> None:
+        server.status = True
+        server.types[MODEL] = "vlm"
+        server.config_types[MODEL] = "gemma4"
+
+        def plain(root: Path) -> None:
+            paths = Paths.resolve(root)
+            models_file.save(paths.models_file, MODEL, {models_file.TEMPLATE_KEY: "plain"})
+
+        with serving(server, tmp_path, provider="omlx", prepare=plain) as page:
+            facts = page.get("/api/session")
+            # the model can complete text, and sees; the manuscript is the chat's wire
+            assert (
+                facts["can_complete_text"],
+                facts["completion_type"],
+                facts["layout"],
+                facts["can_attach"],
+            ) == (True, "chat", "manuscript", True)
+            panel = page.get("/api/providers")
+            mine = next(p for p in panel["providers"] if p["id"] == "omlx")
+            assert mine["models"][0]["text_template"] == "plain"
+            page.play("I was waiting for")
+            story = page.get("/api/session")["story_id"]
+            path = f"/api/stories/{story}/settings/layout"
+            answer = page.patch(path, {"layout": "novel"})
+            assert answer["notice"] and "refused" not in answer
+            # the novel goes over the text wire, drawn as the canvas: no
+            # picture rides one text
+            facts = page.get("/api/session")
+            assert (facts["completion_type"], facts["layout"], facts["can_attach"]) == (
+                "text",
+                "canvas",
+                False,
+            )
+            # the preview is the one text the wire sends: the story in it,
+            # and none of an instruct template's turn markers
+            preview = page.get("/api/session/context")
+            assert [part["role"] for part in preview["parts"]] == ["prompt"]
+            assert "\n\nI was waiting for" in preview["parts"][0]["body"]
+            assert "<|turn>" not in preview["parts"][0]["body"]
+            assert preview["shape"]["total_tokens"] > 0
+            # a line played in the novel, then an empty line, the continue:
+            # no turn of the reader's for it; the line opens a paragraph
+            # after the chat rows before it, and each reply goes on in it
+            page.play("She waited for")
+            page.play("")
+            turns = page.get("/api/play")["messages"]
+            assert [turn["role"] for turn in turns][-3:] == ["user", "assistant", "assistant"]
+            assert [turn["join_type"] for turn in turns][-3:] == [
+                "paragraph",
+                "inline",
+                "inline",
+            ]
+            # the space between is the join's, never stored
+            assert not turns[-2]["body"].startswith(" ")
+
+    def test_the_novel_is_refused_on_a_model_that_cannot_complete_text(self, page: Page) -> None:
+        # the rail hides the glyph off `can_complete_text`; a PATCH is not
+        # refused — the value is the story's, read as the canvas here
+        facts = page.get("/api/session")
+        assert facts["can_complete_text"] is False
+
+
+class TestWebSearchKeyOverTheWire:
+    """ONE box on the Tools tab: what stands is a read, never the key;
+    the key a PATCH, the engine told from its shape; "" forgets it."""
+
+    def test_the_key_goes_in_and_never_comes_back_out(self, page: Page) -> None:
+        # whether a key is held, and nothing else: no engine named
+        assert page.get("/api/integrations/web_search") == {"has_key": False}
+        answer = page.patch("/api/integrations/web_search", {"api_key": "tvly-abc"})
+        assert answer["notice"] and "refused" not in answer
+        assert page.get("/api/integrations/web_search") == {"has_key": True}
+        raw = Paths.resolve(page.root).integrations_file.read_text()
+        assert "tvly-abc" not in raw and "tavily" not in raw
+        answer = page.patch("/api/integrations/web_search", {"api_key": "any-other"})
+        assert page.get("/api/integrations/web_search") == {"has_key": True}
+        answer = page.patch("/api/integrations/web_search", {"api_key": ""})
+        assert "refused" not in answer
+        assert page.get("/api/integrations/web_search") == {"has_key": False}
+        assert page.patch("/api/integrations/web_search", {"api_key": ""})["refused"] is True
+
+    def test_the_prompts_of_the_tools_otaku_runs_are_read_at_their_paths(self, page: Page) -> None:
+        for setting in ("allow_system_info", "allow_web_search"):
+            assert page.get(f"/api/prompts/{setting}")["text"]
+
+
+class TestToolTurnsOverTheWire:
+    """A tool otaku runs, as the page sees it: the call streams named,
+    with who acts on it; the result lands as a turn of its own with the
+    label the page draws; the reply that goes on lands after it."""
+
+    def test_a_tool_otaku_runs_lands_as_a_turn_the_page_names(
+        self, page: Page, server: ModelServer
+    ) -> None:
+        page.play("I listen.")
+        story = page.get("/api/session")["story_id"]
+        answer = page.patch(f"/api/stories/{story}/settings/allow_system_info", {"enabled": True})
+        assert "refused" not in answer
+        call = "```otk-system-info\n```"
+
+        def script(body: dict) -> str:
+            newest = scripted.content_text(body["messages"][-1])
+            if "You are a story analyst" in newest or newest.startswith(("Combine", "Write ")):
+                return scripted.default_script(body)
+            return "It is late." if "Time: " in newest else call
+
+        server.script = script
+        events = page.play("What time is it?")
+        kinds = [e["type"] for e in events]
+        assert kinds[0] == "user_turn" and kinds[-1] == "done"
+        assert kinds.count("assistant_turn") == 2 and kinds.count("tool_turn") == 1
+        assert kinds.index("assistant_turn") < kinds.index("tool_turn")
+        called = next(e for e in events if e["type"] == "assistant_tool_call")
+        assert (called["tool"], called["label"], called["actor"]) == (
+            "system-info",
+            "System info",
+            "system",
+        )
+        told = next(e for e in events if e["type"] == "tool_turn")["turn"]
+        assert (told["role"], told["kind"], told["tool_label"]) == (
+            "tool",
+            "tool",
+            "System info call",
+        )
+        assert told["body"].startswith("Time: ") and told["join_type"] == "paragraph"
+        rows = page.get("/api/play")["messages"]
+        assert [(r["role"], r["tool_label"]) for r in rows[-4:]] == [
+            ("user", None),
+            ("assistant", None),
+            ("tool", "System info call"),
+            ("assistant", None),
+        ]
+        assert rows[-1]["body"] == "It is late."
 
     def test_files_for_a_model_that_cannot_see_are_refused_eagerly(self, page: Page) -> None:
         answer = page.post("/api/play", {"line": "look", "files": [_file(b"x")]})
@@ -992,3 +1276,41 @@ def _fetch(page: Page, path: str) -> tuple[int, dict[str, str], bytes]:
     """A raw GET: the status, the headers, the bytes."""
     with urllib.request.urlopen(page.url + path, timeout=10, context=page.context) as reply:
         return reply.status, dict(reply.headers), reply.read()
+
+
+class TestSupportOverTheWire:
+    """The support docket's request: its message and its email apart,
+    posted to the desk; a refusal is an answer, and a body without a
+    message is a bad request."""
+
+    @pytest.fixture(autouse=True)
+    def _desk_at_the_scripted_server(
+        self, server: ModelServer, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The desk at the scripted server's door — set before the page's
+        session binds it to its endpoint."""
+        monkeypatch.setattr(
+            SupportDesk, "endpoint", server.url.removesuffix("/v1") + "/api/support"
+        )
+
+    def test_a_request_reaches_the_desk_and_a_refusal_is_an_answer(
+        self, page: Page, server: ModelServer
+    ) -> None:
+        answer = page.post(
+            "/api/support", {"message": "The canvas froze.", "email": "me@example.com"}
+        )
+        assert answer["notice"] and "refused" not in answer
+        assert server.posts[-1] == "/api/support"
+        assert server.requests[-1] == {"message": "The canvas froze.", "email": "me@example.com"}
+        # no address, none sent; one that is none, refused before anything leaves
+        page.post("/api/support", {"message": "Thanks."})
+        assert server.requests[-1] == {"message": "Thanks."}
+        sent = len(server.posts)
+        assert (
+            page.post("/api/support", {"message": "Hi", "email": "me@localhost"})["refused"] is True
+        )
+        assert page.post("/api/support", {"message": "  "})["refused"] is True
+        assert len(server.posts) == sent
+        with pytest.raises(urllib.error.HTTPError) as caught:
+            page.post("/api/support", {"email": "me@example.com"})
+        assert caught.value.code == 400

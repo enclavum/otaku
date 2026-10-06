@@ -15,8 +15,8 @@ call and the call's own inside one; plain fences are never tracked.
 `strip`'s: the body without its calls, fences and all, a newline where
 a call stood between two runs of prose, nothing else changed.
 `to_wire`'s: the body under a `ToolSet` — a call of a tool that is on
-as its canonical self, one of a tool that is off as its rule's text,
-any other gone with the blank line beside it. `ReplyParser`'s: the same
+as its canonical self, any other — switched off, or unknown — gone with
+the blank line beside it. `ReplyParser`'s: the same
 parse over a stream — whatever the chunking, the pieces joined are
 `parse_reply`'s segments; a line's start that may yet become a fence is
 held back until its newline decides it, and so is a line's end until
@@ -287,7 +287,6 @@ class TestStrip:
 
 class TestToWire:
     ON = ToolSet(on=frozenset({"note"}))
-    OFF = ToolSet(off={"question": lambda inside: inside.strip().splitlines()[0]})
 
     def test_text_without_calls_is_unchanged(self) -> None:
         assert to_wire("She nods.", self.ON) == "She nods."
@@ -308,14 +307,14 @@ class TestToWire:
         body = "```otk-note\n\nfirst  \n\nsecond\n```"
         assert to_wire(body, self.ON) == body
 
-    def test_a_call_of_a_tool_that_is_off_becomes_its_rule_text(self) -> None:
+    def test_a_call_of_a_tool_that_is_off_leaves_the_wire_inside_and_all(self) -> None:
+        # Off, a tool does not exist for the model: not even its question.
         body = "She nods.\n\n```otk-question\nStay or go?\n1. Stay\n2. Go\n```\nYes."
-        assert to_wire(body, self.OFF) == "She nods.\n\nStay or go?\nYes."
+        assert to_wire(body, self.ON) == "She nods.\n\nYes."
 
-    def test_a_call_ended_by_an_opening_fence_keeps_the_line_between(self) -> None:
-        tools = ToolSet(on=frozenset({"note"}), off=self.OFF.off)
+    def test_a_call_ended_by_an_opening_fence_leaves_or_goes_by_its_own_tool(self) -> None:
         body = "```otk-question\nStay?\n1. Stay\n```otk-note\nplan\n```"
-        assert to_wire(body, tools) == "Stay?\n```otk-note\nplan\n```"
+        assert to_wire(body, self.ON) == "```otk-note\nplan\n```"
         tools = ToolSet(on=frozenset({"note", "question"}))
         assert (
             to_wire(body, tools) == "```otk-question\nStay?\n1. Stay\n```\n```otk-note\nplan\n```"
@@ -336,20 +335,9 @@ class TestToWire:
     def test_a_body_that_is_only_a_call_that_leaves_is_empty(self) -> None:
         assert to_wire("```otk-plan\nx\n```", self.ON) == ""
 
-    def test_a_rule_that_makes_nothing_removes_the_call(self) -> None:
-        tools = ToolSet(off={"note": lambda inside: ""})
-        assert to_wire("She nods.\n\n```otk-note\nplan\n```", tools) == "She nods."
-
-    def test_a_rule_reads_the_inside_without_its_trailing_blank_lines(self) -> None:
-        seen: list[str] = []
-        tools = ToolSet(off={"note": lambda inside: seen.append(inside) or "x"})
-        to_wire("```otk-note\n\nplan  \n\n\n```", tools)
-        assert seen == ["\nplan  "]
-
     def test_every_call_is_treated_by_its_own_tool(self) -> None:
-        tools = ToolSet(on=frozenset({"note"}), off=self.OFF.off)
         body = "A\n```otk-question\nQ?\n1. x\n```\nB\n```otk-plan\np\n```\nC\n```otk-note\nn\n```"
-        assert to_wire(body, tools) == "A\nQ?\nB\nC\n```otk-note\nn\n```"
+        assert to_wire(body, self.ON) == "A\nB\nC\n```otk-note\nn\n```"
 
     def test_a_plain_fence_is_untouched(self) -> None:
         body = "```\ncode\n```\nShe nods.\n```python\nx\n```"

@@ -20,6 +20,10 @@ from scenarios.support.terminal import CTRL_D, CTRL_R, ENTER, ESC, TAB, Terminal
 
 pytestmark = pytest.mark.cli
 
+# The continuation prompt as the transcript shows it: its trailing space is
+# not printed, the caret moved past it, with no placeholder drawn after it.
+_CONTINUED = PROMPT_CONTINUATION.rstrip()
+
 
 class TestFirstRun:
     def test_first_launch_without_a_model_opens_the_sample(self, tmp_path: Path) -> None:
@@ -211,7 +215,7 @@ class TestBlocks:
         terminal = launch_remembered(server, tmp_path / "state")
         terminal.send('"""')
         terminal.send(ENTER, 0.3)
-        terminal.expect(PROMPT_CONTINUATION)
+        terminal.expect(_CONTINUED)
         terminal.send("/regen is part of my story")
         terminal.send(ENTER, 0.3)
         terminal.send('and so is this line"""')
@@ -230,7 +234,7 @@ class TestBlocks:
         terminal = launch_remembered(server, tmp_path / "state")
         terminal.send('"""/me Elara: I step into the hall.')
         terminal.send(ENTER, 0.3)
-        terminal.expect(PROMPT_CONTINUATION)
+        terminal.expect(_CONTINUED)
         terminal.send('The torches have burned down."""')
         terminal.send(ENTER, 1.0)
         terminal.expect("stirred")
@@ -253,7 +257,7 @@ class TestBlocks:
         terminal = launch_remembered(server, tmp_path / "state")
         terminal.send('"""')
         terminal.send(ENTER, 0.3)
-        terminal.expect(PROMPT_CONTINUATION)
+        terminal.expect(_CONTINUED)
         terminal.send("I step into the hall.")
         terminal.send(ENTER, 0.3)
         terminal.send("/c", 0.3)

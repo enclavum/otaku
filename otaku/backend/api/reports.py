@@ -14,7 +14,13 @@ from otaku.backend.api import settings as api_settings
 from otaku.backend.api import stories
 from otaku.backend.session import NO_MODEL_HINT, Refused, Session
 from otaku.backend.story import InjectingSetting
-from otaku.context.assembler import IMAGE_TOKENS, AssembledPrompt, ContextOverflowError
+from otaku.context.assembler import (
+    IMAGE_TOKENS,
+    AssembledPrompt,
+    ContextOverflowError,
+    context_in_force,
+    estimate_tokens,
+)
 from otaku.formatting import (
     Money,
     format_context,
@@ -23,8 +29,15 @@ from otaku.formatting import (
     printable,
     truncate_label,
 )
-from otaku.providers import ALL_CLIENTS, Locality, ModelCapabilities, ModelState, reasoning
-from otaku.store.schema import InjectionPosition
+from otaku.providers import (
+    ALL_CLIENTS,
+    Locality,
+    ModelCapabilities,
+    ModelInfo,
+    ModelState,
+    reasoning,
+)
+from otaku.store.schema import CompletionType, InjectionPosition
 
 
 @dataclass(frozen=True)
@@ -56,11 +69,13 @@ class ContextReport:
     — the facts the diagram and the summary are drawn from — the
     injections it carries (in the request's order: the system message
     first, then the deepest first, the costlier first at one place), and
-    one part per message.
+    one part per message — or, over the text wire, ONE part, the text as the
+    text wire sends it (`wire`), rendered in the model's template.
 
     Nothing in it is otaku's own text except the summary and the role
-    markers `text` brackets (they stand for the JSON role field) — every
-    other line is content the model receives, in order."""
+    markers `text` brackets (they stand for the JSON role field — `prompt`
+    for the text wire's one part) — every other line is content the model
+    receives, in order."""
 
     prompt: AssembledPrompt
     tail_setting: int  # the configured min_tail_messages the rung is compared with
@@ -70,6 +85,18 @@ class ContextReport:
     # the sentence — the model is not loaded, so the window it was cut
     # to is the assembler's substitute until the turn loads it.
     note: str = ""
+    # The text wire: the request as ONE TEXT, exactly as the wire sends
+    # it (`AssembledPrompt.as_text`), and the template it is rendered in;
+    # "" in chat mode, where the parts are the wire.
+    wire: str = ""
+    template: str = ""
+
+    @property
+    def total_tokens(self) -> int:
+        """What the request costs, at the assembler's estimate: the
+        messages', or the text's where the text is the wire — its
+        markers and framing counted."""
+        return estimate_tokens(self.wire) if self.wire else self.prompt.total_tokens
 
     @property
     def kept(self) -> int:
@@ -79,8 +106,8 @@ class ContextReport:
     @property
     def used(self) -> int:
         """Percent of the limit."""
-        prompt = self.prompt
-        return round(100 * prompt.total_tokens / prompt.limit) if prompt.limit else 0
+        limit = self.prompt.limit
+        return round(100 * self.total_tokens / limit) if limit else 0
 
     @property
     def summary(self) -> str:
@@ -110,12 +137,59 @@ def context(session: Session) -> ContextReport:
     says so."""
     client = session._client()
     found = client.models.get(session.model) if client is not None else None
-    max_context = found.max_context if found else None
     try:
-        prompt = session.assemble(max_context)
+        return _preview(session, found)
     except ContextOverflowError as e:
         # The preview of a request that would not be sent is its refusal.
         raise Refused(str(e)) from e
+
+
+@dataclass(frozen=True)
+class ContextUse:
+    """How full the next request is, as `/context` measures it: `used`,
+    its percent of the limit — over 100 where the story cannot fit even
+    fully summarized — and `context`, the window the story is cut to."""
+
+    used: int
+    context: int
+
+    def text(self) -> str:
+        return f"{self.used}% of {format_context(self.context)}"
+
+
+def context_use(session: Session) -> ContextUse | None:
+    """How full the next request is — `context`'s own figure, read after
+    every turn. None while the window is not known (no model, a model
+    not loaded, a catalog that has not answered): a figure against the
+    assembler's stand-in would mislead. Never waits on the internet — a
+    local engine is asked, as the header asks it, and anything else
+    answers from what is cached."""
+    client = session._client()
+    if client is None:
+        return None
+    try:
+        if client.locality_of(session.model) is Locality.LOCAL:
+            found = client.models.get(session.model)
+        else:
+            found = client.models.cached(session.model)
+    except Exception:
+        return None
+    window = found.max_context if found is not None else None
+    if not window:
+        return None
+    try:
+        report = _preview(session, found)
+    except ContextOverflowError as e:
+        return ContextUse(round(100 * e.tokens / e.limit) if e.limit else 0, e.context)
+    return ContextUse(report.used, context_in_force(window, session.max_context_setting))
+
+
+def _preview(session: Session, found: ModelInfo | None) -> ContextReport:
+    """`context`'s report over the model's row as the caller found it —
+    the one computation both reports read their figure from. Raises
+    `ContextOverflowError` for a story that cannot fit."""
+    max_context = found.max_context if found else None
+    prompt = session.assemble(max_context)
     cold = (
         found is not None
         and max_context is None
@@ -142,18 +216,34 @@ def context(session: Session) -> ContextReport:
         for sent in prompt.injections
     ]
     injections.sort(key=lambda each: (-(each.position.depth or 99), -each.tokens))
+    # Over the text wire the request is one text: the preview is that
+    # text, as sent, in one part — its paragraph breaks kept, being its seams.
+    template = session.text_template if session.completion_type is CompletionType.TEXT else None
+    wire = prompt.as_text(template) if template is not None else ""
+    parts = (
+        (ContextPart("prompt", "\n".join(_preview_body(printable(wire), keep_breaks=True))),)
+        if template is not None
+        else tuple(
+            ContextPart(
+                turn.role,
+                "\n".join(
+                    _preview_body(
+                        printable(turn.body),
+                        keep_breaks=bool(prompt.recap and prompt.recap in turn.body),
+                    )
+                ),
+                pictures=len(turn.images),
+            )
+            for turn in prompt.messages
+        )
+    )
     return ContextReport(
         prompt=prompt,
         tail_setting=session._config.min_tail_messages,
         injections=tuple(injections),
-        parts=tuple(
-            ContextPart(
-                turn.role,
-                "\n".join(_preview_body(printable(turn.body), prompt.recap)),
-                pictures=len(turn.images),
-            )
-            for turn in prompt.messages
-        ),
+        parts=parts,
+        wire=wire,
+        template=template.name if template is not None else "",
         note=(
             f"The model is not loaded: the window is {format_context(prompt.limit)} of the "
             "assembler's own until the next turn loads it."
@@ -418,7 +508,7 @@ def balances(session: Session, *, probe: bool = True) -> BalanceReport:
     rather than "would not answer": the page paints the whole slip from
     it and fills the figures from one probed report. The terminal asks
     plainly and gets everything in one wait."""
-    registry = session._providers_registry
+    registry = session._providers
     configured = set(registry.list())
 
     def account(provider: str) -> Balance | None:
@@ -582,6 +672,12 @@ def _session_rows(session: Session) -> tuple[tuple[str, str], ...]:
     if label := stories.headline(session):
         out.append(("Story", truncate_label(label, stories.LABEL_WIDTH)))
     out.append(("Messages", str(len(session.messages))))
+    # Where lore extraction reads the story: the model saved for it, or
+    # the one the model block above names.
+    if session.extraction_model:
+        out.append(("Extraction", session.full_extraction_model_name))
+    elif session.model:
+        out.append(("Extraction", "the story model"))
     # No premise row: a premise is a DOCUMENT, not a fact about the
     # session — it is as long as a reader made it, and `/system` reports
     # it on its own, at whatever length that is. A report of one-line
@@ -610,8 +706,11 @@ def _summary(report: ContextReport) -> str:
     prompt = report.prompt
     lines = ["Context preview — the exact request to be sent. Context summary:", ""]
     lines.append(
-        f"  ~{prompt.total_tokens:,} tokens · {report.used}% of the {prompt.limit:,} limit"
+        f"  ~{report.total_tokens:,} tokens projected · "
+        f"{report.used}% of the {prompt.limit:,} limit"
     )
+    if report.wire:
+        lines.append(f"  text wire: one text, in the {report.template} template")
     if prompt.system_tokens:
         lines.append(f"  system {prompt.system_tokens:,} · transcript {prompt.transcript_tokens:,}")
     # The summaries are not a third slice of the transcript: they STAND IN
@@ -678,12 +777,14 @@ def _summary(report: ContextReport) -> str:
     return "\n".join(lines)
 
 
-def _preview_body(text: str, recap: str) -> list[str]:
+def _preview_body(text: str, *, keep_breaks: bool) -> list[str]:
     """Content lines for the preview. Blank lines are dropped to keep it
-    tight, EXCEPT in the turn carrying the recap, where paragraph breaks
-    are load-bearing: they separate one scene summary from the next (and
-    the last summary from any message text merged in after it)."""
-    if recap and recap in text:
+    tight, EXCEPT where `keep_breaks`: in the turn carrying the recap,
+    whose paragraph breaks separate one scene summary from the next (and
+    the last summary from any message text merged in after it), and in
+    the text wire's one part, whose breaks are the seams between turns —
+    runs of them collapsed to one."""
+    if keep_breaks:
         out: list[str] = []
         for line in text.splitlines():
             if line.strip():

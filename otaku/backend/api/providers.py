@@ -31,12 +31,12 @@ from otaku.settings.migrations import PROMPT_CACHE_ROW, surgery
 ProviderField = Literal["url", "api_key"]
 
 
-def switch_model(session: Session, provider: str, model: str) -> str:
+def set_model(session: Session, provider: str, model: str) -> str:
     """Switch for the rest of the session, keeping the context (compare
     models on one prompt: switch, then regenerate). Parameters follow the
     model; the switch is remembered. Returns the confirmation; raises
     Refused for an unknown provider or a no-op."""
-    if provider not in session._providers_registry.list():
+    if provider not in session._providers.list():
         raise Refused(f"Unknown provider {provider!r}.")
     if f"{provider}/{model}" == session.full_model_name:
         raise Refused(f"Already using {session.full_model_name}.")
@@ -46,18 +46,41 @@ def switch_model(session: Session, provider: str, model: str) -> str:
     return f"Switched to {session.full_model_name}."
 
 
-def switch_spec(session: Session, raw: str) -> str:
+def set_model_raw(session: Session, raw: str) -> str:
     """The typed `/model PROVIDER/MODEL` form: owns the ONE split rule
     (the first slash — model names may carry more) and the refusal that
-    lists the known providers, then wraps `switch_model`. Both frontends'
+    lists the known providers, then wraps `set_model`. Both frontends'
     chat boxes route here; the picker and the web PUT use the structured
     form."""
-    known = session._providers_registry.list()
+    known = session._providers.list()
     head, _, rest = raw.strip().partition("/")
     if head not in known or not rest:
         names = ", ".join(known)
         raise Refused(f"Use PROVIDER/MODEL (providers: {names}), or /model with no args to pick.")
-    return switch_model(session, head, rest)
+    return set_model(session, head, rest)
+
+
+def set_extraction_model(session: Session, provider: str, model: str) -> str:
+    """Save a model of its own for lore extraction — any the picker
+    lists, the story's included: saved, it stays when that one changes.
+    Remembered. Returns the confirmation; raises Refused for an unknown
+    provider or the model already saved."""
+    if provider not in session._providers.list():
+        raise Refused(f"Unknown provider {provider!r}.")
+    spec = f"{provider}/{model}"
+    if spec == f"{session.extraction_provider}/{session.extraction_model}":
+        raise Refused(f"Lore extraction already uses {spec}.")
+    session._update_state(extraction_model=spec)
+    return f"Lore extraction uses {spec}."
+
+
+def clear_extraction_model(session: Session) -> str:
+    """Forget the saved model: lore extraction uses the story's again.
+    Returns the confirmation; raises Refused when none is saved."""
+    if not session.extraction_model:
+        raise Refused("Lore extraction already uses the model you play with.")
+    session._update_state(extraction_model="")
+    return "Lore extraction uses the model you play with."
 
 
 def listed_spec(session: Session) -> str:
@@ -67,11 +90,22 @@ def listed_spec(session: Session) -> str:
     ":latest" tag, and a spec typed without the tag must still be
     found. The remembered spelling where the provider has not listed
     the model, and "" without one."""
-    client = session._client()
-    found = client.models.cached(session.model) if client is not None else None
-    if found is None:
-        return session.full_model_name
-    return f"{session.provider}/{found.name}"
+    return _listed(session, session.provider, session.model)
+
+
+def listed_extraction_spec(session: Session) -> str:
+    """The model saved for lore extraction as its provider lists it, by
+    `listed_spec`'s rule — the row a picker marks; "" while extraction
+    uses the story's model."""
+    return _listed(session, session.extraction_provider, session.extraction_model)
+
+
+def _listed(session: Session, provider: str, model: str) -> str:
+    if not model:
+        return ""
+    client = session._providers.get(provider)
+    found = client.models.cached(model) if client is not None else None
+    return f"{provider}/{found.name if found is not None else model}"
 
 
 @dataclass(frozen=True)
@@ -91,7 +125,7 @@ def get_providers(session: Session, skip: set[str] | None = None) -> Panel:
     """Every reachable provider with its models, and why the others are
     not — the picker's one query; `skip` lets it fetch cloud catalogs
     after its screen is up."""
-    registry = session._providers_registry
+    registry = session._providers
     asked = [name for name in registry.list() if name not in (skip or ())]
     answers = registry.map(registry.info, asked)
     rows = [answer for answer in answers if isinstance(answer, ProviderInfo)]
@@ -125,7 +159,7 @@ def configured(session: Session) -> set[str]:
     """The configured providers' names — what the panel's one-provider
     refresh skips everything but, and nothing more: the sections
     themselves come one at a time through `section`."""
-    return set(session._providers_registry.list())
+    return set(session._providers.list())
 
 
 def loaded_models(session: Session, provider: str) -> set[str]:
@@ -135,7 +169,7 @@ def loaded_models(session: Session, provider: str) -> set[str]:
     slowest it ever is). Raises Refused when it cannot be reached: a
     refresh that failed quietly would leave the panel claiming the
     opposite of what just happened."""
-    client = session._providers_registry.get(provider)
+    client = session._providers.get(provider)
     if client is None:
         raise Refused(f"Unknown provider {provider!r}.")
     try:
@@ -149,7 +183,7 @@ def section(session: Session, provider: str) -> ProviderConfig:
     default otherwise — what the panel shows either way. Raises Refused
     for a name no supported provider answers to: a section is its
     provider's name."""
-    known = session._providers_registry.configs.get(provider)
+    known = session._providers.configs.get(provider)
     if known is not None:
         return known
     if provider not in ALL_CLIENTS:
@@ -208,7 +242,7 @@ def save_field(session: Session, provider: str, attr: ProviderField, value: str)
         session._paths.config_backups_dir,
         [surgery.ensure_section(provider, block), surgery.set_key(provider, attr, line)],
     )
-    session._providers_registry.update(updated)
+    session._providers.update(updated)
     if not written:
         # The registry took the value, the file did not — say so, or the
         # next launch silently forgets what the panel confirmed.
@@ -235,7 +269,7 @@ def clear_field(session: Session, provider: str, attr: ProviderField) -> str:
         # value stays — in the session too, so the panel stays honest.
         return "Not forgotten — providers.toml could not be written."
     cleared = replace(config, url="") if attr == "url" else replace(config, api_key="")
-    session._providers_registry.update(cleared)
+    session._providers.update(cleared)
     return ""
 
 
@@ -265,7 +299,7 @@ def unload(session: Session, provider: str, model: str) -> None:
 
 
 def _managed(session: Session, provider: str) -> OpenAIClient:
-    client = session._providers_registry.get(provider)
+    client = session._providers.get(provider)
     if client is None:
         raise Refused(f"Unknown provider {provider!r}.")
     if not client.capabilities.model_management:

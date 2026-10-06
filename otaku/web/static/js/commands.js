@@ -10,6 +10,7 @@ import * as api from "./api.js";
 import { ask, closeAll, popups } from "./browser.js";
 import { $ } from "./dom.js";
 import { openHelp } from "./help.js";
+import { openSupport } from "./support.js";
 import { openSettings } from "./settings.js";
 import { openModels } from "./models.js";
 import { openBalance, openContext, openInfo, openUsage } from "./reports.js";
@@ -46,6 +47,7 @@ const SCREENS = {
   "/usage": openUsage,
   "/balance": openBalance,
   "/info": openInfo,
+  "/support": openSupport,
   "/help": () => openHelp(),
   "/import": importStory,
   "/card": importCard,
@@ -159,7 +161,7 @@ export async function playLine(line, files = []) {
        the story, and every line after it moves the count. No notice: the
        reply IS the answer — unless the line was refused, and then the
        refusal stands through the landing rather than being wiped by it. */
-    await landed(refused ?? "", { kind: refused ? "otk-error" : "" });
+    await landed(refused ?? "", { kind: refused ? "otk-error" : "", keepPlace: true });
   } catch (e) {
     if (e?.answered) tell(String(e.message ?? e), "otk-error");
   }

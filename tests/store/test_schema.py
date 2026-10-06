@@ -5,15 +5,26 @@ that reads the column (`$.file` is what the sweep extracts).
 
 The `settings` column's text: one JSON object, a key per setting.
 `StorySettingDB.from_json` reads every setting it holds as the column records
-it — a switch, a position, a text — and what it cannot make sense of as
-unsaid; it knows no setting by name. `StorySettingDB.to_json` puts
-settings into the text and keeps every key it does not know.
+it — a switch, a position, a text, a layout — and what it cannot
+make sense of as unsaid; it knows no setting by name.
+`StorySettingDB.to_json` puts settings into the text and keeps every key
+it does not know. `Layout` is the four readings of a story and the two
+facts each derives: its mode and its wire. `StoryMode` is the mode a row
+was written in, as the `mode` column records it.
 """
 
 import json
 from dataclasses import replace
 
-from otaku.store.schema import Attachment, InjectionPosition, StorySettingDB
+from otaku.store.schema import (
+    Attachment,
+    CompletionType,
+    InjectionPosition,
+    Layout,
+    Message,
+    StoryMode,
+    StorySettingDB,
+)
 
 CAT = Attachment(file="pic-0001-20260918-a3f9c1e2.jpg", width=1568, height=1043, size=312044)
 DOG = Attachment(file="pic-0001-20260918-7b02d4ee.png", width=800, height=600, size=90210)
@@ -75,6 +86,56 @@ class TestInjectionPosition:
         assert len({InjectionPosition(2), InjectionPosition(2), InjectionPosition()}) == 2
 
 
+class TestLayout:
+    """`Layout` — the four ways a story is read, and the two facts derived
+    from one: its `mode` (the look) and its `completion_type` (the wire,
+    given whether the model in use can complete text)."""
+
+    def test_each_name_reads_back_as_itself(self) -> None:
+        assert [each.value for each in Layout] == ["novel", "canvas", "manuscript", "chat"]
+        for layout in Layout:
+            assert Layout.from_value(layout.value) is layout
+
+    def test_anything_else_is_none(self) -> None:
+        for said in ("Canvas", "", "story", 1, None, True, ["canvas"]):
+            assert Layout.from_value(said) is None, said
+
+    def test_the_canvas_and_the_novel_are_story_mode_and_the_rest_chat(self) -> None:
+        assert Layout.NOVEL.mode is StoryMode.STORY
+        assert Layout.CANVAS.mode is StoryMode.STORY
+        assert Layout.MANUSCRIPT.mode is StoryMode.CHAT
+        assert Layout.CHAT.mode is StoryMode.CHAT
+
+    def test_the_text_wire_is_the_novels_alone_and_only_where_the_model_can(self) -> None:
+        assert Layout.NOVEL.completion_type(True) is CompletionType.TEXT
+        # a novel reopened on a model that cannot complete text plays as a canvas
+        assert Layout.NOVEL.completion_type(False) is CompletionType.CHAT
+        for other in (Layout.CANVAS, Layout.MANUSCRIPT, Layout.CHAT):
+            assert other.completion_type(True) is CompletionType.CHAT, other
+            assert other.completion_type(False) is CompletionType.CHAT, other
+        assert {each.value for each in CompletionType} == {"chat", "text"}
+
+
+class TestStoryMode:
+    """`StoryMode` — what the `mode` column holds: the stored word reads
+    back, anything else as CHAT, which is also a row's mode when nothing
+    says otherwise (an imported row)."""
+
+    def test_each_word_reads_back_as_itself(self) -> None:
+        assert {each.value for each in StoryMode} == {"story", "chat"}
+        for mode in StoryMode:
+            assert StoryMode.from_value(mode.value) is mode
+
+    def test_anything_else_reads_as_chat(self) -> None:
+        for said in ("block", "inline", "none", "Story", "", None, 1):
+            assert StoryMode.from_value(said) is StoryMode.CHAT, said
+
+    def test_a_row_is_chat_unless_it_says_otherwise(self) -> None:
+        assert Message(role="user", body="Hi").mode is StoryMode.CHAT
+        written = replace(Message(role="user", body="Hi"), mode=StoryMode.STORY)
+        assert written.mode is StoryMode.STORY
+
+
 class TestSettingsColumn:
     def test_a_story_without_settings_has_none(self) -> None:
         assert StorySettingDB.from_json("") == ()
@@ -122,6 +183,22 @@ class TestSettingsColumn:
             found = StorySettingDB.from_json(raw)
             assert found == (StorySettingDB("allow_assistant_notes"),), said
             assert found[0].display_notes is True
+
+    def test_a_layout_is_read_by_its_name_and_anything_else_is_unsaid(self) -> None:
+        raw = json.dumps({"layout": {"enabled": True, "layout": "novel"}})
+        assert StorySettingDB.from_json(raw) == (
+            StorySettingDB("layout", enabled=True, layout=Layout.NOVEL),
+        )
+        for said in ("Canvas", "story", 3, None):
+            raw = json.dumps({"layout": {"layout": said}})
+            assert StorySettingDB.from_json(raw) == (StorySettingDB("layout"),), said
+
+    def test_a_written_layout_reads_back(self) -> None:
+        row = StorySettingDB("layout", enabled=True, layout=Layout.CHAT)
+        assert StorySettingDB.from_json(StorySettingDB.to_json([row], "")) == (row,)
+        assert json.loads(StorySettingDB.to_json([row], "")) == {
+            "layout": {"enabled": True, "layout": "chat"}
+        }
 
     def test_text_that_is_not_an_object_of_objects_holds_no_settings(self) -> None:
         for raw in ("not json", "[1, 2]", '"text"', '{"allow_questions": "on"}'):

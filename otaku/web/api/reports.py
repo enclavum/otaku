@@ -1,6 +1,6 @@
 """The reports, as the page draws them from their facts: the context
-window, the session's info, the usage and the balance — each the
-backend's report object, `asdict`-ed."""
+window and how full it is, the session's info, the usage and the
+balance — each the backend's report object, `asdict`-ed."""
 
 from dataclasses import asdict
 from typing import Any
@@ -20,6 +20,16 @@ def model_words(model: ModelInfo) -> dict[str, str]:
         "reasoning_words": reports.reasoning_words(model.capabilities),
         "capability_words": reports.capability_words(model.capabilities),
     }
+
+
+def context_use(session: Session) -> dict[str, Any]:
+    """How full the next request is — `/context`'s own figure — and its
+    sentence, which the rail's foot shows after every landing; nulls and
+    "" while the window is not known."""
+    use = reports.context_use(session)
+    if use is None:
+        return {"used": None, "context": None, "text": ""}
+    return {**asdict(use), "text": use.text()}
 
 
 def context(session: Session) -> dict[str, Any]:
@@ -49,7 +59,7 @@ def context(session: Session) -> dict[str, Any]:
             "pictures_omitted": prompt.pictures_omitted,
             "pictures_held": prompt.pictures_held,
             "kept": report.kept,
-            "total_tokens": prompt.total_tokens,
+            "total_tokens": report.total_tokens,
             "used": report.used,
         },
         "lede": report.summary,
@@ -157,6 +167,7 @@ def _info(session: Session) -> dict[str, Any]:
 
 ROUTES: dict[tuple[str, str], Route] = {
     ("GET", "/api/session/context"): lambda session, ask: context(session),
+    ("GET", "/api/session/context_use"): lambda session, ask: context_use(session),
     ("GET", "/api/session/info"): lambda session, ask: _info(session),
     ("GET", "/api/balance"): _balance,
     ("GET", "/api/usage"): lambda session, ask: _usage(session, ask.query.get("scope", "")),

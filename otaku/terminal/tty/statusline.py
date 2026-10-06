@@ -28,13 +28,16 @@ import os
 import shutil
 import sys
 import threading
+import time
 from collections.abc import Callable, Iterator
 from typing import TextIO
 
+from otaku.formatting import truncate
 from otaku.terminal.tty import (
     DIM,
     ERASE_LINE,
     GOTO_ROW,
+    INDEX,
     RESET,
     RESTORE_CURSOR,
     SAVE_CURSOR,
@@ -54,24 +57,44 @@ def _terminal() -> TextIO:
 
 
 LABEL = " background task: "
+# How long a note stands at least once shown: a call that ends at once —
+# a tool otaku runs in no time — still reads.
+_NOTE_SECONDS = 1.0
 
 
-def render(status: str) -> str:
-    """The line's text — blank when idle. ONE owner, because the prompt
+def render(status: str, aside: str = "", width: int = 0, note: str = "") -> str:
+    """The line's text: `note`, what the reply streaming is doing — a tool
+    call — then what the background worker is doing, either blank when
+    idle, and `aside` against the right edge of `width` columns, the
+    words on the left giving way where both do not fit. The last column
+    stays empty, so the row never wraps. ONE owner, because the prompt
     toolbar and this pinned row draw the same line on the same terminal
     row, and any difference between them shows up as the line twitching
     the moment a reply starts streaming."""
-    return f"{LABEL}{status}" if status else ""
+    worker = f"{LABEL}{status}" if status else ""
+    left = f" {note}" + (f" ·{worker}" if worker else "") if note else worker
+    room = width - 1
+    if not aside or room <= len(aside):
+        return left[: max(0, room)] if width else left
+    space = room - len(aside)
+    if len(left) > space - 2:
+        left = truncate(left, max(0, space - 2))
+    return left + " " * (space - len(left)) + aside
 
 
 class StatusLine:
-    """Reserves the bottom terminal row and paints `read()` into it.
-    Long-lived: the REPL builds one per session; `pinned()` holds the row
-    for a streaming window, and `refresh()` (safe from the worker thread)
-    is a no-op whenever the row isn't held."""
+    """Reserves the bottom terminal row and paints `read()` into it, with
+    `aside()` against its right edge. Long-lived: the REPL builds one per
+    session; `pinned()` holds the row for a streaming window, and
+    `refresh()` (safe from the worker thread) is a no-op whenever the row
+    isn't held."""
 
-    def __init__(self, read: Callable[[], str]) -> None:
+    def __init__(self, read: Callable[[], str], aside: Callable[[], str]) -> None:
         self._read = read
+        self._aside = aside
+        self._note = ""  # what the reply streaming is doing, while it streams
+        self._noted_at = 0.0  # when the note standing was shown
+        self._clearing: threading.Timer | None = None  # a clear waiting out the minimum
         self._lock = threading.Lock()
         self._rows = 0
         self._open = False
@@ -98,18 +121,23 @@ class StatusLine:
             self._rows = shutil.get_terminal_size().lines
             if self._rows < 3:  # nothing to reserve on a 2-row terminal
                 return
-            # The newline guarantees a free bottom row: if the cursor was
+            # The index guarantees a free bottom row: if the cursor was
             # already on the last one, the screen scrolls instead of the
             # status overwriting live text. Stepping back up afterwards
-            # leaves the cursor exactly where it started.
+            # leaves the cursor exactly where it started — the COLUMN
+            # too, which a newline would not: the tty adds a return to
+            # it, and on the canvas the cursor stands mid-line here, where
+            # the reply is about to go on.
             region = SCROLL_ABOVE.format(self._rows - 1)
-            _terminal().write(f"\n{SAVE_CURSOR}{region}{RESTORE_CURSOR}{UP_ONE}")
+            _terminal().write(f"{INDEX}{SAVE_CURSOR}{region}{RESTORE_CURSOR}{UP_ONE}")
             self._open = True
             atexit.register(self.close)
         self.refresh()
 
     def close(self) -> None:
         with self._lock:
+            self._note = ""  # the reply's own doing ends with its window
+            self._cancel_clearing()
             if not self._open:
                 return
             self._open = False
@@ -121,6 +149,44 @@ class StatusLine:
             )
             _terminal().flush()
         atexit.unregister(self.close)
+
+    def set_note(self, note: str) -> None:
+        """Say what the reply streaming is doing — a tool being called —
+        ahead of the worker's words, "" for nothing; repainted when it
+        changes. A note stands `_NOTE_SECONDS` at least: cleared sooner,
+        it goes when they are out, on a timer, the stream never held; a
+        new note takes over at once, and the row's release clears it."""
+        with self._lock:
+            self._cancel_clearing()
+            if note == self._note:
+                return
+            if not note:
+                left = self._noted_at + _NOTE_SECONDS - time.monotonic()
+                if left > 0:
+                    self._clearing = threading.Timer(left, self._clear_note)
+                    self._clearing.daemon = True
+                    self._clearing.start()
+                    return
+            else:
+                self._noted_at = time.monotonic()
+            self._note = note
+        self.refresh()
+
+    def _clear_note(self) -> None:
+        """The waiting clear, on its timer's thread — unless a note set
+        since, or the row's release, took it over."""
+        with self._lock:
+            if self._clearing is None or self._clearing is not threading.current_thread():
+                return
+            self._clearing = None
+            self._note = ""
+        self.refresh()
+
+    def _cancel_clearing(self) -> None:
+        """Drop a waiting clear; the caller holds the lock."""
+        if self._clearing is not None:
+            self._clearing.cancel()
+            self._clearing = None
 
     def refresh(self) -> None:
         """Repaint. Safe to call from the worker thread, and a no-op when
@@ -135,7 +201,7 @@ class StatusLine:
                 _terminal().write(
                     f"{SAVE_CURSOR}{SCROLL_ABOVE.format(self._rows - 1)}{RESTORE_CURSOR}"
                 )
-            body = render(self._read())[: max(0, size.columns - 1)]
+            body = render(self._read(), self._aside(), size.columns, self._note)
             _terminal().write(
                 f"{SAVE_CURSOR}{GOTO_ROW.format(self._rows)}{ERASE_LINE}{DIM}{body}{RESET}{RESTORE_CURSOR}"
             )

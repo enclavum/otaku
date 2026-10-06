@@ -1,8 +1,9 @@
 """The lore engine and its commands: the /lore dossier edits the story
 in place (premise, messages, scenes, cast), /extract closes scenes over
 played messages and threads each character's memory forward, the closed
-middle reaches the wire as summaries, and /merge folds extraction
-duplicates."""
+middle reaches the wire as summaries, /merge folds extraction
+duplicates, and a character the extractor should never have made is
+deleted."""
 
 import contextlib
 import json
@@ -166,6 +167,19 @@ class TestExtract:
         assert memory.history == "I saw the guest."
         assert len(lore_calls(app)) == 1  # the extraction; no rollup calls
 
+    def test_a_pass_records_its_model_on_every_row_it_makes(self, app: App) -> None:
+        # Who made the memory: the pass's engine and model, on the scene,
+        # the journal and the character it named.
+        story_id = remembered(app)
+        store = app.store
+        rows = (
+            *store.scenes.list(story_id),
+            *store.characters.list(story_id),
+            *store.journals.list(story_id),
+        )
+        assert rows
+        assert {(row.provider, row.model) for row in rows} == {("generic", "test-model")}
+
     def test_a_tool_call_in_a_reply_is_invisible_to_the_pass(self, app: App) -> None:
         # A reply may carry a tool call — the model's own aside. The
         # analysis model never sees it, tags and all, while the prose
@@ -181,6 +195,29 @@ class TestExtract:
         assert "Reveal the letter" not in analyst
         assert "[6] She nods." in analyst
         assert app.store.stories.get_messages(app.session.story_id)[-1].body == reply
+
+    def test_a_tool_turn_is_invisible_to_the_pass(self, app: App) -> None:
+        # A tool otaku ran left its result as a turn of its own — not the
+        # scene: the analyst never sees it, and the numbering skips it.
+        api_stories.update_setting(app.session, "allow_system_info", enabled=True)
+        call = "```otk-system-info\n```"
+
+        def script(body: dict[str, Any]) -> str:
+            newest = scripted.content_text(body["messages"][-1])
+            if "You are a story analyst" in newest or newest.startswith(("Combine", "Write ")):
+                return scripted.default_script(body)
+            return "It is late." if "Time: " in newest else call
+
+        app.server.script = script
+        for i in range(3):
+            app.play(f"Turn number {i}.")
+        roles = [m.role for m in app.session.messages]
+        assert roles == ["user", "assistant", "tool", "assistant"] * 3
+        app.play("/extract")
+        analyst = next(p for p in lore_calls(app) if "You are a story analyst" in p)
+        assert "Time: " not in analyst and "Load average" not in analyst
+        # nine rows of story, numbered as such: the tool's three are no rows
+        assert "[9]" in analyst and "[10]" not in analyst
 
     def test_an_edited_template_with_literal_json_still_extracts(self, server, tmp_path) -> None:
         # The prompts file's promise: what you edit is exactly what the
@@ -253,7 +290,7 @@ class TestExtractSeesPictures:
             test_play._play(app, "Look at this door.", [test_play._cat()])
             app.play("And the hall beyond.")
             # the pass runs on a model that cannot see: the generic provider's
-            api_providers.switch_model(app.session, "generic", "test-model")
+            api_providers.set_model(app.session, "generic", "test-model")
             app.play("/extract")
             analyst = analyst_prompt(app)
             assert isinstance(analyst, str) and "(picture 1)" in analyst
@@ -944,6 +981,88 @@ class TestMerge:
         assert "I saw the guest." in rebuild  # the union of entries...
         assert "Back again." in rebuild  # ...feeds the one memory
 
+    def test_a_merge_lands_in_the_story_it_names(self, app: App) -> None:
+        # A browser addresses any story: the two rows are found in the
+        # story the merge names, not in the one open.
+        story_id = remembered(app)
+        keeper = app.store.characters.list(story_id)[0]
+        twin = app.store.characters.add(story_id, "The Keeper")
+        app.play("/new")
+        app.play("Another story begins.")
+        api_lore.merge_by_id(app.session, twin, keeper.id, story_id)
+        cast = app.store.characters.list(story_id)
+        assert [c.name for c in cast] == ["Keeper"]
+        assert "The Keeper" in cast[0].aliases
+
+
+class TestDeleteCharacter:
+    def test_delete_takes_their_journals_and_their_name_off_their_lines(self, app: App) -> None:
+        story_id = remembered(app)
+        keeper = app.store.characters.list(story_id)[0]
+        spoken = app.store.stories.get_messages(story_id)[1]
+        app.store.messages.set_speaker(spoken.id, keeper.id, "Keeper")
+        api_lore.delete_character(app.session, keeper.id, story_id)
+        assert app.store.characters.list(story_id) == []
+        assert app.store.journals.list(story_id) == []
+        # A deleted character spoke nothing: a label kept would bring them
+        # back through an export and its import.
+        row = next(m for m in app.store.stories.get_messages(story_id) if m.id == spoken.id)
+        assert (row.speaker, row.speaker_id) == (None, None)
+        # The prose that mentions them stays.
+        ids = app.store.stories.get_messages_ids(story_id)
+        (scene,) = app.store.scenes.get_current(story_id, ids)
+        assert scene.summary == "A guest came in and met the Keeper."
+
+    def test_delete_refuses_a_character_carrying_a_card(self, app: App) -> None:
+        # The greeting composes its block from the archive the row holds.
+        app.play(f"/card {SERAPHINA}")
+        story_id = app.session.story_id
+        (seraphina,) = app.store.characters.list(story_id)
+        with pytest.raises(Refused):
+            api_lore.delete_character(app.session, seraphina.id, story_id)
+        assert [c.id for c in app.store.characters.list(story_id)] == [seraphina.id]
+
+    def test_delete_refuses_a_row_of_another_story(self, app: App) -> None:
+        # The story in the address is checked against the row, as an
+        # edit's is.
+        story_id = remembered(app)
+        keeper = app.store.characters.list(story_id)[0]
+        app.play("/new")
+        app.play("Another story begins.")
+        with pytest.raises(Refused):
+            api_lore.delete_character(app.session, keeper.id, app.session.story_id)
+        assert [c.id for c in app.store.characters.list(story_id)] == [keeper.id]
+
+
+class TestCastDuringAPass:
+    """A pass resolves names against the cast it read at its start and
+    writes each row alone: while it runs, the cast is not rewritten
+    under it — a merge and a delete are refused until it lands."""
+
+    def test_merge_and_delete_wait_for_the_pass(self, app: App) -> None:
+        story_id = remembered(app)
+        keeper = app.store.characters.list(story_id)[0]
+        twin = app.store.characters.add(story_id, "The Keeper")
+        for i in range(3):
+            app.play(f"Turn number {3 + i}.")
+        asked = len(lore_calls(app))
+        app.server.chunk_delay = 0.3
+        run = api_lore.extract(app.session)
+        try:
+            deadline = time.monotonic() + 5
+            while len(lore_calls(app)) == asked and time.monotonic() < deadline:
+                time.sleep(0.02)
+            assert len(lore_calls(app)) > asked  # the pass is asking
+            with pytest.raises(Refused):
+                api_lore.merge_by_id(app.session, twin, keeper.id, story_id)
+            with pytest.raises(Refused):
+                api_lore.delete_character(app.session, twin, story_id)
+        finally:
+            app.server.chunk_delay = 0.0
+            run.wait()
+        api_lore.delete_character(app.session, twin, story_id)  # landed: the cast is free
+        assert twin not in [c.id for c in app.store.characters.list(story_id)]
+
 
 class TestWarmUp:
     """The post-close prompt warm-up exists for a LOCAL server's prefix
@@ -991,6 +1110,48 @@ class TestWarmUp:
             assert "Rain." not in texts[-1]
         finally:
             app.close()
+
+    def test_the_story_model_is_warmed_when_extraction_has_its_own(self, tmp_path: Path) -> None:
+        # The pass asks the model saved for extraction; the next turn goes
+        # to the story's, so that is the one warmed.
+        server = scripted.ModelServer(models=("test-model", "extract-model"), managed=True)
+        try:
+            root = tmp_path / "state"
+            set_config_provider(root, server, name="ollama")
+            app = launch(root, server, spec="ollama/test-model")
+            try:
+                api_providers.set_extraction_model(app.session, "ollama", "extract-model")
+                remembered(app)
+                assert _warm_requests(app.server, within=5.0) == 1
+                assert _asked(app.server, analyst=True) == {"extract-model"}
+                assert _asked(app.server, warm=True) == {"test-model"}
+            finally:
+                app.close()
+        finally:
+            server.close()
+
+    def test_a_pass_that_asked_another_model_warms_whatever_it_closed(self, tmp_path: Path) -> None:
+        # On one engine the extraction model may have pushed the story's
+        # out of memory, so a pass that asked it warms the story's model
+        # back — a failed one included.
+        server = scripted.ModelServer(models=("test-model", "extract-model"), managed=True)
+        try:
+            root = tmp_path / "state"
+            set_config_provider(root, server, name="ollama")
+            app = launch(root, server, spec="ollama/test-model")
+            try:
+                api_providers.set_extraction_model(app.session, "ollama", "extract-model")
+                for i in range(3):
+                    app.play(f"Turn number {i}.")
+                app.server.script = _garbled_analysis
+                api_lore.extract(app.session).wait()
+                assert app.store.scenes.list(app.session.story_id) == []  # nothing closed
+                assert _warm_requests(app.server, within=5.0) == 1
+                assert _asked(app.server, warm=True) == {"test-model"}
+            finally:
+                app.close()
+        finally:
+            server.close()
 
     def test_the_generic_provider_never_warms(
         self, server: scripted.ModelServer, tmp_path: Path
@@ -1054,6 +1215,24 @@ def _warm_requests(server: scripted.ModelServer, *, within: float) -> int:
         if seen or time.monotonic() >= deadline:
             return seen
         time.sleep(0.05)
+
+
+def _asked(server: scripted.ModelServer, *, analyst: bool = False, warm: bool = False) -> set[str]:
+    """The models the server was asked for: by the extraction prompt, or
+    by the one-token warm-up."""
+    chats = [r for r in server.requests if "messages" in r]
+    if analyst:
+        chats = [r for r in chats if "You are a story analyst" in str(r["messages"][-1]["content"])]
+    if warm:
+        chats = [r for r in chats if r.get("max_tokens") == 1]
+    return {r["model"] for r in chats}
+
+
+def _garbled_analysis(body: dict[str, Any]) -> str:
+    """The extraction prompt answered with what no pass can parse; every
+    other prompt the default way."""
+    prompt = scripted.content_text(body.get("messages", [{}])[-1])
+    return "garbled" if "You are a story analyst" in prompt else scripted.default_script(body)
 
 
 def remembered(app: App) -> int:

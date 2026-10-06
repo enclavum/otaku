@@ -27,18 +27,21 @@ from typing import Any, Self
 
 from otaku.backend.errors import Refused as Refused  # every caller's door to it
 from otaku.backend.paths import Paths
-from otaku.backend.story import StorySettings
+from otaku.backend.story import StorySettingLayout, StorySettings
 from otaku.context import assembler
 from otaku.context.assembler import AssembledPrompt, ContextShape
 from otaku.formatting import pretty_path
+from otaku.integrations import Integrations
 from otaku.logging import ErrorLog
 from otaku.providers import (
     Locality,
+    ModelInfo,
     OpenAIClient,
     PicturesRide,
     ProviderConfig,
     Registry,
     reasoning,
+    templates,
 )
 from otaku.settings import models as models_file
 from otaku.settings import state as state_file
@@ -46,7 +49,12 @@ from otaku.settings.config import Config, TerminalSettings, WebSettings
 from otaku.settings.prompts import Prompts
 from otaku.settings.state import State
 from otaku.store import Store
-from otaku.store.schema import Message, StorySettingDB
+from otaku.store.schema import (
+    CompletionType,
+    Layout,
+    Message,
+    StorySettingDB,
+)
 from otaku.worker import Worker
 
 # The /set think menu for a model nobody has described: unset first
@@ -128,6 +136,7 @@ class Session:
     _story_id: int | None
     _system: str
     _settings_db: tuple[StorySettingDB, ...]  # what the story has stored, handed to every assembly
+    _text_template_override: str | None  # the model's models.toml text_template line, when written
     _messages: list[Message]
     _params: dict[str, object]
     _think: (
@@ -146,7 +155,8 @@ class Session:
     _state: State
     _paths: Paths
     _store: Store
-    _providers_registry: Registry
+    _providers: Registry
+    _integrations: Integrations  # the integrations as bound
     _worker: Worker
     _closed: bool
 
@@ -158,7 +168,8 @@ class Session:
         prompts: Prompts,
         paths: Paths,
         store: Store,
-        registry: Registry,
+        providers: Registry,
+        integrations: Integrations,
         worker: Worker,
         state: State,
     ) -> Self:
@@ -186,7 +197,8 @@ class Session:
         session._state = state
         session._paths = paths
         session._store = store
-        session._providers_registry = registry
+        session._providers = providers
+        session._integrations = integrations
         session._worker = worker
         session._closed = False
         session._read_model()
@@ -215,17 +227,38 @@ class Session:
 
     @property
     def on_cloud(self) -> bool:
-        """Whether the story is played against a hosted catalog — the
-        prompt marker's question, answered per turn. The generic provider
-        is not one: its url could name a catalog, but the marker says
-        what is known, not what might be."""
+        """Whether what is typed leaves this machine — the prompt marker's
+        question, answered per turn: the story is played against a hosted
+        catalog, or lore extraction, running on idle, asks one. With idle
+        extraction off the story leaves only when a pass is asked for, so
+        its model says nothing here. The generic provider is not one: its
+        url could name a catalog, but the marker says what is known, not
+        what might be."""
         client = self._client()
-        return client is not None and client.locality_of(self.model) is Locality.REMOTE
+        if client is not None and client.locality_of(self.model) is Locality.REMOTE:
+            return True
+        if not self._config.lore_enabled:
+            return False
+        extraction = self._extraction_client()
+        model = self._extraction_spec()[1]
+        return extraction is not None and extraction.locality_of(model) is Locality.REMOTE
 
     @property
     def model(self) -> str:
         """The bare model name, as the server expects it."""
         return self._state.bare_model
+
+    @property
+    def extraction_provider(self) -> str:
+        """The provider of the model saved for lore extraction; "" while
+        extraction uses the story's model."""
+        return self._state.extraction_provider if self._state.extraction_bare_model else ""
+
+    @property
+    def extraction_model(self) -> str:
+        """The bare model saved for lore extraction — kept when the story's
+        model changes; "" while extraction uses the story's model."""
+        return self._state.extraction_bare_model
 
     @property
     def story_id(self) -> int | None:
@@ -282,6 +315,13 @@ class Session:
         """ "provider/model" as remembered, for display; "" without a
         model, a half-written spec included."""
         return self._state.model if self._state.bare_model else ""
+
+    @property
+    def full_extraction_model_name(self) -> str:
+        """ "provider/model" lore extraction uses, for display — the one
+        saved for it, else the story's; "" with neither."""
+        provider, model = self._extraction_spec()
+        return f"{provider}/{model}" if model else ""
 
     @property
     def terminal(self) -> TerminalSettings:
@@ -436,16 +476,105 @@ class Session:
         row = client.models.cached(self.model)
         return row is not None and row.capabilities is not None and row.capabilities.vision is True
 
+    @property
+    def text_completion(self) -> bool:
+        """Whether the model in use has the raw text wire: its engine said
+        so (`ModelCapabilities.text_completion`), and unknown reads as no,
+        the capability's own rule. Read off the cached row, as `vision`
+        is. One of the two facts of `can_complete_text`."""
+        client = self._client()
+        if client is None:
+            return False
+        row = client.models.cached(self.model)
+        return (
+            row is not None
+            and row.capabilities is not None
+            and row.capabilities.text_completion is True
+        )
+
+    @property
+    def text_template(self) -> templates.TextTemplate | None:
+        """The text template the text wire renders around the story on
+        the model in use (`templates.resolve`): its models.toml line, else
+        the engine's word off the cached row, else its name; None where
+        none is known."""
+        if not self.model:
+            return None
+        client = self._client()
+        row = client.models.cached(self.model) if client is not None else None
+        return templates.resolve(
+            self._text_template_override, row.text_template if row else None, self.model
+        )
+
+    def text_template_for(self, info: ModelInfo) -> templates.TextTemplate | None:
+        """The text template any listed model would render with — the
+        report's word on a model that is not in use, its models.toml line
+        read for it."""
+        saved = models_file.load(self._paths.models_file).get(info.name, {})
+        return templates.resolve(saved.get(models_file.TEMPLATE_KEY), info.text_template, info.name)
+
+    @property
+    def can_complete_text(self) -> bool:
+        """Whether the novel is offered on the model in use: its engine
+        serves the text wire, and the template in force is `plain` — a
+        base or story-trained model, named so by hand in models.toml. An
+        instruct model has a template too, but fights a bare text, so the
+        novel is kept from it."""
+        template = self.text_template
+        return (
+            self.text_completion and template is not None and template.name == templates.PLAIN.name
+        )
+
+    @property
+    def layout(self) -> Layout:
+        """The layout the open story is read in — its setting, the default
+        until it says otherwise (`StorySettingLayout`); a frontend reads
+        its `mode` off it."""
+        stored = next(
+            (row for row in self._settings_db if row.name == StorySettingLayout.name), None
+        )
+        return StorySettingLayout(stored).layout
+
+    @property
+    def completion_type(self) -> CompletionType:
+        """The wire the next request goes over, off the open story's
+        layout and the model in use (`Layout.completion_type`,
+        `can_complete_text`)."""
+        return self.layout.completion_type(self.can_complete_text)
+
+    @property
+    def can_attach(self) -> bool:
+        """Whether a picture may ride the next request: the model in use
+        sees (`vision`), and the wire has room for one — the text wire is
+        one text, which has none. What shows the attach affordances in
+        both frontends; a picture is refused regardless."""
+        return self.vision and self.completion_type is CompletionType.CHAT
+
+    @property
+    def integrations(self) -> Integrations:
+        """The integrations as bound (`otaku.integrations.Integrations`) —
+        what a tool otaku runs is handed, and all it sees of the session."""
+        return self._integrations
+
     def assemble(self, max_context: int | None) -> AssembledPrompt:
         """The next request — the one binding of the session's fields to
         `assembler.assemble_story`, so the turn, the preview, and every
         other call site can never disagree on what is sent. The pictures
         ride only while the model can see them, and only the latest
-        turn's where the engine would gather every turn's onto it.
-        Raises `ContextOverflowError` when the story cannot fit the
-        limit even fully degraded."""
+        turn's where the engine would gather every turn's onto it — and
+        never over the text wire, which is one text (`as_text`): held,
+        and counted as held. Every injection is a setting's, the canvas's
+        standing instruction included (`StorySettingEmulateTextCompletion`,
+        gated on the transcript), so the warm-up's job rebuilds the same
+        prefix. Raises `ContextOverflowError` when the story cannot fit
+        the limit even fully degraded."""
         client = self._client()
-        settings = StorySettings(self._settings_db, self._store, self._paths.prompts_file)
+        settings = StorySettings(
+            self._settings_db,
+            self._store,
+            self._paths.prompts_file,
+            can_complete_text=self.can_complete_text,
+        )
         shape = ContextShape(
             head_messages=self._config.head_messages,
             min_tail_messages=self._config.min_tail_messages,
@@ -461,7 +590,9 @@ class Session:
             prompts=self._prompts,
             shape=shape,
             pictures_ride=(
-                client.pictures_ride(self.model) if client is not None else PicturesRide.NONE
+                client.pictures_ride(self.model)
+                if client is not None and self.completion_type is CompletionType.CHAT
+                else PicturesRide.NONE
             ),
         )
 
@@ -472,13 +603,26 @@ class Session:
         the registry by name — never a snapshot."""
         if not self.provider:
             return None
-        client = self._providers_registry.get(self.provider)
+        client = self._providers.get(self.provider)
         return client.config if client is not None else None
 
     def _client(self) -> OpenAIClient | None:
         if not self.model:
             return None
-        return self._providers_registry.get(self.provider)
+        return self._providers.get(self.provider)
+
+    def _extraction_spec(self) -> tuple[str, str]:
+        """(provider, model) lore extraction asks: the pair saved for it,
+        else the story's — the halves fall back together, never one alone."""
+        if self.extraction_model:
+            return self.extraction_provider, self.extraction_model
+        return self.provider, self.model
+
+    def _extraction_client(self) -> OpenAIClient | None:
+        """The client lore extraction asks — `_client`'s, unless a model
+        of its own is saved."""
+        provider, model = self._extraction_spec()
+        return self._providers.get(provider) if model else None
 
     def _switch_to(self, story_id: int, messages: list[Message] | None = None) -> None:
         """Attach to a story — system, messages (or the given truncated
@@ -521,18 +665,18 @@ class Session:
         self._search_index = None
 
     def _undo(self) -> list[Message]:
-        """Discard the trailing exchange: the assistant reply (if any)
-        plus the ONE user row that prompted it — every submission is a
-        single row (a /me or /you direction rides its row's template),
-        and an imported backlog of consecutive user rows is story, not
-        one submission. Nothing is deleted: the head moves back and the
-        undone turns stay in the tree as siblings. Returns the popped
-        messages."""
+        """Discard the trailing exchange: the reply (if any) with its tool
+        chain (`_pop_reply`) plus the ONE user row that prompted it —
+        every submission is a single row (a /me or /you direction rides
+        its row's template), and an imported backlog of consecutive user
+        rows is story, not one submission; a continue's reply, standing
+        after a reply, is an exchange of its own and goes alone. Nothing
+        is deleted: the head moves back and the undone turns stay in the
+        tree as siblings. Returns the popped messages."""
         popped: list[Message] = []
         if not self._messages:
             return popped
-        if self._messages[-1].role == "assistant":
-            popped.append(self._messages.pop())
+        popped += self._pop_reply()
         if self._messages and self._messages[-1].role == "user":
             popped.append(self._messages.pop())
         if popped:
@@ -540,15 +684,36 @@ class Session:
             self._search_index = None
         return popped
 
-    def _drop_last_reply(self) -> Message | None:
-        """Pop the trailing assistant reply (regenerate's first half): the
-        head moves back one; the discarded reply stays in the tree as a
-        sibling."""
-        if not self._messages or self._messages[-1].role != "assistant":
+    def _regen_pop(self) -> Message | None:
+        """Pop the trailing reply with its tool chain (regenerate's first
+        half, `_pop_reply`), so the take re-runs from what stands before
+        it — the reader's line, or the reply a continue went on from:
+        the head moves back; the discarded turns stay in the tree as
+        siblings. Returns the first of the replies dropped, None where
+        the story does not end on one."""
+        popped = self._pop_reply()
+        if not popped:
             return None
-        popped = self._messages.pop()
         self._move_head()
         self._search_index = None
+        return next((row for row in reversed(popped) if row.role == "assistant"), popped[-1])
+
+    def _pop_reply(self) -> list[Message]:
+        """Pop the trailing reply as ONE unit: the reply, and where a
+        tool turn stands right before it, that turn and the reply holding
+        its call, again and again. The unit ends at a reply with no
+        tool turn before it, so two replies side by side — a continue's
+        after the one it went on from — are two units. Reads roles and
+        their order alone, never the mode. Returns the popped rows,
+        newest first; [] where the story does not end on a reply."""
+        popped: list[Message] = []
+        while self._messages and self._messages[-1].role in ("assistant", "tool"):
+            row = self._messages.pop()
+            popped.append(row)
+            if row.role == "assistant" and not (
+                self._messages and self._messages[-1].role == "tool"
+            ):
+                break
         return popped
 
     def _set_system(self, text: str) -> None:
@@ -613,8 +778,21 @@ class Session:
         `_save_model_settings` is the mirror write."""
         self._params = {}
         self._think = None
+        self._text_template_override = None
         saved = models_file.load(self._paths.models_file).get(self.model, {})
         for name, value in saved.items():
+            if name == models_file.TEMPLATE_KEY:
+                # The user's own word, by hand: one of the templates
+                # otaku renders, or a line it cannot honour.
+                if isinstance(value, str) and value in templates.TEXT_TEMPLATES:
+                    self._text_template_override = value
+                else:
+                    names = ", ".join(templates.TEXT_TEMPLATES)
+                    self._note(
+                        f"Ignoring unknown text_template {value!r} saved for {self.model}; "
+                        f"text templates: {names}."
+                    )
+                continue
             if name == models_file.THINK_KEY:
                 # A level the wire spells, or the way out — anything else
                 # is a hand edit the engine would refuse. A budget is
@@ -654,6 +832,8 @@ class Session:
         entry: dict[str, object] = dict(self._params)
         if self._think is not None:
             entry[models_file.THINK_KEY] = self._think
+        if self._text_template_override is not None:
+            entry[models_file.TEMPLATE_KEY] = self._text_template_override
         try:
             models_file.save(self._paths.models_file, self.model, entry)
         except (OSError, ValueError) as e:

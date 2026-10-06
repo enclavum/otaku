@@ -15,24 +15,27 @@ from otaku.backend import (
 )
 from otaku.backend.api import play as api_play
 from otaku.backend.api.play import (
+    AssistantReasoning,
+    AssistantText,
+    AssistantToolCall,
+    AssistantTurn,
     Declined,
     Done,
     Failed,
     PlayEvent,
-    Reasoning,
-    Recorded,
-    Text,
-    ToolCall,
+    ToolTurn,
+    UserTurn,
 )
 from otaku.backend.commands import COMMANDS, PROSE_DESCRIPTION
 from otaku.backend.files import RawFile
 from otaku.backend.session import Refused, Session
+from otaku.backend.tools import TOOLS, get_tool_label
 from otaku.web.api.request import Ask, Blob, NotFound, Route
 
 
 def _turns(session: Session) -> list[dict[str, Any]]:
     """The open story, one row per stored turn, oldest first."""
-    return [turn(message) for message in session.messages]
+    return rows(session.messages)
 
 
 def _history(session: Session) -> list[str]:
@@ -52,7 +55,7 @@ def syntax() -> dict[str, Any]:
     shared table's row is a sentence, and where a word is drawn is the
     medium's business. The rows themselves are declared once, in
     `context.syntax`, and reach here through the shared table."""
-    rows = [spec for spec in COMMANDS if spec.kind is commands.CommandKind.SYNTAX]
+    rows = [spec for spec in COMMANDS if spec.kind is commands.CommandType.SYNTAX]
     return {
         # What a line with no framing does — the one row that is not a
         # word, and the sentence the sheet opens with.
@@ -104,6 +107,12 @@ def play(session: Session, line: str, files: Sequence[RawFile] = ()) -> Iterator
     return api_play.submit(session, line, files)
 
 
+def next_join(session: Session) -> str | None:
+    """How a line typed now would join the newest row — a fact of the
+    session's (`stories.facts`) that the play twin answers."""
+    return api_play.next_join(session)
+
+
 def files_from(body: Mapping[str, Any]) -> list[RawFile]:
     """The pictures a play body carries: `files`, each a name and its
     bytes as base64 — decoded here, on the handler's thread, so a body
@@ -145,23 +154,48 @@ def event(happened: PlayEvent) -> dict[str, Any]:
     match is exhaustive: a new event kind is a type error here, not a
     silence on the wire."""
     match happened:
-        case Recorded():
+        case UserTurn():
             # `note` is the record's own dim line (a /roll's dice); ""
             # rides along so the shape never depends on the turn.
-            return {"type": "recorded", "turn": turn(happened.message), "note": happened.note}
-        case Reasoning():
-            return {"type": "reasoning", "text": happened.text}
-        case Text():
-            return {"type": "text", "text": happened.text}
-        case ToolCall():
-            # A piece of a tool call, the tool's name and its inside;
-            # `closed` marks the piece the closing fence ended.
             return {
-                "type": "tool_call",
+                "type": "user_turn",
+                "turn": turn(happened.message, join=happened.join_type.value),
+                "note": happened.note,
+            }
+        case AssistantReasoning():
+            return {"type": "assistant_reasoning", "text": happened.text}
+        case AssistantText():
+            # `join_type` on the reply's first piece alone, null after: how
+            # the arriving reply joins the text before it, on the canvas.
+            join = happened.join_type.value if happened.join_type is not None else None
+            return {"type": "assistant_text", "text": happened.text, "join_type": join}
+        case AssistantToolCall():
+            # A piece of a tool call, the tool's name and its inside;
+            # `closed` marks the piece the closing fence ended. The tool's
+            # label and who acts on it ride along where the tool is known,
+            # so the page draws a call otaku runs as it streams.
+            known = TOOLS.get(happened.name)
+            return {
+                "type": "assistant_tool_call",
                 "tool": happened.name,
+                "label": known.label if known is not None else "",
+                "actor": known.actor.value if known is not None else None,
                 "text": happened.text,
                 "closed": happened.closed,
             }
+        case AssistantTurn():
+            # The model's row as recorded — split, tags and all — so the
+            # page lands it as the turn it is, in place of what streamed.
+            return {
+                "type": "assistant_turn",
+                "turn": turn(happened.message, join=happened.join_type.value),
+            }
+        case ToolTurn():
+            # The tool's row: the page draws it after the reply it
+            # answers, then opens the block the reply that continues
+            # streams into.
+            row = turn(happened.message, join=happened.join_type.value)
+            return {"type": "tool_turn", "turn": row}
         case Declined():
             return {"type": "declined", "reason": happened.reason}
         case Failed():
@@ -183,18 +217,28 @@ def event(happened: PlayEvent) -> dict[str, Any]:
                 if report is not None
                 else None,
                 "notice": report.notice if report is not None else "",
-                # The reply as stored — split, tags and all — so the page lands
-                # it as the turn it is; null when nothing arrived.
-                "reply": turn(happened.reply) if happened.reply else None,
             }
 
 
-def turn(message: Message) -> dict[str, Any]:
+def rows(messages: Sequence[Message]) -> list[dict[str, Any]]:
+    """Stored turns in order, each with how it joins the one before it
+    (`api.play.join_type`, the join rule, read off the two rows)."""
+    out: list[dict[str, Any]] = []
+    previous: Message | None = None
+    for message in messages:
+        out.append(turn(message, join=api_play.join_type(previous, message)))
+        previous = message
+    return out
+
+
+def turn(message: Message, *, join: str) -> dict[str, Any]:
     """One stored turn as the page reads it: the body, and the facts
     recorded with it — the kind the language stored it as, who answered
     an assistant turn and with what template, and the speaker the
     extractor named (None until its pass reads the turn, which is a
-    state the reader pane draws as pending)."""
+    state the reader pane draws as pending) — and `join`, how it joins
+    the turn before it, which the caller knows (`rows`, or the event
+    that carried the row)."""
     return {
         "id": message.id,
         "role": message.role,
@@ -207,10 +251,18 @@ def turn(message: Message) -> dict[str, Any]:
         # The turn's pictures, the column's own facts: the name the
         # file routes take, the media type, the measure. [] when none.
         "attachments": [asdict(picture) for picture in message.attachments],
+        # A tool turn's tool, as the page names it for what it holds
+        # (`tools.get_tool_label`); null on every other turn.
+        "tool_label": (
+            get_tool_label(message.provider, message.body) if message.role == "tool" else None
+        ),
         # The body split: prose, and each block as its tool's facts — the
         # page draws from these and parses nothing. A block of a tag no
         # tool owns is a block all the same, with its text alone.
-        "segments": api_play.segments(message.body),
+        "segments": api_play.segments(message.body, message.role),
+        # How it joins the turn before it, for the canvas: "inline", as it
+        # stands, or "paragraph", a blank line before it.
+        "join_type": join,
     }
 
 

@@ -103,7 +103,7 @@ openapi: 3.1.0
 
 info:
   title: otaku web API
-  version: 0.6.0
+  version: 0.7.0
   contact:
     name: otaku
     url: https://otaku.sh
@@ -180,6 +180,8 @@ tags:
     description: What otaku is reading, what it will send next, and what it has spent.
   - name: Settings
     description: The knobs, one door each.
+  - name: Support
+    description: A request to otaku's author, sent on through otaku.sh.
   - name: Signing in
     description: The password, where one is set — neither lane, and the one door that is slow on purpose.
   - name: Server
@@ -720,6 +722,18 @@ paths:
         "200": { $ref: "#/components/responses/Answered" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "403": { $ref: "#/components/responses/CrossOrigin" }
+    delete:
+      operationId: deleteStoryCharacter
+      tags: [Dossier]
+      summary: Delete a character the extractor should never have made
+      description: |
+        Their journals go with them, and their name leaves every line
+        they spoke; prose that mentions them stays. Refused for a
+        character carrying an imported card, and while an extraction
+        pass is writing to the story — as a merge is.
+      responses:
+        "200": { $ref: "#/components/responses/Answered" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
 
   /api/stories/{story}/characters/{character}/merge:
     parameters:
@@ -733,7 +747,8 @@ paths:
         What `/merge A into B` does. Its scenes, journals and aliases
         move across and THIS CHARACTER STOPS EXISTING — which is why it
         is not a field of the PATCH above. Ids, not names: the page
-        holds the cast and resolves the name it showed.
+        holds the cast and resolves the name it showed. Refused while an
+        extraction pass is writing to the story.
       requestBody:
         content:
           application/json:
@@ -786,8 +801,9 @@ paths:
       description: |
         Every setting of the story, in the order their injections are
         sent: a tool's switch (questions, assistant notes), the two
-        reminders, and a flag. Read whole, written one at a time. A
-        story stores only what was set; the rest reads at its default.
+        reminders, a flag, and the layout the story is read in. Read
+        whole, written one at a time. A story stores only what was set;
+        the rest reads at its default.
       responses:
         default: { $ref: "#/components/responses/Failed" }
         "200":
@@ -805,7 +821,7 @@ paths:
         required: true
         schema:
           type: string
-          enum: [use_shared_reminder, use_story_reminder, allow_assistant_notes, allow_questions, story_mode]
+          enum: [use_shared_reminder, use_story_reminder, allow_assistant_notes, allow_questions, allow_system_info, allow_web_search, emulate_text_completion, layout]
     patch:
       operationId: patchStorySetting
       tags: [Dossier]
@@ -817,8 +833,11 @@ paths:
         and is refused for a setting that injects nothing;
         `reminder_text` is taken by the story reminder alone — the shared
         reminder's text is /api/shared_reminder's; `display_notes` by the
-        notes tool alone. A flag that is not a boolean is malformed. The
-        answer's notice says where the setting now stands.
+        notes tool alone; `layout` by the layout setting alone, which has
+        no switch — `enabled` is refused for it. A flag that is not a
+        boolean is malformed, and so is a layout that is none of the
+        three names. The answer's notice says where the setting now
+        stands.
       requestBody:
         content:
           application/json:
@@ -832,6 +851,7 @@ paths:
                     - { type: integer, minimum: 1 }
                 reminder_text: { type: string, description: The story's own reminder; "" clears it. }
                 display_notes: { type: boolean, description: Whether the reader is shown the notes the model writes; refused for a setting with nothing to display. }
+                layout: { type: string, enum: [novel, canvas, manuscript, chat], description: "The layout the story is read in; taken by the layout setting alone. The novel is refused on a model that cannot complete text." }
       responses:
         "200": { $ref: "#/components/responses/Answered" }
         "400": { $ref: "#/components/responses/BadRequest" }
@@ -1068,6 +1088,37 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "403": { $ref: "#/components/responses/CrossOrigin" }
 
+  /api/session/extraction_model:
+    put:
+      operationId: putSessionExtractionModel
+      tags: [Models]
+      summary: Pin lore extraction to a model of its own
+      description: |
+        Remembered, like the session's model, and kept when that one
+        changes — the model played with included, once pinned. Refused
+        for an unknown provider, or the model already pinned.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [provider, model]
+              properties:
+                provider: { type: string }
+                model: { type: string }
+      responses:
+        "200": { $ref: "#/components/responses/Answered" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+    delete:
+      operationId: deleteSessionExtractionModel
+      tags: [Models]
+      summary: Unpin — lore extraction uses the model played with again
+      description: Refused when nothing is pinned.
+      responses:
+        "200": { $ref: "#/components/responses/Answered" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+
   /api/session/model/parameters/{name}:
     parameters:
       - { name: name, in: path, required: true, schema: { type: string } }
@@ -1181,6 +1232,33 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ContextReport" }
+
+  /api/session/context_use:
+    get:
+      operationId: getSessionContextUse
+      tags: [Session]
+      summary: How full the next request is
+      description: |
+        The context preview's own figure — `ContextReport.shape.used`, the
+        percent of the limit — and the context the story is cut to, with
+        the sentence the page shows. Over 100 where the story cannot fit
+        even fully summarized. Nulls and "" while the model's window is
+        not known: no model, a model not loaded, a catalog that has not
+        answered. Asks a local engine for the window; nothing across the
+        internet.
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: The figure and its sentence.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [used, context, text]
+                properties:
+                  used: { type: [integer, "null"], description: "Percent of the limit." }
+                  context: { type: [integer, "null"], description: "The context in force, in tokens." }
+                  text: { type: string, description: '"85% of 128K"; "" while the window is not known.' }
 
   /api/session/info:
     get:
@@ -1330,19 +1408,84 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "403": { $ref: "#/components/responses/CrossOrigin" }
 
-  /api/prompts/{tool}:
+  /api/integrations/web_search:
+    get:
+      operationId: getWebSearch
+      tags: [Settings]
+      summary: Where web search stands
+      description: |
+        Whether the web search tool holds a key. The key's value never
+        comes back out.
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: Whether a key is held.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/WebSearch" }
+    patch:
+      operationId: patchWebSearchKey
+      tags: [Settings]
+      summary: Save the web search key, or clear it
+      description: |
+        ONE key, Tavily's or Exa's — which engine it belongs to is told
+        from its shape when a search is asked. Sealed into the web search
+        section of integrations.toml, live in the session at once. An
+        empty string CLEARS it.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [api_key]
+              properties:
+                api_key: { type: string, description: 'The key as typed; "" clears it.' }
+      responses:
+        "200": { $ref: "#/components/responses/Answered" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+
+  /api/support:
+    post:
+      operationId: sendSupportRequest
+      tags: [Support]
+      summary: Send a support request to otaku's author
+      description: |
+        The message, and where one is given the address to answer at,
+        posted on to otaku.sh, which mails it to the author. Nothing of
+        the story rides. Checked before it leaves: an empty message, one
+        over 5000 characters, an address that is none, and a send that
+        failed come back as a refusal, in words.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message: { type: string, description: "The request as typed." }
+                email: { type: [string, "null"], description: "The address to answer at; empty or null when none is given." }
+      responses:
+        "200": { $ref: "#/components/responses/Answered" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/CrossOrigin" }
+
+  /api/prompts/{setting}:
     parameters:
-      - name: tool
+      - name: setting
         in: path
         required: true
-        schema: { type: string, enum: [question, note] }
+        description: An injection setting that sends a prompt — one whose settings row names its `prompt_name`.
+        schema: { type: string, enum: [allow_questions, allow_assistant_notes, allow_system_info, allow_web_search, emulate_text_completion] }
     get:
       operationId: getPrompt
       tags: [Settings]
-      summary: A tool's prompt
+      summary: An injection setting's prompt
       description: |
-        What the model is told about the tool — prompts.toml's text, read
-        fresh, which every story with the tool switched on is sent.
+        The text the setting injects — prompts.toml's, read fresh, which
+        every story with the setting switched on is sent. Refused, with
+        the sentence, for a setting that sends no prompt (a reminder's
+        text is the reader's own).
       responses:
         default: { $ref: "#/components/responses/Failed" }
         "200":
@@ -1353,7 +1496,7 @@ paths:
     put:
       operationId: putPrompt
       tags: [Settings]
-      summary: Set a tool's prompt
+      summary: Set an injection setting's prompt
       description: |
         Written into prompts.toml, that key alone, the pre-edit file
         backed up; "" drops the key and the shipped text stands again.
@@ -1564,6 +1707,10 @@ components:
         card: { type: string, description: 'The import archive, as TOML; "" for an extracted character.' }
         history: { type: string, description: 'Their arc so far — the newest rollup a pass wrote, derived and never written back; "" before the first one.' }
         updated_at: { type: string, format: date-time, description: "When the extractor last wrote the character — display alone." }
+        provider:
+          type: [string, "null"]
+          description: "Who made the character: the engine of the pass that named them, or 'card' for an imported one; null for an imported story's, or one made before the column existed. An edit never changes it."
+        model: { type: [string, "null"], description: "The pass's model, or the card's file name." }
         journals:
           type: array
           items: { $ref: "#/components/schemas/JournalRecord" }
@@ -1594,7 +1741,7 @@ components:
             pictures_held: { type: integer, description: "On earlier verbatim messages but held back: the engine puts every picture on the latest message, so only the latest turn's ride." }
             pictures_omitted: { type: integer, description: "On verbatim messages but not sent: the model cannot see, or the file is gone." }
             kept: { type: integer, description: "Derived: head + tail." }
-            total_tokens: { type: integer, description: "Derived: system + transcript." }
+            total_tokens: { type: integer, description: "Derived: system + transcript — or, over the text wire, the estimate of the one text as sent, its markers and framing counted." }
             used: { type: integer, description: "Derived: percent of the limit." }
         lede: { type: string, description: "The summary said in words." }
         note: { type: string, description: "What the preview could not know, as a sentence — the model is not loaded, so the window is the assembler's substitute until a turn loads it; \"\" when it knew everything." }
@@ -1612,11 +1759,11 @@ components:
               tokens: { type: integer, description: "The assembler's estimate of its cost — inside system_tokens at \"system\", inside transcript_tokens otherwise." }
         parts:
           type: array
-          description: One part per message, exactly as the wire will carry it.
+          description: One part per message, exactly as the wire will carry it — or, over the text wire, ONE part, the text as the text wire sends it (role "prompt"), rendered in the model's template.
           items:
             type: object
             properties:
-              role: { type: string }
+              role: { type: string, description: "The message's role — \"prompt\" for the text wire's one part." }
               body: { type: string }
               pictures: { type: integer, description: "Pictures riding this part; 0 for most." }
 
@@ -1700,28 +1847,45 @@ components:
       description: One frame of the reply stream, keyed by `type`.
       oneOf:
         - type: object
-          description: The user's turn landed — echo it.
+          description: The user's row landed — echo it.
           properties:
-            type: { const: recorded }
+            type: { const: user_turn }
             turn: { $ref: "#/components/schemas/Turn" }
             note:
               type: string
               description: 'The record''s own dim line — the dice a /roll rolled; "" otherwise.'
         - type: object
+          description: A piece of the model's thinking, as it streams.
           properties:
-            type: { const: reasoning }
+            type: { const: assistant_reasoning }
             text: { type: string }
         - type: object
+          description: A piece of the reply's prose, as it streams.
           properties:
-            type: { const: text }
+            type: { const: assistant_text }
             text: { type: string }
+            join_type: { type: [string, "null"], enum: [inline, paragraph, null], description: "How the arriving reply joins the text before it, on the canvas — on the reply's first piece alone, when that piece is prose; null on every other piece." }
         - type: object
           description: A piece of a tool call — the tool's name and its inside, never a fence; the deltas are parsed for the page, which parses nothing.
           properties:
-            type: { const: tool_call }
-            tool: { type: string, description: The tool's name — question, note; a name no tool owns is a call all the same. }
+            type: { const: assistant_tool_call }
+            tool: { type: string, description: The tool's name — question, note, system, search; a name no tool owns is a call all the same. }
+            label: { type: string, description: 'What the page calls the tool where it names it; "" for a name no tool owns.' }
+            actor: { type: [string, "null"], enum: [nobody, user, system, null], description: "Who acts on the call — nobody (an aside), the user (the reply ends there), the system (otaku runs the tool, and the reply goes on); null for a name no tool owns." }
             text: { type: string }
             closed: { type: boolean, description: This piece is the one the closing fence ended. }
+        - type: object
+          description: The model's row landed, as recorded, once its pieces streamed — it ends where the stream ended, at a tool call (its closing fence there whether or not the model wrote one) or at the reply's own end. Sent before a tool runs, at the end, and before `failed` alike; the page lands it in place of what streamed.
+          properties:
+            type: { const: assistant_turn }
+            turn: { $ref: "#/components/schemas/Turn" }
+        - type: object
+          description: A tool ran and its row landed. The reply that continues from it streams next, in the same stream.
+          properties:
+            type: { const: tool_turn }
+            turn:
+              description: The tool turn — role and kind "tool", its provider the tool's name, `tool_label` its label; no speaker; the result its body.
+              allOf: [{ $ref: "#/components/schemas/Turn" }]
         - type: object
           description: The stream declines mid-way; what already happened stands.
           properties:
@@ -1733,7 +1897,7 @@ components:
             type: { const: failed }
             reason: { type: string }
         - type: object
-          description: The turn's end.
+          description: The turn's end. Every row landed before it, each told by its own event.
           properties:
             type: { const: done }
             stats:
@@ -1752,15 +1916,11 @@ components:
                 prompt_tokens: { type: integer, nullable: true }
                 cached_tokens: { type: integer, nullable: true }
                 completion_tokens: { type: integer, nullable: true }
-                max_context: { type: integer, nullable: true, description: "The context the prompt was measured against." }
+                max_context: { type: integer, nullable: true, description: "The context the prompt was cut to: the model's window under the configured cap; null while the window is not known." }
                 finish_reason: { type: string, nullable: true, description: 'Why the model stopped, in the wire''s word: "stop", "length", …; null where it said none.' }
                 truncated: { type: boolean, description: "Derived: the reply was cut at the reply limit." }
                 rate: { type: number, nullable: true, description: "Derived: tokens per second over the generation alone." }
-                context_used: { type: integer, nullable: true, description: "Derived: percent of the context the prompt took." }
-            reply:
-              nullable: true
-              description: The reply as stored, the turn whole — split into segments, fences and all — for the page to land in place; null when nothing arrived.
-              allOf: [{ $ref: "#/components/schemas/Turn" }]
+                context_used: { type: integer, nullable: true, description: "Derived: percent of that context the prompt actually took, by the engine's own count." }
 
     PreparedCard:
       type: object
@@ -1791,6 +1951,7 @@ components:
         /api/machine and nothing carries a second copy.
       properties:
         current: { type: string, description: '"provider/model" as the provider lists the model (Ollama tags a bare name ":latest"), which is how the page finds its row; "" without a model.' }
+        extraction: { type: string, description: 'The model pinned for lore extraction, listed as `current` is; "" while extraction uses the model played with.' }
         providers:
           type: array
           items:
@@ -1857,6 +2018,7 @@ components:
                       description: "Where the model is served: its own where it differs from its provider's (Ollama's ollama.com models are remote), the provider's otherwise. What a caption on the model reads."
                     max_context_catalogue: { type: string, description: "The model's own maximum context, formatted; \"\" when the provider states none." }
                     max_context_loaded: { type: string, description: "What the running instance serves, formatted; \"\" while none runs or the engine does not say." }
+                    text_template: { type: string, nullable: true, description: "The text template the text wire wraps the story in for this model, as otaku resolves it — its models.toml `text_template` line, else the engine's word, else its name (gemma4, gemma, mistral-tekken, chatml, llama3, plain); on it the canvas layout is story mode. Null where none is known: the model plays chat mode whatever the layout. Chat mode never uses it." }
                     capabilities:
                       type: object
                       nullable: true
@@ -1894,6 +2056,10 @@ components:
         summary: { type: string }
         history: { type: string, description: 'The story-so-far THROUGH this scene; "" when not generated here. DERIVED — there is no write for it.' }
         updated_at: { type: string, format: date-time, description: "When the extractor last wrote the scene — display alone." }
+        provider:
+          type: [string, "null"]
+          description: "Who made the scene: the engine of the pass that closed it; null for an imported story's, or one made before the column existed. A later rollup or an edit never changes it."
+        model: { type: [string, "null"], description: "The pass's model." }
         present:
           type: array
           items: { type: string }
@@ -1914,6 +2080,7 @@ components:
         version: { type: string }
         model: { type: string, description: "The bare model name; \"(no model)\" when none." }
         provider: { type: string, description: "The provider serving the model; \"\" without a model." }
+        extraction_model: { type: string, description: "\"provider/model\" lore extraction asks — the one pinned for it, else the model played with; \"\" with neither." }
         max_context:
           type: string
           description: >
@@ -1924,7 +2091,14 @@ components:
         story: { type: string, description: "The open story's name; \"\" when none." }
         story_id: { type: [integer, "null"] }
         turns: { type: integer, description: "How many, so the runhead needs no chain." }
-        vision: { type: boolean, description: "Whether the model in use takes pictures — what shows the attach button; a picture is refused regardless." }
+        can_attach: { type: boolean, description: "Whether a picture may ride the next request — the model in use sees, and the mode's wire carries one, which the text wire's one text does not; what shows the attach button. A picture is refused regardless." }
+        completion_type: { type: string, enum: [chat, text], description: "The wire the next request goes over (Session.completion_type): text for a novel on a model that can complete text, chat otherwise." }
+        layout: { type: string, enum: [canvas, manuscript, chat], description: "The look the open story is drawn in (Transcript.layout) — the canvas for a novel and a canvas alike. On the canvas the send button reads Continue and an empty line continues the text." }
+        can_complete_text: { type: boolean, description: "Whether the novel is offered on the model in use: its engine serves the text wire and a plain template is in force (a text_template = \"plain\" line in models.toml). What shows the novel glyph." }
+        next_join:
+          type: [string, "null"]
+          enum: [inline, paragraph, null]
+          description: How a line typed now, opening with no break of its own, would join the newest row (the backend's join rule) — where the canvas's typing place draws its one space or opens a paragraph; null while the story has no row.
 
     Settings:
       type: object
@@ -1967,6 +2141,14 @@ components:
       required: [text]
       properties:
         text: { type: string }
+
+    WebSearch:
+      type: object
+      required: [has_key]
+      properties:
+        has_key:
+          type: boolean
+          description: Whether web search holds a key.
 
     Status:
       type: object
@@ -2045,8 +2227,9 @@ components:
             properties:
               name: { type: string, description: What the story stores it under — the path segment a PATCH takes. }
               label: { type: string, description: "The switch's label, as the Tools tab shows it." }
-              injection_label: { type: string, nullable: true, description: "The name of the TEXT the setting injects — what a depth ruler places and /context lists — lowercase (questions, assistant notes, story reminder, shared reminder); null for a setting that injects nothing." }
-              tool: { type: string, nullable: true, description: "The name of the tool this setting switches (question, note) — its prompt is /api/prompts/{tool}'s; null for a setting that is no tool's." }
+              injection_label: { type: string, nullable: true, description: "The name of the TEXT the setting injects — what a depth ruler places and /context lists — lowercase (questions, assistant notes, story reminder, shared reminder, text completion emulation); null for a setting that injects nothing." }
+              tool: { type: string, nullable: true, description: "The name of the tool this setting switches (question, note, system-info, web-search); null for a setting that is no tool's." }
+              prompt_name: { type: string, nullable: true, description: "The prompts.toml key of the prompt it injects — otaku's text, edited at /api/prompts/{setting}; null where the text is the reader's own (a reminder) or none is injected (the layout)." }
               allowed_positions:
                 type: array
                 description: Every position it may take, as a menu offers them; empty for a setting that injects nothing.
@@ -2054,7 +2237,7 @@ components:
                   oneOf:
                     - { type: string, enum: [system] }
                     - { type: integer, minimum: 1 }
-              enabled: { type: boolean }
+              enabled: { type: boolean, description: "Whether it is on — off for a new story; always true for the layout setting, which has no switch." }
               position:
                 nullable: true
                 description: Where its injection rides — "system" appends it to the system message; a number puts it before that one of the reader's messages counted from the end, 1 the latest; null for a setting that injects nothing.
@@ -2063,6 +2246,7 @@ components:
                   - { type: integer, minimum: 1 }
               reminder_text: { type: string, nullable: true, description: "The story's own reminder; null for a setting that has none (every one but the story reminder's)." }
               display_notes: { type: boolean, nullable: true, description: "Whether the reader is shown the notes the model writes; null for a setting with nothing to display." }
+              layout: { type: string, nullable: true, enum: [novel, canvas, manuscript, chat, null], description: "The layout the story is read in — novel (the canvas over the text wire, the model continuing the text), canvas (one continuous text), manuscript (played lines as interjections), chat (alternating blocks); manuscript until the story says otherwise. Null for every setting but the layout's." }
 
     Syntax:
       type: object
@@ -2091,15 +2275,18 @@ components:
       type: object
       properties:
         id: { type: integer }
-        role: { type: string, enum: [user, assistant] }
+        role: { type: string, enum: [user, assistant, tool], description: "A tool turn is a tool's result: nobody's line, no reply." }
         body: { type: string }
-        kind: { type: string, enum: [dialogue, narration, ooc, card] }
+        kind: { type: string, enum: [dialogue, narration, ooc, card, tool] }
         speaker:
           type: [string, "null"]
           description: "The extractor's name for who spoke; null until its pass reads the turn."
         provider:
           type: [string, "null"]
-          description: "Who generated an assistant turn ('card' on a card greeting)."
+          description: "Who generated the turn: an engine, 'card' on a card greeting, or a tool's name on a tool turn."
+        tool_label:
+          type: [string, "null"]
+          description: "A tool turn's tool as the page names it for the result it holds ('Web search call'; 'Web search failed' for a search that failed); null on every other turn."
         model: { type: [string, "null"] }
         template:
           type: [string, "null"]
@@ -2108,9 +2295,13 @@ components:
           type: array
           description: "The turn's pictures; [] when none."
           items: { $ref: "#/components/schemas/Attachment" }
+        join_type:
+          type: string
+          enum: [inline, paragraph]
+          description: "How the turn joins the one before it, the wire's own rule (context.assembler.get_join_type): inline — one space before it, where both rows were written in story mode, neither a tool's result nor a card's, and no break stands at the boundary; paragraph — a blank line before it, every other row. What the canvas layout draws by."
         segments:
           type: array
-          description: The body split in order — prose, and each tool call as its tool's facts — so the page draws a turn without parsing it. The body itself stays whole above, for the editor.
+          description: The body split in order — prose, and each tool call as its tool's facts; a user's line, its story and its words with the model (context.syntax.spans) — so the page draws a turn without parsing it. The body itself stays whole above, for the editor.
           items:
             oneOf:
               - type: object
@@ -2118,10 +2309,17 @@ components:
                   kind: { const: prose }
                   text: { type: string }
               - type: object
+                description: "A user's line's words with the model: all of a /you or /ooc line after its token, whatever follows a /ooc or /cue inliner. Out of character, never story."
+                properties:
+                  kind: { const: ooc }
+                  text: { type: string }
+              - type: object
                 description: A tool call; a tool's carries what it read (backend.tools.Tool.to_json), one of a name no tool owns its text alone.
                 properties:
                   kind: { const: tool_call }
-                  tool: { type: string, description: The tool's name — question, note; any other is one no tool owns. }
+                  tool: { type: string, description: The tool's name — question, note, system, search; any other is one no tool owns. }
+                  label: { type: string, description: "What the page calls the tool where it names it." }
+                  actor: { type: string, enum: [nobody, user, system], description: "Who acts on the call: nobody, the user, or the system (otaku)." }
                   text: { type: string, description: The call's inside, as written. }
                   question: { type: string, description: "A question's: the question itself." }
                   options:

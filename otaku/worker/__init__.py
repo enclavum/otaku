@@ -8,13 +8,17 @@ One path into a pass, so a forced close can never race an automatic
 one. The worker is the system log's owner and only writer: everything a
 pass does lands there.
 
-After a scene closes, the warm-up — LOCAL providers only: the close
-rewrites the next request's shape, so the server's cached prefix is
-stale. The exact next request (rebuilt from the Job's snapshot) is sent
-with max_tokens=1 while the user still reads — skipped once they moved
-on, because the prefix it would warm is one they are already past, and
-never sent to a cloud provider, which has no per-session cache to warm
-and would bill the full window for the one token.
+The pass asks the model extraction uses, which need not be the one
+the turns go to. After a scene closes, the warm-up — the turns' model,
+LOCAL providers only: the close rewrites the next request's shape, so
+the server's cached prefix is stale. After any pass that asked another
+model too: on one engine that model may have pushed the turns' out of
+memory, and the warm-up loads it back. The exact next request (rebuilt
+from the Job's snapshot) is sent with max_tokens=1 while the user still
+reads — skipped once they moved on, because the prefix it would warm is
+one they are already past, and never sent to a cloud provider, which
+has no per-session cache to warm and would bill the full window for the
+one token.
 """
 
 import contextlib
@@ -48,10 +52,15 @@ class Job:
     the worker reads no settings files."""
 
     # The pass: which model, how.
-    provider: str
-    model: str  # its name; the engine's row is asked for once it is loaded
+    extraction_provider: str
+    extraction_model: str  # its name; the engine's row is asked for once it is loaded
     extraction_settings: ExtractionSettings
     force: bool  # the manual close: gate and settle margin dropped
+
+    # The story's model, which the next request goes to — the warm-up's;
+    # "" with none.
+    provider: str
+    model: str
 
     # The next request, as `assemble_story` takes it, in its order.
     story_id: int
@@ -76,7 +85,8 @@ class Worker:
     submission drops the queue and skips the warm-up; a running pass
     finishes), `cancel` (abort mid-stream; nothing half-done commits),
     `shutdown` (non-blocking; exit is immediate). `status` is the
-    one-line account the frontends show; `on_status` its repaint hook.
+    one-line account the frontends show; `on_status` its repaint hook;
+    `extracting_story_id` the story a pass is writing to.
 
     While a job runs, the pass reports its current step through the
     status row. A small display thread holds the LAST line of a pass on
@@ -116,6 +126,9 @@ class Worker:
         # the work that is pointless once they have moved on.
         self._abort: threading.Event | None = None
         self._deferred: threading.Event | None = None
+        # The story of the pass in flight, None outside one; an int rebind
+        # is atomic, so `extracting_story_id` reads it without the lock.
+        self._extracting_story_id: int | None = None
         self._stopped = False
         self._thread: threading.Thread | None = None
         self._display: threading.Thread | None = None
@@ -198,6 +211,13 @@ class Worker:
         from any thread; a str rebind is atomic, so no lock is needed."""
         return self._shown
 
+    @property
+    def extracting_story_id(self) -> int | None:
+        """The story a pass is writing to right now, None when none is.
+        The pass resolves names against the cast it read at its start, so
+        a cast row removed under it fails its next write."""
+        return self._extracting_story_id
+
     # ---------- worker internals ----------
 
     def _loop(self) -> None:
@@ -216,18 +236,19 @@ class Worker:
                 # a waiting manual close must never hang on a crash.
                 result = PassResult.FAILED
                 report = Report()
+                extractor: Extractor | None = None
                 try:
                     try:
                         self._set_status("")  # a new pass supersedes a held failure
                         if store is None:
                             store = self._store_factory()
-                        client = self._providers.get(job.provider)
+                        client = self._providers.get(job.extraction_provider)
                         if client is None:
-                            raise ProviderError(f"Unknown provider {job.provider!r}.")
+                            raise ProviderError(f"Unknown provider {job.extraction_provider!r}.")
                         extractor = Extractor(
                             store,
                             client,
-                            job.model,
+                            job.extraction_model,
                             job.story_id,
                             extraction_settings=job.extraction_settings,
                             cancel=self._abort,
@@ -253,14 +274,24 @@ class Worker:
                             )
                             if self._errors is not None:
                                 self._errors.record(f"lore pass (story {job.story_id})", e)
+                    # The pass writes nothing more (the warm-up only reads),
+                    # and a waiter told it is done may edit the cast at once.
+                    self._extracting_story_id = None
                     # Before the warm-up: the waiter asked for the scene
                     # close, not for a prefill it was never going to watch.
                     if job.on_done is not None:
                         with contextlib.suppress(Exception):
                             job.on_done(result, report)
                     with contextlib.suppress(Exception):
-                        if result is PassResult.CLOSED and store is not None and client is not None:
-                            self._warm(store, client, job)
+                        turn = self._providers.get(job.provider) if job.model else None
+                        other = (job.extraction_provider, job.extraction_model) != (
+                            job.provider,
+                            job.model,
+                        )
+                        asked_other = other and extractor is not None and extractor.asked
+                        closed = result is PassResult.CLOSED
+                        if (closed or asked_other) and store is not None and turn is not None:
+                            self._warm(store, turn, job)
                 finally:
                     # Idle — unless the pass failed, in which case its
                     # reason stays on screen until the next one starts.
@@ -287,11 +318,13 @@ class Worker:
             self._pending = None
             self._abort = threading.Event()
             self._deferred = threading.Event()
+            self._extracting_story_id = job.story_id
             return job
 
     def _warm(self, store: Store, client: OpenAIClient, job: Job) -> None:
         """Prefill the server's cache with the request the next turn will
-        send — the arguments mirror the session's `assemble_story` call
+        send — `client` the turns' own, never the pass's unless they are
+        one — the arguments mirror the session's `assemble_story` call
         because the prompt must match byte for byte; a warm-up of a
         slightly different prefix caches nothing useful.
 

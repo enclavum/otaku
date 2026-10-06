@@ -81,9 +81,11 @@ const ROUTES = {
   "PUT /api/stories/{story}/premise": (p, q, b) => store.setSystem(num(p.story), String(b.text)),
   "GET /api/stories/{story}/settings": (p) => store.storySettings(num(p.story)),
   "PATCH /api/stories/{story}/settings/{setting}": (p, q, b) =>
-    // A flag that is not a boolean is malformed, as the server answers it.
+    // A flag that is not a boolean is malformed, as the server answers
+    // it; so is a layout that is none of the four names.
     (b.enabled != null && typeof b.enabled !== "boolean") ||
-    (b.display_notes != null && typeof b.display_notes !== "boolean")
+    (b.display_notes != null && typeof b.display_notes !== "boolean") ||
+    (b.layout != null && !["novel", "canvas", "manuscript", "chat"].includes(b.layout))
       ? status(400)
       : store.updateSetting(num(p.story), p.setting, b),
   "PATCH /api/stories/{story}/scenes/{scene}": (p, q, b) =>
@@ -100,6 +102,10 @@ const ROUTES = {
       num(p.character),
       String(b.card ?? b.description),
     ),
+  "DELETE /api/stories/{story}/characters/{character}": () => ({
+    notice: `Deleting characters is not in the demo — ${store.INSTALL}.`,
+    refused: true,
+  }),
   "PUT /api/stories/{story}/characters/{character}/merge": () => ({
     notice: `Merging characters is not in the demo — ${store.INSTALL}.`,
     refused: true,
@@ -128,6 +134,9 @@ const ROUTES = {
   "PATCH /api/providers/{provider}/models/{model}": (p, q, b) =>
     store.loadModel(p.model, Boolean(b.loaded)),
   "PUT /api/session/model": (p, q, b) => store.switchModel(String(b.provider), String(b.model)),
+  "PUT /api/session/extraction_model": (p, q, b) =>
+    store.setExtractionModel(String(b.provider), String(b.model)),
+  "DELETE /api/session/extraction_model": () => store.clearExtractionModel(),
   "PUT /api/session/model/parameters/{name}": (p, q, b) => store.setParameter(p.name, b.value),
   "DELETE /api/session/model/parameters/{name}": (p) => store.setParameter(p.name, "reset"),
   "GET /api/machine": () => store.memory(),
@@ -144,16 +153,28 @@ const ROUTES = {
           b.discard ? "truncate" : "resume",
         ),
   "GET /api/session/context": () => store.context(),
+  "GET /api/session/context_use": () => store.contextUse(),
   "GET /api/session/info": () => store.info(version),
   "GET /api/balance": () => store.balance(),
   "GET /api/usage": (p, q) => store.usage(q.get("scope") ?? ""),
   // Settings
   "GET /api/settings": () => store.settings(),
   "PUT /api/settings/{setting}": (p, q, b) => store.setKnob(p.setting, b.value),
+  // Web search: no key is held or saved in the demo — the product's shape.
+  "GET /api/integrations/web_search": () => ({ has_key: false }),
+  "PATCH /api/integrations/web_search": () => ({
+    notice: `The web search key is not saved in the demo — ${store.INSTALL}.`,
+  }),
+  // A support request is not sent from the demo: a refusal, the product's
+  // shape, so the docket keeps what was typed.
+  "POST /api/support": () => ({
+    notice: `A support request is not sent from the demo — ${store.INSTALL}.`,
+    refused: true,
+  }),
   "GET /api/shared_reminder": () => store.sharedReminder(),
   "PUT /api/shared_reminder": (p, q, b) => store.setSharedReminder(String(b.text)),
-  "GET /api/prompts/{tool}": (p) => store.prompt(p.tool),
-  "PUT /api/prompts/{tool}": (p, q, b) => store.setPrompt(p.tool, String(b.text)),
+  "GET /api/prompts/{setting}": (p) => store.prompt(p.setting),
+  "PUT /api/prompts/{setting}": (p, q, b) => store.setPrompt(p.setting, String(b.text)),
 };
 
 // The path parameters that are row ids, as `web/server.py` declares
@@ -493,7 +514,7 @@ function play(body, regenerate, signal) {
     // `note` is the record's own dim line (a /roll's dice in the real
     // backend); the demo rolls nothing, so it is always empty — but the
     // field arrives, because the shape must not depend on the turn.
-    events.push({ type: "recorded", turn: store.recordTurn("user", line), note: "" });
+    events.push({ type: "user_turn", turn: store.recordTurn("user", line), note: "" });
   }
   const reply = script.reply(regenerate);
   const promptTokens = store.contextTokens();
@@ -545,10 +566,11 @@ function play(body, regenerate, signal) {
             ? `[ total ${seconds.toFixed(1)}s, prompt ${promptTokens} tok, eval ${tokens} tok @ ${rate} tok/s ]`
             : "";
           const reply = land();
-          // The product's shape: the report's facts beside the line, the
-          // reply as stored, no question (the demo's model asks none), and
-          // a notice the page's own model never has — it finishes what
-          // it starts.
+          // The product's shape: the reply as stored lands as its own
+          // event, then the end — the report's facts beside the line, no
+          // question (the demo's model asks none), and a notice the
+          // page's own model never has: it finishes what it starts.
+          if (reply) frame(controller, { type: "assistant_turn", turn: reply });
           const report = {
             total_seconds: seconds,
             first_token_seconds: Math.min(0.2, seconds),
@@ -561,15 +583,20 @@ function play(body, regenerate, signal) {
             rate: Number(rate),
             context_used: null,
           };
-          frame(controller, { type: "done", stats, report, notice: "", reply });
+          frame(controller, { type: "done", stats, report, notice: "" });
           over = true;
           controller.close();
           return;
         }
         const chunk = words.slice(at, at + 3).join("");
         at += 3;
+        // the first piece says how the reply joins the text (`join_type`):
+        // after the line just played, inline on the canvas, a paragraph
+        // everywhere else; null on every piece after it
+        const canvas = store.facts(version).layout === "canvas";
+        const join = streamed ? null : canvas ? "inline" : "paragraph";
         streamed += chunk;
-        frame(controller, { type: "text", text: chunk });
+        frame(controller, { type: "assistant_text", text: chunk, join_type: join });
         timer = setTimeout(tick, 24);
       };
       timer = setTimeout(tick, regenerate ? 350 : 650); // the wait before the first token

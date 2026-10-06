@@ -65,6 +65,15 @@ class RowTracker:
         self._pending = False
         self._state = _TEXT
 
+    def rewind(self, rows: int, column: int) -> None:
+        """Place the count outright — where an erase left the cursor, or
+        where a restored exchange begins: a column at the width is the
+        deferred wrap, as `feed` leaves it."""
+        self.rows = rows
+        self.column = min(column, self.width)
+        self._pending = column >= self.width
+        self._state = _TEXT
+
     def _consume(self, ch: str) -> None:
         if self._state != _TEXT:
             self._escape(ch)

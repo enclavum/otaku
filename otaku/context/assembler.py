@@ -51,15 +51,17 @@ both cost their tokens in the fit.
 from bisect import bisect_left
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
+from enum import Enum
 from typing import Protocol
 
 from otaku.context import syntax, tool_calls
 from otaku.context.cards import card_to_wire
 from otaku.context.injections import ROW_KIND, Injection, inject_into_system, inject_into_tail
 from otaku.providers import PicturesRide
+from otaku.providers.openai.templates import TextTemplate
 from otaku.store import Store
 from otaku.store.files import FileStore
-from otaku.store.schema import InjectionPosition, Message, Scene
+from otaku.store.schema import InjectionPosition, Message, Scene, StoryMode
 
 _DEFAULT_CONTEXT = 8_192  # when the provider states no max context
 # The kind of a recap row: wire-only, its body already wire text — as
@@ -83,7 +85,15 @@ _TAIL_FLOOR = 50
 
 class ContextOverflowError(Exception):
     """Case 6: the story cannot fit the limit even fully degraded. The
-    message is the sentence to show."""
+    message is the sentence to show; the figures that did not meet ride
+    with it — `tokens` the smallest the story gets, `limit` what it had
+    to fit (the context less the reply's reserve), `context` the window."""
+
+    def __init__(self, message: str, *, tokens: int, limit: int, context: int) -> None:
+        super().__init__(message)
+        self.tokens = tokens
+        self.limit = limit
+        self.context = context
 
 
 class PromptTexts(Protocol):
@@ -95,6 +105,10 @@ class PromptTexts(Protocol):
     def recap_header(self) -> str: ...
     @property
     def card_framing(self) -> str: ...  # the card block template, for composing card rows
+    @property
+    def story_framing(self) -> str: ...  # the text wire's instruction around the premise
+    @property
+    def tool_framing(self) -> str: ...  # a tool turn's text as the model reads it
 
 
 @dataclass(frozen=True)
@@ -117,6 +131,16 @@ class WirePicture:
     media_type: str
 
 
+class JoinType(Enum):
+    """How a row joins the text before it — the ONE seam vocabulary, on
+    the wire turn and on the wire to a frontend (`value`): INLINE, one
+    space before it; PARAGRAPH, a blank line. `get_join_type` decides,
+    and `join` writes it."""
+
+    INLINE = "inline"
+    PARAGRAPH = "paragraph"
+
+
 @dataclass(frozen=True)
 class WireTurn:
     """One turn as SENT — composed wire text and the pictures riding on
@@ -132,6 +156,8 @@ class WireTurn:
     # Reads differently next request: an injection that moves with the
     # end landed in it, or above it. A prompt-cache mark belongs before.
     volatile: bool = False
+    # How it joins the text before it: its first row's seam (`get_join_type`).
+    join_type: JoinType = JoinType.PARAGRAPH
 
 
 @dataclass(frozen=True)
@@ -150,6 +176,16 @@ class InjectionSent:
 class AssembledPrompt:
     """The wire-ready request plus the numbers behind it."""
 
+    # The system message's text — the premise and what was injected after
+    # it — "" when the request carries none: the chat wire then sends no
+    # system row, and the text wire frames the story with its standing
+    # instruction alone.
+    system: str
+    # The same for the TEXT wire: prompts.toml's `story_framing` around the
+    # premise, `{premise}` filled — the standing instruction a model turn
+    # needs before it (a model turn with no turn before it degenerates,
+    # and a new story's premise is empty). Never "": the framing stands.
+    story_system: str
     messages: list[WireTurn]  # [system?] + the wire turns
 
     # The budget.
@@ -182,6 +218,61 @@ class AssembledPrompt:
     @property
     def total_tokens(self) -> int:
         return self.system_tokens + self.transcript_tokens
+
+    def as_text(self, template: TextTemplate, opener: str = "") -> str:
+        """The request as the TEXT wire sends it: `story_system` and the
+        story (`as_story_text`, `opener` appended — a retry's paragraph
+        break) rendered in `template`'s turn markers, the story as the
+        model's own turn in progress. The one rendering: the turn sends
+        it and `/context` previews it."""
+        return template.render(self.story_system, self.as_story_text() + opener)
+
+    def as_story_text(self) -> str:
+        """The story as ONE TEXT, for the text wire: the turns' bodies in
+        order, the system's aside; no roles, no labels, each seam
+        `get_join_type`'s (`join`). The text keeps the last turn's trailing
+        break, a paragraph the reader opened for the model to write in.
+        The pictures do not ride it (the caller holds them:
+        `pictures_held`)."""
+        out = ""
+        for turn in self.messages:
+            if turn.role == "system":
+                continue
+            out = join(out, turn.join_type, turn.body) if out else turn.body.lstrip()
+        return out
+
+
+def get_join_type(previous: Message | None, next: Message) -> JoinType:
+    """How `next` joins `previous`, the row before it — the wire's and
+    the canvas's one rule, read off the two rows and the newlines at the
+    boundary: INLINE where both were written in story mode, neither
+    stands alone (a card's line or greeting), and no newline stands at
+    the end of the one or the start of the other; PARAGRAPH otherwise —
+    the first row, a chat row or a row standing alone on either side, a
+    break the reader typed or the model wrote at the edge. Spaces at the
+    edges decide nothing. A tool's result runs on in story mode like any
+    row written there: story mode does not draw it, so the reply after
+    it goes on in the paragraph the call interrupted."""
+    if previous is None:
+        return JoinType.PARAGRAPH
+    rows = (previous, next)
+    if any(row.mode is not StoryMode.STORY for row in rows):
+        return JoinType.PARAGRAPH
+    # A card's line and greeting stand alone in any mode: nobody wrote
+    # them into the text.
+    if any(row.kind == "card" or row.provider == "card" for row in rows):
+        return JoinType.PARAGRAPH
+    if previous.body.rstrip(" \t").endswith("\n") or next.body.lstrip(" \t").startswith("\n"):
+        return JoinType.PARAGRAPH
+    return JoinType.INLINE
+
+
+def join(previous: str, join_type: JoinType, next: str) -> str:
+    """`next` after `previous` across a seam `join_type` decided: one
+    space inline, a blank line for a paragraph — the whitespace at the
+    two edges given up for it, so the space is never stored and a word
+    is never completed across rows."""
+    return previous.rstrip() + (" " if join_type is JoinType.INLINE else "\n\n") + next.lstrip()
 
 
 def estimate_tokens(text: str) -> int:
@@ -226,6 +317,8 @@ def assemble_story(
         injections=injections,
         tool_set=tool_set,
         recap_header=prompts.recap_header,
+        story_framing=prompts.story_framing,
+        tool_framing=prompts.tool_framing,
         shape=shape,
         files=store.files,
         pictures_ride=pictures_ride,
@@ -243,7 +336,10 @@ def assemble_story(
         f"The story does not fit the context limit: it needs {prompt.total_tokens:,} tokens even "
         f"fully summarized and with the tail reduced, and the context is {shape.max_context:,} "
         f"tokens — "
-        f"raise it or run /extract to close more scenes."
+        f"raise it or run /extract to close more scenes.",
+        tokens=prompt.total_tokens,
+        limit=limit,
+        context=shape.max_context,
     )
 
 
@@ -285,6 +381,8 @@ class _Assembly:
     injections: Sequence[Injection]
     tool_set: tool_calls.ToolSet  # how a row's tool calls go on the wire
     recap_header: str
+    story_framing: str  # the text wire's instruction, `{premise}` to fill
+    tool_framing: str  # a tool turn's enclosure, `{tool}` and `{body}` to fill
     shape: ContextShape
     files: FileStore  # where a row's pictures are read from
     pictures_ride: PicturesRide
@@ -358,6 +456,8 @@ class _Assembly:
         pictures_sent = sum(len(pictures) for pictures in pictures_of.values())
         return AssembledPrompt(
             messages=wire,
+            system=self.system,
+            story_system=self.story_framing.replace("{premise}", self.system).strip(),
             limit=limit,
             system_tokens=system_tokens,
             transcript_tokens=head_tokens + recap.tokens + tail_tokens + injected_tokens,
@@ -505,6 +605,16 @@ class _Assembly:
         if message.kind in (_RECAP_KIND, ROW_KIND):
             return message.body
         body = tool_calls.to_wire(message.body, self.tool_set)
+        if message.role == "tool":
+            # A tool's result — a tool turn: not a typed line, and
+            # read out of character, the tool named as the model named
+            # it in the call — the row's `provider`.
+            name = message.provider or "tool"
+            return self.tool_framing.replace("{tool}", name).replace("{body}", body)
+        if message.role == "assistant":
+            # The model's row is not a typed line — no direction to read
+            # off it — and goes as it stands.
+            return body
         return syntax.to_wire(replace(message, body=body), is_last=is_last)
 
     def _wire_tokens(
@@ -522,7 +632,10 @@ class _Assembly:
         and nothing else (a recap or injected row has none to look up).
         Consecutive same-role rows rejoin into one turn, pictures and all —
         storage granularity is otaku's bookkeeping; the model sees one
-        prompt per exchange."""
+        prompt per exchange. A tool turn goes as the reader's — the chat
+        wire has two sides, and a tool's answer is what the model is told
+        — framed by `_wire_text`. The seam between two rows is
+        `get_join_type`'s, written as `as_story_text` writes it (`join`)."""
         out: list[WireTurn] = []
         volatile = False  # from the first injected row on: it moves with the end
         for position, message in enumerate(rows):
@@ -532,15 +645,19 @@ class _Assembly:
             text = self._wire_text(message, is_last=position == len(rows) - 1)
             images = pictures_of.get(message, ())
             volatile = volatile or message.kind == ROW_KIND
-            if out and out[-1].role == message.role:
+            join_type = get_join_type(rows[position - 1] if position else None, message)
+            role = "user" if message.role == "tool" else message.role
+            if out and out[-1].role == role:
                 out[-1] = WireTurn(
-                    role=message.role,
-                    body=out[-1].body + "\n\n" + text,
+                    role=role,
+                    body=join(out[-1].body, join_type, text),
                     images=out[-1].images + images,
                     volatile=volatile,
+                    join_type=out[-1].join_type,
                 )
             else:
-                out.append(WireTurn(role=message.role, body=text, images=images, volatile=volatile))
+                turn = WireTurn(role, text.lstrip(), images, volatile=volatile, join_type=join_type)
+                out.append(turn)
         return out
 
 

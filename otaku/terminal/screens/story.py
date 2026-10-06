@@ -15,21 +15,25 @@ as a FIELD LIST — one row per text (`LoreView.scene_fields` /
 `char_fields`; the view composes, this screen renders) — and Enter on a
 field edits it IN PLACE (Ctrl+S saves, Esc cancels). A journal row is
 the intersection of a scene and a character, so `o` pivots to the same
-entry through the other tab. The tools tab is the story's settings
+entry through the other tab. Del on a cast row deletes the character
+after a y/n confirm. The tools tab is the story's settings
 (`backend.story`), one row each — a checkbox and the name; Space
 checks and unchecks it — with the setting's fields in the panel beside:
-the notes' display, a reminder's text, a tool's instructions (its
-prompt, `backend.api.settings`), and last where its text rides. Enter
+the notes' display, a reminder's text, a setting's instructions (its
+prompt, `backend.api.settings`), the web search key
+(`backend.api.integrations`), and last where its text rides. Enter
 or Tab moves into the panel, where ↑/↓ walk the fields and Enter acts
 on the one under the cursor — a checkbox toggles, the depth opens the
 closed list of places in the same panel (↑/↓ pick, Enter sets — a
 dropdown, no dialog), a reminder's text edits in place like any field,
-the instructions row opens the prompt over the whole panel (Ctrl+S
-saves, Esc cancels, the fields return) — and Esc returns to the list.
+the web search key is typed in place over where it stands (never
+shown; Delete forgets it), the instructions row opens the prompt over
+the whole panel (Ctrl+S saves, Esc cancels, the fields return) — and
+Esc returns to the list.
 Every change is written at once through
-`backend.api`; a setting's confirmation is not shown here — the row
-itself shows where the setting now stands — only a refusal is, and the
-texts' own sentences (a reminder or a prompt saved).
+`backend.api`; nothing it says is shown here — the row itself shows
+where the setting now stands. The sentences (a confirmation, a refusal)
+are kept in `notice` for a caller and drawn nowhere.
 
 Editable fields are the write-once primitives; the extractor's own —
 states, and every history, the scene's own included — are shown dim
@@ -55,6 +59,7 @@ from prompt_toolkit.key_binding import (
     KeyBindings,
     merge_key_bindings,
 )
+from prompt_toolkit.keys import Keys
 from prompt_toolkit.layout.containers import (
     AnyContainer,
     ConditionalContainer,
@@ -67,13 +72,14 @@ from prompt_toolkit.layout.dimension import D
 from prompt_toolkit.styles import Style
 
 from otaku.backend import Character, InjectionPosition, Message, Scene
+from otaku.backend.api import integrations as api_integrations
 from otaku.backend.api import lore as api_lore
 from otaku.backend.api import settings as api_settings
 from otaku.backend.api import stories as api_stories
 from otaku.backend.api.lore import Field, LoreView
 from otaku.backend.session import Refused, Session
-from otaku.backend.story import StorySetting
-from otaku.formatting import flatten, truncate
+from otaku.backend.story import InjectingSetting, StorySetting
+from otaku.formatting import flatten, printable, truncate
 from otaku.terminal.screens.base import (
     ListScreen,
     ansi_fragments,
@@ -85,7 +91,7 @@ from otaku.terminal.screens.base import (
 )
 from otaku.terminal.tty import latin_key
 from otaku.terminal.tty.render import message as render_message
-from otaku.terminal.tty.render import notes_displayed, pictures_note
+from otaku.terminal.tty.render import pictures_note, shown_tools
 from otaku.terminal.tty.theme import theme
 from otaku.terminal.tty.typography import highlight_toml
 
@@ -109,16 +115,34 @@ _ABOUT: dict[str, str] = {
     "allow_questions": (
         "The narrator may ask you something directly and wait for an answer before going on."
     ),
+    "allow_web_search": "The narrator may look something up on the internet.",
+    "allow_system_info": "The narrator may ask for local system facts.",
     "allow_assistant_notes": (
         "The narrator may keep a short note to itself between turns, never played into the story."
     ),
-    "use_story_reminder": "Sent with every reply in this story, wherever you place it.",
-    "use_shared_reminder": "Sent with every reply in every story.",
+    "use_story_reminder": "Injected into this story with every reply.",
+    "use_shared_reminder": "Injected into the story with every reply, common across stories.",
+    "emulate_text_completion": (
+        "Only in the story mode. The narrator is told to continue the text from where it "
+        "ends, as a text completion would, instead of answering it."
+    ),
 }
+
+# A caption's bold opening, where it has one: the words the caption
+# starts with, drawn bold.
+_LEAD: dict[str, str] = {"emulate_text_completion": "Only in the story mode."}
+
+# The settings that open a group: the list draws a blank row before
+# each, after the first row — the tools, then the reminders, then the
+# canvas's own.
+_OPENS_GROUP = frozenset({"use_story_reminder", "emulate_text_completion"})
 
 # The one setting whose text is not the story's: every story is sent the
 # same reminder, read and written through its own operations.
 _SHARED_REMINDER = "use_shared_reminder"
+# The one setting with a key under it: the web search key, every
+# story's, read and written through its own operations.
+_WEB_SEARCH = "allow_web_search"
 
 # A checkbox, as a row draws it.
 _CHECKED, _UNCHECKED = "[x]", "[ ]"
@@ -158,24 +182,24 @@ def _style() -> Style:
             "preview.title": f"bold fg:{colors.title.style} {panel}",
             "preview.muted": f"dim fg:{colors.muted.style} {panel}",
             "preview.body": f"fg:{colors.text.style} {panel}",
-            "notice": f"dim fg:{colors.muted.style} {panel}",
         }
     )
 
 
-ToolFieldKind = Literal["display", "reminder", "prompt", "position"]
+ToolFieldKind = Literal["display", "reminder", "prompt", "key", "position"]
 # The kinds that are a text to edit: a reminder where it is read, a
-# prompt over the whole panel.
-_TEXT_KINDS: frozenset[ToolFieldKind] = frozenset({"reminder", "prompt"})
+# prompt over the whole panel, the web search key typed over its standing.
+_TEXT_KINDS: frozenset[ToolFieldKind] = frozenset({"reminder", "prompt", "key"})
 
 
 @dataclass(frozen=True)
 class _ToolField:
     """One field of a setting, as the panel walks them: the notes'
-    display, a reminder's text, a tool's instructions (its prompt),
-    where its text rides. `text` is the field as read; a reminder edits
-    in place, the instructions open the prompt over the whole panel —
-    the rest toggle or choose."""
+    display, a reminder's text, a setting's instructions (its prompt), the
+    web search key, where its text rides. `text` is the field as read;
+    a reminder edits in place, the key is typed in place over where it
+    stands (never shown), the instructions open the prompt over the
+    whole panel — the rest toggle or choose."""
 
     kind: ToolFieldKind
     label: str
@@ -237,8 +261,10 @@ class Dossier(ListScreen):
         # walked it over the allowed places.
         self.settings: list[StorySetting] = []
         self.shared_text: str = ""
-        self.prompts: dict[str, str] = {}  # each tool's prompt, by the tool's name
-        self.notes_displayed: bool = False
+        # where web search stands: its engine, and whether it holds a key
+        self.web_search = api_integrations.WebSearchState(False)
+        self.prompts: dict[str, str] = {}  # each injection setting's prompt, by its name
+        self.shown_tools: frozenset[str] = frozenset()
         self.in_panel: bool = False
         self.field: int = 0
         self.choosing: bool = False
@@ -248,6 +274,8 @@ class Dossier(ListScreen):
         # which _RESUME_OPTIONS row is highlighted (fork is the default).
         self.confirming_resume: bool = False
         self.resume_choice: int = 0
+        # The delete confirm (Del on a cast row): up or not.
+        self.confirming_cast_delete: bool = False
 
         # A prompt open for editing: the tools panel is the editor alone
         # until Ctrl+S or Esc (`_start_edit` sets it, `_finish_edit` clears).
@@ -305,17 +333,18 @@ class Dossier(ListScreen):
     def _reload_settings(self) -> None:
         """The story's settings again — after every write, since the
         backend lays what was stored over the defaults — and with them
-        the shared reminder's text and each tool's prompt, read once here
-        rather than per redraw."""
+        the shared reminder's text and each injection setting's prompt,
+        read once here rather than per redraw."""
         held = api_stories.get_settings(self.session, self.story_id)
         self.settings = [setting for name in _ABOUT if (setting := held.get(name)) is not None]
         self.shared_text = api_stories.get_shared_reminder(self.session)
+        self.web_search = api_integrations.web_search(self.session)
         self.prompts = {
-            setting.tool.name: api_settings.get_tool_prompt(self.session, setting.tool.name)
+            setting.name: api_settings.get_prompt(self.session, setting.name)
             for setting in self.settings
-            if setting.tool is not None
+            if isinstance(setting, InjectingSetting) and setting.prompt_name is not None
         }
-        self.notes_displayed = notes_displayed(held)
+        self.shown_tools = shown_tools(held)
 
     # ---------- view lookups ----------
 
@@ -362,8 +391,8 @@ class Dossier(ListScreen):
     def _tool_fields(self, setting: StorySetting) -> list[_ToolField]:
         """A setting's fields as the panel walks them: the notes' display,
         for the one with something to display; the reminder's text, for
-        the story's own and the shared one; a tool's instructions, a
-        row that opens the prompt; and last, for one that injects, where
+        the story's own and the shared one; the instructions of one that
+        sends a prompt, a row that opens it; and last, for one that injects, where
         its text rides — each reading as the setting stands now."""
         rows: list[_ToolField] = []
         if setting.display_notes is not None:
@@ -372,11 +401,18 @@ class Dossier(ListScreen):
             rows.append(_ToolField("reminder", "shared text", self.shared_text))
         elif setting.reminder_text is not None:
             rows.append(_ToolField("reminder", "reminder text", setting.reminder_text))
-        if setting.tool is not None:
-            rows.append(_ToolField("prompt", "instructions", self.prompts[setting.tool.name]))
+        if setting.name in self.prompts:
+            rows.append(_ToolField("prompt", "instructions", self.prompts[setting.name]))
+        if setting.name == _WEB_SEARCH:
+            rows.append(_ToolField("key", "web search key", self._key_text()))
         if setting.injection_position is not None:
             rows.append(_ToolField("position", "depth", setting.injection_position.text))
         return rows
+
+    def _key_text(self) -> str:
+        """Where the web search key stands, as its field reads — never
+        the key."""
+        return "(key set)" if self.web_search.has_key else "(none)"
 
     def _tool_field(self) -> _ToolField | None:
         """The field the panel's cursor is on; None off the tab or with
@@ -526,9 +562,15 @@ class Dossier(ListScreen):
             # line again: a reply's calls are drawn as blocks, on rows of
             # their own, and a row has no rows. Never longer than the cut:
             # the tags the drawing drops outweigh the bar it adds.
-            head = flatten(
-                self._render(head, m.role, pictures=pictures, notes=self.notes_displayed)
-            )
+            # A tool's turn is its result as stored — a search's is the
+            # internet's text, so made printable: the transcript draws the
+            # tool's label alone, but here the row is read for itself.
+            if m.role == "tool":
+                head = printable(head)
+            else:
+                head = flatten(
+                    self._render(head, m.role, pictures=pictures, shown=self.shown_tools)
+                )
             # The original message number, so a filtered row still reads
             # as its true position in the story.
             row = f"{orig + 1:>4} · {m.role:<{role_w}} · {head}"
@@ -589,17 +631,34 @@ class Dossier(ListScreen):
         return out
 
     def _tool_rows(self) -> StyleAndTextTuples:
-        """One row per setting: its checkbox and its name. The band stays
-        on the list's row while the cursor is in the panel, dimmed so
-        the panel reads as the place the cursor went."""
+        """One row per setting: its checkbox and its name, a blank row
+        before each group after the first (`_gaps`). The band stays on
+        the list's row while the cursor is in the panel, dimmed so the
+        panel reads as the place the cursor went."""
         out: StyleAndTextTuples = []
         if not self.settings:
             out.append(("class:muted", "  (no settings in this build)"))
             return out
+        gaps = self._gaps()
         for row_i, setting in enumerate(self.settings):
+            if row_i in gaps:
+                out.append(("", "\n"))
             row = f"{_checkbox(setting.enabled)} {setting.label}"
             self._emit_row(out, row_i == self.cursor, row, dim=self.in_panel)
         return out
+
+    def _gaps(self) -> frozenset[int]:
+        """The rows of the tools list a blank row is drawn before: each
+        setting that opens a group (`_OPENS_GROUP`), the first row aside."""
+        return frozenset(i for i, s in enumerate(self.settings) if i and s.name in _OPENS_GROUP)
+
+    def _cursor_line(self) -> int:
+        """The visual row of the cursor: the tools list draws a blank row
+        before each group (`_tool_rows`), so a cursor sits below its
+        index by the gaps above it."""
+        if self.tab == "tools" and self.settings:
+            return self.cursor + sum(1 for gap in self._gaps() if self.cursor >= gap)
+        return self.cursor
 
     def _panel_header_text(self) -> StyleAndTextTuples:
         """The fixed header above the panel's text. It lives in its own
@@ -644,12 +703,17 @@ class Dossier(ListScreen):
             # the window's own wrapping carries styles across wrapped
             # rows. Editing swaps this window out, so the buffer stays
             # raw text.
-            body = self._render(
-                m.body,
-                m.role,
-                pictures=len(m.attachments),
-                notes=self.notes_displayed,
-                width=max(10, self._preview_inner_width()),
+            # a tool's turn as its result, plain, as the list row reads it
+            body = (
+                printable(m.body)
+                if m.role == "tool"
+                else self._render(
+                    m.body,
+                    m.role,
+                    pictures=len(m.attachments),
+                    shown=self.shown_tools,
+                    width=max(10, self._preview_inner_width()),
+                )
             )
             if not body.endswith("\n"):
                 body += "\n"
@@ -663,13 +727,10 @@ class Dossier(ListScreen):
                 out.append(("class:preview.body", "\n"))
             for line in wrap_text(m.template, width):
                 out.append(("class:preview.muted", line + "\n"))
-        # The model that generated THIS turn, dimmed and right-aligned —
-        # user turns have none (messages.model is NULL there) and show
-        # nothing.
-        if m.role == "assistant" and m.model:
-            label = f"{m.provider}/{m.model}" if m.provider else m.model
-            out.append(("class:preview.body", "\n"))
-            out.append(("class:preview.muted", label.rjust(width) + "\n"))
+        # The model that generated THIS turn — user turns have none
+        # (messages.model is NULL there) and show nothing.
+        if m.role == "assistant":
+            out += _made_by(m.provider, m.model, width)
         return out
 
     def _field_preview(self, width: int) -> StyleAndTextTuples:
@@ -710,6 +771,7 @@ class Dossier(ListScreen):
         if present:
             out.append(("class:preview.body", "\n"))
             out.append(("class:preview.muted", "present: " + ", ".join(present) + "\n"))
+        out += _made_by(s.provider, s.model, width)
         return out
 
     def _cast_preview(self, width: int) -> StyleAndTextTuples:
@@ -739,14 +801,16 @@ class Dossier(ListScreen):
         else:
             out.append(("class:preview.body", "\n"))
             out.append(("class:preview.muted", "(no journal yet)\n"))
+        out += _made_by(c.provider, c.model, width)
         return out
 
     def _tool_parts(self) -> tuple[list[_ToolField], list[_ToolField], _ToolField | None]:
-        """The setting's fields around its text — a reminder's: those
-        above it, those below, and the text itself — None for a setting
-        with none, whose fields are all above."""
+        """The setting's fields around its text — a reminder's, or the
+        web search key's standing: those above it, those below, and the
+        text itself — None for a setting with none, whose fields are all
+        above."""
         fields = self._tool_fields(self.settings[self.cursor]) if self.settings else []
-        text = next((f for f in fields if f.kind == "reminder"), None)
+        text = next((f for f in fields if f.kind in ("reminder", "key")), None)
         if text is None:
             return fields, [], None
         at = fields.index(text)
@@ -768,7 +832,7 @@ class Dossier(ListScreen):
         if f.kind == "display":
             return [(style, f"{f.text} {f.label}")]
         if f.kind == "prompt":
-            return [(style, f.label)]  # a row to press: its text is shown only to edit
+            return [(style, f"[ {f.label} ]")]  # a row to press: its text is shown only to edit
         if f.kind != "position":
             return [(style, f"{f.label}:")]
         if not self.choosing:
@@ -793,14 +857,15 @@ class Dossier(ListScreen):
             return [("class:preview.muted", "nothing to preview")]
         setting = self.settings[self.cursor]
         width = max(10, self._preview_inner_width())
-        lines = [("class:preview.body", line) for line in wrap_text(_ABOUT[setting.name], width)]
+        out = _caption(_ABOUT[setting.name], _LEAD.get(setting.name, ""), width)
         above, _, text = self._tool_parts()
         for f in [*above, *([text] if text is not None else [])]:
-            lines += [("class:preview.body", ""), *self._tool_lines(f)]
-        return _joined(lines)
+            out += [("class:preview.body", "\n\n"), *_joined(self._tool_lines(f))]
+        return out
 
     def _tool_text(self) -> StyleAndTextTuples:
-        """The reminder's text as read, where the editor opens over it."""
+        """The reminder's text as read, or the key's standing, where the
+        editor opens over it."""
         _, _, text = self._tool_parts()
         if text is None:
             return []
@@ -834,6 +899,18 @@ class Dossier(ListScreen):
         out.append(("class:dialog.muted", "↑/↓ choose · enter confirm · esc cancel"))
         return out
 
+    def _cast_delete_text(self) -> StyleAndTextTuples:
+        """The confirm: the question naming the character, a blank row,
+        the keys."""
+        target = self._cast_target()
+        if target is None:
+            return []
+        return [
+            ("class:dialog.title", f"Delete {truncate(flatten(target.name), 50)}?\n"),
+            ("class:dialog.body", "\n"),
+            ("class:dialog.muted", "y to confirm     n / esc to cancel"),
+        ]
+
     def _help_text(self) -> StyleAndTextTuples:
         if self.editing:
             return [("class:help", " editing — ctrl+s save · esc cancel")]
@@ -852,7 +929,13 @@ class Dossier(ListScreen):
             if self.in_panel:
                 f = self._tool_field()
                 verb = {"display": "toggle", "position": "choose"}.get(f.kind if f else "", "edit")
-                return [("class:help", f" ↑/↓ fields · enter {verb} · ←/→ tabs · esc back to list")]
+                forget = " · del forget" if f is not None and f.kind == "key" else ""
+                return [
+                    (
+                        "class:help",
+                        f" ↑/↓ fields · enter {verb}{forget} · ←/→ tabs · esc back to list",
+                    )
+                ]
             return [
                 (
                     "class:help",
@@ -875,6 +958,13 @@ class Dossier(ListScreen):
                     "class:help",
                     " ↑/↓ navigate · / filter · e edit · enter resume from this turn"
                     f" · ←/→ tabs · esc {back}",
+                )
+            ]
+        if self.tab == "cast":
+            return [
+                (
+                    "class:help",
+                    f" ↑/↓ navigate · / filter · enter open · del delete · ←/→ tabs · esc {back}",
                 )
             ]
         return [
@@ -1052,6 +1142,20 @@ class Dossier(ListScreen):
         if f is not None and f.kind == "display":
             self._write_setting(setting, display_notes=not setting.display_notes)
 
+    def _forget_key(self) -> None:
+        """Delete on the web search key's field, outside the editor:
+        forget the key — the file and the running session both, the
+        models screen's Del. Bare, the field has nothing to forget."""
+        f = self._tool_field()
+        if f is None or f.kind != "key" or not self.web_search.has_key:
+            return
+        try:
+            self.notice = api_integrations.set_web_search_key(self.session, "")
+        except Refused as e:
+            self.notice = str(e)
+            return
+        self._reload_settings()
+
     def _move_field(self, delta: int) -> None:
         fields = self._tool_fields(self.settings[self.cursor]) if self.settings else []
         if fields:
@@ -1093,10 +1197,10 @@ class Dossier(ListScreen):
         display_notes: bool | None = None,
         reminder_text: str | None = None,
     ) -> None:
-        """One field of one setting through `backend.api.stories`. Its
-        confirmation is not shown — the row shows where the setting now
-        stands, once the tab has read the story again — only a refusal
-        is."""
+        """One field of one setting through `backend.api.stories`. Nothing
+        it says is shown — the row shows where the setting now stands,
+        once the tab has read the story again; a refusal is kept in
+        `notice`, drawn nowhere."""
         try:
             api_stories.update_setting(
                 self.session,
@@ -1117,6 +1221,38 @@ class Dossier(ListScreen):
         whole screen, so it quits; the picker overrides this to reveal
         its list again."""
         get_app().exit()
+
+    # ---------- a cast row's delete ----------
+
+    def _cast_target(self) -> Character | None:
+        """The character under the cast list's cursor; None anywhere else,
+        an open detail included."""
+        if not self.dossier_on or self.tab != "cast" or self.detail is not None:
+            return None
+        if not self.cast_f or self.view is None:
+            return None
+        return self.view.cast[self.cast_f[self.cursor]]
+
+    def _request_cast_delete(self) -> None:
+        self.notice = ""
+        if self._cast_target() is not None:
+            self.confirming_cast_delete = True
+
+    def _do_cast_delete(self) -> None:
+        """y on the confirm: the character through `backend.api.lore`,
+        then the memory and the cast's visible rows read again. A refusal
+        is kept in `notice`, drawn nowhere, and the row stays."""
+        self.confirming_cast_delete = False
+        target = self._cast_target()
+        if target is None:
+            return
+        try:
+            self.notice = api_lore.delete_character(self.session, target.id, self.story_id)
+        except Refused as e:
+            self.notice = str(e)
+            return
+        self._reload()
+        self._refilter()
 
     # ---------- the landings ----------
 
@@ -1176,10 +1312,16 @@ class Dossier(ListScreen):
         if self.tab == "premise":
             return self.premise
         if self.tab == "messages":
-            return self.msgs[self.turn_filtered[self.cursor]].body
+            # without the whitespace at its edges, the row's join, which the
+            # save keeps (`stories.edit_message`) — as the page's field does
+            return self.msgs[self.turn_filtered[self.cursor]].body.strip()
         if self.tab == "tools":
             focused = self._tool_field()
-            return focused.text if focused is not None else ""
+            # the key's field shows where it stands, never the key: a new
+            # one is typed from nothing
+            if focused is None or focused.kind == "key":
+                return ""
+            return focused.text
         return self.fields[self.cursor].text
 
     def _start_edit(self) -> None:
@@ -1229,8 +1371,12 @@ class Dossier(ListScreen):
                 return
             if self.tab == "tools":
                 setting = self.settings[self.cursor]
-                if prompt_edited and setting.tool is not None:
-                    self.notice = api_settings.set_tool_prompt(self.session, setting.tool.name, new)
+                focused = self._tool_field()
+                if prompt_edited and setting.name in self.prompts:
+                    self.notice = api_settings.set_prompt(self.session, setting.name, new)
+                    self._reload_settings()
+                elif focused is not None and focused.kind == "key":
+                    self.notice = api_integrations.set_web_search_key(self.session, new)
                     self._reload_settings()
                 elif setting.name == _SHARED_REMINDER:
                     self.notice = api_stories.set_shared_reminder(self.session, new)
@@ -1364,6 +1510,21 @@ class Dossier(ListScreen):
         def _choose_enter(event: Any) -> None:
             self._choose_place(confirm=True)
 
+        # While the delete confirm is up: only y/n/esc do anything.
+        deleting = Condition(lambda: self.confirming_cast_delete)
+
+        @kb.add("escape", eager=True, filter=deleting)
+        def _cast_delete_esc(event: Any) -> None:
+            self.confirming_cast_delete = False
+
+        @kb.add(Keys.Any, filter=deleting, eager=True)
+        def _cast_delete_any(event: Any) -> None:
+            key = latin_key(event.data) if event.data else ""
+            if key == "y":
+                self._do_cast_delete()
+            elif key == "n":
+                self.confirming_cast_delete = False
+
         # In the tools panel the arrows walk the setting's fields, not the
         # list; Enter, Space and Esc are the standard keys' and read
         # `in_panel` themselves.
@@ -1377,7 +1538,7 @@ class Dossier(ListScreen):
         def _field_down(event: Any) -> None:
             self._move_field(1)
 
-        idle = ~resuming & ~choosing & self._extra_idle()
+        idle = ~resuming & ~choosing & ~deleting & self._extra_idle()
         self._standard_keys(kb, when=idle & ~in_panel)
 
         # What the panel keeps of the standard keys: Enter acts on the
@@ -1393,6 +1554,10 @@ class Dossier(ListScreen):
         @kb.add(" ", filter=idle & in_panel)
         def _panel_space(event: Any) -> None:
             self._toggle_checkbox()
+
+        @kb.add("delete", filter=idle & in_panel)
+        def _panel_delete(event: Any) -> None:
+            self._forget_key()
 
         in_dossier = Condition(lambda: self.dossier_on)
 
@@ -1412,6 +1577,20 @@ class Dossier(ListScreen):
         @kb.add("tab", filter=idle & in_dossier & on_tools_list)
         def _into_panel(event: Any) -> None:
             self._enter_panel()
+
+        # Del on a cast row asks to delete the character. The key macOS
+        # captions "delete" arrives as backspace, honoured wherever no
+        # filter is open for it to edit — after the standard keys, so it
+        # outranks their no-op, as on the story list.
+        on_cast_row = Condition(lambda: self._cast_target() is not None)
+
+        @kb.add("delete", filter=idle & on_cast_row)
+        def _cast_delete_key(event: Any) -> None:
+            self._request_cast_delete()
+
+        @kb.add("backspace", filter=idle & on_cast_row & Condition(lambda: not self.in_filter))
+        def _cast_delete_backspace(event: Any) -> None:
+            self._request_cast_delete()
 
         self._extra_keys(kb, idle)
 
@@ -1461,7 +1640,9 @@ class Dossier(ListScreen):
             self._move_edit_cursor(1)
 
         # Focusable so focus has somewhere to return to when editing ends.
-        self._items_control = self._make_items_control(focusable=True)
+        self._items_control = self._make_items_control(
+            focusable=True, cursor_line=self._cursor_line
+        )
         self._items_window = Window(
             content=self._items_control,
             wrap_lines=False,
@@ -1576,10 +1757,6 @@ class Dossier(ListScreen):
             Window(height=1, char=" ", always_hide_cursor=True),
             text_line(self._filter_text, filter=Condition(lambda: self.in_filter)),
             center,
-            text_line(
-                lambda: [("class:notice", "  " + self.notice if self.notice else "")],
-                filter=Condition(lambda: bool(self.notice)),
-            ),
             Window(height=1, char=" ", always_hide_cursor=True),
             text_line(self._help_text, style="class:help"),
         ]
@@ -1617,14 +1794,53 @@ class Dossier(ListScreen):
             ),
             filter=resuming,
         )
+        cast_delete_dialog = ConditionalContainer(
+            content=bordered_box(
+                FormattedTextControl(text=self._cast_delete_text, show_cursor=False),
+                width=D(min=44, max=70, preferred=60),
+                height=D.exact(7),
+                style="class:dialog.body",
+                border_style="class:dialog.border",
+            ),
+            filter=deleting,
+        )
 
         root = VSplit([left_pane, preview_side])
-        floats: list[AnyContainer] = [resume_dialog, *self._extra_floats()]
+        floats: list[AnyContainer] = [resume_dialog, cast_delete_dialog, *self._extra_floats()]
         return self._finish_app(root, bindings, _style(), floats=floats)
 
 
 def _checkbox(on: bool) -> str:
     return _CHECKED if on else _UNCHECKED
+
+
+def _made_by(provider: str | None, model: str | None, width: int) -> StyleAndTextTuples:
+    """Who made a turn, a scene or a character, closing its preview: after
+    a blank row, dimmed and right-aligned. Nothing without a model — a
+    row no pass made, or one made before anything recorded it."""
+    if not model:
+        return []
+    label = f"{provider}/{model}" if provider else model
+    return [("class:preview.body", "\n"), ("class:preview.muted", label.rjust(width) + "\n")]
+
+
+def _caption(text: str, lead: str, width: int) -> StyleAndTextTuples:
+    """A setting's caption wrapped to `width`, a newline between its
+    lines and none after (as `_joined` lays lines), the `lead` it opens
+    with — where it has one — in bold, across the lines it wraps to."""
+    out: StyleAndTextTuples = []
+    remaining = len(lead)
+    lines = wrap_text(text, width)
+    for i, line in enumerate(lines):
+        head, tail = line[:remaining], line[remaining:]
+        remaining = max(0, remaining - len(line) - 1)  # the space the wrap took
+        if head:
+            out.append(("class:preview.body bold", head))
+        if tail or not head:
+            out.append(("class:preview.body", tail))
+        if i < len(lines) - 1:
+            out.append(("class:preview.body", "\n"))
+    return out
 
 
 def _joined(lines: list[tuple[str, str]]) -> StyleAndTextTuples:

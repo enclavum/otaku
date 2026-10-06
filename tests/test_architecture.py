@@ -21,7 +21,7 @@ import typing
 from pathlib import Path
 
 import otaku.backend
-from otaku.backend.commands import COMMANDS, CommandKind, CommandSpec
+from otaku.backend.commands import COMMANDS, CommandSpec, CommandType
 from otaku.terminal.chat import bindings
 from otaku.web import api as web_api
 from otaku.web import server as web_server
@@ -51,6 +51,7 @@ _ALLOWED = {
         "worker",
         "context",
         "providers",
+        "integrations",
         "store",
         "settings",
         "encryption",
@@ -61,6 +62,9 @@ _ALLOWED = {
     # `formatting` for `Money`: what a provider reports a balance IN is a
     # value type, and value types live in the leaf everyone may reach.
     "providers": {"settings", "formatting"},
+    # The services otaku asks for something other than a completion: their
+    # sections live in settings as the providers' do.
+    "integrations": {"settings", "formatting"},
     "store": {"encryption"},
     "settings": {"formatting"},
     "logging": {"providers", "encryption", "formatting"},
@@ -220,7 +224,8 @@ _ON_THE_PAGE = {
     "/lore": "screen:/lore",
     "/cast": "screen:/cast",
     "/extract": "screen:/extract",
-    "/merge": "none:no UI yet — the cast pane has no merge, by decision",
+    # the cast pane's Merge into… writes the same fold
+    "/merge": "PUT /api/stories/{story}/characters/{character}/merge",
     "/context": "screen:/context",
     "/balance": "screen:/balance",
     "/usage": "screen:/usage",
@@ -235,6 +240,11 @@ _ON_THE_PAGE = {
     "/set autocorrect": "screen:/set",
     "/set notification": "screen:/set",
     "/set max_context": "screen:/set",
+    # the layout switch in the contents rail writes the setting the
+    # terminal's two modes store
+    "/set mode": "PATCH /api/stories/{story}/settings/{setting}",
+    # the Support request button in the Help docket's footer opens it
+    "/support": "screen:/support",
     "/help": "screen:/help",
     # The one gap that can never be filled: this command's whole purpose
     # is to reach the page, and the reader of the page is already there.
@@ -285,7 +295,7 @@ class TestFrontendParity:
 def _dispatchable() -> set[str]:
     """Every command a frontend must answer. SYNTAX rows are the story's
     own language — they play, they do not dispatch."""
-    return {spec.token for spec in COMMANDS if spec.kind is not CommandKind.SYNTAX}
+    return {spec.token for spec in COMMANDS if spec.kind is not CommandType.SYNTAX}
 
 
 def _answerable() -> set[str]:
@@ -374,21 +384,27 @@ _PAGE = {
     # `browser` for the kit's editor: a stored turn is corrected where it
     # is read, as the dossier corrects one. The kit is below the frame.
     "transcript": {"api", "browser", "dom", "pictures", "prose", "status", "table"},
+    # The layout switch: the story's `layout` setting written and the flow
+    # re-read in place, with the reader's place kept (`transcript`).
+    "layout": {"api", "browser", "dom", "status", "transcript"},
     "browser": {"dom", "status"},
     # `format` for the runhead's story name: a title is cut the same way
     # wherever the page writes one.
     # `browser` for `guard` alone — the kit's one barricade, which every
     # floating promise on this page goes through, the extraction Stop
     # included. The kit is below the frame, so this is not a cycle.
-    "shell": {"api", "browser", "dom", "format", "status", "transcript"},
+    "shell": {"api", "browser", "dom", "format", "layout", "status", "transcript"},
     "help": {"browser", "dom", "table"},
+    # The support docket: the reader's request, sent to the site.
+    "support": {"api", "browser", "dom"},
     # `story` is the dossier under the browser: the browser reaches into
     # it (Open story), never the other way — its route back is a command.
     "story": {"api", "browser", "dom", "format", "pictures", "prose", "shell", "tools"},
     # The dossier's fifth tab in a module of its own, built from `story`
     # and handed the dossier's footnote helper — so it reaches nothing
     # of the tabs beside it.
-    "tools": {"api", "browser", "dom", "shell"},
+    # `models` for the mask a set key reads behind, as a provider's does.
+    "tools": {"api", "browser", "dom", "models", "shell"},
     "stories": {"api", "browser", "dom", "format", "shell", "story", "transfer"},
     "models": {"api", "browser", "dom", "shell"},
     "settings": {"api", "browser", "dom", "table"},
@@ -410,6 +426,7 @@ _PAGE = {
         "status",
         "stories",
         "story",
+        "support",
         "table",
         "transcript",
         "transfer",
@@ -421,6 +438,7 @@ _PAGE = {
         "commands",
         "composer",
         "dom",
+        "layout",
         "login",
         "shell",
         "table",
@@ -468,7 +486,7 @@ class TestPageCaptions:
 
 
 def _syntax_rows() -> list[CommandSpec]:
-    return [spec for spec in COMMANDS if spec.kind is CommandKind.SYNTAX]
+    return [spec for spec in COMMANDS if spec.kind is CommandType.SYNTAX]
 
 
 def _page_source(name: str) -> str:

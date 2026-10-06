@@ -47,16 +47,29 @@ export function tell(sentence, kind = "") {
   line.classList.toggle("otk-status--error", Boolean(sentence) && kind === "otk-error");
 }
 
-/** What refused the line just typed, above the box it was typed in. It
-    stands there, whatever the status line says meanwhile, until
-    `settle` — the reader changing the words, or trying again. */
+/** What refused the line just typed, where it was typed: above the box —
+    or, on the canvas, IN the box standing disabled under the story, in
+    place of its placeholder (`shell.showFacts` keeps it there). It
+    stands, whatever the status line says meanwhile, until `settle` — the
+    reader changing the words, or trying again. */
 export function complain(sentence) {
+  const box = $("#otk-msg");
+  if (box?.disabled) {
+    box.dataset.refused = sentence;
+    box.placeholder = sentence;
+    return;
+  }
   if (!complaint) return;
   complaint.textContent = sentence;
   complaint.hidden = false;
 }
 
 export function settle() {
+  const box = $("#otk-msg");
+  if (box?.dataset.refused !== undefined) {
+    delete box.dataset.refused;
+    box.placeholder = box.dataset.standing ?? box.placeholder;
+  }
   if (!complaint) return;
   complaint.textContent = "";
   complaint.hidden = true;

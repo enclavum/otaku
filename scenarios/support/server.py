@@ -49,6 +49,7 @@ class ModelServer:
         *,
         managed: bool = False,
         tls: ssl.SSLContext | None = None,
+        port: int = 0,
     ) -> None:
         self.models = list(models)
         self.managed = managed
@@ -129,6 +130,10 @@ class ModelServer:
         # Retry-After header, as the server would spell it.
         self.refusal_body: dict[str, Any] | None = None
         self.retry_after: str | None = None
+        # otaku.sh's support desk, at /api/support on this server: 204,
+        # as the site's Worker answers a request it mailed on; a test sets
+        # a failure.
+        self.support_status = 204
         self.requests: list[dict[str, Any]] = []
         self.request_headers: list[dict[str, str]] = []  # one row per POST, same order
         self.posts: list[str] = []  # every POST path, same order
@@ -403,6 +408,12 @@ class ModelServer:
                 outer.requests.append(body)
                 outer.request_headers.append(dict(self.headers))
                 outer.posts.append(self.path.split("?", 1)[0].rstrip("/"))
+                if self.path.split("?", 1)[0].rstrip("/") == "/api/support":
+                    self.send_response(outer.support_status)
+                    if outer.support_status != 204:
+                        self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
                 if outer.balances and self.path.rstrip("/").endswith("/check-balance"):
                     if not self._authorized():
                         return
@@ -566,7 +577,9 @@ class ModelServer:
             def _event(self, payload: dict[str, Any]) -> None:
                 self.wfile.write(b"data: " + json.dumps(payload).encode() + b"\n\n")
 
-        self._httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        # A free port unless one is asked for — an engine's own, where the
+        # server stands in for it by hand (`scripts/test_model.py`).
+        self._httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
         scheme = "http"
         if tls is not None:
             # A server behind its own certificate — KoboldCpp's --ssl, a
@@ -588,6 +601,7 @@ class ModelServer:
         self.refusal_body = None
         self.retry_after = None
         self.finish = "stop"
+        self.support_status = 204
         self.requests.clear()
         self.request_headers.clear()
         self.posts.clear()

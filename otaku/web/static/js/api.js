@@ -177,6 +177,8 @@ export const editJournal = (story, record, fields) =>
   patch(`/api/stories/${story}/journals/${record}`, fields);
 export const mergeCharacter = (story, character, into) =>
   put(`/api/stories/${story}/characters/${character}/merge`, { into });
+export const deleteCharacter = (story, character) =>
+  remove(`/api/stories/${story}/characters/${character}`);
 export const storySettings = (story) => get(`/api/stories/${story}/settings`);
 export const updateSetting = (story, name, fields) =>
   patch(`/api/stories/${story}/settings/${name}`, fields);
@@ -208,6 +210,10 @@ export const setLoaded = (provider, model, loaded) =>
     { loaded },
   );
 export const switchModel = (provider, model) => put("/api/session/model", { provider, model });
+// The model lore extraction uses: pinned, or back to the one played with.
+export const setExtractionModel = (provider, model) =>
+  put("/api/session/extraction_model", { provider, model });
+export const clearExtractionModel = () => remove("/api/session/extraction_model");
 export const machine = () => get("/api/machine");
 
 // ---------- the session ----------
@@ -220,6 +226,8 @@ export const facts = () => get("/api/session");
 export const setHead = (story, message, discard = false) =>
   put("/api/session/head", { story, message, discard });
 export const context = () => get("/api/session/context");
+// How full the next request is, and its sentence; "" while the window is unknown.
+export const contextUse = () => get("/api/session/context_use");
 export const info = () => get("/api/session/info");
 export const balance = () => get("/api/balance");
 // The slip's first paint: the roster costs no network — rows and notes
@@ -234,8 +242,12 @@ export const settings = () => get("/api/settings");
 export const sharedReminder = () => get("/api/shared_reminder");
 export const setSharedReminder = (text) => put("/api/shared_reminder", { text });
 // A tool's prompt: prompts.toml's text, edited in place.
-export const prompt = (tool) => get(`/api/prompts/${tool}`);
-export const setPrompt = (tool, text) => put(`/api/prompts/${tool}`, { text });
+export const prompt = (setting) => get(`/api/prompts/${setting}`);
+export const setPrompt = (setting, text) => put(`/api/prompts/${setting}`, { text });
+// Web search: where it stands, and its one key — which engine is told from the key.
+export const webSearch = () => get("/api/integrations/web_search");
+export const sendSupport = (message, email) => post("/api/support", { message, email });
+export const setWebSearchKey = (key) => patch("/api/integrations/web_search", { api_key: key });
 export const setSetting = (name, value) => put(`/api/settings/${name}`, { value });
 export const setParameter = (name, value) =>
   put(`/api/session/model/parameters/${encodeURIComponent(name)}`, { value });
