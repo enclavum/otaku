@@ -85,13 +85,13 @@ class LmStudioModels(OpenAIModels):
             key = entry.get("key")
             if not isinstance(key, str) or entry.get("type") == "embedding":
                 continue  # an embedding model answers a chat with a 400
-            max_context_loaded = self._max_context_loaded_of(entry)
+            context_loaded = self._max_context_loaded_of(entry)
             models.append(
                 ModelInfo(
                     name=key,
                     size=positive_int(entry.get("size_bytes")),
-                    max_context_catalogue=positive_int(entry.get("max_context_length")),
-                    max_context_loaded=max_context_loaded,
+                    context_length=positive_int(entry.get("max_context_length")),
+                    context_loaded=context_loaded,
                     capabilities=self._capabilities_of(entry),
                     state=ModelState.LOADED
                     if entry.get("loaded_instances")
@@ -107,7 +107,7 @@ class LmStudioModels(OpenAIModels):
         if entry.get("loaded_instances"):
             return ModelInfo(
                 name=name,
-                max_context_loaded=self._max_context_loaded_of(entry),
+                context_loaded=self._max_context_loaded_of(entry),
                 state=ModelState.LOADED,
             )
         return ModelInfo(name=name, state=ModelState.UNLOADED)

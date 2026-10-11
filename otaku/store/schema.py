@@ -248,7 +248,7 @@ class StorySettingDB:
     layout the story is read in — the last three each one setting's, the
     others every injecting setting's.
     WHICH settings there are, and what each may take, is no business of
-    the column's (`backend.story`)."""
+    the column's (`backend.domain.story.settings`)."""
 
     name: str
     enabled: bool = False
@@ -379,7 +379,7 @@ class Layout(Enum):
 
     def completion_type(self, can_complete_text: bool) -> "CompletionType":
         """The wire alone: TEXT for the novel where the model in use can
-        complete text (`Session.can_complete_text`), CHAT for every other
+        complete text (`ModelFacts.can_complete_text`), CHAT for every other
         case — a novel on a model that cannot is played as a canvas."""
         if self is Layout.NOVEL and can_complete_text:
             return CompletionType.TEXT

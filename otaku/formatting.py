@@ -10,6 +10,11 @@ from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+# The most a story's label takes wherever a sentence or a report names
+# it, the fork number kept (`truncate_label`); the page keeps a copy
+# (`format.js`).
+LABEL_WIDTH = 50
+
 # Control characters display must drop: C0 minus newline and tab, DEL, and
 # C1 (U+0080..U+009F) — xterm honors 8-bit CSI/OSC aliases even in UTF-8 mode.
 _CONTROL = {c: None for c in range(32) if chr(c) not in "\n\t"}

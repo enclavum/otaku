@@ -15,7 +15,7 @@ file exists it is the source — edit a value to change it, delete the
 file to regenerate the release defaults. A key absent from the file
 falls back to the built-in, and a malformed file or template is IGNORED
 with a returned warning — a bad override must never cost a session, and
-this module never prints (the launch folds warnings into the session's
+this module never prints (the launch folds warnings into the app's
 notices).
 """
 
@@ -143,7 +143,7 @@ Rules:
 """
 
 # The tools' prompts: what tells the model how a tool is used
-# (`backend.tools`). Sent as an injection while the tool is switched on
+# (`backend.domain.story._tools`). Sent as an injection while the tool is switched on
 # for the story — bare in the system message, inside the OOC enclosure
 # in chat — so neither carries an enclosure of its own.
 TOOL_QUESTIONS_DEFAULT = """\

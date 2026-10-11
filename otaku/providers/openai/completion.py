@@ -94,7 +94,7 @@ class Reply(Iterator[Chunk]):
 
 class RequestSink(Protocol):
     """Where requests and their answers are recorded — the injected
-    seam the session's request log satisfies, a mirror of
+    seam the app's request log satisfies, a mirror of
     `logging.RequestLog` method for method. `record_request` returns
     the id the answer is later filed under; `record_answer` files what
     the stream came to: the status, its `Stats`, the answer's text and
@@ -116,7 +116,7 @@ class RequestSink(Protocol):
 
 
 # The parameters every OpenAI endpoint reads, by the app's names — the
-# ones `/set` takes (`backend.session.PARAMETERS`), which the body
+# ones `/set` takes (`backend.domain.app.PARAMETERS`), which the body
 # carries as they are.
 PROTOCOL_PARAMS: frozenset[str] = frozenset(
     {"temperature", "top_p", "max_tokens", "presence_penalty", "frequency_penalty", "seed", "stop"}
@@ -131,7 +131,7 @@ SAMPLER_PARAMS: frozenset[str] = frozenset({"top_k", "min_p", "repetition_penalt
 _SAMPLER_WORDS: frozenset[str] = SAMPLER_PARAMS | {"repeat_penalty"}
 
 # A parameter's bounds as an engine holds them: (low, high), None for
-# no bound on that side. The app's own table (`backend.session.PARAMETERS`)
+# no bound on that side. The app's own table (`backend.domain.app.PARAMETERS`)
 # is the catalogs' — the protocol's 0 to 2 on temperature and the
 # penalties; an engine that takes more, or less, says so here.
 Bounds = tuple[float | None, float | None]

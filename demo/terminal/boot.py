@@ -454,8 +454,8 @@ def _build_demo_client():
             return [
                 ModelInfo(
                     name=MODEL,
-                    max_context_catalogue=CONTEXT_SIZE,
-                    max_context_loaded=CONTEXT_SIZE,
+                    context_length=CONTEXT_SIZE,
+                    context_loaded=CONTEXT_SIZE,
                     state=ModelState.LOADED,
                 )
             ]
@@ -549,10 +549,10 @@ def _build_demo_client():
 def _patch_threads() -> None:
     import otaku.terminal.chat.stream as chat_stream
     import otaku.terminal.screens.models as screens_models
+    from otaku.agents import Worker
+    from otaku.agents.extraction import Extractor, PassResult, Report
     from otaku.providers import smoothing
     from otaku.providers.registry import Registry
-    from otaku.worker import Worker
-    from otaku.worker.extraction import Extractor, PassResult, Report
 
     class DemoSpinner:
         """One static frame where the real spinner animates on a thread;
@@ -687,7 +687,7 @@ def _seed_state_dir(root: Path) -> None:
     one scripted provider, smoothing off (the pacing is the script's),
     idle extraction off (a browser tab has no worker thread to run it —
     /extract is the demo's door), samples on."""
-    from otaku.backend.paths import Paths
+    from otaku.backend.domain.app._paths import Paths
     from otaku.settings import config as config_file
     from otaku.settings import providers as providers_file
     from otaku.settings import write_atomic
@@ -732,12 +732,13 @@ def main() -> None:
 
     from prompt_toolkit.application import create_app_session
 
-    import otaku.terminal.chat.bindings as bindings
+    import otaku.terminal.dispatch as dispatch
+    import otaku.terminal.dispatch.story.context as story_context
     import otaku.terminal.tty as tty_mod
     from otaku.backend import launch as backend_launch
-    from otaku.backend.api import providers as api_providers
+    from otaku.backend.api import Api, ModelRef
     from otaku.providers import registry as providers_registry
-    from otaku.terminal.chat import loop as chat_loop
+    from otaku.terminal import run as terminal_run
 
     tty_mod.ask = _demo_ask
     # No local engines to detect: first-run and the ensure-providers
@@ -753,13 +754,13 @@ def main() -> None:
     def demo_disabled(chat, raw: str) -> None:
         chat.say("This command is disabled in the demo.")
 
-    bindings._INTERACTIVE["/web"] = demo_disabled
-    bindings._INTERACTIVE["/bye"] = demo_disabled
+    dispatch.HANDLERS["/web"] = demo_disabled
+    dispatch.HANDLERS["/bye"] = demo_disabled
 
     # /card is REAL here — parser, persona ask, join, greeting all run —
     # so a bare /card points at the card the demo ships instead of
     # leaving the visitor with no file to name.
-    real_card = bindings._INTERACTIVE["/card"]
+    real_card = dispatch.HANDLERS["/card"]
 
     def demo_card(chat, raw: str) -> None:
         if not raw.strip():
@@ -768,9 +769,9 @@ def main() -> None:
             return
         real_card(chat, raw)
 
-    bindings._INTERACTIVE["/card"] = demo_card
+    dispatch.HANDLERS["/card"] = demo_card
     # /context pages through `less`; the terminal here scrolls instead.
-    bindings.click = SimpleNamespace(
+    story_context.click = SimpleNamespace(
         echo_via_pager=lambda text, color=True: (
             sys.stdout.write(text if text.endswith("\n") else text + "\n"),
             sys.stdout.flush(),
@@ -786,15 +787,16 @@ def main() -> None:
     cards = Path("/cards")
     cards.mkdir(parents=True, exist_ok=True)
     (cards / "odo.json").write_text(demo_script.SAMPLE_CARD, encoding="utf-8")
-    session = backend_launch.open_session(root)
-    if not session.model:
-        api_providers.set_model(session, PROVIDER, MODEL)
+    app = backend_launch.open_app(root)
+    api = Api(app)
+    if api.app.get().model is None:
+        api.app.update(model=ModelRef(PROVIDER, MODEL))
 
     term_input, term_output = _build_ptk_io()
     try:
         with create_app_session(input=term_input, output=term_output):
-            chat_loop.run(session)
+            terminal_run.run(app)
     finally:
-        session.close()
+        app.close()
     sys.stdout.write("\r\n\x1b[2mThe session is over — reload the page to start again.\x1b[0m\r\n")
     sys.stdout.flush()

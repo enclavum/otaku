@@ -8,7 +8,7 @@ exactly as typed.
 a path travel escaped; the reader is asked with them unescaped.
 """
 
-from otaku.backend.files import RawFile
+from otaku.terminal.api.story.messages import RawFile
 from otaku.terminal.prompt.pictures import escape, extract_pictures, token_at, unescape
 
 PICTURES = {"cat.jpg", "pics/dog.png", "my pics/cat.jpg", "~/cat.heic"}

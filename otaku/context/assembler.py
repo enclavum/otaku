@@ -18,8 +18,8 @@ its cases so the two read side by side:
 - case 6 (nothing left to degrade): the assembly refuses —
   `ContextOverflowError`, the sentence to show riding it.
 
-The limit is the smaller of the model's max context and the
-`max_context` setting (0 = the model's), minus a reserve for the model's
+The limit is the context in force — the model's window, under the
+context limit where one is set (`context_in_force`) — minus a reserve for the model's
 reply — sized
 from the story's own recent replies, so a terse story reserves little
 and a florid one enough. Card rows are never summarized and never
@@ -87,13 +87,14 @@ class ContextOverflowError(Exception):
     """Case 6: the story cannot fit the limit even fully degraded. The
     message is the sentence to show; the figures that did not meet ride
     with it — `tokens` the smallest the story gets, `limit` what it had
-    to fit (the context less the reply's reserve), `context` the window."""
+    to fit (the context less the reply's reserve), `context_in_force`
+    what the request was cut to."""
 
-    def __init__(self, message: str, *, tokens: int, limit: int, context: int) -> None:
+    def __init__(self, message: str, *, tokens: int, limit: int, context_in_force: int) -> None:
         super().__init__(message)
         self.tokens = tokens
         self.limit = limit
-        self.context = context
+        self.context_in_force = context_in_force
 
 
 class PromptTexts(Protocol):
@@ -119,7 +120,9 @@ class ContextShape:
 
     head_messages: int
     min_tail_messages: int  # the tail never targets fewer; case 5 lowers it in emergencies
-    max_context: int  # the context in force (`context_in_force`), or the cap alone until it is
+    # What a request is cut to (`context_in_force`) — or, in a job's
+    # shape, the limit alone until the warm-up finishes it.
+    context_in_force: int
 
 
 @dataclass(frozen=True)
@@ -280,13 +283,13 @@ def estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 
-def context_in_force(max_context: int | None, setting: int) -> int:
-    """The context a prompt is cut to: the model's own (`max_context`,
-    or the default where nobody states one), or the `max_context`
-    setting where it is lower — 0 for no setting. The one rule, so the
-    turn, the preview and the warm-up cut alike."""
-    max_context = max_context or _DEFAULT_CONTEXT
-    return min(max_context, setting) if setting else max_context
+def context_in_force(context_window: int | None, context_limit: int) -> int:
+    """The context a prompt is cut to: the model's window (or the
+    default where nobody states one), or the context limit where it is
+    lower — 0 for no limit. The one rule, so the turn, the preview and
+    the warm-up cut alike."""
+    window = context_window or _DEFAULT_CONTEXT
+    return min(window, context_limit) if context_limit else window
 
 
 def assemble_story(
@@ -323,7 +326,7 @@ def assemble_story(
         files=store.files,
         pictures_ride=pictures_ride,
     )
-    limit = max(0, shape.max_context - assembly.reserve)
+    limit = max(0, shape.context_in_force - assembly.reserve)
 
     for tail_target in assembly.rungs:  # case 5
         prompt = assembly.compose(tail_target, limit)
@@ -334,12 +337,12 @@ def assemble_story(
     # the context it had to fit.
     raise ContextOverflowError(
         f"The story does not fit the context limit: it needs {prompt.total_tokens:,} tokens even "
-        f"fully summarized and with the tail reduced, and the context is {shape.max_context:,} "
-        f"tokens — "
+        f"fully summarized and with the tail reduced, and the context is "
+        f"{shape.context_in_force:,} tokens — "
         f"raise it or run /extract to close more scenes.",
         tokens=prompt.total_tokens,
         limit=limit,
-        context=shape.max_context,
+        context_in_force=shape.context_in_force,
     )
 
 
@@ -633,7 +636,7 @@ class _Assembly:
         Consecutive same-role rows rejoin into one turn, pictures and all —
         storage granularity is otaku's bookkeeping; the model sees one
         prompt per exchange. A tool turn goes as the reader's — the chat
-        wire has two sides, and a tool's answer is what the model is told
+        wire has two sides, and a tool's result is what the model is told
         — framed by `_wire_text`. The seam between two rows is
         `get_join_type`'s, written as `as_story_text` writes it (`join`)."""
         out: list[WireTurn] = []

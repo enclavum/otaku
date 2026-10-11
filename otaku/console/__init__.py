@@ -2,14 +2,14 @@
 
 Not the terminal frontend — that is `terminal`, a whole medium of its
 own. This is the little that both frontends print into the shell that
-started them, and neither may own: the banner a session opens with
+started them, and neither may own: the banner each frontend opens with
 (`banner`) — the mark and three lines for `otaku`, the address for
 `otaku web` — the live tail of requests under it (`ticker`), which the web frontend keeps
-while a browser has the session, and the notification ring (`sound`),
+while a browser has the app, and the notification ring (`sound`),
 which a landed reply plays into the same shell whichever frontend the
 reply landed in.
 
-Nothing here reads a session: what a banner states is HANDED to it by
+Nothing here reads the app: what a banner states is HANDED to it by
 the frontend that opened one, and what the tail shows is handed to it a
 line at a time. The escape vocabulary the two need is spelled here,
 once, and the terminal frontend takes its own copies from this module

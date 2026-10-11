@@ -1,21 +1,21 @@
 """The web frontend's life — everything `otaku web` is, above HTTP.
 
-`run` is the whole of it over an open session, as `chat.run` is the
+`run` is the whole of it over the app, as `chat.run` is the
 terminal's: what the launch has to say, where the page is, and the tail
 of requests until the reader stops it. Everything `otaku web` prints is
 printed HERE, into the terminal it was launched from — `web.server`
 below prints nothing and is handed one line per request worth showing.
 
 `serve` is the composition root under `run`: the thread that owns the
-session's thread, the state that spans requests, the hooks the server
+app's thread, the state that spans requests, the hooks the server
 answers the beat from, and the signal that makes Ctrl+C an orderly stop
 are all wired here — so `server` stays HTTP and `thread` stays a queue.
 
-`settings` is where this frontend listens: the session's own `[web]`
+`settings` is where this frontend listens: the app's own `[web]`
 slice, with the development port override laid over it. The address is
 the medium, like a key binding or a column width — so a frontend reads
 one slice and only its own, and gets it the way the terminal gets its
-looks, off the session rather than out of the file.
+looks, off the app rather than out of the file.
 """
 
 import contextlib
@@ -29,13 +29,12 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from otaku.backend import WebSettings
-from otaku.backend.session import Session
 from otaku.console import banner, keys, sound, ticker
-from otaku.web import api
+from otaku.web.api import Api, App
+from otaku.web.api.app.settings import WebSettings
 from otaku.web.cert import CertError, get_context
 from otaku.web.server import Hooks, bind
-from otaku.web.thread import SessionRunner
+from otaku.web.thread import AppRunner
 
 __all__ = ["ServeError", "run", "serve", "settings"]
 
@@ -52,39 +51,51 @@ class ServeError(Exception):
     caller has a sentence to print rather than a traceback to dump."""
 
 
-def run(
-    session: Session, *, full: bool = True, host: str | None = None, port: int | None = None
-) -> bool:
-    """This frontend's whole life over an open session, as `chat.run` is
-    the terminal's: what the launch has to say, where the page is, and
+def run(app: App, *, host: str | None = None, port: int | None = None) -> bool:
+    """This frontend's whole life over the app, as `chat.run` is the
+    terminal's: what its launch had to say, where the page is, and
     the tail of requests until the reader stops it. Everything printed
     by `otaku web` is printed here — into the terminal it was launched
     from, which is the only part of that terminal this frontend has.
-    Closing the session stays the caller's, as it is for the other
+    Closing the app stays the caller's, as it is for the other
     frontend. Returns whether the reader asked to be served again on
-    fresh sources (Ctrl+R) — which is the caller's to do, over a
-    session it has closed, and asked only where the process is the
-    caller's to replace: `otaku web`, never `/web`.
-
-    FULL is a terminal this frontend opens: `otaku web`, with the launch
-    to report. Without it the session came from `/web`, into a chat
-    already in progress — the reports were read when it opened, so all
-    this owes the reader is the address.
+    fresh sources (Ctrl+R) — which is the caller's to do, over an app
+    it has closed.
 
     `host` and `port` are a caller overriding where it listens for this
     run — the command line's own, laid over the configured address."""
-    config = settings(session.web, host=host, port=port)
-    if full:
-        # The launch's own reports have nowhere to go in a browser that
-        # is not open yet, so they go where the reader is: the terminal
-        # they typed in, one blank line after the lot, as the terminal's
-        # launch does. A chat handing its session over has none left — it
-        # printed them when it opened.
-        for report in session.notices:
-            print(report)
-        if session.notices:
-            print()
-        session.notices.clear()
+    # The launch's own reports have nowhere to go in a browser that is
+    # not open yet, so they go where the reader is: the terminal they
+    # typed in, one blank line after the lot, as the terminal's launch
+    # does.
+    notices = Api(app).app.get().launch.notices
+    for report in notices:
+        print(report)
+    if notices:
+        print()
+    restart = _serve_with_tail(app, host=host, port=port, restartable=True)
+    # The shell prompt starts against a blank rather than against the
+    # last request.
+    print()
+    return restart
+
+
+def run_shared(app: App) -> None:
+    """This frontend over an app another frontend has open — the
+    terminal's `/web`, into a chat in progress: what its launch had to
+    say was printed when the chat opened, so all this owes the reader is
+    the address and the tail until they stop it. Never restartable, the process not being
+    this caller's to replace; nothing printed after, the blank before
+    the chat's next prompt being its own. Closing the app stays the
+    caller's."""
+    _serve_with_tail(app, host=None, port=None, restartable=False)
+
+
+def _serve_with_tail(app: App, *, host: str | None, port: int | None, restartable: bool) -> bool:
+    """Where the page is, then the server with the last requests under
+    it until the reader stops it; whether they asked for a restart."""
+    setup = Api(app).settings.web.get()
+    config = settings(setup.config, host=host, port=port)
     # Said before the socket is bound, because the address is the
     # configuration's and not the socket's answer: a reader can be
     # opening the page while the first request is still arriving.
@@ -111,28 +122,22 @@ def run(
             tail.stop()
 
         restart = serve(
-            session,
+            app,
             config,
-            session.custom_web_dir,
-            session.cert_dir,
+            setup.custom_dir,
+            setup.cert_dir,
             show=tail.show,
             stopping=stopping,
-            restartable=full,
+            restartable=restartable,
         )
-    if full:
-        # The shell prompt starts against a blank rather than against the
-        # last request. A chat taking its session back needs none from
-        # here: the blank before its next prompt is its ledger's, and one
-        # printed here as well would be two.
-        print()
     return restart
 
 
 def settings(
     config: WebSettings, *, host: str | None = None, port: int | None = None
 ) -> WebSettings:
-    """Where this frontend listens: the session's own `[web]` slice, with
-    what outranks it laid over. The slice arrives from the session as the
+    """Where this frontend listens: the app's own `[web]` slice, with
+    what outranks it laid over. The slice arrives from the app as the
     terminal's looks do — a frontend reads one slice and only its own,
     and neither reads the file for itself.
 
@@ -157,7 +162,7 @@ def settings(
 
 
 def serve(
-    session: Session,
+    app: App,
     config: WebSettings,
     custom_web_dir: Path,
     cert_dir: Path,
@@ -167,13 +172,13 @@ def serve(
     stop: threading.Event | None = None,
     restartable: bool = False,
 ) -> bool:
-    """Serve one open session until interrupted — the composition root
+    """Serve the app until interrupted — the composition root
     under `run`, the background worker started here for the same reason
     `chat.run` starts it. `config` is the configured address (`settings`
     above); `custom_web_dir` is the state dir's own web directory, where
     the reader's `custom.css` lives and nothing else is ever read from;
     `cert_dir` is where the TLS pair lives, read only when the address
-    says https. Closing the session stays the caller's, like every other
+    says https. Closing the app stays the caller's, like every other
     frontend's.
 
     Nothing here is printed. `show` is handed one line per request worth
@@ -188,37 +193,34 @@ def serve(
     terminal (Ctrl+D as Ctrl+C; with `restartable`, Ctrl+R as a stop
     that asks to be served again) are watched only there too. Returns
     whether Ctrl+R asked."""
-    session.start_worker()
-    runner = SessionRunner(session)
-    # What the background worker says while nobody asked it anything —
-    # the idle extraction pass above all. The terminal pins its status
-    # row and prints its sentences in the flow; the page has neither
-    # until it asks, so the sentences wait in the mailbox and go out on
-    # the heartbeat it is already making.
-    sayings = _Sayings()
-    tls_context = _get_tls_context(config, cert_dir, session, show)
+    app.start_worker()
+    runner = AppRunner(app)
+    # The interface the hooks below ask, each safe from any thread.
+    interface = Api(app)
+    tls_context = _get_tls_context(config, cert_dir, app, show)
     try:
         server = bind(
             config,
             runner,
-            api.Pending(),
             custom_web_dir,
             Hooks(
                 show=show or (lambda line: None),
                 # A contained crash goes where every frontend's contained
-                # crashes go. Called off the session's thread by design:
+                # crashes go. Called off the app's thread by design:
                 # it appends to a day-file and never reaches the store,
-                # and a handler that queued for the session's thread to
+                # and a handler that queued for the app's thread to
                 # report a crash would wait behind the very job that
                 # crashed.
-                record=session.record_crash,
-                working=session.status,
-                sayings=sayings.drain,
+                record=app.record_crash,
+                working=interface.app.status.get,
                 # A landed reply rings the terminal this server was
                 # launched from — one user, one desk: the browser and
                 # this shell sit in front of the same reader, and the
                 # sound machinery is the one the chat already rings.
-                ring=lambda: sound.ring(session.terminal.notification_sound),
+                ring=lambda: sound.ring(interface.settings.terminal.get().notification_sound),
+                # Slow on purpose, so asked on the handler's thread: it
+                # reads the config alone, never the store.
+                check_password=interface.settings.check_password,
             ),
             tls_context,
             config.password or None,
@@ -229,20 +231,17 @@ def serve(
         raise ServeError(f"cannot serve at {config.host}:{config.port} — {e.strerror or e}") from e
     if stop is not None:
         server.stopping = stop
-    # The session's one thread is this frontend's too. Between frames a
+    # The app's one thread is this frontend's too. Between frames a
     # reply gives it back (the server's pump drains), and while a reply
     # is only being WAITED for — the long silence before the first token
     # above all — the backend hands it over here. Either way it spends
     # the time answering reads, which is why a screen opens mid-reply.
     #
-    # Both hooks are BORROWED, not taken: a session that came here from
-    # a chat (`/web`) goes back to it, and a chat whose notice sink was
-    # left pointing at this server's mailbox would never hear the worker
-    # again. The finally below puts both back.
-    was_idle = session.set_on_idle(runner.drain)
-    was_notice = session.set_on_notice(sayings.put)
+    # The hook is BORROWED, not taken: an app that came here from a chat
+    # (`/web`) goes back to it, and the finally below puts it back.
+    was_idle = app.set_on_idle(runner.drain)
     # Serving moves to a thread so that THIS one — the thread that opened
-    # the session, and the only one its sqlite connection will answer —
+    # the app, and the only one its sqlite connection will answer —
     # stays free to run the work the handlers hand it.
     # The signal handler is installed before the serving thread starts,
     # so no request can race a window where Ctrl+C still meant Python's
@@ -284,19 +283,18 @@ def serve(
             signal.signal(signal.SIGINT, was)
         server.shutdown()
         server.server_close()
-        # Whoever was waiting on the session's thread is told there is no
+        # Whoever was waiting on the app's thread is told there is no
         # answer coming, rather than waiting for one forever.
         runner.abandon()
-        # The borrowed hooks go back to whoever held them before.
-        session.set_on_idle(was_idle)
-        session.set_on_notice(was_notice)
+        # The borrowed hook goes back to whoever held it before.
+        app.set_on_idle(was_idle)
     return asked.is_set()
 
 
 def _get_tls_context(
     config: WebSettings,
     cert_dir: Path,
-    session: Session,
+    app: App,
     show: Callable[[str], None] | None,
 ) -> ssl.SSLContext | None:
     """What every accepted connection is wrapped in, or None where the
@@ -313,28 +311,8 @@ def _get_tls_context(
     try:
         return get_context(cert_dir, show)
     except CertError as e:
-        where = session.record_crash("web certificate", e)
+        where = app.record_crash("web certificate", e)
         raise ServeError(f"{e}" + (f" (recorded in {where})" if where else "")) from e
-
-
-class _Sayings:
-    """The background worker's sentences, held for the beat: `put` is
-    called from the WORKER's thread the moment a pass has something to
-    say, `drain` from a handler's when the page next asks — so the two
-    never meet inside the list."""
-
-    def __init__(self) -> None:
-        self._lines: list[str] = []
-        self._lock = threading.Lock()
-
-    def put(self, sentence: str) -> None:
-        with self._lock:
-            self._lines.append(sentence)
-
-    def drain(self) -> list[str]:
-        with self._lock:
-            said, self._lines[:] = list(self._lines), []
-        return said
 
 
 def _interrupting(

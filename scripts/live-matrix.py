@@ -171,8 +171,8 @@ def main():
             print("load/unload FAILED:", e)
 
     row = client.models.get(a.model)
-    print(f"max_context_catalogue: {row.max_context_catalogue if row else None}")
-    print(f"max_context_loaded: {row.max_context_loaded if row else None}")
+    print(f"context_length: {row.context_length if row else None}")
+    print(f"context_loaded: {row.context_loaded if row else None}")
     print(f"capabilities: {row.capabilities if row is not None else None}")
 
     print("efforts:")

@@ -19,11 +19,11 @@ import pytest
 
 from otaku import encryption
 from otaku import logging as otaku_logging
-from otaku.backend import files as backend_files
 from otaku.backend import launch as backend_launch
-from otaku.backend.api import providers as api_providers
-from otaku.backend.files import RawFile
-from otaku.backend.paths import Paths
+from otaku.backend.api import Api, ModelRef
+from otaku.backend.api.story.messages import RawFile
+from otaku.backend.domain.app._paths import Paths
+from otaku.backend.domain.story import pictures as backend_files
 from otaku.encryption import Cipher, EncryptionError, PlainCipher
 from otaku.formatting import toml_string
 from otaku.settings import config as config_mod
@@ -104,7 +104,7 @@ class TestEncryption:
         app.close()
         relaunched = launch(root, server)
         try:
-            assert [m.body for m in relaunched.session.messages] == [
+            assert [m.body for m in relaunched.messages] == [
                 "I enter the hall.",
                 scripted.CHAT_REPLY,
             ]
@@ -172,7 +172,9 @@ class TestBackups:
 
         relaunched = launch(root, server)
         try:
-            assert any("backup failed" in notice for notice in relaunched.session.notices)
+            assert any(
+                "backup failed" in notice for notice in relaunched.api.app.get().launch.notices
+            )
         finally:
             relaunched.close()
 
@@ -312,7 +314,7 @@ class TestSchemaMigration:
         _v1_database(root)
         app = launch(root, server)
         try:
-            assert any("migrated" in notice for notice in app.session.notices)
+            assert any("migrated" in notice for notice in app.api.app.get().launch.notices)
         finally:
             app.close()
 
@@ -525,7 +527,11 @@ class TestFilesFolder:
         try:
             story = store.stories.add("Cats")
             picture = _attach(store, story, CAT)
-            store.stories.append(story, Message(role="user", body="Look.", attachments=(picture,)))
+            store.stories.append(
+                story,
+                Message(role="user", body="Look.", attachments=(picture,)),
+                after=store.stories.get_head(story),
+            )
             copy = store.stories.fork(story)
             (message,) = store.stories.get_messages(copy)
             assert message.attachments == (picture,)  # the origin's name, shared
@@ -539,7 +545,11 @@ class TestFilesFolder:
         try:
             story = store.stories.add("Cats")
             picture = _attach(store, story, CAT)
-            store.stories.append(story, Message(role="user", body="Look.", attachments=(picture,)))
+            store.stories.append(
+                story,
+                Message(role="user", body="Look.", attachments=(picture,)),
+                after=store.stories.get_head(story),
+            )
             copy = store.stories.fork(story)
             store.stories.delete(copy)
             assert len(_files(paths)) == 1  # the original still names it
@@ -556,8 +566,12 @@ class TestFilesFolder:
         try:
             story = store.stories.add("Cats")
             picture = _attach(store, story, CAT)
-            store.stories.append(story, Message(role="user", body="Look.", attachments=(picture,)))
-            store.stories.set_head(story, None)
+            store.stories.append(
+                story,
+                Message(role="user", body="Look.", attachments=(picture,)),
+                after=store.stories.get_head(story),
+            )
+            store.stories.set_head(story, None, expected_head=store.stories.get_head(story))
             assert store.stories.sweep_files() == 0
             assert len(_files(paths)) == 1
         finally:
@@ -569,7 +583,11 @@ class TestFilesFolder:
         try:
             story = store.stories.add("Cats")
             picture = _attach(store, story, CAT)
-            store.stories.append(story, Message(role="user", body="Look.", attachments=(picture,)))
+            store.stories.append(
+                story,
+                Message(role="user", body="Look.", attachments=(picture,)),
+                after=store.stories.get_head(story),
+            )
             (paths.database_dir / "files" / ".deadbeef.tmp").write_bytes(b"half")
             assert store.stories.sweep_files() == 1
             assert [path.name for path in _files(paths)] == [picture.file]
@@ -584,7 +602,11 @@ class TestFilesFolder:
         try:
             story = store.stories.add("Cats")
             picture = _attach(store, story, CAT)
-            store.stories.append(story, Message(role="user", body="Look.", attachments=(picture,)))
+            store.stories.append(
+                story,
+                Message(role="user", body="Look.", attachments=(picture,)),
+                after=store.stories.get_head(story),
+            )
         finally:
             store.close()
         (paths.database_dir / "files" / "pic-0009-20260101-deadbeef.jpg").write_bytes(b"orphan")
@@ -754,7 +776,7 @@ class TestConfigMigration:
         assert "max_context = 0" in migrated
         assert "0 = the model's own max context" in migrated  # the comment rides it
         assert migrated.index("[context]") < migrated.index("max_context")
-        assert cfg.max_context == 0
+        assert cfg.context_limit == 0
         backups = sorted(app.paths.config_backups_dir.iterdir())
         load_config(app.paths)
         assert config_file.read_text() == migrated
@@ -967,21 +989,21 @@ class TestFirstLaunch:
         app = launch(tmp_path / "state", server)
         try:
             assert app.server.requests == []  # seeding never calls a model
-            story_id = app.session.story_id
+            story_id = app.story_id
             assert story_id is not None
             story = app.store.stories.get(story_id)
             assert story.title == "The River That Forgot Its Name"
-            assert len(app.session.messages) == 16
+            assert len(app.messages) == 16
             # The sample's pictures, shipped beside its document, landed
             # on the message they are named for, through the app's own
             # intake: the files and their thumbnails are in the folder.
-            pictured = app.session.messages[14]
+            pictured = app.messages[14]
             assert pictured.role == "user" and len(pictured.attachments) == 2
             for picture in pictured.attachments:
                 assert app.store.files.get(picture.file) is not None
                 assert app.store.files.get_thumb(picture.file) is not None
                 assert picture.width <= 1568 and picture.height <= 1568
-            assert all(not m.attachments for i, m in enumerate(app.session.messages) if i != 14)
+            assert all(not m.attachments for i, m in enumerate(app.messages) if i != 14)
             ids = app.store.stories.get_messages_ids(story_id)
             assert len(app.store.scenes.get_current(story_id, ids)) == 2
             assert [c.name for c in app.store.characters.list(story_id)] == ["Maren", "Tallis"]
@@ -1007,46 +1029,46 @@ class TestFirstLaunch:
         # Remembered: a relaunch resumes the landing and does NOT seed again.
         relaunched = launch(tmp_path / "state", server)
         try:
-            assert relaunched.session.story_id == story_id
+            assert relaunched.story_id == story_id
             assert len(relaunched.store.stories.list()) == 2
         finally:
             relaunched.close()
 
-    def test_a_declined_launch_picker_opens_the_session_anyway(self, server, tmp_path) -> None:
-        # Esc in the launch picker is not a cancel: the session opens
+    def test_a_declined_launch_picker_opens_the_app_anyway(self, server, tmp_path) -> None:
+        # Esc in the launch picker is not a cancel: the app opens
         # model-less — the same state /model's Esc leaves behind.
         app = launch(tmp_path / "state", server, spec=None)
         try:
-            assert app.session.provider == ""
+            assert app.api.app.get().model is None
         finally:
             app.close()
 
     def test_no_models_still_opens_into_the_sample(self, server, tmp_path, capsys) -> None:
-        # Nothing reachable: the session opens without a model, the sample
+        # Nothing reachable: the app opens without a model, the sample
         # is there to explore, and a turn is kept as story but explains
         # why nothing streams.
         set_config(tmp_path / "state", seed_sample=True)
         app = launch(tmp_path / "state", server, spec="")
         try:
-            assert app.session.provider == ""
-            story = app.store.stories.get(app.session.story_id)
+            assert app.api.app.get().model is None
+            story = app.store.stories.get(app.story_id)
             assert story.title == "The River That Forgot Its Name"
             capsys.readouterr()
             app.play("Hello? Is someone there?")
             assert "No model selected" in capsys.readouterr().out
             assert app.server.requests == []
-            assert len(app.session.messages) == 17  # the turn is story, kept
+            assert len(app.messages) == 17  # the turn is story, kept
         finally:
             app.close()
 
-    def test_a_model_picked_later_revives_the_session(self, server, tmp_path, capsys) -> None:
+    def test_a_model_picked_later_revives_the_app(self, server, tmp_path, capsys) -> None:
         set_config(tmp_path / "state", seed_sample=True)
         app = launch(tmp_path / "state", server, spec="")
         try:
             app.play("/model generic/test-model")
             assert f"Switched to {BOLD}generic/test-model{RESET}." in capsys.readouterr().out
             app.play("I climb toward the voice.")
-            assert app.session.messages[-1].body == scripted.CHAT_REPLY
+            assert app.messages[-1].body == scripted.CHAT_REPLY
         finally:
             app.close()
 
@@ -1064,52 +1086,59 @@ class TestFirstLaunch:
 
     def test_the_knob_off_seeds_nothing(self, app: App) -> None:
         # The scenario default: a fresh database, seed_sample = false.
-        assert app.session.story_id is None
+        assert app.story_id is None
         assert app.store.stories.list() == []
 
 
 class TestResume:
     def test_a_deleted_remembered_story_starts_fresh(self, app: App) -> None:
         app.play("I enter the hall.")
-        app.store.stories.delete(app.session.story_id)
+        app.store.stories.delete(app.story_id)
         relaunched = launch(app.paths.root, app.server)
         try:
-            assert relaunched.session.story_id is None
+            assert relaunched.story_id is None
         finally:
             relaunched.close()
 
     def test_a_remembered_model_of_a_deleted_provider_reports_and_skips(self, app: App) -> None:
         """The launch's own promise (validation has ONE home there): a
         remembered spec the files no longer make sense of is reported in
-        the notices and skipped — the session opens model-less, never a
-        failed launch."""
+        the notices and skipped — the app opens model-less, never a failed
+        launch."""
         state_file = app.paths.state_file
-        text = state_file.read_text().replace(f'"{app.session.full_model_name}"', '"ghost/model"')
+        model = app.api.app.get().model
+        assert model is not None
+        text = state_file.read_text().replace(f'"{model.provider}/{model.name}"', '"ghost/model"')
         state_file.write_text(text)
-        session = backend_launch.open_session(app.paths.root)
+        opened = backend_launch.open_app(app.paths.root)
         try:
-            assert session.provider == "" and session.model == ""
-            assert any("ghost/model" in notice for notice in session.notices)
+            assert Api(opened).app.get().model is None
+            assert any("ghost/model" in notice for notice in Api(opened).app.get().launch.notices)
         finally:
-            session.close()
+            opened.close()
 
     def test_a_saved_extraction_model_of_a_deleted_provider_reports_and_goes(
         self, app: App
     ) -> None:
         # The same promise for the model saved for extraction: reported,
         # dropped, and extraction asks the story's model again.
-        api_providers.set_extraction_model(app.session, "generic", "extract-model")
+        app.api.app.update(extraction_model=ModelRef("generic", "extract-model"))
         state_file = app.paths.state_file
         state_file.write_text(
             state_file.read_text().replace('"generic/extract-model"', '"ghost/extract-model"')
         )
-        session = backend_launch.open_session(app.paths.root)
+        opened = backend_launch.open_app(app.paths.root)
         try:
-            assert session.extraction_model == ""
-            assert session.full_extraction_model_name == session.full_model_name
-            assert any("ghost/extract-model" in notice for notice in session.notices)
+            extraction = Api(opened).app.get().extraction_model
+            assert extraction is not None and not extraction.pinned
+            facts = Api(opened).app.get()
+            assert facts.model is not None and facts.extraction_model is not None
+            followed = (facts.extraction_model.provider, facts.extraction_model.name)
+            assert followed == (facts.model.provider, facts.model.name)
+            notices = Api(opened).app.get().launch.notices
+            assert any("ghost/extract-model" in notice for notice in notices)
         finally:
-            session.close()
+            opened.close()
 
 
 def set_encryption(root, key: str) -> None:

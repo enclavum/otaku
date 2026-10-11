@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from otaku.backend.paths import Paths
+from otaku.backend.domain.app._paths import Paths
 from otaku.settings import state as state_mod
 from otaku.terminal.tty import PROMPT_CONTINUATION
 from scenarios.support import server as scripted
@@ -300,7 +300,7 @@ def _listening(port: int) -> bool:
 def remember(root: Path) -> None:
     """state.toml pointing at the scripted model, so launch lands in the
     REPL instead of the picker."""
-    state_mod.save(Paths.resolve(root).state_file, state_mod.State(model=SPEC))
+    state_mod.save(Paths.resolve(root).state_file, state_mod.StateConfig(model=SPEC))
 
 
 def launch_remembered(

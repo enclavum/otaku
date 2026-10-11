@@ -209,7 +209,7 @@ _PROMPT_MIGRATIONS: list[Migration] = [
 
 # The prompt_cache row as the file spells it — ONE rendering, shared by
 # the migration below and the picker's section founding
-# (`backend.api.providers.save_field`), so an upgraded file and a
+# (`backend.domain.app.providers.update_provider`), so an upgraded file and a
 # freshly founded section carry the same line.
 PROMPT_CACHE_ROW = row(
     'prompt_cache = "5m"', 'prompt caching: "off" | "5m" | "1h" — 1h suits slow-paced play'

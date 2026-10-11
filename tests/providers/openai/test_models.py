@@ -15,31 +15,31 @@ def _half() -> OpenAIModels:
     return OpenAIModels(CONFIG, OpenAIAuth(CONFIG, ""), Http("engine", {}))
 
 
-class TestMaxContext:
+class TestContextWindow:
     def test_the_loaded_size_is_what_a_request_gets(self) -> None:
-        row = ModelInfo("m", max_context_catalogue=131_072, max_context_loaded=8192)
-        assert row.max_context == 8192
+        row = ModelInfo("m", context_length=131_072, context_loaded=8192)
+        assert row.context_window == 8192
 
     @pytest.mark.parametrize("state", list(ModelState))
     def test_the_loaded_size_wins_in_every_state(self, state: ModelState) -> None:
-        assert ModelInfo("m", max_context_loaded=4096, state=state).max_context == 4096
+        assert ModelInfo("m", context_loaded=4096, state=state).context_window == 4096
 
     def test_the_models_own_serves_where_loading_is_not_a_thing(self) -> None:
-        catalog = ModelInfo("m", max_context_catalogue=128_000, state=ModelState.UNKNOWN)
-        assert catalog.max_context == 128_000
+        catalog = ModelInfo("m", context_length=128_000, state=ModelState.UNKNOWN)
+        assert catalog.context_window == 128_000
 
     @pytest.mark.parametrize("state", [ModelState.UNLOADED, ModelState.LOADING, ModelState.LOADED])
     def test_an_engines_model_without_a_loaded_size_has_none(self, state: ModelState) -> None:
-        assert ModelInfo("m", max_context_catalogue=131_072, state=state).max_context is None
+        assert ModelInfo("m", context_length=131_072, state=state).context_window is None
 
     def test_nothing_known_is_none(self) -> None:
-        assert ModelInfo("m").max_context is None
+        assert ModelInfo("m").context_window is None
 
 
 class TestDefaults:
     def test_a_row_says_nothing_until_told(self) -> None:
         row = ModelInfo("m")
-        assert (row.size, row.max_context_catalogue, row.max_context_loaded) == (None, None, None)
+        assert (row.size, row.context_length, row.context_loaded) == (None, None, None)
         assert (row.max_output_tokens, row.capabilities, row.state) == (
             None,
             None,

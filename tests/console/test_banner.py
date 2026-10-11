@@ -6,8 +6,8 @@ with — so the cases that matter are the ones nobody runs.
 
 import pytest
 
-from otaku.backend import WebSettings
 from otaku.console.banner import _is_public, address, render_web
+from otaku.settings.config import WebSettings
 
 
 class TestAddress:

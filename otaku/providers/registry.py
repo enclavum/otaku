@@ -2,8 +2,8 @@
 before it is saved.
 
 The section name IS the engine: `ALL_CLIENTS` maps the eight names to
-their clients in the model picker's canonical order — the generic
-provider first, the engines on this machine, the catalogs — and a
+their clients in the model picker's canonical order — the engines on
+this machine, the generic provider, the catalogs — and a
 section named anything else is not served: the registry leaves it out
 and names it in `ignored`, for the launch to say so. One section per
 engine; a second server of one kind is not a thing yet. First-run
@@ -149,7 +149,7 @@ class Registry:
             return self._build(config)
 
     def update(self, config: ProviderConfig) -> None:
-        """Swap one provider's configuration for the running session and
+        """Swap one provider's configuration for the running app and
         rebuild its client against the new url and key — the panel lists
         the models right after. Persisting the change is the caller's
         business. Raises ValueError for a name no engine answers to: the

@@ -1,19 +1,24 @@
-/* The demo's session: the state a real otaku keeps below both
-   frontends, held in this tab's memory instead. Seeded from the
-   captured fixtures (the shipped sample story, read off a real
-   session), mutated by the same operations the page performs, and
-   forgotten on reload — which makes reload the demo's reset button.
+/* The demo's backend: what a real otaku keeps below both frontends, held
+   in this tab's memory instead. Seeded from the captured fixtures — the
+   real server's own answers over the shipped sample stories
+   (`demo/capture_fixtures_web.py`) — changed by the same operations the
+   page performs, and forgotten on reload, which makes reload the demo's
+   reset button.
 
-   Sentences mirror the backend's wording (`otaku/backend/api/*`)
-   so the demo answers exactly as the product would; anything the demo
-   deliberately cannot do says so honestly and points at the install. */
+   Every read answers a representation in the product's shape, and every
+   write `{value, notice}` as the product's `Changed` does; a refusal is
+   thrown (`Refused`: the status its kind takes and the sentence), which
+   `demo.js` answers as the product's problem body. The sentences are the
+   backend's, copied — the demo has no backend to ask — and what the demo
+   cannot do at all says so and points at the install. */
 
-// What the fake provider claims to be. One provider with two models, so
-// the picker's switch, load and unload have something real to do.
+import * as script from "./script.js";
+
+// What the demo's provider claims to be: a section of its own, with two
+// models of its own, so the picker's switch, pin, load and unload have
+// something real to do. Its models think nothing, see nothing, and
+// complete no raw text.
 export const PROVIDER = "demo";
-// What a local engine states of its models, in the product's shape —
-// the page's own model thinks nothing, takes no images and completes
-// no raw text — and the info report's two rows on it, in its words.
 const MODEL_CAPABILITIES = {
   vision: false,
   audio: false,
@@ -24,357 +29,626 @@ const MODEL_CAPABILITIES = {
   text_completion: false,
   structured_output: false,
 };
-const MODEL_WORDS = { locality: "local", reasoning_words: "not supported", capability_words: "none" };
 const MODELS = [
-  { name: "demo-model", loaded: true, size: "4.7 GB", max_context_catalogue: "32K", max_context_loaded: "", capabilities: { ...MODEL_CAPABILITIES }, text_template: null, ...MODEL_WORDS },
-  { name: "demo-model-mini", loaded: false, size: "1.9 GB", max_context_catalogue: "8K", max_context_loaded: "", capabilities: { ...MODEL_CAPABILITIES }, text_template: null, ...MODEL_WORDS },
+  { name: "demo-model", size: 4_700_000_000, window: 32768 },
+  { name: "demo-model-mini", size: 1_900_000_000, window: 8192 },
 ];
-// What the demo's provider can do: it manages models, counts nothing
-// exactly, marks no cache, and reads the protocol's own parameters and
-// no sampler beyond them — the fixtures are captured over a scripted
-// Ollama, whose wire reads exactly those, and the settings fixture lists
-// the same seven.
-const CAPABILITIES = {
-  tokenizer: false,
-  prompt_cache: false,
-  model_management: true,
-  supported_params: [
-    "temperature", "top_p", "max_tokens", "presence_penalty", "frequency_penalty", "seed", "stop",
-  ],
-};
-// The window the fixtures' context previews were captured under
-// (scripts/demo_fixtures.py) — the two must agree, or the demo's own
-// numbers argue with the captured ledes.
+// The window the fixtures' context previews were captured under — the
+// demo's own model claims the same, or its numbers argue with them.
 const WINDOW = 32768;
-const LIMIT = WINDOW - 1024; // approximates the real assembler's adaptive reply reserve
+// The reply's reserve the assembler keeps out of the window.
+const RESERVE = 194;
+const LABEL_WIDTH = 50;
 
 export const INSTALL = "install otaku from otaku.sh to do this for real";
 
-const state = {
-  stories: new Map(), // id → {title, system, turns:[{id,role,body}], updatedAt}
-  lore: new Map(), // id → {scenes:[…], cast:[…]} as the lore read shapes them
-  open: null, // the open story's id
-  nextStory: 1,
-  nextMessage: 1,
-  model: "demo-model",
-  extraction: "", // "provider/model" pinned for lore extraction; "" = the model above
-  settings: null, // seeded from the settings fixture; values live here
-  storySettingDefaults: null, // every story's settings as a fresh story reads them
-  storySettings: new Map(), // id → the settings a story changed, in the read's shape
-  sharedReminder: "", // the text every story with use_shared_reminder on is sent
-  shipped: null, // every injection setting's prompt as shipped, by its name — what an emptied one restores
-  prompts: null, // every injection setting's prompt as it stands, by its name
-  history: [], // the composer's ↑/↓ lines, most recent first
-  usage: [], // one row per completed reply: {story, prompt, completion, seconds}
-  syntax: null, // the story's typed language, for the menu and the sheet
-  contextFixtures: new Map(), // id → captured preview, served until that story moves
-  status: "", // what /api/status reports the worker doing
-};
+// ---------- the refusals ----------
 
-export function seed(fixtures) {
-  const { river, tour, settings, storySettings, prompts, syntax } = fixtures;
-  state.syntax = syntax;
-  state.settings = structuredClone(settings);
-  state.storySettingDefaults = storySettings.settings;
-  state.shipped = prompts;
-  state.prompts = structuredClone(prompts);
-  // Both shipped samples, the way a fresh install seeds them; the row's
-  // own `open` flag says which one the demo lands in.
-  for (const sample of [river, tour].filter(Boolean)) {
-    const id = state.nextStory++;
-    state.stories.set(id, {
-      title: sample.story.title || "",
-      system: sample.opened.premise || "",
-      turns: sample.opened.messages.map((t) => ({ ...t })),
-      updatedAt: sample.story.updated_at,
-    });
-    state.lore.set(id, {
-      scenes: structuredClone(sample.opened.scenes),
-      characters: structuredClone(sample.opened.characters),
-    });
-    if (sample.context) state.contextFixtures.set(id, sample.context);
-    if (sample.story.open) state.open = id;
-    state.nextMessage = Math.max(state.nextMessage, ...sample.opened.messages.map((t) => t.id)) + 1;
+/** What the backend declines, under the status its kind says: 404 a
+    subject that is not there, 409 a state that rules it out, 412 a head
+    that moved, 422 input it cannot take, 502 a service that failed it. */
+export class Refused extends Error {
+  constructor(status, detail, extra = {}) {
+    super(detail);
+    this.status = status;
+    this.detail = detail;
+    this.extra = extra;
   }
 }
 
-// ---------- reads ----------
+const notFound = (detail) => new Refused(404, detail);
+const conflict = (detail) => new Refused(409, detail);
+const invalid = (detail) => new Refused(422, detail);
+const unavailable = (detail) => new Refused(502, detail);
+// The sentences more than one operation refuses with (`backend.errors`).
+const NO_SUCH_STORY = "No such story.";
+const OFF_CHAIN = "That message is not on the story's current chain.";
+const HEAD_MOVED = "The story moved on since you last saw it — nothing was changed.";
+const NOT_IN_DEMO = (what) => `${what} is not in the demo — ${INSTALL}.`;
 
-export function facts(version) {
-  const story = state.stories.get(state.open);
-  const model = MODELS.find((m) => m.name === state.model);
-  // With no story open, the settings a first turn would make it with.
-  const held = story ? _settingsOf(state.open) : state.storySettingDefaults;
-  const layout = held?.find((s) => s.name === "layout")?.layout ?? "manuscript";
-  const canCompleteText = Boolean(
-    model?.capabilities.text_completion && model?.text_template === "plain",
-  );
-  const completionType = layout === "novel" && canCompleteText ? "text" : "chat";
+// ---------- the state ----------
+
+const state = {
+  stories: new Map(), // id → a held story (`hold`)
+  nextStory: 1,
+  nextMessage: 1,
+  nextLore: 1, // scenes, characters and journals alike: a demo's ids need not be the store's
+  defaults: [], // the settings a story made now starts with
+  model: MODELS[0].name,
+  pinned: null, // the model lore extraction is pinned to; null follows the one above
+  loaded: new Set([MODELS[0].name]),
+  launch: { notices: [], hint: "" },
+  version: "",
+  settings: null, // `Settings`, minus what the demo keeps elsewhere
+  language: null,
+  history: [], // the composer's ↑/↓ lines, most recent first
+  sharedReminder: "",
+  toolPrompts: {}, // tool → {name, text}, as it stands
+  shippedToolPrompts: {},
+  prompts: {}, // prompts.toml key → {name, text}, as it stands
+  shippedPrompts: {},
+  modelSettings: new Map(), // model → `ModelSettings`
+  modelTemplate: null, // the captured `ModelSettings`, a fresh model's own
+  listing: null, // the captured provider listing: its vocabulary
+  providerCapabilities: null,
+  usage: [], // {story, purpose, prompt, completion, seconds}
+  status: "", // the worker's one line
+};
+
+export function seed(fixtures) {
+  const { app, river, tour } = fixtures;
+  state.version = app.app.version;
+  state.launch = { notices: [], hint: app.app.launch.hint };
+  state.settings = structuredClone(app.settings);
+  state.language = app.language;
+  state.defaults = app.story_defaults;
+  state.toolPrompts = structuredClone(app.tool_prompts);
+  state.shippedToolPrompts = structuredClone(app.tool_prompts);
+  state.prompts = structuredClone(app.prompts);
+  state.shippedPrompts = structuredClone(app.prompts);
+  state.modelTemplate = app.model_settings;
+  state.listing = app.providers;
+  state.providerCapabilities = app.providers.providers.find((row) => row.capabilities)?.capabilities ?? null;
+  // Both shipped samples, as a fresh install seeds them, under the ids the
+  // capture read them at, and the one a launch resumes as it resumes it.
+  const listed = new Map(app.stories.map((row) => [row.id, row]));
+  for (const sample of [river, tour]) {
+    const facts = sample.story;
+    const held = hold(facts.id, {
+      title: facts.title,
+      premise: facts.premise,
+      updatedAt: facts.updated_at,
+      storySoFar: listed.get(facts.id)?.story_so_far ?? "",
+      messages: structuredClone(sample.messages),
+      settings: structuredClone(sample.settings),
+      lore: structuredClone(sample.lore),
+    });
+    held.context = sample.context;
+    held.fill = sample.fill;
+    state.nextStory = Math.max(state.nextStory, facts.id + 1);
+    for (const message of held.messages) state.nextMessage = Math.max(state.nextMessage, message.id + 1);
+    for (const row of [...held.lore.scenes, ...held.lore.characters, ...held.lore.journals]) {
+      state.nextLore = Math.max(state.nextLore, row.id + 1);
+    }
+  }
+}
+
+function hold(id, { title = "", premise = "", updatedAt = now(), storySoFar = "", messages = [], settings = null, lore = null } = {}) {
+  const held = {
+    id,
+    title,
+    premise,
+    updatedAt,
+    storySoFar,
+    messages,
+    settings: settings ?? structuredClone(state.defaults),
+    lore: lore ?? { story_id: id, message_count: 0, extracted_up_to: 0, scenes: [], characters: [], journals: [] },
+    context: null, // the captured preview, served until the story moves
+    fill: null,
+    persona: "",
+    extraction: null, // the forced pass: {story_id, status, report}
+  };
+  state.stories.set(id, held);
+  return held;
+}
+
+function held(id) {
+  const found = state.stories.get(id);
+  if (!found) throw notFound(NO_SUCH_STORY);
+  return found;
+}
+
+// ---------- a story, as a client draws it ----------
+
+/** Where a story's head stands: its newest message, null with none. */
+export function headOf(id) {
+  return held(id).messages.at(-1)?.id ?? null;
+}
+
+/** The head a write moves from must be the one it names (`If-Match`):
+    a head moved meanwhile is the product's 412, nothing written. */
+export function checkHead(id, expected) {
+  const head = headOf(id);
+  if (head !== expected) throw new Refused(412, HEAD_MOVED, { head });
+}
+
+function storyOf(story) {
+  const layout = layoutOf(story);
+  const newest = story.messages.at(-1) ?? null;
   return {
-    version,
-    model: state.model,
-    provider: "demo",
-    extraction_model: state.extraction || `${PROVIDER}/${state.model}`,
-    max_context: model ? model.max_context_catalogue : "",
-    story: story ? label(story) : "",
-    story_id: state.open,
-    turns: story ? story.turns.length : 0,
-    // As the backend derives it (`Session.can_attach`): the model sees, and
-    // the wire has room for a picture, which one text has not. The demo's
-    // model cannot see, so no attach button shows.
-    can_attach: Boolean(model?.capabilities.vision) && completionType === "chat",
-    // The wire and the look, derived from the story's layout as the
-    // backend derives them (`schema.Layout`): the novel is drawn as
-    // the canvas, and goes over the text wire only on a model that
-    // continues a bare text — its engine's text completion and a `plain`
-    // template (`Session.can_complete_text`) — which the demo's is not.
-    completion_type: completionType,
-    layout: layout === "novel" ? "canvas" : layout,
-    can_complete_text: canCompleteText,
-    // How a line typed now would join the newest row: as every turn the
-    // demo records joins, a paragraph (`recordTurn`); null with none
-    next_join: story?.turns.length ? "paragraph" : null,
+    id: story.id,
+    title: story.title,
+    label: labelOf(story),
+    premise: story.premise,
+    head: newest?.id ?? null,
+    message_count: story.messages.length,
+    updated_at: story.updatedAt,
+    layout,
+    mode: modeOf(layout),
+    next_join: newest === null ? null : joinOf(newest, { mode: modeOf(layout), body: "", kind: "dialogue" }),
+    // the demo's models complete no raw text: every layout goes over the
+    // chat wire, a novel played as the canvas (`Layout.completion_type`)
+    completion_type: "chat",
+    // a picture rides where the model sees, the chat wire having room for
+    // one (`ModelFacts.can_attach`)
+    can_attach: MODEL_CAPABILITIES.vision,
+    question: questionOf(story),
+    shown_tools: shownTools(story),
+    folded_tools: foldedTools(story),
   };
 }
 
-export function turns() {
-  const story = state.stories.get(state.open);
-  return story ? story.turns.map((t) => ({ ...t })) : [];
+function summaryOf(story) {
+  return {
+    id: story.id,
+    title: story.title,
+    label: labelOf(story),
+    story_so_far: story.storySoFar,
+    first_message: story.messages[0]?.body ?? "",
+    model: "",
+    updated_at: story.updatedAt,
+    message_count: story.messages.length,
+  };
+}
+
+const layoutOf = (story) => story.settings.find((row) => row.name === "layout")?.layout ?? "manuscript";
+// `Layout.mode`: the canvas and the novel are read as one text
+const modeOf = (layout) => (layout === "canvas" || layout === "novel" ? "story" : "chat");
+const settingOf = (story, name) => story.settings.find((row) => row.name === name);
+
+function labelOf(story) {
+  const first = story.messages.find((row) => row.role === "user")?.body ?? "";
+  return flatten(story.title || story.storySoFar || first);
+}
+
+/* The join rule (`assembler.get_join_type`), copied: INLINE where both rows
+   were written in story mode, neither stands alone — a card's line or
+   greeting — and no line break stands between them; PARAGRAPH otherwise. */
+function joinOf(previous, next) {
+  if (previous === null) return "paragraph";
+  const alone = (row) => row.kind === "card" || row.provider === "card";
+  const inline =
+    previous.mode === "story" &&
+    next.mode === "story" &&
+    !alone(previous) &&
+    !alone(next) &&
+    !/\n\s*$/.test(previous.body) &&
+    !/^\s*\n/.test(next.body);
+  return inline ? "inline" : "paragraph";
+}
+
+function shownTools(story) {
+  const shown = [];
+  if (settingOf(story, "allow_questions")?.enabled) shown.push("question");
+  const notes = settingOf(story, "allow_assistant_notes");
+  if (notes?.enabled && notes.display_notes) shown.push("note");
+  return shown;
+}
+
+function foldedTools(story) {
+  const notes = settingOf(story, "allow_assistant_notes");
+  return notes?.enabled && !notes.display_notes ? ["note"] : [];
+}
+
+/* The question the story stands on (`messages.posed_question`), copied:
+   the newest reply, the questions tool on, whose last call is a question
+   with nothing after it but notes and whitespace. */
+function questionOf(story) {
+  const newest = story.messages.at(-1);
+  if (newest?.role !== "assistant" || !shownTools(story).includes("question")) return null;
+  for (const segment of [...newest.segments].reverse()) {
+    if (segment.kind === "prose") {
+      if (segment.text.trim()) return null;
+    } else if (segment.tool === "question") {
+      return { text: segment.text, question: segment.question, options: segment.options };
+    } else if (segment.tool !== "note") {
+      return null;
+    }
+  }
+  return null;
+}
+
+// ---------- the app ----------
+
+export function app() {
+  const model = modelRow(state.model);
+  const extracting = state.pinned ?? state.model;
+  return {
+    version: state.version,
+    launch: structuredClone(state.launch),
+    model: {
+      provider: PROVIDER,
+      name: model.name,
+      listed_name: model.name,
+      context_window: model.window,
+      capabilities: { ...MODEL_CAPABILITIES },
+      can_complete_text: false,
+      can_attach: MODEL_CAPABILITIES.vision,
+    },
+    extraction_model: {
+      provider: PROVIDER,
+      name: extracting,
+      listed_name: extracting,
+      pinned: state.pinned !== null,
+    },
+    on_cloud: false,
+  };
+}
+
+/* The model in use and the one lore extraction is pinned to — the
+   product's sentences (`domain.app.providers`), its refusals. */
+export function updateApp({ model, extraction_model: pin } = {}) {
+  const said = [];
+  if (model !== undefined) {
+    const wanted = knownModel(model);
+    if (wanted === state.model) said.push(`Already using ${PROVIDER}/${wanted}.`);
+    else {
+      state.model = wanted;
+      said.push(`Switched to ${PROVIDER}/${wanted}.`);
+    }
+  }
+  if (pin !== undefined) {
+    if (pin === null) {
+      if (state.pinned === null) said.push("Lore extraction already uses the model you play with.");
+      else {
+        state.pinned = null;
+        said.push("Lore extraction uses the model you play with.");
+      }
+    } else {
+      const wanted = knownModel(pin);
+      if (state.pinned === wanted) said.push(`Lore extraction already uses ${PROVIDER}/${wanted}.`);
+      else {
+        state.pinned = wanted;
+        said.push(`Lore extraction uses ${PROVIDER}/${wanted}.`);
+      }
+    }
+  }
+  if (!said.length) throw invalid("Nothing to change.");
+  return { value: app(), notice: said.join(" ") };
+}
+
+function knownModel({ provider, name }) {
+  if (provider !== PROVIDER) {
+    if (!state.listing.providers.some((row) => row.id === provider)) {
+      throw notFound(`No supported provider is named ${provider}.`);
+    }
+    // every real engine is out of the tab's reach
+    throw unavailable(`Could not reach ${provider}.`);
+  }
+  return name;
+}
+
+export function status() {
+  return { status: state.status, notices: [] };
+}
+
+export function setStatus(line) {
+  state.status = line;
+}
+
+/* The machine's gauge, which the picker reads again every second. There
+   is no machine here, so it drifts a little rather than standing still —
+   a figure that never moves would say the poll was not running. */
+export function machine() {
+  const used = 23.4 + (Math.round(Date.now() / 1000) % 7) / 10;
+  return { memory: `RAM: ${used.toFixed(1)} / 64.0 GB (${Math.round((100 * used) / 64)}%)` };
+}
+
+// ---------- settings ----------
+
+export function settings() {
+  return structuredClone(state.settings);
+}
+
+/* The fields given, each with its sentence (`domain.app.settings`). */
+export function updateSettings(fields) {
+  const said = [];
+  for (const name of ["verbose", "autocorrect", "notification"]) {
+    if (fields[name] === undefined) continue;
+    state.settings[name] = fields[name];
+    said.push(`${name[0].toUpperCase()}${name.slice(1)}: ${fields[name] ? "on" : "off"}.`);
+  }
+  if (fields.context_limit !== undefined) {
+    const tokens = fields.context_limit;
+    if (tokens < 0) throw invalid("Max context cannot be negative — 0 means the model's own max context.");
+    state.settings.context_limit = tokens;
+    state.settings.context_limit_text = limitText(tokens);
+    said.push(`Max context: ${limitText(tokens)}.`);
+  }
+  if (fields.last_story !== undefined) {
+    const story = fields.last_story;
+    state.settings.last_story = story !== null && state.stories.has(story) ? story : null;
+    said.push(story === null ? "A launch resumes no story." : `A launch resumes story ${story}.`);
+  }
+  if (!said.length) throw invalid("Nothing to change.");
+  return { value: settings(), notice: said.join(" ") };
+}
+
+const limitText = (tokens) =>
+  tokens === 0 ? "0 (the model's own max context)" : `${tokens.toLocaleString("en-US")} tokens`;
+
+export function language() {
+  return state.language;
 }
 
 export function history() {
   return [...state.history];
 }
 
-export function syntax() {
-  return state.syntax;
+export function addHistory(text) {
+  const said = text.trim();
+  if (said && state.history[0] !== said) {
+    state.history.unshift(said);
+    state.history.length = Math.min(state.history.length, 100);
+  }
+  return { value: history(), notice: "Kept in the history." };
 }
 
-export function stories(q = "") {
-  const needle = q.trim().toLowerCase();
-  return [...state.stories.entries()]
-    .filter(([id, s]) => {
-      if (!needle) return true;
-      const face = `${label(s)} ${storySoFar(id)} ${firstUser(s)} ${PROVIDER}/${state.model}`;
-      return `${face} ${s.turns.map((t) => t.body).join(" ")}`.toLowerCase().includes(needle);
-    })
-    .sort((a, b) => (a[1].updatedAt < b[1].updatedAt ? 1 : -1))
-    .map(([id, s]) => ({
-      id,
-      label: label(s),
-      title: s.title,
-      story_so_far: storySoFar(id),
-      first_user: firstUser(s),
-      model: `${PROVIDER}/${state.model}`,
-      updated_at: s.updatedAt,
-      turns: s.turns.length,
-      open: id === state.open,
-    }));
+// ---------- the texts the settings send ----------
+
+export function sharedReminder() {
+  return { text: state.sharedReminder };
 }
 
-export function story(id) {
-  /* One story WHOLE — the one read the dossier makes. Three would let a
-     pass land between two of them, which is the product's reason too. */
-  const held = state.stories.get(id);
-  if (!held) return null;
-  const memory = state.lore.get(id) ?? { scenes: [], characters: [] };
-  const copy = structuredClone(memory);
-  const total = held.turns.length;
-  const read = copy.scenes.reduce((far, scene) => {
-    const end = Number(String(scene.span ?? "").split("-")[1] ?? 0);
-    return end > far ? end : far;
-  }, 0);
+export function updateSharedReminder(text) {
+  state.sharedReminder = text.trim();
   return {
-    id,
-    label: label(held),
-    title: held.title,
-    updated_at: held.updatedAt,
-    premise: held.system || "",
-    messages: held.turns.map((t) => ({ ...t })),
-    read_through: read,
-    unread: Math.max(0, total - read),
-    unread_span: total > read ? `${read + 1}-${total}` : "",
-    scenes: copy.scenes,
-    characters: copy.characters,
+    value: sharedReminder(),
+    notice: state.sharedReminder ? "Shared reminder saved." : "Shared reminder cleared.",
   };
 }
 
-/* The machine's gauge, which the picker re-reads every second. There is
-   no machine here, so it drifts a little rather than standing still —
-   a figure that never moves would say the poll was not running. */
-export function memory() {
-  const used = 23.4 + (Math.round(Date.now() / 1000) % 7) / 10;
-  return { memory: `RAM: ${used.toFixed(1)} / 64.0 GB (${Math.round((100 * used) / 64)}%)` };
+export function toolPrompt(tool) {
+  return structuredClone(knownTool(tool));
 }
 
+export function updateToolPrompt(tool, text) {
+  const prompt = knownTool(tool);
+  return savePrompt(prompt, text, state.shippedToolPrompts[tool]);
+}
+
+function knownTool(tool) {
+  const found = state.toolPrompts[tool];
+  if (!found) {
+    const tools = Object.keys(state.toolPrompts).join(", ");
+    throw notFound(`Unknown tool '${tool}'. Tools: ${tools}.`);
+  }
+  return found;
+}
+
+export function prompt(name) {
+  return structuredClone(knownPrompt(name));
+}
+
+export function updatePrompt(name, text) {
+  return savePrompt(knownPrompt(name), text, state.shippedPrompts[name]);
+}
+
+function knownPrompt(name) {
+  const found = state.prompts[name];
+  if (!found) {
+    const prompts = Object.keys(state.prompts).join(", ");
+    throw notFound(`Unknown prompt '${name}'. Prompts: ${prompts}.`);
+  }
+  return found;
+}
+
+function savePrompt(prompt, text, shipped) {
+  const typed = text.trim();
+  prompt.text = typed ? text : shipped.text;
+  return {
+    value: structuredClone(prompt),
+    notice: typed ? "Prompt saved." : "Prompt restored to the built-in.",
+  };
+}
+
+// ---------- integrations ----------
+
+export function webSearch() {
+  return { has_key: false };
+}
+
+export function updateWebSearch(key) {
+  if (!key.trim()) return { value: webSearch(), notice: "No web search key to clear." };
+  throw conflict(NOT_IN_DEMO("Saving a web search key"));
+}
+
+export function supportRequest(body) {
+  if (!body.trim()) throw invalid("Nothing to send: write what you need help with.");
+  throw conflict(NOT_IN_DEMO("Sending a support request"));
+}
+
+// ---------- providers and models ----------
+
+/* The panel: the demo's own provider, then the supported eight as a tab
+   reaches them — not at all. The vocabulary is the captured listing's. */
 export function providers(scope = "") {
-  // The product answers in two phases — the providers on this machine
-  // now, the cloud catalogs after. The demo has no cloud half, and says
-  // so with an empty second phase rather than doubled providers.
-  if (scope === "cloud") {
-    return {
-      current: `${PROVIDER}/${state.model}`,
-      extraction: state.extraction,
-      memory: memory().memory,
-      providers: [],
-    };
+  const rows = [demoProvider(), ...state.listing.providers.map(unreachable)];
+  let shown = rows;
+  if (scope === "local") shown = rows.filter((row) => row.locality !== "remote");
+  else if (scope === "cloud") shown = rows.filter((row) => row.locality !== "local");
+  else if (scope) {
+    shown = rows.filter((row) => row.id === scope);
+    if (!shown.length) throw notFound(`No provider is named ${scope}.`);
   }
-  const all = allProviders();
-  if (scope && scope !== "local") {
-    const named = all.providers.filter((provider) => provider.id === scope);
-    // a name nothing is configured under answers 404, as the product does
-    if (!named.length) return null;
-    return { ...all, providers: named };
+  return {
+    providers: shown,
+    parameters: [...state.listing.parameters],
+    effort_levels: [...state.listing.effort_levels],
+  };
+}
+
+export function provider(name) {
+  const row = providers().providers.find((each) => each.id === name);
+  if (!row) throw notFound(`No supported provider is named ${name}.`);
+  const { id, label, locality, configured, url, key_source } = row;
+  return { id, label, locality, configured, url, key_source };
+}
+
+export function updateProvider(name) {
+  provider(name);
+  throw conflict(NOT_IN_DEMO("Saving a provider's settings"));
+}
+
+function demoProvider() {
+  return {
+    id: PROVIDER,
+    label: "Demo",
+    locality: "unknown",
+    configured: true,
+    url: "in this browser tab",
+    asked: true,
+    answered: true,
+    failure: null,
+    key_source: null,
+    capabilities: structuredClone(state.providerCapabilities),
+    models: models(PROVIDER),
+  };
+}
+
+function unreachable(row) {
+  return {
+    ...structuredClone(row),
+    // none of them is reachable from a browser tab
+    url: row.configured ? row.url : "",
+    asked: row.configured,
+    answered: false,
+    failure: row.configured ? `Could not reach ${row.id}.` : null,
+    key_source: null,
+    capabilities: null,
+    models: [],
+  };
+}
+
+export function models(providerName) {
+  if (providerName !== PROVIDER) {
+    provider(providerName);
+    throw unavailable(`Could not reach ${providerName}.`);
   }
-  return all;
+  return MODELS.map((model) => ({
+    name: model.name,
+    size: model.size,
+    context_window: model.window,
+    context_length: model.window,
+    context_loaded: state.loaded.has(model.name) ? model.window : null,
+    max_output_tokens: null,
+    capabilities: { ...MODEL_CAPABILITIES },
+    state: state.loaded.has(model.name) ? "loaded" : "unloaded",
+    locality: null,
+    text_template: null,
+    reasoning_words: "not supported",
+    capability_words: "none",
+  }));
 }
 
-function allProviders() {
-  return {
-    current: `${PROVIDER}/${state.model}`,
-    extraction: state.extraction,
-    memory: memory().memory,
-    providers: [
-      {
-        id: PROVIDER,
-        label: "Demo",
-        order: 8, // a hand-written section sorts after the eight supported providers, as in the product
-        locality: "unknown", // the product cannot say where such a section runs
-        connected: true,
-        reason: "",
-        url: "in this browser tab",
-        key_source: null,
-        capabilities: { ...CAPABILITIES, supported_params: [...CAPABILITIES.supported_params] },
-        models: MODELS.map((m) => ({ ...m, capabilities: { ...m.capabilities } })),
-      },
-      ...[
-        ["generic", "Generic OpenAI provider", "", "unknown"],
-        ["llamacpp", "llama.cpp", "http://localhost:8080/v1", "local"],
-        ["koboldcpp", "KoboldCpp", "http://localhost:5001/v1", "local"],
-        ["ollama", "Ollama", "http://localhost:11434/v1", "local"],
-        ["omlx", "oMLX", "http://localhost:8100/v1", "local"],
-        ["lmstudio", "LM Studio", "http://localhost:1234/v1", "local"],
-        ["openrouter", "OpenRouter", "https://openrouter.ai/api/v1", "remote"],
-        ["nanogpt", "NanoGPT", "https://nano-gpt.com/api/v1", "remote"],
-      ].map(([id, labelled, url, locality], order) => ({
-        id,
-        label: labelled,
-        order,
-        locality,
-        connected: false,
-        // The product's sentence for a server nobody reached, as the
-        // demo's page reaches none: everything lives in the tab.
-        reason: `Could not reach ${id}.`,
-        url,
-        key_source: null,
-        capabilities: null, // a provider that did not answer states nothing
-        models: [],
-      })),
-    ],
-  };
+export function updateModel(providerName, name, loaded) {
+  models(providerName);
+  modelRow(name, true);
+  if (loaded) state.loaded.add(name);
+  else state.loaded.delete(name);
+  const row = models(PROVIDER).find((model) => model.name === name);
+  return { value: row, notice: loaded ? `Loaded ${name}.` : `Unloaded ${name}.` };
 }
 
-export function settings() {
-  const s = state.settings;
-  return {
-    think: s.think,
-    think_levels: s.think_levels,
-    think_budget: s.think_budget,
-    verbose: s.verbose,
-    autocorrect: s.autocorrect,
-    notification: s.notification,
-    max_context: s.max_context ?? 65536,
-    idle_seconds: s.idle_seconds ?? 300,
-    model: state.model,
-    parameters: s.parameters.map((p) => ({ ...p })),
-  };
+export function modelSettings(providerName, name) {
+  models(providerName);
+  modelRow(name, true);
+  if (!state.modelSettings.has(name)) state.modelSettings.set(name, structuredClone(state.modelTemplate));
+  return structuredClone(state.modelSettings.get(name));
 }
 
-export function context() {
-  // The captured preview is the real assembler's work and is served as
-  // long as it is true; a story that moved gets an honest recompute.
-  const fixture = state.contextFixtures.get(state.open);
-  if (fixture) return fixture;
-  const story = state.stories.get(state.open);
-  const bodies = story ? story.turns : [];
-  const system = story ? story.system : "";
-  const systemTokens = estimate(system);
-  const transcript = bodies.reduce((n, t) => n + estimate(t.body), 0);
-  const total = systemTokens + transcript;
-  const used = Math.round((100 * total) / LIMIT);
-  const lede =
-    "Context preview — the exact request to be sent. Context summary:\n\n" +
-    `  ~${total.toLocaleString("en-US")} tokens projected · ${used}% of the ${LIMIT.toLocaleString("en-US")} limit\n` +
-    (systemTokens ? `  system ${systemTokens.toLocaleString("en-US")} · transcript ${transcript.toLocaleString("en-US")}\n` : "") +
-    `  ${bodies.length} messages verbatim`;
-  return {
-    shape: {
-      head: 0,
-      tail: 0,
-      middle: 0,
-      kept: bodies.length,
-      summaries: 0,
-      history: false,
-      rolled_up: 0,
-      tail_target: 150,
-      tail_setting: 150,
-      total_tokens: total,
-      system_tokens: systemTokens,
-      transcript_tokens: transcript,
-      limit: LIMIT,
-      used,
-    },
-    lede,
-    note: "",
-    // The recompute assembles no injections — a switched-on setting's text
-    // is not in these parts either — so it reports none, honestly.
-    injections: [],
-    parts: [
-      ...(system ? [{ role: "system", body: system }] : []),
-      ...bodies.map((t) => ({ role: t.role, body: t.body })),
-    ],
-  };
+/* A model's thinking level and its parameters, read against the model's
+   vocabulary (`domain.app.models`) — the levels the template carries, the
+   bounds each parameter states. */
+export function updateModelSettings(providerName, name, { think, parameters }) {
+  const held = modelSettings(providerName, name);
+  const said = [];
+  if (think !== undefined) {
+    const levels = held.choices.levels;
+    if (!levels.includes(think)) {
+      throw invalid(`${name} does not take ${think}. Levels for this model: ${levels.join(", ")}.`);
+    }
+    held.think = think;
+    held.think_text = think;
+    said.push(`Think: ${think}.`);
+  }
+  for (const [param, value] of Object.entries(parameters ?? {})) {
+    const row = held.parameters.find((each) => each.name === param);
+    if (!row) throw invalid(`Unknown parameter '${param}'.`);
+    if (value === null || value === "") {
+      row.value = null;
+      row.text = "";
+      delete held.params[param];
+      said.push(`Parameter ${param} reset to default.`);
+      continue;
+    }
+    const number = Number(value);
+    if (Number.isNaN(number) || (row.kind === "int" && !Number.isInteger(number))) {
+      throw invalid(`Could not parse '${value}' as ${row.kind}.`);
+    }
+    if ((row.low !== null && number < row.low) || (row.high !== null && number > row.high)) {
+      const range = row.high === null ? `at least ${row.low}` : `between ${row.low} and ${row.high}`;
+      throw invalid(`${param} must be ${range}.`);
+    }
+    row.value = number;
+    row.text = String(value);
+    held.params[param] = String(value); // the saved value, as models.toml holds it
+    said.push(`${param} = ${value}.`);
+  }
+  if (!said.length) throw invalid("Nothing to change.");
+  state.modelSettings.set(name, held);
+  return { value: structuredClone(held), notice: said.join(" ") };
 }
 
-// How full the next request is: the preview's own figure over the
-// demo model's window, and the sentence (`reports.ContextUse.text`).
-export function contextUse() {
-  const { shape } = context();
-  const size = WINDOW >= 1024 ? `${Math.round(WINDOW / 1024)}K` : String(WINDOW);
-  return { used: shape.used, context: WINDOW, text: `${shape.used}% of ${size}` };
+function modelRow(name, refuse = false) {
+  const found = MODELS.find((model) => model.name === name);
+  if (!found && refuse) throw notFound(`No model is named ${name}.`);
+  return found ?? MODELS[0];
 }
 
-export function usage(scope) {
-  const scopes = [
-    { key: "", label: "this story" },
-    { key: "all", label: "all stories" },
-  ];
-  if (scope !== "" && scope !== "all") return { notice: "Usage: /usage [all]", refused: true, scopes };
-  const rows = scope === "all" ? state.usage : state.usage.filter((r) => r.story === state.open);
+// ---------- reports ----------
+
+export function usage(storyId = null) {
+  const rows = storyId === null ? state.usage : state.usage.filter((row) => row.story === storyId);
   if (!rows.length) {
-    return {
-      notice: scope === "all" ? "No recorded usage yet." : "No recorded usage for this story.",
-      refused: true,
-      scopes,
-    };
+    throw notFound(storyId === null ? "No recorded usage yet." : "No recorded usage for this story.");
   }
-  const prompt = rows.reduce((n, r) => n + r.prompt, 0);
-  const completion = rows.reduce((n, r) => n + r.completion, 0);
-  const seconds = rows.reduce((n, r) => n + r.seconds, 0);
+  const prompt = rows.reduce((n, row) => n + row.prompt, 0);
+  const completion = rows.reduce((n, row) => n + row.completion, 0);
+  const seconds = rows.reduce((n, row) => n + row.seconds, 0);
   return {
-    scope: scope === "all" ? "all stories" : "this story",
-    scopes,
+    scope: storyId === null ? "all stories" : "this story",
     rows: [
       {
         purpose: "chat",
-        label: "Played turns", // `reports.USAGE_PURPOSES`, whose spelling this is
         provider: PROVIDER,
         model: state.model,
         requests: rows.length,
         prompt_tokens: prompt,
         completion_tokens: completion,
-        cached_tokens: 0, // the demo model keeps no cache to read from
+        cached_tokens: 0, // the demo's model keeps no cache to read from
         rate: seconds > 0 ? completion / seconds : 0,
+        purpose_label: "Played turns",
       },
     ],
     requests: rows.length,
@@ -386,45 +660,13 @@ export function usage(scope) {
   };
 }
 
-export function cast() {
-  /* The open story's characters, shaped as the product's `/api/cast`
-     answers — the composer's name menu reads it in the demo too. */
-  const memory = state.lore.get(state.open);
-  return {
-    characters: (memory?.characters ?? []).map((person) => ({
-      id: person.id,
-      name: person.name,
-      description: person.description ?? "",
-    })),
-  };
-}
-
-export function balance() {
-  // Nobody has a key in a browser tab, so every account says the same
-  // thing — and the total is null, as it is whenever nothing answered.
-  const nothing = (provider, label) => ({
-    provider,
-    label,
-    money: null,
-    note: "no key set",
-    value: "no key set",
-  });
-  // `?probe=none` changes nothing here: no key is ever probed.
-  return {
-    rows: [nothing("openrouter", "OpenRouter"), nothing("nanogpt", "NanoGPT")],
-    total: null,
-    note: `This story runs on ${PROVIDER}, which spends nothing. Paid providers are charged only when you switch to one.`,
-  };
-}
-
-export function info(version) {
-  const story = state.stories.get(state.open);
-  const session = [["Messages", String(story ? story.turns.length : 0)]];
-  if (story) session.unshift(["Story", cut(label(story), 50)]);
-  // No premise row — the product's report stopped carrying one, and this
-  // answers in the product's shape or it answers wrongly.
-  const set = state.settings.parameters.filter((p) => p.value);
-  if (set.length) session.push(["Parameters", set.map((p) => `${p.name} = ${p.value}`).join(", ")]);
+export function info(storyId = null) {
+  const story = storyId === null ? null : state.stories.get(storyId) ?? null;
+  const rows = [];
+  if (story) {
+    rows.push(["Story", cut(labelOf(story), LABEL_WIDTH)], ["Messages", String(story.messages.length)]);
+  }
+  rows.push(["Extraction", state.pinned ? `${PROVIDER}/${state.pinned}` : "the story model"]);
   return {
     sections: [
       { rows: [["State dir", "(this browser tab — nothing leaves it)"]], note: "" },
@@ -432,675 +674,631 @@ export function info(version) {
         rows: [
           ["Backend", "demo (a model that lives in the page)"],
           ["Model", state.model],
-          // The model's own size; the product adds a "Served max context"
-          // row only where the loaded instance's differs, and here it never does.
-          ["Max context", modelRow().max_context_catalogue],
-          // The product's capability rows, as the page's own model
-          // honestly answers them: no effort reaches it, and it takes no
-          // images and completes no raw text.
           ["Reasoning", "not supported"],
           ["Capabilities", "none"],
         ],
         note: "",
       },
-      { rows: session, note: `otaku ${version} — this is the scripted demo; ${INSTALL}.` },
+      { rows, note: `otaku ${state.version} — this is the scripted demo; ${INSTALL}.` },
     ],
   };
 }
 
-export function exportDocument(storyId) {
-  const story = state.stories.get(storyId);
-  if (!story || !story.turns.length) return { notice: "Nothing to export yet.", refused: true };
-  const name = `${slug(label(story)) || "story"}.md`;
-  const text = [
-    `# ${label(story)}`,
-    "",
-    "*Played in the otaku demo — a real otaku exports the full document, memory included.*",
-    "",
-    ...story.turns.map((t) => (t.role === "user" ? `> ${t.body}` : t.body)),
-  ].join("\n\n");
-  return { name, text };
+export function balance() {
+  // Nobody has a key in a browser tab, so every account says the same —
+  // and the total is null, as it is whenever nothing answered.
+  const nothing = (id, label) => ({ provider: id, label, money: null, note: "no key set", value: "no key set" });
+  return {
+    rows: [nothing("openrouter", "OpenRouter"), nothing("nanogpt", "NanoGPT")],
+    total: null,
+    note: `This story runs on ${PROVIDER}, which spends nothing. Paid providers are charged only when you switch to one.`,
+  };
 }
 
-// ---------- the writes a screen performs ----------
+// ---------- the stories ----------
 
-export function land(storyId, messageId, action) {
-  const story = state.stories.get(storyId);
-  if (!story) return refuse("That message is not on the story's current chain.");
-  if (messageId == null) {
-    // A resume never used the pick, so it may come without one, as the
-    // product's `api.stories.land` says — a story with nothing played
-    // has none to give. The routes hand a null here for a resume alone.
-    state.open = storyId;
-    return say(landed("Resumed"));
-  }
-  const at = story.turns.findIndex((t) => t.id === messageId);
-  if (at < 0) return refuse("That message is not on the story's current chain.");
-  if (action === "fork") {
-    const id = addStory(numberedTitle(story.title), story.system, story.turns.slice(0, at + 1));
-    state.open = id;
-    const named = cut(label(state.stories.get(id)), 50);
-    const lead = named ? `Forked to: ${named}. ` : "Forked. ";
-    return { notice: `${lead}Continued from message ${at + 1}.`, story: id };
-  }
-  if (action === "truncate") {
-    story.turns = story.turns.slice(0, at + 1);
-    touch(storyId);
-    state.open = storyId;
-    return say(landed("Truncated"));
-  }
-  state.open = storyId;
-  return say(landed("Resumed"));
+export function stories(query = "") {
+  const needle = query.trim().toLowerCase();
+  return [...state.stories.values()]
+    .filter((story) => {
+      if (!needle) return true;
+      const face = [labelOf(story), story.storySoFar, ...story.messages.map((row) => row.body)];
+      return face.join(" ").toLowerCase().includes(needle);
+    })
+    .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : b.id - a.id))
+    .map(summaryOf);
 }
 
-export function setSystem(storyId, text) {
-  // The story the PATH named, which is not always the open one: the
-  // dossier edits any story from the outside.
-  const story = state.stories.get(storyId);
-  if (!text) {
-    const current = story && story.system;
-    return say(current ? `System: "${current}"` : "System: (none)");
-  }
-  if (story) {
-    story.system = text;
-    touch(storyId);
-  }
-  return say(`System prompt set (${text.length} chars).`);
+export function story(id) {
+  return storyOf(held(id));
 }
 
-export function storySettings(storyId) {
-  /* A story's settings as they stand — what it changed, over the
-     defaults every story starts from. Null for a story that is not
-     there: the product's 404. */
-  if (!state.stories.has(storyId)) return null;
-  return { settings: structuredClone(_settingsOf(storyId)) };
+export function createStory({ title = "", premise = "" } = {}) {
+  const story = hold(state.nextStory++, { title: title.trim(), premise });
+  const named = title.trim();
+  return {
+    value: storyOf(story),
+    notice: named ? `Started a new story: "${cut(named, LABEL_WIDTH)}".` : "Started a new story.",
+  };
 }
 
-export function updateSetting(storyId, name, body) {
-  /* One setting, the fields given laid over it. The refusals and the
-     confirmation are the product's sentences, copied: what a setting
-     takes is decided in `backend.story` and said in
-     `backend.api.stories.update_setting`, which the demo cannot ask. */
-  if (!state.stories.has(storyId)) return null;
-  const settings = _settingsOf(storyId);
-  const setting = settings.find((s) => s.name === name);
-  if (!setting) {
-    const known = settings.map((s) => s.name).join(", ");
-    return refuse(`Unknown setting '${name}'. Settings: ${known}.`);
+/* The title, the premise and the head, whichever are given — the head
+   moved back from the one the write names. */
+export function updateStory(id, { title, premise, head }, expected) {
+  const story = held(id);
+  if (title === undefined && premise === undefined && head === undefined) throw invalid("Nothing to change.");
+  if (title !== undefined && !title.trim()) throw invalid("A story needs a title — or leave the one it has.");
+  if (head !== undefined) {
+    checkHead(id, expected);
+    if (!story.messages.some((row) => row.id === head)) throw notFound(OFF_CHAIN);
   }
-  // the layout setting is the one that holds a layout: a value, not a
-  // switch — its switch refused before anything else, as there
-  const holdsLayout = setting.layout != null;
-  if (holdsLayout && body.enabled != null) {
-    return refuse(`${setting.label} has no switch: a story is always read in one.`);
-  }
-  if (body.position != null) {
-    if (!setting.allowed_positions.length) {
-      return refuse(`${setting.label} has no position: it injects nothing.`);
-    }
-    if (!setting.allowed_positions.includes(body.position)) {
-      return refuse(
-        `${setting.label} takes one of these positions: ${setting.allowed_positions.join(", ")}.`,
-      );
-    }
-  }
-  if (body.reminder_text != null && setting.reminder_text === null) {
-    return refuse(`${setting.label} has no reminder of its own.`);
-  }
-  if (body.display_notes != null && setting.display_notes === null) {
-    return refuse(`${setting.label} has nothing to display.`);
-  }
-  if (body.layout != null && !holdsLayout) {
-    return refuse(`${setting.label} has no layout.`);
-  }
-  if (holdsLayout) {
-    if (body.layout != null) setting.layout = body.layout;
-    // `StorySettingLayout.standing`: a caption, no full stop
-    return say(`${setting.label}: ${setting.layout}`);
-  }
-  if (body.display_notes != null) setting.display_notes = body.display_notes;
-  if (body.enabled != null) setting.enabled = body.enabled;
-  if (body.position != null) setting.position = body.position;
-  if (body.reminder_text != null) setting.reminder_text = String(body.reminder_text);
-  if (!setting.enabled) return say(`${setting.label}: off.`);
-  if (setting.position === null) return say(`${setting.label}: on.`);
-  if (setting.position === "system") return say(`${setting.label}: on, in the system message.`);
-  // before which of the reader's messages, counted from the end
-  // (`StorySetting.standing`)
-  const depth = setting.position;
-  if (depth === 1) return say(`${setting.label}: on, before your latest message.`);
-  if (depth === 2) return say(`${setting.label}: on, before your previous message.`);
-  return say(`${setting.label}: on, before your ${depth}${depth === 3 ? "rd" : "th"}-last message.`);
-}
-
-export function sharedReminder() {
-  return { text: state.sharedReminder };
-}
-
-export function setSharedReminder(text) {
-  // The sentences are `backend.api.stories.set_shared_reminder`'s.
-  state.sharedReminder = text.trim();
-  return say(text.trim() ? "Shared reminder saved." : "Shared reminder cleared.");
-}
-
-export function prompt(setting) {
-  // The refusals are `backend.api.settings._prompt_name`'s sentences, copied.
-  if (!(setting in state.prompts)) return _noPrompt(setting);
-  return { text: state.prompts[setting] };
-}
-
-export function setPrompt(setting, text) {
-  // The sentences are `backend.api.settings.set_prompt`'s.
-  if (!(setting in state.prompts)) return _noPrompt(setting);
-  const typed = text.trim();
-  state.prompts[setting] = typed || state.shipped[setting];
-  return say(typed ? "Prompt saved." : "Prompt restored to the built-in.");
-}
-
-function _noPrompt(name) {
-  const found = state.storySettingDefaults.find((row) => row.name === name);
-  if (found) return refuse(`${found.label} has no prompt.`);
-  const known = state.storySettingDefaults.map((row) => row.name).join(", ");
-  return refuse(`Unknown setting '${name}'. Settings: ${known}.`);
-}
-
-function _settingsOf(storyId) {
-  // Held once a story changes one; the defaults, copied, until then.
-  let held = state.storySettings.get(storyId);
-  if (!held) {
-    held = structuredClone(state.storySettingDefaults);
-    state.storySettings.set(storyId, held);
-  }
-  return held;
-}
-
-export function renameStory(storyId, title) {
-  if (!title.trim()) return refuse("A story needs a title — or leave the one it has.");
-  const story = state.stories.get(storyId);
-  if (story) {
+  const said = [];
+  if (title !== undefined) {
     story.title = title.trim();
-    touch(storyId);
+    said.push(`Story title set to "${title.trim()}".`);
   }
-  return say(`Story title set to "${title.trim()}".`);
-}
-
-export function deleteStory(storyId) {
-  // a row already gone answers 404, as the product does
-  if (!state.stories.has(storyId)) return null;
-  state.stories.delete(storyId);
-  state.lore.delete(storyId);
-  if (state.open === storyId) state.open = null;
-  return say("Story deleted.");
-}
-
-export function editMessage(messageId, body) {
-  if (!body.trim()) return refuse("A message cannot be emptied — undo the exchange instead.");
-  for (const [id, story] of state.stories) {
-    const turn = story.turns.find((t) => t.id === messageId);
-    if (turn) {
-      turn.body = body;
-      touch(id);
-      moved(id);
-      return say("Message edited.");
-    }
+  if (premise !== undefined) {
+    story.premise = premise;
+    said.push(premise ? `System prompt set (${premise.length} chars).` : "System prompt cleared.");
   }
-  return say("Message edited.");
-}
-
-export function editLore(storyId, kind, target, text) {
-  /* One corrected row, addressed the way the product addresses it: the
-     PATH said which story and which row, the body said which of its
-     fields, and all three arrive here. The row must be that story's
-     own — the product checks the address and refuses first (sentence
-     copied from backend.api.lore.edit). */
-  const memory = state.lore.get(storyId);
-  if (!memory) return refuse("No story yet — send a message first.");
-  const rows =
-    kind === "entry"
-      ? memory.scenes.flatMap((scene) => scene.journals)
-      : kind.startsWith("scene-")
-        ? memory.scenes
-        : memory.characters;
-  if (!rows.some((row) => row.id === target)) {
-    const noun = kind === "entry" ? "journal" : kind.startsWith("scene-") ? "scene" : "character";
-    return refuse(`That ${noun} is not in this story's memory.`);
+  if (head !== undefined) {
+    story.messages = story.messages.slice(0, story.messages.findIndex((row) => row.id === head) + 1);
+    moved(story);
+    said.push(landedLine(story, "Truncated"));
   }
-  if (kind === "scene-summary" && !text.trim()) {
-    return refuse("An emptied summary would swallow its scene — not saved.");
+  touch(story);
+  return { value: storyOf(story), notice: said.join(" ") };
+}
+
+export function deleteStory(id) {
+  held(id);
+  state.stories.delete(id);
+  if (state.settings.last_story === id) state.settings.last_story = null;
+  return { value: null, notice: "Story deleted." };
+}
+
+export function fork(id, { at = null, title = "" } = {}) {
+  const story = held(id);
+  if (!story.messages.length) throw conflict("Nothing to fork yet — send a message first.");
+  let kept = story.messages;
+  if (at !== null) {
+    const index = story.messages.findIndex((row) => row.id === at);
+    if (index < 0) throw notFound(OFF_CHAIN);
+    kept = story.messages.slice(0, index + 1);
   }
-  for (const scene of memory.scenes) {
-    if (kind === "scene-title" && scene.id === target) scene.title = text;
-    if (kind === "scene-summary" && scene.id === target) scene.summary = text;
-  }
-  for (const person of memory.characters) {
-    if (kind === "description" && person.id === target) person.description = text;
-    if (kind === "card" && person.id === target) person.card = text;
-  }
-  // A journal record is one thing read from two sides, so both sides
-  // carry it and both must be corrected.
-  for (const group of [memory.scenes, memory.characters]) {
-    for (const item of group) {
-      for (const record of item.journals) {
-        if (record.id === target) record[kind] = text;
-      }
-    }
-  }
-  return say("Saved.");
+  const copy = hold(state.nextStory++, {
+    title: title.trim() || numbered(story.title),
+    premise: story.premise,
+    storySoFar: story.storySoFar,
+    messages: structuredClone(kept),
+    settings: structuredClone(story.settings),
+    lore: { ...structuredClone(story.lore), story_id: 0 },
+  });
+  copy.lore.story_id = copy.id;
+  const label = cut(labelOf(copy), LABEL_WIDTH);
+  const lead = label ? `Forked to: ${label}.` : "Forked.";
+  return {
+    value: storyOf(copy),
+    notice: at === null ? lead : `${lead} Continued from message ${copy.messages.length}.`,
+  };
 }
 
-export function switchModel(provider, model) {
-  if (provider !== PROVIDER) return refuse(`Unknown provider '${provider}'.`);
-  if (model === state.model) return refuse(`Already using ${PROVIDER}/${state.model}.`);
-  if (!MODELS.some((m) => m.name === model)) {
-    return say(`Switched to ${PROVIDER}/${model}.`); // the real backend trusts the name too
-  }
-  state.model = model;
-  return say(`Switched to ${PROVIDER}/${state.model}.`);
+function numbered(title) {
+  if (!title) return "";
+  const taken = new Set([...state.stories.values()].map((story) => story.title));
+  for (let n = 2; ; n += 1) if (!taken.has(`${title} - ${n}`)) return `${title} - ${n}`;
 }
 
-// The model lore extraction uses, pinned or back to the model above —
-// the product's refusals and sentences (`backend.api.providers`).
-export function setExtractionModel(provider, model) {
-  if (provider !== PROVIDER) return refuse(`Unknown provider '${provider}'.`);
-  const spec = `${provider}/${model}`;
-  if (spec === state.extraction) return refuse(`Lore extraction already uses ${spec}.`);
-  state.extraction = spec;
-  return say(`Lore extraction uses ${spec}.`);
-}
-
-export function clearExtractionModel() {
-  if (!state.extraction) return refuse("Lore extraction already uses the model you play with.");
-  state.extraction = "";
-  return say("Lore extraction uses the model you play with.");
-}
-
-export function loadModel(model, wanted) {
-  const row = MODELS.find((m) => m.name === model);
-  if (!row || !CAPABILITIES.model_management) return refuse(`${PROVIDER} cannot load or unload models.`);
-  row.loaded = wanted;
-  return say(wanted ? `Loaded ${model}.` : `Unloaded ${model}.`);
-}
-
-export function recordHistory(line) {
-  const said = line.trim();
-  if (!said || state.history[0] === said) return say("");
-  state.history.unshift(said);
-  state.history.length = Math.min(state.history.length, 100);
-  return say("");
-}
-
-// ---------- the story-level writes ----------
-
-export function newStory(title) {
-  const id = addStory(title.trim(), "", []);
-  state.open = id;
-  // The id it made, as the product's `Created` carries it: a page with
-  // no story addresses this one next.
-  const said = title.trim()
-    ? say(`Started a new story: "${cut(title.trim(), 50)}".`)
-    : say("Started a new story.");
-  return { ...said, story: id };
-}
-
-export function forkStory(storyId, title) {
-  // The story the PATH named — a copy made from a browser row must not
-  // silently copy whatever happens to be open instead.
-  const story = state.stories.get(storyId);
-  if (!story || !story.turns.length) return refuse("Nothing to fork yet — send a message first.");
-  const id = addStory(title.trim() || numberedTitle(story.title), story.system, story.turns);
-  state.open = id;
-  const named = cut(label(state.stories.get(id)), 50);
-  return { notice: named ? `Forked to: ${named}.` : "Forked.", story: id };
-}
-
-export function undo() {
-  const story = state.stories.get(state.open);
+/* The trailing exchange taken back: the reply, and the one line of the
+   reader's that prompted it — a continue's reply alone. */
+export function undo(id, expected) {
+  const story = held(id);
+  checkHead(id, expected);
   const popped = [];
-  if (story && story.turns.at(-1)?.role === "assistant") popped.push(story.turns.pop());
-  if (story && story.turns.at(-1)?.role === "user") popped.push(story.turns.pop());
-  if (!popped.length) return refuse("Nothing to undo.");
-  touch(state.open);
-  moved(state.open);
-  return say(`Took back the last exchange (${popped.length} messages).`);
+  if (story.messages.at(-1)?.role === "assistant") popped.push(story.messages.pop());
+  if (story.messages.at(-1)?.role === "user") popped.push(story.messages.pop());
+  if (!popped.length) throw conflict("Nothing to undo.");
+  touch(story);
+  moved(story);
+  return { value: storyOf(story), notice: `Took back the last exchange (${popped.length} messages).` };
 }
 
-export function setKnob(name, value) {
-  /* One session-wide knob, dispatched by name — the shape the server
-     answers `PUT /api/settings/{setting}` with, down to a raw string
-     each setter parses for itself. A knob the demo has never heard of
-     is refused here rather than silently kept. */
-  const raw = value === true ? "on" : value === false ? "off" : String(value);
-  const setter = _KNOBS[name];
-  if (!setter) return refuse(`Unknown setting '${name}'.`);
-  return setter(raw);
+function landedLine(story, verb) {
+  const label = cut(labelOf(story), LABEL_WIDTH);
+  const head = label ? `Story: ${label}. ` : "";
+  const count = story.messages.length;
+  return count ? `${head}${verb} at message ${count}.` : `${head}${verb}, nothing played yet.`;
 }
 
-// The product's bounds (`backend.session.PARAMETERS`): [low, high],
-// high null for no ceiling; a name absent takes any value of its type.
-const _RANGES = {
-  temperature: [0, 2],
-  top_p: [0, 1],
-  top_k: [0, null],
-  min_p: [0, 1],
-  max_tokens: [1, null],
-  presence_penalty: [-2, 2],
-  frequency_penalty: [-2, 2],
-  repetition_penalty: [0, 2],
-};
+// ---------- messages ----------
 
-export function setParameter(name, value) {
-  // One per-model parameter; "reset" puts it back to the model's own
-  // default, which is what a DELETE on it means.
-  const row = state.settings.parameters.find((p) => p.name === name);
-  if (!row) {
-    const known = state.settings.parameters.filter((p) => p.supported).map((p) => p.name).join(", ");
-    return refuse(`Unsupported parameter '${name}'. Supported: ${known}.`);
-  }
-  const text = String(value).trim();
-  if (text.toLowerCase() === "reset") {
-    if (!row.value) return say(`Parameter ${name} is already at its default.`);
-    row.value = "";
-    return say(`Parameter ${name} reset to default.`);
-  }
-  if (row.type === "float" && Number.isNaN(Number.parseFloat(text))) {
-    return refuse(`Could not parse '${text}' as float.`);
-  }
-  if (row.type === "int" && !/^-?\d+$/.test(text)) return refuse(`Could not parse '${text}' as int.`);
-  const range = _RANGES[name];
-  if (range) {
-    const [low, high] = range;
-    const number = Number(text);
-    if (number < low || (high !== null && number > high)) {
-      return refuse(`${name} must be ${high === null ? `at least ${low}` : `between ${low} and ${high}`}.`);
-    }
-  }
-  row.value = text;
-  return say(`${name} = ${text}.`);
+export function messages(id, last = null) {
+  const rows = held(id).messages;
+  return structuredClone(last === null ? rows : rows.slice(-last));
 }
 
-const _KNOBS = {
-  think: (raw) => {
-    const s = state.settings;
-    const value = raw.trim().toLowerCase();
-    if (value === "unset") {
-      s.think = "unset";
-      return say("Think: unset.");
-    }
-    if (/^\d+$/.test(value)) {
-      // The demo's model takes no budget, as the product says of one.
-      return refuse(
-        `${state.model} does not take a thinking budget. Levels for this model: ${s.think_levels.join(", ")}.`,
-      );
-    }
-    if (!s.think_levels.includes(value)) {
-      return refuse(`Usage: /set think ${s.think_levels.join("|")}`);
-    }
-    s.think = value;
-    return say(`Think: ${value}.`);
-  },
-  verbose: (raw) => _toggle("verbose", "Verbose", raw),
-  autocorrect: (raw) => _toggle("autocorrect", "Autocorrect", raw),
-  notification: (raw) => _toggle("notification", "Notification", raw),
-  max_context: (raw) => {
-    const value = raw.trim().toLowerCase();
-    if (["off", "none", "0"].includes(value)) {
-      state.settings.max_context = 0;
-      return say("Max context: 0 (the model's own max context).");
-    }
-    if (!/^\d+$/.test(value)) return refuse("Usage: /set max_context TOKENS|off");
-    state.settings.max_context = Number.parseInt(value, 10);
-    return say(`Max context: ${state.settings.max_context} tokens.`);
-  },
-};
-
-function _toggle(name, label, raw) {
-  const value = raw.trim().toLowerCase();
-  if (["on", "true", "yes"].includes(value)) state.settings[name] = true;
-  else if (["off", "false", "no"].includes(value)) state.settings[name] = false;
-  else return refuse(`Usage: /set ${name} on|off`);
-  return say(`${label}: ${state.settings[name] ? "on" : "off"}.`);
+export function message(id, messageId) {
+  const found = held(id).messages.find((row) => row.id === messageId);
+  if (!found) throw notFound(OFF_CHAIN);
+  return structuredClone(found);
 }
 
-// ---------- what the reply stream needs ----------
+export function updateMessage(id, messageId, body) {
+  const story = held(id);
+  const found = story.messages.find((row) => row.id === messageId);
+  if (!found) throw notFound(OFF_CHAIN);
+  if (!body.trim()) throw invalid("A message cannot be emptied — undo the exchange instead.");
+  found.body = body;
+  found.segments = [{ kind: "prose", text: body }];
+  touch(story);
+  moved(story);
+  return { value: structuredClone(found), notice: "Message edited." };
+}
 
-export function recordTurn(role, body) {
-  let story = state.stories.get(state.open);
-  if (!story) {
-    // The first real turn creates the story, exactly as the backend does.
-    const id = addStory("", "", []);
-    state.open = id;
-    story = state.stories.get(id);
-  }
-  const turn = {
+/** One row recorded at the story's head, in the shape the product's rows
+    take — the demo's model writes prose and no tool call, so a row is
+    one prose segment, its own unit. */
+export function record(id, role, body, extra = {}) {
+  const story = held(id);
+  const previous = story.messages.at(-1) ?? null;
+  const row = {
     id: state.nextMessage++,
     role,
     body,
     kind: "dialogue",
-    // Absent is NULL here as it is in `web.api._turn`: a speaker the
-    // extractor has not named yet is a state the reader pane draws.
+    template: null,
     speaker: null,
     provider: role === "assistant" ? PROVIDER : null,
     model: role === "assistant" ? state.model : null,
-    template: null,
     attachments: [],
-    // The demo's model writes prose and no tagged block, so a turn it
-    // records is one prose segment (`backend.api.play.segments`).
+    mode: modeOf(layoutOf(story)),
     segments: [{ kind: "prose", text: body }],
-    // the demo's model completes chat, so a turn joins as a paragraph (`web.api.play.turn`)
     join_type: "paragraph",
+    tool_label: null,
+    unit: 0,
+    ...extra,
   };
-  story.turns.push(turn);
-  touch(state.open);
-  moved(state.open);
-  return { ...turn };
+  row.join_type = joinOf(previous, row);
+  row.unit = row.id;
+  story.messages.push(row);
+  touch(story);
+  moved(story);
+  return structuredClone(row);
 }
 
-export function importCard(landed) {
-  /* The three writes `backend.api.cards.add` makes, on this store: the
-     typed /card row (speaker-linked), the cast row with the card
-     archive, and the greeting as the character's own first words —
-     provider "card", the file for a model, exactly as the product
-     spells authored rows. `persona` is remembered per story, the way
-     the real import reads it back from the archive. */
-  let story = state.stories.get(state.open);
-  if (!story) {
-    const id = addStory("", "", []);
-    state.open = id;
-    story = state.stories.get(id);
-  }
-  story.turns.push({
-    id: state.nextMessage++,
-    role: "user",
-    body: landed.line,
-    kind: "card",
-    speaker: landed.name,
-    provider: null,
-    model: null,
-    template: null,
-    attachments: [],
-    segments: [{ kind: "prose", text: landed.line }],
-    join_type: "paragraph",
-  });
-  const memory = memoryOf(state.open);
-  const characterId = memory.characters.reduce((top, c) => Math.max(top, c.id), 0) + 1;
-  memory.characters.push({
-    id: characterId,
-    name: landed.name,
-    aliases: [],
-    description: landed.description,
-    card: landed.card,
-    history: "",
-    updated_at: new Date().toISOString(),
-    // made by the card, as the product records it (`api.cards`)
-    provider: "card",
-    model: landed.fileName,
-    journals: [],
-  });
-  story.persona = landed.persona;
-  if (landed.greeting) {
-    story.turns.push({
-      id: state.nextMessage++,
-      role: "assistant",
-      body: landed.greeting,
-      kind: "dialogue",
-      speaker: landed.name,
-      provider: "card",
-      model: landed.fileName,
-      template: null,
-      attachments: [],
-      segments: [{ kind: "prose", text: landed.greeting }],
-      join_type: "paragraph",
-    attachments: [],
-    });
-  }
-  touch(state.open);
-  moved(state.open);
+/** How the reply about to stream joins the story: its first piece's
+    `join_type`, by the rule the recorded row will carry. */
+export function replyJoin(id) {
+  const story = held(id);
+  const mode = modeOf(layoutOf(story));
+  return joinOf(story.messages.at(-1) ?? null, { mode, body: "x", kind: "dialogue", provider: PROVIDER });
 }
 
-export function personaOf() {
-  // The story's memory of who the player is — asked once, then the
-  // default every later import offers (`api.cards.remembered_persona`).
-  return state.stories.get(state.open)?.persona ?? "";
-}
-
-export function findCharacter(name) {
-  const memory = state.lore.get(state.open);
-  return (memory?.characters ?? []).find((person) => person.name === name) ?? null;
-}
-
-export function dropLastReply() {
-  const story = state.stories.get(state.open);
-  if (!story || story.turns.at(-1)?.role !== "assistant") return null;
-  const popped = story.turns.pop();
-  touch(state.open);
-  moved(state.open);
-  return popped;
-}
-
-export function hasTurns() {
-  const story = state.stories.get(state.open);
-  return Boolean(story && story.turns.length);
-}
-
-export function openTurns() {
-  const story = state.stories.get(state.open);
-  return story ? story.turns : [];
+/** Regenerate's first half: the standing reply set aside. */
+export function dropReply(id) {
+  const story = held(id);
+  if (story.messages.at(-1)?.role !== "assistant") throw conflict("Nothing to regenerate.");
+  story.messages.pop();
+  touch(story);
+  moved(story);
 }
 
 export function verbose() {
   return state.settings.verbose;
 }
 
-export function recordUsage(prompt, completion, seconds) {
-  state.usage.push({ story: state.open, prompt, completion, seconds });
+export function recordUsage(id, prompt, completion, seconds) {
+  state.usage.push({ story: id, purpose: "chat", prompt, completion, seconds });
 }
 
-export function contextTokens() {
-  return context().shape.total_tokens;
+// ---------- a story's settings ----------
+
+export function storySettings(id) {
+  return structuredClone(held(id).settings);
 }
 
-// ---------- the lore pass ----------
-
-export function memoryOf(storyId) {
-  if (!state.lore.has(storyId)) state.lore.set(storyId, { scenes: [], characters: [] });
-  return state.lore.get(storyId);
+export function storySetting(id, name) {
+  return structuredClone(knownSetting(held(id), name));
 }
 
-export function openId() {
-  return state.open;
+function knownSetting(story, name) {
+  const found = settingOf(story, name);
+  if (!found) {
+    const known = story.settings.map((row) => row.name).join(", ");
+    throw notFound(`Unknown setting '${name}'. Settings: ${known}.`);
+  }
+  return found;
 }
 
-export function setStatus(line) {
-  state.status = line;
+/* One setting, the fields given laid over it — what it takes decided and
+   said as `domain.story.settings` decides and says it, copied. */
+export function updateStorySetting(id, name, fields) {
+  const story = held(id);
+  const setting = knownSetting(story, name);
+  const holdsLayout = setting.layout !== null;
+  if (holdsLayout && fields.enabled !== undefined) {
+    throw invalid(`${setting.label} has no switch: a story is always read in one.`);
+  }
+  if (fields.position !== undefined) {
+    const allowed = setting.allowed_positions.map((row) => row.value);
+    if (!allowed.length) throw invalid(`${setting.label} has no position: it injects nothing.`);
+    if (!allowed.includes(fields.position)) {
+      throw invalid(`${setting.label} takes one of these positions: ${allowed.join(", ")}.`);
+    }
+  }
+  if (fields.reminder_text !== undefined && setting.reminder_text === null) {
+    throw invalid(`${setting.label} has no reminder of its own.`);
+  }
+  if (fields.display_notes !== undefined && setting.display_notes === null) {
+    throw invalid(`${setting.label} has nothing to display.`);
+  }
+  if (fields.layout !== undefined && !holdsLayout) throw invalid(`${setting.label} has no layout.`);
+  if (holdsLayout) {
+    if (fields.layout !== undefined) setting.layout = fields.layout;
+    moved(story);
+    return { value: structuredClone(setting), notice: `${setting.label}: ${setting.layout}` };
+  }
+  if (fields.display_notes !== undefined) setting.display_notes = fields.display_notes;
+  if (fields.enabled !== undefined) setting.enabled = fields.enabled;
+  if (fields.reminder_text !== undefined) setting.reminder_text = fields.reminder_text;
+  if (fields.position !== undefined) {
+    const found = setting.allowed_positions.find((row) => row.value === fields.position);
+    setting.injection_position = { value: found.value, text: found.text };
+  }
+  moved(story);
+  return { value: structuredClone(setting), notice: standing(setting) };
 }
 
-export function status() {
-  return state.status;
+// `StorySetting.standing`: where a switched-on setting rides, in words
+function standing(setting) {
+  if (!setting.enabled) return `${setting.label}: off.`;
+  const position = setting.injection_position?.value ?? null;
+  if (position === null) return `${setting.label}: on.`;
+  if (position === "system") return `${setting.label}: on, in the system message.`;
+  // before which of the reader's messages, counted from the end
+  if (position === 1) return `${setting.label}: on, before your latest message.`;
+  if (position === 2) return `${setting.label}: on, before your previous message.`;
+  return `${setting.label}: on, before your ${position}${position === 3 ? "rd" : "th"}-last message.`;
+}
+
+// ---------- lore ----------
+
+export function lore(id) {
+  const story = held(id);
+  return { ...structuredClone(story.lore), message_count: story.messages.length };
+}
+
+export function scenes(id) {
+  return structuredClone(held(id).lore.scenes);
+}
+
+export function scene(id, sceneId) {
+  return structuredClone(loreRow(held(id), "scenes", sceneId, "scene"));
+}
+
+export function updateScene(id, sceneId, { title, summary }) {
+  const row = loreRow(held(id), "scenes", sceneId, "scene");
+  if (title === undefined && summary === undefined) throw invalid("Nothing to change.");
+  if (summary !== undefined && !summary.trim()) {
+    throw invalid("An emptied summary would swallow its scene — not saved.");
+  }
+  if (title !== undefined) row.title = title;
+  if (summary !== undefined) row.summary = summary;
+  return { value: structuredClone(row), notice: "Saved." };
+}
+
+export function characters(id, name = null) {
+  const rows = held(id).lore.characters;
+  return structuredClone(name === null ? rows : rows.filter((row) => row.name === name));
+}
+
+export function character(id, characterId) {
+  return structuredClone(loreRow(held(id), "characters", characterId, "character"));
+}
+
+export function updateCharacter(id, characterId, { description, card }) {
+  const row = loreRow(held(id), "characters", characterId, "character");
+  if (description === undefined && card === undefined) throw invalid("Nothing to change.");
+  if (description !== undefined) row.description = description;
+  if (card !== undefined) row.card = card;
+  return { value: structuredClone(row), notice: "Saved." };
+}
+
+export function deleteCharacter(id) {
+  held(id);
+  throw conflict(NOT_IN_DEMO("Deleting a character"));
+}
+
+export function mergeCharacter(id) {
+  held(id);
+  throw conflict(NOT_IN_DEMO("Merging characters"));
+}
+
+export function journals(id) {
+  return structuredClone(held(id).lore.journals);
+}
+
+export function journal(id, journalId) {
+  return structuredClone(loreRow(held(id), "journals", journalId, "journal"));
+}
+
+export function updateJournal(id, journalId, { entry }) {
+  const row = loreRow(held(id), "journals", journalId, "journal");
+  if (entry === undefined) throw invalid("Nothing to change.");
+  row.entry = entry;
+  return { value: structuredClone(row), notice: "Saved." };
+}
+
+function loreRow(story, list, rowId, noun) {
+  const found = story.lore[list].find((row) => row.id === rowId);
+  if (!found) throw notFound(`That ${noun} is not in this story's memory.`);
+  return found;
+}
+
+/* The forced pass: started (202, polled), read until done, given up —
+   the demo's model closes a canned scene a moment later
+   (`script.nextScene`), in the shape the real pass writes. */
+export function startExtraction(id) {
+  const story = held(id);
+  if (story.extraction?.status === "running") {
+    return { value: structuredClone(story.extraction), notice: "A pass is already running." };
+  }
+  story.extraction = { story_id: id, status: "running", report: null };
+  state.status = "closing a scene…";
+  const run = story.extraction;
+  setTimeout(() => {
+    if (run.status !== "running") return;
+    run.report = closeScene(story);
+    run.status = "done";
+    state.status = "";
+  }, 2500);
+  return { value: structuredClone(run), notice: "Extracting lore from the recent messages…" };
+}
+
+export function extraction(id) {
+  const story = held(id);
+  if (!story.extraction) throw notFound("No pass was asked for this story.");
+  return structuredClone(story.extraction);
+}
+
+export function stopExtraction(id) {
+  const story = held(id);
+  if (story.extraction?.status !== "running") throw conflict("No pass is running.");
+  story.extraction.status = "cancelled";
+  story.extraction.report = "Cancelled — nothing half-done commits; already-closed scenes stay.";
+  state.status = "";
+  return { value: null, notice: story.extraction.report };
+}
+
+function closeScene(story) {
+  const covered = story.lore.extracted_up_to;
+  const last = story.messages.length - 2; // the settle margin: the tail stays open
+  if (last - covered < 4) return "Nothing new since the last scene.";
+  const canned = script.nextScene();
+  const sceneId = state.nextLore++;
+  const no = story.lore.scenes.length + 1;
+  story.lore.scenes.push({
+    id: sceneId,
+    no,
+    span: `${covered + 1}-${last}`,
+    title: canned.title,
+    summary: canned.summary,
+    history: "",
+    start_message_id: story.messages[covered]?.id ?? null,
+    end_message_id: story.messages[last - 1]?.id ?? null,
+    provider: PROVIDER,
+    model: state.pinned ?? state.model,
+    updated_at: now(),
+  });
+  for (const person of story.lore.characters) {
+    story.lore.journals.push({
+      id: state.nextLore++,
+      scene_id: sceneId,
+      scene_no: no,
+      character_id: person.id,
+      entry: canned.entry,
+      state: canned.state,
+      history: "",
+      messages_since: 0,
+      provider: PROVIDER,
+      model: state.pinned ?? state.model,
+      updated_at: now(),
+    });
+  }
+  story.lore.extracted_up_to = last;
+  story.storySoFar = canned.summary;
+  return `Scene '${canned.title}' closed: ${story.lore.characters.length} journal(s) written.`;
+}
+
+// ---------- cards ----------
+
+export function personaOf(id) {
+  return held(id).persona;
+}
+
+/* The card's three writes, as `domain.story.cards.import_card` makes them:
+   the typed /card row, speaker-linked; the cast row with the card's
+   archive, made by the card; the greeting as the character's own first
+   words. Answered as the two rows and the report. */
+export function importCard(id, expected, { name, description, archive, greeting, fileName, line, persona, report }) {
+  const story = held(id);
+  checkHead(id, expected);
+  if (story.lore.characters.some((row) => row.name === name)) {
+    const source = story.lore.characters.find((row) => row.name === name).card
+      ? "imported earlier"
+      : "extracted from play";
+    throw conflict(`${name} already exists in this story (${source}) — import under another name: /card FILE NAME.`);
+  }
+  const characterId = state.nextLore++;
+  story.lore.characters.push({
+    id: characterId,
+    name,
+    aliases: [],
+    description,
+    card: archive,
+    history: "",
+    history_journal_id: null,
+    provider: "card",
+    model: fileName,
+    updated_at: now(),
+  });
+  story.persona = persona;
+  const typed = record(id, "user", line, { kind: "card", speaker: name, provider: null, model: null });
+  const said = greeting
+    ? record(id, "assistant", greeting, { speaker: name, provider: "card", model: fileName })
+    : null;
+  return {
+    value: { character_id: characterId, line: typed, greeting: said, report },
+    notice: report,
+  };
+}
+
+// ---------- the context ----------
+
+/* The captured preview is the real assembler's work and is served while
+   it is true; a story that moved gets an honest recompute in its shape —
+   the demo's model counts nothing, so a token is four characters. */
+export function context(id) {
+  const story = held(id);
+  if (story.context) return structuredClone(story.context);
+  const systemTokens = estimate(story.premise);
+  const transcript = story.messages.reduce((n, row) => n + estimate(row.body), 0);
+  const total = systemTokens + transcript;
+  const limit = limitOf();
+  const used = Math.round((100 * total) / limit);
+  const lede = [
+    "Context preview — the exact request to be sent. Context summary:",
+    "",
+    `  ~${total.toLocaleString("en-US")} tokens projected · ${used}% of the ${limit.toLocaleString("en-US")} limit`,
+    ...(systemTokens ? [`  system ${systemTokens.toLocaleString("en-US")} · transcript ${transcript.toLocaleString("en-US")}`] : []),
+    `  ${story.messages.length} messages verbatim`,
+  ].join("\n");
+  return {
+    shape: {
+      head: story.messages.length,
+      middle: 0,
+      history: false,
+      rolled_up: 0,
+      summaries: 0,
+      tail: 0,
+      tail_target: 150,
+      tail_setting: 150,
+      system_tokens: systemTokens,
+      transcript_tokens: transcript,
+      limit,
+      pictures_sent: 0,
+      pictures_omitted: 0,
+      pictures_held: 0,
+      kept: story.messages.length,
+      total_tokens: total,
+      used,
+    },
+    lede,
+    note: "",
+    // the recompute assembles no injection, so it reports none, honestly
+    injections: [],
+    parts: [
+      ...(story.premise ? [{ role: "system", body: story.premise, pictures: 0 }] : []),
+      ...story.messages.map((row) => ({ role: row.role === "tool" ? "user" : row.role, body: row.body, pictures: 0 })),
+    ],
+  };
+}
+
+export function fill(id) {
+  const story = held(id);
+  if (story.fill) return structuredClone(story.fill);
+  const { shape } = context(id);
+  const window = modelRow(state.model).window;
+  const size = window >= 1024 ? `${Math.round(window / 1024)}K` : String(window);
+  return { percent: shape.used, context_in_force: window, text: `${shape.used}% of ${size}` };
+}
+
+export function contextTokens(id) {
+  return context(id).shape.total_tokens;
+}
+
+const limitOf = () => {
+  const window = modelRow(state.model).window;
+  const cap = state.settings.context_limit;
+  return (cap && cap < window ? cap : window) - RESERVE;
+};
+
+// ---------- transfer ----------
+
+export function exportDocument(id) {
+  const story = held(id);
+  if (!story.messages.length) throw conflict("Nothing to export yet.");
+  const label = labelOf(story);
+  return {
+    name: `${slug(label) || "story"}.md`,
+    text: [
+      `# ${label}`,
+      "",
+      "*Played in the otaku demo — a real otaku exports the full document, memory included.*",
+      "",
+      ...story.messages.map((row) => (row.role === "user" ? `> ${row.body}` : row.body)),
+    ].join("\n\n"),
+  };
+}
+
+/* A document landed as a story: plain text alone here — a paragraph a
+   message, the reader's and the model's in turn — and a pass started over
+   it, as the product starts one. */
+export function importDocument(text, fileName) {
+  if (!fileName.toLowerCase().endsWith(".txt")) {
+    throw conflict(
+      `Only plain-text imports work in the demo — ${INSTALL} (SillyTavern chats and otaku exports included).`,
+    );
+  }
+  const paragraphs = text.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+  if (!paragraphs.length) throw invalid("The file contains no text to import.");
+  const story = hold(state.nextStory++);
+  paragraphs.forEach((body, i) => record(story.id, i % 2 ? "assistant" : "user", body));
+  const notice = `Imported ${paragraphs.length} message(s) → story ${story.id}.`;
+  const started = startExtraction(story.id);
+  return { value: { story_id: story.id, notices: [notice], extraction: started.value }, notice };
+}
+
+// ---------- the pictures ----------
+
+/** The file names a sample's messages carry — what the demo can serve. */
+export function pictureNames() {
+  const names = new Set();
+  for (const story of state.stories.values()) {
+    for (const row of story.messages) for (const picture of row.attachments) names.add(picture.file);
+  }
+  return names;
 }
 
 // ---------- internals ----------
 
-function addStory(title, system, turns) {
-  const id = state.nextStory++;
-  state.stories.set(id, {
-    title,
-    system,
-    turns: turns.map((t) => ({ ...t })),
-    updatedAt: new Date().toISOString(),
-  });
-  return id;
+function touch(story) {
+  story.updatedAt = now();
 }
 
-export function importStory(paragraphs) {
-  const turnsIn = paragraphs.map((body, i) => ({
-    id: state.nextMessage++,
-    role: i % 2 ? "assistant" : "user",
-    body,
-  }));
-  const id = addStory("", "", []);
-  state.stories.get(id).turns = turnsIn;
-  state.open = id;
-  moved(id);
-  return { id, count: turnsIn.length };
+function moved(story) {
+  // The captured preview stops being true the moment its story moves; the
+  // recompute takes over for that story alone.
+  story.context = null;
+  story.fill = null;
 }
 
-function landed(verb) {
-  const story = state.stories.get(state.open);
-  const named = story ? cut(label(story), 50) : "";
-  const head = named ? `Story: ${named}. ` : "";
-  const count = story ? story.turns.length : 0;
-  return count ? `${head}${verb} at message ${count}.` : `${head}${verb}, nothing played yet.`;
+function now() {
+  // the product's spelling: local time, its offset, whole seconds
+  const date = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const offset = -date.getTimezoneOffset();
+  const sign = offset >= 0 ? "+" : "-";
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+    `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}` +
+    `${sign}${pad(Math.floor(Math.abs(offset) / 60))}:${pad(Math.abs(offset) % 60)}`
+  );
 }
 
-function numberedTitle(title) {
-  return title ? `${title} - 2` : "";
-}
-
-function label(story) {
-  if (story.title) return flatten(story.title);
-  const id = [...state.stories.entries()].find(([, s]) => s === story)?.[0];
-  const arc = id ? storySoFar(id) : "";
-  if (arc) return flatten(arc);
-  return flatten(firstUser(story));
-}
-
-function storySoFar(id) {
-  // The arc a listing row shows: the newest scene's own rollup, and the
-  // newest summary where no rollup was composed here.
-  const scenes = state.lore.get(id)?.scenes ?? [];
-  return scenes.at(-1)?.history || scenes.at(-1)?.summary || "";
-}
-
-function firstUser(story) {
-  return story.turns.find((t) => t.role === "user")?.body || "";
-}
-
-function touch(id) {
-  const story = state.stories.get(id);
-  if (story) story.updatedAt = new Date().toISOString();
-}
-
-function moved(id) {
-  // The captured context preview stops being true the moment its story
-  // moves; the recompute takes over for that story alone.
-  state.contextFixtures.delete(id);
-}
-
-function modelRow() {
-  return MODELS.find((m) => m.name === state.model) ?? MODELS[0];
-}
-
-function estimate(text) {
-  return Math.ceil(text.length / 4);
-}
-
-function flatten(text) {
-  return text.replace(/\s+/g, " ").trim();
-}
-
-function cut(text, limit) {
-  return text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
-}
+const estimate = (text) => Math.ceil(text.length / 4);
+const flatten = (text) => text.replace(/\s+/g, " ").trim();
+const cut = (text, limit) => (text.length > limit ? `${text.slice(0, limit - 1)}…` : text);
 
 function slug(text) {
   return text
@@ -1108,12 +1306,4 @@ function slug(text) {
     .replace(/[^\w\s-]/g, "")
     .replace(/[\s_-]+/g, "-")
     .replace(/^-|-$/g, "");
-}
-
-function say(notice) {
-  return { notice };
-}
-
-function refuse(notice) {
-  return { notice, refused: true };
 }

@@ -6,7 +6,7 @@ and the in-stream Ctrl+R watcher (raw-tty, POSIX; a no-op elsewhere).
 Cancellation is the generator contract: Ctrl+C closes the stream and
 returns to the prompt — the partial is recorded by the backend's own
 close handling; Ctrl+R closes it and reports `regen` so the caller runs
-`api.play.regenerate` and shows the fresh take in place.
+`api.stories.regens` and shows the fresh take in place.
 """
 
 import contextlib
@@ -19,29 +19,26 @@ import time
 from collections.abc import Iterator
 from typing import Any, Self, TextIO
 
-from otaku.backend import StoryMode
-from otaku.backend.api.play import (
+from otaku.console.sound import ring
+from otaku.terminal.api import Actor, JoinType, StoryMode
+from otaku.terminal.api.story.messages import (
+    AssistantMessage,
     AssistantReasoning,
     AssistantText,
     AssistantToolCall,
-    AssistantTurn,
     Declined,
     Done,
     Failed,
     PlayEvent,
-    ToolTurn,
-    UserTurn,
-    join_type,
+    ToolMessage,
+    UserMessage,
 )
-from otaku.backend.tools import TOOLS, Actor, get_tool_label
-from otaku.console.sound import ring
 from otaku.terminal.chat.chat import Chat
 from otaku.terminal.tty import DIM, RESET, error_line
 from otaku.terminal.tty.cursor import terminal_width
 from otaku.terminal.tty.render import (
     BlockStream,
     QuestionStream,
-    asked,
     flow,
     message,
     spaced,
@@ -77,10 +74,9 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
     status row erase themselves and stay outside)."""
     chat.replied = True
     out = chat.ledger.reply
-    session = chat.session
     # The canvas: the one text — no block for the reader's line, the
     # reply going on where the text ended (`ledger.echo_flow`).
-    is_story_mode = session.layout.mode is StoryMode.STORY
+    is_story_mode = chat.layout.mode is StoryMode.STORY
     streamed = False  # anything shown yet (the error line's lead blank, the line to end)
     in_text = True  # the story's text drawn last, not a block: where a row may stay open
     chars = 0
@@ -148,19 +144,21 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                 # tool's, and while a tool otaku runs works after the reply
                 # holding the call landed — gone with whatever comes next.
                 if isinstance(event, AssistantToolCall):
-                    chat.status_line.set_note(_calling(event.name))
-                elif not isinstance(event, AssistantTurn):
+                    chat.status_line.set_note(event.status)
+                elif not isinstance(event, AssistantMessage):
                     chat.status_line.set_note("")
-                if isinstance(event, UserTurn):
+                if isinstance(event, UserMessage):
                     if is_story_mode:
                         # The canvas: the played line is prose in the one
                         # text, no block. The ledger places the cursor by the
-                        # line's join (the event's `join_type`: under the
+                        # line's join (the turn's `join_type`: under the
                         # standing blank, or on where the text ended, one
                         # space after it) and the line is typeset through the
                         # reply's own streamer, so a quote it opens and the
                         # reply closes reads as one.
-                        inline = chat.ledger.echo_flow(inline=event.join_type.value == "inline")
+                        inline = chat.ledger.echo_flow(
+                            inline=event.message.join_type is JoinType.INLINE
+                        )
                         # the breaks at its edges are the joins' to draw, not
                         # drawn twice
                         body = event.message.body.strip("\n")
@@ -233,12 +231,11 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                         # question it is asked (`render.flow`)
                         after_call = True
                         continue
-                    tool = TOOLS.get(event.name)
-                    if tool is not None and tool.actor is Actor.SYSTEM:
+                    if event.actor is Actor.SYSTEM:
                         # A call otaku runs — the search's query — is the
                         # model's, not the story's: nothing drawn, as
                         # `render.message` draws nothing for it; the result
-                        # follows as a block of its own (`ToolTurn`).
+                        # follows as a block of its own (`ToolMessage`).
                         after_call = True
                         continue
                     if event.name in ("question", "note"):
@@ -283,19 +280,19 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                     streamer.feed(opening + event.text + closing)
                     fed += opening + event.text + closing
                     streamed = True
-                elif isinstance(event, AssistantTurn):
+                elif isinstance(event, AssistantMessage):
                     # The row as recorded is what the screen already shows,
                     # drawn as it streamed: nothing to draw.
                     continue
-                elif isinstance(event, ToolTurn):
+                elif isinstance(event, ToolMessage):
                     # The reply holding the call ended at it; the tool turn
                     # is drawn as its own dim block behind the bar, the label
                     # alone — the result is the model's to read, not the
                     # story's — as `render.message` draws it again on a
                     # resume; the reply that continues streams under it, set
                     # apart as after any block. Story mode's text draws none:
-                    # the reply that continues opens a paragraph, as its
-                    # join says (`render.flow`).
+                    # the reply that continues goes on as its join says, in
+                    # the paragraph the call interrupted (`render.flow`).
                     if is_story_mode:
                         continue
                     close_block()
@@ -304,8 +301,7 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                     block_name = "tool"
                     fed += block.open(streamer, fed)
                     in_text = False
-                    label = get_tool_label(event.message.provider, event.message.body)
-                    written = block.feed(label)
+                    written = block.feed(event.message.tool_label or "")
                     fed += written
                     streamed = streamed or bool(written)
                     close_block()
@@ -368,7 +364,7 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
             # a Ctrl+R's erase counts the row ended (`erase_reply_tail`)
             open_row = in_text and not watcher.regen_requested
             _end_row(chat, out, story_mode=is_story_mode and open_row)
-        if session.verbose:
+        if chat.api.settings.get().verbose:
             elapsed = time.monotonic() - start
             rate = chars / elapsed if elapsed > 0 else 0.0
             stats = (
@@ -396,10 +392,10 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                 chat.ledger.echo_flow(inline=False)
                 chat.ledger.reply_begins()
         return True
-    if session.notification and not interrupted:
+    if chat.api.settings.get().notification and not interrupted:
         # The turn is over and the screen wants its reader back. Not
         # after a Ctrl+C: whoever pressed it is already here.
-        ring(session.terminal.notification_sound)
+        ring(chat.api.settings.terminal.get().notification_sound)
     return False
 
 
@@ -467,14 +463,6 @@ class _StreamWatcher:
                 return
 
 
-def _calling(name: str) -> str:
-    """What the status row says while a call of the tool `name` streams —
-    the page's words (`transcript.js _calling`), copied: the tool named
-    by its label, lowercase, or by its name where this build has none."""
-    tool = TOOLS.get(name)
-    return f"calling the {(tool.label if tool is not None else name).lower()} tool"
-
-
 def _unbracketed(stats: str) -> str:
     """The stats line without the `[ … ]` it is framed in under a reply:
     on the status row, a row of its own, the frame is not needed."""
@@ -506,11 +494,9 @@ def drop_past_question(chat: Chat) -> None:
     starts: inside it the key watcher owns the terminal's answers, which
     the erase asks for. Where the erase cannot be proven, the question
     stays."""
-    session = chat.session
-    rows = session.messages
-    shown = chat.shown_tools
-    if session.layout.mode is not StoryMode.STORY or not rows or asked(rows[-1], shown) is None:
+    if chat.layout.mode is not StoryMode.STORY or not chat.posed:
         return
+    rows = chat.messages()
     # the question alone, where the stream noted its start: the prose above
     # it stands as it is, the answer going on from its end
     if chat.ledger.take_question():
@@ -529,7 +515,7 @@ def drop_past_question(chat: Chat) -> None:
     piece = flow(items[first:])
     if before is None:
         lead = ""
-    elif join_type(before, items[first]) == "inline":
+    elif items[first].join_type is JoinType.INLINE:
         lead = " "
     else:
         lead, piece = "\n\n", piece.lstrip("\n")

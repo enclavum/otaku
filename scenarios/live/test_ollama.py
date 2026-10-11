@@ -26,7 +26,7 @@ pytestmark = pytest.mark.live
 class TestOllama:
     def test_a_turn_streams_and_persists(self, live_app) -> None:  # type: ignore[no-untyped-def]
         live_app.play("Ответь одним словом: да или нет?")
-        chain = live_app.store.stories.get_messages(live_app.session.story_id)
+        chain = live_app.store.stories.get_messages(live_app.story_id)
         assert chain[0].role == "user"
         assert chain[1].role == "assistant"
         assert chain[1].body.strip()
@@ -36,7 +36,7 @@ class TestOllama:
         live_app.play("Я зажигаю факел и осматриваюсь.")
         live_app.play("/extract")
         out = capsys.readouterr().out
-        story_id = live_app.session.story_id
+        story_id = live_app.story_id
         ids = live_app.store.stories.get_messages_ids(story_id)
         if "closed" in out:  # the model produced parseable JSON
             assert live_app.store.scenes.get_current(story_id, ids)

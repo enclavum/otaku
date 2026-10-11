@@ -2,7 +2,7 @@
 /set parameter and the thinking level written by /set think, one entry
 per bare model name, and the ONE key a user writes by hand:
 `text_template`, the text template the text wire renders around the story,
-which no command sets. Rewritten wholesale on every change; the session carries the
+which no command sets. Rewritten wholesale on every change; the app carries the
 template line so a rewrite keeps it."""
 
 import tomllib
@@ -13,10 +13,10 @@ from otaku.settings import read_settings, write_atomic
 
 # The thinking level is the engine's own word for an effort, and which
 # words exist is the provider layer's (`providers.reasoning.EFFORT_LEVELS`),
-# read back against it by the session: this file only holds one. "unset"
+# read back against it by the app: this file only holds one. "unset"
 # is not a level but is saved like one: nothing is sent, and the engine
 # decides. A model with no think row starts OFF where the provider says
-# it thinks (`api.settings.default_think` writes the row as the model
+# it thinks (`App._make_current` writes the row as the model
 # becomes current), and has no row otherwise.
 THINK_UNSET = "unset"
 # The entry's two keys that are not inference parameters.

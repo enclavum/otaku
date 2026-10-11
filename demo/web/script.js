@@ -5,8 +5,6 @@
    visitor plays; regenerates get a genuinely different take, as they
    would from a model. */
 
-import * as store from "./store.js";
-
 // The continuations, in playing order. Each entry is one reply; `alt`
 // is what a regenerate answers instead, so "another take" shows a real
 // difference and not the same paragraph re-typed.
@@ -113,42 +111,11 @@ const SCENES = [
 
 let closed = 0;
 
-/** Close one scene over the turns played since the last close — the
-    shape of a real pass's report, on the demo's own memory. */
-export function extract() {
-  const memory = store.memoryOf(store.openId());
-  const turns = store.openTurns();
-  const covered = memory.scenes.length
-    ? Math.max(...memory.scenes.map((s) => Number(s.span.split("-")[1] || 0)))
-    : 0;
-  const fresh = turns.length - covered;
-  if (fresh < 4) return { report: "Nothing new since the last scene." };
+/** The next scene a pass closes — its title, summary, and the journal
+    entry and state each character gets; the store writes them in the
+    shape the real pass does (`store.startExtraction`). */
+export function nextScene() {
   const canned = SCENES[Math.min(closed, SCENES.length - 1)];
   closed += 1;
-  const first = covered + 1;
-  const last = turns.length - 2; // the settle margin: the tail stays open
-  const id = 1000 + closed;
-  /* One journal per character, held by BOTH sides the way the real
-     payload writes it twice — here it is the same object in both lists,
-     so a correction through either lens lands once. */
-  const journals = memory.characters.map((person) => ({
-    id: 2000 + closed * 10 + person.id,
-    scene: id,
-    character: person.id,
-    entry: canned.entry,
-    state: canned.state,
-  }));
-  memory.scenes.push({
-    id,
-    number: memory.scenes.length + 1,
-    span: `${first}-${last}`,
-    title: canned.title,
-    summary: canned.summary,
-    history: "",
-    updated_at: new Date().toISOString(),
-    present: memory.characters.map((c) => c.name),
-    journals,
-  });
-  memory.characters.forEach((person, i) => person.journals.push(journals[i]));
-  return { report: `Scene '${canned.title}' closed: ${journals.length} journal(s) written.` };
+  return canned;
 }

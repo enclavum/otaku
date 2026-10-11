@@ -77,13 +77,13 @@ class OmlxModels(OpenAIModels):
             kind = entry.get("model_type")
             if isinstance(kind, str) and kind and kind not in _LANGUAGE_MODELS:
                 continue
-            state, max_context_loaded = self._state_of(entry)
+            state, context_loaded = self._state_of(entry)
             models.append(
                 ModelInfo(
                     name=model_id,
                     size=positive_int(entry.get("estimated_size")),  # the weights, estimated
-                    max_context_catalogue=positive_int(entry.get("model_context_length")),
-                    max_context_loaded=max_context_loaded,
+                    context_length=positive_int(entry.get("model_context_length")),
+                    context_loaded=context_loaded,
                     capabilities=self._capabilities_of(entry),
                     state=state,
                     text_template=templates.family_of_config_type(entry.get("config_model_type")),
@@ -95,8 +95,8 @@ class OmlxModels(OpenAIModels):
         entry = _status_entry(http, self._config.base_url, name)
         if entry is None:
             return None
-        state, max_context_loaded = self._state_of(entry)
-        return ModelInfo(name=name, max_context_loaded=max_context_loaded, state=state)
+        state, context_loaded = self._state_of(entry)
+        return ModelInfo(name=name, context_loaded=context_loaded, state=state)
 
     # ---------- the native surface ----------
 

@@ -16,7 +16,6 @@ an open block a leading slash is an inliner's place, never a command's.
 from prompt_toolkit.completion import CompleteEvent, Completion
 from prompt_toolkit.document import Document
 
-from otaku.backend.session import PARAMETERS, THINK_MENU
 from otaku.terminal.prompt.completion import (
     CommandCompleter,
     InlinerCompleter,
@@ -204,15 +203,17 @@ class TestThinkMenu:
     """The /set think menu is what the model in use takes, looked up
     live through `levels` — nothing is offered past a level."""
 
-    def test_the_menu_is_what_the_session_answers(self) -> None:
+    def test_the_menu_is_what_the_model_answers(self) -> None:
         completer = SlashCompleter.build(levels=lambda: ("unset", "none", "low"))
         rows = list(completer.get_completions(Document("/set think "), CompleteEvent()))
         assert [r.text for r in rows] == ["unset", "none", "low"]
         rows = list(completer.get_completions(Document("/set think u"), CompleteEvent()))
         assert [r.text for r in rows] == ["unset"]
 
-    def test_without_a_session_the_whole_ladder_is_offered(self) -> None:
-        assert _offered("/set think ") == list(THINK_MENU)
+    def test_with_nothing_to_ask_nothing_is_offered(self) -> None:
+        # without a model, the backend answers what any model would take
+        # (`ModelSettings.choices`); a completer built bare asks nobody
+        assert _offered("/set think ") == []
 
     def test_nothing_follows_a_level(self) -> None:
         assert _offered("/set think high ") == []
@@ -222,15 +223,15 @@ class TestParameterMenu:
     """The /set parameter menu is what the provider in use reads, looked
     up live through `parameters` — each followed by its `reset`."""
 
-    def test_the_menu_is_what_the_session_answers(self) -> None:
+    def test_the_menu_is_what_the_model_answers(self) -> None:
         completer = SlashCompleter.build(parameters=lambda: ("temperature", "seed"))
         rows = list(completer.get_completions(Document("/set parameter "), CompleteEvent()))
         assert [r.text for r in rows] == ["temperature", "seed"]
         rows = list(completer.get_completions(Document("/set parameter seed "), CompleteEvent()))
         assert [r.text for r in rows] == ["reset"]
 
-    def test_without_a_session_every_parameter_is_offered(self) -> None:
-        assert _offered("/set parameter ") == list(PARAMETERS)
+    def test_with_nothing_to_ask_nothing_is_offered(self) -> None:
+        assert _offered("/set parameter ") == []
 
 
 class TestModeMenu:

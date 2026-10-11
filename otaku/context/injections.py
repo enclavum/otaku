@@ -6,7 +6,7 @@ appended to the system message (`inject_into_system`), or given a row
 of its own before one of the reader's messages (`inject_into_tail`) — a
 synthesized user row, wire-only as a recap row is, which the
 assembler's one merge then joins to its neighbour. Who makes one is
-above this package (a story's settings, `backend.story`; later a
+above this package (a story's settings, `backend.domain.story.settings`; later a
 lorebook), and the assembler is handed them built. WHEN they go in, and
 what they cost the budget, is the assembler's.
 """

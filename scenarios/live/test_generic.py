@@ -12,7 +12,6 @@ from pathlib import Path
 
 import pytest
 
-from otaku.backend.api import providers as api_providers
 from otaku.providers.clients.omlx import OmlxClient
 from otaku.settings.providers import ProviderConfig
 from scenarios.support.live import case_key, case_model
@@ -73,16 +72,16 @@ class TestGeneric:
             tmp_path, server, ProviderConfig(name="generic", url=url, api_key=key), model
         )
         try:
-            panel = api_providers.get_providers(app.session)
+            panel = app.api.providers.list()
             assert "generic" in panel.reachable
-            generic = next(r for r in panel.rows if r.id == "generic")
+            generic = next(r for r in panel.providers if r.id == "generic")
             # The listing is the protocol's: non-empty is the promise. The
             # named model need not appear in it — a catalog's bare listing
             # is not its detailed one, and Ollama lists `name:tag` — the
             # turn below is what proves the model.
             assert generic.models
             app.play("Reply with one word: ready?")
-            chain = app.store.stories.get_messages(app.session.story_id)
+            chain = app.store.stories.get_messages(app.story_id)
             assert chain[1].role == "assistant"
             assert chain[1].body.strip()
         finally:

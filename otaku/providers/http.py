@@ -8,7 +8,7 @@ provider's name, for a failure's sentence, and the headers every
 request carries, composed once by the auth — the key in force is fixed
 for a client's life, a changed section rebuilding the client. It holds
 no state and is shared: the picker's fan-out
-and the session's turn use one at the same time. What a SEQUENCE of
+and the app's turn use one at the same time. What a SEQUENCE of
 calls needs — one budget over llama.cpp's two reads or KoboldCpp's
 five, rather than the full timeout for each, and one purpose to file a
 failure under — is a `within` view: a copy under one deadline and one

@@ -6,15 +6,15 @@ entries only when asked, directories with a trailing `/`; `split` and
 `matches` are the pure core).
 
 A line that STARTS with a slash walks the command tree (specs and
-descriptions from `backend.commands`, the terminal's completion shapes —
+descriptions from `commands`, the terminal's completion shapes —
 path arguments behind `@`, cast names per command — bound here); a slash
 token typed INSIDE a played line offers the inliners (their rows come
-from `backend.commands` like every other's). On ordinary prose both stay
+from the same table). On ordinary prose both stay
 silent — the two surfaces are mutually exclusive by construction:
 `applies` asks the same question from opposite sides, so the menu never
-pops mid-sentence. The cast menu reads `api.lore.cast` through the
-callable the prompt passes — cheap and empty-safe, fit for a
-per-keystroke call.
+pops mid-sentence. The cast menu reads the story's characters
+(`api.stories.characters`) through the callable the prompt passes —
+cheap and empty-safe, fit for a per-keystroke call.
 """
 
 import re
@@ -25,8 +25,7 @@ from typing import Any, Self
 from prompt_toolkit.completion import CompleteEvent, Completer, Completion
 from prompt_toolkit.document import Document
 
-from otaku.backend.commands import COMMANDS, CommandSpec, CommandType
-from otaku.backend.session import PARAMETERS, THINK_MENU
+from otaku.terminal.commands import COMMANDS, CommandSpec, CommandType
 from otaku.terminal.prompt import pictures
 from otaku.terminal.tty import latin_key
 
@@ -57,7 +56,7 @@ NAME_LEAF = "<name>"
 THINK_LEAF = "<level>"
 
 # And PARAMETER_LEAF: "a /set parameter goes here" — the ones the
-# provider in use reads, looked up live (`api.settings.parameter_names`),
+# provider in use reads, looked up live (`api.providers.models.settings.get`),
 # each followed by its `reset`.
 PARAMETER_LEAF = "<parameter>"
 
@@ -88,7 +87,7 @@ class _Surface(Completer):
     two questions about the line alone: whether it is the surface in
     play, and which token is being completed on it — empty when a menu
     belongs here with nothing typed into it yet — and one about the
-    session: whether it may open at all right now."""
+    app: whether it may open at all right now."""
 
     def is_open(self) -> bool:
         return True
@@ -121,9 +120,9 @@ class CommandCompleter(_Surface):
         # rows for the commands whose argument is a character.
         self.cast = cast or (lambda: ())
         # What /set think and /set parameter take on the model in use,
-        # looked up live — the whole vocabulary with no session to ask.
-        self.levels = levels or (lambda: THINK_MENU)
-        self.parameters = parameters or (lambda: tuple(PARAMETERS))
+        # looked up live — nothing offered with no app to ask.
+        self.levels = levels or (lambda: ())
+        self.parameters = parameters or (lambda: ())
         self.shortcuts: dict[str, str] = {}
 
     @staticmethod
@@ -187,7 +186,7 @@ class CommandCompleter(_Surface):
         yield from _rows(menu, self.partial(text), tuple(path), self.shortcuts)
 
     def _expanded(self, node: Any) -> Any:
-        """A leaf that asks the session, expanded to the menu it stands
+        """A leaf that asks the app, expanded to the menu it stands
         for the moment the walk steps onto it — so what follows (a
         parameter's `reset`) is walked like any node."""
         if node == THINK_LEAF:
@@ -286,7 +285,7 @@ class SlashCompleter(Completer):
         /set think and /set parameter take on the model in use, likewise;
         `pictures_accepted` whether a picture would be taken, which is when the picture
         menu may open (never, by default). `shortcuts` (token → caption,
-        from `chat.bindings.SHORTCUTS` as data) fills the menu's key
+        from `commands.SHORTCUTS` as data) fills the menu's key
         column."""
         command = CommandCompleter(_completion_tree(), cast, levels, parameters)
         command.shortcuts = shortcuts or {}
@@ -315,11 +314,11 @@ class SlashCompleter(Completer):
         return None
 
 
-# ---------- the menus off the shared table ----------
+# ---------- the menus off the command table ----------
 
 
 def _completion_tree() -> CompletionTree:
-    """The slash-completion tree over `backend.commands.COMMANDS`: one
+    """The slash-completion tree over `commands.COMMANDS`: one
     top-level key per line-opening row (the SYNTAX directions included —
     typed like commands, discoverable like them), the /set family nested
     by its second word, and this module's own shapes at the leaves."""
@@ -361,7 +360,7 @@ def _subcommand_leaf(name: str) -> "CompletionTree | str | None":
 
 
 def _inliner_menu() -> dict[str, str]:
-    """The mid-line menu: every inliner row of the shared table, keyed by
+    """The mid-line menu: every inliner row of the command table, keyed by
     its bare token — a table row is written behind a `…`, so `/ooc`
     inside a line and `/ooc` opening one keep their separate meanings
     without colliding."""

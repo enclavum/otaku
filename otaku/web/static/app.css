@@ -600,7 +600,7 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 
 /* =============================================================================
    TRANSCRIPT LAYOUTS — the same turns, read three ways. Only the flow's
-   `data-transcript` changes (`layout.js`); no markup moves, and every turn
+   `data-transcript` changes (`shell.js`); no markup moves, and every turn
    keeps its rubric whether or not the layout shows it. The manuscript is
    the rules above; the two below are laid over them. The question, notes
    and thinking blocks keep their one look in all three until each layout's
@@ -950,7 +950,7 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 .otk-gap { flex: none; width: 100%; }
 
 /* which layout the transcript is read in — three glyphs above the status
-   line, the one in force pressed (`layout.js`) */
+   line, the one in force pressed (`shell.js`) */
 .otk-modes {
   flex: none; display: flex; align-items: center; gap: 4px;
   margin: 0 30px; padding: 10px 0 8px;

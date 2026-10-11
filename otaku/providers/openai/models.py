@@ -102,10 +102,10 @@ class ModelInfo:
 
     name: str
     size: int | None = None  # bytes on disk; local engines only
-    max_context_catalogue: int | None = None  # the model's own max context
+    context_length: int | None = None  # the model's own maximum
     # What the loaded instance serves — or, on an engine that loads on
     # demand under a cap it states beforehand (omlx), what a request gets.
-    max_context_loaded: int | None = None
+    context_loaded: int | None = None
     # The most a reply may run, where a catalog states it (OpenRouter's
     # top_provider.max_completion_tokens); the local engines set none.
     max_output_tokens: int | None = None
@@ -120,14 +120,14 @@ class ModelInfo:
     text_template: str | None = None
 
     @property
-    def max_context(self) -> int | None:
+    def context_window(self) -> int | None:
         """What a request gets: the loaded instance's context size (the
         cap a request would load under, where the engine states one), or
         the model's own where loading is not a thing (a catalog). None
         for a model not loaded, or not known."""
-        if self.max_context_loaded is not None:
-            return self.max_context_loaded
-        return self.max_context_catalogue if self.state is ModelState.UNKNOWN else None
+        if self.context_loaded is not None:
+            return self.context_loaded
+        return self.context_length if self.state is ModelState.UNKNOWN else None
 
 
 # Named at module level, where `list` is still the builtin: the class
@@ -154,7 +154,7 @@ class OpenAIModels:
         # facts into the next one; `get` serves the cached entry with
         # the engine's word merged over it. The lock covers each read
         # and write, never a call to the engine: the picker's fan-out
-        # and the session's turn share one client.
+        # and the app's turn share one client.
         self._cached_models: dict[str, ModelInfo] = {}
         self._lock = threading.Lock()
 
@@ -298,7 +298,7 @@ class OpenAIModels:
         return replace(
             fresh,
             size=fresh.size or cached.size,
-            max_context_catalogue=fresh.max_context_catalogue or cached.max_context_catalogue,
+            context_length=fresh.context_length or cached.context_length,
             max_output_tokens=fresh.max_output_tokens or cached.max_output_tokens,
             capabilities=fresh.capabilities or cached.capabilities,
             locality=fresh.locality or cached.locality,
@@ -330,9 +330,9 @@ class OpenAIModels:
             meta = meta if isinstance(meta, dict) else {}
             model = ModelInfo(
                 str(listed["id"]),
-                max_context_catalogue=positive_int(listed.get("context_length"))
+                context_length=positive_int(listed.get("context_length"))
                 or positive_int(meta.get("n_ctx_train")),
-                max_context_loaded=positive_int(listed.get("max_model_len"))
+                context_loaded=positive_int(listed.get("max_model_len"))
                 or positive_int(meta.get("n_ctx")),
             )
             models.append(self._decode(listed, model))

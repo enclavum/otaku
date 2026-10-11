@@ -1,4 +1,4 @@
-/* The page over an open session: what it asks for at boot, and every
+/* The page over the story it plays: what it asks for at boot, and every
    DOM listener it ever registers — both in one place, so "what is wired
    when this loads?" is answered by reading one function.
 
@@ -14,48 +14,52 @@
      shut the whole popup. So `cancel` is refused and Esc is routed here.
    - Bodies arrive verbatim. Nothing on this side rewrites the text. */
 
-import * as api from "./js/api.js";
-import { closeAll } from "./js/browser.js";
+import { api, login, whenUnauthorized } from "./js/api/index.js";
+import { closeAll } from "./js/kit/browser.js";
 import { editTurn, keepsScreen, openTab, run as runCommand } from "./js/commands.js";
-import { showSignOut, signIn, signOut } from "./js/login.js";
+import { showSignOut, signIn, signOut } from "./js/screens/login.js";
 import { draft, focusComposer, primeHistory, submit, wire as wireComposer } from "./js/composer.js";
-import { $, $$, watchTextareas } from "./js/dom.js";
-import { wireLayout } from "./js/layout.js";
+import { $, $$, watchTextareas } from "./js/kit/dom.js";
+import * as held from "./js/play/held.js";
 import {
   disconnected,
   drawPlayed,
+  facts,
   landed,
   showContextUse,
   showFacts,
+  watchForChanges,
   watchServer,
   wireFullscreen,
+  wireLayout,
   wireTheme,
-} from "./js/shell.js";
-import { load as loadTable } from "./js/table.js";
-import { whenEdited } from "./js/transcript.js";
-import { watchForChanges } from "./js/watch.js";
+} from "./js/play/shell.js";
+import { load as loadLanguage } from "./js/play/language.js";
+import { whenEdited } from "./js/play/transcript.js";
 
 async function boot() {
   try {
     /* Before anything is drawn: a password asked for and this browser
        not through it means the dialog comes first, rather than four
        reads refused in the background. A cookie that runs out LATER is
-       caught at the request it refuses (`api.whenUnauthorized`). */
-    const login = await api.loginState();
-    showSignOut(login.required);
+       caught at the request it refuses (`whenUnauthorized`). */
+    const signing = await login.get();
+    showSignOut(signing.required);
     // The dialog opens as `signIn` is called, so it is already in front
     // when the shell is shown behind it.
-    const signingIn = login.required && !login.signed_in ? signIn() : null;
+    const signingIn = signing.required && !signing.signed_in ? signIn() : null;
     shown();
     if (signingIn) await signingIn;
-    const [facts, language, history] = await Promise.all([
-      api.facts(),
-      api.syntax(),
-      api.history(),
+    // the story a launch resumes — this page plays it until it lands in another
+    await held.resume();
+    const [read, language, history] = await Promise.all([
+      facts(),
+      api.language.get(),
+      api.history.list(),
     ]);
-    loadTable(language);
-    showFacts(facts);
-    await Promise.all([drawPlayed(facts.story_id), showContextUse()]);
+    loadLanguage(language);
+    showFacts(read);
+    await Promise.all([drawPlayed(read.story_id), showContextUse()]);
     primeHistory(history);
     disconnected(false);
   } catch {
@@ -70,7 +74,7 @@ function shown() {
 }
 
 function start() {
-  api.whenUnauthorized(signIn);
+  whenUnauthorized(signIn);
   // the transcript draws a turn as an editor and hands the write here
   whenEdited(editTurn);
   wireComposer();
@@ -92,7 +96,7 @@ function start() {
   watchForChanges();
   /* The heartbeat and the connected mark, both directions — the page
      finds out that otaku stopped, and that it is back, in which case
-     `boot` runs again: a restarted otaku may be open on another story. */
+     `boot` runs again: a restarted otaku may resume another story. */
   watchServer(boot);
 
   // Every command button, wherever it is: the contents, a panel's
@@ -131,7 +135,7 @@ function start() {
       toggleRail();
       return;
     }
-    // A layout taken (`layout.wireLayout` writes it): the story is read
+    // A layout taken (`shell.wireLayout` writes it): the story is read
     // another way, and the next line is still typed — the caret comes
     // back to the box.
     if (event.target.closest("[data-transcript-mode]")) {

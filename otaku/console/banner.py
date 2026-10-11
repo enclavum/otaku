@@ -1,6 +1,6 @@
-"""The banner: what a session opens with in the shell that started it —
+"""The banner: what a frontend opens with in the shell that started it —
 the mark beside three lines for a chat, where the page is for a served
-session. Each ends on a blank row, which is what separates it from
+app. Each ends on a blank row, which is what separates it from
 whatever is printed under it. The mark is the one thing in colour; the
 lines are the terminal's own text, dimmed but for what a reader looks
 for — the name, the address, a warning.
@@ -29,18 +29,18 @@ _MARK = """
 
 
 @dataclass(frozen=True)
-class SessionFacts:
+class AppFacts:
     """What a chat banner states, as its caller reads them off the
-    session it is opening — arriving ready to print: the banner draws
+    app it is opening — arriving ready to print: the banner draws
     them and nothing else, and asks no store and no provider anything."""
 
     model: str  # "(no model)" when none
     provider: str  # the provider serving it; "" when none
-    max_context: int | None  # the context the model gets, when a LOCAL provider answers
+    context_window: int | None  # what a request gets on the model, when a LOCAL provider answers
 
 
 class WebFacts(Protocol):
-    """Where a served session listens and what it asks of whoever
+    """Where a served app listens and what it asks of whoever
     reaches it — the `[web]` settings slice, as its caller hands it
     over. A protocol rather than the type: `console` imports nothing
     above it, so it names the fields it reads and no more."""
@@ -77,14 +77,14 @@ _COLOUR = _Style(
 _PLAIN = _Style()
 
 
-def render_terminal(facts: SessionFacts) -> str:
-    """The banner a chat session opens with: the mark, and beside it the
+def render_terminal(facts: AppFacts) -> str:
+    """The banner the chat opens with: the mark, and beside it the
     name, the model with the context it gets, and the provider serving
     it — then where the commands are, which the prompt does not say."""
     style = _style()
     model = facts.model
-    if facts.max_context:
-        model += f" · {format_context(facts.max_context)} context"
+    if facts.context_window:
+        model += f" · {format_context(facts.context_window)} context"
     last = " · ".join(part for part in (facts.provider, "/help for commands") if part)
     said = [
         _name(style),
@@ -101,7 +101,7 @@ def render_terminal(facts: SessionFacts) -> str:
 
 
 def render_web(where: WebFacts) -> str:
-    """What a served session opens with, said the way a server says it:
+    """What a served app opens with, said the way a server says it:
     the name, where the page is and how to quit — no mark, and the model
     and the story are on the page itself. After the address, that a
     password is set; under it, on a host that reaches past this machine

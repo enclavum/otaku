@@ -23,14 +23,16 @@ class TestRender:
     def test_a_family_without_a_system_role_puts_the_premise_in_a_user_turn(self) -> None:
         rendered = TEXT_TEMPLATES["gemma"].render("Be brief.", "Once")
         assert rendered == (
-            "<bos><start_of_turn>user\nBe brief.<end_of_turn>\n<start_of_turn>model\nOnce"
+            "<start_of_turn>user\nBe brief.<end_of_turn>\n<start_of_turn>model\nOnce"
         )
 
     def test_an_empty_premise_leaves_no_turn_before_the_story(self) -> None:
         assert TEXT_TEMPLATES["chatml"].render("  \n", "Once") == "<|im_start|>assistant\nOnce"
 
-    def test_bos_is_spelled_only_where_the_family_says(self) -> None:
-        assert TEXT_TEMPLATES["llama3"].render("", "Once").startswith("<|begin_of_text|>")
+    def test_bos_is_spelled_only_where_the_tokenizer_adds_none(self) -> None:
+        assert TEXT_TEMPLATES["gemma4"].render("", "Once").startswith("<bos>")
+        assert TEXT_TEMPLATES["llama3"].render("", "Once").startswith("<|start_header_id|>")
+        assert TEXT_TEMPLATES["mistral-tekken"].render("Be brief.", "Once").startswith("[INST]")
         assert TEXT_TEMPLATES["chatml"].render("", "Once").startswith("<|im_start|>")
 
     def test_plain_is_the_bare_text(self) -> None:

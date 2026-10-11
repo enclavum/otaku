@@ -8,7 +8,7 @@ bytes go with the turn. A token that names nothing stays as typed —
 "@Mara" is prose. The token runs to the next whitespace, a space inside
 a path escaped `\\ `, which is what the completion menu inserts. The
 stored body never holds the token. Whether the model can see is the
-backend's decision (`play.submit` refuses when it cannot); this module
+backend's decision (the line played is refused when it cannot); this module
 only reads files. In a COMMAND line `@` keeps its old meaning, a
 completion trigger, and this module is never asked.
 """
@@ -17,7 +17,7 @@ import re
 from collections.abc import Callable
 from pathlib import Path
 
-from otaku.backend.files import RawFile
+from otaku.terminal.api.story.messages import RawFile
 
 SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"})
 # An `@` that opens a token (nothing but whitespace before it), then the

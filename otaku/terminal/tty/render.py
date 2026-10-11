@@ -5,19 +5,19 @@ after them in dim brackets; a reply is typeset the way it streamed —
 one or the other, never both: they are counterparts, not layers. The
 reply goes through the very typesetter it arrived on, run to the end
 in one pass, so a turn echoed on resume is the same text that was on
-screen when it played. The vocabulary comes from `backend.commands`, so
-what counts as a command is never guessed from a slash.
+screen when it played. The vocabulary is the terminal's table
+(`commands`, the language's rows among its own), so what counts
+as a command is never guessed from a slash.
 
 A reply's tool calls are drawn as what they are, never as their tags,
 each a BLOCK of its own in the flow — a blank line before it, one after
 it where prose goes on (`spaced`), a bar opening every row, the text
 wrapped at the width and plain (`BlockStream`), streamed piece by piece
 and echoed through the same object — a question or a note only while
-the story shows its tool (`shown_tools`, the caller's to read off the
-story's settings and pass), otherwise left out, fences and all, as the
-wire leaves it out. A question is the question alone (`QuestionStream`)
-— its answers are the prompt's menu while the story stands on it
-(`asked`, the page's `transcript.questionPosed` rule copied), and are
+the story shows its tool (`Story.shown_tools`, the caller's to pass),
+otherwise left out, fences and all, as the wire leaves it out. A
+question is the question alone (`QuestionStream`) — its answers are the
+prompt's menu while the story stands on it (`Story.question`), and are
 gone with the menu once answered; a note is dim, bar and all. Every
 other call still prints as it streamed, fences and all, until its look
 is decided.
@@ -25,17 +25,17 @@ is decided.
 
 import io
 import re
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import TextIO
 
 from prompt_toolkit.utils import get_cwidth
 
-from otaku.backend import Message
-from otaku.backend.api import play as api_play
-from otaku.backend.commands import COMMANDS, spans
-from otaku.backend.story import StorySettingAssistantNotes, StorySettingQuestions, StorySettings
-from otaku.backend.tools import ToolQuestion, get_tool_label
 from otaku.formatting import printable
+from otaku.terminal.api import JoinType
+from otaku.terminal.api.story.language import is_option, spans
+from otaku.terminal.api.story.messages import Message
+from otaku.terminal.commands import COMMANDS
 from otaku.terminal.tty import DIM, user_block
 from otaku.terminal.tty.cursor import terminal_width
 from otaku.terminal.tty.theme import theme
@@ -161,10 +161,10 @@ class QuestionStream(BlockStream):
     alone, as a block — its answers are the prompt's menu while the
     story stands on it, not text in the flow, so what stays in the
     scrollback is what a past question shows. The question is the lines
-    before the first option, as the tool reads it (`ToolQuestion`), and
-    that is decided line by line as the call streams: a line whose first
-    token is an option's head (`1.`, `a)`) is held until its end tells
-    (`ToolQuestion.is_option`), and once a line is an option, it and
+    before the first option, as the tool reads it, and that is decided
+    line by line as the call streams: a line whose first token is an
+    option's head (`1.`, `a)`) is held until its end tells
+    (`language.is_option`), and once a line is an option, it and
     everything after it is dropped; every other line streams word by
     word."""
 
@@ -182,7 +182,7 @@ class QuestionStream(BlockStream):
 
     def close(self) -> str:
         held = ""
-        if not self._options and not self._decided and not ToolQuestion.is_option(self._line):
+        if not self._options and not self._decided and not is_option(self._line):
             held = self._pass(self._line)  # a last line without its newline, the question's
         self._line = ""
         self._out.write(held)
@@ -194,7 +194,7 @@ class QuestionStream(BlockStream):
         if ch == "\n":
             out = ""
             if not self._decided:
-                if ToolQuestion.is_option(self._line):
+                if is_option(self._line):
                     self._options = True
                     return ""
                 out = self._pass(self._line)
@@ -205,11 +205,7 @@ class QuestionStream(BlockStream):
         self._line += ch
         # At the first token's end, the line tells: an option's head keeps
         # it held to its newline; anything else is the question's, and flows.
-        if (
-            ch.isspace()
-            and self._line.strip()
-            and not ToolQuestion.is_option(self._line.strip() + " x")
-        ):
+        if ch.isspace() and self._line.strip() and not is_option(self._line.strip() + " x"):
             self._decided = True
             return self._pass(self._line)
         return ""
@@ -222,6 +218,7 @@ def message(
     text: str,
     role: str,
     *,
+    segments: Sequence[Mapping[str, object]] | None = None,
     pictures: int = 0,
     shown: frozenset[str] = frozenset(),
     width: int | None = None,
@@ -236,9 +233,11 @@ def message(
     `shown` holds its tool (`shown_tools`), else left out — blocks behind the bar,
     wrapped at `width`, the terminal's unless the caller draws into a
     narrower place. In story mode's one text (`story`) a call of a tool
-    this build does not know is left out too. Takes no settings besides that — the
-    user's colors reached the theme at launch, so a caller only has to
-    say WHAT it is drawing.
+    this build does not know is left out too. A reply is drawn from its
+    `segments`, its body as the backend split it (`Message.segments`); None
+    draws `text` as prose alone — a cut of a body, which no split
+    matches. Takes no settings besides that — the user's colors reached
+    the theme at launch, so a caller only has to say WHAT it is drawing.
     The one renderer for showing AND measuring, so the ledger can never
     disagree with an echo."""
     if role == "user":
@@ -270,7 +269,7 @@ def message(
         return out.getvalue()
     fed = ""
     after_call = False  # a call's block was drawn last: prose going on is set apart
-    for segment in api_play.segments(text):
+    for segment in segments if segments is not None else ({"kind": "prose", "text": text},):
         piece = str(segment["text"])
         if segment["kind"] == "prose":
             if after_call:
@@ -354,43 +353,6 @@ def _columns(text: str) -> int:
     return sum(max(0, get_cwidth(ch)) for ch in text)
 
 
-def shown_tools(settings: StorySettings) -> frozenset[str]:
-    """The tools whose calls the reader is shown: a question while its
-    tool is on — off, a tool does not exist for the model, and the
-    reader sees what the model reads — and the notes while theirs is on
-    with its display switch. The page's `transcript.displayTools`, the
-    rule copied."""
-    shown: set[str] = set()
-    questions = settings.get(StorySettingQuestions.name)
-    if questions is not None and questions.enabled:
-        shown.add("question")
-    notes = settings.get(StorySettingAssistantNotes.name)
-    if notes is not None and notes.enabled and notes.display_notes:
-        shown.add("note")
-    return frozenset(shown)
-
-
-def asked(newest: Message | None, shown: frozenset[str]) -> ToolQuestion | None:
-    """The question the story stands on, read: the questions tool is on
-    (`shown`), and the newest message is a reply whose last call is a
-    question, with nothing after it but notes and whitespace — prose, or
-    a call of a tool this build does not know, means the model went on
-    past it; a line played since means it was answered. The page's
-    `transcript.questionPosed`, the rule copied."""
-    if newest is None or newest.role != "assistant" or "question" not in shown:
-        return None
-    for segment in reversed(api_play.segments(newest.body)):
-        if segment["kind"] == "prose":
-            if str(segment["text"]).strip():
-                return None
-            continue
-        if segment["tool"] == "question":
-            return ToolQuestion(str(segment["text"]))
-        if segment["tool"] != "note":
-            return None
-    return None
-
-
 def pictures_note(count: int) -> str:
     """The note's plain text — `[ 1 picture ]` — for a caller that
     measures a row before styling it; "" for none."""
@@ -408,22 +370,52 @@ def turn(item: Message, *, shown: frozenset[str] = frozenset(), story: bool = Fa
     body = item.body.strip()
     if item.role == "user":
         return user_block(message(body, "user", pictures=len(item.attachments)))
-    label = get_tool_label(item.provider, item.body) if item.role == "tool" else ""
-    return "\n".join(message(body, item.role, shown=shown, label=label, story=story).splitlines())
+    drawn = message(
+        body,
+        item.role,
+        segments=_trimmed(item.segments),
+        shown=shown,
+        label=item.tool_label or "",
+        story=story,
+    )
+    return "\n".join(drawn.splitlines())
+
+
+def _trimmed(segments: Sequence[Mapping[str, object]]) -> list[Mapping[str, object]]:
+    """A body's segments with the whitespace at its two edges dropped, as
+    the stripped body would split: the edge prose trimmed, and gone where
+    nothing is left of it."""
+    out = list(segments)
+    while out and out[0]["kind"] == "prose":
+        text = str(out[0]["text"]).lstrip()
+        if text:
+            out[0] = {**out[0], "text": text}
+            break
+        out.pop(0)
+    while out and out[-1]["kind"] == "prose":
+        text = str(out[-1]["text"]).rstrip()
+        if text:
+            out[-1] = {**out[-1], "text": text}
+            break
+        out.pop()
+    return out
 
 
 def last_turns(
-    messages: list[Message],
+    messages: Sequence[Message],
     count: int,
     *,
     shown: frozenset[str] = frozenset(),
     is_story_mode: bool = False,
+    posed: bool = False,
 ) -> str:
     """The last `count` turns, echoed the way they played: one blank line
     between turns, bodies verbatim, the calls of the tools `shown` —
-    or, in story mode (`is_story_mode`), as the one text they are (`flow`)."""
+    or, in story mode (`is_story_mode`), as the one text they are
+    (`flow`), the question the newest turn asked drawn where the story
+    stands on it (`posed`)."""
     if is_story_mode:
-        return flow(messages[-count:], shown=shown)
+        return flow(messages[-count:], shown=shown, posed=posed)
     out: list[str] = []
     for item in messages[-count:]:
         out.append("")
@@ -431,28 +423,27 @@ def last_turns(
     return "\n".join(out).lstrip("\n")
 
 
-def unit_start(items: list[Message], end: int) -> int:
-    """Where the reply ending at `items[end - 1]` begins as ONE unit: the
-    reply, and where a tool turn stands right before it, that turn and
-    the reply holding its call, again and again — what /undo and /regen
-    take (`Session._pop_reply`, the rule copied)."""
-    at = end - 1
-    while at > 0 and (items[at].role == "tool" or items[at - 1].role == "tool"):
-        at -= 1
-    return at
+def unit_start(items: Sequence[Message], end: int) -> int:
+    """Where the reply ending at `items[end - 1]` begins as ONE unit —
+    what /undo and /regen take: the turn its `unit` names, found among
+    `items` (the turn itself where `items` starts after it)."""
+    unit = items[end - 1].unit
+    return next((at for at in range(end - 1, -1, -1) if items[at].id == unit), end - 1)
 
 
-def flow(items: list[Message], *, shown: frozenset[str] = frozenset()) -> str:
+def flow(
+    items: Sequence[Message], *, shown: frozenset[str] = frozenset(), posed: bool = False
+) -> str:
     """The turns as ONE text — the canvas's echo in this medium: a user
     row as prose, no block, typeset as the text is; every row joined to
-    the text before it as `api.play.join_type` says — a paragraph after
+    the text before it as its `join_type` says — a paragraph after
     one blank line, an inline row after one space; no tool's block drawn
     (`flow_offsets`). No trailing newline, like `turn`."""
-    return flow_offsets(items, shown=shown)[0]
+    return flow_offsets(items, shown=shown, posed=posed)[0]
 
 
 def flow_offsets(
-    items: list[Message], *, shown: frozenset[str] = frozenset()
+    items: Sequence[Message], *, shown: frozenset[str] = frozenset(), posed: bool = False
 ) -> tuple[str, list[int]]:
     """`flow`'s text, and where each turn's own text begins in it — a
     paragraph join's blank counted with the turn BEFORE it — so the
@@ -463,25 +454,23 @@ def flow_offsets(
     its join says: on, in story mode, the paragraph the call interrupted."""
     out = ""
     starts: list[int] = []
-    previous: Message | None = None
     for index, item in enumerate(items):
         if item.role == "tool":
             # the result is the model's to read: nothing drawn, its place
             # in the text kept for the turn after it to join from
             starts.append(len(out))
-            previous = item
             continue
         # the spaces at a row's edges decide nothing: the join draws its own
         body = replace(item, body=item.body.strip(" \t"))
         # a past question is no part of the one text — its answer stands
         # there as the reader's line; the one the story stands on is drawn
-        posed = index == len(items) - 1 and asked(item, shown) is not None
-        seen = shown & {"question"} if posed else frozenset()
+        newest = posed and index == len(items) - 1
+        seen = shown & {"question"} if newest else frozenset()
         piece = prose(body.body) if item.role == "user" else turn(body, shown=seen, story=True)
         if not out:
             starts.append(0)
             out = piece
-        elif api_play.join_type(previous, item) == "paragraph":
+        elif item.join_type is JoinType.PARAGRAPH:
             out = out.rstrip("\n") + "\n\n"
             starts.append(len(out))
             out += piece.lstrip("\n")
@@ -489,7 +478,6 @@ def flow_offsets(
             # the space is the turn's, so an erase of it takes the join too
             starts.append(len(out))
             out += " " + piece
-        previous = item
     return out, starts
 
 
@@ -508,7 +496,7 @@ def typeset_line(streamer: Streamer, text: str) -> None:
     a reply's prose is, through `streamer` — the reply's own, live, so a
     quote it opens and the reply closes reads as one — its commands
     picked out as chat mode picks them out, and its words with the model
-    dim (`commands.spans`), both beside the typesetting (`Streamer.aside`):
+    dim (`language.spans`), both beside the typesetting (`Streamer.aside`):
     neither is story. The breaks at its edges are the streamer's, the
     joins they draw collapsing as ever."""
     core = text.strip("\n")

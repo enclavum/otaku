@@ -1,6 +1,6 @@
 """Story browser — opened by `/stories`.
 
-The story list in front of the dossier (`screens.story`): one
+The story list in front of the dossier (`screens.dossier`): one
 Application, so drilling in and backing out are flicker-free. The list
 is the level the dossier cannot be — every story at once — and Enter
 opens the highlighted one as the four-tab dossier, on its messages
@@ -11,7 +11,7 @@ Enter); Esc there reveals the list as it was left, filter and all.
 A row's label is the story's title, else its newest story-so-far
 rollup, else its first prompt. `/` filters; the filter also matches
 full message content, indexed lazily on the first keystroke — the ONE
-rule both frontends promise (`api.stories.search`). Del deletes a story
+rule both frontends promise (`api.stories.list`). Del deletes a story
 after a confirm; every write is EXECUTED inside the screen through
 `backend.api` (the screens' one ownership rule), and a landing rides
 `result` for the caller to print.
@@ -28,29 +28,28 @@ from prompt_toolkit.layout.containers import AnyContainer, ConditionalContainer
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.dimension import D
 
-from otaku.backend import StoryListing
-from otaku.backend.api import stories as api_stories
-from otaku.backend.session import Session
 from otaku.formatting import flatten, human_age, truncate
+from otaku.terminal.api import Api
+from otaku.terminal.api.story.stories import StorySummary
 from otaku.terminal.screens.base import bordered_box, wrap_text
-from otaku.terminal.screens.story import Dossier
+from otaku.terminal.screens.dossier import Dossier
 from otaku.terminal.tty import latin_key
 
 
 class StoryPicker(Dossier):
-    def __init__(self, session: Session) -> None:
-        super().__init__(session)
-        rows = api_stories.listing(session)
-        self.all: list[StoryListing] = list(rows)
-        self.filtered: list[StoryListing] = list(rows)
+    def __init__(self, api: Api, played: int | None) -> None:
+        super().__init__(api)
+        rows = api.stories.list()
+        self.all: list[StorySummary] = list(rows)
+        self.filtered: list[StorySummary] = list(rows)
         # The list's cursor and filter, stashed while the dossier is in
         # front; Esc restores them verbatim on the way back.
         self._list_state: tuple[int, bool, str] = (0, False, "")
         self.confirming_delete: bool = False
-        # Where the browser opens: on the loaded story.
-        if session.story_id is not None:
+        # Where the browser opens: on the story played.
+        if played is not None:
             for i, row in enumerate(self.all):
-                if row.id == session.story_id:
+                if row.id == played:
                     self.cursor = i
                     break
 
@@ -79,7 +78,7 @@ class StoryPicker(Dossier):
         for i, listing in enumerate(self.filtered):
             ts = listing.updated_at.astimezone().strftime("%m-%d %H:%M")
             head = truncate(flatten(listing.label), max(10, avail))
-            line = f"{ts} · {listing.num_messages:>4} msg · {head}"
+            line = f"{ts} · {listing.message_count:>4} msg · {head}"
             self._emit_row(out, i == self.cursor, line)
         return out
 
@@ -117,10 +116,10 @@ class StoryPicker(Dossier):
             out.append(("class:preview.body", "\n"))
             for line in wrap_text(row.story_so_far, width):
                 out.append(("class:preview.body", line + "\n"))
-        if row.first_user:
+        if row.first_message:
             out.append(("class:preview.body", "\n"))
             out.append(("class:preview.muted", "first prompt:\n"))
-            for line in wrap_text(flatten(row.first_user), width):
+            for line in wrap_text(flatten(row.first_message), width):
                 out.append(("class:preview.body", line + "\n"))
         return out
 
@@ -169,12 +168,12 @@ class StoryPicker(Dossier):
             self.filtered = list(self.all)
         else:
             # The whole filter rule lives below both frontends
-            # (api.stories.search): buried content OR the row's own
+            # (api.stories.list): buried content OR the row's own
             # face — so this browser and the page can never find
             # different stories. Cheap per keystroke (the content index
-            # is session-held), and the corpus never crosses the
+            # is app-held), and the corpus never crosses the
             # boundary.
-            found = set(api_stories.search(self.session, q))
+            found = {row.id for row in self.api.stories.list(query=q)}
             self.filtered = [row for row in self.all if row.id in found]
         if self.cursor >= len(self.filtered):
             self.cursor = max(0, len(self.filtered) - 1)
@@ -196,7 +195,7 @@ class StoryPicker(Dossier):
         row = self.filtered[self.cursor]
         # Nothing played: no message to pick, and a dossier opened on an
         # empty tab is a dead end — Enter resumes the story itself.
-        if not row.num_messages:
+        if not row.message_count:
             self._land_on(row.id, None, "resume")
             return
         self._list_state = (self.cursor, self.in_filter, self.query)
@@ -233,7 +232,7 @@ class StoryPicker(Dossier):
             return
         target = self.filtered[self.cursor]
         try:
-            api_stories.delete(self.session, target.id)
+            self.api.stories.delete(target.id)
         except Exception:
             # Silent failure is acceptable here — the row stays visible
             # and the user can try again or check the DB out of band.
@@ -292,11 +291,12 @@ class StoryPicker(Dossier):
         ]
 
 
-def pick(session: Session) -> str | None:
-    """Browse; on a confirmed landing the land is EXECUTED and its line
-    returned for the caller to print (with the scene re-echo); None when
-    cancelled (Esc/Ctrl+C) — the loaded story is pre-selected."""
-    picker = StoryPicker(session)
+def pick(api: Api, played: int | None) -> tuple[int, str] | None:
+    """Browse; on a confirmed landing the land is EXECUTED, and the story
+    it settled in returned with its line for the caller to play and print
+    (with the scene re-echo); None when cancelled (Esc/Ctrl+C) — the story
+    `played` is pre-selected."""
+    picker = StoryPicker(api, played)
     if not picker.all:
         return None
     return picker.run()

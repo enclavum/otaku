@@ -115,7 +115,7 @@ class OllamaModels(OpenAIModels):
             if entry.get("remote_host"):
                 remote[name] = ModelInfo(
                     name=name,
-                    max_context_catalogue=context,
+                    context_length=context,
                     capabilities=self._capabilities_of(caps) if isinstance(caps, list) else None,
                     locality=Locality.REMOTE,
                 )
@@ -129,8 +129,8 @@ class OllamaModels(OpenAIModels):
             ModelInfo(
                 name=name,
                 size=sizes.get(name),
-                max_context_catalogue=contexts.get(name),
-                max_context_loaded=running.get(name) if running else None,
+                context_length=contexts.get(name),
+                context_loaded=running.get(name) if running else None,
                 state=self._state_of(running, name),
             )
             for name in names
@@ -151,7 +151,7 @@ class OllamaModels(OpenAIModels):
         if running is None:
             return None
         fresh = ModelInfo(
-            name=name, max_context_loaded=running.get(name), state=self._state_of(running, name)
+            name=name, context_loaded=running.get(name), state=self._state_of(running, name)
         )
         if name in self._carded:
             return fresh
@@ -163,20 +163,20 @@ class OllamaModels(OpenAIModels):
         # The trained length is under the architecture's own key
         # ("gemma3.context_length") — or any key so named, when the
         # architecture is not stated.
-        max_context_catalogue = None
+        context_length = None
         if isinstance(info, dict):
             arch = info.get("general.architecture")
             keyed = info.get(f"{arch}.context_length") if isinstance(arch, str) else None
             if keyed is None:
                 keyed = next((v for k, v in info.items() if k.endswith(".context_length")), None)
-            max_context_catalogue = positive_int(keyed)
+            context_length = positive_int(keyed)
         self._carded.add(name)
         return replace(
             fresh,
             capabilities=self._capabilities_of(caps)
             if isinstance(caps, list)
             else ModelCapabilities(),
-            max_context_catalogue=max_context_catalogue,
+            context_length=context_length,
         )
 
     def _canonical(self, name: str) -> str:

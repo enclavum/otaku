@@ -15,7 +15,7 @@ The three pillars of otaku:
 - **keep the context small**, even for long stories, without losing the details that matter;
 - **high-quality interfaces**, in the browser and in the terminal.
 
-![otaku web](https://raw.githubusercontent.com/enclavum/otaku/main/images/capture-web.png?v=0.7.0)
+![otaku web](https://raw.githubusercontent.com/enclavum/otaku/main/images/capture-web.png?v=0.8.0)
 
 ## Demo
 
@@ -238,6 +238,7 @@ Everything lives in the state dir, `~/.otaku` by default:
   settings.
 - `configs/providers.toml` — one section per provider (URL, API key). The model picker edits it
   for you, and API keys are stored sealed.
+- `configs/integrations.toml` — the web search key, stored sealed; the Tools tab edits it for you.
 - `configs/prompts.toml` — every template otaku ever sends, editable.
 - `configs/state.toml`, `configs/models.toml` — the app's own memory of your session and
   per-model settings.

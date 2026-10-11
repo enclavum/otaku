@@ -1,9 +1,9 @@
-"""Work handed to the thread that owns the session.
+"""Work handed to the thread that owns the app.
 
 A sqlite connection answers only the thread that created it — the store
 is built that way, and the background worker keeps its own connection for
 the same reason — while an HTTP server answers on a thread per
-connection. So a handler never touches the session: it hands work to the
+connection. So a handler never touches the app: it hands work to the
 thread that owns it and waits for the answer. Serialization comes free,
 because there is only ever one thread in there.
 
@@ -11,7 +11,7 @@ The cost of one thread is that a long job holds it, and the longest job
 in otaku is a reply arriving token by token. So reads are queued apart
 and answered in the gaps between frames: browsing the stories, opening
 the lore, previewing the context all work while the model is talking,
-without a second connection and without two callers in the session at
+without a second connection and without two callers in the app at
 once.
 
 This is the one piece of the package a reader must understand
@@ -22,49 +22,49 @@ import queue
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, TypeVar
+from typing import Any, Generic, TypeVar
 
-from otaku.backend.session import Session
-
-__all__ = ["SessionRunner", "StoppingError"]
+__all__ = ["AppRunner", "StoppingError"]
 
 
 class StoppingError(Exception):
-    """The session's thread is gone: otaku is on its way out, and the
+    """The app's thread is gone: otaku is on its way out, and the
     job will not be run. Not a crash — the one answer a request can get
     that nothing should be recorded for."""
 
 
-# How long the session thread sleeps before looking up when nothing has
+# How long the app thread sleeps before looking up when nothing has
 # arrived — short enough that Ctrl+C is felt, and never the latency of a
 # request, which wakes the wait itself.
 _QUEUE_TICK = 0.25
 
+# The app the work runs on — any object: the runner never looks inside it.
+A = TypeVar("A")
 T = TypeVar("T")
 
 
 @dataclass
-class _Work:
-    """One call waiting for the session's thread, and the answer coming
+class _Work(Generic[A]):
+    """One call waiting for the app's thread, and the answer coming
     back — a value or the exception it raised, so a failure surfaces at
     the caller rather than dying quietly in another thread."""
 
-    call: Callable[[Session], Any]
+    call: Callable[[A], Any]
     done: threading.Event = field(default_factory=threading.Event)
     value: Any = None
     error: BaseException | None = None
 
-    def execute(self, session: Session) -> None:
+    def execute(self, app: A) -> None:
         try:
-            self.value = self.call(session)
+            self.value = self.call(app)
         except BaseException as e:  # carried to the caller, never swallowed
             self.error = e
         finally:
             self.done.set()
 
 
-class SessionRunner:
-    """The queue between the request threads and the session's own.
+class AppRunner(Generic[A]):
+    """The queue between the request threads and the app's own.
 
     TWO queues, and the difference between them is what a job may do. A
     write moves the story, so it waits its turn behind whatever is
@@ -74,10 +74,10 @@ class SessionRunner:
     app is dead until the model stops talking.
     """
 
-    def __init__(self, session: Session) -> None:
-        self._session = session
-        self._writes: queue.Queue[_Work] = queue.Queue()
-        self._reads: queue.Queue[_Work] = queue.Queue()
+    def __init__(self, app: A) -> None:
+        self._app = app
+        self._writes: queue.Queue[_Work[A]] = queue.Queue()
+        self._reads: queue.Queue[_Work[A]] = queue.Queue()
         # Set by every put, so an idle loop wakes on the work rather than
         # on the clock. Without it the tick below is not just how long a
         # stop takes to notice — it is how long every screen takes to
@@ -85,14 +85,14 @@ class SessionRunner:
         self._arrived = threading.Event()
         self._closed = False
 
-    def run(self, work: Callable[[Session], T], *, reading: bool = False) -> T:
-        """Run `work` on the session's thread; what it raises is raised
+    def run(self, work: Callable[[A], T], *, reading: bool = False) -> T:
+        """Run `work` on the app's thread; what it raises is raised
         again HERE, where the request that caused it can answer for it.
-        `reading` promises that `work` only READS the session — it is
+        `reading` promises that `work` only READS the app — it is
         what lets the job run between the frames of a reply."""
         if self._closed:
             raise StoppingError
-        job = _Work(work)
+        job: _Work[A] = _Work(work)
         (self._reads if reading else self._writes).put(job)
         self._arrived.set()
         if self._closed:
@@ -124,7 +124,7 @@ class SessionRunner:
             except queue.Empty:
                 self._arrived.wait(_QUEUE_TICK)
                 continue
-            job.execute(self._session)
+            job.execute(self._app)
 
     def abandon(self) -> None:
         """Answer every job still waiting, and every job still to come,
@@ -144,12 +144,12 @@ class SessionRunner:
 
     def drain(self) -> None:
         """Answer every read waiting right now, and return. Called from
-        the session's own thread — the loop between jobs, and a reply
+        the app's own thread — the loop between jobs, and a reply
         between frames — so nothing here runs beside anything else: the
-        session still sees one caller, in order."""
+        app still sees one caller, in order."""
         while True:
             try:
                 job = self._reads.get_nowait()
             except queue.Empty:
                 return
-            job.execute(self._session)
+            job.execute(self._app)

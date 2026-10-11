@@ -1,8 +1,8 @@
 """The source aggregate: stories and their message trees.
 
 Message rows form a sibling tree via `parent_id`; the story's `head_id`
-is the current position, and its messages — root to head — are what a
-session sees. The API is explicit operations: `append` adds at the head,
+is the current position, and its messages — root to head — are what the
+app sees. The API is explicit operations: `append` adds at the head,
 undo is `set_head` (abandoned turns stay in the tree as siblings),
 regenerate is a `set_head` + `append` that diverges into a sibling.
 
@@ -22,6 +22,7 @@ import re
 from collections.abc import Callable, Container, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 from otaku.store.database import Database
 from otaku.store.files import FileStore
@@ -50,9 +51,18 @@ class StoryListing:
     def label(self) -> str:
         """The row's display name — THE fallback rule, in its one home:
         title, else the newest story-so-far rollup, else the first user
-        message; "" when nothing exists to name. `api.stories.headline`
-        applies the same rule to the loaded story."""
+        message; "" when nothing exists to name. `api.stories.get_story`
+        reads it off `get_listing` for one story."""
         return self.title or self.story_so_far or self.first_user
+
+
+class StaleHeadError(Exception):
+    """A head move that named the head it expected, and found another:
+    nothing was written, and `head` is where the head stands."""
+
+    def __init__(self, head: int | None) -> None:
+        super().__init__(f"the head moved to {head}")
+        self.head = head
 
 
 class StoryOps:
@@ -107,40 +117,7 @@ class StoryOps:
             "SELECT id, title, updated_at, head_id FROM stories",
         ).fetchall()
         # fmt: on
-        tree = self._get_tree_rows([int(r[0]) for r in rows if r[3] is not None])
-
-        chains: dict[int, set[int]] = {}
-        lengths: dict[int, int] = {}
-        first_user_ids: dict[int, int] = {}
-        models: dict[int, str] = {}
-        for story_row in rows:
-            story_id = int(story_row[0])
-            chain = chains[story_id] = set()
-            node = story_row[3]
-            while node is not None and node in tree:  # head → root; finite via the parent CHECK
-                chain.add(node)
-                parent, role, provider, model = tree[node]
-                if role == "user":
-                    first_user_ids[story_id] = node  # last user seen = root-most
-                if role == "assistant" and model and story_id not in models:
-                    models[story_id] = f"{provider}/{model}" if provider else model
-                node = parent
-            lengths[story_id] = len(chain)
-
-        first_users = self._get_bodies(first_user_ids)
-        so_far = self._get_stories_so_far(chains)
-        listings = [
-            StoryListing(
-                id=int(story_id),
-                title=self._db.unseal(title),
-                story_so_far=so_far.get(int(story_id), ""),
-                first_user=first_users.get(int(story_id), ""),
-                model=models.get(int(story_id), ""),
-                updated_at=datetime.fromisoformat(updated_at),
-                num_messages=lengths[int(story_id)],
-            )
-            for story_id, title, updated_at, _head in rows
-        ]
+        listings = self._get_listings(rows)
         # Ties (same second) break toward the newer story, so the order is
         # deterministic however fast the stories were touched.
         return sorted(listings, key=lambda item: (item.updated_at, item.id), reverse=True)
@@ -171,6 +148,17 @@ class StoryOps:
     def exists(self, story_id: int) -> bool:
         row = self._db.conn.execute("SELECT 1 FROM stories WHERE id = ?", (story_id,)).fetchone()
         return row is not None
+
+    def get_listing(self, story_id: int) -> StoryListing | None:
+        """One story's row of the browser, by `list`'s own reading."""
+        # fmt: off
+        rows = self._db.conn.execute(
+            "SELECT id, title, updated_at, head_id FROM stories WHERE id = ?",
+            (story_id,),
+        ).fetchall()
+        # fmt: on
+        listings = self._get_listings(rows)
+        return listings[0] if listings else None
 
     def get_system(self, story_id: int) -> str:
         row = self._db.conn.execute(
@@ -220,41 +208,49 @@ class StoryOps:
         ).fetchone()
         return row[0] if row else None
 
-    def set_head(self, story_id: int, message_id: int | None) -> None:
+    def set_head(self, story_id: int, message_id: int | None, *, expected_head: int | None) -> None:
         """Undo's primitive: point the story at an earlier message (or None
-        for an empty story). The turns after it stay in the tree as
-        siblings — nothing is deleted."""
+        for an empty story), moved from `expected_head` in the same
+        statement — StaleHeadError where the head stands elsewhere. The
+        turns after it stay in the tree as siblings — nothing is deleted."""
         with self._db.conn as conn:
             # fmt: off
-            conn.execute(
-                "UPDATE stories SET head_id = ?, updated_at = ? WHERE id = ?",
-                (message_id, self._db.now(), story_id),
+            moved = conn.execute(
+                "UPDATE stories SET head_id = ?, updated_at = ? WHERE id = ? AND head_id IS ?",
+                (message_id, self._db.now(), story_id, expected_head),
             )
             # fmt: on
+            if moved.rowcount != 1:
+                raise StaleHeadError(self.get_head(story_id))
 
     # ---------- the message tree ----------
 
-    def append(self, story_id: int, message: Message) -> int:
-        """Add one turn at the head and advance it. `message.id` is ignored;
+    def append(self, story_id: int, message: Message, *, after: int | None) -> int:
+        """Add one turn after `after` — the head the caller read, None for
+        an empty story — and advance the head to it, moved from there in
+        the same statement: a head another writer moved meanwhile is a
+        StaleHeadError, and nothing is written. `message.id` is ignored;
         the assigned id is returned."""
         now = self._db.now()
         with self._db.conn as conn:
-            head = self.get_head(story_id)
+            parent = after
             # fmt: off
             cur = conn.execute(
                 "INSERT INTO messages (story_id, parent_id, role, kind, speaker_id, speaker, body, template, provider, model, created_at, updated_at, attachments, mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (story_id, head, message.role, message.kind, message.speaker_id, self._db.seal_opt(message.speaker), self._db.seal(message.body), self._db.seal_opt(message.template), message.provider, message.model, now, now, Attachment.to_json(message.attachments), message.mode.value),
+                (story_id, parent, message.role, message.kind, message.speaker_id, self._db.seal_opt(message.speaker), self._db.seal(message.body), self._db.seal_opt(message.template), message.provider, message.model, now, now, Attachment.to_json(message.attachments), message.mode.value),
             )
             message_id = int(cur.lastrowid or 0)
-            conn.execute(
-                "UPDATE stories SET head_id = ?, updated_at = ? WHERE id = ?",
-                (message_id, now, story_id),
+            moved = conn.execute(
+                "UPDATE stories SET head_id = ?, updated_at = ? WHERE id = ? AND head_id IS ?",
+                (message_id, now, story_id, parent),
             )
             # fmt: on
+            if moved.rowcount != 1:
+                raise StaleHeadError(self.get_head(story_id))
         return message_id
 
     def get_messages(self, story_id: int) -> builtins.list[Message]:
-        """The story as a session sees it: its messages, decrypted,
+        """The story as the app sees it: its messages, decrypted,
         root → head."""
         head = self.get_head(story_id)
         if head is None:
@@ -452,6 +448,43 @@ class StoryOps:
         taken = {self._db.unseal(title) for (title,) in rows}
         return base if base not in taken else (unique_title(base, taken) or base)
 
+    def _get_listings(self, rows: builtins.list[Any]) -> builtins.list[StoryListing]:
+        """The browser rows of these stories (id, title, updated_at,
+        head_id), in the order given."""
+        tree = self._get_tree_rows([int(r[0]) for r in rows if r[3] is not None])
+        chains: dict[int, set[int]] = {}
+        lengths: dict[int, int] = {}
+        first_user_ids: dict[int, int] = {}
+        models: dict[int, str] = {}
+        for story_row in rows:
+            story_id = int(story_row[0])
+            chain = chains[story_id] = set()
+            node = story_row[3]
+            while node is not None and node in tree:  # head → root; finite via the parent CHECK
+                chain.add(node)
+                parent, role, provider, model = tree[node]
+                if role == "user":
+                    first_user_ids[story_id] = node  # last user seen = root-most
+                if role == "assistant" and model and story_id not in models:
+                    models[story_id] = f"{provider}/{model}" if provider else model
+                node = parent
+            lengths[story_id] = len(chain)
+
+        first_users = self._get_bodies(first_user_ids)
+        so_far = self._get_stories_so_far(chains)
+        return [
+            StoryListing(
+                id=int(story_id),
+                title=self._db.unseal(title),
+                story_so_far=so_far.get(int(story_id), ""),
+                first_user=first_users.get(int(story_id), ""),
+                model=models.get(int(story_id), ""),
+                updated_at=datetime.fromisoformat(updated_at),
+                num_messages=lengths[int(story_id)],
+            )
+            for story_id, title, updated_at, _head in rows
+        ]
+
     def _get_chain_ids(self, head_id: int | None) -> builtins.list[int]:
         """Walk the parent chain from a head; ids come back root → head."""
         if head_id is None:
@@ -522,6 +555,33 @@ class MessagesOps:
 
     def __init__(self, db: Database) -> None:
         self._db = db
+
+    def get(self, message_id: int) -> Message | None:
+        """One message, decrypted — None for an id the tree does not hold."""
+        # fmt: off
+        row = self._db.conn.execute(
+            "SELECT id, role, kind, speaker_id, speaker, body, template, provider, model, attachments, mode FROM messages WHERE id = ?",
+            (message_id,),
+        ).fetchone()
+        # fmt: on
+        if row is None:
+            return None
+        mid, role, kind, speaker_id, speaker, body, template, provider, model, attachments, mode = (
+            row
+        )
+        return Message(
+            id=int(mid),
+            role=str(role),
+            kind=str(kind),
+            speaker_id=speaker_id,
+            speaker=self._db.unseal_opt(speaker),
+            body=self._db.unseal(body),
+            template=self._db.unseal_opt(template),
+            provider=provider,
+            model=model,
+            attachments=Attachment.from_json(attachments),
+            mode=StoryMode.from_value(mode),
+        )
 
     def update(self, message_id: int, body: str) -> None:
         """The author's correction of one message's text — the one deliberate

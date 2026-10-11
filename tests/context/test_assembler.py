@@ -3,8 +3,8 @@
 Cases 1-2: a story below the verbatim threshold, or one without covering
 summaries, goes out whole. Case 3: HEAD verbatim, the covered scenes as
 summaries, the TAIL verbatim and scene-aligned; a card is never
-summarized away. Case 4: over the limit — the smaller of the window and
-`max_context` — the oldest summaries are replaced by the story-so-far
+summarized away. Case 4: over the limit — the context in force, the
+window under the context limit — the oldest summaries are replaced by the story-so-far
 through the last replaced scene. Case 5: still over, the tail target
 steps down to its floor; past the floor the assembly refuses. Across all
 of them the wire promise holds: the model sees the stored messages and
@@ -45,13 +45,13 @@ NO_TOOLS = ToolSet()  # every call leaves the wire
 def assemble(
     system: str,
     messages: list[Message],
-    max_context: int | None,
+    context_window: int | None,
     *,
     scenes: tuple = (),
     recap_header: str = "",
     head_messages: int = 20,
     min_tail_messages: int = 150,
-    max_context_setting: int = 0,
+    context_limit: int = 0,
     files=None,
     newest_pictures_only: bool = False,
     injections: tuple[Injection, ...] = (),
@@ -64,7 +64,7 @@ def assemble(
     shape = ContextShape(
         head_messages=head_messages,
         min_tail_messages=min_tail_messages,
-        max_context=context_in_force(max_context, max_context_setting),
+        context_in_force=context_in_force(context_window, context_limit),
     )
     if files is None:
         pictures_ride = PicturesRide.NONE
@@ -272,7 +272,7 @@ class TestRecapDegrades:
         sent = "\n".join(m.body for m in prompt.messages)
         assert sent.index("((OOC: Elara joins.))") < sent.index("Arc through two.")
 
-    def test_max_context_caps_a_larger_window(self) -> None:
+    def test_the_context_limit_caps_a_larger_window(self) -> None:
         # The window would hold everything; the setting caps it, the
         # reply reserve coming off the capped value.
         prompt = assemble(
@@ -282,12 +282,12 @@ class TestRecapDegrades:
             scenes=self._scenes(),
             head_messages=5,
             min_tail_messages=10,
-            max_context_setting=2524,
+            context_limit=2524,
         )
         assert prompt.history and "Arc through two." in prompt.recap
         assert prompt.limit == 1500  # the cap minus the reserve
 
-    def test_max_context_zero_means_the_whole_window(self) -> None:
+    def test_a_context_limit_of_zero_means_the_whole_window(self) -> None:
         prompt = assemble(
             "",
             turns(40),
@@ -295,7 +295,7 @@ class TestRecapDegrades:
             scenes=self._scenes(),
             head_messages=5,
             min_tail_messages=10,
-            max_context_setting=0,
+            context_limit=0,
         )
         assert not prompt.history  # everything fits — case 4 never fires
         assert prompt.scenes_summarized == 3
@@ -352,8 +352,8 @@ class TestRejected:
         with pytest.raises(ContextOverflowError) as caught:
             assemble("", rows, 2048, head_messages=5, min_tail_messages=10)
         refusal = caught.value
-        assert refusal.context == 2048
-        assert 0 < refusal.limit < refusal.context
+        assert refusal.context_in_force == 2048
+        assert 0 < refusal.limit < refusal.context_in_force
         assert refusal.tokens > refusal.limit
 
 

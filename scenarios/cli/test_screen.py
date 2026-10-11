@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from otaku.backend import Layout
+from otaku.backend.api import Layout
 from scenarios.support.emulator import (
     COLS,
     CTRL_C,

@@ -2,7 +2,7 @@
 archive the cast row keeps, macro binding, and the wire block composed
 back out of the archive — writer and reader of the archive in ONE
 place. FILE decoding (PNG chunks, JSON) lives with the other wild
-formats, in `backend.formats.cards`; this module never touches bytes.
+formats, in `backend.domain._formats.cards`; this module never touches bytes.
 `{{char}}`/`{{user}}` macros stay unbound until `bind` applies the names
 only the import knows. Everything here is pure strings.
 """
@@ -51,7 +51,7 @@ def bind(text: str, *, char: str, user: str) -> str:
 
 def binds(macro: str) -> bool:
     """Whether `bind` would resolve this exact `{{…}}` (or TavernAI-era)
-    token — the vocabulary question `backend.formats.cards` asks to
+    token — the vocabulary question `backend.domain._formats.cards` asks to
     report macros nothing will bind."""
     return bool(_CHAR_MACRO.fullmatch(macro) or _USER_MACRO.fullmatch(macro))
 

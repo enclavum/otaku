@@ -1,0 +1,358 @@
+"""A story's memory, operated: loaded whole — its current scenes, the
+cast in appearance order, the current timeline's journal records — a
+scene, a character and a journal record each read and corrected, a
+character merged or deleted; and the forced extraction pass, started
+through the worker, kept per story while it runs and after (a run is read
+without the app's thread), and given up."""
+
+import tomllib
+from collections.abc import Iterable
+from dataclasses import dataclass, replace
+from typing import TypeVar
+
+from otaku.backend.domain.app import App
+from otaku.backend.domain.app._runs import WorkerRun
+from otaku.backend.domain.story import _chain
+from otaku.backend.errors import NO_MODEL_HINT, NO_SUCH_STORY, Conflict, Invalid, NotFound
+from otaku.store.schema import Character, Journal, Scene
+
+# A row of a story's memory, as `_theirs` finds it.
+R = TypeVar("R", Scene, Character, Journal)
+
+
+@dataclass(frozen=True)
+class ExtractionState:
+    """A forced pass as it stands: its `status` — "running", "done",
+    "cancelled" or "failed" — and, once it is not running, its one-line
+    `report`."""
+
+    status: str
+    report: str | None
+
+
+@dataclass(frozen=True)
+class Memory:
+    """A story's memory loaded whole: how many messages its chain holds,
+    its current scenes, the cast in appearance order, the current
+    timeline's journal records, and each chain message's ordinal by id."""
+
+    story_id: int
+    total_messages: int
+    scenes: tuple[Scene, ...]
+    cast: tuple[Character, ...]
+    journals: tuple[Journal, ...]
+    ordinal: dict[int, int]
+
+    def scene_no(self, scene_id: int) -> int:
+        """1-based position of a scene in story order — the number every
+        label leads with; 0 for a scene not in the memory."""
+        return next((i + 1 for i, s in enumerate(self.scenes) if s.id == scene_id), 0)
+
+    def scene_span(self, scene_id: int) -> str:
+        """The scene's "N-M" message range on the CURRENT chain — "" when
+        either end is off it (an edit moved the head past the scene)."""
+        scene = next((s for s in self.scenes if s.id == scene_id), None)
+        if scene is None:
+            return ""
+        start = self.ordinal.get(scene.start_message_id)
+        end = self.ordinal.get(scene.end_message_id)
+        if start is None or end is None:
+            return ""
+        return f"{start}-{end}"
+
+    def messages_since(self, scene_id: int) -> int:
+        """How far the story has moved past a scene's end, in messages."""
+        scene = next((s for s in self.scenes if s.id == scene_id), None)
+        if scene is None:
+            return 0
+        return self.total_messages - self.ordinal.get(scene.end_message_id, self.total_messages)
+
+    def extracted_up_to(self) -> int:
+        """The last message a closed scene covers, as a 1-based chain
+        position — 0 when nothing has been read yet. Derived, never
+        stored: a scene closes at a message, so the newest scene's end
+        IS how far the extractor has read. What lies past it is no
+        fault: the settle margin leaves the newest messages open on
+        purpose, and a forced pass is what closes them early."""
+        ends = [self.ordinal.get(s.end_message_id, 0) for s in self.scenes]
+        return max(ends, default=0)
+
+    def scene(self, scene_id: int) -> Scene:
+        """One scene of the memory. Raises NotFound for one that is not in
+        it — another story's, or a rewound timeline's."""
+        return _theirs(self.scenes, scene_id, "scene")
+
+    def character(self, character_id: int) -> Character:
+        """One character of the cast. Raises NotFound as `scene`."""
+        return _theirs(self.cast, character_id, "character")
+
+    def journal(self, journal_id: int) -> Journal:
+        """One journal record of the memory. Raises NotFound as `scene`."""
+        return _theirs(self.journals, journal_id, "journal")
+
+    def character_history(self, character_id: int) -> tuple[str, Journal | None]:
+        """The character's arc SO FAR — their newest non-empty rollup, and
+        the journal record it stands in; "" and None before a pass has
+        written one. A scene's arc is a column of its own
+        (`Scene.history`); a character's is not, so this is where it is
+        read."""
+        position = {s.id: i for i, s in enumerate(self.scenes)}
+        rows = sorted(
+            (j for j in self.journals if j.character_id == character_id),
+            key=lambda r: position.get(r.scene_id, 0),
+        )
+        for row in reversed(rows):
+            if row.history:
+                return row.history, row
+        return "", None
+
+
+# ---------- the forced pass ----------
+
+
+def create_extraction(app: App, story_id: int) -> tuple[ExtractionState, str]:
+    """Run the extraction over a story right now, through the worker (one
+    path into a pass, so a forced close can never race an automatic one):
+    gate and settle margin dropped, closing right up to the last message
+    — the pass as it stands, and the sentence. A pass already running for
+    the story is the one answered: a second would set the first aside,
+    and whoever waits on it would never read its report. Raises NotFound
+    for a story that is not there, Conflict without a model to extract
+    with."""
+    if not app._store.stories.exists(story_id):
+        raise NotFound(NO_SUCH_STORY)
+    running = app._extraction_runs.get(story_id)
+    if running is not None and running.poll() is None:
+        return _state_of(running), "A pass is already running."
+    if app._client(app._extraction_model()) is None:
+        raise Conflict(NO_MODEL_HINT)
+    run = WorkerRun(app._worker)
+    job = replace(_chain.build_job(app, story_id, force=True), on_done=run._finish)
+    app._worker.schedule(job, now=True)
+    app._extraction_runs[story_id] = run
+    return _state_of(run), "Extracting lore from the recent messages\u2026"
+
+
+def get_extraction(app: App, story_id: int) -> ExtractionState:
+    """A story's forced pass as it stands — the one running, or the last
+    one asked for. Safe from any thread: a run is read without the app's.
+    Raises NotFound where none was asked for."""
+    run = app._extraction_runs.get(story_id)
+    if run is None:
+        raise NotFound("No pass was asked for this story.")
+    return _state_of(run)
+
+
+def delete_extraction(app: App, story_id: int) -> str:
+    """Give up a story's forced pass — nothing half-done commits;
+    already-closed scenes stay — and the sentence that says so. Refused
+    where none is running: a pass can finish between the asking and
+    this, and an automatic pass is the worker's own, which nobody asked
+    for and nobody cancels."""
+    run = app._extraction_runs.get(story_id)
+    if run is None or run.poll() is not None:
+        raise Conflict("No pass is running.")
+    return run.cancel()
+
+
+def _state_of(run: WorkerRun) -> ExtractionState:
+    """A pass as it stands: running, or done with its report — scenes
+    closed, journals written, too little new play yet — cancelled, or
+    failed."""
+    report = run.poll()
+    status = (
+        "running"
+        if report is None
+        else "cancelled"
+        if run.cancelled
+        else "failed"
+        if run.failed
+        else "done"
+    )
+    return ExtractionState(status, report)
+
+
+# ---------- the memory ----------
+
+
+def get_lore(app: App, story_id: int) -> Memory:
+    """A story's memory loaded whole. Raises NotFound for a story that
+    is not there."""
+    if not app._store.stories.exists(story_id):
+        raise NotFound(NO_SUCH_STORY)
+    store = app._store
+    ids = store.stories.get_messages_ids(story_id)
+    scenes = tuple(store.scenes.get_current(story_id, ids))
+    current = {s.id for s in scenes}
+    return Memory(
+        story_id=story_id,
+        total_messages=len(ids),
+        scenes=scenes,
+        # In order of appearance (row order), not by name: the cast reads
+        # as the story introduced it.
+        cast=tuple(store.characters.list(story_id)),
+        journals=tuple(j for j in store.journals.list(story_id) if j.scene_id in current),
+        ordinal={mid: i + 1 for i, mid in enumerate(ids)},
+    )
+
+
+def get_scene(app: App, story_id: int, scene_id: int) -> Scene:
+    """One scene of a story's memory. Raises NotFound for one that is
+    not in it — another story's, or a rewound timeline's."""
+    return get_lore(app, story_id).scene(scene_id)
+
+
+def get_character(app: App, story_id: int, character_id: int) -> Character:
+    """One character of a story's cast. Raises NotFound as `scene`."""
+    return get_lore(app, story_id).character(character_id)
+
+
+def get_journal(app: App, story_id: int, journal_id: int) -> Journal:
+    """One journal record of a story's memory. Raises NotFound as
+    `scene`."""
+    return get_lore(app, story_id).journal(journal_id)
+
+
+def list_characters(app: App, story_id: int, *, name: str | None = None) -> tuple[Character, ...]:
+    """A story's characters in appearance order — the cheap read the
+    prompt menus and the pickers fire per keystroke — or, by `name`, the
+    one a typed name or alias resolves to, case-insensitively (none for
+    none). Empty for a story that is not there: a menu question is never
+    a refusal."""
+    if name is None:
+        return tuple(app._store.characters.list(story_id))
+    found = app._store.characters.find(story_id, name)
+    return (found,) if found is not None else ()
+
+
+def update_scene(
+    app: App, story_id: int, scene_id: int, *, title: str | None = None, summary: str | None = None
+) -> str:
+    """The author's correction of a scene of a story's memory — None
+    leaves a field as it is. The scene is CHECKED to be that story's, the
+    way a message edit checks its chain: a browser addresses any story,
+    and a correction that landed on another story's row would rewrite
+    memory nobody was looking at. Its arc (`history`) is derived and has
+    no write. Raises Refused for nothing to change, an emptied summary,
+    and a scene not in the story's memory — nothing written."""
+    get_scene(app, story_id, scene_id)
+    if title is None and summary is None:
+        raise Invalid("Nothing to change.")
+    if summary is not None and not summary.strip():
+        # A cleared summary would silently swallow the scene's span: the
+        # assembler covers a scene only while its summary exists, and a
+        # later scene's coverage still moves the tail past this one.
+        # Extraction refuses to commit exactly this state.
+        raise Invalid("An emptied summary would swallow its scene — not saved.")
+    app._store.scenes.update(scene_id, title=title, summary=summary)
+    return "Saved."
+
+
+def update_character(
+    app: App,
+    story_id: int,
+    character_id: int,
+    *,
+    description: str | None = None,
+    card: str | None = None,
+) -> str:
+    """The author's correction of a story's character — its description,
+    and the card archive an imported one carries (emptied to nothing
+    included). Checked to be that story's as `update_scene` checks.
+    Raises Refused for nothing to change, a card that is no TOML, and a
+    character not in the cast — nothing written."""
+    get_character(app, story_id, character_id)
+    if description is None and card is None:
+        raise Invalid("Nothing to change.")
+    if card is not None:
+        try:
+            tomllib.loads(card)
+        except tomllib.TOMLDecodeError as e:
+            # The archive is data other features parse — a broken edit is
+            # refused the way an emptied summary is.
+            raise Invalid(f"Not valid TOML — not saved: {e}") from e
+    if description is not None:
+        app._store.characters.set_description(character_id, description)
+    if card is not None:
+        app._store.characters.set_card(character_id, card)
+    return "Saved."
+
+
+def update_journal(app: App, story_id: int, journal_id: int, *, entry: str | None = None) -> str:
+    """The author's correction of a journal record's entry. The state is
+    the extractor's own and has no write: correcting the entry is what
+    moves the record. Checked to be that story's as `update_scene`
+    checks; raises Refused for nothing to change."""
+    get_journal(app, story_id, journal_id)
+    if entry is None:
+        raise Invalid("Nothing to change.")
+    app._store.journals.set_entry(journal_id, entry)
+    return "Saved."
+
+
+def merge_characters(app: App, story_id: int, character_id: int, *, into: int) -> str:
+    """Fold a story's character into another — speakers and journals
+    follow, the one folded becomes an alias of `into`, the character
+    and the sentence. Refused toward the direction that would destroy an
+    imported card's archive."""
+    _ensure_cast_idle(app, story_id)
+    # Resolved against THAT story's cast, so an id from another story is
+    # as refused as an id that is not there at all.
+    cast = {row.id: row for row in app._store.characters.list(story_id)}
+    source, target = cast.get(character_id), cast.get(into)
+    if source is None or target is None:
+        raise NotFound("No such character in this story (see /cast).")
+    if source.id == target.id:
+        raise Invalid(f"'{source.name}' and '{target.name}' are already the same character.")
+    if source.card:
+        # A merge deletes the source row, its card archive with it — and
+        # the card rows pointing at the target would send their typed
+        # line instead of the composed block. Refused toward the
+        # direction that keeps the archive.
+        raise Conflict(
+            f"{source.name} carries an imported card, which a merge would destroy — "
+            f"merge the other direction (/merge {target.name} into {source.name}) "
+            f"so the card survives."
+        )
+    app._store.characters.merge(story_id, source.id, target.id)
+    # SOURCE is now an alias of TARGET, so a later /me or /you naming it
+    # still resolves — nothing else to update.
+    return f"Merged {source.name} into {target.name} ('{source.name}' is now an alias)."
+
+
+def delete_character(app: App, story_id: int, character_id: int) -> str:
+    """Remove a character the extractor should never have made, their
+    journals with them, and their name from every line they spoke.
+    Prose that mentions them (summaries, other characters' entries)
+    stays, and a later pass may make them again from new messages.
+    Refused for a character carrying an imported card: the greeting
+    composes its block from that archive."""
+    _ensure_cast_idle(app, story_id)
+    character = _theirs(app._store.characters.list(story_id), character_id, "character")
+    if character.card:
+        raise Conflict(
+            f"{character.name} carries an imported card — "
+            f"only an extracted character can be deleted."
+        )
+    app._store.characters.delete(character.id)
+    return f"Deleted {character.name} and their journals."
+
+
+def _ensure_cast_idle(app: App, story_id: int) -> None:
+    """A pass resolves names against the cast it read at its start and
+    writes each row alone, so a row removed under it would fail a scene
+    half-written: the cast is not rewritten while one runs."""
+    if app._worker.extracting_story_id == story_id:
+        raise Conflict("An extraction pass is running — try again when it lands.")
+
+
+def _theirs(rows: Iterable[R], target: int, noun: str) -> R:
+    """The addressed row, which must be in the story's own memory — the
+    same rule `stories.update_message` holds over its chain. The rows
+    come from the story's VIEW, so a row of a rewound timeline refuses
+    along with another story's: neither is in the memory any browser
+    shows."""
+    found = next((row for row in rows if row.id == target), None)
+    if found is None:
+        raise NotFound(f"That {noun} is not in this story's memory.")
+    return found

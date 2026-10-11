@@ -4,22 +4,22 @@
    Every one of these is reached by a BUTTON — nothing here composes a
    command line for the far end to parse. `SCREENS` is keyed by the token
    the contents rail carries; what each one asks of otaku is an endpoint,
-   named in `api.js`. */
+   named in the page's client (`api/`). */
 
-import * as api from "./api.js";
-import { ask, closeAll, popups } from "./browser.js";
-import { $ } from "./dom.js";
-import { openHelp } from "./help.js";
-import { openSupport } from "./support.js";
-import { openSettings } from "./settings.js";
-import { openModels } from "./models.js";
-import { openBalance, openContext, openInfo, openUsage } from "./reports.js";
-import { landed, refresh, watchExtraction } from "./shell.js";
-import { openStories } from "./stories.js";
-import { confirmFork, openStory } from "./story.js";
-import { tell } from "./status.js";
-import { clear, isPlaying, play, stopPlaying, takeBack } from "./transcript.js";
-import { exportStory, importCard, importDocument } from "./transfer.js";
+import { api } from "./api/index.js";
+import { ask, closeAll, popups } from "./kit/browser.js";
+import { $ } from "./kit/dom.js";
+import * as held from "./play/held.js";
+import { openHelp, openSupport } from "./screens/help.js";
+import { openSettings } from "./screens/settings.js";
+import { openModels } from "./screens/models.js";
+import { openBalance, openContext, openInfo, openUsage } from "./screens/reports.js";
+import { landed, refresh, watchExtraction } from "./play/shell.js";
+import { openStories } from "./screens/stories.js";
+import { confirmFork, openStory } from "./screens/dossier.js";
+import { tell } from "./kit/status.js";
+import { clear, isPlaying, play, stopPlaying, takeBack } from "./play/transcript.js";
+import { exportStory, importCard, importDocument } from "./screens/transfer.js";
 
 const SCREENS = {
   "/stories": openStories,
@@ -30,10 +30,12 @@ const SCREENS = {
   "/new": newStory,
   "/fork": () =>
     confirmFork(async () => {
-      const story = (await api.facts()).story_id;
+      const story = held.story();
       if (story === null) return tell(_NO_STORY.fork, "otk-error");
-      const { notice } = await api.fork(story);
-      await landed(notice, { redraw: "always" });
+      const forked = await api.stories.forks.create(story);
+      // play goes on in the copy
+      if (!forked.refused) held.hold(forked.value.id);
+      await landed(forked.notice, { redraw: "always" });
     }),
   /* The story dossier answers three commands, one tab each — the bare
      token opens it there; `/system some text` is answered by the
@@ -57,7 +59,7 @@ const SCREENS = {
   "/regen": regenerate,
   "/last": () => refresh(),
   "/clear": () => clear(),
-  // A tab is not the session: closing one must not stop a server the
+  // A tab is not the server: closing one must not stop a server the
   // reader may be using from another, so /bye says where the exit is.
   "/bye": () => tell("Close the tab. The server stops in the terminal."),
 };
@@ -113,18 +115,16 @@ async function newStory() {
   const choice = await ask("new-story", () => (field.value = ""));
   if (choice !== "start") return;
   closeAll();
-  const { notice } = await api.newStory(field.value.trim());
-  await landed(notice, { redraw: "always" });
+  const made = await api.stories.create({ title: field.value.trim() });
+  if (!made.refused) held.hold(made.value.id);
+  await landed(made.notice, { redraw: "always" });
 }
 
 async function importStory() {
   /* The imported story lands in the library the reader is looking at, so
      the list is asked again and left on what just arrived. */
   await importDocument();
-  if (popups.get("/stories")?.open) {
-    const facts = await api.facts();
-    await openStories("", { selectId: facts.story_id });
-  }
+  if (popups.get("/stories")?.open) await openStories("", { selectId: held.story() });
 }
 
 async function confirmed({ title, body, note = "", action, cancel = "Cancel", run }) {
@@ -157,8 +157,8 @@ export async function playLine(line, files = []) {
   try {
     const refused = await play(line, { files });
     /* A played line is a write like any other and the runhead is drawn
-       from facts that just changed — the first line of a session makes
-       the story, and every line after it moves the count. No notice: the
+       from facts that just changed — a first line makes the story, and
+       every line after it moves the count. No notice: the
        reply IS the answer — unless the line was refused, and then the
        refusal stands through the landing rather than being wiped by it. */
     await landed(refused ?? "", { kind: refused ? "otk-error" : "", keepPlace: true });
@@ -190,11 +190,17 @@ async function undo() {
      answer. A refusal — nothing to undo — still speaks, under the
      prompt, and the FLAG is what says so; the page never reads the
      wording. */
-  const answer = await api.undo();
-  if (!answer.refused) takeBack(await api.turns());
+  const story = held.story();
+  const answer =
+    story === null ? { notice: _NOTHING_TO_UNDO, refused: true } : await api.stories.undos.create(story);
+  if (!answer.refused) takeBack(await api.stories.messages.list(story), answer.value.question);
   await landed("");
   if (answer.refused) tell(answer.notice);
 }
+
+/* What the backend says with no exchange to take back — COPIED, as the
+   page has no story to ask (`backend.domain.story.stories.NOTHING_TO_UNDO`). */
+const _NOTHING_TO_UNDO = "Nothing to undo.";
 
 async function regenerate() {
   /* Mid-reply, regenerate means "not this one, try again", as `/regen`
@@ -220,10 +226,11 @@ const _BEHIND = "The story changed since this page drew it — reload the page t
 export async function editTurn(position, drawn, text) {
   // a write mid-reply would wait behind the reply with the field open
   if (isPlaying()) return { notice: _MID_REPLY, refused: true };
-  const [facts, turns] = await Promise.all([api.facts(), api.turns()]);
+  const story = held.story();
+  const turns = story === null ? [] : await api.stories.messages.list(story);
   const turn = turns[position];
   if (turn?.body !== drawn) return { notice: _BEHIND, refused: true };
-  const answer = await api.editMessage(facts.story_id, turn.id, text);
+  const answer = await api.stories.messages.update(story, turn.id, { body: text });
   // the story's name falls back to its first line, so the runhead asks again
   if (!answer.refused) await landed("");
   return answer;
@@ -232,7 +239,7 @@ export async function editTurn(position, drawn, text) {
 /* What the backend says when there is no story to act on. COPIED,
    because the page cannot ask: these endpoints address a story by id,
    and with no story there is no id for the path. Their homes are
-   `backend.api.stories.fork` and `backend.api.lore.extract`. */
+   `backend.domain.story.stories.fork_story` and `backend.errors.NO_STORY_HINT`. */
 const _NO_STORY = {
   fork: "Nothing to fork yet — send a message first.",
   extract: "No story yet — send a message first.",
@@ -243,16 +250,17 @@ async function extractNow() {
      happens anyway, which is the normal way this runs. With nothing
      outside a scene there is nothing to ask: the pass would only
      decline. */
-  const facts = await api.facts();
-  if (facts.story_id === null) {
+  const story = held.story();
+  if (story === null) {
     tell(_NO_STORY.extract, "otk-error");
     return;
   }
-  const [opened, knobs] = await Promise.all([
-    api.story(facts.story_id).catch(() => null),
-    api.settings().catch(() => null),
+  const [memory, knobs] = await Promise.all([
+    api.stories.lore.get(story).catch(() => null),
+    api.settings.get().catch(() => null),
   ]);
-  const pending = opened?.unread ?? 0;
+  // the messages past the last one a scene closed
+  const pending = memory?.refused ? 0 : (memory?.message_count ?? 0) - (memory?.extracted_up_to ?? 0);
   if (!pending) {
     tell("Every message already belongs to a scene. There is nothing to extract.");
     return;
@@ -265,7 +273,7 @@ async function extractNow() {
       "character present.",
     note: `Left alone, otaku does this by itself after ${idleSpan(knobs?.idle_seconds)} at the prompt.`,
     action: "Extract now",
-    run: () => extract(facts.story_id),
+    run: () => extract(story),
   });
 }
 
@@ -282,8 +290,8 @@ function idleSpan(seconds) {
 }
 
 async function extract(story) {
-  const { notice, watching } = await api.extract(story);
+  const started = await api.stories.extraction.create(story);
   closeAll();
-  tell(notice);
-  if (watching) watchExtraction(story);
+  tell(started.notice);
+  if (started.value?.status === "running") watchExtraction(story);
 }

@@ -1,19 +1,19 @@
-"""The two answers that are a STREAM rather than a payload: a reply as
-it arrives, framed as server-sent events on the session's thread, and
-the watch stream that names each file the page is made of as it
-changes, held open for as long as the tab is."""
+"""The answers that are a STREAM rather than a payload: a reply as it
+arrives — a line played, a reply regenerated (`api.STREAMS`) — framed
+as server-sent events on the app's thread, and the watch stream that
+names each file the page is made of as it changes, held open for as long
+as the tab is."""
 
 import json
 import select
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator
 
-from otaku.backend.api.play import PlayEvent
-from otaku.backend.files import RawFile
-from otaku.backend.session import Refused, Session
 from otaku.web import api
+from otaku.web.api import Api, App, Refused
+from otaku.web.api.story.messages import PlayEvent
 from otaku.web.server import watch
 from otaku.web.server.assets import EVENT_STREAM, NO_STORE, STATIC_PATH
-from otaku.web.server.base import DISCONNECTED, Wire
+from otaku.web.server.base import DISCONNECTED, RETRY_AFTER, Wire
 from otaku.web.thread import StoppingError
 
 # The other request the page makes that nobody asked for: held open for
@@ -29,43 +29,51 @@ _RETRY_MS = 2000
 class Streams(Wire):
     """The handler's streaming half."""
 
-    def _play(self, line: str, *, regenerate: bool = False, files: Sequence[RawFile] = ()) -> None:
-        """One story line, its reply streamed as it arrives — or a fresh
-        take on the standing one, which streams the same way.
+    def _stream(self, produce: Callable[[Api], Iterator[PlayEvent]]) -> None:
+        """A reply streamed as it arrives — a line played, or a fresh
+        take on the standing one.
 
-        The whole turn is ONE job on the session's thread: the line is
+        The whole turn is ONE job on the app's thread: the line is
         recorded and its reply streamed without the thread going free in
-        between, so nothing — another tab landing a story, a `/new` — can
-        move the story out from under a line already accepted. The
+        between, so nothing can move the story out from under a line
+        already accepted. `produce` validates before the first event is
+        asked for — a refusal, a head that moved from the one `If-Match`
+        named, a malformed body arrive before a byte of the stream. The
         handler thread only waits, so the two never write at once. A
         browser that goes away breaks the write, which closes the
         generator: the backend's cancel-and-keep, reached by the same
         door Ctrl+C uses in the terminal."""
-        produce = (
-            api.regenerate if regenerate else (lambda session: api.play.play(session, line, files))
-        )
         self._streaming = False
         try:
-            self.server.runner.run(lambda session: self._pump(produce(session), session))
+            self.server.runner.run(lambda app: self._pump(produce(Api(app)), app))
         except StoppingError:
-            self.send_error(503, "otaku is stopping")
+            self._fault(503, headers=(("Retry-After", RETRY_AFTER),))
+        except api.PreconditionRequired as e:
+            self._fault(428, e)
         except Refused as e:
             # Checked before it plays, so this arrives before a byte of
             # the stream: invalid syntax leaves the story untouched, and
             # the usage line is the whole answer.
-            self._json({"notice": str(e), "refused": True})
+            self._outcome(e)
+        except (KeyError, TypeError, ValueError) as e:
+            # Before the stream, a body that is not what it claims; inside
+            # it, a bug like any other below.
+            if not self._streaming:
+                self._fault(400, e)
+            else:
+                self.server.crashed(f"web {self.command} {self._path()}", e)
         except Exception as e:
-            # Every other POST reaches this through `_answer`; this one
+            # Every other request reaches this through `_answer`; this one
             # cannot, because its answer is a stream. Once a frame has
             # gone out there is no status left to send — the page reads
             # the short stream as a finished reply — so the log is the
             # only place left to say what happened.
             self.server.crashed(f"web {self.command} {self._path()}", e)
             if not self._streaming:
-                self._failed(500, e)
+                self._fault(500, e)
 
-    def _pump(self, events: Iterator[PlayEvent], session: Session) -> None:
-        """Write the stream out, on the session's thread. Whatever ends
+    def _pump(self, events: Iterator[PlayEvent], app: App) -> None:
+        """Write the stream out, on the app's thread. Whatever ends
         it — the last event, a closed tab, a failure — the generator is
         closed, which is what records a partial reply."""
         self._streaming = True
@@ -73,7 +81,7 @@ class Streams(Wire):
         # write; before the first token there is none. So for this reply
         # the idle hook drains and then answers whether the page is still
         # there, and a vanished page ends the reply at once.
-        was_idle = session.set_on_idle(self._drain_and_look)
+        was_idle = app.set_on_idle(self._drain_and_look)
         try:
             # Inside the try from the first byte: the header flush is a
             # socket write too, and a tab that RST'd while this job sat
@@ -97,7 +105,7 @@ class Streams(Wire):
                     return
                 self._frame(json.dumps(api.event(happened)))
                 # A reply is the longest job there is, and it owns the
-                # session's thread for all of it. Between two frames is
+                # app's thread for all of it. Between two frames is
                 # where the reads waiting on that thread get answered —
                 # a rail button pressed mid-reply opens its screen now,
                 # not when the model stops.
@@ -108,13 +116,13 @@ class Streams(Wire):
             # a crash would log a traceback per reload.
             return
         finally:
-            session.set_on_idle(was_idle)
+            app.set_on_idle(was_idle)
             events.close()  # type: ignore[attr-defined]
         # The turn ran to its natural end and the reader has the whole
         # reply — the moment the screen wants them back. Not on a Stop or
         # a closed tab (the returns above): whoever cut it either acted
         # or left — the terminal's own "not after a Ctrl+C" rule.
-        if session.notification:
+        if api.app_settings.notifies(Api(app)):
             self.server.hooks.ring()
 
     def _drain_and_look(self) -> bool:
@@ -155,7 +163,7 @@ class Streams(Wire):
             for name in watch.changes(STATIC_PATH, self.server.custom_web_dir):
                 # A stopped server lets the stream go: held open, it
                 # would ping a still-working socket for the life of the
-                # process after `/web` hands the session back.
+                # process after `/web` hands the app back.
                 if self.server.stopping.is_set():
                     return
                 if name is None:

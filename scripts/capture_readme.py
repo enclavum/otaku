@@ -94,13 +94,10 @@ def _dress(target: Path) -> None:
     store.write_text(text.replace("vision: false", "vision: true"), encoding="utf-8")
     fixture = target / "fixtures" / "river.json"
     data = json.loads(fixture.read_text(encoding="utf-8"))
-    opened = data["opened"]
-    opened["messages"] = opened["messages"][:SHOWN_TURNS]
-    last = opened["messages"][-1]["id"]
-    for key in ("read_through",):
-        if isinstance(opened.get(key), int):
-            opened[key] = min(opened[key], last)
-    data["story"]["turns"] = len(opened["messages"])
+    data["messages"] = data["messages"][:SHOWN_TURNS]
+    # the captured preview and fill were the whole river's: the demo works
+    # them out again for the story it now holds
+    data["context"] = data["fill"] = None
     fixture.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
 
 

@@ -1,0 +1,170 @@
+/* The help docket: the language, the two keys that go with it, and what
+   the transcript answers to — and the support docket its footer opens.
+
+   What a reader needs written down is what they cannot see on the page:
+   the words a line may open or close with, the two verbs that have a
+   key, and the double click that opens a message — no button says so. Everything else IS on the page — a row in the contents, a
+   button on its panel, a hint under the box — which is what the footer
+   says.
+
+   Every token, argument shape and group name is read from `language.js`,
+   the language's one home on this side. What each row MEANS is written
+   here, lowercase: a sheet has room for a caption, not for the table's
+   full sentence. */
+
+import { api } from "../api/index.js";
+import { footnote, popups, wiring } from "../kit/browser.js";
+import { $, element, span } from "../kit/dom.js";
+import { opens, prose, rows as syntaxRows } from "../play/language.js";
+
+/* The keys the PAGE answers to. They belong beside the language they
+   are used on, which is why they are grouped by the language's own
+   halves and not listed apart. */
+/* What the two halves of the language are called on the sheet. The
+   medium's own headings: where a word is drawn, and under what, is the
+   page's business. */
+const _GROUPS = { playing: "Playing", inline: "Inside a prompt" };
+
+const _KEYS = {
+  playing: [
+    [["ctrl", "r"], "re-run the last prompt"],
+    [["ctrl", "u"], "take back the last exchange"],
+  ],
+};
+
+/* What the transcript answers to, in a section of its own after the
+   language: the page's gestures, not a word typed. */
+const _TRANSCRIPT = [["double-click", "edit a message in place"]];
+
+/* What each row of the language means, by its token. */
+const _MEANS = {
+  "/me": "send the message as a character",
+  "/you": "ask the model to play a character",
+  "/ooc": "talk to the model out of character",
+  "/roll": "roll real dice (1d20+5) — the model narrates exactly what fell",
+  "… /ooc": "an aside out of character",
+  "… /cue": "steer just the next reply — not kept in context afterwards",
+};
+
+export function openHelp() {
+  const popup = popups.get("/help");
+  const body = $("[data-help-body]", popup);
+  const scroller = $(".otk-docket__body", popup);
+  wiring(popup);
+
+  const blocks = [];
+  let group = null;
+  let grid = null;
+  // The story's own language and nothing else: a command is a row in the
+  // contents and a button on the panel it belongs to, and a sheet that
+  // repeats the menu is a sheet nobody reads.
+  for (const row of syntaxRows()) {
+    const half = opens(row.token) ? "playing" : "inline";
+    if (half !== group) {
+      group = half;
+      if (blocks.length) blocks.push(element("div", "otk-rule--double"));
+      const block = element("div", "otk-v otk-v--md");
+      block.append(span("otk-label", _GROUPS[half]));
+      // The row that is not a word: what typing anything else does.
+      if (half === "playing") {
+        block.append(element("p", "otk-prose otk-prose--lead", prose()));
+      }
+      grid = element("div", "otk-keys-grid");
+      for (const [chord, meaning] of _KEYS[half] ?? []) {
+        grid.append(keys(...chord.map((key) => span("otk-key", key))), span("otk-keys__meaning", meaning));
+      }
+      block.append(grid);
+      blocks.push(block);
+    }
+    const label = keys(span("otk-key", row.token));
+    if (row.args) label.append(span("otk-keys__plus", row.args));
+    grid.append(label, span("otk-keys__meaning", _MEANS[row.token] ?? ""));
+  }
+
+  const gestures = element("div", "otk-keys-grid");
+  for (const [gesture, meaning] of _TRANSCRIPT) {
+    gestures.append(keys(span("otk-key", gesture)), span("otk-keys__meaning", meaning));
+  }
+  const transcript = element("div", "otk-v otk-v--md");
+  transcript.append(span("otk-label", "Transcript"), gestures);
+  blocks.push(element("div", "otk-rule--double"), transcript);
+
+  body.replaceChildren(...blocks);
+  /* `showModal` focuses the first focusable descendant unless something
+     claims it with `autofocus`. The sheet is what the reader came for,
+     so the slip's body takes the focus and the keys scroll it. */
+  if (!popup.open) popup.showModal();
+  scroller.focus();
+}
+
+function keys(...parts) {
+  /* One chord, or one typed token: the same box either way, joined by
+     the same `+`. */
+  const box = element("span", "otk-keys");
+  parts.forEach((part, i) => {
+    if (i) box.append(span("otk-keys__plus", "+"));
+    box.append(part);
+  });
+  return box;
+}
+
+// ---------- the support docket ----------
+
+/* The support docket, opened from the help docket's footer: a message to
+   otaku's author, and the address to answer at where the reader gives
+   one, sent through the site (`backend.api.app.integrations`) — nothing
+   of the story attached. A refusal (no message, an address that is none,
+   a send that failed) is the backend's sentence in the footer, the docket
+   left open with what was typed. A request sent stays on screen, the
+   confirmation in the footer and Send become Close; opened again, the
+   docket starts a new one. The address is kept for it. */
+
+export function openSupport() {
+  const popup = popups.get("/support");
+  const signal = wiring(popup);
+  const email = $("[data-support-email]", popup);
+  const message = $("[data-support-message]", popup);
+  const cancel = $(".otk-close", popup);
+  const send = $("[data-send]", popup);
+  // a request sent last time is done; one cancelled waits as it was typed
+  if (popup.dataset.sent !== undefined) {
+    message.value = "";
+    delete popup.dataset.sent;
+  }
+  send.textContent = "Send";
+  cancel.style.visibility = "";
+  footnote(popup, "");
+  send.addEventListener(
+    "click",
+    async () => {
+      if (popup.dataset.sent !== undefined) {
+        popup.close();
+        return;
+      }
+      send.disabled = true;
+      try {
+        const answer = await api.integrations.supportRequests.create({
+          body: message.value,
+          email: email.value,
+        });
+        footnote(popup, answer.notice);
+        if (answer.refused) return;
+        popup.dataset.sent = "";
+        send.textContent = "Close";
+        // out of sight but not of the row: Close stands where Send stood
+        cancel.style.visibility = "hidden";
+      } catch (e) {
+        // a fault is a bug, not an answer: the console gets it, the reader a sentence
+        console.error(e);
+        footnote(popup, String(e.message ?? e));
+      } finally {
+        send.disabled = false;
+      }
+    },
+    { signal },
+  );
+  if (!popup.open) popup.showModal();
+  // the body holds the focus (`autofocus`), so a phone's keyboard waits for
+  // a tap; with a mouse, the caret is put in the first field at once
+  if (!window.matchMedia("(pointer: coarse)").matches) email.focus();
+}

@@ -52,7 +52,7 @@ from scenarios.support.server import ModelServer  # noqa: E402
 # require Python >= 3.14 and are out of scope. A release already on the
 # current schema is still rehearsed — the settings, the export and the
 # read-back all matter — it simply has no ladder to run.
-VERSIONS = ("0.2.1", "0.2.2", "0.3.0", "0.4.0", "0.4.1", "0.4.2", "0.4.3", "0.5.0", "0.6.0")
+VERSIONS = ("0.2.1", "0.2.2", "0.3.0", "0.4.0", "0.4.1", "0.4.2", "0.4.3", "0.5.0", "0.6.0", "0.7.0")
 PROVIDER, MODEL = "generic", "test-model"
 WORK = Path(os.environ.get("REHEARSAL_DIR", "/tmp/otaku-rehearsal"))
 
@@ -291,7 +291,7 @@ def read_through_app(current: str, root: Path) -> dict:
     python = str(Path(current).parent / "python")
     code = (
         "import json;"
-        "from otaku.backend.paths import Paths;"
+        "from otaku.backend.domain.app._paths import Paths;"
         "from otaku.encryption import unlock;"
         "from otaku.settings import config as config_file;"
         "from otaku.store import Store;"

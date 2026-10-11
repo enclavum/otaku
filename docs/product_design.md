@@ -1,5 +1,7 @@
 # otaku - top level product design
 
+**Note: the document is partly outdated.**
+
 ## Stories
 
 Roleplays / chats with an LLM are saved as stories. You start a story, and later you can branch

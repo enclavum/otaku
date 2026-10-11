@@ -1,0 +1,909 @@
+{
+ "story_defaults": [
+  {
+   "name": "use_shared_reminder",
+   "label": "Use shared reminder",
+   "tool": null,
+   "enabled": false,
+   "injection_label": "shared reminder",
+   "prompt_name": null,
+   "injection_position": {
+    "value": 2,
+    "text": "3rd last"
+   },
+   "allowed_positions": [
+    {
+     "value": 1,
+     "text": "2nd last"
+    },
+    {
+     "value": 2,
+     "text": "3rd last"
+    },
+    {
+     "value": 3,
+     "text": "4th last"
+    },
+    {
+     "value": 4,
+     "text": "5th last"
+    },
+    {
+     "value": 5,
+     "text": "6th last"
+    },
+    {
+     "value": 6,
+     "text": "7th last"
+    },
+    {
+     "value": 7,
+     "text": "8th last"
+    },
+    {
+     "value": 8,
+     "text": "9th last"
+    }
+   ],
+   "reminder_text": null,
+   "display_notes": null,
+   "layout": null
+  },
+  {
+   "name": "use_story_reminder",
+   "label": "Set story reminder",
+   "tool": null,
+   "enabled": false,
+   "injection_label": "story reminder",
+   "prompt_name": null,
+   "injection_position": {
+    "value": 2,
+    "text": "3rd last"
+   },
+   "allowed_positions": [
+    {
+     "value": 1,
+     "text": "2nd last"
+    },
+    {
+     "value": 2,
+     "text": "3rd last"
+    },
+    {
+     "value": 3,
+     "text": "4th last"
+    },
+    {
+     "value": 4,
+     "text": "5th last"
+    },
+    {
+     "value": 5,
+     "text": "6th last"
+    },
+    {
+     "value": 6,
+     "text": "7th last"
+    },
+    {
+     "value": 7,
+     "text": "8th last"
+    },
+    {
+     "value": 8,
+     "text": "9th last"
+    }
+   ],
+   "reminder_text": "",
+   "display_notes": null,
+   "layout": null
+  },
+  {
+   "name": "allow_assistant_notes",
+   "label": "Allow assistant notes",
+   "tool": "note",
+   "enabled": false,
+   "injection_label": "assistant notes",
+   "prompt_name": "tool_assistant_notes_prompt",
+   "injection_position": {
+    "value": 1,
+    "text": "2nd last"
+   },
+   "allowed_positions": [
+    {
+     "value": "system",
+     "text": "system"
+    },
+    {
+     "value": 1,
+     "text": "2nd last"
+    },
+    {
+     "value": 2,
+     "text": "3rd last"
+    },
+    {
+     "value": 3,
+     "text": "4th last"
+    },
+    {
+     "value": 4,
+     "text": "5th last"
+    },
+    {
+     "value": 5,
+     "text": "6th last"
+    },
+    {
+     "value": 6,
+     "text": "7th last"
+    },
+    {
+     "value": 7,
+     "text": "8th last"
+    },
+    {
+     "value": 8,
+     "text": "9th last"
+    }
+   ],
+   "reminder_text": null,
+   "display_notes": true,
+   "layout": null
+  },
+  {
+   "name": "allow_questions",
+   "label": "Allow questions",
+   "tool": "question",
+   "enabled": false,
+   "injection_label": "questions",
+   "prompt_name": "tool_questions_prompt",
+   "injection_position": {
+    "value": 1,
+    "text": "2nd last"
+   },
+   "allowed_positions": [
+    {
+     "value": "system",
+     "text": "system"
+    },
+    {
+     "value": 1,
+     "text": "2nd last"
+    },
+    {
+     "value": 2,
+     "text": "3rd last"
+    },
+    {
+     "value": 3,
+     "text": "4th last"
+    },
+    {
+     "value": 4,
+     "text": "5th last"
+    },
+    {
+     "value": 5,
+     "text": "6th last"
+    },
+    {
+     "value": 6,
+     "text": "7th last"
+    },
+    {
+     "value": 7,
+     "text": "8th last"
+    },
+    {
+     "value": 8,
+     "text": "9th last"
+    }
+   ],
+   "reminder_text": null,
+   "display_notes": null,
+   "layout": null
+  },
+  {
+   "name": "allow_system_info",
+   "label": "Allow system info",
+   "tool": "system-info",
+   "enabled": false,
+   "injection_label": "system info",
+   "prompt_name": "tool_system_info_prompt",
+   "injection_position": {
+    "value": 1,
+    "text": "2nd last"
+   },
+   "allowed_positions": [
+    {
+     "value": "system",
+     "text": "system"
+    },
+    {
+     "value": 1,
+     "text": "2nd last"
+    },
+    {
+     "value": 2,
+     "text": "3rd last"
+    },
+    {
+     "value": 3,
+     "text": "4th last"
+    },
+    {
+     "value": 4,
+     "text": "5th last"
+    },
+    {
+     "value": 5,
+     "text": "6th last"
+    },
+    {
+     "value": 6,
+     "text": "7th last"
+    },
+    {
+     "value": 7,
+     "text": "8th last"
+    },
+    {
+     "value": 8,
+     "text": "9th last"
+    }
+   ],
+   "reminder_text": null,
+   "display_notes": null,
+   "layout": null
+  },
+  {
+   "name": "allow_web_search",
+   "label": "Allow web search",
+   "tool": "web-search",
+   "enabled": false,
+   "injection_label": "web search",
+   "prompt_name": "tool_web_search_prompt",
+   "injection_position": {
+    "value": 1,
+    "text": "2nd last"
+   },
+   "allowed_positions": [
+    {
+     "value": "system",
+     "text": "system"
+    },
+    {
+     "value": 1,
+     "text": "2nd last"
+    },
+    {
+     "value": 2,
+     "text": "3rd last"
+    },
+    {
+     "value": 3,
+     "text": "4th last"
+    },
+    {
+     "value": 4,
+     "text": "5th last"
+    },
+    {
+     "value": 5,
+     "text": "6th last"
+    },
+    {
+     "value": 6,
+     "text": "7th last"
+    },
+    {
+     "value": 7,
+     "text": "8th last"
+    },
+    {
+     "value": 8,
+     "text": "9th last"
+    }
+   ],
+   "reminder_text": null,
+   "display_notes": null,
+   "layout": null
+  },
+  {
+   "name": "emulate_text_completion",
+   "label": "Emulate text completion",
+   "tool": null,
+   "enabled": false,
+   "injection_label": "text completion emulation",
+   "prompt_name": "emulate_text_completion_prompt",
+   "injection_position": {
+    "value": "system",
+    "text": "system"
+   },
+   "allowed_positions": [
+    {
+     "value": "system",
+     "text": "system"
+    },
+    {
+     "value": 1,
+     "text": "2nd last"
+    },
+    {
+     "value": 2,
+     "text": "3rd last"
+    },
+    {
+     "value": 3,
+     "text": "4th last"
+    },
+    {
+     "value": 4,
+     "text": "5th last"
+    },
+    {
+     "value": 5,
+     "text": "6th last"
+    },
+    {
+     "value": 6,
+     "text": "7th last"
+    },
+    {
+     "value": 7,
+     "text": "8th last"
+    },
+    {
+     "value": 8,
+     "text": "9th last"
+    }
+   ],
+   "reminder_text": null,
+   "display_notes": null,
+   "layout": null
+  },
+  {
+   "name": "layout",
+   "label": "Layout",
+   "tool": null,
+   "enabled": true,
+   "injection_label": null,
+   "prompt_name": null,
+   "injection_position": null,
+   "allowed_positions": [],
+   "reminder_text": null,
+   "display_notes": null,
+   "layout": "manuscript"
+  }
+ ],
+ "app": {
+  "version": "0.8.0",
+  "launch": {
+   "notices": [],
+   "hint": "Sample stories were imported so you can look around — type to play on, /stories switches between them, or see every command with /help · /model chooses a model · /new starts your own play."
+  },
+  "model": {
+   "provider": "ollama",
+   "name": "test-model",
+   "listed_name": "test-model",
+   "context_window": 32768,
+   "capabilities": {
+    "vision": false,
+    "audio": false,
+    "supported_params": null,
+    "reasoning_efforts": [],
+    "reasoning_switch": false,
+    "reasoning_budget": false,
+    "text_completion": false,
+    "structured_output": true
+   },
+   "can_complete_text": false,
+   "can_attach": false
+  },
+  "extraction_model": {
+   "provider": "ollama",
+   "name": "test-model",
+   "listed_name": "test-model",
+   "pinned": false
+  },
+  "on_cloud": false
+ },
+ "settings": {
+  "last_story": 1,
+  "verbose": false,
+  "autocorrect": true,
+  "notification": false,
+  "context_limit": 0,
+  "context_limit_text": "0 (the model's own max context)",
+  "idle_seconds": 300.0
+ },
+ "language": {
+  "prose": "Your character speaks or acts; the model continues the scene — sent verbatim",
+  "openers": [
+   {
+    "token": "/me",
+    "args": "NAME: PROMPT"
+   },
+   {
+    "token": "/you",
+    "args": "NAME[: HINT]"
+   },
+   {
+    "token": "/ooc",
+    "args": "PROMPT"
+   },
+   {
+    "token": "/roll",
+    "args": "DICE [PROMPT]"
+   }
+  ],
+  "inliners": [
+   {
+    "token": "… /ooc",
+    "args": "TEXT"
+   },
+   {
+    "token": "… /cue",
+    "args": "TEXT"
+   }
+  ]
+ },
+ "history": {
+  "items": []
+ },
+ "web_search": {
+  "has_key": false
+ },
+ "shared_reminder": {
+  "text": ""
+ },
+ "providers": {
+  "providers": [
+   {
+    "id": "llamacpp",
+    "label": "llama.cpp",
+    "locality": "local",
+    "configured": true,
+    "url": "http://127.0.0.1:9/v1",
+    "asked": true,
+    "answered": false,
+    "failure": "Could not reach llamacpp.",
+    "key_source": null,
+    "capabilities": null,
+    "models": []
+   },
+   {
+    "id": "koboldcpp",
+    "label": "KoboldCpp",
+    "locality": "local",
+    "configured": true,
+    "url": "http://127.0.0.1:9/v1",
+    "asked": true,
+    "answered": false,
+    "failure": "Could not reach koboldcpp.",
+    "key_source": null,
+    "capabilities": null,
+    "models": []
+   },
+   {
+    "id": "ollama",
+    "label": "Ollama",
+    "locality": "local",
+    "configured": true,
+    "url": "http://localhost:11434/v1",
+    "asked": true,
+    "answered": true,
+    "failure": null,
+    "key_source": "config",
+    "capabilities": {
+     "tokenizer": false,
+     "prompt_cache": false,
+     "model_management": true,
+     "supported_params": [
+      "frequency_penalty",
+      "max_tokens",
+      "presence_penalty",
+      "seed",
+      "stop",
+      "temperature",
+      "top_p"
+     ],
+     "bounds": {
+      "temperature": [
+       0,
+       null
+      ],
+      "presence_penalty": [
+       null,
+       null
+      ],
+      "frequency_penalty": [
+       null,
+       null
+      ]
+     }
+    },
+    "models": [
+     {
+      "name": "test-model",
+      "size": 1000000,
+      "context_window": 32768,
+      "context_length": 32768,
+      "context_loaded": 32768,
+      "max_output_tokens": null,
+      "capabilities": {
+       "vision": false,
+       "audio": false,
+       "supported_params": null,
+       "reasoning_efforts": [],
+       "reasoning_switch": false,
+       "reasoning_budget": false,
+       "text_completion": false,
+       "structured_output": true
+      },
+      "state": "loaded",
+      "locality": null,
+      "text_template": null,
+      "reasoning_words": "not supported",
+      "capability_words": "json output"
+     }
+    ]
+   },
+   {
+    "id": "omlx",
+    "label": "oMLX",
+    "locality": "local",
+    "configured": true,
+    "url": "http://127.0.0.1:9/v1",
+    "asked": true,
+    "answered": false,
+    "failure": "Could not reach omlx.",
+    "key_source": null,
+    "capabilities": null,
+    "models": []
+   },
+   {
+    "id": "lmstudio",
+    "label": "LM Studio",
+    "locality": "local",
+    "configured": true,
+    "url": "http://127.0.0.1:9/v1",
+    "asked": true,
+    "answered": false,
+    "failure": "Could not reach lmstudio.",
+    "key_source": null,
+    "capabilities": null,
+    "models": []
+   },
+   {
+    "id": "generic",
+    "label": "Generic OpenAI provider",
+    "locality": "unknown",
+    "configured": false,
+    "url": "",
+    "asked": false,
+    "answered": false,
+    "failure": null,
+    "key_source": null,
+    "capabilities": null,
+    "models": []
+   },
+   {
+    "id": "openrouter",
+    "label": "OpenRouter",
+    "locality": "remote",
+    "configured": false,
+    "url": "https://openrouter.ai/api/v1",
+    "asked": false,
+    "answered": false,
+    "failure": null,
+    "key_source": null,
+    "capabilities": null,
+    "models": []
+   },
+   {
+    "id": "nanogpt",
+    "label": "NanoGPT",
+    "locality": "remote",
+    "configured": false,
+    "url": "https://nano-gpt.com/api/v1",
+    "asked": false,
+    "answered": false,
+    "failure": null,
+    "key_source": null,
+    "capabilities": null,
+    "models": []
+   }
+  ],
+  "parameters": [
+   "temperature",
+   "top_p",
+   "top_k",
+   "min_p",
+   "max_tokens",
+   "presence_penalty",
+   "frequency_penalty",
+   "repetition_penalty",
+   "seed",
+   "stop"
+  ],
+  "effort_levels": [
+   "none",
+   "minimal",
+   "low",
+   "medium",
+   "high",
+   "xhigh",
+   "max"
+  ]
+ },
+ "provider": {
+  "id": "ollama",
+  "label": "Ollama",
+  "locality": "local",
+  "configured": true,
+  "url": "http://localhost:11434/v1",
+  "key_source": "config"
+ },
+ "models": {
+  "items": [
+   {
+    "name": "test-model",
+    "size": 1000000,
+    "context_window": 32768,
+    "context_length": 32768,
+    "context_loaded": 32768,
+    "max_output_tokens": null,
+    "capabilities": {
+     "vision": false,
+     "audio": false,
+     "supported_params": null,
+     "reasoning_efforts": [],
+     "reasoning_switch": false,
+     "reasoning_budget": false,
+     "text_completion": false,
+     "structured_output": true
+    },
+    "state": "loaded",
+    "locality": null,
+    "text_template": null,
+    "reasoning_words": "not supported",
+    "capability_words": "json output"
+   }
+  ]
+ },
+ "model_settings": {
+  "think": "unset",
+  "think_text": "unset",
+  "choices": {
+   "levels": [
+    "unset"
+   ],
+   "budget": false
+  },
+  "parameters": [
+   {
+    "name": "temperature",
+    "value": null,
+    "text": "",
+    "kind": "float",
+    "supported": true,
+    "low": 0,
+    "high": null
+   },
+   {
+    "name": "top_p",
+    "value": null,
+    "text": "",
+    "kind": "float",
+    "supported": true,
+    "low": 0,
+    "high": 1
+   },
+   {
+    "name": "top_k",
+    "value": null,
+    "text": "",
+    "kind": "int",
+    "supported": false,
+    "low": 0,
+    "high": null
+   },
+   {
+    "name": "min_p",
+    "value": null,
+    "text": "",
+    "kind": "float",
+    "supported": false,
+    "low": 0,
+    "high": 1
+   },
+   {
+    "name": "max_tokens",
+    "value": null,
+    "text": "",
+    "kind": "int",
+    "supported": true,
+    "low": 1,
+    "high": null
+   },
+   {
+    "name": "presence_penalty",
+    "value": null,
+    "text": "",
+    "kind": "float",
+    "supported": true,
+    "low": null,
+    "high": null
+   },
+   {
+    "name": "frequency_penalty",
+    "value": null,
+    "text": "",
+    "kind": "float",
+    "supported": true,
+    "low": null,
+    "high": null
+   },
+   {
+    "name": "repetition_penalty",
+    "value": null,
+    "text": "",
+    "kind": "float",
+    "supported": false,
+    "low": 0,
+    "high": 2
+   },
+   {
+    "name": "seed",
+    "value": null,
+    "text": "",
+    "kind": "int",
+    "supported": true,
+    "low": null,
+    "high": null
+   },
+   {
+    "name": "stop",
+    "value": null,
+    "text": "",
+    "kind": "list",
+    "supported": true,
+    "low": null,
+    "high": null
+   }
+  ],
+  "params": {},
+  "text_template": null
+ },
+ "info": {
+  "sections": [
+   {
+    "rows": [
+     [
+      "State dir",
+      "~/.otaku"
+     ]
+    ],
+    "note": ""
+   },
+   {
+    "rows": [
+     [
+      "Backend",
+      "ollama (http://localhost:11434/v1)"
+     ],
+     [
+      "Model",
+      "test-model"
+     ],
+     [
+      "Auth",
+      "api_key configured"
+     ],
+     [
+      "Loaded",
+      "yes"
+     ],
+     [
+      "Size",
+      "0.0 GB"
+     ],
+     [
+      "Max context",
+      "32K"
+     ],
+     [
+      "Reasoning",
+      "not supported"
+     ],
+     [
+      "Capabilities",
+      "json output"
+     ]
+    ],
+    "note": ""
+   },
+   {
+    "rows": [
+     [
+      "Messages",
+      "0"
+     ],
+     [
+      "Extraction",
+      "the story model"
+     ]
+    ],
+    "note": ""
+   }
+  ]
+ },
+ "balance": {
+  "rows": [
+   {
+    "provider": "openrouter",
+    "label": "OpenRouter",
+    "money": null,
+    "note": "no key set",
+    "value": "no key set"
+   },
+   {
+    "provider": "nanogpt",
+    "label": "NanoGPT",
+    "money": null,
+    "note": "no key set",
+    "value": "no key set"
+   }
+  ],
+  "total": null,
+  "note": "This story runs on ollama, which spends nothing. Paid providers are charged only when you switch to one."
+ },
+ "stories": [
+  {
+   "id": 2,
+   "title": "The Vermilion Tour",
+   "label": "The Vermilion Tour",
+   "story_so_far": "Bell Harrow becomes stage manager of the Vermilion Players at the Corona, inheriting a mysterious prompt book, a leaking corner, and an unopened iron trunk tied to Vessendal's debts and a proscribed, unfinished two-hundred-year-old play from Katterau. Alongside Emeran Falk, Odalric Vane, Mirelle Sorel, and clerk Casimir Prewick, she uncovers cryptic pages, forged bills, and buried debts—Vane's hidden loan from Hessel Brandt, Anna Sorel's sealed legacy, Mirelle's true parentage and hidden son Rupert/Anton, and copyist Anselm Krug's long guilt. Investigations lead through Achterhalt, the capital's Office of Public Morals (Lenz), and reclusive heir Marius Skarke, who secretly funds the play's revival. Harrow imposes strict rules—certified copies only, no wagers, no volunteering for the unfilled \"eleventh line\"—and orchestrates the play's full, certified performance at the Theatre Royal, breaking its centuries-old curse by finally answering its silent bell. Aftermath: debts settled, Grelle's long guilt resolved, Fenner Bacher rescued and adopted into the company, Mirelle reunited with her son, and the once-cursed script formally retired. The Players gain solvency, a new wagon, and stability. Seasons pass in performances, reconciliations, and quiet institutional rituals—chalk lists, certified books, Toby's promotion—cementing Harrow's harbor-like role holding the company together.",
+   "first_message": "/card vane.json",
+   "model": "",
+   "updated_at": "2026-01-01T00:00:00+00:00",
+   "message_count": 318
+  },
+  {
+   "id": 1,
+   "title": "The River That Forgot Its Name",
+   "label": "The River That Forgot Its Name",
+   "story_so_far": "The traveling cartographer Maren came down into the Meade valley to update her survey and found the river gone from its bed — dry as old bone, the ferry up on chocks. Tallis, the old ferryman and the only soul who stayed, told her the water left three nights ago and that it went uphill, and the scour marks along the empty channel bear him out. On the ferry deck he pointed to the weir at Harrow Lock as the place the river always fought, and under his finger the inked river on Maren's own map moved. She has drawn the true course in red and set out for the lock as dusk comes down.",
+   "first_message": "I follow the post road down into the Meade valley, checking the hills against my survey as I go.",
+   "model": "",
+   "updated_at": "2026-01-01T00:00:00+00:00",
+   "message_count": 16
+  }
+ ],
+ "tool_prompts": {
+  "note": {
+   "name": "tool_assistant_notes_prompt",
+   "text": "You may end a reply with a fenced code block marked otk-note: a note to\nyourself that the reader never sees.\n\nWrite there only what your reply does not say and you will need, or find\nuseful, in later turns: something you decided but did not state, why you\nanswered as you did, what you are holding back or mean to bring up later,\nwhere you intend this to go. Any notes you wrote before are in your earlier\nreplies — add what is new or what changed, never what is already there or in\nthe visible text. Many turns have nothing to add; then write no block at all.\n\nWrite the notes in whatever form is clear to you later — shorthand, fragments,\na list — and keep them brief: they cost the same context as everything else.\n\nTwo examples, from unrelated exchanges. The form is free — these only show the\nrange.\n\n```otk-note\nToln recognized the seal. Saying nothing yet — he wants to see if she offers it\nfirst.\n```\n\n```otk-note\nThird time they've asked for the short version: one paragraph from now on\nunless asked for more. The figure they gave earlier was 40k, not 4k — a slip,\nnot worth correcting unless it comes to matter.\n```\n\nClose the block before anything else follows, never put a block inside another,\nand stop after the closing fence. Never mention the block's marker. Never write\nit outside the block itself."
+  },
+  "question": {
+   "name": "tool_questions_prompt",
+   "text": "You may ask the reader ONE question when a choice is theirs to make rather than\nyours. Write it as the last thing in your reply, in a fenced code block marked\notk-question: the question on the first line, then the answers for the reader\nto pick from as numbered lines, at least two. Like this, from an unrelated\nstory:\n\n```otk-question\nDoes Mara confess tonight, or wait for the ball?\n1. She confesses tonight\n2. She waits for the ball\n3. She confesses, but to the wrong person\n```\n\nThe reader's next message is the answer.\n\nClose the block before anything else follows, never put a block inside another,\nand stop after the closing fence. Never mention the block's marker. Never write\nit outside the block itself."
+  },
+  "system-info": {
+   "name": "tool_system_info_prompt",
+   "text": "You may ask the time, the phase of the moon, the nearest solstice or\nequinox, and which model you are, when the story needs it: end your reply\nwith an empty fenced code block marked otk-system-info, like this:\n\n```otk-system-info\n```\n\nThe answer arrives as the next message, out of character."
+  },
+  "web-search": {
+   "name": "tool_web_search_prompt",
+   "text": "You may look something up on the internet when a character would, or when\nthe story needs a real fact: end your reply with a fenced code block marked\notk-web-search holding the query alone, like this, from an unrelated story:\n\n```otk-web-search\nLisbon tram routes 1930s\n```\n\nThe results arrive as the next message, out of character: short snippets\nfrom the top pages."
+  }
+ },
+ "prompts": {
+  "emulate_text_completion_prompt": {
+   "name": "emulate_text_completion_prompt",
+   "text": "Behave as a text completion: the story is one continuous text,\nand you continue it exactly from where it ends. When the last sentence is\nunfinished, finish it without repeating any of its words; when it is\nfinished, begin the next paragraph. Take over the turn wherever the text\nstops."
+  }
+ }
+}
