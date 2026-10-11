@@ -1,7 +1,8 @@
 /* THE PAGE'S DOOR TO OTAKU — its client of `web.api`, laid out as the
-   interface is: its two packages of twins as two modules, `app.js` and
-   `story.js`, a section in each for every twin under the twin's name, and
-   the HTTP itself beside them, this layer's machinery (`_http.js`).
+   interface is: its three packages of twins as three modules, `app.js`,
+   `codex.js` and `story.js`, a section in each for every twin under the
+   twin's name, and the HTTP itself beside them, this layer's machinery
+   (`_http.js`).
 
    The facade, `api`: a resource per top-level path, a sub-resource an
    attribute of its parent — the interface's own call paths
@@ -42,7 +43,7 @@ export const api = {
   usage: app.usage,
   info: app.info,
   balance: app.balance,
-  pictures: story.pictures,
+  pictures: app.pictures,
   history: app.history,
   integrations: app.integrations,
   language: story.language,

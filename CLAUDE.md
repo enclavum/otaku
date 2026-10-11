@@ -45,8 +45,8 @@ The state dir defaults to `~/.otaku`, relocatable via the
 ## Architecture
 
 The code's layout is `docs/code_structure.md`: the layers and what each
-may import, the backend's interface over its domain, the mirror of `app`
-and `story` twins in five places, the machinery, each frontend's door,
+may import, the backend's interface over its domain, the mirror of `app`,
+`codex` and `story` twins in five places, the machinery, each frontend's door,
 the terminal's, the web's and the page's layouts, how the two frontends'
 parts correspond, and a call followed from either frontend down to the
 store. Read it before moving code or adding a module.

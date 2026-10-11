@@ -27,11 +27,11 @@ from otaku.backend.api._writes import UNCHANGED, Changed, Unchanged
 from otaku.backend.api.app import AppResource
 from otaku.backend.api.app.history import HistoryResource
 from otaku.backend.api.app.integrations import IntegrationsResource
+from otaku.backend.api.app.pictures import PicturesResource
 from otaku.backend.api.app.providers import ProvidersResource
 from otaku.backend.api.app.reports import BalanceResource, InfoResource, UsageResource
 from otaku.backend.api.app.settings import SettingsResource
 from otaku.backend.api.story.language import LanguageResource
-from otaku.backend.api.story.pictures import PicturesResource
 from otaku.backend.api.story.prompts import PromptsResource, SharedReminderResource, ToolsResource
 from otaku.backend.api.story.stories import StoriesResource
 from otaku.backend.api.story.transfer import ImportsResource

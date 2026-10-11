@@ -86,6 +86,16 @@ export const history = {
   create: (fields) => post("/api/history", fields),
 };
 
+// ---------- pictures ----------
+
+/* The stored pictures, a message's and a card's alike: where each is
+   served, and its thumbnail, by the name its row carries — an address, not
+   a request: an `img` asks for it, and the answer is immutable. */
+export const pictures = {
+  url: (name) => `/api/pictures/${segment(name)}`,
+  thumbnail: { url: (name) => `/api/pictures/${segment(name)}/thumbnail` },
+};
+
 // ---------- reports ----------
 
 /* The installation's reports, the page drawing them from their facts: what

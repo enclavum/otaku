@@ -39,18 +39,18 @@ serve the app it holds (`/web`); the web knows nothing of the terminal.
       launch.py   one state dir opened as the app
       samples/    the stories and pictures a first launch seeds
 
-Inside, imports point one way: `errors` ← `domain.app` ← `domain.story` ← `api` ← `launch`, with
-`domain._formats` beside `domain.story`. A module imports another by its own module path, never
-through a package root. A package root holds its namesake or nothing: the facade and the vocabulary
-its resources share in `api`, the app's own resources in `api.app`, the `App` in `domain.app`,
-nothing in either `story`.
+Inside, imports point one way: `errors` ← `domain.app` ← `domain.codex` ← `domain.story` ← `api` ←
+`launch`, with `domain._formats` beside `domain.story`. A module imports another by its own module
+path, never through a package root. A package root holds its namesake or nothing: the facade and the
+vocabulary its resources share in `api`, the app's own resources in `api.app`, the `App` in
+`domain.app`, nothing in any `codex` or `story`.
 
 ## The mirror
 
 Five places are laid out alike — the domain (`backend.domain`), the interface (`backend.api`), each
 frontend's api package (`web.api`, `terminal.api`), and the page's api client
-(`web/static/js/api/`) — in two packages of twins, `app` for the installation and `story` for a
-story and what it holds:
+(`web/static/js/api/`) — in three packages of twins, `app` for the installation, `codex` for what
+every story may draw on and no story owns, and `story` for a story and what it holds:
 
     app/                                    story/
       __init__       the app itself           stories    the stories, the actions on one
@@ -59,19 +59,22 @@ story and what it holds:
       providers      the providers            lore       its memory
       models         a provider's models,     cards      a character card brought in
                      a model's settings       context    its next request
-      integrations   web search, support      pictures   a message's pictures
-      history        the lines submitted      transfer   the story in and out as a document
-      reports        the tokens, the run,     prompts    what its settings send
-                     the accounts             language   the story's language
+      integrations   web search, support      transfer   the story in and out as a document
+      history        the lines submitted      prompts    what its settings send
+      pictures       a picture in, and back   language   the story's language
+      reports        the tokens, the run,
+                     the accounts
 
-The five hold the same module list in the same structure: the same two packages, the same modules
+    codex/           its root alone
+
+The five hold the same module list in the same structure: the same three packages, the same modules
 in each under the same names, and each package root holding its namesake or nothing. The page's
-client writes the list in its own shape: a package is one module (`app.js`, `story.js`) and a twin a
-section of it, headed with the twin's name, in the order above — the `app` root's resources its
-`app` section, the `story` root's none. A module is added to all five or to none, and a place holds
-nothing beside its twins but its own machinery. The terminal's `dispatch` follows the same layout
-with a module for each resource that has commands — a resource without one has nothing to carry out
-there.
+client writes the list in its own shape: a package is one module (`app.js`, `codex.js`, `story.js`)
+and a twin a section of it, headed with the twin's name, in the order above — the `app` root's
+resources its `app` section, the `codex` and `story` roots' none. A module is added to all five or
+to none, and a place holds nothing beside its twins but its own machinery. The terminal's `dispatch`
+follows the same layout with a module for each resource that has commands — a resource without one
+has nothing to carry out there.
 
 A module imports a twin from the layer below under an alias that names the layer: an interface
 module imports `domain_<name>` — any other domain module too — and the terminal imports a module of
@@ -332,8 +335,9 @@ typed argument means and makes the `api.stories.update` call itself.
 
 The store is laid out by table, not by resource: one `*Ops` class per table, held by `Store` under
 the table's name (`store.stories`, `store.messages`, …), the tables of a kind in one module —
-`ops.stories` (stories, messages), `ops.lore` (scenes, characters, journals), `ops.records` (usage,
-history, settings). Only the domain touches it, through `app._store`.
+`ops.codex` (cards), `ops.stories` (stories, messages), `ops.lore` (scenes, characters, journals),
+`ops.records` (usage, history, settings) — and on `Store` itself the one operation that spans the
+tables and the files folder, `sweep_files`. Only the domain touches it, through `app._store`.
 
 ## Protected names
 

@@ -1,16 +1,18 @@
-"""Pictures coming in: read once, below both frontends, so what the
-model is shown is the same whichever medium sent it.
+"""The installation's pictures: one coming in, read once below both
+frontends and below every owner — a turn's and a codex card's alike — so
+what the model is shown is the same whichever medium sent it and whoever
+keeps it; and one stored, read back by the name its row carries.
 
 A picture arrives as the reader's bytes and leaves as the wire copy: the
 type sniffed from the bytes (never the name), decoded, the camera's
 orientation applied, downsized to `WIRE_EDGE` and never upsized, every
-metadata block dropped (EXIF with its GPS, XMP, comments — the colour
-profile stays, it is not private and keeps the colours honest), and
-re-encoded: PNG stays PNG, so a screenshot keeps its text sharp;
-everything else becomes JPEG, the one format every engine takes. A
-thumbnail of `THUMB_EDGE` is cut from the same decoded image for the
-page's transcript. `read_picture` is that pipeline over bytes; `save`
-stores what it made under its name and returns the row's side
+metadata block dropped (EXIF with its GPS, XMP, comments, a card's
+embedded text — the colour profile stays, it is not private and keeps
+the colours honest), and re-encoded: PNG stays PNG, so a screenshot
+keeps its text sharp; everything else becomes JPEG, the one format every
+engine takes. A thumbnail of `THUMB_EDGE` is cut from the same decoded
+image for the page. `read_picture` is that pipeline over bytes; `save`
+stores what it made under its owner's number and returns the row's side
 (`store.schema.Attachment`), apart so a turn reads every picture before
 it saves any.
 
@@ -18,10 +20,8 @@ What is refused, each with its own sentence (`Refused`): bytes over
 `MAX_BYTES`, a type not taken, a picture over `MAX_PIXELS` (judged on
 the header, before a pixel is decoded, which is what stops a
 decompression bomb), a file that will not decode, and a HEIC where the
-opener is absent (Pyodide has none). `MAX_PICTURES` is the per-turn
-limit `_play.submit_line` holds a line to, and the two sentences beside it are
-the refusals that are not about one file: a model that cannot see, too
-many pictures on one turn.
+opener is absent (Pyodide has none). How many pictures one turn may
+carry is the play's (`domain.story._play`).
 """
 
 import io
@@ -46,12 +46,8 @@ else:
 
 WIRE_EDGE = 1568  # px, the long edge on the wire; never upsized to it
 THUMB_EDGE = 512  # px, the thumbnail's long edge
-MAX_PICTURES = 8  # on one turn
 MAX_BYTES = 10_000_000  # of one file as it arrives; decimal, as a phone shows it
 MAX_PIXELS = 100_000_000  # decoded, judged from the header; a 48 MP phone is well under
-
-CANNOT_SEE = "This model cannot see pictures."
-TOO_MANY = f"At most {MAX_PICTURES} pictures on one turn."
 
 _JPEG_QUALITY = 85
 _THUMB_QUALITY = 80
@@ -63,8 +59,6 @@ _TAKEN_SENTENCE = "only JPEG, PNG, WebP or HEIC"
 # The `ftyp` brands a HEIC or HEIF file opens with, for the refusal that
 # names the format where its opener is absent.
 _HEIF_BRANDS = (b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis", b"mif1", b"msf1")
-
-
 # A picture name the files folder does not hold.
 _NO_SUCH_PICTURE = "No such picture."
 
@@ -92,8 +86,8 @@ class Picture:
 
 def get_picture(app: App, name: str) -> tuple[bytes, str]:
     """A stored picture as the model saw it, and its media type, under
-    the name a turn's attachments carry. Raises NotFound when the folder
-    has no such file."""
+    the name its row carries. Raises NotFound when the folder has no
+    such file."""
     found = app._store.files.get(name)
     if found is None:
         raise NotFound(_NO_SUCH_PICTURE)
@@ -108,12 +102,12 @@ def get_thumbnail(app: App, name: str) -> bytes:
     return found
 
 
-def save(files: FileStore, picture: Picture, story_id: int) -> Attachment:
-    """A picture into the folder under the story's number, and the row
-    that names it. Apart from `read_picture` so a turn can read every
-    picture first and save none until all of them are: a refusal then
-    leaves the folder as it was."""
-    name = files.add(Owner.STORY, story_id, picture.data, picture.media_type, thumb=picture.thumb)
+def save(files: FileStore, picture: Picture, owner: Owner, number: int) -> Attachment:
+    """A picture into the folder under its owner's number — a story's or
+    a card's — and the row that names it. Apart from `read_picture` so a
+    turn can read every picture first and save none until all of them
+    are: a refusal then leaves the folder as it was."""
+    name = files.add(owner, number, picture.data, picture.media_type, thumb=picture.thumb)
     return Attachment(
         file=name,
         width=picture.width,

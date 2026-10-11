@@ -22,7 +22,7 @@ from otaku.agents import Worker
 from otaku.backend.api import Api
 from otaku.backend.domain.app import App, LaunchFacts, _passwords
 from otaku.backend.domain.app._paths import Paths
-from otaku.backend.domain.story.pictures import RawFile, read_picture, save
+from otaku.backend.domain.app.pictures import RawFile, read_picture, save
 from otaku.backend.domain.story.settings import StorySettingQuestions
 from otaku.backend.errors import NO_MODEL_HINT, NotFound, Refused
 from otaku.encryption import AskSecret, Cipher, SealedError
@@ -44,6 +44,7 @@ from otaku.settings.config import ConfigError as ConfigError
 from otaku.settings.integrations import IntegrationConfig, IntegrationSettings
 from otaku.store import DatabaseError as DatabaseError
 from otaku.store import Store, is_encrypted
+from otaku.store.files import Owner
 from otaku.store.schema import Attachment
 
 # A sample's pictures ship beside its document, named for the message
@@ -387,7 +388,9 @@ def _seed_pictures(app: App, story_id: int, document: Path) -> list[str]:
         except (Refused, OSError) as e:
             notices.append(f"The sample picture {name} could not be added ({e}).")
             continue
-        by_message.setdefault(number, []).append(save(app._store.files, picture, story_id))
+        by_message.setdefault(number, []).append(
+            save(app._store.files, picture, Owner.STORY, story_id)
+        )
     for number, attachments in by_message.items():
         app._store.messages.set_attachments(ids[number - 1], attachments)
     return notices

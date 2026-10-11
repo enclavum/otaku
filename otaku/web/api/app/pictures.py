@@ -1,9 +1,9 @@
-"""A turn's pictures, as the page draws them: the file and its
-thumbnail, by the name the turn's attachments carry — bytes, which a
-browser may keep, since a file never changes once written."""
+"""The stored pictures, a turn's and a card's alike, as the page draws
+them: the file and its thumbnail, by the name their rows carry — bytes,
+which a browser may keep, since a file never changes once written."""
 
 from otaku.backend.api import Api
-from otaku.backend.api.story.pictures import Picture
+from otaku.backend.api.app.pictures import Picture
 from otaku.web.api._request import Blob, Route
 
 

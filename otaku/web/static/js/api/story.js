@@ -115,16 +115,6 @@ export const context = {
   fill: { get: (story) => get(`/api/stories/${story}/context/fill`) },
 };
 
-// ---------- pictures ----------
-
-/* A message's pictures: where each is served, and its thumbnail, by the
-   name the message's attachments carry — an address, not a request: an
-   `img` asks for it, and the answer is immutable. */
-export const pictures = {
-  url: (name) => `/api/pictures/${segment(name)}`,
-  thumbnail: { url: (name) => `/api/pictures/${segment(name)}/thumbnail` },
-};
-
 // ---------- transfer ----------
 
 /* Stories crossing otaku's edge: a document landed as a story (`imports`:

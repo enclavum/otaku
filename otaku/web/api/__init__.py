@@ -12,21 +12,22 @@ whose answer is the reply as it arrives, each event named on the wire by
 `event`. What is NOT here is HTTP: `web.server` matches a request against
 these tables and carries the result, and nothing else.
 
-The package mirrors `backend.api`, two packages of twins: `app`, the
+The package mirrors `backend.api`, three packages of twins: `app`, the
 installation (the app itself, `machine`, `settings`, `providers`,
-`models`, `integrations`, `history`, `reports`), and `story`, a story
-and what it holds (`stories`, `settings`, `messages`, `lore`, `cards`,
-`context`, `pictures`, `transfer`, `prompts`, `language`) — each module
-translating its twin's answers into the page's and holding its own
-rows — and `_request`, the layer's machinery: what every row is handed
-and hands back. A module calls its own twin's resources and nothing
-else of the interface; what it needs of another twin it takes from that
-twin's sibling here (every path inside a story is `story.stories.tagged`,
-and a write that moves a head asks `story.stories.expected_head`), which
-is what keeps every translation of one twin in one module. The tables
-here are the modules' rows merged, and a path in two of them is a fault
-at import: the server matches one sorted list built from all of them,
-and a duplicate would let the compile order decide.
+`models`, `integrations`, `history`, `pictures`, `reports`), `codex`,
+what every story may draw on, and `story`, a story and what it holds
+(`stories`, `settings`, `messages`, `lore`, `cards`, `context`,
+`transfer`, `prompts`, `language`) — each module translating its twin's
+answers into the page's and holding its own rows — and `_request`, the
+layer's machinery: what every row is handed and hands back. A module
+calls its own twin's resources and nothing else of the interface; what
+it needs of another twin it takes from that twin's sibling here (every
+path inside a story is `story.stories.tagged`, and a write that moves a
+head asks `story.stories.expected_head`), which is what keeps every
+translation of one twin in one module. The tables here are the modules'
+rows merged, and a path in two of them is a fault at import: the server
+matches one sorted list built from all of them, and a duplicate would
+let the compile order decide.
 
 The package is the web's ONE door to the backend: nothing else in the
 web imports `otaku.backend.api` — the server takes the app, the facade,
@@ -86,7 +87,15 @@ from otaku.web.api._request import (
     Tagged,
     etag,
 )
-from otaku.web.api.app import history, integrations, machine, models, providers, reports
+from otaku.web.api.app import (
+    history,
+    integrations,
+    machine,
+    models,
+    pictures,
+    providers,
+    reports,
+)
 from otaku.web.api.app import settings as app_settings
 from otaku.web.api.story import (
     cards,
@@ -94,7 +103,6 @@ from otaku.web.api.story import (
     language,
     lore,
     messages,
-    pictures,
     prompts,
     stories,
     transfer,
@@ -193,6 +201,7 @@ ROUTES: dict[tuple[str, str], Route] = _merged(
     models.ROUTES,
     integrations.ROUTES,
     history.ROUTES,
+    pictures.ROUTES,
     reports.ROUTES,
     stories.ROUTES,
     story_settings.ROUTES,
@@ -200,7 +209,6 @@ ROUTES: dict[tuple[str, str], Route] = _merged(
     lore.ROUTES,
     cards.ROUTES,
     context.ROUTES,
-    pictures.ROUTES,
     transfer.ROUTES,
     prompts.ROUTES,
     language.ROUTES,

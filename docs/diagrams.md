@@ -37,8 +37,9 @@ under the graph state the edges ASCII cannot draw cleanly.
               └──────────────────► store ◄─────────────────────────────┘
 
     backend: a frontend reaches it through `backend.api` alone (cli adds
-             `backend.launch`); inside, `errors` ◄ `domain.app` ◄ `domain.story`
-             ◄ `api` ◄ `launch` — `docs/code_structure.md`, "The backend"
+             `backend.launch`); inside, `errors` ◄ `domain.app` ◄ `domain.codex`
+             ◄ `domain.story` ◄ `api` ◄ `launch` — `docs/code_structure.md`,
+             "The backend"
     sealing: store · logging ─► encryption — the DATA plane (one session cipher
              for the database and the request log, BY DESIGN); backend ─► encryption
              covers both planes (data unlock + the api-key plane); keys are wired

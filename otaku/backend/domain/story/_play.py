@@ -20,6 +20,7 @@ from collections.abc import Generator, Iterator, Sequence
 from dataclasses import dataclass, field, replace
 
 from otaku.backend.domain.app import App
+from otaku.backend.domain.app.pictures import Picture, RawFile, read_picture, save
 from otaku.backend.domain.story._chain import (
     append_message,
     assemble,
@@ -29,15 +30,6 @@ from otaku.backend.domain.story._chain import (
     unit_start,
 )
 from otaku.backend.domain.story._tools import TOOLS, Actor, Tool, read_call
-from otaku.backend.domain.story.pictures import (
-    CANNOT_SEE,
-    MAX_PICTURES,
-    TOO_MANY,
-    Picture,
-    RawFile,
-    read_picture,
-    save,
-)
 from otaku.backend.domain.story.settings import StorySettings, ToolSetting, settings_of
 from otaku.backend.errors import NO_MODEL_HINT, NO_SUCH_STORY, Conflict, Invalid, NotFound
 from otaku.context import syntax
@@ -51,8 +43,14 @@ from otaku.context.assembler import (
 from otaku.context.tool_calls import FENCE, Prose, ReplyParser, ToolCall, parse_reply
 from otaku.providers import OpenAIClient, ProviderError, Reasoning, Reply, Stats, Text, templates
 from otaku.settings.state import ModelRef
+from otaku.store.files import Owner
 from otaku.store.schema import Character, CompletionType, Layout, Message, StoryMode
 
+# How many pictures one turn may carry, and the refusals that are not
+# about one file: a model that cannot see, too many on one turn.
+_MAX_PICTURES = 8
+_CANNOT_SEE = "This model cannot see pictures."
+_TOO_MANY = f"At most {_MAX_PICTURES} pictures on one turn."
 # A picture is refused over the text wire though the model sees: the
 # request is one text, which has no room for one (`ModelFacts.can_attach`).
 NO_PICTURE_ON_TEXT = "The request is one text here: no picture can ride it."
@@ -218,11 +216,11 @@ def _checked(
     # the story and the folder untouched, and nothing is saved before
     # the turn records.
     if files and not facts.vision:
-        raise Conflict(CANNOT_SEE)
+        raise Conflict(_CANNOT_SEE)
     if files and not facts.can_attach(layout):
         raise Conflict(NO_PICTURE_ON_TEXT)
-    if len(files) > MAX_PICTURES:
-        raise Invalid(TOO_MANY)
+    if len(files) > _MAX_PICTURES:
+        raise Invalid(_TOO_MANY)
     # An empty line is a CONTINUE in the canvas — the story goes on where
     # it stands, no turn recorded (`_submit_events`), over either wire —
     # and nothing at all in the other layouts: refused, never an empty
@@ -296,7 +294,9 @@ def _submit_events(
     request_speaker = known if frame.speaks == "request" else None
     # The pictures go into the folder before the turn records, under the
     # story's number. Nothing was written before this point.
-    attachments = tuple(save(app._store.files, picture, story_id) for picture in pictures)
+    attachments = tuple(
+        save(app._store.files, picture, Owner.STORY, story_id) for picture in pictures
+    )
     row = append_message(
         app,
         story_id,

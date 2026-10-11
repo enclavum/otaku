@@ -19,19 +19,20 @@ The map:
 - `backend.errors` — the refusal channel: `Refused` and its kinds, the
   shared refusal sentences.
 
-The interface and the domain are laid out alike, in two packages each:
+The interface and the domain are laid out alike, in three packages each:
 `app`, the installation — the App itself, its settings, the providers
 and their models, the integrations, the history, the machine, the
-reports — and `story`, a story and what it holds. A module in one has a
-TWIN of its name in the other, which an interface module imports as
+pictures, the reports — `codex`, what every story may draw on and no
+story owns, and `story`, a story and what it holds. A module in one has
+a TWIN of its name in the other, which an interface module imports as
 `domain_<name>`. What has no twin is a layer's MACHINERY, protected by
 its name (`api._writes`; `domain._formats`, `domain.app._paths`,
 `_passwords`, `_runs`, `domain.story._chain`, `_play`, `_tools`): its
 own layer imports it, the layer above never does — the launch, which
 composes the app, excepted.
 
-Inside, imports point one way: `errors` ← `domain.app` ← `domain.story`
-← `api` ← `launch`, `domain._formats` beside `domain.story`. Backend
-modules import each other by their own module path, never through a
-package root's re-exports.
+Inside, imports point one way: `errors` ← `domain.app` ← `domain.codex`
+← `domain.story` ← `api` ← `launch`, `domain._formats` beside
+`domain.story`. Backend modules import each other by their own module
+path, never through a package root's re-exports.
 """

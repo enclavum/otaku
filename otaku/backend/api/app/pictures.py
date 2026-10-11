@@ -1,13 +1,13 @@
-"""The pictures a turn carries, by the name its attachments give them
-(`PicturesResource`), each with its thumbnail. A file never changes once
-written."""
+"""The installation's stored pictures, a turn's and a card's alike, by
+the name their rows give them (`PicturesResource`), each with its
+thumbnail. A file never changes once written."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 from otaku.backend.domain.app import App
-from otaku.backend.domain.story import pictures as domain_pictures
+from otaku.backend.domain.app import pictures as domain_pictures
 
 
 class PicturesResource:
@@ -19,8 +19,8 @@ class PicturesResource:
 
     def get(self, name: str) -> Picture:
         """A stored picture as the model saw it, with its media type,
-        under the name a turn's attachments carry. Raises NotFound when
-        the folder has no such file."""
+        under the name its row carries. Raises NotFound when the folder
+        has no such file."""
         data, media_type = domain_pictures.get_picture(self._app, name)
         return Picture(data, media_type)
 

@@ -1,7 +1,7 @@
 """THE TERMINAL'S DOOR TO THE BACKEND — the one package of the terminal
 that imports `otaku.backend.api`, as `web.api` is the page's. It is laid
-out as the interface is, in its two packages of twins: a module for each
-interface module, re-exporting everything that module answers and
+out as the interface is, in its three packages of twins: a module for
+each interface module, re-exporting everything that module answers and
 holding what the terminal's own input means to it — a typed argument and
 the sentence it is answered with (`app.model`, `story.stories.title`), a
 setting's prompt (`story.prompts`), a provider's field

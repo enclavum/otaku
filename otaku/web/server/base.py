@@ -45,8 +45,9 @@ LOOPBACK = ("127.0.0.1", "0.0.0.0", "::", "::1", "localhost", "")
 _WILDCARD = ("0.0.0.0", "::", "")
 
 # What a request body may weigh. A turn's pictures are the heaviest thing
-# the page sends — eight of 10 MB each at most (`backend.domain.story.pictures`'
-# limits, copied), base64 in the JSON — and nothing else comes close.
+# the page sends — eight of 10 MB each at most (the play's
+# `_MAX_PICTURES` and `backend.domain.app.pictures.MAX_BYTES`, copied),
+# base64 in the JSON — and nothing else comes close.
 MAX_BODY = 8 * 10 * 1024 * 1024 * 4 // 3 + 1024 * 1024
 
 # When to ask again after a 503: otaku is stopping, and a reader's Ctrl+R
