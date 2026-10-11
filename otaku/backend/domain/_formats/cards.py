@@ -1,6 +1,6 @@
 """Character-card FILES: reading the wild formats (a PNG with base64
 JSON in its text chunks, or plain JSON) into the one honest
-`context.cards.Card`. Beside `sillytavern` and `plaintext` on purpose:
+`context.cards.StoryCard`. Beside `sillytavern` and `plaintext` on purpose:
 every foreign artifact is decoded in this package; what a card SENDS is
 `context.cards`' business.
 
@@ -34,7 +34,7 @@ import struct
 import zlib
 from dataclasses import replace as _replace
 
-from otaku.context.cards import Card, binds
+from otaku.context.cards import StoryCard, binds
 
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 _CARD_KEYWORDS = (b"chara", b"ccv3")
@@ -47,7 +47,7 @@ class CardError(ValueError):
     """A file `load_card` refuses, with the reason readable as printed."""
 
 
-def load_card(data: bytes, *, file_name: str = "") -> tuple[Card, list[str]]:
+def load_card(data: bytes, *, file_name: str = "") -> tuple[StoryCard, list[str]]:
     """The card in `data` (a PNG or JSON file's bytes) and the notes the
     import should say out loud — a dropped lorebook, disagreeing embedded
     copies, macros nothing will bind. `file_name` (no path) rides the card
@@ -140,14 +140,14 @@ def _json_payload(data: bytes) -> dict[str, object]:
 # ---------- normalizing one candidate ----------
 
 
-def _normalize(payload: dict[str, object]) -> Card | None:
+def _normalize(payload: dict[str, object]) -> StoryCard | None:
     """One candidate onto the allowlist; None when it has no name, which
     is the one thing a card cannot be without."""
     card = _card_dict(payload)
     name = _text(card, "name")
     if not name:
         return None
-    return Card(
+    return StoryCard(
         name=name,
         description=_text(card, "description"),
         personality=_text(card, "personality"),
@@ -199,7 +199,7 @@ def _newlines(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
-def _unknown_macros(card: Card) -> list[str]:
+def _unknown_macros(card: StoryCard) -> list[str]:
     """Every `{{…}}` nothing will bind, deduplicated in reading order —
     reported at import rather than stripped or silently shipped."""
     text = "\n".join(

@@ -23,10 +23,11 @@ frontends show a scene's and a character's where they show a message's:
 the page's margin (`dossier.js` `madeBy`), the terminal's preview
 (`dossier/base.py` `made_by`).
 
-A message's pictures are files beside the database (`store/files.py`),
-coming in through one reader below both frontends
-(`backend.domain.story.pictures`). The daily snapshot is of the database
-file alone: the folder is not backed up.
+A message's pictures and a codex card's are files beside the database
+(`store/files.py`, named by their `Owner`), coming in through one reader
+below both frontends (`backend.domain.story.pictures`), and swept
+against what both tables name (`Store.sweep_files`). The daily snapshot
+is of the database file alone: the folder is not backed up.
 
 ## Store conventions
 

@@ -7,10 +7,11 @@ undo is `set_head` (abandoned turns stay in the tree as siblings),
 regenerate is a `set_head` + `append` that diverges into a sibling.
 
 `fork` deep-copies a story through the cut — messages, surviving scenes,
-their journals, and the cast, ids remapped — so every story is fully
-self-contained. A picture is the one thing not copied: the message names
-it and the files folder holds it once (`schema.Attachment`), so a fork
-shares it by reference, and `delete` sweeps the folder afterwards.
+their journals, and the cast, ids remapped, each character's codex link
+kept — so every story is fully self-contained. A picture is the one
+thing not copied: the message names it and the files folder holds it
+once (`schema.Attachment`), so a fork shares it by reference, and
+`Store.sweep_files` clears the folder after a delete.
 """
 
 # Deferred annotations: the ops classes define `list` methods, which
@@ -25,7 +26,6 @@ from datetime import datetime
 from typing import Any
 
 from otaku.store.database import Database
-from otaku.store.files import FileStore
 from otaku.store.schema import Attachment, Message, Story, StoryMode, StorySettingDB
 
 # The numbered suffix a fork's title carries — every one it has collected,
@@ -66,11 +66,8 @@ class StaleHeadError(Exception):
 
 
 class StoryOps:
-    def __init__(self, db: Database, files: FileStore) -> None:
-        """Over the nucleus AND the files folder: a story's deletion is
-        the one operation that spans both stores."""
+    def __init__(self, db: Database) -> None:
         self._db = db
-        self._files = files
 
     def add(self, title: str | None = None) -> int:
         """A new story. A title already taken is NUMBERED, the way a fork
@@ -135,13 +132,12 @@ class StoryOps:
 
     def delete(self, story_id: int) -> None:
         """The one destructive act, and it is the user's: drop a story and
-        everything it owns, then sweep the files folder of what no message
-        names any more. The story row references its own head message, so
-        FK checks defer to commit."""
+        everything it owns — its pictures stay in the folder until
+        `Store.sweep_files`. The story row references its own head
+        message, so FK checks defer to commit."""
         self._db.conn.execute("PRAGMA defer_foreign_keys = ON")
         with self._db.conn as conn:
             conn.execute("DELETE FROM stories WHERE id = ?", (story_id,))
-        self.sweep_files()
 
     # ---------- getters and setters ----------
 
@@ -357,13 +353,13 @@ class StoryOps:
 
             character_map: dict[int, int] = {}
             rows = conn.execute(
-                "SELECT id, name, aliases, description, card, provider, model FROM characters WHERE story_id = ?",
+                "SELECT id, name, aliases, description, card, provider, model, card_id FROM characters WHERE story_id = ?",
                 (story_id,),
             ).fetchall()
-            for cid, name, aliases, description, card, c_provider, c_model in rows:
+            for cid, name, aliases, description, card, c_provider, c_model, card_id in rows:
                 cur = conn.execute(
-                    "INSERT INTO characters (story_id, name, aliases, description, card, created_at, updated_at, provider, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (new_story, name, aliases, description, card, now, now, c_provider, c_model),
+                    "INSERT INTO characters (story_id, name, aliases, description, card, created_at, updated_at, provider, model, card_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (new_story, name, aliases, description, card, now, now, c_provider, c_model, card_id),
                 )
                 character_map[int(cid)] = int(cur.lastrowid or 0)
 
@@ -414,22 +410,6 @@ class StoryOps:
             )
             # fmt: on
         return new_story
-
-    # ---------- the files folder ----------
-
-    def sweep_files(self) -> int:
-        """Delete every file in the folder no message names; how many
-        went. Run after a story is deleted and once at launch, so a crash
-        between the rows and the files heals on the next run. What is
-        kept is every name some message carries, on any branch of
-        any story — abandoned siblings count: undo and regen delete
-        nothing, and their turns stay reachable."""
-        # fmt: off
-        rows = self._db.conn.execute(
-            "SELECT DISTINCT json_extract(a.value, '$.file') FROM messages m, json_each(m.attachments) a WHERE m.attachments IS NOT NULL",
-        ).fetchall()
-        # fmt: on
-        return self._files.sweep(str(row[0]) for row in rows if row[0] is not None)
 
     # ---------- internals ----------
 
@@ -606,6 +586,17 @@ class MessagesOps:
                 (character_id, self._db.seal(name), self._db.now(), message_id),
             )
             # fmt: on
+
+    def get_file_names(self) -> set[str]:
+        """Every file name some message carries, on any branch of any
+        story — abandoned siblings count: undo and regen delete nothing,
+        and their turns stay reachable."""
+        # fmt: off
+        rows = self._db.conn.execute(
+            "SELECT DISTINCT json_extract(a.value, '$.file') FROM messages m, json_each(m.attachments) a WHERE m.attachments IS NOT NULL",
+        ).fetchall()
+        # fmt: on
+        return {str(row[0]) for row in rows if row[0] is not None}
 
     def set_attachments(self, message_id: int, attachments: Sequence[Attachment]) -> None:
         """The pictures on one message, replaced — the rows that name

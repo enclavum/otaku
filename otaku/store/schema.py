@@ -2,15 +2,16 @@
 
 Always the CURRENT shape: a fresh database is created from it directly,
 and `store.migrations` brings old databases to it. The semantics ride in
-from the old module unchanged with the DDL text: stories/messages are
-source, scenes/characters/journals derivatives, sibling trees via
-parent_id, the two-level rollup pattern, per-field sealing (the `attachments`
-column plain on purpose: the app's facts about files the folder beside
-the database holds sealed), audit-only timestamps. A story's settings
-are one sealed JSON on its row (`StorySettingDB`); the `settings` table
-holds the ones stories SHARE. A setting is that table's when it is a
-text that may need sealing — a config file is never sealed — and a
-config file's otherwise.
+from the old module unchanged with the DDL text: cards the codex, which
+no story owns, stories/messages source, scenes/characters/journals
+derivatives, sibling trees via parent_id, the two-level rollup pattern,
+per-field sealing (`attachments` and `pictures` plain on purpose: the
+app's facts about files the folder beside the database holds sealed;
+`digests` too, the folder's own judgement on an unkeyed digest),
+audit-only timestamps. A story's settings are one sealed JSON on its row
+(`StorySettingDB`); the `settings` table holds the ones stories SHARE. A
+setting is that table's when it is a text that may need sealing — a
+config file is never sealed — and a config file's otherwise.
 """
 
 import json
@@ -19,9 +20,25 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Self
 
-SCHEMA_VERSION = "9"
+SCHEMA_VERSION = "10"
 
 SCHEMA_DDL = """
+-- ---------- the codex: what every story may draw on ----------
+
+-- A story's character links to its card (`characters.card_id`) and holds
+-- a COPY of its fields: an edit on either side never reaches the other.
+CREATE TABLE cards (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       BLOB NOT NULL,
+    aliases    BLOB,                     -- JSON array, sealed
+    tagline    BLOB,                     -- one line for the reader; never sent to the model
+    fields     BLOB,                     -- the card's fields as TOML, macros unbound
+    pictures   TEXT,                     -- its pictures as a JSON list, see Attachment; the first the portrait; NULL when none
+    digests    TEXT,                     -- the card files it was made from, as a JSON list; NULL when none
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 -- ---------- source: what was actually said ----------
 
 CREATE TABLE stories (
@@ -94,6 +111,7 @@ CREATE TABLE characters (
     card        BLOB,                    -- an imported card as TOML
     provider    TEXT,                    -- who made the row
     model       TEXT,
+    card_id     INTEGER REFERENCES cards(id) ON DELETE SET NULL,  -- the codex card it is linked to
     UNIQUE (story_id, id)                -- composite-FK target: same-story references only
 );
 
@@ -150,9 +168,27 @@ CREATE INDEX idx_messages_speaker  ON messages (speaker_id);
 CREATE INDEX idx_scenes_story      ON scenes (story_id);
 CREATE INDEX idx_scenes_end        ON scenes (end_message_id);
 CREATE INDEX idx_characters_story  ON characters (story_id);
+CREATE UNIQUE INDEX idx_characters_card ON characters (card_id, story_id) WHERE card_id IS NOT NULL;
 CREATE INDEX idx_journals_rollup   ON journals (story_id, character_id, id);
 CREATE INDEX idx_token_usage_story ON token_usage (story_id);
 """
+
+
+@dataclass(frozen=True)
+class Card:
+    """A character card in the codex: a character as the reader keeps it
+    across stories. `fields` is the card's text as the TOML archive
+    `context.cards` writes and reads; the first of the pictures is the
+    portrait; `digests` name the card files it was made from."""
+
+    id: int
+    name: str
+    aliases: tuple[str, ...] = ()
+    tagline: str = ""
+    fields: str = ""
+    pictures: tuple["Attachment", ...] = ()  # the files folder holds the bytes
+    digests: tuple[str, ...] = ()
+    updated_at: str = ""  # audit column, surfaced for display alone
 
 
 @dataclass(frozen=True)
@@ -220,6 +256,7 @@ class Character:
     updated_at: str = ""  # audit column, surfaced for display alone
     provider: str | None = None  # who made the row (see the DDL)
     model: str | None = None
+    card_id: int | None = None  # the codex card it is linked to; None when unlinked
 
 
 @dataclass(frozen=True)

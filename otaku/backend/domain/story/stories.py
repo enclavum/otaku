@@ -148,6 +148,7 @@ def delete_story(app: App, story_id: int) -> str:
     if not exists(app, story_id):
         raise NotFound(NO_SUCH_STORY)
     app._store.stories.delete(story_id)
+    app._store.sweep_files()
     app._search_index = None
     return "Story deleted."
 

@@ -146,7 +146,7 @@ def open_app(root: str | Path | None = None, *, ask_secret: AskSecret | None = N
             notices.append(note.show)
     # The files folder, swept against what the rows still name — what a
     # crash between a delete's rows and its files left behind.
-    swept = store.stories.sweep_files()
+    swept = store.sweep_files()
     if swept:
         system_log.record(f"files folder swept: {swept} unreferenced file(s) removed")
     # The worker's own store connection (WAL makes the concurrent write

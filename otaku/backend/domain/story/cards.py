@@ -22,7 +22,7 @@ from otaku.backend.domain.story import _chain
 from otaku.backend.domain.story.settings import settings_of
 from otaku.backend.errors import Conflict, Invalid
 from otaku.context.assembler import estimate_tokens
-from otaku.context.cards import Card, bind, card_to_wire, card_toml
+from otaku.context.cards import StoryCard, bind, card_to_wire, card_toml
 from otaku.store.schema import Message
 
 # A card block above roughly this many tokens gets a warning: it rides
@@ -38,7 +38,7 @@ class CheckedCard:
     and whether it is worth warning about, and the persona the story
     remembers ("" for none)."""
 
-    card: Card
+    card: StoryCard
     notes: tuple[str, ...]
     block_tokens: int
     large: bool
@@ -130,7 +130,7 @@ def import_card(
 
 def _read_card(
     app: App, story_id: int | None, data: bytes, file_name: str, rename: str
-) -> tuple[Card, list[str]]:
+) -> tuple[StoryCard, list[str]]:
     """The card the bytes hold, renamed where asked, and what reading it
     noted — refused when it is no card, or the story's cast already
     answers to its name: importing over it would double the character."""
@@ -151,7 +151,7 @@ def _read_card(
     return card, notes
 
 
-def _block_tokens(app: App, card: Card, persona: str) -> int:
+def _block_tokens(app: App, card: StoryCard, persona: str) -> int:
     """The composed block's cost estimate, over the persona the ask
     defaults to — the answer only swaps a name, never the size class."""
     return estimate_tokens(

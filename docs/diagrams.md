@@ -23,10 +23,10 @@ under the graph state the edges ASCII cannot draw cleanly.
     cli ─┬─► terminal ─────────┐        cli also: ─► logging (viewing) · ─► update
          └─► web (◄─ browser) ─┤                  ─► backend.launch (opens the app)
              both ─► console   ▼
-            ┌─────────────────────────┐   schedules   ┌──────────────────────┐
-            │         backend         │ ────────────► │        agents        │ ◄── idle deadline
-            │  api · domain · launch  │               │ extraction · warm-up │
-            └─┬──┬──┬──┬──┬──┬──┬─────┘               └──┬────┬────┬────┬────┘
+            ┌─────────────────────────┐   schedules  ┌──────────────────────┐
+            │         backend         │ ───────────► │        agents        │ ◄── idle deadline
+            │  api · domain · launch  │              │ extraction · warm-up │
+            └─┬──┬──┬──┬──┬──┬──┬─────┘              └──┬────┬────┬────┬────┘
               │  │  │  │  │  │  └► integrations         │    │    │    │
               │  │  │  │  │  └───► settings             │    │    │    │
               │  │  │  │  └──────► encryption (unlock)  │    │    │    │
@@ -75,11 +75,11 @@ three, owning the frontend's life and the terminal it prints into.
       │ life; the ONLY    │ ◄───────────────────── │  guards · streams · assets   │
       │ module that       │   Hooks: show · record │                              │
       │ prints            │   working · ring ·     └───┬──────────────────────┬───┘
-      └────┬─────────┬────┘   check_password            │ run(work,            │ ROUTES · STREAMS
-           │         │        (injected, no             │ reading=…)           │ Ask · Created ·
-           │         │        import — see below)       │ drain()              │ Accepted · Tagged
-           │         └──────────────────────────────────┤                      │ Blob · event
-           │  AppRunner()                               ▼                      ▼
+      └────┬─────────┬────┘   check_password           │ run(work,            │ ROUTES · STREAMS
+           │         │        (injected, no            │ reading=…)           │ Ask · Created ·
+           │         │        import — see below)      │ drain()              │ Accepted · Tagged
+           │         └─────────────────────────────────┤                      │ Blob · event
+           │  AppRunner()                              ▼                      ▼
            │  .loop(stopping) · .abandon()   ┌──────────────────┐   ┌──────────────────┐
            └────────────────────────────────►│      thread      │   │       api        │
                                              │ ONE thread owns  │   │ what the page    │

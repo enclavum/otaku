@@ -175,14 +175,15 @@ class CharacterOps:
         card: str | None = None,
         provider: str | None = None,
         model: str | None = None,
+        card_id: int | None = None,
     ) -> int:
         now = self._db.now()
         sealed_aliases = self._db.seal_opt(json.dumps(list(aliases)) if aliases else None)
         with self._db.conn as conn:
             # fmt: off
             cur = conn.execute(
-                "INSERT INTO characters (story_id, name, aliases, description, card, created_at, updated_at, provider, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (story_id, self._db.seal(name), sealed_aliases, self._db.seal_opt(description), self._db.seal_opt(card), now, now, provider, model),
+                "INSERT INTO characters (story_id, name, aliases, description, card, created_at, updated_at, provider, model, card_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (story_id, self._db.seal(name), sealed_aliases, self._db.seal_opt(description), self._db.seal_opt(card), now, now, provider, model, card_id),
             )
             # fmt: on
         return int(cur.lastrowid or 0)
@@ -190,7 +191,7 @@ class CharacterOps:
     def list(self, story_id: int) -> builtins.list[Character]:
         # fmt: off
         rows = self._db.conn.execute(
-            "SELECT id, name, aliases, description, card, updated_at, provider, model FROM characters WHERE story_id = ? ORDER BY id",
+            "SELECT id, name, aliases, description, card, updated_at, provider, model, card_id FROM characters WHERE story_id = ? ORDER BY id",
             (story_id,),
         ).fetchall()
         # fmt: on
@@ -204,8 +205,9 @@ class CharacterOps:
                 updated_at=str(updated),
                 provider=provider,
                 model=model,
+                card_id=card_id,
             )
-            for cid, name, aliases, description, card, updated, provider, model in rows
+            for cid, name, aliases, description, card, updated, provider, model, card_id in rows
         ]
 
     def update(
@@ -276,6 +278,19 @@ class CharacterOps:
             conn.execute(
                 "UPDATE characters SET card = ?, updated_at = ? WHERE id = ?",
                 (self._db.seal_opt(card or None), self._db.now(), character_id),
+            )
+            # fmt: on
+
+    def set_card_id(self, character_id: int, card_id: int | None) -> None:
+        """Link a cast row to a codex card, or unlink it with None —
+        nothing else on either row changes: the character keeps its own
+        copy of whatever it holds. One link per card in a story: a second
+        raises `sqlite3.IntegrityError` (the unique index)."""
+        with self._db.conn as conn:
+            # fmt: off
+            conn.execute(
+                "UPDATE characters SET card_id = ?, updated_at = ? WHERE id = ?",
+                (card_id, self._db.now(), character_id),
             )
             # fmt: on
 

@@ -1,4 +1,4 @@
-"""Character cards as context material: the normalized `Card`, the
+"""Character cards as context material: the normalized `StoryCard`, the
 archive the cast row keeps, macro binding, and the wire block composed
 back out of the archive — writer and reader of the archive in ONE
 place. FILE decoding (PNG chunks, JSON) lives with the other wild
@@ -21,7 +21,7 @@ _PLACEHOLDER = re.compile(r"\{(\w+)\}")
 
 
 @dataclass(frozen=True)
-class Card:
+class StoryCard:
     """One character card, normalized. `name` is the only required field;
     text fields keep their macros."""
 
@@ -56,7 +56,7 @@ def binds(macro: str) -> bool:
     return bool(_CHAR_MACRO.fullmatch(macro) or _USER_MACRO.fullmatch(macro))
 
 
-def card_toml(card: Card, *, user: str) -> str:
+def card_toml(card: StoryCard, *, user: str) -> str:
     """The archive the characters table keeps: the card as the
     user-readable TOML "the fields the prompt was built from" — `name`
     and `user` first (the bindings, recorded as data), then every
@@ -66,7 +66,7 @@ def card_toml(card: Card, *, user: str) -> str:
     no trailing newline, so the archive is exactly what a document
     round-trip (which trims body edges) gives back."""
     lines = [_toml_pair("name", card.name), _toml_pair("user", user)]
-    for field in fields(Card):
+    for field in fields(StoryCard):
         if field.name == "name":
             continue
         value = getattr(card, field.name)
@@ -92,7 +92,7 @@ def card_to_wire(toml_text: str, template: str) -> str:
     # absent scenario must drop its template line, not survive as a
     # literal `{scenario}`. Only names outside the card's vocabulary are
     # left as written.
-    values: dict[str, str] = {field.name: "" for field in fields(Card)}
+    values: dict[str, str] = {field.name: "" for field in fields(StoryCard)}
     values["user"] = user
     for key, value in data.items():
         if isinstance(value, str):

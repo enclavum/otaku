@@ -33,7 +33,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from otaku.backend.domain.app import App
 from otaku.backend.errors import Invalid, NotFound
 from otaku.formatting import format_megabytes
-from otaku.store.files import FileStore
+from otaku.store.files import FileStore, Owner
 from otaku.store.schema import Attachment
 
 try:  # HEIC needs libheif, which pillow-heif bundles — except on Pyodide.
@@ -113,7 +113,7 @@ def save(files: FileStore, picture: Picture, story_id: int) -> Attachment:
     that names it. Apart from `read_picture` so a turn can read every
     picture first and save none until all of them are: a refusal then
     leaves the folder as it was."""
-    name = files.add(story_id, picture.data, picture.media_type, thumb=picture.thumb)
+    name = files.add(Owner.STORY, story_id, picture.data, picture.media_type, thumb=picture.thumb)
     return Attachment(
         file=name,
         width=picture.width,

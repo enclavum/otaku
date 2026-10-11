@@ -5,6 +5,7 @@ and the files folder beside it for the bytes a row only names.
 files folder beside it under the same cipher, and exposes one ops group
 per table:
 
+    store.cards       the codex's character cards
     store.stories     stories and their message trees (source)
     store.messages    individual messages (source)
     store.scenes      scenes and the story-so-far rollup (derivatives)
@@ -13,7 +14,9 @@ per table:
     store.usage       token accounting
     store.history     the terminal's Up/Down input history
     store.settings    the settings stories share (the texts that may need sealing)
-    store.files       the files folder beside the database: a turn's pictures (`FileStore`)
+    store.files       the files folder beside the database: a turn's and a card's pictures (`FileStore`)
+
+and the one operation that spans the tables and the folder: the sweep.
 """
 
 from pathlib import Path
@@ -22,6 +25,7 @@ from typing import Self
 from otaku.encryption import Cipher
 from otaku.store.database import Database, DatabaseError, Note, is_encrypted
 from otaku.store.files import FileStore
+from otaku.store.ops.codex import CardOps
 from otaku.store.ops.lore import CharacterOps, JournalOps, SceneOps
 from otaku.store.ops.records import HistoryOps, SettingsOps, UsageOps
 from otaku.store.ops.stories import MessagesOps, StoryOps
@@ -31,9 +35,8 @@ __all__ = ["DatabaseError", "Note", "Store", "is_encrypted"]
 
 class Store:
     def __init__(self, db: Database, files: FileStore) -> None:
-        # Deleting a story spans both stores — the one operation that
-        # does — so the stories ops are handed the folder by name.
-        self.stories = StoryOps(db, files)
+        self.cards = CardOps(db)
+        self.stories = StoryOps(db)
         self.messages = MessagesOps(db)
         self.scenes = SceneOps(db)
         self.characters = CharacterOps(db)
@@ -61,3 +64,10 @@ class Store:
 
     def close(self) -> None:
         self._db.close()
+
+    def sweep_files(self) -> int:
+        """Delete every file in the folder no message and no card names;
+        how many went. Run after a story or a card is deleted and once at
+        launch, so a crash between the rows and the files heals on the
+        next run."""
+        return self.files.sweep(self.messages.get_file_names() | self.cards.get_file_names())
