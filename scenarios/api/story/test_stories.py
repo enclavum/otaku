@@ -13,8 +13,12 @@ story the chat plays, and the remembered state.
 """
 
 from collections.abc import Callable
+from pathlib import Path
 
-from otaku.backend.api import Api, Layout
+import pytest
+
+from otaku.backend.api import Api, Layout, Refused
+from otaku.backend.api.codex.cards import RawFile
 from otaku.backend.domain.app._paths import Paths
 from otaku.terminal.api.story.prompts import read_prompt
 from otaku.terminal.screens import stories as screen_stories
@@ -35,6 +39,9 @@ from scenarios.support.screens import (
 Picker = Callable[[Api, "int | None"], "tuple[int, str] | None"]
 
 HOW_TO_ASK = "ASK LIKE THIS"
+
+
+CAT = Path(__file__).parents[2] / "fixtures" / "cat.jpg"
 
 
 class TestBrowsing:
@@ -495,6 +502,62 @@ class TestRegenerate:
             assert [m.id for m in app.messages] == before
         finally:
             app.close()
+
+
+class TestStartWithCards:
+    """A story started with codex cards: a card row and a linked character
+    each, in pick order, then the first card's greeting — one voice opens
+    it — and the portraits of the cards asked for on their rows."""
+
+    def test_the_cards_come_in_order_and_one_greeting_opens(self, app: App) -> None:
+        quiet = app.api.cards.create(name="Wren").value
+        mira = app.api.cards.create(name="Mira", greeting="Hello, {{user}}.").value
+        tallis = app.api.cards.create(name="Tallis", greeting="Who goes?").value
+        made = app.api.stories.create(card_ids=(quiet.id, mira.id, tallis.id), persona="Alex").value
+        rows = app.store.stories.get_messages(made.id)
+        assert [(m.kind, m.body) for m in rows] == [
+            ("card", "/card Wren"),
+            ("card", "/card Mira"),
+            ("card", "/card Tallis"),
+            ("dialogue", "Hello, Alex."),
+        ]
+        assert rows[-1].speaker == "Mira"
+        cast = app.store.characters.list(made.id)
+        assert [(c.name, c.card_id) for c in cast] == [
+            ("Wren", quiet.id),
+            ("Mira", mira.id),
+            ("Tallis", tallis.id),
+        ]
+        assert made.title == "Wren, Mira, Tallis"  # an untitled one named for them
+
+    def test_the_portraits_asked_for_ride_their_rows(self, app: App) -> None:
+        mira = app.api.cards.create(name="Mira").value
+        wren = app.api.cards.create(name="Wren").value
+        for card in (mira, wren):
+            app.api.cards.pictures.create(card.id, file=RawFile(CAT.read_bytes(), "cat.jpg"))
+        made = app.api.stories.create(
+            title="Two", card_ids=(mira.id, wren.id), card_pictures=(wren.id,), persona="you"
+        ).value
+        first, second = app.store.stories.get_messages(made.id)
+        assert first.attachments == ()
+        assert second.attachments == app.api.cards.get(wren.id).pictures
+
+    def test_a_pick_one_story_cannot_hold_is_refused_and_nothing_is_made(self, app: App) -> None:
+        mira = app.api.cards.create(name="Mira").value
+        twin = app.api.cards.create(name="Mira").value
+        before = len(app.api.stories.list())
+        for picked in ((mira.id, mira.id), (mira.id, twin.id), (mira.id, 999)):
+            with pytest.raises(Refused):
+                app.api.stories.create(card_ids=picked, persona="you")
+        assert len(app.api.stories.list()) == before
+
+    def test_a_fork_keeps_its_characters_links(self, app: App) -> None:
+        mira = app.api.cards.create(name="Mira").value
+        made = app.api.stories.create(card_ids=(mira.id,), persona="you").value
+        fork = app.api.stories.forks.create(made.id).value
+        (character,) = app.store.characters.list(fork.id)
+        assert character.card_id == mira.id
+        assert len(app.api.cards.get(mira.id).stories) == 2
 
 
 class TestTheStoryTheTerminalHolds:

@@ -129,6 +129,18 @@ def _capture(url: str) -> dict[str, Any]:
         },
         "river": _story(url, river),
         "tour": _story(url, tour),
+        "codex": _codex(url),
+    }
+
+
+def _codex(url: str) -> dict[str, Any]:
+    """All characters as the page reads it — the cards as listed, each one
+    whole, and the stories' characters no card claims."""
+    cards = _get(f"{url}/api/cards")[1]["items"]
+    return {
+        "cards": cards,
+        "card": {str(row["id"]): _get(f"{url}/api/cards/{row['id']}")[1] for row in cards},
+        "unlinked": _get(f"{url}/api/cards/unlinked")[1]["items"],
     }
 
 

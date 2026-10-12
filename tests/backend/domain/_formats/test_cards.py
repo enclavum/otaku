@@ -122,6 +122,11 @@ class TestLoadCard:
         _, notes = load_card(_json(payload))
         assert any("{{roll:d20}}" in note for note in notes)
 
+    def test_original_is_bound_so_never_reported(self) -> None:
+        payload = _v2(name="Elara", system_prompt="{{original}} Stay in {{char}}'s voice.")
+        _, notes = load_card(_json(payload))
+        assert notes == []
+
 
 class TestNormalization:
     def test_line_endings_normalize(self) -> None:
@@ -140,23 +145,43 @@ class TestNormalization:
         card, _ = load_card(_json(_v2(name="Iblisse", personality="chaos itself")))
         assert (card.description, card.personality) == ("", "chaos itself")
 
-    def test_the_depth_note_needs_text_not_just_the_key(self) -> None:
+    def test_the_reminder_needs_text_not_just_the_key(self) -> None:
         with_key = _v2(name="E", extensions={"depth_prompt": {"depth": 0, "prompt": "  "}})
         card, _ = load_card(_json(with_key))
-        assert card.depth_note == ""
+        assert card.reminder == ""
         with_text = _v2(name="E", extensions={"depth_prompt": {"prompt": "always hits"}})
         card, _ = load_card(_json(with_text))
-        assert card.depth_note == "always hits"
+        assert card.reminder == "always hits"
+
+    def test_the_reminders_depth_counts_the_readers_messages(self) -> None:
+        # SillyTavern counts every message, 0 after the last; otaku the
+        # reader's alone, 1 before the newest: half, rounded up, from 1.
+        for st_depth, depth in ((0, 1), (1, 1), (2, 1), (3, 2), (4, 2), (5, 3), (9, 5)):
+            prompt = {"depth_prompt": {"depth": st_depth, "prompt": "p"}}
+            card, _ = load_card(_json(_v2(name="E", extensions=prompt)))
+            assert card.reminder_depth == depth, st_depth
+
+    def test_a_reminder_without_a_depth_takes_sillytaverns_default(self) -> None:
+        for prompt in ({"prompt": "p"}, {"prompt": "p", "depth": "deep"}):
+            card, _ = load_card(_json(_v2(name="E", extensions={"depth_prompt": prompt})))
+            assert card.reminder_depth == 2  # SillyTavern's 4, counted otaku's way
 
     def test_blank_alternate_greetings_drop(self) -> None:
         card, _ = load_card(_json(_v2(name="E", alternate_greetings=["hi", "  ", "yo"])))
         assert card.alternate_greetings == ("hi", "yo")
 
-    def test_the_stored_but_unsent_fields_survive(self) -> None:
-        # Storage is generous; the template is what keeps them off the wire.
-        payload = _v2(name="E", system_prompt="sys", creator_notes="read me")
+    def test_the_fields_beside_the_block_survive(self) -> None:
+        # Storage is generous: the system prompt rides on its own, the
+        # post-history instructions and the notes are kept, sent nowhere.
+        payload = _v2(
+            name="E", system_prompt="sys", post_history_instructions="ph", creator_notes="read me"
+        )
         card, _ = load_card(_json(payload))
-        assert (card.system_prompt, card.creator_notes) == ("sys", "read me")
+        assert (card.system_prompt, card.post_history_instructions, card.creator_notes) == (
+            "sys",
+            "ph",
+            "read me",
+        )
 
     def test_runtime_junk_never_reaches_the_card(self) -> None:
         # The allowlist: `chat` (the ST leak) and friends drop on the floor.

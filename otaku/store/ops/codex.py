@@ -132,6 +132,69 @@ class CardOps:
             )
             # fmt: on
 
+    def add_digest(self, card_id: int, digest: str) -> None:
+        """One more card file this card answers to — a reader who said an
+        imported file IS this card; one already there is left as it is."""
+        card = self.get(card_id)
+        if card is None or digest in card.digests:
+            return
+        with self._db.conn as conn:
+            # fmt: off
+            conn.execute(
+                "UPDATE cards SET digests = ?, updated_at = ? WHERE id = ?",
+                (_digests_json([*card.digests, digest]), self._db.now(), card_id),
+            )
+            # fmt: on
+
+    # ---------- resolution ----------
+
+    def find_by_digest(self, digest: str) -> Card | None:
+        """The card made from a card file with this digest, or one a reader
+        said it is; None for none."""
+        # fmt: off
+        row = self._db.conn.execute(
+            "SELECT id FROM cards c WHERE EXISTS (SELECT 1 FROM json_each(c.digests) d WHERE d.value = ?) ORDER BY id",
+            (digest,),
+        ).fetchone()
+        # fmt: on
+        return self.get(int(row[0])) if row is not None else None
+
+    def merge(self, source_id: int, target_id: int) -> None:
+        """Fold a card into another: every story character linked to the
+        source links to the target, the source's name and aliases join the
+        target's aliases, its pictures follow the target's, the digests
+        union, and the source is deleted; the target's own fields stand.
+        A story holding characters linked to both cannot take it (one
+        link per card in a story) and raises `sqlite3.IntegrityError`
+        with nothing written — the caller refuses first."""
+        if source_id == target_id:
+            raise ValueError("a card cannot be merged into itself")
+        source, target = self.get(source_id), self.get(target_id)
+        if source is None or target is None:
+            raise ValueError("both cards must exist")
+        aliases = [
+            alias
+            for alias in dict.fromkeys([*target.aliases, source.name, *source.aliases])
+            if alias != target.name
+        ]
+        kept = {picture.file for picture in target.pictures}
+        pictures = [*target.pictures, *(p for p in source.pictures if p.file not in kept)]
+        digests = list(dict.fromkeys([*target.digests, *source.digests]))
+        with self._db.conn as conn:
+            # fmt: off
+            conn.execute(
+                "UPDATE characters SET card_id = ?, updated_at = ? WHERE card_id = ?",
+                (target_id, self._db.now(), source_id),
+            )
+            conn.execute(
+                "UPDATE cards SET aliases = ?, pictures = ?, digests = ?, updated_at = ? WHERE id = ?",
+                (self._seal_aliases(aliases), Attachment.to_json(pictures), _digests_json(digests), self._db.now(), target_id),
+            )
+            conn.execute(
+                "DELETE FROM cards WHERE id = ?", (source_id,)
+            )
+            # fmt: on
+
     # ---------- shaping ----------
 
     def _card(self, row: Any) -> Card:

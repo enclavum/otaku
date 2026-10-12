@@ -16,7 +16,7 @@
 
 import { api, login, whenUnauthorized } from "./js/api/index.js";
 import { closeAll } from "./js/kit/browser.js";
-import { editTurn, keepsScreen, openTab, run as runCommand } from "./js/commands.js";
+import { editTurn, keepsScreen, openCodex, openTab, run as runCommand } from "./js/commands.js";
 import { showSignOut, signIn, signOut } from "./js/screens/login.js";
 import { draft, focusComposer, primeHistory, submit, wire as wireComposer } from "./js/composer.js";
 import { $, $$, watchTextareas } from "./js/kit/dom.js";
@@ -121,6 +121,12 @@ function start() {
     if (event.target.closest("[data-sign-out]")) {
       foldRail();
       signOut();
+      return;
+    }
+    // The contents row of a screen with no command yet: All characters.
+    if (event.target.closest("[data-characters]")) {
+      openCodex();
+      foldRail();
       return;
     }
     // The contents rows that are no command: a tab of the open story's

@@ -1,9 +1,9 @@
-"""A story's memory, operated: loaded whole — its current scenes, the
-cast in appearance order, the current timeline's journal records — a
-scene, a character and a journal record each read and corrected, a
-character merged or deleted; and the forced extraction pass, started
-through the worker, kept per story while it runs and after (a run is read
-without the app's thread), and given up."""
+"""A story's memory, operated: loaded whole — its current scenes, the cast
+in appearance order, the current timeline's journal records — a scene, a
+character and a journal record each read and corrected, a character
+linked to a codex card or unlinked, merged or deleted; and the forced
+extraction pass, started through the worker, kept per story while it
+runs and after (a run is read without the app's thread), and given up."""
 
 import tomllib
 from collections.abc import Iterable
@@ -12,7 +12,8 @@ from typing import TypeVar
 
 from otaku.backend.domain.app import App
 from otaku.backend.domain.app._runs import WorkerRun
-from otaku.backend.domain.story import _chain
+from otaku.backend.domain.codex import cards as codex_cards
+from otaku.backend.domain.story import _request
 from otaku.backend.errors import NO_MODEL_HINT, NO_SUCH_STORY, Conflict, Invalid, NotFound
 from otaku.store.schema import Character, Journal, Scene
 
@@ -34,7 +35,8 @@ class ExtractionState:
 class Memory:
     """A story's memory loaded whole: how many messages its chain holds,
     its current scenes, the cast in appearance order, the current
-    timeline's journal records, and each chain message's ordinal by id."""
+    timeline's journal records, each chain message's ordinal by id, and
+    the name of each codex card the cast is linked to, by its id."""
 
     story_id: int
     total_messages: int
@@ -42,6 +44,7 @@ class Memory:
     cast: tuple[Character, ...]
     journals: tuple[Journal, ...]
     ordinal: dict[int, int]
+    card_names: dict[int, str]
 
     def scene_no(self, scene_id: int) -> int:
         """1-based position of a scene in story order — the number every
@@ -127,7 +130,7 @@ def create_extraction(app: App, story_id: int) -> tuple[ExtractionState, str]:
     if app._client(app._extraction_model()) is None:
         raise Conflict(NO_MODEL_HINT)
     run = WorkerRun(app._worker)
-    job = replace(_chain.build_job(app, story_id, force=True), on_done=run._finish)
+    job = replace(_request.build_job(app, story_id, force=True), on_done=run._finish)
     app._worker.schedule(job, now=True)
     app._extraction_runs[story_id] = run
     return _state_of(run), "Extracting lore from the recent messages\u2026"
@@ -184,15 +187,18 @@ def get_lore(app: App, story_id: int) -> Memory:
     ids = store.stories.get_messages_ids(story_id)
     scenes = tuple(store.scenes.get_current(story_id, ids))
     current = {s.id for s in scenes}
+    # In order of appearance (row order), not by name: the cast reads as
+    # the story introduced it.
+    cast = tuple(store.characters.list(story_id))
+    linked = {c.card_id for c in cast if c.card_id is not None}
     return Memory(
         story_id=story_id,
         total_messages=len(ids),
         scenes=scenes,
-        # In order of appearance (row order), not by name: the cast reads
-        # as the story introduced it.
-        cast=tuple(store.characters.list(story_id)),
+        cast=cast,
         journals=tuple(j for j in store.journals.list(story_id) if j.scene_id in current),
         ordinal={mid: i + 1 for i, mid in enumerate(ids)},
+        card_names={card_id: codex_cards.get_card(app, card_id).name for card_id in linked},
     )
 
 
@@ -276,6 +282,28 @@ def update_character(
     if card is not None:
         app._store.characters.set_card(character_id, card)
     return "Saved."
+
+
+def set_card_id(app: App, story_id: int, character_id: int, card_id: int | None) -> str:
+    """A story's character linked to a codex card, or unlinked with None —
+    nothing else on either changes: the character keeps its own copy of
+    whatever it holds. Checked to be that story's as `update_scene`
+    checks; raises Refused for no such card, nothing to change, and a
+    card another of the story's characters is linked to already."""
+    character = get_character(app, story_id, character_id)
+    if card_id == character.card_id:
+        raise Invalid("Nothing to change.")
+    if card_id is None:
+        assert character.card_id is not None
+        was = codex_cards.get_card(app, character.card_id)
+        app._store.characters.set_card_id(character.id, None)
+        return f"Unlinked {character.name} from {was.name}."
+    card = codex_cards.get_card(app, card_id)
+    other = next((c for c in app._store.characters.list(story_id) if c.card_id == card.id), None)
+    if other is not None:
+        raise Conflict(f"{other.name} in this story is linked to {card.name} already.")
+    app._store.characters.set_card_id(character.id, card.id)
+    return f"Linked {character.name} to {card.name}."
 
 
 def update_journal(app: App, story_id: int, journal_id: int, *, entry: str | None = None) -> str:

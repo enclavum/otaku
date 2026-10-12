@@ -27,9 +27,9 @@ story owns, and `story`, a story and what it holds. A module in one has
 a TWIN of its name in the other, which an interface module imports as
 `domain_<name>`. What has no twin is a layer's MACHINERY, protected by
 its name (`api._writes`; `domain._formats`, `domain.app._paths`,
-`_passwords`, `_runs`, `domain.story._chain`, `_play`, `_tools`): its
-own layer imports it, the layer above never does — the launch, which
-composes the app, excepted.
+`_passwords`, `_runs`, `domain.story._chain`, `_request`, `_play`,
+`_tools`): its own layer imports it, the layer above never does — the
+launch, which composes the app, excepted.
 
 Inside, imports point one way: `errors` ← `domain.app` ← `domain.codex`
 ← `domain.story` ← `api` ← `launch`, `domain._formats` beside

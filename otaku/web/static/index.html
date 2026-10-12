@@ -61,7 +61,10 @@
     <div class="otk-rail__head"><span class="otk-eyebrow">Contents</span></div>
     <!-- the folio numerals are counted by the stylesheet, not typed here -->
     <div class="otk-toc">
-      <button type="button" class="otk-toc__row otk-toc__row--lead" data-command="/stories"><span>All stories</span></button>
+      <!-- the codex's cards: a page screen of its own, no command yet — the
+           terminal's to come -->
+      <button type="button" class="otk-toc__row otk-toc__row--lead" data-characters><span>Characters</span></button>
+      <button type="button" class="otk-toc__row otk-toc__row--lead" data-command="/stories"><span>Stories</span></button>
       <span class="otk-toc__gap"></span>
       <button type="button" class="otk-toc__row" data-command="/system"><span>Premise</span></button>
       <button type="button" class="otk-toc__row" data-goto="messages"><span>Messages</span></button>
@@ -206,6 +209,58 @@
       <div class="otk-detail__scroll" data-detail></div>
       <div class="otk-actions" data-actions></div>
     </div>
+  </div>
+
+  <footer class="otk-panel__foot"><span data-note></span></footer>
+</dialog>
+
+<!-- every character the reader keeps across stories: the codex's cards, as
+     a list or a gallery at three tile sizes (`data-view`), the stories'
+     unlinked characters in a column that folds (`data-unlinked`), and an
+     open card as a sheet over both. Built by `characters.js`. -->
+<dialog class="otk-panel otk-panel--wide" data-popup="/characters" aria-label="All characters">
+  <header class="otk-panel__head">
+    <span class="otk-eyebrow">All characters</span>
+    <!-- the list, or the gallery at each tile size -->
+    <span class="otk-seg" role="group" aria-label="View">
+      <button type="button" class="otk-seg__btn otk-seg__btn--glyph" data-view="list" aria-pressed="false" title="list" aria-label="list"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="1.4"><line x1="1.5" y1="3.5" x2="14.5" y2="3.5"/><line x1="1.5" y1="8" x2="14.5" y2="8"/><line x1="1.5" y1="12.5" x2="14.5" y2="12.5"/></g></svg></button>
+      <button type="button" class="otk-seg__btn otk-seg__btn--glyph" data-view="small" aria-pressed="false" title="small" aria-label="small"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><g fill="currentColor"><rect x="1" y="1" width="3.6" height="3.6"/><rect x="6.2" y="1" width="3.6" height="3.6"/><rect x="11.4" y="1" width="3.6" height="3.6"/><rect x="1" y="6.2" width="3.6" height="3.6"/><rect x="6.2" y="6.2" width="3.6" height="3.6"/><rect x="11.4" y="6.2" width="3.6" height="3.6"/><rect x="1" y="11.4" width="3.6" height="3.6"/><rect x="6.2" y="11.4" width="3.6" height="3.6"/><rect x="11.4" y="11.4" width="3.6" height="3.6"/></g></svg></button>
+      <button type="button" class="otk-seg__btn otk-seg__btn--glyph" data-view="mid" aria-pressed="true" title="mid" aria-label="mid"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><g fill="currentColor"><rect x="1" y="1" width="6" height="6"/><rect x="9" y="1" width="6" height="6"/><rect x="1" y="9" width="6" height="6"/><rect x="9" y="9" width="6" height="6"/></g></svg></button>
+      <button type="button" class="otk-seg__btn otk-seg__btn--glyph" data-view="large" aria-pressed="false" title="large" aria-label="large"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="1.5" width="13" height="13" fill="currentColor"/></svg></button>
+    </span>
+    <span class="otk-push"></span>
+    <button type="button" class="otk-btn" data-import-card>Import</button>
+    <button type="button" class="otk-btn otk-close">Close <span class="otk-btn__key">esc</span></button>
+  </header>
+
+  <div class="otk-chars" data-view="mid" data-unlinked="open">
+    <div class="otk-chars__main">
+      <div class="otk-chars__gallery" data-gallery></div>
+      <div class="otk-chars__list" data-rows></div>
+      <div class="otk-chars__bar">
+        <label class="otk-label" for="otk-filter-cards" hidden>Filter</label>
+        <input class="otk-filter otk-chars__filter" id="otk-filter-cards" type="search" placeholder="filter cards" data-filter-cards>
+        <span class="otk-push"></span>
+        <span class="otk-chars__picked" data-picked></span>
+        <button type="button" class="otk-chars__clear" data-clear hidden>clear</button>
+        <button type="button" class="otk-btn otk-btn--primary" data-start disabled>Start a story</button>
+      </div>
+    </div>
+
+    <aside class="otk-unlinked" aria-label="Unlinked story characters">
+      <button type="button" class="otk-unlinked__head otk-unlinked__toggle"><span class="otk-label otk-label--ink">Unlinked</span><span class="otk-index__sub" data-unlinked-count></span><span class="otk-unlinked__fold">collapse &rsaquo;</span></button>
+      <div class="otk-unlinked__list" data-unlinked-list></div>
+      <div class="otk-unlinked__pinned">
+        <label class="otk-label" for="otk-filter-unlinked" hidden>Filter</label>
+        <input class="otk-filter" id="otk-filter-unlinked" type="search" placeholder="filter story characters" data-filter-unlinked>
+      </div>
+      <button type="button" class="otk-unlinked__strip otk-unlinked__toggle"><span>&lsaquo;</span><span class="otk-unlinked__striplabel" data-unlinked-strip>Unlinked</span></button>
+    </aside>
+
+    <!-- the open card, and an unlinked story character read before linking
+         it: filled when one opens -->
+    <section class="otk-sheet otk-sheet--card" data-sheet="card" hidden></section>
+    <section class="otk-sheet otk-sheet--unlinked" data-sheet="unlinked" hidden></section>
   </div>
 
   <footer class="otk-panel__foot"><span data-note></span></footer>
@@ -557,6 +612,56 @@
   </div>
 </dialog>
 
+<!-- a story started with codex cards: its title, who the reader plays, and
+     which cards send their portrait — one switch each, built when it opens
+     (`characters.startStory`) -->
+<dialog class="otk-dialog" data-dialog="start" aria-labelledby="otk-start-title">
+  <span class="otk-eyebrow" id="otk-start-title">Start a story</span>
+  <div class="otk-field-row otk-field-row--card">
+    <label class="otk-label" for="otk-start-name">title</label>
+    <input class="otk-field" id="otk-start-name" type="text" placeholder="optional">
+    <label class="otk-label" for="otk-start-persona">user name</label>
+    <input class="otk-field" id="otk-start-persona" type="text" placeholder="who you play" required>
+  </div>
+  <div class="otk-v otk-v--sm" data-start-pictures>
+    <span class="otk-label" data-start-count></span>
+  </div>
+  <div class="otk-dialog__foot">
+    <span class="otk-dialog__escape">each joins the story linked to its card</span>
+    <button type="button" class="otk-btn" data-choice="cancel">Cancel</button>
+    <button type="button" class="otk-btn otk-btn--primary" data-choice="start">Start</button>
+  </div>
+</dialog>
+
+<!-- one picker for every "which card": a story character to link, a card to
+     invite, the card another is merged into. Rows built when it opens
+     (`characters.pickCard`). -->
+<dialog class="otk-dialog" data-dialog="pick-card" aria-labelledby="otk-pick-title">
+  <span class="otk-eyebrow" data-title id="otk-pick-title">Choose a card</span>
+  <div class="otk-pick" role="listbox" aria-label="Cards" data-pick></div>
+  <label class="otk-label" for="otk-filter-pick" hidden>Filter</label>
+  <input class="otk-filter" id="otk-filter-pick" type="search" placeholder="filter cards" data-filter-pick>
+  <div class="otk-dialog__foot">
+    <button type="button" class="otk-btn otk-btn--lead" data-choice="import">Import&hellip;</button>
+    <span class="otk-push"></span>
+    <button type="button" class="otk-btn" data-choice="cancel">Cancel</button>
+    <button type="button" class="otk-btn otk-btn--primary" data-choice="choose">Choose</button>
+  </div>
+</dialog>
+
+<!-- a card made by hand: its name, and the card opens to be filled in -->
+<dialog class="otk-dialog" data-dialog="new-card" aria-labelledby="otk-new-card-title">
+  <span class="otk-eyebrow" id="otk-new-card-title">New card</span>
+  <div class="otk-dialog__field">
+    <label class="otk-label" for="otk-new-card-name">name</label>
+    <input class="otk-field" id="otk-new-card-name" type="text" autofocus>
+  </div>
+  <div class="otk-dialog__foot">
+    <button type="button" class="otk-btn" data-choice="cancel">Cancel</button>
+    <button type="button" class="otk-btn otk-btn--primary" data-choice="create">Create</button>
+  </div>
+</dialog>
+
 <!-- a name to give: the story the browser is on -->
 <dialog class="otk-dialog" data-dialog="rename" aria-labelledby="otk-rename-title">
   <span class="otk-eyebrow" data-title id="otk-rename-title">Rename story</span>
@@ -625,7 +730,7 @@
 </dialog>
 
 <dialog class="otk-dialog" data-dialog="card" aria-labelledby="otk-card-title">
-  <span class="otk-eyebrow" data-title id="otk-card-title">Import a character card</span>
+  <span class="otk-eyebrow" data-title id="otk-card-title">Import</span>
 
   <!-- STATE: .is-dragover while a file is over it, .is-filled once dropped.
        It takes the focus so no text field does: the dialog opens on the
@@ -637,6 +742,8 @@
     <span class="otk-label otk-label--accent">or choose a file</span>
     <input id="otk-card-file" type="file" accept=".png,.json" hidden>
   </label>
+  <!-- a codex card brought in instead of a file: where the file would be -->
+  <div class="otk-chosen" data-chosen hidden></div>
 
   <div class="otk-field-row otk-field-row--card">
     <label class="otk-label" for="otk-card-name">import as</label>
@@ -646,12 +753,20 @@
   </div>
   <p class="otk-note" data-persona-note hidden>The card writes to <span class="otk-code">{{user}}</span>; whatever is here replaces it.</p>
 
+  <!-- a card of the same name already in the codex: this file IS that card,
+       or a new one -->
+  <span class="otk-label" data-similar-label hidden>Already in All characters?</span>
+  <div class="otk-choices" role="radiogroup" data-similar hidden></div>
+
+  <!-- only when the card carries a picture -->
+  <div class="otk-picsend" data-picsend hidden><span class="otk-picsend__thumb" data-picsend-thumb></span><span class="otk-picsend__text">Send the picture to the context</span><button type="button" class="otk-switch otk-switch--h" role="switch" aria-checked="false" aria-label="Send the picture to the context" data-picsend-switch><span class="otk-switch__knob"></span></button></div>
+
   <span class="otk-label" data-outcomes-label hidden>This import will</span>
   <div class="otk-outcomes" data-outcomes hidden></div>
   <p class="otk-note" data-card-note hidden></p>
 
   <div class="otk-dialog__foot">
-    <span class="otk-dialog__escape">joins the current story</span>
+    <span class="otk-dialog__escape" data-card-escape>joins the current story</span>
     <button type="button" class="otk-btn" data-choice="cancel">Cancel</button>
     <button type="button" class="otk-btn otk-btn--primary" data-choice="import">Import</button>
   </div>

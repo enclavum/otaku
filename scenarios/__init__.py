@@ -3,8 +3,8 @@
 The layout follows the app's own seams:
 
 - `api/` — everything inside the running app, laid out as the interface
-  is: `app/` and `story/`, a module for each of its twins a story reaches
-  (`story/test_messages.py` a line played and its reply), classes in
+  is: `app/`, `codex/` and `story/`, a module for each of its twins a story
+  reaches (`story/test_messages.py` a line played and its reply), classes in
   `/help` order, with the screen a command opens tested beside it — and
   `test_meta.py`, the commands no resource answers.
 - `cli/` — one module per top-level command: `test_main.py` (the bare

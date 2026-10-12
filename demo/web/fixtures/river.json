@@ -810,6 +810,8 @@
     "card": null,
     "history": "Maren came down the post road to bring her survey of the Meade valley up to date and found the river vanished from its bed. Tallis, the last ferryman, told her it left three nights ago and went uphill — and the scoured banks of the empty channel bore him out in every particular. When he pointed to the weir at Harrow Lock on her survey map, the inked river moved under his finger, the first map Maren has ever seen change its mind. She has drawn the true course in red and set out along the towpath to reach the lock before full dark.",
     "history_journal_id": 3,
+    "card_id": 1,
+    "card_name": "Maren",
     "provider": null,
     "model": null,
     "updated_at": "2026-01-01T00:00:00+00:00"
@@ -824,6 +826,8 @@
     "card": null,
     "history": "Tallis stayed with his beached ferry after the river left the Meade valley, telling anyone who would listen that the water had gone uphill — and no one listened until the cartographer Maren came down the post road. She took his account as testimony, read the truth of it in the scoured banks, and when her map moved under his finger at the ferry deck he gave her honest directions to Harrow Lock. He could not make himself go along, and the shame of staying sits with him by the dry landing.",
     "history_journal_id": 4,
+    "card_id": 2,
+    "card_name": "Tallis",
     "provider": null,
     "model": null,
     "updated_at": "2026-01-01T00:00:00+00:00"
@@ -906,6 +910,7 @@
   },
   "lede": "Context preview — the exact request to be sent. Context summary:\n\n  ~1,641 tokens projected · 5% of the 32,574 limit\n  system 73 · transcript 1,568\n  16 messages verbatim\n  2 pictures on the verbatim messages not sent: the model cannot see, or the file is gone\n  injected:\n  - questions (2nd last, ~180 tokens)",
   "note": "",
+  "cards": [],
   "injections": [
    {
     "label": "questions",

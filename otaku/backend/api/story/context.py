@@ -224,6 +224,14 @@ def _summary(report: ContextReport) -> str:
             f"  {prompt.pictures_omitted} picture{plural} on the verbatim messages not sent: "
             "the model cannot see, or the file is gone"
         )
+    if prompt.cards:
+        # The character cards the request carries, wherever each rides —
+        # a bullet each, its portrait counted; the total where there is
+        # something to total. Their texts are in the parts.
+        total = sum(card.tokens for card in prompt.cards)
+        summed = f" (~{total:,} total)" if len(prompt.cards) > 1 else ""
+        lines.append(f"  cards{summed}:")
+        lines.extend(f"  - {card.name} (~{card.tokens:,} tokens)" for card in prompt.cards)
     if report.injections:
         # What rides besides the story, each where the story put it — a
         # bullet each, named as the setting names what it injects; the

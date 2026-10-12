@@ -20,6 +20,7 @@ from otaku.settings.integrations import render as render_integrations
 from otaku.settings.migrations.config_file import hash_plain_password
 from otaku.settings.migrations.integrations_file import ensure_integrations
 from otaku.settings.migrations.prompt_texts import (
+    CARD_FRAMING_0_7_0,
     EXTRACT_0_2_2,
     EXTRACT_0_3_0,
     EXTRACT_0_5_0,
@@ -49,6 +50,7 @@ from otaku.settings.migrations.surgery import (
     update_settings_file,
 )
 from otaku.settings.prompts import (
+    CARD_FRAMING_DEFAULT,
     EXTRACT_DEFAULT,
     JOURNAL_HISTORY_DEFAULT,
     SCENE_HISTORY_DEFAULT,
@@ -204,6 +206,11 @@ _PROMPT_MIGRATIONS: list[Migration] = [
     # attached where the model can see: the template asks for what
     # matters in them, since a summarized row loses its picture.
     refresh_template("extract_prompt", EXTRACT_0_5_0, EXTRACT_DEFAULT),
+    # 0.8.0 — a card's reminder (its depth note) rides on its own, a few of
+    # the reader's messages from the end, so its line leaves the block; and
+    # the block's close, which rode on that line and went with it whenever
+    # a card had none, stands on its own.
+    refresh_template("card_framing", CARD_FRAMING_0_7_0, CARD_FRAMING_DEFAULT),
 ]
 
 

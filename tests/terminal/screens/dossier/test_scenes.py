@@ -75,6 +75,8 @@ def _character(character_id: int, name: str) -> Character:
         card=None,
         history="",
         history_journal_id=None,
+        card_id=None,
+        card_name=None,
         provider=None,
         model=None,
         updated_at="",

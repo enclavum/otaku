@@ -1,6 +1,6 @@
 """Pictures coming in.
 
-`backend.story.pictures.read_picture` promises the wire copy of a picture: the type
+`backend.domain.app.pictures.read_picture` promises the wire copy of a picture: the type
 read from the bytes, the camera's orientation applied, the long edge
 downsized to the wire edge and never upsized, every metadata block gone
 but the colour profile, PNG kept as PNG and everything else made JPEG,
@@ -14,8 +14,8 @@ import io
 import pytest
 from PIL import Image
 
-from otaku.backend.domain.story import pictures
-from otaku.backend.domain.story.pictures import RawFile
+from otaku.backend.domain.app import pictures
+from otaku.backend.domain.app.pictures import RawFile
 from otaku.backend.errors import Refused
 
 ICC = b"not a real profile, but bytes the container carries as one"

@@ -152,19 +152,19 @@ tags:
   - name: Stories
     description: The stories, their copies, each one's settings, and its next request — the context it sends and how full that is.
   - name: Messages
-    description: A story's chain — read, corrected, played on, regenerated, taken back.
+    description: A story's chain — read, corrected, played on, a card brought in, regenerated, taken back.
   - name: Lore
     description: A story's memory — scenes, characters, journals — and the pass that builds it.
-  - name: Cards
-    description: A character card, vetted and imported into a story.
-  - name: Pictures
-    description: A message's pictures.
   - name: Transfer
     description: A story in and out as a document.
+  - name: Codex
+    description: The character cards every story may draw on — made by hand, from a card file or from a story's character, corrected, merged — and the stories' characters no card claims.
   - name: App
     description: otaku as it runs — the model in use and the one lore extraction asks, the launch, the machine.
   - name: Composer
     description: The composer's history, and the story's typed language.
+  - name: Pictures
+    description: The stored pictures — a message's and a card's.
   - name: Providers
     description: The providers, their models, and a model's own settings.
   - name: Integrations
@@ -184,9 +184,11 @@ tags:
 # A vendor extension: Redoc and Scalar draw it, Swagger UI ignores it.
 x-tagGroups:
   - name: Stories and what they hold
-    tags: [Stories, Messages, Lore, Cards, Pictures, Transfer]
+    tags: [Stories, Messages, Lore, Transfer]
+  - name: What every story may draw on
+    tags: [Codex]
   - name: The app around them
-    tags: [App, Composer, Providers, Integrations, Reports, Settings, Prompts]
+    tags: [App, Composer, Pictures, Providers, Integrations, Reports, Settings, Prompts]
   - name: The server
     tags: [Signing in, Server]
 
@@ -227,7 +229,12 @@ paths:
       operationId: createStory
       tags: [Stories]
       summary: Make a story
-      description: Made at once, with its title, its premise, or neither — in the browser before its first message. Every setting starts off.
+      description: |
+        Made at once, with its title, its premise, or neither — in the
+        browser before its first message. Every setting starts off. Given
+        codex cards, it starts with them, in pick order: a card row and a
+        character each, linked to its card, then the greeting of the first
+        card that has one; an untitled one is named for them.
       requestBody:
         content:
           application/json:
@@ -236,6 +243,9 @@ paths:
               properties:
                 title: { type: string }
                 premise: { type: string, description: "The system prompt, verbatim." }
+                card_ids: { type: array, items: { type: integer }, description: "The codex cards it starts with, in pick order." }
+                card_pictures: { type: array, items: { type: integer }, description: "The cards among them whose portrait rides their row." }
+                persona: { type: string, description: "The reader's name the cards' {{user}} binds to." }
       responses:
         default: { $ref: "#/components/responses/Failed" }
         "201":
@@ -571,6 +581,70 @@ paths:
                   - $ref: "#/components/schemas/Changed"
                   - properties: { value: { $ref: "#/components/schemas/Message" } }
 
+  /api/stories/{story}/cards:
+    parameters:
+      - $ref: "#/components/parameters/Story"
+    post:
+      operationId: createStoryCard
+      tags: [Messages]
+      summary: Bring a character card into the story — a card file, or a codex card
+      description: |
+        Always through the codex. A card's FILE, as bytes — a path over
+        HTTP would name a file on the server — goes into the codex first:
+        a file it holds already brings its card in, and `reuse` names the
+        codex card the reader says it is. A codex card (`card_id`) is
+        invited as it stands. With `validate_only`, the card is read and
+        vetted and nothing is stored — what the persona ask is drawn from,
+        the story's remembered persona its default. Without it, the card is
+        brought in — played on from the head `If-Match` names: the typed
+        row (the card's portrait on it where `with_pictures` asks), the
+        character with the card's fields, linked to the codex card, the
+        greeting message — and `/undo` takes the exchange whole, the codex
+        card staying. The page sends the file both times: nothing waits on
+        the server between the two.
+      parameters:
+        - name: validate_only
+          in: query
+          schema: { type: boolean, default: false }
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              description: A card file (`data` and `file_name`), or a codex card (`card_id`).
+              properties:
+                data: { type: string, format: byte, description: "The card file — PNG or JSON — base64." }
+                file_name: { type: string }
+                reuse: { type: integer, description: "The codex card the reader says the file is." }
+                card_id: { type: integer, description: "A codex card, invited." }
+                rename: { type: string, description: 'The name the card is brought in under; "" its own.' }
+                persona: { type: string, description: "The reader's name the card's {{user}} binds to. Required to import." }
+                with_pictures: { type: boolean, default: false, description: "Whether the card's portrait rides its row." }
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: Vetted, nothing stored (`validate_only`).
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StoryCardCheck" }
+        "201":
+          description: Imported; `Location` names the character the card became.
+          headers:
+            Location: { $ref: "#/components/headers/Location" }
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Changed"
+                  - properties: { value: { $ref: "#/components/schemas/ImportedCard" } }
+        "412": { $ref: "#/components/responses/HeadMoved" }
+        "428": { $ref: "#/components/responses/HeadRequired" }
+
   /api/stories/{story}/regens:
     parameters:
       - $ref: "#/components/parameters/Story"
@@ -763,8 +837,8 @@ paths:
     patch:
       operationId: updateCharacter
       tags: [Lore]
-      summary: Correct a character
-      description: The description, and the card an imported one carries — emptied to nothing included.
+      summary: Correct a character, or link it to a codex card
+      description: The description, and the card an imported one carries — emptied to nothing included — and the codex card it is linked to (`card_id`; null unlinks), which changes nothing else on either.
       requestBody:
         required: true
         content:
@@ -774,6 +848,7 @@ paths:
               properties:
                 description: { type: string }
                 card: { type: string }
+                card_id: { type: [integer, "null"] }
       responses:
         default: { $ref: "#/components/responses/Failed" }
         "200":
@@ -954,97 +1029,6 @@ paths:
                   - $ref: "#/components/schemas/Changed"
                   - properties: { value: { type: "null" } }
 
-  # ---------- Cards ----------
-
-  /api/stories/{story}/cards:
-    parameters:
-      - $ref: "#/components/parameters/Story"
-    post:
-      operationId: createCard
-      tags: [Cards]
-      summary: Import a character card into the story
-      description: |
-        The card's FILE, as bytes: a path over HTTP would name a file on
-        the server. With `validate_only`, the card is read and vetted and
-        nothing is stored — what the persona ask is drawn from, the
-        story's remembered persona its default. Without it, the card is
-        imported — played on from the head `If-Match` names: the typed
-        row, the character with the card's archive, the greeting message —
-        and `/undo` takes the exchange whole. The page sends the file both
-        times: nothing waits on the server between the two.
-      parameters:
-        - name: validate_only
-          in: query
-          schema: { type: boolean, default: false }
-        - $ref: "#/components/parameters/IfMatch"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [data, file_name]
-              properties:
-                data: { type: string, format: byte, description: "The card file — PNG or JSON — base64." }
-                file_name: { type: string }
-                rename: { type: string, description: 'The name the card is imported under; "" its own.' }
-                persona: { type: string, description: "The reader's name the card's {{user}} binds to. Required to import." }
-      responses:
-        default: { $ref: "#/components/responses/Failed" }
-        "200":
-          description: Vetted, nothing stored (`validate_only`).
-          headers:
-            ETag: { $ref: "#/components/headers/ETag" }
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/CardCheck" }
-        "201":
-          description: Imported; `Location` names the character the card became.
-          headers:
-            Location: { $ref: "#/components/headers/Location" }
-            ETag: { $ref: "#/components/headers/ETag" }
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: "#/components/schemas/Changed"
-                  - properties: { value: { $ref: "#/components/schemas/ImportedCard" } }
-        "412": { $ref: "#/components/responses/HeadMoved" }
-        "428": { $ref: "#/components/responses/HeadRequired" }
-
-  # ---------- Pictures ----------
-
-  /api/pictures/{name}:
-    parameters:
-      - $ref: "#/components/parameters/Picture"
-    get:
-      operationId: getPicture
-      tags: [Pictures]
-      summary: A message's picture
-      description: The bytes as stored, unsealed. A file never changes once written, so a browser may keep it a year.
-      responses:
-        default: { $ref: "#/components/responses/Failed" }
-        "200":
-          description: The picture.
-          content:
-            image/jpeg: {}
-            image/png: {}
-
-  /api/pictures/{name}/thumbnail:
-    parameters:
-      - $ref: "#/components/parameters/Picture"
-    get:
-      operationId: getThumbnail
-      tags: [Pictures]
-      summary: A picture's thumbnail
-      description: Cut from the same image at intake, at most 512 pixels on a side. Kept like the picture.
-      responses:
-        default: { $ref: "#/components/responses/Failed" }
-        "200":
-          description: The thumbnail.
-          content:
-            image/jpeg: {}
-
   # ---------- Transfer ----------
 
   /api/imports:
@@ -1101,6 +1085,254 @@ paths:
   # ==================================================================
   # THE APP — the installation around the stories
   # ==================================================================
+
+  # ---------- Codex ----------
+
+  /api/cards:
+    get:
+      operationId: listCards
+      tags: [Codex]
+      summary: The codex's character cards, by name
+      description: Every card, or those whose name, an alias or the tagline holds `query`, cased as the reader likes.
+      parameters:
+        - name: query
+          in: query
+          schema: { type: string }
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: The cards.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/CardSummary" }
+    post:
+      operationId: createCard
+      tags: [Codex]
+      summary: Make a card — from a card file, a story's character, or by hand
+      description: |
+        Three ways, by what the body carries. A card FILE — `data`, base64,
+        and the `file_name` it was picked as, `rename` overriding its own
+        name: a file the codex holds already makes nothing and answers that
+        card, `reuse` names the card the reader says it is (both `200`),
+        and otherwise a card is made, a PNG's picture its portrait (`201`);
+        with `validate_only` the file is read and vetted and nothing stored
+        — the cards the codex may hold it as already. A story's character —
+        `story_id` and `character_id`: promoted, its name, aliases and
+        fields, and linked to it (`201`). Otherwise a `name` and the card's
+        fields, by hand (`201`).
+      parameters:
+        - name: validate_only
+          in: query
+          schema: { type: boolean, default: false }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - title: A card file
+                  type: object
+                  required: [data, file_name]
+                  properties:
+                    data: { type: string, format: byte, description: "The card file — PNG or JSON — base64." }
+                    file_name: { type: string }
+                    rename: { type: string, description: 'The name the card is made under; "" its own.' }
+                    reuse: { type: integer, description: "The card the reader says the file is: nothing is made, and the file is noted as that card's." }
+                - title: A story's character
+                  type: object
+                  required: [story_id, character_id]
+                  properties:
+                    story_id: { type: integer }
+                    character_id: { type: integer }
+                - title: By hand
+                  allOf:
+                    - $ref: "#/components/schemas/CardFields"
+                    - required: [name]
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: Vetted, nothing stored (`validate_only`); or a card file the codex holds already.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/CardCheck"
+                  - allOf:
+                      - $ref: "#/components/schemas/Changed"
+                      - properties: { value: { $ref: "#/components/schemas/CardImport" } }
+        "201":
+          description: Made; `Location` names the card. A card file answers what it became (`CardImport`), the other two the card.
+          headers:
+            Location: { $ref: "#/components/headers/Location" }
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Changed"
+                  - properties:
+                      value:
+                        oneOf: [{ $ref: "#/components/schemas/CardImport" }, { $ref: "#/components/schemas/Card" }]
+
+  /api/cards/unlinked:
+    get:
+      operationId: listUnlinkedCharacters
+      tags: [Codex]
+      summary: Every story's character no card claims
+      description: The most written about first — by journal rows, then story, then appearance — or those whose name, an alias, or a journal record's entry or state holds `query`.
+      parameters:
+        - name: query
+          in: query
+          schema: { type: string }
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: The characters.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/StoryCharacter" }
+
+  /api/cards/{card}:
+    parameters:
+      - $ref: "#/components/parameters/Card"
+    get:
+      operationId: getCard
+      tags: [Codex]
+      summary: One card whole
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: The card.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Card" }
+    patch:
+      operationId: updateCard
+      tags: [Codex]
+      summary: Correct a card
+      description: The parts the body carries, each replacing what stood. `pictures` are each of the card's own by name, in the order they now stand, the first the portrait; a picture is removed on its own path.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/CardFields"
+                - properties:
+                    pictures:
+                      type: array
+                      items: { type: string }
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: The card as it now stands.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Changed"
+                  - properties: { value: { $ref: "#/components/schemas/Card" } }
+    delete:
+      operationId: deleteCard
+      tags: [Codex]
+      summary: Delete a card
+      description: Its pictures go with it; the story characters linked to it stay, unlinked and otherwise untouched.
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: Deleted.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Changed"
+                  - properties: { value: { type: "null" } }
+
+  /api/cards/{card}/pictures:
+    parameters:
+      - $ref: "#/components/parameters/Card"
+    post:
+      operationId: createCardPicture
+      tags: [Codex]
+      summary: Add a picture to a card
+      description: After the card's others, read through the one intake every picture takes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [data]
+              properties:
+                data: { type: string, format: byte, description: "The picture, base64; its type is sniffed from the bytes." }
+                name: { type: string, description: "What the reader called it — for a refusal's sentence alone." }
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: The card as it now stands.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Changed"
+                  - properties: { value: { $ref: "#/components/schemas/Card" } }
+
+  /api/cards/{card}/pictures/{name}:
+    parameters:
+      - $ref: "#/components/parameters/Card"
+      - $ref: "#/components/parameters/Picture"
+    delete:
+      operationId: deleteCardPicture
+      tags: [Codex]
+      summary: Remove a picture from a card
+      description: The file stays while a story's card row it rode names it.
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: The card as it now stands.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Changed"
+                  - properties: { value: { $ref: "#/components/schemas/Card" } }
+
+  /api/cards/{card}/merges:
+    parameters:
+      - $ref: "#/components/parameters/Card"
+    post:
+      operationId: mergeCard
+      tags: [Codex]
+      summary: Fold a card into another
+      description: Its story characters follow, its name becomes an alias of `into`, its pictures follow `into`'s. Refused where one story holds characters linked to both.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [into]
+              properties:
+                into: { type: integer }
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: The card it went into, as it now stands.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Changed"
+                  - properties: { value: { $ref: "#/components/schemas/Card" } }
 
   # ---------- App ----------
 
@@ -1227,6 +1459,39 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Language" }
+
+  # ---------- Pictures ----------
+
+  /api/pictures/{name}:
+    parameters:
+      - $ref: "#/components/parameters/Picture"
+    get:
+      operationId: getPicture
+      tags: [Pictures]
+      summary: A stored picture — a message's or a card's
+      description: The bytes as stored, unsealed. A file never changes once written, so a browser may keep it a year.
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: The picture.
+          content:
+            image/jpeg: {}
+            image/png: {}
+
+  /api/pictures/{name}/thumbnail:
+    parameters:
+      - $ref: "#/components/parameters/Picture"
+    get:
+      operationId: getThumbnail
+      tags: [Pictures]
+      summary: A picture's thumbnail
+      description: Cut from the same image at intake, at most 512 pixels on a side. Kept like the picture.
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: The thumbnail.
+          content:
+            image/jpeg: {}
 
   # ---------- Providers ----------
 
@@ -1855,8 +2120,10 @@ components:
       { name: tool, in: path, required: true, schema: { type: string }, description: "A tool's name, as a story setting's `tool` names it: question, note, system-info, web-search." }
     Prompt:
       { name: prompt, in: path, required: true, schema: { type: string }, description: "A prompt's prompts.toml key, as a story setting's `prompt_name` names it — one no tool owns: emulate_text_completion_prompt." }
+    Card:
+      { name: card, in: path, required: true, schema: { type: integer }, description: "A codex card's id." }
     Picture:
-      { name: name, in: path, required: true, schema: { type: string }, description: "The picture's file name, as a message's attachments carry it." }
+      { name: name, in: path, required: true, schema: { type: string }, description: "The picture's file name, as a message's attachments or a card's pictures carry it." }
     IfMatch:
       name: If-Match
       in: header
@@ -1924,9 +2191,9 @@ components:
 
     Attachment:
       type: object
-      description: One picture on a message — the file name the picture paths take, whose extension says the type, and its measure as the model sees it. The reader's file name is not kept.
+      description: One picture on a message or a card — the file name the picture paths take, whose extension says the type, and its measure as the model sees it. The reader's file name is not kept.
       properties:
-        file: { type: string, description: "pic-<story>-<day>-<8 hex>.jpg or .png." }
+        file: { type: string, description: "pic-<story>-<day>-<8 hex> for a message's, crd-<card>-<day>-<8 hex> for a card's; .jpg or .png." }
         width: { type: integer }
         height: { type: integer }
         size: { type: integer, description: "Bytes, as stored." }
@@ -1951,18 +2218,84 @@ components:
               note: { type: string, description: 'Why there is no figure — "no key set", or the dash for an account that did not answer.' }
               value: { type: string, description: "The row as one string — the figure, or the note." }
 
+    Card:
+      type: object
+      description: One codex card whole — its name, aliases and tagline (one line for the reader, never sent to the model), the card's fields with their macros as written, the file it came from ("" for none), its pictures in order (the first the portrait), the story characters it is linked to, and when it was last written.
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        aliases: { type: array, items: { type: string } }
+        tagline: { type: string }
+        description: { type: string }
+        personality: { type: string }
+        scenario: { type: string }
+        greeting: { type: string }
+        alternate_greetings: { type: array, items: { type: string } }
+        examples: { type: array, items: { type: string } }
+        reminder: { type: string, description: "A standing rule, sent on its own before the reader's `reminder_depth`-th message from the end." }
+        reminder_depth: { type: integer, minimum: 1, default: 2, description: "Before which of the reader's messages from the end the reminder goes, 1 the newest." }
+        system_prompt: { type: string, description: "Joined to the system message of a story the card is in, after its premise." }
+        post_history_instructions: { type: string, description: "Kept, sent nowhere." }
+        creator_notes: { type: string }
+        file_name: { type: string }
+        pictures: { type: array, items: { $ref: "#/components/schemas/Attachment" } }
+        stories: { type: array, items: { $ref: "#/components/schemas/StoryCharacter" } }
+        updated_at: { type: string, description: "For display alone." }
+
     CardCheck:
       type: object
-      description: A card read and vetted for a story, nothing stored.
+      description: A card file read and vetted for the codex, nothing stored.
       properties:
-        name: { type: string, description: "The name it goes by — its own, or the rename." }
+        name: { type: string, description: "The name the card would take — its own, or the rename." }
         notes:
           type: array
           items: { type: string }
           description: What the import should say out loud.
-        block_tokens: { type: integer, description: "The composed block's cost estimate — it rides every request." }
-        large: { type: boolean, description: "Worth warning about." }
-        persona: { type: string, description: 'The persona the story remembers — the ask''s default; "" for none.' }
+        has_picture: { type: boolean, description: "Whether the file carries a picture." }
+        same_card:
+          description: The card the codex holds the file as already — importing it makes nothing; null where none.
+          oneOf: [{ $ref: "#/components/schemas/CardSummary" }, { type: "null" }]
+        similar_cards:
+          type: array
+          items: { $ref: "#/components/schemas/CardSummary" }
+          description: The cards of the same name the reader may say it is (`reuse`).
+
+    CardFields:
+      type: object
+      description: A card's parts as a reader writes them.
+      properties:
+        name: { type: string }
+        aliases: { type: array, items: { type: string } }
+        tagline: { type: string, description: "One line." }
+        description: { type: string }
+        personality: { type: string }
+        scenario: { type: string }
+        greeting: { type: string }
+        alternate_greetings: { type: array, items: { type: string } }
+        examples: { type: array, items: { type: string } }
+        reminder: { type: string, description: "A standing rule, sent on its own before the reader's `reminder_depth`-th message from the end." }
+        reminder_depth: { type: integer, minimum: 1, default: 2, description: "Before which of the reader's messages from the end the reminder goes, 1 the newest." }
+        system_prompt: { type: string, description: "Joined to the system message of a story the card is in, after its premise." }
+        post_history_instructions: { type: string, description: "Kept, sent nowhere." }
+        creator_notes: { type: string }
+
+    CardImport:
+      type: object
+      description: What a card file became — the card, and whether it was made now (false where the codex held it already, or the reader said which card it is).
+      properties:
+        card: { $ref: "#/components/schemas/Card" }
+        made: { type: boolean }
+
+    CardSummary:
+      type: object
+      description: A card as the codex lists it.
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        aliases: { type: array, items: { type: string } }
+        tagline: { type: string }
+        pictures: { type: array, items: { $ref: "#/components/schemas/Attachment" }, description: "In order, the first the portrait." }
+        story_count: { type: integer, description: "How many stories it is in, one linked character in each." }
 
     Changed:
       type: object
@@ -1984,6 +2317,8 @@ components:
         card: { type: [string, "null"], description: "The archive an imported character carries, as TOML; null for one the extractor named." }
         history: { type: string, description: 'Their arc so far — the newest rollup a pass wrote, derived, no write; "" before the first.' }
         history_journal_id: { type: [integer, "null"], description: "The id of the journal record that arc was taken from — where a page says how old it is." }
+        card_id: { type: [integer, "null"], description: "The codex card it is linked to; null for none." }
+        card_name: { type: [string, "null"], description: "That card's name." }
         provider: { type: [string, "null"], description: "Who made the character: the engine of the pass that named them, or 'card'; null for an imported story's. An edit never changes it." }
         model: { type: [string, "null"], description: "The pass's model, or the card's file name." }
         updated_at: { type: string, description: "When the extractor last wrote them — display alone." }
@@ -2014,6 +2349,14 @@ components:
             used: { type: integer, description: "Derived: percent of the limit, over 100 where the story cannot fit." }
         lede: { type: string, description: "The summary said in words." }
         note: { type: string, description: 'What the preview could not know; "" when it knew everything.' }
+        cards:
+          type: array
+          description: The character cards the request carries, in the order sent — verbatim or whole in the recap — each costed with its portrait; the texts themselves are in the parts.
+          items:
+            type: object
+            properties:
+              name: { type: string, description: "The name it came in under." }
+              tokens: { type: integer }
         injections:
           type: array
           description: What the request carries besides the story, in the order sent; the texts themselves are in the parts.
@@ -2079,6 +2422,7 @@ components:
       type: object
       properties:
         character_id: { type: integer, description: "The character the card became." }
+        card_id: { type: integer, description: "The codex card it is linked to." }
         line: { $ref: "#/components/schemas/Message" }
         greeting:
           description: The card's greeting message; null where the card has none.
@@ -2525,6 +2869,38 @@ components:
           type: array
           items: { type: string }
           description: The tools whose calls a frontend that can fold draws by their label alone, the text its hover hint — note while the notes are on and not displayed.
+
+    StoryCardCheck:
+      type: object
+      description: A card read and vetted for a story, nothing stored.
+      properties:
+        name: { type: string, description: "The name it goes by — its own, or the rename." }
+        notes:
+          type: array
+          items: { type: string }
+          description: What the import should say out loud.
+        block_tokens: { type: integer, description: "The composed block's cost estimate — it rides every request." }
+        large: { type: boolean, description: "Worth warning about." }
+        persona: { type: string, description: 'The persona the story remembers — the ask''s default; "" for none.' }
+        has_picture: { type: boolean, description: "Whether the card has a portrait its row could carry." }
+        same_card:
+          description: For a file, the codex card it is already; null for none.
+          oneOf: [{ $ref: "#/components/schemas/CardSummary" }, { type: "null" }]
+        similar_cards:
+          type: array
+          items: { $ref: "#/components/schemas/CardSummary" }
+          description: For a file, the codex cards of the same name the reader may say it is (`reuse`).
+
+    StoryCharacter:
+      type: object
+      description: A story's character as the codex lists it.
+      properties:
+        story_id: { type: integer }
+        story_label: { type: string, description: "The label a reader finds the story by." }
+        character_id: { type: integer }
+        name: { type: string }
+        aliases: { type: array, items: { type: string } }
+        journal_count: { type: integer, description: "Its journal rows, on any of the story's timelines." }
 
     StorySetting:
       type: object

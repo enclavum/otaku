@@ -15,6 +15,7 @@ import { openSettings } from "./screens/settings.js";
 import { openModels } from "./screens/models.js";
 import { openBalance, openContext, openInfo, openUsage } from "./screens/reports.js";
 import { landed, refresh, watchExtraction } from "./play/shell.js";
+import { openCharacters } from "./screens/characters.js";
 import { openStories } from "./screens/stories.js";
 import { confirmFork, openStory } from "./screens/dossier.js";
 import { tell } from "./kit/status.js";
@@ -90,6 +91,17 @@ const backToStories = (storyId) => openStories("", { selectId: storyId });
 export async function openTab(tab) {
   try {
     await openStory({ tab, allStories: backToStories });
+  } catch (e) {
+    console.error(e);
+    tell(String(e.message ?? e), "otk-error");
+  }
+}
+
+/** The contents row that is a screen of the page's own: All characters,
+    the codex's cards — no command yet, the terminal's screen to come. */
+export async function openCodex() {
+  try {
+    await openCharacters();
   } catch (e) {
     console.error(e);
     tell(String(e.message ?? e), "otk-error");

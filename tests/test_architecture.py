@@ -84,19 +84,22 @@ _ALLOWED = {
     "formatting": set(),
 }
 
-# Inside the backend, one way: `errors` ← `domain.app` ← `domain.story`
-# ← `api` ← `launch`, `domain._formats` beside `domain.story` needing
-# none of them. The launch composes the app, the domain's machinery
-# included; the two package roots hold nothing.
+# Inside the backend, one way: `errors` ← `domain.app` ← `domain.codex`
+# ← `domain.story` ← `api` ← `samples` ← `launch`, `domain._formats`
+# beside `domain.story` needing none of them — the codex reads a card
+# file through it too. The launch composes the app, the domain's
+# machinery included; the two package roots hold nothing.
 _BACKEND = {
     "backend": set(),
     "errors": set(),
     "domain": set(),
     "domain.app": {"errors"},
     "domain._formats": set(),
-    "domain.story": {"errors", "domain.app", "domain._formats"},
-    "api": {"errors", "domain.app", "domain.story"},
-    "launch": {"errors", "domain.app", "domain.story", "domain._formats", "api"},
+    "domain.codex": {"errors", "domain.app", "domain._formats"},
+    "domain.story": {"errors", "domain.app", "domain.codex", "domain._formats"},
+    "api": {"errors", "domain.app", "domain.codex", "domain.story"},
+    "samples": {"errors", "domain.app", "domain.story", "api"},
+    "launch": {"errors", "domain.app", "domain.story", "domain._formats", "api", "samples"},
 }
 
 # Inside the terminal, one way: `api` ← `commands` ← `tty` ← {`prompt`,
@@ -172,7 +175,7 @@ _PLACES = {
     "web.api": (_SRC / "web" / "api", ".py"),
     "terminal.api": (_SRC / "terminal" / "api", ".py"),
 }
-_TWINS = ("app", "story")
+_TWINS = ("app", "codex", "story")
 _PACKAGE_ROOTS = {"__init__.py", "index.js"}
 _CLIENT = _STATIC / "js" / "api"
 # A section of the client, headed with its twin's name.
@@ -200,13 +203,15 @@ class TestMirror:
         packages = {path.stem for path in _CLIENT.glob("*.js")} - {"index"}
         assert {name for name in packages if not name.startswith("_")} == set(_TWINS)
 
-    def test_a_story_root_holds_nothing(self) -> None:
-        # nothing in either `story`: its modules are imported by their paths
-        for place, (directory, _) in _PLACES.items():
-            body = ast.parse((directory / "story" / "__init__.py").read_text()).body
-            assert all(_is_docstring(node) for node in body), place
-        # the client's `story` has no section of its own name
-        assert "story" not in _SECTION.findall((_CLIENT / "story.js").read_text())
+    def test_a_codex_and_a_story_root_hold_nothing(self) -> None:
+        # nothing in any `codex` or `story`: their modules are imported by
+        # their paths
+        for package in ("codex", "story"):
+            for place, (directory, _) in _PLACES.items():
+                body = ast.parse((directory / package / "__init__.py").read_text()).body
+                assert all(_is_docstring(node) for node in body), f"{place}.{package}"
+            # the client's package has no section of its own name
+            assert package not in _SECTION.findall((_CLIENT / f"{package}.js").read_text())
 
     def test_dispatch_follows_the_layout_for_the_resources_with_commands(self) -> None:
         dispatch = _SRC / "terminal" / "dispatch"
@@ -415,8 +420,9 @@ class TestInterface:
 class TestAppPrivacy:
     def test_the_apps_underscore_surface_stays_in_the_domain(self) -> None:
         # The domain's modules are the implementation and the launch
-        # composes the app; nothing else touches its members — the suites
-        # included, which assert through a second Store connection.
+        # composes the app, the samples' seeding with it; nothing else
+        # touches its members — the suites included, which assert through
+        # a second Store connection.
         # the handle, never a module path (`domain.app._paths`); split: never matches itself
         needle = re.compile(r"(?<![.\w])(?:app|backend)" + r"\._[a-z]")
         uses = []
@@ -424,7 +430,10 @@ class TestAppPrivacy:
             for path in sorted((_ROOT / tree).rglob("*.py")):
                 if "__pycache__" in path.parts or path.is_relative_to(_SRC / "backend" / "domain"):
                     continue
-                if path == _SRC / "backend" / "launch.py":
+                if path in (
+                    _SRC / "backend" / "launch.py",
+                    _SRC / "backend" / "samples" / "__init__.py",
+                ):
                     continue
                 for number, line in enumerate(path.read_text().splitlines(), start=1):
                     if needle.search(line):
@@ -640,7 +649,22 @@ _PAGE = {
     "help": {"api", "browser", "dom", "language"},
     # The dossier under the browser: the browser reaches into it (Open
     # story), never the other way — its route back is a command.
-    "dossier": {"api", "browser", "dom", "format", "held", "pictures", "prose", "shell", "tools"},
+    # `characters` for the Cast tab's card: linked, picked, invited.
+    "dossier": {
+        "api",
+        "browser",
+        "characters",
+        "dom",
+        "format",
+        "held",
+        "pictures",
+        "prose",
+        "shell",
+        "tools",
+    },
+    # All characters, and the card picker every "which card" goes through;
+    # `transfer` for the card dialog an invite and an import open.
+    "characters": {"api", "browser", "dom", "format", "held", "pictures", "shell", "transfer"},
     # The dossier's fifth tab in a module of its own. `models` for the
     # mask a set key reads behind, as a provider's does.
     "tools": {"api", "browser", "dom", "models", "shell"},
@@ -658,6 +682,7 @@ _PAGE = {
     "commands": {
         "api",
         "browser",
+        "characters",
         "dom",
         "dossier",
         "held",

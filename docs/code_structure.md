@@ -37,10 +37,10 @@ serve the app it holds (`/web`); the web knows nothing of the terminal.
       domain/     what otaku does: every rule and every store access
       errors.py   the refusals, raised below and caught above
       launch.py   one state dir opened as the app
-      samples/    the stories and pictures a first launch seeds
+      samples/    the sample stories, their pictures and cards, seeded at a first launch
 
 Inside, imports point one way: `errors` ← `domain.app` ← `domain.codex` ← `domain.story` ← `api` ←
-`launch`, with `domain._formats` beside `domain.story`. A module imports another by its own module
+`samples` ← `launch`, with `domain._formats` beside `domain.story`. A module imports another by its own module
 path, never through a package root. A package root holds its namesake or nothing: the facade and the
 vocabulary its resources share in `api`, the app's own resources in `api.app`, the `App` in
 `domain.app`, nothing in any `codex` or `story`.
@@ -65,7 +65,8 @@ every story may draw on and no story owns, and `story` for a story and what it h
       reports        the tokens, the run,
                      the accounts
 
-    codex/           its root alone
+    codex/
+      cards          a character card, kept across stories
 
 The five hold the same module list in the same structure: the same three packages, the same modules
 in each under the same names, and each package root holding its namesake or nothing. The page's
@@ -93,7 +94,8 @@ A module with no twin is its layer's machinery, and the underscore in its name s
     backend.domain.app._paths       what one state dir holds
     backend.domain.app._passwords   the web password's hash
     backend.domain.app._runs        a forced extraction pass, as it runs
-    backend.domain.story._chain     a story's chain: appended, popped, assembled
+    backend.domain.story._chain     a story's chain: appended, popped, its head moved
+    backend.domain.story._request   a story's next request, and the worker's job over it
     backend.domain.story._play      the play: a line recorded, its reply streamed
     backend.domain.story._tools     the tools a reply may call
     web.api._request                what a route is handed and hands back
@@ -110,9 +112,9 @@ entry and its events through `domain.story.messages`, a fresh take on a reply th
 `backend.api` is what a frontend calls, in-process, with no transport.
 
 A frontend builds one `Api` over the app it is handed and holds it. The facade has a resource per
-top-level path — `app`, `settings`, `tools`, `prompts`, `shared_reminder`, `providers`, `stories`,
-`imports`, `usage`, `info`, `balance`, `pictures`, `history`, `integrations`, `language` — and a
-sub-resource is an attribute of its parent, so a call spells its URL:
+top-level path — `app`, `settings`, `tools`, `prompts`, `shared_reminder`, `providers`, `cards`,
+`stories`, `imports`, `usage`, `info`, `balance`, `pictures`, `history`, `integrations`, `language`
+— and a sub-resource is an attribute of its parent, so a call spells its URL:
 `api.stories.messages.create(5, line=…)` is `POST /api/stories/5/messages`.
 
 A resource class, `<Noun>Resource`, holds the app and nothing else — no story, no cache. Its methods
@@ -157,8 +159,8 @@ verb: `fork_story`, `undo_exchange`, `regenerate_reply`, `submit_line`, `switch_
 written alone is `set_<field>`.
 
 The `App` (`domain.app`) is what one opened state dir is made of. Its underscore members are the
-domain's: the domain's modules use them, the launch composes them, and nothing above the domain
-touches them.
+domain's: the domain's modules use them, the launch composes them — the samples' seeding with it —
+and nothing above the domain touches them.
 
 `backend.errors` holds `Refused` and its kinds — `NotFound`, `Conflict` (`HeadMoved` among them),
 `Invalid`, `Unavailable` — and the refusal sentences more than one module says.
@@ -237,8 +239,8 @@ thread and no HTTP; `server` is the one that knows both at work, and `run` the o
       js/play/         the story as the page plays it: the story it holds, the language, the frame
                        around the transcript, the transcript
       js/screens/      what opens over the page: the story browser, the dossier and its Tools tab,
-                       the model picker, the settings slip, the reports, the transfers, help and
-                       support, the sign-in
+                       All characters and its card picker, the model picker, the settings slip,
+                       the reports, the transfers, help and support, the sign-in
       js/commands.js   what a row of the contents opens, and the doors the play goes through
       js/composer.js   one line in
 
@@ -368,4 +370,4 @@ twins, the machinery's privacy, the doors, the resource classes' verbs and answe
 every route follows, and the spec against the routes.
 
 The scenarios that play the app in-process, `scenarios/api/`, are laid out as the interface is:
-`app/` and `story/`, a module for each twin a story reaches.
+`app/`, `codex/` and `story/`, a module for each twin a story reaches.

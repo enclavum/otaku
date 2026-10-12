@@ -31,6 +31,7 @@ from otaku.backend.api.app.pictures import PicturesResource
 from otaku.backend.api.app.providers import ProvidersResource
 from otaku.backend.api.app.reports import BalanceResource, InfoResource, UsageResource
 from otaku.backend.api.app.settings import SettingsResource
+from otaku.backend.api.codex.cards import CardsResource
 from otaku.backend.api.story.language import LanguageResource
 from otaku.backend.api.story.prompts import PromptsResource, SharedReminderResource, ToolsResource
 from otaku.backend.api.story.stories import StoriesResource
@@ -73,6 +74,7 @@ class Api:
         self.prompts = PromptsResource(app)
         self.shared_reminder = SharedReminderResource(app)
         self.providers = ProvidersResource(app)
+        self.cards = CardsResource(app)
         self.stories = StoriesResource(app)
         self.imports = ImportsResource(app)
         self.usage = UsageResource(app)

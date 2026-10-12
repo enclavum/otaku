@@ -93,10 +93,13 @@ const state = {
   providerCapabilities: null,
   usage: [], // {story, purpose, prompt, completion, seconds}
   status: "", // the worker's one line
+  cards: new Map(), // id → a codex card, as `Card` minus the stories it is in
+  nextCard: 1,
+  cardDigests: new Map(), // id → the digests of the card files it was made from
 };
 
 export function seed(fixtures) {
-  const { app, river, tour } = fixtures;
+  const { app, river, tour, codex } = fixtures;
   state.version = app.app.version;
   state.launch = { notices: [], hint: app.app.launch.hint };
   state.settings = structuredClone(app.settings);
@@ -130,6 +133,14 @@ export function seed(fixtures) {
     for (const row of [...held.lore.scenes, ...held.lore.characters, ...held.lore.journals]) {
       state.nextLore = Math.max(state.nextLore, row.id + 1);
     }
+  }
+  // The samples' cards, as a fresh install keeps them: the stories they
+  // are in are read off the casts, as the store reads them.
+  for (const [id, card] of Object.entries(codex.card)) {
+    const row = structuredClone(card);
+    delete row.stories;
+    state.cards.set(Number(id), row);
+    state.nextCard = Math.max(state.nextCard, Number(id) + 1);
   }
 }
 
@@ -713,9 +724,35 @@ export function story(id) {
   return storyOf(held(id));
 }
 
-export function createStory({ title = "", premise = "" } = {}) {
-  const story = hold(state.nextStory++, { title: title.trim(), premise });
-  const named = title.trim();
+/* A story made at once — and, given codex cards (`cards`: each its id,
+   name, aliases, archive, greeting and file, composed by the router), one
+   started with them as `cards.bring_in_cards` starts it: a card row and a
+   character each, linked, then the first card's greeting; an untitled one
+   named for them. */
+export function createStory({ title = "", premise = "", cards = [], persona = "" } = {}) {
+  if (new Set(cards.map((card) => card.id)).size !== cards.length) throw invalid("A card is picked twice.");
+  const seen = new Set();
+  for (const card of cards) {
+    if (seen.has(card.name.toLowerCase())) {
+      throw conflict(`Two of the cards are called ${card.name} — rename one first.`);
+    }
+    seen.add(card.name.toLowerCase());
+  }
+  const named = title.trim() || cards.map((card) => card.name).join(", ");
+  const story = hold(state.nextStory++, { title: named, premise });
+  let greeter = null;
+  for (const card of cards) {
+    const { characterId } = bringIn(story, { ...card, line: `/card ${card.name}` });
+    if (!greeter && card.greeting) greeter = { ...card, characterId };
+  }
+  if (cards.length) story.persona = persona;
+  if (greeter) {
+    record(story.id, "assistant", greeter.greeting, {
+      speaker: greeter.name,
+      provider: "card",
+      model: greeter.fileName || null,
+    });
+  }
   return {
     value: storyOf(story),
     notice: named ? `Started a new story: "${cut(named, LABEL_WIDTH)}".` : "Started a new story.",
@@ -996,12 +1033,36 @@ export function character(id, characterId) {
   return structuredClone(loreRow(held(id), "characters", characterId, "character"));
 }
 
-export function updateCharacter(id, characterId, { description, card }) {
+export function updateCharacter(id, characterId, { description, card, card_id: cardId }) {
   const row = loreRow(held(id), "characters", characterId, "character");
-  if (description === undefined && card === undefined) throw invalid("Nothing to change.");
-  if (description !== undefined) row.description = description;
-  if (card !== undefined) row.card = card;
-  return { value: structuredClone(row), notice: "Saved." };
+  if (description === undefined && card === undefined && cardId === undefined) throw invalid("Nothing to change.");
+  const said = [];
+  if (description !== undefined || card !== undefined) {
+    if (description !== undefined) row.description = description;
+    if (card !== undefined) row.card = card;
+    said.push("Saved.");
+  }
+  if (cardId !== undefined) said.push(linkCharacter(id, row, cardId));
+  return { value: structuredClone(row), notice: said.join(" ") };
+}
+
+/* A story's character linked to a codex card, or unlinked with null, as
+   `domain.story.lore.set_card_id` links it — nothing else on either
+   changes. */
+function linkCharacter(id, row, cardId) {
+  if (cardId === row.card_id) throw invalid("Nothing to change.");
+  if (cardId === null) {
+    const was = cardRow(row.card_id);
+    row.card_id = null;
+    row.card_name = null;
+    return `Unlinked ${row.name} from ${was.name}.`;
+  }
+  const card = cardRow(cardId);
+  const other = held(id).lore.characters.find((each) => each.card_id === card.id);
+  if (other) throw conflict(`${other.name} in this story is linked to ${card.name} already.`);
+  row.card_id = card.id;
+  row.card_name = card.name;
+  return `Linked ${row.name} to ${card.name}.`;
 }
 
 export function deleteCharacter(id) {
@@ -1120,37 +1181,356 @@ export function personaOf(id) {
    the typed /card row, speaker-linked; the cast row with the card's
    archive, made by the card; the greeting as the character's own first
    words. Answered as the two rows and the report. */
-export function importCard(id, expected, { name, description, archive, greeting, fileName, line, persona, report }) {
+/* The card's three writes, the codex card `card` brought in: the typed
+   /card row, speaker-linked; the cast row with the card's archive, made by
+   the card and linked to it; the greeting as the character's own first
+   words. Answered as the two rows, the codex card and the report. */
+export function importCard(id, expected, { card, name, aliases, archive, greeting, fileName, line, persona, report }) {
   const story = held(id);
   checkHead(id, expected);
-  if (story.lore.characters.some((row) => row.name === name)) {
-    const source = story.lore.characters.find((row) => row.name === name).card
-      ? "imported earlier"
-      : "extracted from play";
-    throw conflict(`${name} already exists in this story (${source}) — import under another name: /card FILE NAME.`);
+  ensureFree(id, name, card);
+  const { characterId, typed } = bringIn(story, { id: card, name, aliases, archive, fileName, line });
+  story.persona = persona;
+  const said = greeting
+    ? record(id, "assistant", greeting, { speaker: name, provider: "card", model: fileName || null })
+    : null;
+  return {
+    value: { character_id: characterId, card_id: card, line: typed, greeting: said, report },
+    notice: report,
+  };
+}
+
+/** Refused where the story's cast already answers to the name, or holds
+    the codex card already under another (`cards._ensure_free`). */
+export function ensureFree(id, name, cardId = null) {
+  const story = held(id);
+  const existing = story.lore.characters.find((row) => row.name.toLowerCase() === name.toLowerCase());
+  if (existing) {
+    const source = existing.card ? "imported earlier" : "extracted from play";
+    throw conflict(`${existing.name} already exists in this story (${source}) — import under another name: /card FILE NAME.`);
   }
+  const linked = cardId === null ? null : story.lore.characters.find((row) => row.card_id === cardId);
+  if (linked) throw conflict(`${cardRow(cardId).name} is in this story already, as ${linked.name}.`);
+}
+
+function bringIn(story, { id: cardId, name, aliases = [], archive, fileName = "", line }) {
   const characterId = state.nextLore++;
   story.lore.characters.push({
     id: characterId,
     name,
-    aliases: [],
-    description,
+    aliases: aliases.filter((alias) => alias.toLowerCase() !== name.toLowerCase()),
+    description: "",
     card: archive,
     history: "",
     history_journal_id: null,
+    card_id: cardId,
+    card_name: state.cards.get(cardId)?.name ?? null,
     provider: "card",
-    model: fileName,
+    model: fileName || null,
     updated_at: now(),
   });
-  story.persona = persona;
-  const typed = record(id, "user", line, { kind: "card", speaker: name, provider: null, model: null });
-  const said = greeting
-    ? record(id, "assistant", greeting, { speaker: name, provider: "card", model: fileName })
-    : null;
+  const typed = record(story.id, "user", line, { kind: "card", speaker: name, provider: null, model: null });
+  return { characterId, typed };
+}
+
+// ---------- the codex ----------
+
+/* All characters, as `backend.domain.codex.cards` keeps them: the cards,
+   the stories each is in read off the casts as the store reads them, the
+   digest of each card file a card was made from, and the stories'
+   characters no card claims. A card's picture is not in the demo: it has
+   nowhere to keep one. */
+
+const NO_SUCH_CARD = "No such card.";
+// a card's fields as `CardsResource.update` takes them, the name and the
+// tagline aside
+const CARD_FIELDS = [
+  "description", "personality", "scenario", "greeting", "alternate_greetings", "examples",
+  "reminder", "reminder_depth", "system_prompt", "post_history_instructions", "creator_notes",
+];
+
+function cardRow(id) {
+  const found = state.cards.get(id);
+  if (!found) throw notFound(NO_SUCH_CARD);
+  return found;
+}
+
+/** The story characters a card is linked to, by story (`StoryCharacter`). */
+function linkedTo(cardId) {
+  const rows = [];
+  for (const story of [...state.stories.values()].sort((a, b) => a.id - b.id)) {
+    for (const row of story.lore.characters) if (row.card_id === cardId) rows.push(storyCharacter(story, row));
+  }
+  return rows;
+}
+
+function storyCharacter(story, row) {
   return {
-    value: { character_id: characterId, line: typed, greeting: said, report },
-    notice: report,
+    story_id: story.id,
+    story_label: labelOf(story),
+    character_id: row.id,
+    name: row.name,
+    aliases: structuredClone(row.aliases),
+    journal_count: story.lore.journals.filter((record) => record.character_id === row.id).length,
   };
+}
+
+const cardOf = (card) => ({ ...structuredClone(card), stories: linkedTo(card.id) });
+
+export function cardSummary(card) {
+  return {
+    id: card.id,
+    name: card.name,
+    aliases: structuredClone(card.aliases),
+    tagline: card.tagline,
+    pictures: structuredClone(card.pictures),
+    story_count: linkedTo(card.id).length,
+  };
+}
+
+/** Every card by name, or those whose name, an alias or the tagline holds
+    `query`. */
+export function cards(query = "") {
+  const needle = query.trim().toLowerCase();
+  return [...state.cards.values()]
+    .filter((card) => !needle || [card.name, ...card.aliases, card.tagline].join(" ").toLowerCase().includes(needle))
+    .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()) || a.id - b.id)
+    .map(cardSummary);
+}
+
+export function card(id) {
+  return cardOf(cardRow(id));
+}
+
+function cleanName(name) {
+  const cleaned = (name ?? "").trim();
+  if (!cleaned) throw invalid("A card needs a name.");
+  return cleaned;
+}
+
+function cleanTagline(tagline) {
+  const cleaned = (tagline ?? "").trim();
+  if (cleaned.includes("\n")) throw invalid("A tagline is one line.");
+  return cleaned;
+}
+
+const cleanAliases = (aliases, name) => [
+  ...new Set(aliases.map((alias) => alias.trim()).filter((alias) => alias && alias.toLowerCase() !== name.toLowerCase())),
+];
+
+/* A reminder goes before one of the reader's messages, the newest 1
+   (`backend.domain.codex.cards._checked`). */
+function checkDepth(fields) {
+  const depth = fields.reminder_depth;
+  if (depth !== undefined && !(Number.isInteger(depth) && depth >= 1)) {
+    throw invalid("A reminder's depth is a whole number from 1.");
+  }
+}
+
+function makeCard({ name, aliases = [], tagline = "", fields = {}, fileName = "" }) {
+  const id = state.nextCard++;
+  const made = {
+    id,
+    name,
+    aliases: cleanAliases(aliases, name),
+    tagline,
+    description: "", personality: "", scenario: "", greeting: "",
+    alternate_greetings: [], examples: [],
+    reminder: "", reminder_depth: 2, system_prompt: "", post_history_instructions: "", creator_notes: "",
+    file_name: fileName,
+    pictures: [],
+    updated_at: now(),
+  };
+  for (const key of CARD_FIELDS) if (fields[key] !== undefined) made[key] = structuredClone(fields[key]);
+  state.cards.set(id, made);
+  return made;
+}
+
+export function createCard({ name, aliases = [], tagline = "", fields = {} }) {
+  checkDepth(fields);
+  const made = makeCard({ name: cleanName(name), aliases, tagline: cleanTagline(tagline), fields });
+  return { value: cardOf(made), notice: `Added ${made.name} to the codex.` };
+}
+
+export function updateCard(id, fields) {
+  const card = cardRow(id);
+  if (!Object.keys(fields).length) throw invalid("Nothing to change.");
+  checkDepth(fields);
+  const name = fields.name !== undefined ? cleanName(fields.name) : card.name;
+  const tagline = fields.tagline !== undefined ? cleanTagline(fields.tagline) : card.tagline;
+  let pictures = card.pictures;
+  if (fields.pictures !== undefined) {
+    const byName = new Map(card.pictures.map((picture) => [picture.file, picture]));
+    const wanted = fields.pictures;
+    if ([...wanted].sort().join("\n") !== [...byName.keys()].sort().join("\n")) {
+      throw invalid("A new order names each of the card's pictures once.");
+    }
+    pictures = wanted.map((file) => byName.get(file));
+  }
+  card.name = name;
+  card.tagline = tagline;
+  card.pictures = pictures;
+  card.aliases = cleanAliases(fields.aliases ?? card.aliases, name);
+  for (const key of CARD_FIELDS) if (fields[key] !== undefined) card[key] = structuredClone(fields[key]);
+  card.updated_at = now();
+  renamed(card);
+  return { value: cardOf(card), notice: "Saved." };
+}
+
+export function deleteCard(id) {
+  const card = cardRow(id);
+  const stories = new Set(linkedTo(id).map((row) => row.story_id)).size;
+  for (const story of state.stories.values()) {
+    for (const row of story.lore.characters) {
+      if (row.card_id === id) {
+        row.card_id = null;
+        row.card_name = null;
+      }
+    }
+  }
+  state.cards.delete(id);
+  state.cardDigests.delete(id);
+  let said = `Deleted ${card.name} from the codex.`;
+  if (stories) said += ` Its characters in ${stories} ${stories === 1 ? "story" : "stories"} stay, unlinked.`;
+  return { value: null, notice: said };
+}
+
+export function mergeCard(id, into) {
+  const source = cardRow(id);
+  const target = cardRow(into);
+  if (source.id === target.id) throw invalid(`${source.name} and ${target.name} are already the same card.`);
+  const stories = new Set(linkedTo(source.id).map((row) => row.story_id));
+  const shared = linkedTo(target.id).find((row) => stories.has(row.story_id));
+  if (shared) {
+    throw conflict(
+      `"${shared.story_label}" has characters linked to both ${source.name} and ${target.name} — merge them in the story first.`,
+    );
+  }
+  for (const story of state.stories.values()) {
+    for (const row of story.lore.characters) {
+      if (row.card_id === source.id) {
+        row.card_id = target.id;
+        row.card_name = target.name;
+      }
+    }
+  }
+  target.aliases = cleanAliases([...target.aliases, source.name, ...source.aliases], target.name);
+  const kept = new Set(target.pictures.map((picture) => picture.file));
+  target.pictures = [...target.pictures, ...source.pictures.filter((picture) => !kept.has(picture.file))];
+  state.cardDigests.set(target.id, [...new Set([...(state.cardDigests.get(target.id) ?? []), ...(state.cardDigests.get(source.id) ?? [])])]);
+  state.cards.delete(source.id);
+  state.cardDigests.delete(source.id);
+  target.updated_at = now();
+  return { value: cardOf(target), notice: `Merged ${source.name} into ${target.name} ('${source.name}' is now an alias).` };
+}
+
+export function addCardPicture(id) {
+  cardRow(id);
+  throw conflict(NOT_IN_DEMO("A card's picture"));
+}
+
+/** A picture taken off a card by its file name (`delete_card_picture`). */
+export function removeCardPicture(id, name) {
+  const card = cardRow(id);
+  const kept = card.pictures.filter((picture) => picture.file !== name);
+  if (kept.length === card.pictures.length) throw notFound(`${card.name} has no such picture.`);
+  card.pictures = kept;
+  card.updated_at = now();
+  return { value: cardOf(card), notice: "Picture removed." };
+}
+
+/** Every story's character no card claims — or those whose name, an alias
+    or a journal record's entry or state holds the query — the most written
+    about first. */
+export function unlinked(query = "") {
+  const needle = query.trim().toLowerCase();
+  const rows = [];
+  for (const story of [...state.stories.values()].sort((a, b) => a.id - b.id)) {
+    for (const row of story.lore.characters) {
+      if (row.card_id != null) continue;
+      const journaled = story.lore.journals
+        .filter((record) => record.character_id === row.id)
+        .flatMap((record) => [record.entry, record.state]);
+      const text = [row.name, ...row.aliases, ...journaled].join("\n").toLowerCase();
+      if (needle && !text.includes(needle)) continue;
+      rows.push(storyCharacter(story, row));
+    }
+  }
+  return rows.sort((a, b) => b.journal_count - a.journal_count);
+}
+
+/** A card made from a story's character and linked to it. */
+export function promote(storyId, characterId) {
+  const story = held(storyId);
+  const row = story.lore.characters.find((each) => each.id === characterId);
+  if (!row) throw notFound("That character is not in this story's memory.");
+  if (row.card_id != null) {
+    throw conflict(`This character is linked to ${cardRow(row.card_id).name} in the codex already.`);
+  }
+  const made = makeCard({ name: row.name, aliases: row.aliases, fields: { description: row.description } });
+  row.card_id = made.id;
+  row.card_name = made.name;
+  return {
+    value: cardOf(made),
+    notice: `Added ${row.name} to the codex, linked to this story's character.`,
+  };
+}
+
+/** What tells one card file's card from another's: its fields as read,
+    the file's name left out. */
+const digestOf = (found) =>
+  JSON.stringify(Object.keys(found).filter((key) => key !== "file_name").sort().map((key) => [key, found[key]]));
+
+export function sameCard(found) {
+  const digest = digestOf(found);
+  const id = [...state.cardDigests.entries()].find(([, digests]) => digests.includes(digest))?.[0];
+  return id === undefined ? null : state.cards.get(id);
+}
+
+/** A card file read for the codex, nothing stored (`CardCheck`). */
+export function checkCardFile(found, notes, hasPicture, rename = "") {
+  const same = sameCard(found);
+  const named = rename.trim() || found.name;
+  const wanted = new Set([named.toLowerCase(), found.name.toLowerCase()]);
+  const similar = [...state.cards.values()].filter(
+    (card) => card !== same && [card.name, ...card.aliases].some((alias) => wanted.has(alias.toLowerCase())),
+  );
+  return {
+    name: named,
+    notes,
+    has_picture: hasPicture,
+    same_card: same ? cardSummary(same) : null,
+    similar_cards: similar.map(cardSummary),
+  };
+}
+
+/** A card file into the codex (`CardImport`): one the codex holds already
+    makes nothing, `reuse` names the card the reader says it is; else a
+    card is made — its picture, where the file has one, not in the demo. */
+export function importCardFile(found, notes, hasPicture, { rename = "", reuse = null } = {}) {
+  const digest = digestOf(found);
+  const same = sameCard(found);
+  if (same) return { value: { card: cardOf(same), made: false }, notice: `${same.name} is in the codex already.` };
+  if (reuse !== null) {
+    const kept = cardRow(reuse);
+    state.cardDigests.set(kept.id, [...(state.cardDigests.get(kept.id) ?? []), digest]);
+    return { value: { card: cardOf(kept), made: false }, notice: `Kept ${kept.name}: the codex holds it already.` };
+  }
+  const name = rename.trim() ? cleanName(rename) : found.name;
+  const made = makeCard({ name, fields: found, fileName: found.file_name ?? "" });
+  state.cardDigests.set(made.id, [digest]);
+  const said = [`Added ${name} to the codex`, ...notes];
+  if (hasPicture) said.push(`its picture was not kept: ${NOT_IN_DEMO("A card's picture")}`);
+  const sentence = said.join(" · ");
+  return { value: { card: cardOf(made), made: true }, notice: sentence.endsWith(".") ? sentence : `${sentence}.` };
+}
+
+/** The stories' casts name the cards they are linked to: a rename reaches
+    them. */
+function renamed(card) {
+  for (const story of state.stories.values()) {
+    for (const row of story.lore.characters) if (row.card_id === card.id) row.card_name = card.name;
+  }
 }
 
 // ---------- the context ----------
@@ -1195,6 +1575,14 @@ export function context(id) {
     },
     lede,
     note: "",
+    // the card rows as the product lists them, each costed by the archive
+    // its character holds — what the product sends in the row's place
+    cards: story.messages
+      .filter((row) => row.kind === "card")
+      .map((row) => {
+        const cast = story.lore.characters.find((character) => character.name === row.speaker);
+        return { name: row.speaker ?? "", tokens: estimate(cast?.card ?? row.body) };
+      }),
     // the recompute assembles no injection, so it reports none, honestly
     injections: [],
     parts: [

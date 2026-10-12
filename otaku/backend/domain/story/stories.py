@@ -1,14 +1,17 @@
 """The stories, operated: found (the one filter rule both browsers
-promise), read off the store, made, renamed, given a premise, deleted,
+promise), read off the store, made — empty, or started with codex
+cards — renamed, given a premise, deleted,
 forked, rewound — and the actions on a story's trailing exchange: a
 fresh take on its reply (the play engine's, `_play`), the exchange taken
 back. Every write naming the story it acts on, every chain-changing one
 dropping the search index.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from otaku.backend.domain.app import App
+from otaku.backend.domain.story import cards
 from otaku.backend.domain.story._chain import drop_unplayed_card, pop_exchange
 
 # Re-exported: a fresh take on the last reply is an action on the story,
@@ -102,14 +105,33 @@ def get_story(app: App, story_id: int) -> StoryRecord:
     )
 
 
-def create_story(app: App, *, title: str = "", premise: str = "") -> tuple[int, str]:
+def create_story(
+    app: App,
+    *,
+    title: str = "",
+    premise: str = "",
+    card_ids: Sequence[int] = (),
+    card_pictures: Sequence[int] = (),
+    persona: str = "",
+) -> tuple[int, str]:
     """A brand-new story, made AT ONCE — it is in the browser and carries
     its title before its first turn, not after — and the sentence.
-    `title` and `premise` are optional, the premise taken verbatim."""
-    title = title.strip()
+    `title` and `premise` are optional, the premise taken verbatim. Given
+    codex cards, it starts with them (`cards.bring_in_cards`),
+    `card_pictures` the cards among them whose portrait rides their row,
+    `persona` what their `{{user}}` binds to; an untitled one is named
+    for them. Raises
+    Refused for a card the codex does not hold, one picked twice, and
+    two of one name — nothing made."""
+    picked = cards.check_cards(app, card_ids)
+    title = title.strip() or ", ".join(card.name for card in picked)
     story_id = app._store.stories.add(title=title or None)
     if premise:
         app._store.stories.set_system(story_id, premise)
+    if picked:
+        cards.bring_in_cards(
+            app, story_id, picked, card_pictures=set(card_pictures), persona=persona
+        )
     app._search_index = None
     if title:
         return story_id, f'Started a new story: "{truncate_label(title, LABEL_WIDTH)}".'

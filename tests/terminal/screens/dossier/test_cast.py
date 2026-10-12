@@ -70,6 +70,8 @@ def _character(
         card=card,
         history=history,
         history_journal_id=history_journal_id,
+        card_id=None,
+        card_name=None,
         provider=None,
         model=None,
         updated_at="",

@@ -39,7 +39,7 @@ from otaku.backend.api.story.messages import (
 from otaku.backend.api.story.stories import Story
 from otaku.backend.domain._formats import EXPORT_MARKER
 from otaku.backend.domain.app._paths import Paths
-from otaku.backend.domain.story import _chain as chain
+from otaku.backend.domain.story import _request
 from otaku.backend.domain.story._play import NO_PICTURE_ON_TEXT, NOTHING_TO_SEND
 from otaku.context.assembler import JoinType, estimate_tokens
 from otaku.settings import models as models_file
@@ -1015,7 +1015,7 @@ class TestTheNovel:
             reply = app.store.stories.get_messages(app.story_id)[-1]
             assert reply.body == "\n\nThe rain fell."
             assert (
-                chain.assemble(app.backend, app.story_id, None)
+                _request.assemble(app.backend, app.story_id, None)
                 .as_story_text()
                 .endswith("It was late.\n\nThe rain fell.")
             )
@@ -1125,8 +1125,8 @@ class TestTheCanvasOverTheChatWire:
         _layout(app, Layout.CANVAS)
         _emulating(app)
         app.play("One.")
-        turn = [i.owner for i in chain.assemble(app.backend, app.story_id, None).injections]
-        job = [i.owner for i in chain.build_job(app.backend, app.story_id).injections]
+        turn = [i.owner for i in _request.assemble(app.backend, app.story_id, None).injections]
+        job = [i.owner for i in _request.build_job(app.backend, app.story_id).injections]
         assert turn == job == ["emulate_text_completion"]
 
     def test_a_reply_goes_on_in_the_paragraph_it_follows(self, app: App) -> None:

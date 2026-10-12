@@ -1,0 +1,40 @@
+# The sample stories' characters, kept in All characters at a first launch
+# (`backend.samples`): each made from its story's character and linked
+# to it, its tagline set — and, where `picture` names one, its portrait
+# added from a picture shipped beside the samples. The others stay
+# unlinked, for a first look at linking one.
+
+[[card]]
+story = "river"
+name = "Maren"
+tagline = "Redraws maps that have stopped being true"
+
+[[card]]
+story = "river"
+name = "Tallis"
+tagline = "The last ferryman of the Meade"
+
+[[card]]
+story = "tour"
+name = "Bell Harrow"
+tagline = "A stage manager who keeps her own notebook"
+
+[[card]]
+story = "tour"
+name = "Odalric Vane"
+tagline = "Velvet manners over old debts"
+
+[[card]]
+story = "tour"
+name = "Mirelle Sorel"
+tagline = "Leading lady, running the company from the fly floor"
+
+[[card]]
+story = "tour"
+name = "Casimir Prewick"
+tagline = "A censor's clerk who stamps only what he can defend"
+
+[[card]]
+story = "tour"
+name = "Emeran Falk"
+tagline = "A tragedian with cut pages sewn into his coat"

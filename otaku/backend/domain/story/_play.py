@@ -23,12 +23,11 @@ from otaku.backend.domain.app import App
 from otaku.backend.domain.app.pictures import Picture, RawFile, read_picture, save
 from otaku.backend.domain.story._chain import (
     append_message,
-    assemble,
-    build_job,
     check_head,
     pop_reply,
     unit_start,
 )
+from otaku.backend.domain.story._request import assemble, build_job
 from otaku.backend.domain.story._tools import TOOLS, Actor, Tool, read_call
 from otaku.backend.domain.story.settings import StorySettings, ToolSetting, settings_of
 from otaku.backend.errors import NO_MODEL_HINT, NO_SUCH_STORY, Conflict, Invalid, NotFound

@@ -15,6 +15,7 @@
    hooks and the sign-in. */
 
 import * as app from "./app.js";
+import * as codex from "./codex.js";
 import * as story from "./story.js";
 
 export { login, whenLost, whenReached, whenUnauthorized } from "./_http.js";
@@ -26,6 +27,7 @@ export const api = {
   prompts: story.prompts,
   sharedReminder: story.sharedReminder,
   providers: { ...app.providers, models: app.models },
+  cards: codex.cards,
   stories: {
     ...story.stories,
     settings: story.settings,

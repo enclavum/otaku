@@ -26,6 +26,7 @@ from otaku.backend.domain.app._paths import Paths
 from otaku.backend.domain.app.models import PARAMETERS, THINK_MENU
 from otaku.integrations import SupportDesk
 from otaku.settings import models as models_file
+from otaku.store.files import Owner
 from scenarios.support import server as scripted
 from scenarios.support.harness import MODEL, set_config, set_config_provider
 from scenarios.support.server import ModelServer
@@ -841,6 +842,18 @@ class TestStorySettings:
         ]
         assert all(i["tokens"] > 0 for i in injections)
 
+    def test_the_context_preview_carries_the_cards_and_what_they_inject(self, page: Page) -> None:
+        page.play("I listen at the culvert mouth.")
+        story = page.story
+        assert page.get(f"/api/stories/{story}/context")["cards"] == []
+        wren = {"name": "Wren", "system_prompt": "Never lie.", "reminder": "Riddles."}
+        card = page.post("/api/cards", {**wren, "reminder_depth": 1})["value"]["id"]
+        page.post(f"/api/stories/{story}/cards", {"card_id": card, "persona": "Alex"}, if_match="*")
+        preview = page.get(f"/api/stories/{story}/context")
+        (sent,) = preview["cards"]
+        assert sent["name"] == "Wren" and sent["tokens"] > 0
+        assert [i["position"] for i in preview["injections"]] == ["system", 1]
+
     def test_the_shared_reminder_has_a_path_of_its_own(self, page: Page) -> None:
         assert page.get("/api/shared-reminder") == {"text": ""}
         answer = page.patch("/api/shared-reminder", {"text": "Stay grim."})
@@ -1258,7 +1271,7 @@ class TestPictures:
     ) -> None:
         # A file never changes once written, so the browser keeps it — but
         # it sits behind the sign-in, so no cache between may.
-        name = page.store.files.add(1, CAT.read_bytes(), "image/jpeg", thumb=b"thumb")
+        name = page.store.files.add(Owner.STORY, 1, CAT.read_bytes(), "image/jpeg", thumb=b"thumb")
         status, headers, body = _fetch(page, f"/api/pictures/{name}")
         assert (status, body) == (200, CAT.read_bytes())
         assert headers["Content-Type"] == "image/jpeg"
@@ -1271,6 +1284,99 @@ class TestPictures:
     def test_a_name_nothing_is_stored_under_is_404(self, page: Page) -> None:
         assert page.status("/api/pictures/pic-0001-20260101-deadbeef.jpg") == 404
         assert page.status("/api/pictures/pic-0001-20260101-deadbeef.jpg/thumbnail") == 404
+
+
+class TestTheCodexOverTheWire:
+    """All characters at its paths: a card made three ways — by hand, from
+    a card file (201 where one is made, 200 where the codex held it), from
+    a story's character — vetted, corrected, merged and deleted, a picture
+    added, the unlinked listed; a story's character linked by `card_id`,
+    and a story started with cards. A card's id is digits, as every row
+    id is."""
+
+    def test_a_card_made_by_hand_lives_where_its_location_says(self, page: Page) -> None:
+        status, headers, answer = page.answer(
+            "POST", "/api/cards", {"name": "Mira", "aliases": ["the thief"], "examples": ["a"]}
+        )
+        card = answer["value"]
+        assert status == 201 and headers["location"] == f"/api/cards/{card['id']}"
+        assert page.get(headers["location"])["examples"] == ["a"]
+        (row,) = page.get("/api/cards")["items"]
+        assert (row["name"], row["story_count"], row["pictures"]) == ("Mira", 0, [])
+        assert page.get("/api/cards?query=thief")["items"][0]["id"] == card["id"]
+
+    def test_a_card_file_is_vetted_then_made_then_held(self, page: Page) -> None:
+        data = base64.b64encode(SERAPHINA.read_bytes()).decode()
+        body = {"data": data, "file_name": "seraphina.png"}
+        check = page.post("/api/cards?validate_only=true", body)
+        assert (check["name"], check["has_picture"], check["same_card"]) == (
+            "Seraphina",
+            True,
+            None,
+        )
+        status, headers, made = page.answer("POST", "/api/cards", body)
+        assert status == 201 and made["value"]["made"] is True
+        assert headers["location"] == f"/api/cards/{made['value']['card']['id']}"
+        status, _, again = page.answer("POST", "/api/cards", body)
+        assert status == 200 and again["value"]["made"] is False
+
+    def test_a_card_is_corrected_merged_and_deleted(self, page: Page) -> None:
+        a = page.post("/api/cards", {"name": "A"})["value"]["id"]
+        b = page.post("/api/cards", {"name": "B"})["value"]["id"]
+        fixed = page.patch(f"/api/cards/{a}", {"tagline": "first", "alternate_greetings": ["hi"]})
+        assert fixed["value"]["tagline"] == "first"
+        assert fixed["value"]["alternate_greetings"] == ["hi"]
+        merged = page.post(f"/api/cards/{a}/merges", {"into": b})
+        assert merged["value"]["aliases"] == ["A"]
+        assert page.delete(f"/api/cards/{b}")["value"] is None
+        assert page.get("/api/cards")["items"] == []
+        assert page.refused("GET", f"/api/cards/{b}")["status"] == 404
+
+    def test_a_picture_is_added_to_a_card_and_removed(self, page: Page) -> None:
+        card = page.post("/api/cards", {"name": "Mira"})["value"]["id"]
+        file = {"name": "cat.jpg", "data": base64.b64encode(CAT.read_bytes()).decode()}
+        (picture,) = page.post(f"/api/cards/{card}/pictures", file)["value"]["pictures"]
+        assert page.status(f"/api/pictures/{picture['file']}") == 200
+        path = f"/api/cards/{card}/pictures/{picture['file']}"
+        assert page.delete(path)["value"]["pictures"] == []
+        assert page.refused("DELETE", path)["status"] == 404
+
+    def test_a_reminders_depth_is_a_whole_number_from_one(self, page: Page) -> None:
+        assert page.refused("POST", "/api/cards", {"name": "Mira", "reminder_depth": 0})
+        card = page.post("/api/cards", {"name": "Mira", "reminder": "r"})["value"]
+        assert card["reminder_depth"] == 2
+        assert page.refused("PATCH", f"/api/cards/{card['id']}", {"reminder_depth": 0})
+        body = b'{"name": "Mira", "reminder_depth": "2"}'
+        assert page.status("/api/cards", method="POST", data=body) == 400
+
+    def test_a_character_is_promoted_linked_and_unlinked(self, page: Page) -> None:
+        story = page.made()
+        keeper = page.store.characters.add(story, "Keeper")
+        (row,) = page.get("/api/cards/unlinked")["items"]
+        assert (row["name"], row["story_id"], row["journal_count"]) == ("Keeper", story, 0)
+        status, _, made = page.answer(
+            "POST", "/api/cards", {"story_id": story, "character_id": keeper}
+        )
+        assert status == 201 and page.get("/api/cards/unlinked")["items"] == []
+        path = f"/api/stories/{story}/characters/{keeper}"
+        assert page.patch(path, {"card_id": None})["value"]["card_id"] is None
+        linked = page.patch(path, {"card_id": made["value"]["id"]})["value"]
+        assert (linked["card_id"], linked["card_name"]) == (made["value"]["id"], "Keeper")
+
+    def test_a_story_starts_with_cards(self, page: Page) -> None:
+        mira = page.post("/api/cards", {"name": "Mira", "greeting": "Hello."})["value"]["id"]
+        status, _, made = page.answer(
+            "POST", "/api/stories", {"card_ids": [mira], "card_pictures": [], "persona": "you"}
+        )
+        story = made["value"]["id"]
+        assert status == 201 and made["value"]["title"] == "Mira"
+        rows = page.get(f"/api/stories/{story}/messages")["items"]
+        assert [row["kind"] for row in rows] == ["card", "dialogue"]
+        bad = {"card_ids": ["one"]}
+        assert page.status("/api/stories", method="POST", data=json.dumps(bad).encode()) == 400
+
+    def test_a_card_id_is_digits(self, page: Page) -> None:
+        assert page.status("/api/cards/mira") == 404
 
 
 class TestTheNovelOverTheWire:

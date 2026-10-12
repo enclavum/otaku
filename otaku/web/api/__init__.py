@@ -15,8 +15,8 @@ these tables and carries the result, and nothing else.
 The package mirrors `backend.api`, three packages of twins: `app`, the
 installation (the app itself, `machine`, `settings`, `providers`,
 `models`, `integrations`, `history`, `pictures`, `reports`), `codex`,
-what every story may draw on, and `story`, a story and what it holds
-(`stories`, `settings`, `messages`, `lore`, `cards`, `context`,
+what every story may draw on (`cards`), and `story`, a story and what it
+holds (`stories`, `settings`, `messages`, `lore`, `cards`, `context`,
 `transfer`, `prompts`, `language`) — each module translating its twin's
 answers into the page's and holding its own rows — and `_request`, the
 layer's machinery: what every row is handed and hands back. A module
@@ -97,6 +97,7 @@ from otaku.web.api.app import (
     reports,
 )
 from otaku.web.api.app import settings as app_settings
+from otaku.web.api.codex import cards as codex_cards
 from otaku.web.api.story import (
     cards,
     context,
@@ -149,6 +150,7 @@ __all__ = [
     "app",
     "app_settings",
     "cards",
+    "codex_cards",
     "context",
     "etag",
     "event",
@@ -203,6 +205,7 @@ ROUTES: dict[tuple[str, str], Route] = _merged(
     history.ROUTES,
     pictures.ROUTES,
     reports.ROUTES,
+    codex_cards.ROUTES,
     stories.ROUTES,
     story_settings.ROUTES,
     messages.ROUTES,

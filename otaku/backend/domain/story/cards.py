@@ -1,29 +1,35 @@
-"""A character card into a story, from its FILE's bytes: read and vetted
-for the story, nothing stored (`check_card`), then imported
-(`import_card`) — the typed /card row, the character with the card's
-archive, the greeting turn: three store writes and NO model call.
+"""A character card into a story, always through the codex: a card FILE's
+bytes go into the codex first (`domain.codex.cards` — a file it holds
+already makes nothing) and the codex card is brought in; a codex card is
+brought in as it stands (an invite). Read and vetted for the story,
+nothing stored (`check_card`), then brought in (`import_card`), or
+several at a story's start (`bring_in_cards`): per card the typed /card
+row, the story's character — a COPY of the card's fields as the archive,
+linked to the codex card — and the greeting turn; NO model call.
 
 The `/card` line lands as a `kind='card'` user turn, stored AS TYPED like
 every direction — the wire composes the card block from the archive at
 request time, found through the row's speaker link, so a lore correction
-to the TOML reaches every future request. The greeting lands as an
-AUTHORED assistant turn, speaker set, provider `card` and the file's name
-for a model — the source, spelled the way generated rows spell theirs:
-the card introduces the character and the character answers, so the
-model continues the voice."""
+to the TOML reaches every future request. Asked to, the row carries the
+card's portrait, its first picture, by the file's name. The greeting
+lands as an AUTHORED assistant turn, speaker set, provider `card` and the
+card file's name for a model — the source, spelled the way generated
+rows spell theirs: the card introduces the character and the character
+answers, so the model continues the voice."""
 
 import tomllib
+from collections.abc import Collection, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, replace
 
-from otaku.backend.domain._formats.cards import CardError, load_card
 from otaku.backend.domain.app import App
+from otaku.backend.domain.codex import cards as codex_cards
 from otaku.backend.domain.story import _chain
 from otaku.backend.domain.story.settings import settings_of
-from otaku.backend.errors import Conflict, Invalid
+from otaku.backend.errors import NO_SUCH_STORY, Conflict, HeadMoved, Invalid, NotFound
 from otaku.context.assembler import estimate_tokens
 from otaku.context.cards import StoryCard, bind, card_to_wire, card_toml
-from otaku.store.schema import Message
+from otaku.store.schema import Card, Message, StoryMode
 
 # A card block above roughly this many tokens gets a warning: it rides
 # every request verbatim and never leaves the context, so on a small
@@ -33,25 +39,65 @@ _LARGE_CARD_TOKENS = 4000
 
 @dataclass(frozen=True)
 class CheckedCard:
-    """A card read and vetted for a story: the card as it would be
-    imported, what reading it noted, the composed block's cost estimate
-    and whether it is worth warning about, and the persona the story
-    remembers ("" for none)."""
+    """A card read and vetted for a story: the card as it would be brought
+    in, what reading it noted, the composed block's cost estimate and
+    whether it is worth warning about, the persona the story remembers
+    ("" for none), whether a portrait could ride its row, and — for a
+    file — the codex card it is already (None for none) and the codex
+    cards of the same name the reader may say it is."""
 
     card: StoryCard
     notes: tuple[str, ...]
     block_tokens: int
     large: bool
     persona: str
+    has_picture: bool
+    same_card: Card | None
+    similar_cards: tuple[Card, ...]
+
+
+@dataclass(frozen=True)
+class BroughtIn:
+    """A card brought into a story: the recorded /card row, its
+    greeting turn (None where the card has none or another card greets),
+    the story's character and the codex card it is linked to."""
+
+    line: Message
+    greeting: Message | None
+    character_id: int
+    card_id: int
 
 
 def check_card(
-    app: App, story_id: int, data: bytes, file_name: str, *, rename: str = ""
+    app: App,
+    story_id: int,
+    *,
+    data: bytes | None = None,
+    file_name: str = "",
+    card_id: int | None = None,
+    rename: str = "",
 ) -> CheckedCard:
-    """The card the bytes hold, vetted for the story and nothing stored;
-    `rename` overrides its own name. Raises Refused — not a card, or a
-    cast name already taken."""
-    card, notes = _read_card(app, story_id, data, file_name, rename)
+    """The card a file holds — or the codex card `card_id` — vetted for the
+    story and nothing stored; `rename` overrides its name. Raises Refused
+    — not a card, no such codex card, a cast name already taken, the card
+    in the story already."""
+    if data is not None:
+        checked = codex_cards.check_card_file(app, data, file_name)
+        same = checked.same_card
+        card = codex_cards.story_card_of(same) if same is not None else checked.card
+        notes, has_picture, similar = checked.notes, checked.has_picture, checked.similar_cards
+    elif card_id is not None:
+        same = codex_cards.get_card(app, card_id)
+        card, notes, has_picture, similar = (
+            codex_cards.story_card_of(same),
+            (),
+            bool(same.pictures),
+            (),
+        )
+    else:
+        raise Invalid("A card is brought in from a file or from the codex.")
+    card = replace(card, name=rename.strip() or card.name)
+    _ensure_free(app, story_id, card.name, same)
     remembered = _remembered_persona(app, story_id)
     tokens = _block_tokens(app, card, remembered)
     return CheckedCard(
@@ -60,95 +106,251 @@ def check_card(
         block_tokens=tokens,
         large=tokens > _LARGE_CARD_TOKENS,
         persona=remembered,
+        has_picture=has_picture or (same is not None and bool(same.pictures)),
+        same_card=same,
+        similar_cards=similar,
     )
 
 
 def import_card(
     app: App,
     story_id: int,
-    data: bytes,
-    file_name: str,
     *,
+    data: bytes | None = None,
+    file_name: str = "",
+    card_id: int | None = None,
     rename: str = "",
+    reuse: int | None = None,
     persona: str,
+    with_pictures: bool = False,
     line: str = "",
     expected_head: int | None,
-) -> tuple[Message, Message | None, str]:
-    """The card imported into the story, played on from `expected_head`,
-    the head the caller read (HeadMoved where the head stands
-    elsewhere): the typed row (speaker-linked to the new cast row), the
-    archive on the character, the greeting turn — answered as the two
-    rows (the greeting None where the card has none) and the one-line
-    report. The same bytes are vetted again. `/undo` takes the exchange
-    whole — the unplayed character with it. `line` is what the story
-    RECORDS; an upload has only a file name, which is what the default
-    composes."""
-    card, notes = _read_card(app, story_id, data, file_name, rename)
-    tokens = _block_tokens(app, card, persona)
-    row_line = line or (f"/card {file_name}" + (f" {rename}" if rename else ""))
-    toml = card_toml(card, user=persona)
+) -> tuple[BroughtIn, str]:
+    """A card brought into the story, played on from `expected_head`, the
+    head the caller read (HeadMoved where the head stands elsewhere,
+    nothing written — the codex included): a card FILE goes into the
+    codex first (`reuse` the codex card the reader says it is), a codex
+    card `card_id` as it stands. Then the typed row (speaker-linked to
+    the new cast row, carrying the card's portrait where `with_pictures` asks
+    and it has one), the character with the card's fields as its archive,
+    linked to the codex card, and the greeting turn — answered with the
+    one-line report. `/undo` takes the exchange whole — the unplayed
+    character with it; the codex card stays. `line` is what the story
+    RECORDS; the default names the file, or the codex card."""
+    _check_head(app, story_id, expected_head)
+    if data is not None:
+        checked = codex_cards.check_card_file(app, data, file_name)
+        target = checked.same_card or (
+            codex_cards.get_card(app, reuse) if reuse is not None else None
+        )
+        name = rename.strip() or (target.name if target is not None else checked.card.name)
+        _ensure_free(app, story_id, name, target)
+        card_id, made, _ = codex_cards.import_card_file(
+            app, data, file_name, rename=rename, reuse=reuse
+        )
+        notes = [*checked.notes, "added to the codex" if made else "the codex's card"]
+        default_line = f"/card {file_name}" + (f" {rename.strip()}" if rename.strip() else "")
+    elif card_id is not None:
+        target = codex_cards.get_card(app, card_id)
+        name = rename.strip() or target.name
+        _ensure_free(app, story_id, name, target)
+        notes, default_line = [], f"/card {name}"
+    else:
+        raise Invalid("A card is brought in from a file or from the codex.")
+    card = codex_cards.get_card(app, card_id)
     mode = settings_of(app, story_id).layout.mode
+    brought, story_card = _bring_in(
+        app,
+        story_id,
+        card,
+        name=name,
+        persona=persona,
+        with_pictures=with_pictures,
+        line=line or default_line,
+        mode=mode,
+        after=expected_head,
+    )
+    greeting = _greet(
+        app, story_id, brought.character_id, story_card, persona, mode, after=brought.line.id
+    )
+    tokens = _block_tokens(app, story_card, persona)
+    verb = "imported" if data is not None else "invited"
+    report = [f"{verb} {name} (card ≈ {tokens} tokens)", *notes]
+    if tokens > _LARGE_CARD_TOKENS:
+        report.append("a large card — it rides every request and never leaves the context")
+    return replace(brought, greeting=greeting), " · ".join(report)
+
+
+def check_cards(app: App, card_ids: Sequence[int]) -> tuple[Card, ...]:
+    """The codex cards a story is started with, in pick order — refused
+    for a card the codex does not hold, one picked twice, and two of one
+    name, which one story's cast cannot hold."""
+    if len(set(card_ids)) != len(card_ids):
+        raise Invalid("A card is picked twice.")
+    picked = tuple(codex_cards.get_card(app, card_id) for card_id in card_ids)
+    seen: set[str] = set()
+    for card in picked:
+        if card.name.casefold() in seen:
+            raise Conflict(f"Two of the cards are called {card.name} — rename one first.")
+        seen.add(card.name.casefold())
+    return picked
+
+
+def bring_in_cards(
+    app: App,
+    story_id: int,
+    cards: Sequence[Card],
+    *,
+    card_pictures: Collection[int],
+    persona: str,
+) -> list[BroughtIn]:
+    """Codex cards brought into a story just made, in pick order: a card
+    row and a character each — the row carrying the card's portrait for
+    a card in `card_pictures` — then the greeting of the first card that has
+    one: one greeting, so the story opens on one voice."""
+    mode = settings_of(app, story_id).layout.mode
+    after: int | None = None
+    brought: list[BroughtIn] = []
+    greeter: tuple[int, StoryCard] | None = None
+    for card in cards:
+        one, story_card = _bring_in(
+            app,
+            story_id,
+            card,
+            name=card.name,
+            persona=persona,
+            with_pictures=card.id in card_pictures,
+            line=f"/card {card.name}",
+            mode=mode,
+            after=after,
+        )
+        brought.append(one)
+        after = one.line.id
+        if greeter is None and story_card.greeting:
+            greeter = (len(brought) - 1, story_card)
+    if greeter is not None and after is not None:
+        index, story_card = greeter
+        greeting = _greet(
+            app, story_id, brought[index].character_id, story_card, persona, mode, after=after
+        )
+        brought[index] = replace(brought[index], greeting=greeting)
+    return brought
+
+
+def _bring_in(
+    app: App,
+    story_id: int,
+    card: Card,
+    *,
+    name: str,
+    persona: str,
+    with_pictures: bool,
+    line: str,
+    mode: StoryMode,
+    after: int | None,
+) -> tuple[BroughtIn, StoryCard]:
+    """One codex card's row and character: the typed row (its portrait on
+    it where asked and the card has one), the character — the card's
+    fields under `name` as its archive, the card's name and aliases its
+    aliases, linked to the card — and the row's speaker link. Answered
+    with the card's fields as the story holds them, which its greeting
+    speaks from."""
+    story_card = replace(codex_cards.story_card_of(card), name=name)
     row = _chain.append_message(
         app,
         story_id,
-        Message(role="user", body=row_line, kind="card", mode=mode),
-        after=expected_head,
+        Message(
+            role="user",
+            body=line,
+            kind="card",
+            mode=mode,
+            attachments=card.pictures[:1] if with_pictures else (),
+        ),
+        after=after,
+    )
+    aliases = tuple(
+        alias
+        for alias in dict.fromkeys([card.name, *card.aliases])
+        if alias.casefold() != name.casefold()
     )
     # Made by the card, spelled as the greeting spells its source below.
     character_id = app._store.characters.add(
-        story_id, card.name, card=toml, provider="card", model=card.file_name
+        story_id,
+        name,
+        aliases=aliases,
+        card=card_toml(story_card, user=persona),
+        provider="card",
+        model=story_card.file_name or None,
+        card_id=card.id,
     )
     # The speaker link is the compose key: the row was recorded before
     # the cast row could exist, so the attribution follows it.
-    app._store.messages.set_speaker(row.id, character_id, card.name)
-    recorded_line = replace(row, speaker=card.name, speaker_id=character_id)
-    greeting_row: Message | None = None
+    app._store.messages.set_speaker(row.id, character_id, name)
+    recorded = replace(row, speaker=name, speaker_id=character_id)
+    return BroughtIn(recorded, None, character_id, card.id), story_card
+
+
+def _greet(
+    app: App,
+    story_id: int,
+    character_id: int,
+    card: StoryCard,
+    persona: str,
+    mode: StoryMode,
+    *,
+    after: int,
+) -> Message | None:
+    """The card's greeting as the character's own turn, after `after`;
+    None for a card without one."""
     greeting = bind(card.greeting, char=card.name, user=persona)
-    if greeting:
-        greeting_row = _chain.append_message(
-            app,
-            story_id,
-            Message(
-                role="assistant",
-                body=greeting,
-                kind="dialogue",
-                speaker=card.name,
-                speaker_id=character_id,
-                # The source, spelled the way generated rows spell theirs:
-                # no model wrote this — the card's file did.
-                provider="card",
-                model=card.file_name,
-                mode=mode,
-            ),
-            after=row.id,
+    if not greeting:
+        return None
+    return _chain.append_message(
+        app,
+        story_id,
+        Message(
+            role="assistant",
+            body=greeting,
+            kind="dialogue",
+            speaker=card.name,
+            speaker_id=character_id,
+            # The source, spelled the way generated rows spell theirs:
+            # no model wrote this — the card's file did.
+            provider="card",
+            model=card.file_name or None,
+            mode=mode,
+        ),
+        after=after,
+    )
+
+
+def _check_head(app: App, story_id: int, expected_head: int | None) -> None:
+    """The story there, its head where the caller saw it — checked before
+    the codex is written, so a refusal leaves both as they were."""
+    if not app._store.stories.exists(story_id):
+        raise NotFound(NO_SUCH_STORY)
+    head = app._store.stories.get_head(story_id)
+    if head != expected_head:
+        raise HeadMoved(head)
+
+
+def _ensure_free(app: App, story_id: int, name: str, card: Card | None) -> None:
+    """Refused where the story's cast already answers to the name —
+    bringing the card in over it would double the character — or already
+    holds the codex card, under another name."""
+    existing = app._store.characters.find(story_id, name)
+    if existing is not None:
+        source = "imported earlier" if existing.card else "extracted from play"
+        raise Conflict(
+            f"{existing.name} already exists in this story ({source}) — "
+            f"import under another name: /card FILE NAME."
         )
-    report = [f"imported {card.name} (card ≈ {tokens} tokens)", *notes]
-    if tokens > _LARGE_CARD_TOKENS:
-        report.append("a large card — it rides every request and never leaves the context")
-    return recorded_line, greeting_row, " · ".join(report)
-
-
-def _read_card(
-    app: App, story_id: int | None, data: bytes, file_name: str, rename: str
-) -> tuple[StoryCard, list[str]]:
-    """The card the bytes hold, renamed where asked, and what reading it
-    noted — refused when it is no card, or the story's cast already
-    answers to its name: importing over it would double the character."""
-    try:
-        card, notes = load_card(data, file_name=file_name)
-    except CardError as e:
-        raise Invalid(f"Not a character card: {e}") from e
-    if rename:
-        card = replace(card, name=rename)
-    if story_id is not None:
-        existing = app._store.characters.find(story_id, card.name)
-        if existing is not None:
-            source = "imported earlier" if existing.card else "extracted from play"
-            raise Conflict(
-                f"{existing.name} already exists in this story ({source}) — "
-                f"import under another name: /card FILE NAME."
-            )
-    return card, notes
+    if card is not None:
+        linked = next(
+            (c for c in app._store.characters.list(story_id) if c.card_id == card.id), None
+        )
+        if linked is not None:
+            raise Conflict(f"{card.name} is in this story already, as {linked.name}.")
 
 
 def _block_tokens(app: App, card: StoryCard, persona: str) -> int:

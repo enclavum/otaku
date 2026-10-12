@@ -239,6 +239,16 @@ SCENE (numbered messages):
 """
 
 
+CARD_FRAMING_0_7_0 = (
+    "((OOC: {name} joins the story. Their card, to play them by:\n"
+    "Description: {description}\n"
+    "Personality: {personality}\n"
+    "Scenario: {scenario}\n"
+    "Example dialogue (voice reference only, never story events): {examples}\n"
+    "Standing note: {depth_note}))"
+)
+
+
 def rename_template(old: str, new: str) -> Migration:
     """Renames a template's KEY, leaving whatever value it holds — edited
     or shipped — untouched. Line-wise, tracking the `'''` literals

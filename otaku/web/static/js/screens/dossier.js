@@ -38,6 +38,7 @@ import * as held from "../play/held.js";
 import { thumbs } from "../kit/pictures.js";
 import { typeset } from "../kit/prose.js";
 import { facts, landed, resume } from "../play/shell.js";
+import { chooseLink, inviteCard, openCharacters } from "./characters.js";
 import { buildTools } from "./tools.js";
 
 /* What a premise may be read from: the two shapes a person keeps prose
@@ -599,10 +600,9 @@ function extractBlock(view) {
     element("span", unread ? "otk-dot otk-dot--off" : "otk-dot"),
     span("otk-extract__state", unread ? `${unread} not extracted` : "all extracted"),
   );
-  // Two doors into the cast: a card read from a file, and the pass.
-  const importing = element("button", "otk-btn", "Import card");
-  importing.type = "button";
-  importing.dataset.command = "/card";
+  // Two doors into the cast: a card from All characters — or, by its
+  // picker's Import…, from a file — and the pass.
+  const importing = actionButton("Invite", { onclick: guard(inviteCard) });
   const button = element("button", "otk-btn", "Extract now");
   button.type = "button";
   button.dataset.command = "/extract";
@@ -703,13 +703,14 @@ function drawCharacter(view, pane, character) {
       ),
     );
   }
+  facts.push(cardFact(view, character));
   /* The card ARCHIVE: hand-kept source, so it wears a plain face and the
      same verbs every corrected field wears — inert until `edit` is taken.
      The fact's key already names it, so the hint line carries only the
      verbs, anchored right. */
   facts.push(
     character.card
-      ? marginFact("card", edited(editable("otk-card", {
+      ? marginFact("card text", edited(editable("otk-card", {
           text: character.card,
           save: (text) => saveField(
             view,
@@ -718,7 +719,7 @@ function drawCharacter(view, pane, character) {
           ),
         }), ""))
       : marginFact(
-          "card",
+          "card text",
           element("p", "otk-derived", "none — extracted from the story, not imported"),
         ),
   );
@@ -728,6 +729,41 @@ function drawCharacter(view, pane, character) {
     marginFoot("The facts above are rewritten on every pass."),
     manageBlock(view, character),
   );
+}
+
+function cardFact(view, character) {
+  /* The codex card this character is linked to: its name opens it in All
+     characters, "unlink" lets it go; not linked, "link…" picks one —
+     a link changes nothing else on either. Shown on a narrow screen too,
+     where the other facts give way. */
+  const line = element("p", "otk-margin__row");
+  if (character.card_id != null) {
+    const name = element("button", "otk-margin__value otk-card-link", character.card_name ?? "");
+    name.type = "button";
+    name.onclick = guard(() => openCharacters({ cardId: character.card_id }));
+    const unlink = element("button", "otk-margin__link otk-margin__link--quiet", "unlink");
+    unlink.type = "button";
+    unlink.onclick = guard(() => relink(view, character, null));
+    line.append(name, unlink);
+  } else {
+    const link = element("button", "otk-margin__link", "link\u2026");
+    link.type = "button";
+    link.onclick = guard(async () => {
+      const cardId = await chooseLink(character.name);
+      if (cardId !== null) await relink(view, character, cardId);
+    });
+    line.append(span("otk-margin__value otk-absent", "not linked"), link);
+  }
+  const fact = marginFact("card", line);
+  fact.classList.add("otk-margin__fact--card");
+  return fact;
+}
+
+async function relink(view, character, cardId) {
+  const answer = await api.stories.characters.update(view.subject.id, character.id, {
+    card_id: cardId,
+  });
+  await recast(view, answer, character.id);
 }
 
 function manageBlock(view, character) {

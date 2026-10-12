@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from otaku.backend.api._writes import UNCHANGED, Changed, Unchanged
-from otaku.backend.api.story.cards import CardsResource
+from otaku.backend.api.story.cards import StoryCardsResource
 from otaku.backend.api.story.context import ContextResource
 from otaku.backend.api.story.lore import (
     CharactersResource,
@@ -58,7 +58,7 @@ class StoriesResource:
         self.characters = CharactersResource(app)
         self.journals = JournalsResource(app)
         self.extraction = ExtractionResource(app)
-        self.cards = CardsResource(app)
+        self.cards = StoryCardsResource(app)
         self.export = ExportResource(app)
         self.context = ContextResource(app)
 
@@ -86,11 +86,33 @@ class StoriesResource:
         there."""
         return _story(self._app, domain_stories.get_story(self._app, story_id))
 
-    def create(self, *, title: str = "", premise: str = "") -> Changed[Story]:
+    def create(
+        self,
+        *,
+        title: str = "",
+        premise: str = "",
+        card_ids: tuple[int, ...] = (),
+        card_pictures: tuple[int, ...] = (),
+        persona: str = "",
+    ) -> Changed[Story]:
         """A brand-new story, made AT ONCE — it is in the browser and
         carries its title before its first turn, not after. `title` and
-        `premise` are optional, the premise taken verbatim."""
-        story_id, said = domain_stories.create_story(self._app, title=title, premise=premise)
+        `premise` are optional, the premise taken verbatim. Given codex
+        cards (`card_ids`, in pick order), it starts with them: a card row
+        and a character each, linked to its card, then the greeting of
+        the first card that has one — `card_pictures` the cards whose
+        portrait rides their row, `persona` what their `{{user}}` binds
+        to; an untitled one is named for them. Raises Refused for a card the
+        codex does not hold, one picked twice, and two of one name —
+        nothing made."""
+        story_id, said = domain_stories.create_story(
+            self._app,
+            title=title,
+            premise=premise,
+            card_ids=card_ids,
+            card_pictures=card_pictures,
+            persona=persona,
+        )
         return Changed(self.get(story_id), said)
 
     def update(

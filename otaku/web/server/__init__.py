@@ -84,7 +84,7 @@ _READING = "GET"
 # number that is not one. Every other parameter is a NAME — a provider, a
 # model, a setting, a picture — and names may be anything a segment can
 # hold.
-_NUMERIC = ("story", "message", "scene", "character", "journal")
+_NUMERIC = ("story", "message", "scene", "character", "journal", "card")
 
 
 def _pattern(template: str) -> "re.Pattern[str]":

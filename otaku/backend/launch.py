@@ -4,27 +4,26 @@ class; the app itself is the product.
 `open_app` is the whole composition — paths, config (first-run write
 + convergent migrations), the key ceremony (the content plane's cipher,
 shared by the store and the request log), providers (sealed keys opened,
-values injected into the registry), store, worker, sample seeding — and
+values injected into the registry), store, worker, the samples seeded
+(`backend.samples`) — and
 it never prints: what a frontend should say rides on the app, its
 `LaunchFacts`, read as `api.app.get().launch`.
 The module also carries the launch pieces cli needs alone (`otaku logs
 requests` unlocks the way the app does).
 """
 
-import re
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import TypeVar
 
 from otaku import encryption
 from otaku.agents import Worker
+from otaku.backend import samples
 from otaku.backend.api import Api
 from otaku.backend.domain.app import App, LaunchFacts, _passwords
 from otaku.backend.domain.app._paths import Paths
-from otaku.backend.domain.app.pictures import RawFile, read_picture, save
-from otaku.backend.domain.story.settings import StorySettingQuestions
-from otaku.backend.errors import NO_MODEL_HINT, NotFound, Refused
+from otaku.backend.errors import NO_MODEL_HINT
 from otaku.encryption import AskSecret, Cipher, SealedError
 
 # What `open_app` raises when a piece refuses, for the caller to catch.
@@ -44,23 +43,6 @@ from otaku.settings.config import ConfigError as ConfigError
 from otaku.settings.integrations import IntegrationConfig, IntegrationSettings
 from otaku.store import DatabaseError as DatabaseError
 from otaku.store import Store, is_encrypted
-from otaku.store.files import Owner
-from otaku.store.schema import Attachment
-
-# A sample's pictures ship beside its document, named for the message
-# they belong to: `river.15.1.jpg` is the first picture of river.md's
-# 15th message. The document itself carries no picture — the export
-# format never does — so the first launch puts them on the message
-# through the app's own intake, as a reader's attachment would land.
-_SAMPLE_PICTURE = re.compile(r"^(?P<stem>.+)\.(?P<message>\d+)\.(?P<order>\d+)\.[A-Za-z0-9]+$")
-# The river sample ends on a question, and a tool that is off has its
-# calls neither drawn nor sent: it lands with the questions tool on.
-_ASKING_SAMPLE = "river.md"
-_SAMPLES_NOTICE = (
-    "Sample stories were imported so you can look around — type to play on, "
-    "/stories switches between them, or see every command with /help · "
-    "/model chooses a model · /new starts your own play."
-)
 
 
 def open_app(root: str | Path | None = None, *, ask_secret: AskSecret | None = None) -> App:
@@ -72,15 +54,14 @@ def open_app(root: str | Path | None = None, *, ask_secret: AskSecret | None = N
     block headless. Order: config before cipher before store (the key
     ceremony must precede any content); the worker is built but not
     started — the frontend starts it once it can repaint. A fresh
-    database is seeded with the shipped sample stories (`backend/samples`,
-    the package's own data; the first by name remembered as the one to
-    land in), the hint landing in `LaunchFacts.hint` (the one bold
-    post-scene line); EVERY settings-file warning (state, prompts,
-    providers, keys) joins `LaunchFacts.notices`, and the store's admin
-    facts go to the system
+    database is seeded with the shipped sample stories (`backend.samples`;
+    the first by name remembered as the one to land in), the hint
+    landing in `LaunchFacts.hint` (the one bold post-scene line); EVERY
+    settings-file warning (state, prompts, providers, keys) joins
+    `LaunchFacts.notices`, and the store's admin facts go to the system
     log — the ones it marks `show` (a migration that ran, a failed
-    backup) joining the notices too:
-    below backend nothing prints conversation. The one sanctioned stderr voice below cli is the
+    backup) joining the notices too: below backend nothing prints
+    conversation. The one sanctioned stderr voice below cli is the
     append-only logs' own last-resort write-failure warning; everything
     else on stderr is cli's `otaku:` diagnostics. Raises ConfigError,
     EncryptionError, or DatabaseError when a piece refuses; the caller ends
@@ -179,8 +160,8 @@ def open_app(root: str | Path | None = None, *, ask_secret: AskSecret | None = N
     notices += app._make_current()
     hint = ""
     if fresh and config.seed_sample:
-        notices += _seed_samples(app)
-        hint = _SAMPLES_NOTICE if Api(app).settings.get().last_story is not None else ""
+        notices += samples.seed(app)
+        hint = samples.HINT if Api(app).settings.get().last_story is not None else ""
     app._launch_facts = LaunchFacts(tuple(notices), hint)
     return app
 
@@ -328,81 +309,3 @@ def _resolve_api_keys(
                 config = replace(config, api_key="")
         resolved[name] = config
     return resolved, warnings
-
-
-# ---------- the sample stories ----------
-
-
-def _seed_samples(app: App) -> list[str]:
-    """A database created from scratch is seeded with the shipped sample
-    stories, through the import operation's own machinery — native
-    imports, so no pass runs and no model is called — and remembered, so
-    the user lands (and stays) in the middle of a playable story. Every
-    samples/*.md lands, in name order, and the app settles in the
-    FIRST of them: the short story is the landing, the rest wait in
-    /stories. Returns what went wrong, as notices."""
-    samples = Path(__file__).parent / "samples"  # the launch's own, beside it
-    api = Api(app)
-    notices: list[str] = []
-    landed: list[int] = []
-    for file in sorted(samples.glob("*.md")) if samples.is_dir() else []:
-        try:
-            imported = api.imports.create(
-                text=file.read_text(encoding="utf-8"), file_name=file.name
-            ).value
-        except (Refused, OSError) as e:
-            # Best effort, per file: a damaged sample says so and the
-            # others still land. A first launch is the worst possible
-            # place for a traceback.
-            notices.append(f"The sample story {file.name} could not be imported ({e}).")
-        else:
-            landed.append(imported.story_id)
-            notices += _seed_pictures(app, imported.story_id, file)
-            if file.name == _ASKING_SAMPLE:
-                api.stories.settings.update(
-                    imported.story_id, StorySettingQuestions.name, enabled=True
-                )
-    if landed:
-        api.settings.update(last_story=landed[0])
-    return notices
-
-
-def _seed_pictures(app: App, story_id: int, document: Path) -> list[str]:
-    """The sample's pictures, shipped beside its document
-    (`_sample_pictures`), into the story the way a reader's land: read
-    through the one intake — sniffed, oriented, downsized, thumbnailed
-    — saved under the story's number, and put on the message each
-    belongs to. Best effort per picture: one that cannot be read, or
-    names a message the document lacks, says so — the notices returned —
-    and the rest land."""
-    notices: list[str] = []
-    names = sorted(p.name for p in document.parent.iterdir()) if document.parent.is_dir() else []
-    ids = app._store.stories.get_messages_ids(story_id)
-    by_message: dict[int, list[Attachment]] = {}
-    for number, name in _sample_pictures(names, document.stem):
-        path = document.parent / name
-        try:
-            if not 1 <= number <= len(ids):
-                raise NotFound(f"{document.name} has no message {number}")
-            picture = read_picture(RawFile(path.read_bytes(), name))
-        except (Refused, OSError) as e:
-            notices.append(f"The sample picture {name} could not be added ({e}).")
-            continue
-        by_message.setdefault(number, []).append(
-            save(app._store.files, picture, Owner.STORY, story_id)
-        )
-    for number, attachments in by_message.items():
-        app._store.messages.set_attachments(ids[number - 1], attachments)
-    return notices
-
-
-def _sample_pictures(names: Iterable[str], stem: str) -> list[tuple[int, str]]:
-    """The pictures shipped for the sample `stem` among `names`, each
-    with the number of the message it belongs to, in message and then
-    picture order (`_SAMPLE_PICTURE`): the shipped layout's one rule."""
-    found: list[tuple[int, int, str]] = []
-    for name in names:
-        match = _SAMPLE_PICTURE.match(name)
-        if match is not None and match.group("stem") == stem:
-            found.append((int(match.group("message")), int(match.group("order")), name))
-    return [(message, name) for message, _order, name in sorted(found)]

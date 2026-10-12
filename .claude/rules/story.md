@@ -4,6 +4,7 @@ paths:
   - "otaku/backend/domain/story/prompts.py"
   - "otaku/backend/domain/story/_play.py"
   - "otaku/backend/domain/story/_chain.py"
+  - "otaku/backend/domain/story/_request.py"
   - "otaku/backend/domain/story/messages.py"
   - "otaku/backend/domain/story/context.py"
   - "otaku/backend/domain/app/models.py"

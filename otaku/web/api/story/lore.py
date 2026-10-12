@@ -6,7 +6,7 @@ starts, polls and stops — kept by the backend, per story."""
 
 from typing import Any
 
-from otaku.backend.api import UNCHANGED, Api
+from otaku.backend.api import UNCHANGED, Api, Unchanged
 from otaku.web.api._request import Accepted, Ask, Route, changed, plain
 from otaku.web.api.story.stories import tagged
 
@@ -32,12 +32,18 @@ def _update_scene(api: Api, ask: Ask) -> Any:
 
 
 def _update_character(api: Api, ask: Ask) -> Any:
+    """A character's description and card archive, and its link to a
+    codex card — `card_id`, a card's id or null to unlink."""
+    card_id: int | Unchanged | None = UNCHANGED
+    if "card_id" in ask.body:
+        card_id = None if ask.body["card_id"] is None else ask.integer("card_id")
     return changed(
         api.stories.characters.update(
             ask.id("story"),
             ask.id("character"),
             description=ask.need("description") if "description" in ask.body else UNCHANGED,
             card=ask.need("card") if "card" in ask.body else UNCHANGED,
+            card_id=card_id,
         )
     )
 

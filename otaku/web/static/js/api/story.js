@@ -95,10 +95,12 @@ export const extraction = {
 
 // ---------- cards ----------
 
-/* Character cards brought into a story: a card's file (`{data, file_name,
-   rename}`, the bytes as base64) vetted for the story and nothing stored —
-   `validateOnly` — or imported with the `persona` it speaks to, played on
-   from the head this page last read. */
+/* Character cards brought into a story, always through the codex: a card's
+   file (`{data, file_name, rename, reuse}`, the bytes as base64) or a codex
+   card (`{card_id, rename}`), vetted for the story and nothing stored —
+   `validateOnly` — or brought in with the `persona` it speaks to and, where
+   `with_pictures` asks, its portrait, played on from the head this page last
+   read. */
 export const cards = {
   create: (story, fields, { validateOnly = false } = {}) =>
     validateOnly

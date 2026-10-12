@@ -166,12 +166,22 @@ class WireTurn:
 @dataclass(frozen=True)
 class InjectionSent:
     """One injection as the request carries it: whose (its `owner`, a
-    setting's name), where it was asked to go, and what it costs — in
-    `system_tokens` at the system position, in `transcript_tokens` at a
-    depth."""
+    setting's name or a card's), where it was asked to go, and what it
+    costs — in `system_tokens` at the system position, in
+    `transcript_tokens` at a depth."""
 
     owner: str
     position: InjectionPosition
+    tokens: int
+
+
+@dataclass(frozen=True)
+class CardSent:
+    """One card row as the request carries it: whose (the name it came in
+    under) and what it costs, its portrait counted — in
+    `transcript_tokens`, whether it rides verbatim or whole in the recap."""
+
+    name: str
     tokens: int
 
 
@@ -217,6 +227,8 @@ class AssembledPrompt:
 
     # The injections, in the order given — what `/context` reports of them.
     injections: tuple[InjectionSent, ...] = ()
+    # The card rows, in the order sent — what `/context` reports of them.
+    cards: tuple[CardSent, ...] = ()
 
     @property
     def total_tokens(self) -> int:
@@ -420,7 +432,13 @@ class _Assembly:
         budget = max(0, limit - system_tokens)
         head, covered, tail = self._split(tail_target)
         verbatim = head + tail
-        pictures_of, pictures_held = self._pictures(verbatim)
+        # A card row in a covered scene rides the recap whole, at every
+        # level, and its picture with it: a card's portrait outlives the
+        # summary of the scene it came in.
+        cards = [m for scene in covered for m in scene.cards]
+        pictures_of, pictures_held = self._pictures(head + cards + tail)
+        # The recap's estimate holds a card's text; its picture is added here.
+        card_pictures_tokens = IMAGE_TOKENS * sum(len(pictures_of.get(m, ())) for m in cards)
         head_tokens = sum(self._wire_tokens(m, pictures_of.get(m, ())) for m in head)
         tail_tokens = sum(
             self._wire_tokens(m, pictures_of.get(m, ()), is_last=i == len(tail) - 1)
@@ -441,7 +459,10 @@ class _Assembly:
         # is about one summary long — this loop is what that picture means
         # once every size is actually measured. Level 0 is always yielded.
         for recap in self._degrade(covered):
-            if head_tokens + recap.tokens + tail_tokens + injected_tokens <= budget:
+            if (
+                head_tokens + recap.tokens + card_pictures_tokens + tail_tokens + injected_tokens
+                <= budget
+            ):
                 break  # the first fit wins; the deepest level rides otherwise
 
         wire: list[WireTurn] = []
@@ -451,11 +472,11 @@ class _Assembly:
         wall = len(head) + len(recap.rows) if recap.rows else 0
         rows = inject_into_tail(head + recap.rows + tail, self.injections, wall)
         wire.extend(self._wire_turns(rows, pictures_of))
-        # A picture is counted only where its row stays verbatim: a
-        # summarized row's is neither sent nor missed, the summary is what
-        # remains of the turn. Omitted is what would not load — no vision,
-        # a file gone.
-        pictures_attached = sum(len(m.attachments) for m in verbatim)
+        # A picture is counted only where its row is sent whole — verbatim,
+        # or a card's row in the recap: a summarized row's is neither sent
+        # nor missed, the summary is what remains of the turn. Omitted is
+        # what would not load — no vision, a file gone.
+        pictures_attached = sum(len(m.attachments) for m in head + cards + tail)
         pictures_sent = sum(len(pictures) for pictures in pictures_of.values())
         return AssembledPrompt(
             messages=wire,
@@ -463,7 +484,11 @@ class _Assembly:
             story_system=self.story_framing.replace("{premise}", self.system).strip(),
             limit=limit,
             system_tokens=system_tokens,
-            transcript_tokens=head_tokens + recap.tokens + tail_tokens + injected_tokens,
+            transcript_tokens=head_tokens
+            + recap.tokens
+            + card_pictures_tokens
+            + tail_tokens
+            + injected_tokens,
             head=len(head),
             middle=len(self.messages) - len(verbatim),
             tail=len(tail),
@@ -479,6 +504,11 @@ class _Assembly:
                 InjectionSent(i.owner, i.position, estimate_tokens(i.text))
                 for i in self.injections
                 if i.text
+            ),
+            cards=tuple(
+                CardSent(m.speaker or "", self._wire_tokens(m, pictures_of.get(m, ())))
+                for m in [*head, *cards, *tail]
+                if m.kind == "card"
             ),
         )
 
@@ -520,11 +550,10 @@ class _Assembly:
                 covered[bisect_left(ends, position[m.id])].cards.append(m)
         return messages[:head_messages], covered, messages[boundary + 1 :]
 
-    def _pictures(
-        self, verbatim: list[Message]
-    ) -> tuple[dict[Message, tuple[WirePicture, ...]], int]:
-        """Which pictures ride which verbatim row, read from the folder
-        here and only here: every row's — or, where the engine gathers
+    def _pictures(self, rows: list[Message]) -> tuple[dict[Message, tuple[WirePicture, ...]], int]:
+        """Which pictures ride which row sent whole — the verbatim rows and
+        the card rows the recap carries, in story order — read from the
+        folder here and only here: every row's — or, where the engine gathers
         every picture onto the latest prompt, the newest pictured row's
         alone, so a follow-up without a picture still reaches the model
         with the picture it is about, and no second row's stacks under
@@ -533,7 +562,7 @@ class _Assembly:
         A row is its own key: a stored row's id tells it from every other."""
         if self.pictures_ride is PicturesRide.NONE:
             return {}, 0
-        pictured = [m for m in verbatim if m.attachments]
+        pictured = [m for m in rows if m.attachments]
         held = 0
         if self.pictures_ride is PicturesRide.LATEST and pictured:
             held = sum(len(m.attachments) for m in pictured[:-1])

@@ -79,9 +79,29 @@ def _get(api: Api, ask: Ask) -> Tagged:
 
 
 def _create(api: Api, ask: Ask) -> Created:
-    """A story, made at once: its title, its premise, or neither."""
-    made = api.stories.create(title=ask.text("title"), premise=ask.text("premise"))
+    """A story, made at once: its title, its premise, or neither — and
+    the codex cards it starts with (`card_ids`, in pick order),
+    `card_pictures` the cards whose portraits ride, `persona` what their
+    `{{user}}` binds to."""
+    made = api.stories.create(
+        title=ask.text("title"),
+        premise=ask.text("premise"),
+        card_ids=_ids(ask, "card_ids"),
+        card_pictures=_ids(ask, "card_pictures"),
+        persona=ask.text("persona"),
+    )
     return Created(changed(made), landed_story(made.value.id))
+
+
+def _ids(ask: Ask, name: str) -> tuple[int, ...]:
+    """A body field that is a JSON list of row ids, () where the body
+    leaves it out; anything else is a malformed request."""
+    value = ask.body.get(name, [])
+    if not isinstance(value, list) or not all(
+        isinstance(item, int) and not isinstance(item, bool) for item in value
+    ):
+        raise TypeError(f"{name} is not a list of ids")
+    return tuple(value)
 
 
 def _update(api: Api, ask: Ask) -> Tagged:

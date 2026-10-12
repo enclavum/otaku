@@ -1202,6 +1202,48 @@ class TestWarmUp:
             server.close()
 
 
+class TestCardLinks:
+    """A story's character linked to a codex card, or unlinked — nothing
+    else on either changes — and the link a merge keeps."""
+
+    def test_a_character_is_linked_and_unlinked(self, app: App) -> None:
+        story = app.ensure_story()
+        character = app.store.characters.add(story, "Mira", description="mine")
+        card = app.api.cards.create(name="Mira of the codex", description="the codex's").value
+        linked = app.api.stories.characters.update(story, character, card_id=card.id).value
+        assert (linked.card_id, linked.card_name, linked.description) == (
+            card.id,
+            "Mira of the codex",
+            "mine",
+        )
+        assert app.api.cards.get(card.id).stories[0].character_id == character
+        unlinked = app.api.stories.characters.update(story, character, card_id=None).value
+        assert (unlinked.card_id, unlinked.card_name) == (None, None)
+        assert app.api.cards.get(card.id).stories == ()
+
+    def test_one_character_of_a_story_to_a_card(self, app: App) -> None:
+        story = app.ensure_story()
+        first = app.store.characters.add(story, "Mira")
+        second = app.store.characters.add(story, "Mirabel")
+        card = app.api.cards.create(name="Mira").value
+        app.api.stories.characters.update(story, first, card_id=card.id)
+        with pytest.raises(Refused):
+            app.api.stories.characters.update(story, second, card_id=card.id)
+        with pytest.raises(Refused):
+            app.api.stories.characters.update(story, second, card_id=999)  # no such card
+        with pytest.raises(Refused):
+            app.api.stories.characters.update(story, first, card_id=card.id)  # nothing to change
+
+    def test_a_merge_keeps_the_targets_link_or_takes_the_sources(self, app: App) -> None:
+        story = app.ensure_story()
+        source = app.store.characters.add(story, "The Keeper")
+        target = app.store.characters.add(story, "Keeper")
+        card = app.api.cards.create(name="Keeper").value
+        app.api.stories.characters.update(story, source, card_id=card.id)
+        merged = app.api.stories.characters.merges.create(story, source, into=target).value
+        assert (merged.id, merged.card_id) == (target, card.id)
+
+
 def _warm_requests(server: scripted.ModelServer, *, within: float) -> int:
     """How many warm-up requests the server has seen — the one-token
     prefill is the only request the app ever caps at a single token.

@@ -1,4 +1,4 @@
-"""The launch's pure rules: the shipped layout of a sample's pictures.
+"""The samples' pure rules: the shipped layout of a sample's pictures.
 
 A sample's pictures ship beside its document, named
 `<stem>.<message>.<order>.<ext>`: `_sample_pictures` picks out the ones
@@ -8,7 +8,7 @@ directory — the documents, another sample's pictures, a name that does
 not follow the rule — is left alone.
 """
 
-from otaku.backend.launch import _sample_pictures
+from otaku.backend.samples import _sample_pictures
 
 
 class TestSamplePictures:

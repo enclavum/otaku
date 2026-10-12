@@ -215,6 +215,25 @@ class TestCharacterCards:
         prompt = assemble("", rows, 65536, scenes=(scene(64, "sum"),))
         assert "breathe /cue whisper softly" in "\n".join(m.body for m in prompt.messages)
 
+    def test_every_card_the_request_carries_is_listed_with_its_cost(self) -> None:
+        rows = turns(220)
+        rows[46] = replace(card(47, "((OOC: Elara joins.))"), speaker="Elara")  # in the recap
+        rows[210] = replace(card(211, "((OOC: Wren joins.))"), speaker="Wren")  # in the tail
+        scenes = (scene(42, "sum two"), scene(64, "sum three"))
+        prompt = assemble("", rows, 65536, scenes=scenes, min_tail_messages=150)
+        assert [sent.name for sent in prompt.cards] == ["Elara", "Wren"]
+        assert all(sent.tokens > 0 for sent in prompt.cards)
+
+    def test_a_cards_portrait_counts_in_its_cost(self) -> None:
+        plain = [replace(card(1, "((OOC: Elara joins.))"), speaker="Elara"), user("I wave.")]
+        pictured = [replace(plain[0], attachments=(CAT,)), plain[1]]
+        without = assemble("", plain, 8192, files=CAT_FOLDER)
+        with_it = assemble("", pictured, 8192, files=CAT_FOLDER)
+        assert with_it.cards[0].tokens - without.cards[0].tokens == IMAGE_TOKENS
+
+    def test_a_request_without_cards_lists_none(self) -> None:
+        assert assemble("", [user("I wave.")], 8192).cards == ()
+
 
 class TestRecapDegrades:
     """Case 4: over the limit, the oldest summaries are replaced by the
@@ -809,6 +828,24 @@ class TestPictures:
         (with_it,) = [turn for turn in prompt.messages if turn.images]
         assert "turn 200." in with_it.body and "turn 30." not in with_it.body
         assert (prompt.pictures_sent, prompt.pictures_omitted) == (1, 0)
+
+    def test_a_card_rows_picture_rides_the_recap_with_it(self) -> None:
+        # A card row in a summarized scene rides the recap whole — and its
+        # portrait with it, costed in the fit like a verbatim row's; the
+        # summarized prose row beside it loses its picture as before.
+        story = turns(220)
+        story[29] = replace(story[29], attachments=(CAT,))
+        story[30] = replace(card(31, "Elara joins."), attachments=(CAT,))
+        scenes = (scene(25, "sum one"), scene(42, "sum two"), scene(64, "sum three"))
+        prompt = assemble("", story, 65536, scenes=scenes, min_tail_messages=150, files=CAT_FOLDER)
+        assert prompt.scenes_summarized == 3
+        (with_it,) = [turn for turn in prompt.messages if turn.images]
+        assert "Elara joins." in with_it.body and "turn 30." not in with_it.body
+        assert with_it.images == (CAT_PICTURE,)
+        assert (prompt.pictures_sent, prompt.pictures_omitted) == (1, 0)
+        plain = [replace(m, attachments=()) for m in story]
+        without = assemble("", plain, 65536, scenes=scenes, min_tail_messages=150, files=CAT_FOLDER)
+        assert prompt.transcript_tokens - without.transcript_tokens == IMAGE_TOKENS
 
     def test_with_newest_pictures_only_earlier_rows_pictures_are_held_back(self) -> None:
         # An engine that gathers every picture onto the latest prompt

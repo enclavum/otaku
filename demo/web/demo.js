@@ -27,8 +27,10 @@ const realFetch = window.fetch.bind(window);
 const ready = (async () => {
   const load = async (name) =>
     (await realFetch(new URL(`./fixtures/${name}.json`, import.meta.url))).json();
-  const [app, river, tour] = await Promise.all([load("app"), load("river"), load("tour")]);
-  store.seed({ app, river, tour });
+  const [app, river, tour, codex] = await Promise.all([
+    load("app"), load("river"), load("tour"), load("codex"),
+  ]);
+  store.seed({ app, river, tour, codex });
 })();
 
 // ---------- the routes ----------
@@ -76,7 +78,22 @@ const ROUTES = {
   // the stories
   "GET /api/stories": (p, q) => items(store.stories(q.get("query") ?? "")),
   "POST /api/stories": (p, q, b) => {
-    const made = store.createStory({ title: text(b, "title"), premise: text(b, "premise") });
+    // a story started with codex cards: each brought in as the product
+    // brings it, its archive bound to the persona — no picture rides here
+    const persona = text(b, "persona");
+    const cards = ids(b, "card_ids").map((id) => {
+      const found = store.card(id);
+      return {
+        id: found.id,
+        name: found.name,
+        aliases: [...found.aliases],
+        archive: _cardToml(found, persona),
+        greeting: _bind(found.greeting, found.name, persona),
+        fileName: found.file_name,
+      };
+    });
+    ids(b, "card_pictures");
+    const made = store.createStory({ title: text(b, "title"), premise: text(b, "premise"), cards, persona });
     return created(made, `/api/stories/${made.value.id}`);
   },
   "GET /api/stories/{story}": (p) => store.story(num(p.story)),
@@ -124,8 +141,11 @@ const ROUTES = {
     changed(store.updateScene(num(p.story), num(p.scene), given(b, ["title", "summary"]))),
   "GET /api/stories/{story}/characters": (p, q) => items(store.characters(num(p.story), q.get("name"))),
   "GET /api/stories/{story}/characters/{character}": (p) => store.character(num(p.story), num(p.character)),
-  "PATCH /api/stories/{story}/characters/{character}": (p, q, b) =>
-    changed(store.updateCharacter(num(p.story), num(p.character), given(b, ["description", "card"]))),
+  "PATCH /api/stories/{story}/characters/{character}": (p, q, b) => {
+    const fields = given(b, ["description", "card"]);
+    if ("card_id" in b) fields.card_id = b.card_id === null ? null : integer(b, "card_id");
+    return changed(store.updateCharacter(num(p.story), num(p.character), fields));
+  },
   "DELETE /api/stories/{story}/characters/{character}": (p) => changed(store.deleteCharacter(num(p.story))),
   "POST /api/stories/{story}/characters/{character}/merges": (p) =>
     changed(store.mergeCharacter(num(p.story))),
@@ -139,6 +159,19 @@ const ROUTES = {
   },
   "GET /api/stories/{story}/extraction": (p) => store.extraction(num(p.story)),
   "DELETE /api/stories/{story}/extraction": (p) => changed(store.stopExtraction(num(p.story))),
+  // the codex: All characters
+  "GET /api/cards": (p, q) => items(store.cards(q.get("query") ?? "")),
+  "POST /api/cards": (p, q, b) => makeCard(q, b),
+  "GET /api/cards/unlinked": (p, q) => items(store.unlinked(q.get("query") ?? "")),
+  "GET /api/cards/{card}": (p) => store.card(num(p.card)),
+  "PATCH /api/cards/{card}": (p, q, b) => changed(store.updateCard(num(p.card), cardFields(b, true))),
+  "DELETE /api/cards/{card}": (p) => changed(store.deleteCard(num(p.card))),
+  "POST /api/cards/{card}/pictures": (p, q, b) => {
+    need(b, "data");
+    return changed(store.addCardPicture(num(p.card)));
+  },
+  "DELETE /api/cards/{card}/pictures/{name}": (p) => changed(store.removeCardPicture(num(p.card), p.name)),
+  "POST /api/cards/{card}/merges": (p, q, b) => changed(store.mergeCard(num(p.card), integer(b, "into"))),
   // a message's pictures: the sample's own, shipped with the fixtures and
   // served as the product serves a stored file — a name nothing is stored
   // under answers 404, as it does there
@@ -154,7 +187,7 @@ const STREAMS = {
 
 // The path parameters that are row ids, as `web.server._NUMERIC` declares
 // them. Every other parameter is a name and may be anything.
-const _NUMERIC = ["story", "message", "scene", "character", "journal"];
+const _NUMERIC = ["story", "message", "scene", "character", "journal", "card"];
 
 /* The templates, compiled once — longest first, as the server sorts them,
    so a literal segment is never eaten by a parameter. A row id matches
@@ -211,6 +244,38 @@ function integer(body, name) {
     throw new Fault(400, `TypeError: ${name} is not an integer`);
   }
   return value;
+}
+
+function strings(body, name) {
+  const value = body[name] ?? [];
+  if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) {
+    throw new Fault(400, `TypeError: ${name} is not a list of strings`);
+  }
+  return value;
+}
+
+function ids(body, name) {
+  const value = body[name] ?? [];
+  if (!Array.isArray(value) || !value.every((item) => Number.isInteger(item) && typeof item !== "boolean")) {
+    throw new Fault(400, `TypeError: ${name} is not a list of ids`);
+  }
+  return value;
+}
+
+/* A card's parts as the body carries them (`web.api.codex.cards`): the
+   texts, the lists and the reminder's depth — and, for a correction, its
+   name, tagline, aliases and pictures besides. */
+function cardFields(body, correcting = false) {
+  const fields = {};
+  const texts = [
+    "description", "personality", "scenario", "greeting", "reminder", "system_prompt",
+    "post_history_instructions", "creator_notes", ...(correcting ? ["name", "tagline"] : []),
+  ];
+  const lists = ["alternate_greetings", "examples", ...(correcting ? ["aliases", "pictures"] : [])];
+  for (const name of texts) if (name in body) fields[name] = need(body, name);
+  for (const name of lists) if (name in body) fields[name] = strings(body, name);
+  if ("reminder_depth" in body) fields.reminder_depth = integer(body, "reminder_depth");
+  return fields;
 }
 
 function given(body, names) {
@@ -381,11 +446,14 @@ function _normalizeCard(payload) {
   const name = text("name");
   if (!name) return null;
   const extensions = card.extensions;
-  const depth =
+  const prompt =
     extensions && typeof extensions === "object" && extensions.depth_prompt &&
     typeof extensions.depth_prompt === "object"
-      ? _newlines(String(extensions.depth_prompt.prompt ?? "")).trim()
-      : "";
+      ? extensions.depth_prompt
+      : {};
+  // SillyTavern counts every message, otaku the reader's
+  // (`backend.domain._formats.cards._reminder_depth`)
+  const depth = Number.isInteger(prompt.depth) ? prompt.depth : 4;
   return {
     name,
     description: text("description"),
@@ -396,7 +464,8 @@ function _normalizeCard(payload) {
       .map((item) => _newlines(String(item)).trim())
       .filter(Boolean),
     examples: text("mes_example").split(/<START>/i).map((block) => block.trim()).filter(Boolean),
-    depth_note: depth,
+    reminder: _newlines(String(prompt.prompt ?? "")).trim(),
+    reminder_depth: Math.max(1, Math.ceil(depth / 2)),
     system_prompt: text("system_prompt"),
     post_history_instructions: text("post_history_instructions"),
     creator_notes: text("creator_notes"),
@@ -405,12 +474,12 @@ function _normalizeCard(payload) {
 
 function _unknownMacros(card) {
   const text = [
-    card.description, card.personality, card.scenario, card.greeting, card.depth_note,
-    ...card.alternate_greetings, ...card.examples,
+    card.description, card.personality, card.scenario, card.greeting, card.reminder,
+    card.system_prompt, ...card.alternate_greetings, ...card.examples,
   ].join("\n");
   const seen = new Map();
   for (const macro of text.match(_ANY_MACRO) ?? []) {
-    if (!/^\{\{\s*char\s*\}\}$/i.test(macro) && !/^\{\{\s*user\s*\}\}$/i.test(macro)) {
+    if (!/^\{\{\s*(char|user|original)\s*\}\}$/i.test(macro)) {
       seen.set(macro, null);
     }
   }
@@ -467,53 +536,126 @@ function _cardToml(card, user) {
   const lines = [pair("name", card.name), pair("user", user)];
   const keys = [
     "description", "personality", "scenario", "greeting", "alternate_greetings",
-    "examples", "depth_note", "system_prompt", "post_history_instructions",
+    "examples", "reminder", "reminder_depth", "system_prompt", "post_history_instructions",
     "creator_notes", "file_name",
   ];
   for (const key of keys) {
     const value = card[key];
-    if (value == null || value.length === 0) continue;
+    // a number where it is not its default, as the product writes it
+    if (key === "reminder_depth" ? value == null || value === 2 : value == null || value.length === 0) continue;
     lines.push(pair(key, value));
   }
   return lines.join("\n\n");
 }
 
 
-async function card(story, query, body, ask) {
-  const fileName = need(body, "file_name");
-  const rename = text(body, "rename");
-  let loaded;
+/** A card FILE read: the card it holds, what reading it noted, and
+    whether it carries a picture — or the product's refusal. */
+async function readCardFile(data, fileName) {
+  const bytes = _b64bytes(data);
   try {
-    loaded = await _loadCard(_b64bytes(need(body, "data")), fileName);
+    const loaded = await _loadCard(bytes, fileName);
+    return { found: loaded.card, notes: loaded.notes, hasPicture: _PNG_MAGIC.every((value, i) => bytes[i] === value) };
   } catch (e) {
     if (!(e instanceof _NotACard)) throw e;
     throw new store.Refused(422, `Not a character card: ${e.message}`);
   }
-  const found = loaded.card;
-  if (rename) found.name = rename;
+}
+
+/* A card made three ways, as `web.api.codex.cards` makes it: a card file
+   (vetted alone with `?validate_only=true`; held already, or `reuse`d,
+   it makes nothing and answers 200), a story's character promoted, or a
+   name and its fields. */
+async function makeCard(query, body) {
+  if ("data" in body) {
+    const { found, notes, hasPicture } = await readCardFile(need(body, "data"), need(body, "file_name"));
+    if (query.get("validate_only") === "true") return store.checkCardFile(found, notes, hasPicture, text(body, "rename"));
+    const reuse = body.reuse == null ? null : integer(body, "reuse");
+    const answer = store.importCardFile(found, notes, hasPicture, { rename: text(body, "rename"), reuse });
+    return answer.value.made ? created(answer, `/api/cards/${answer.value.card.id}`) : changed(answer);
+  }
+  if ("story_id" in body) {
+    const made = store.promote(integer(body, "story_id"), integer(body, "character_id"));
+    return created(made, `/api/cards/${made.value.id}`);
+  }
+  const made = store.createCard({
+    name: need(body, "name"),
+    aliases: strings(body, "aliases"),
+    tagline: text(body, "tagline"),
+    fields: cardFields(body),
+  });
+  return created(made, `/api/cards/${made.value.id}`);
+}
+
+/* A card into a story, always through the codex (`domain.story.cards`):
+   a file goes into the codex first — a file the codex holds brings its
+   card in, `reuse` names the one the reader says it is — and a codex
+   card (`card_id`) is invited as it stands. The head is checked before
+   the codex is written. No picture rides in the demo. */
+async function card(story, query, body, ask) {
+  store.story(story);
+  const rename = text(body, "rename").trim();
+  const fromFile = "data" in body;
+  let found;
+  let notes = [];
+  let hasPicture = false;
+  let fileName = "";
+  let held = null;
+  if (fromFile) {
+    fileName = need(body, "file_name");
+    ({ found, notes, hasPicture } = await readCardFile(need(body, "data"), fileName));
+    held = store.sameCard(found);
+  } else {
+    held = store.card(integer(body, "card_id"));
+    found = held;
+    hasPicture = held.pictures.length > 0;
+  }
+  const reuse = fromFile && !held && body.reuse != null ? store.card(integer(body, "reuse")) : null;
+  const target = held ?? reuse;
+  const name = rename || (target ? target.name : found.name);
+  const fields = { ...(target ?? found), name };
   const persona = store.personaOf(story);
-  const tokens = Math.ceil(_cardToml(found, persona || "you").length / 4);
+  const tokens = Math.ceil(_cardToml(fields, persona || "you").length / 4);
   if (query.get("validate_only") === "true") {
-    if (store.characters(story, found.name).length) {
-      const existing = store.characters(story, found.name)[0];
-      const source = existing.card ? "imported earlier" : "extracted from play";
-      throw new store.Refused(
-        409,
-        `${found.name} already exists in this story (${source}) — import under another name: /card FILE NAME.`,
-      );
-    }
-    return { name: found.name, notes: loaded.notes, block_tokens: tokens, large: tokens > _LARGE_CARD_TOKENS, persona };
+    store.ensureFree(story, name, held?.id ?? null);
+    return {
+      name,
+      notes,
+      block_tokens: tokens,
+      large: tokens > _LARGE_CARD_TOKENS,
+      persona,
+      has_picture: hasPicture || Boolean(held?.pictures.length),
+      same_card: held ? store.cardSummary(held) : null,
+      similar_cards: fromFile && !held ? store.checkCardFile(found, notes, hasPicture).similar_cards : [],
+    };
   }
   const speaking = need(body, "persona");
-  const report = [`imported ${found.name} (card ≈ ${tokens} tokens)`, ...loaded.notes];
+  const expected = expectedHead(story, ask);
+  store.checkHead(story, expected);
+  store.ensureFree(story, name, target?.id ?? null);
+  let cardId = held?.id ?? null;
+  let made = false;
+  if (fromFile) {
+    const answer = store.importCardFile(found, notes, hasPicture, { rename, reuse: reuse?.id ?? null });
+    cardId = answer.value.card.id;
+    made = answer.value.made;
+  }
+  const brought = store.card(cardId);
+  const storyCard = { ...brought, name };
+  const report = [
+    `${fromFile ? "imported" : "invited"} ${name} (card ≈ ${tokens} tokens)`,
+    ...notes,
+    ...(fromFile ? [made ? "added to the codex" : "the codex's card"] : []),
+  ];
   if (tokens > _LARGE_CARD_TOKENS) report.push("a large card — it rides every request and never leaves the context");
-  const imported = store.importCard(story, expectedHead(story, ask), {
-    name: found.name,
-    description: found.description,
-    archive: _cardToml(found, speaking),
-    greeting: _bind(found.greeting, found.name, speaking),
-    fileName: found.file_name,
-    line: `/card ${fileName}` + (rename ? ` ${rename}` : ""),
+  const imported = store.importCard(story, expected, {
+    card: cardId,
+    name,
+    aliases: [brought.name, ...brought.aliases],
+    archive: _cardToml(storyCard, speaking),
+    greeting: _bind(storyCard.greeting, name, speaking),
+    fileName: storyCard.file_name,
+    line: fromFile ? `/card ${fileName}` + (rename ? ` ${rename}` : "") : `/card ${name}`,
     persona: speaking,
     report: report.join(" · "),
   });

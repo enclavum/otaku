@@ -151,6 +151,29 @@ class TestPictures:
             assert "not sent" in app.api.stories.context.get(app.story_id).summary
 
 
+class TestCardPortrait:
+    """A codex card's portrait, sent with the card where the reader asked:
+    it rides the card row as a turn's picture rides its turn."""
+
+    def test_the_portrait_reaches_a_model_that_sees(self, tmp_path) -> None:
+        with _seeing(tmp_path) as app:
+            card = app.api.cards.create(name="Mira").value
+            app.api.cards.pictures.create(card.id, file=_cat())
+            story = app.ensure_story()
+            app.api.stories.cards.create(
+                story, card_id=card.id, persona="you", with_pictures=True, expected_head=None
+            )
+            app.play("Who is she?")
+            sent = [
+                part
+                for message in app.server.requests[-1]["messages"]
+                if isinstance(message["content"], list)
+                for part in message["content"]
+                if part.get("type") == "image_url"
+            ]
+            assert len(sent) == 1
+
+
 def _cat() -> RawFile:
     return RawFile(CAT.read_bytes(), "cat.jpg")
 

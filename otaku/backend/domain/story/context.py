@@ -6,7 +6,7 @@ text, is the interface's (`api.stories.context`)."""
 from dataclasses import dataclass
 
 from otaku.backend.domain.app import App
-from otaku.backend.domain.story import _chain
+from otaku.backend.domain.story import _request
 from otaku.backend.domain.story.settings import InjectingSetting, settings_of
 from otaku.backend.errors import NO_SUCH_STORY, Conflict, NotFound
 from otaku.context.assembler import (
@@ -114,15 +114,16 @@ def _preview(app: App, story_id: int, found: ModelInfo | None) -> Preview:
     it — the one computation both reports read their figure from.
     Raises `ContextOverflowError` for a story that cannot fit."""
     context_window = found.context_window if found else None
-    prompt = _chain.assemble(app, story_id, context_window)
+    prompt = _request.assemble(app, story_id, context_window)
     cold = (
         found is not None
         and context_window is None
         and found.state in (ModelState.UNLOADED, ModelState.LOADING)
     )
-    # An injection names its owner, a setting; the report names the text
-    # as the setting names what it injects. One this build has no
-    # setting for keeps its owner's name. Listed in the request's own
+    # An injection names its owner: a setting, which the report names the
+    # text after as the setting names what it injects, or a card's text,
+    # named already ("Maren's reminder"). One this build has no setting
+    # for keeps its owner's name. Listed in the request's own
     # order — the system message first, then the deepest first, the one
     # before the newest message last; the costlier first where two share
     # a place — whatever order they were sent in.

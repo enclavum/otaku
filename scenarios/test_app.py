@@ -22,24 +22,25 @@ from otaku import logging as otaku_logging
 from otaku.backend import launch as backend_launch
 from otaku.backend.api import Api, ModelRef
 from otaku.backend.api.story.messages import RawFile
+from otaku.backend.domain.app import pictures as backend_files
 from otaku.backend.domain.app._paths import Paths
-from otaku.backend.domain.story import pictures as backend_files
 from otaku.encryption import Cipher, EncryptionError, PlainCipher
 from otaku.formatting import toml_string
 from otaku.settings import config as config_mod
 from otaku.settings import prompts as prompts_mod
 from otaku.settings import providers as providers_mod
 from otaku.settings.migrations import surgery
-from otaku.settings.migrations.prompt_texts import EXTRACT_0_2_2
+from otaku.settings.migrations.prompt_texts import CARD_FRAMING_0_7_0, EXTRACT_0_2_2
 from otaku.store import DatabaseError, Store, is_encrypted
 from otaku.store import migrations as store_migrations
 from otaku.store.database import check_value
-from otaku.store.files import FileStore
+from otaku.store.files import FileStore, Owner
 from otaku.store.migrations import v2 as store_v2
 from otaku.store.migrations import v3 as store_v3
 from otaku.store.migrations import v4 as store_v4
 from otaku.store.migrations import v5 as store_v5
 from otaku.store.migrations import v6 as store_v6
+from otaku.store.migrations import v10 as store_v10
 from otaku.store.schema import SCHEMA_DDL, Attachment, Message, StoryMode, StorySettingDB
 from otaku.terminal.tty import BOLD, RESET
 from scenarios.support import server as scripted
@@ -253,7 +254,7 @@ class TestSchemaMigration:
         paths = _v1_database(tmp_path / "state")
         store = _open(paths)
         try:
-            assert any("Database migrated (v1 → v9)" in note.show for note in store.notes)
+            assert any("Database migrated (v1 → v10)" in note.show for note in store.notes)
             (message,) = store.stories.get_messages(1)
             # The v1 `framing` column reads back through the renamed one.
             assert (message.body, message.template) == ("I enter.", "TPL")
@@ -292,6 +293,14 @@ class TestSchemaMigration:
             (journal,) = store.journals.list(1)
             for row in (scene, keeper, journal):
                 assert (row.provider, row.model) == (None, None)
+            # The v10 `card_id` trails the cast: a v1 character reads NULL
+            # there — linked to no card — and the codex v10 created is empty
+            # until the reader fills it.
+            assert keeper.card_id is None
+            assert store.cards.list() == []
+            card = store.cards.add("Keeper")
+            store.characters.set_card_id(keeper.id, card)
+            assert store.characters.list(1)[0].card_id == card
         finally:
             store.close()
         # Step 7 wrote nothing into the rows it found: a record shorter
@@ -303,7 +312,7 @@ class TestSchemaMigration:
         finally:
             conn.close()
         assert read == [(1, "chat"), (2, "chat"), (3, "chat")]
-        assert _meta_version(paths) == "9"
+        assert _meta_version(paths) == "10"
 
     def test_a_migration_that_ran_is_reported_at_launch(
         self, server: ModelServer, tmp_path
@@ -445,6 +454,22 @@ class TestSchemaMigration:
         end = shipped.index(");", start) + 1
         assert shipped[start:end] == store_v5._V4_MESSAGES
 
+    def test_the_frozen_v9_is_what_the_release_shipped(self) -> None:
+        """Step 10's precondition against the schema the v0.7.0 tag shipped
+        (version 9): the cast the codex link is appended to."""
+        proc = subprocess.run(
+            ["git", "show", "v0.7.0:otaku/store/schema.py"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if proc.returncode != 0:
+            pytest.skip("the v0.7.0 tag is not reachable here")
+        shipped = proc.stdout
+        start = shipped.index("CREATE TABLE characters")
+        end = shipped.index(");", start) + 1
+        assert shipped[start:end] == store_v10._V9_CHARACTERS
+
     def test_the_ladder_resumes_from_where_it_stamped(self, tmp_path, monkeypatch) -> None:
         paths = _v1_database(tmp_path / "state")
         monkeypatch.setitem(store_migrations._STEPS, 3, _raise)
@@ -454,10 +479,10 @@ class TestSchemaMigration:
         monkeypatch.setitem(store_migrations._STEPS, 3, store_v3.to_3)
         resumed = _open(paths)
         try:
-            assert any("Database migrated (v2 → v9)" in note.show for note in resumed.notes)
+            assert any("Database migrated (v2 → v10)" in note.show for note in resumed.notes)
         finally:
             resumed.close()
-        assert _meta_version(paths) == "9"
+        assert _meta_version(paths) == "10"
 
 
 class TestFilesFolder:
@@ -472,7 +497,7 @@ class TestFilesFolder:
             paths.database_file, Cipher(FILES_KEY), backups_dir=paths.backups_dir, keep=0
         )
         try:
-            name = store.files.add(24, CAT, "image/jpeg", thumb=THUMB)
+            name = store.files.add(Owner.STORY, 24, CAT, "image/jpeg", thumb=THUMB)
             # Readable in a listing: the kind, the story, the day, a short
             # digest of the bytes, the picture's own extension — and the
             # thumbnail beside it.
@@ -490,7 +515,7 @@ class TestFilesFolder:
         paths = _state(tmp_path)
         store = _open(paths)
         try:
-            name = store.files.add(1, CAT, "image/jpeg")
+            name = store.files.add(Owner.STORY, 1, CAT, "image/jpeg")
             assert (paths.database_dir / "files" / name).read_bytes() == CAT
             assert store.files.get_thumb(name) is None  # none was given
         finally:
@@ -502,7 +527,7 @@ class TestFilesFolder:
             paths.database_file, Cipher(FILES_KEY), backups_dir=paths.backups_dir, keep=0
         )
         try:
-            name = store.files.add(1, CAT, "image/jpeg")
+            name = store.files.add(Owner.STORY, 1, CAT, "image/jpeg")
         finally:
             store.close()
         other = FileStore(paths.database_dir / "files", Cipher(FILES_OTHER_KEY))
@@ -512,11 +537,11 @@ class TestFilesFolder:
         paths = _state(tmp_path)
         store = _open(paths)
         try:
-            first = store.files.add(1, CAT, "image/jpeg")
-            assert store.files.add(1, CAT, "image/jpeg") == first
+            first = store.files.add(Owner.STORY, 1, CAT, "image/jpeg")
+            assert store.files.add(Owner.STORY, 1, CAT, "image/jpeg") == first
             assert len(_files(paths)) == 1
             # Another story's copy is its own file, under its own number.
-            assert store.files.add(2, CAT, "image/jpeg") != first
+            assert store.files.add(Owner.STORY, 2, CAT, "image/jpeg") != first
             assert len(_files(paths)) == 2
         finally:
             store.close()
@@ -539,7 +564,7 @@ class TestFilesFolder:
         finally:
             store.close()
 
-    def test_deleting_a_story_sweeps_what_no_message_names(self, tmp_path) -> None:
+    def test_a_story_deleted_and_swept_takes_what_no_message_names(self, tmp_path) -> None:
         paths = _state(tmp_path)
         store = _open(paths)
         try:
@@ -552,9 +577,59 @@ class TestFilesFolder:
             )
             copy = store.stories.fork(story)
             store.stories.delete(copy)
-            assert len(_files(paths)) == 1  # the original still names it
+            assert store.sweep_files() == 0  # the original still names it
             store.stories.delete(story)
+            assert store.sweep_files() == 1
             assert _files(paths) == []
+        finally:
+            store.close()
+
+    def test_a_card_picture_is_named_by_the_card(self, tmp_path) -> None:
+        paths = _state(tmp_path)
+        store = _open(paths)
+        try:
+            name = store.files.add(Owner.CARD, 12, CAT, "image/jpeg")
+            assert re.fullmatch(r"crd-0012-\d{8}-[0-9a-f]{8}\.jpg", name)
+            # the same bytes for a story are a file of their own
+            assert store.files.add(Owner.STORY, 12, CAT, "image/jpeg") != name
+        finally:
+            store.close()
+
+    def test_the_sweep_keeps_what_a_card_names_and_takes_it_with_the_card(self, tmp_path) -> None:
+        paths = _state(tmp_path)
+        store = _open(paths)
+        try:
+            card = store.cards.add("Mira")
+            name = store.files.add(Owner.CARD, card, CAT, "image/jpeg", thumb=THUMB)
+            store.cards.set_pictures(
+                card, [Attachment(file=name, width=2, height=2, size=len(CAT))]
+            )
+            assert store.sweep_files() == 0
+            store.cards.delete(card)
+            assert store.sweep_files() == 2  # the picture and its thumbnail
+            assert _files(paths) == []
+        finally:
+            store.close()
+
+    def test_a_card_picture_sent_to_a_story_outlives_the_card(self, tmp_path) -> None:
+        # The card row carries the card's file by name, as a fork does a
+        # turn's: the story keeps it after the card is gone.
+        paths = _state(tmp_path)
+        store = _open(paths)
+        try:
+            card = store.cards.add("Mira")
+            name = store.files.add(Owner.CARD, card, CAT, "image/jpeg")
+            portrait = Attachment(file=name, width=2, height=2, size=len(CAT))
+            store.cards.set_pictures(card, [portrait])
+            story = store.stories.add("Cats")
+            store.stories.append(
+                story,
+                Message(role="user", body="/card Mira", kind="card", attachments=(portrait,)),
+                after=None,
+            )
+            store.cards.delete(card)
+            assert store.sweep_files() == 0
+            assert store.files.get(name) == (CAT, "image/jpeg")
         finally:
             store.close()
 
@@ -572,7 +647,7 @@ class TestFilesFolder:
                 after=store.stories.get_head(story),
             )
             store.stories.set_head(story, None, expected_head=store.stories.get_head(story))
-            assert store.stories.sweep_files() == 0
+            assert store.sweep_files() == 0
             assert len(_files(paths)) == 1
         finally:
             store.close()
@@ -589,7 +664,7 @@ class TestFilesFolder:
                 after=store.stories.get_head(story),
             )
             (paths.database_dir / "files" / ".deadbeef.tmp").write_bytes(b"half")
-            assert store.stories.sweep_files() == 1
+            assert store.sweep_files() == 1
             assert [path.name for path in _files(paths)] == [picture.file]
         finally:
             store.close()
@@ -623,7 +698,7 @@ class TestFilesFolder:
         store = _open(paths)
         try:
             read = backend_files.read_picture(RawFile(CAT_PHOTO.read_bytes(), "cat.jpg"))
-            picture = backend_files.save(store.files, read, 1)
+            picture = backend_files.save(store.files, read, Owner.STORY, 1)
             assert picture.file.endswith(".jpg")
             assert max(picture.width, picture.height) <= backend_files.WIRE_EDGE
             stored = store.files.get(picture.file)
@@ -874,6 +949,22 @@ class TestConfigMigration:
         assert "# my note" in migrated
         assert any(p.name.startswith("prompts-") for p in app.paths.config_backups_dir.iterdir())
 
+    def test_the_card_template_that_left_its_block_open_follows_the_built_in(
+        self, server: ModelServer, tmp_path
+    ) -> None:
+        app = launch(tmp_path / "state", server)
+        app.close()
+        prompts_file = app.paths.prompts_file
+        stub = prompts_file.read_text()
+        stale = stub.replace(
+            toml_string(prompts_mod.CARD_FRAMING_DEFAULT), toml_string(CARD_FRAMING_0_7_0)
+        )
+        assert stale != stub
+        prompts_file.write_text(stale)
+        load_config(app.paths)
+        migrated = tomllib.loads(prompts_file.read_text())
+        assert migrated["card_framing"] == prompts_mod.CARD_FRAMING_DEFAULT
+
     def test_a_current_config_is_left_untouched(self, server: ModelServer, tmp_path) -> None:
         app = launch(tmp_path / "state", server)
         app.close()
@@ -1034,6 +1125,30 @@ class TestFirstLaunch:
         finally:
             relaunched.close()
 
+    def test_the_samples_characters_are_kept_in_all_characters(self, server, tmp_path) -> None:
+        # The samples' manifest names their main characters: each a card
+        # made from its story's character and linked to it, its tagline
+        # set; the rest stay unlinked, for a first look at linking one.
+        set_config(tmp_path / "state", seed_sample=True)
+        app = launch(tmp_path / "state", server)
+        try:
+            manifest = tomllib.loads(
+                (Path(backend_launch.__file__).parent / "samples" / "cards.toml").read_text()
+            )
+            named = {row["name"]: row["tagline"] for row in manifest["card"]}
+            cards = app.api.cards.list()
+            assert {card.name: card.tagline for card in cards} == named
+            assert all(card.story_count == 1 for card in cards)
+            for card in cards:
+                (linked,) = app.api.cards.get(card.id).stories
+                assert linked.name == card.name
+                assert app.api.cards.get(card.id).description  # the story's own
+            unlinked = app.api.cards.unlinked.list()
+            assert unlinked and not {row.name for row in unlinked} & set(named)
+            assert app.server.requests == []  # still no model called
+        finally:
+            app.close()
+
     def test_a_declined_launch_picker_opens_the_app_anyway(self, server, tmp_path) -> None:
         # Esc in the launch picker is not a cancel: the app opens
         # model-less — the same state /model's Esc leaves behind.
@@ -1172,9 +1287,14 @@ def _v1_database(root) -> Paths:
         start = v1_ddl.index(f"CREATE TABLE {table}")
         end = v1_ddl.index(");", start) + 1
         v1_ddl = v1_ddl[:start] + shipped + v1_ddl[end:]
-    # Version 1 had no `settings` table at all: step 6 creates it.
-    start = v1_ddl.index("CREATE TABLE settings")
-    v1_ddl = v1_ddl[:start] + v1_ddl[v1_ddl.index(");", start) + 2 :]
+    # Version 1 had no `settings` table at all: step 6 creates it — nor
+    # the codex's `cards` and the index over the cast's link to it, which
+    # step 10 creates.
+    for table in ("settings", "cards"):
+        start = v1_ddl.index(f"CREATE TABLE {table}")
+        v1_ddl = v1_ddl[:start] + v1_ddl[v1_ddl.index(");", start) + 2 :]
+    index = v1_ddl.index("CREATE UNIQUE INDEX idx_characters_card")
+    v1_ddl = v1_ddl[:index] + v1_ddl[v1_ddl.index(";", index) + 2 :]
     conn = sqlite3.connect(paths.database_file)
     conn.executescript("BEGIN;" + v1_ddl)
     # fmt: off
@@ -1247,7 +1367,7 @@ def _files(paths: Paths) -> list:
 def _attach(store: Store, story_id: int, data: bytes) -> Attachment:
     """A picture into the folder under the story's number, and the row
     that names it."""
-    name = store.files.add(story_id, data, "image/jpeg")
+    name = store.files.add(Owner.STORY, story_id, data, "image/jpeg")
     return Attachment(file=name, width=2, height=2, size=len(data))
 
 

@@ -53,6 +53,8 @@ def _context(api: Api, ask: Ask) -> dict[str, Any]:
         "lede": report.summary,
         # What the preview could not know, in the report's words; "".
         "note": report.note,
+        # The character cards it carries, each with its portrait counted.
+        "cards": [{"name": card.name, "tokens": card.tokens} for card in prompt.cards],
         # What rides besides the story, each with its place named as the
         # depth ruler names it, and its cost.
         "injections": [

@@ -66,7 +66,7 @@ class Job:
     story_id: int
     system: str
     messages: list[Message]
-    injections: tuple[Injection, ...]  # what the story's settings inject, built
+    injections: tuple[Injection, ...]  # what the story's settings and cards inject, built
     tool_set: ToolSet  # how the story's tool calls go on the wire
     prompts: PromptTexts  # the prompts object, whole
     # Its `context_in_force` is the context limit alone: the warm-up

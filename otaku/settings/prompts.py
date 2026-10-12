@@ -26,7 +26,48 @@ from pathlib import Path
 from otaku.formatting import toml_string
 from otaku.settings import commit, read_settings, write_atomic
 
-# The big lore templates, named here so the _DEFAULTS table stays readable.
+# The built-in templates, named in `_DEFAULTS`'s order so the table stays
+# readable.
+
+ME_FRAMING_DEFAULT = "((OOC: The user writes as {name}.))\n{body}"
+
+YOU_FRAMING_DEFAULT = (
+    "((OOC: You play {name} in an interactive story. Respond only as {name} — "
+    "their words, actions, and perceptions, consistent with the story so far. "
+    "Never speak, act, or decide for any other character.))"
+)
+
+OOC_FRAMING_DEFAULT = (
+    "((OOC: {body}\n\nAnswer briefly out of character, as a co-author planning "
+    "the story — do not continue the scene or write any prose.))"
+)
+
+ROLL_FRAMING_DEFAULT = (
+    "((OOC: Dice roll {dice}. The dice are already rolled and the result is "
+    "final — say what was rolled and the total in your reply, then narrate "
+    "the outcome of exactly this result; never reroll it, change it, or "
+    "roll on your own.))\n{body}"
+)
+
+# A card's block, a line per field — a line whose fields are all empty is
+# left out (`context.cards.card_to_wire`), so the block's close stands on
+# a line of its own.
+CARD_FRAMING_DEFAULT = (
+    "((OOC: {name} joins the story. Their card, to play them by:\n"
+    "Description: {description}\n"
+    "Personality: {personality}\n"
+    "Scenario: {scenario}\n"
+    "Example dialogue (voice reference only, never story events): {examples}\n"
+    "))"
+)
+
+# The text wire's standing instruction, before the premise in the turn
+# that precedes the story: the model turn must follow SOME turn — alone
+# it degenerates — and a premise may be empty.
+STORY_FRAMING_DEFAULT = (
+    "Continue the story below exactly where the text ends, in its voice and "
+    "tense. Write only the story.\n\n{premise}"
+)
 
 EXTRACT_DEFAULT = """\
 You are a story analyst. Read the scene below — the latest exchange of an
@@ -220,6 +261,10 @@ Lisbon tram routes 1930s
 The results arrive as the next message, out of character: short snippets
 from the top pages."""
 
+# What a tool's RESULT is framed as, as the model reads it: the tool
+# turn's text, out of character, the tool named.
+TOOL_FRAMING_DEFAULT = "((OOC: {tool} result:\n{body}))"
+
 # The canvas over the chat wire: the story is one text the model goes on
 # with, the instruct model told to behave as a text completion would
 # (`StorySettingEmulateTextCompletion`).
@@ -230,37 +275,12 @@ finished, begin the next paragraph. Take over the turn wherever the text
 stops."""
 
 _DEFAULTS = {
-    "me_framing": "((OOC: The user writes as {name}.))\n{body}",
-    "you_framing": (
-        "((OOC: You play {name} in an interactive story. Respond only as {name} — "
-        "their words, actions, and perceptions, consistent with the story so far. "
-        "Never speak, act, or decide for any other character.))"
-    ),
-    "ooc_framing": (
-        "((OOC: {body}\n\nAnswer briefly out of character, as a co-author planning "
-        "the story — do not continue the scene or write any prose.))"
-    ),
-    "roll_framing": (
-        "((OOC: Dice roll {dice}. The dice are already rolled and the result is "
-        "final — say what was rolled and the total in your reply, then narrate "
-        "the outcome of exactly this result; never reroll it, change it, or "
-        "roll on your own.))\n{body}"
-    ),
-    "card_framing": (
-        "((OOC: {name} joins the story. Their card, to play them by:\n"
-        "Description: {description}\n"
-        "Personality: {personality}\n"
-        "Scenario: {scenario}\n"
-        "Example dialogue (voice reference only, never story events): {examples}\n"
-        "Standing note: {depth_note}))"
-    ),
-    # The text wire's standing instruction, before the premise in the turn
-    # that precedes the story: the model turn must follow SOME turn — alone
-    # it degenerates — and a premise may be empty.
-    "story_framing": (
-        "Continue the story below exactly where the text ends, in its voice and "
-        "tense. Write only the story.\n\n{premise}"
-    ),
+    "me_framing": ME_FRAMING_DEFAULT,
+    "you_framing": YOU_FRAMING_DEFAULT,
+    "ooc_framing": OOC_FRAMING_DEFAULT,
+    "roll_framing": ROLL_FRAMING_DEFAULT,
+    "card_framing": CARD_FRAMING_DEFAULT,
+    "story_framing": STORY_FRAMING_DEFAULT,
     "extract_prompt": EXTRACT_DEFAULT,
     "scene_history_prompt": SCENE_HISTORY_DEFAULT,
     "journal_history_prompt": JOURNAL_HISTORY_DEFAULT,
@@ -269,11 +289,7 @@ _DEFAULTS = {
     "tool_assistant_notes_prompt": TOOL_ASSISTANT_NOTES_DEFAULT,
     "tool_system_info_prompt": TOOL_SYSTEM_INFO_DEFAULT,
     "tool_web_search_prompt": TOOL_WEB_SEARCH_DEFAULT,
-    # What a tool's RESULT is framed as, as the model reads it: the tool
-    # turn's text, out of character, the tool named.
-    "tool_framing": "((OOC: {tool} result:\n{body}))",
-    # The canvas's standing instruction on the chat wire: what makes an
-    # instruct model continue one text, mid-sentence where it stops.
+    "tool_framing": TOOL_FRAMING_DEFAULT,
     "emulate_text_completion_prompt": EMULATE_TEXT_COMPLETION_PROMPT,
 }
 

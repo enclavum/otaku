@@ -16,6 +16,7 @@ from otaku.backend.api._writes import UNCHANGED, Changed, Unchanged
 from otaku.backend.domain.app import App
 from otaku.backend.domain.story import lore as domain_lore
 from otaku.backend.domain.story.lore import ExtractionState, Memory
+from otaku.backend.errors import Invalid
 from otaku.store import schema
 
 
@@ -113,19 +114,30 @@ class CharactersResource:
         *,
         description: str | Unchanged = UNCHANGED,
         card: str | Unchanged = UNCHANGED,
+        card_id: int | Unchanged | None = UNCHANGED,
     ) -> Changed[Character]:
         """The author's correction of a character — its description, and
-        the card archive an imported one carries. Raises Refused for
-        nothing to change, a card that is no TOML, and a character not in
-        the cast — nothing written."""
-        said = domain_lore.update_character(
-            self._app,
-            story_id,
-            character_id,
-            description=None if isinstance(description, Unchanged) else description,
-            card=None if isinstance(card, Unchanged) else card,
-        )
-        return Changed(self.get(story_id, character_id), said)
+        the card archive an imported one carries — and its link to a
+        codex card (`card_id`; None unlinks), which changes nothing else
+        on either. Raises Refused for nothing to change, a card that is
+        no TOML, a character not in the cast, no such codex card, and a
+        card another of the story's characters is linked to already."""
+        said = []
+        if not isinstance(description, Unchanged) or not isinstance(card, Unchanged):
+            said.append(
+                domain_lore.update_character(
+                    self._app,
+                    story_id,
+                    character_id,
+                    description=None if isinstance(description, Unchanged) else description,
+                    card=None if isinstance(card, Unchanged) else card,
+                )
+            )
+        if not isinstance(card_id, Unchanged):
+            said.append(domain_lore.set_card_id(self._app, story_id, character_id, card_id))
+        if not said:
+            raise Invalid("Nothing to change.")
+        return Changed(self.get(story_id, character_id), " ".join(said))
 
     def delete(self, story_id: int, character_id: int) -> Changed[None]:
         """Remove a character the extractor should never have made, their
@@ -241,6 +253,8 @@ def _character(held: Memory, row: schema.Character) -> Character:
         card=row.card,
         history=history,
         history_journal_id=holder.id if holder is not None else None,
+        card_id=row.card_id,
+        card_name=held.card_names.get(row.card_id) if row.card_id is not None else None,
         provider=row.provider,
         model=row.model,
         updated_at=row.updated_at,
@@ -312,7 +326,8 @@ class Character:
     description, the card archive an imported one carries (None for one
     the extractor made), its arc so far — the newest non-empty rollup,
     "" before a pass has written one — and the id of the journal record
-    it was taken from (where a frontend says how old it is), who made
+    it was taken from (where a frontend says how old it is), the codex
+    card it is linked to and that card's name (None for none), who made
     it, and when it was last written (for display alone)."""
 
     id: int
@@ -322,6 +337,8 @@ class Character:
     card: str | None
     history: str
     history_journal_id: int | None
+    card_id: int | None
+    card_name: str | None
     provider: str | None
     model: str | None
     updated_at: str

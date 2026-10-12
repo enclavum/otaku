@@ -6,9 +6,10 @@ settings (`settings`), its messages and a line played on them
 character card brought in (`cards`), its next request (`context`), the
 story in and out as a document (`transfer`), the prompts its settings
 send and the shared reminder (`prompts`), and its language (`language`).
-Its machinery has no twin in the interface: the chain (`_chain`), the
-play that records a line and streams the reply (`_play`), the tools the
-settings switch on (`_tools`).
+Its machinery has no twin in the interface: the chain (`_chain`), its
+next request and the worker's job over it (`_request`), the play that
+records a line and streams the reply (`_play`), the tools the settings
+switch on (`_tools`).
 
 Imported by module path; this root re-exports nothing.
 """

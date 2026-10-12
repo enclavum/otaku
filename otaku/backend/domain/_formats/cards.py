@@ -21,7 +21,8 @@ the player's, which only the import command knows. Line endings are
 normalized to `\\n` — cards mix them, even within one file — and
 `mes_example` is split on its `<START>` delimiter into separate example
 blocks, because passed through whole the model reads the delimiter as
-literal text.
+literal text. The depth prompt is the card's reminder, its depth turned
+from SillyTavern's count of every message into otaku's of the reader's.
 
 Everything here is pure: bytes and strings in, values out, no disk and
 no model — the import operation owns the store.
@@ -37,6 +38,8 @@ from dataclasses import replace as _replace
 from otaku.context.cards import StoryCard, binds
 
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+# SillyTavern's depth for a depth prompt that names none.
+_ST_DEPTH = 4
 _CARD_KEYWORDS = (b"chara", b"ccv3")
 
 _ANY_MACRO = re.compile(r"\{\{[^{}]{1,40}\}\}")
@@ -163,7 +166,8 @@ def _normalize(payload: dict[str, object]) -> StoryCard | None:
             for block in (b.strip() for b in _START.split(_text(card, "mes_example")))
             if block
         ),
-        depth_note=_depth_note(card),
+        reminder=_reminder(card),
+        reminder_depth=_reminder_depth(card),
         system_prompt=_text(card, "system_prompt"),
         post_history_instructions=_text(card, "post_history_instructions"),
         creator_notes=_text(card, "creator_notes"),
@@ -177,10 +181,25 @@ def _card_dict(payload: dict[str, object]) -> dict[str, object]:
     return data if isinstance(data, dict) else payload
 
 
-def _depth_note(card: dict[str, object]) -> str:
+def _depth_prompt(card: dict[str, object]) -> dict[str, object]:
     extensions = card.get("extensions")
     prompt = (extensions.get("depth_prompt") or {}) if isinstance(extensions, dict) else {}
-    return _newlines(str(prompt.get("prompt", ""))).strip() if isinstance(prompt, dict) else ""
+    return prompt if isinstance(prompt, dict) else {}
+
+
+def _reminder(card: dict[str, object]) -> str:
+    return _newlines(str(_depth_prompt(card).get("prompt", ""))).strip()
+
+
+def _reminder_depth(card: dict[str, object]) -> int:
+    """SillyTavern counts every message from the end, 0 after the last;
+    otaku counts the reader's, 1 before the newest, and never goes after
+    it — so half its depth, rounded up, from 1. A card without one takes
+    SillyTavern's default, 4."""
+    depth = _depth_prompt(card).get("depth", _ST_DEPTH)
+    if type(depth) is not int:
+        depth = _ST_DEPTH
+    return max(1, -(-depth // 2))
 
 
 def _text(card: dict[str, object], key: str) -> str:
@@ -208,7 +227,8 @@ def _unknown_macros(card: StoryCard) -> list[str]:
             card.personality,
             card.scenario,
             card.greeting,
-            card.depth_note,
+            card.reminder,
+            card.system_prompt,
             *card.alternate_greetings,
             *card.examples,
         ]

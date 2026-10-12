@@ -69,31 +69,22 @@ export async function openContext() {
 
   const head = element("div", "otk-v otk-v--lg");
   head.append(summary, stages(shape));
+  if (preview.cards.length) {
+    /* The character cards the request carries, listed as the injections
+       are: the name each came in under, what it costs with its portrait
+       counted — no place: a card rides where the story brought it in. */
+    const rows = preview.cards.map((card) => ({ name: card.name, at: "", tokens: card.tokens }));
+    head.append(costed("Cards", rows));
+  }
   if (preview.injections.length) {
-    /* What rides besides the story, as the design lists it under the
-       stages: a section head with the total, then a row per injection —
-       the name of the text placed (the backend's, capitalised for a
-       row), a dotted leader, where it rides, what it costs — in the
-       request's order, as the backend lists them. The texts themselves
-       are in the wire below. */
-    const injected = element("div", "otk-context__injected");
-    const total = preview.injections.reduce((sum, injection) => sum + injection.tokens, 0);
-    const heading = element("div", "otk-section otk-context__injrow otk-context__injhead");
-    // the total, where there is something to total: one row says its own
-    const summed = preview.injections.length > 1 ? `~${count(total)} tokens` : "";
-    heading.append(span("", "Injected"), span(""), span(""), span("otk-context__injtok", summed));
-    injected.append(heading);
-    for (const injection of preview.injections) {
-      const row = element("div", "otk-context__injrow");
-      row.append(
-        span("otk-context__injname", capitalised(injection.label)),
-        span("otk-context__injdots"),
-        span("otk-context__injat", injection.position_text),
-        span("otk-context__injtok", `~${count(injection.tokens)} tokens`),
-      );
-      injected.append(row);
-    }
-    head.append(injected);
+    /* What rides besides the story: the name of the text placed (the
+       backend's, capitalised for a row) and where it rides. */
+    const rows = preview.injections.map((injection) => ({
+      name: capitalised(injection.label),
+      at: injection.position_text,
+      tokens: injection.tokens,
+    }));
+    head.append(costed("Injected", rows));
   }
 
   const wire = element("div", "otk-context__wire");
@@ -118,6 +109,31 @@ export async function openContext() {
   body.replaceChildren(head, wire);
   footnote(popup, `~${count(shape.total_tokens)} of ${count(shape.limit)} tokens projected`);
   body.focus();
+}
+
+function costed(title, rows) {
+  /* A costed list, as the design draws one under the stages: a section
+     head with the total, then a row per item — its name, a dotted leader,
+     where it rides, what it costs — in the request's order, as the
+     backend lists them. The texts themselves are in the wire below. */
+  const list = element("div", "otk-context__injected");
+  const total = rows.reduce((sum, row) => sum + row.tokens, 0);
+  const heading = element("div", "otk-section otk-context__injrow otk-context__injhead");
+  // the total, where there is something to total: one row says its own
+  const summed = rows.length > 1 ? `~${count(total)} tokens` : "";
+  heading.append(span("", title), span(""), span(""), span("otk-context__injtok", summed));
+  list.append(heading);
+  for (const { name, at, tokens } of rows) {
+    const row = element("div", "otk-context__injrow");
+    row.append(
+      span("otk-context__injname", name),
+      span("otk-context__injdots"),
+      span("otk-context__injat", at),
+      span("otk-context__injtok", `~${count(tokens)} tokens`),
+    );
+    list.append(row);
+  }
+  return list;
 }
 
 function stages(shape) {

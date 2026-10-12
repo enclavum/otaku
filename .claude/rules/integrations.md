@@ -46,6 +46,6 @@ has no boolean shortcut on purpose.
 ## Pictures on the wire
 
 Where a picture rides is answered once, `client.pictures_ride(model)`,
-and asked alike by the assembler (through `_chain.assemble`) and the
+and asked alike by the assembler (through `_request.assemble`) and the
 lore pass (`extraction._scene_pictures`); an engine's quirk lives on its
 client (`OpenAICompletion.pictures_ride`), never as a capability.
