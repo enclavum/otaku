@@ -22,6 +22,7 @@ from otaku.backend.api import ModelRef, Refused
 from otaku.backend.api.story.lore import Extraction
 from otaku.backend.domain._formats import exports, imports
 from otaku.backend.domain.app._paths import Paths
+from otaku.store.schema import Message
 from otaku.terminal.screens import dossier as screen_dossier
 from scenarios.api.story.test_pictures import _cat, _play, _seeing
 from scenarios.support import server as scripted
@@ -926,13 +927,13 @@ class TestMerge:
         app.store.characters.add(story_id, "Sera the Second")
         app.play("/merge Seraphina into Sera the Second")
         kept = app.store.characters.find(story_id, "Seraphina")
-        assert kept is not None and kept.card  # refused: the archive survives
-        assert app.store.characters.find(story_id, "Sera the Second").card is None
+        assert kept is not None and kept.profile  # refused: the profile survives
+        assert app.store.characters.find(story_id, "Sera the Second").profile is None
 
         app.play("/merge Sera the Second into Seraphina")
         merged = app.store.characters.find(story_id, "Sera the Second")
         assert merged is not None and merged.id == kept.id  # now an alias
-        assert merged.card == kept.card
+        assert merged.profile == kept.profile
 
     def test_merge_invalidates_the_rolled_up_memory(self, app: App) -> None:
         # A rollup composed before the merge covers only one side; the
@@ -1242,6 +1243,82 @@ class TestCardLinks:
         app.api.stories.characters.update(story, source, card_id=card.id)
         merged = app.api.stories.characters.merges.create(story, source, into=target).value
         assert (merged.id, merged.card_id) == (target, card.id)
+
+    def test_a_link_vetted_counts_the_copies_and_stores_nothing(self, app: App) -> None:
+        # B and C hold one unlinked Maren each; D holds two, and E is no fork
+        story, maren, others = _family(app)
+        card = app.api.cards.create(name="Maren").value
+        vetted = app.api.stories.characters.update(
+            story, maren, card_id=card.id, validate_only=True
+        )
+        assert vetted.copies == 2
+        assert _maren_links(app, story, others) == {"a": [None], "b": [None], "c": [None]}
+
+    def test_a_link_takes_its_copies_along_only_when_asked(self, app: App) -> None:
+        story, maren, others = _family(app)
+        card = app.api.cards.create(name="Maren").value
+        app.api.stories.characters.update(story, maren, card_id=card.id)
+        assert _maren_links(app, story, others) == {"a": [card.id], "b": [None], "c": [None]}
+        app.api.stories.characters.update(story, maren, card_id=None)
+        app.api.stories.characters.update(story, maren, card_id=card.id, with_copies=True)
+        assert _maren_links(app, story, others) == {"a": [card.id], "b": [card.id], "c": [card.id]}
+        # a story holding two Marens, and one outside the family, untouched
+        assert [c.card_id for c in app.store.characters.list(others["d"])] == [None, None]
+        assert [c.card_id for c in app.store.characters.list(others["e"])] == [None]
+
+    def test_a_story_the_link_would_be_refused_in_is_passed_over(self, app: App) -> None:
+        story, maren, others = _family(app)
+        card = app.api.cards.create(name="Maren").value
+        guard = app.store.characters.add(others["b"], "Guard")
+        app.api.stories.characters.update(others["b"], guard, card_id=card.id)
+        vetted = app.api.stories.characters.update(
+            story, maren, card_id=card.id, validate_only=True
+        )
+        assert vetted.copies == 1  # C alone: the card links B's Guard already
+
+    def test_a_linked_copy_is_no_copy_to_take(self, app: App) -> None:
+        story, maren, others = _family(app)
+        (copy,) = app.store.characters.list(others["b"])
+        other = app.api.cards.create(name="Maren the Elder").value
+        app.api.stories.characters.update(others["b"], copy.id, card_id=other.id)
+        card = app.api.cards.create(name="Maren").value
+        app.api.stories.characters.update(story, maren, card_id=card.id, with_copies=True)
+        assert _maren_links(app, story, others) == {"a": [card.id], "b": [other.id], "c": [card.id]}
+
+    def test_a_link_vetted_is_refused_as_the_link_would_be(self, app: App) -> None:
+        story, maren, _ = _family(app)
+        card = app.api.cards.create(name="Maren").value
+        app.api.stories.characters.update(
+            story, app.store.characters.add(story, "Guard"), card_id=card.id
+        )
+        with pytest.raises(Refused):
+            app.api.stories.characters.update(story, maren, card_id=card.id, validate_only=True)
+
+
+def _family(app: App) -> tuple[int, int, dict[str, int]]:
+    """A story with Maren in it, and its forks, each holding her copy: B
+    forked from it, C from B, D from it with a second Maren of its own —
+    and E, a story of its own with a Maren too. The story, its Maren, and
+    the others by letter."""
+    story = app.ensure_story()
+    app.store.stories.append(story, Message(role="user", body="I enter."), after=None)
+    maren = app.store.characters.add(story, "Maren")
+    b = app.api.stories.forks.create(story).value.id
+    c = app.api.stories.forks.create(b).value.id
+    d = app.api.stories.forks.create(story).value.id
+    app.store.characters.add(d, "Maren")
+    e = app.store.stories.add("E")
+    app.store.characters.add(e, "Maren")
+    return story, maren, {"b": b, "c": c, "d": d, "e": e}
+
+
+def _maren_links(app: App, story: int, others: dict[str, int]) -> dict[str, list[int | None]]:
+    """The card each Maren of the story, B and C is linked to."""
+    stories = {"a": story, "b": others["b"], "c": others["c"]}
+    return {
+        letter: [c.card_id for c in app.store.characters.list(each) if c.name == "Maren"]
+        for letter, each in stories.items()
+    }
 
 
 def _warm_requests(server: scripted.ModelServer, *, within: float) -> int:

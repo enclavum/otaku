@@ -43,7 +43,7 @@ export async function importCard({ cardId = null } = {}) {
      is dropped on its new card tile). The outcomes are the backend's own
      sentences about this card beside the page's lines about what an
      import does — the dialog decides where they appear, never what the
-     backend's say. Everything lands in the flow. */
+     backend's say. A refusal is said in the dialog's foot (`report`). */
   const inviting = cardId !== null;
   const invited = inviting ? await api.cards.get(cardId) : null;
   if (invited?.refused) {
@@ -70,8 +70,8 @@ export async function importCard({ cardId = null } = {}) {
   };
   /* The card read and vetted, nothing stored: `{card}` — its name, the
      backend's notes, whether it carries a picture, the codex card it is
-     already and those of its name, and for a story its size in tokens,
-     whether that is worth a warning and the persona the story remembers
+     already and those of its name, its size in tokens, whether that is
+     worth a warning, and the persona the story remembers
      — or the refusal. */
   const prepare = async (fileName, bytes, rename) => {
     const story = await storyFor();
@@ -245,7 +245,7 @@ export async function importCard({ cardId = null } = {}) {
        file: the note asks for one. A name emptied: the field says so —
        it binds `{{user}}` everywhere, and a silent default would decide
        it for the reader. A card that refused to read: the refusal
-       already on screen stays the answer until the rename changes.
+       already on screen is the answer, and the rename is the way out.
        Wired before `ask` adds its own listeners, so the stop is the
        whole veto — the button and the dialog's Enter alike; `wiring`
        drops the last opening's veto with its stale closures. */

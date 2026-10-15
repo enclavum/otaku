@@ -287,6 +287,36 @@ class TestFork:
         assert [c.name for c in cast] == ["Keeper"]
         assert app.store.journals.get_current(story_id, ids)[cast[0].id].state == "at the gate"
 
+    def test_the_family_is_every_story_forks_join(self, app: App) -> None:
+        # Up, down and across: the one it was forked from, its forks, theirs
+        # and their siblings — and never a story no fork joins.
+        app.play("I enter the hall.")
+        a = app.story_id
+        b = app.api.stories.forks.create(a).value.id
+        c = app.api.stories.forks.create(b).value.id
+        d = app.api.stories.forks.create(a).value.id
+        e = app.store.stories.add("E")
+        assert {s.id for s in app.api.stories.forks.list(c)} == {a, b, d}
+        assert {s.id for s in app.api.stories.forks.list(a)} == {b, c, d}
+        assert e not in {s.id for s in app.api.stories.forks.list(d)}
+        assert app.api.stories.forks.list(e) == []
+
+    def test_a_story_deleted_between_still_joins_the_forks_made_from_it(self, app: App) -> None:
+        # B gone: C and D, both forked from it, still share its start; A,
+        # which B was forked from, no fork row names any more.
+        app.play("I enter the hall.")
+        a = app.story_id
+        b = app.api.stories.forks.create(a).value.id
+        c = app.api.stories.forks.create(b).value.id
+        d = app.api.stories.forks.create(b).value.id
+        app.api.stories.delete(b)
+        assert {s.id for s in app.api.stories.forks.list(c)} == {d}
+        assert app.api.stories.forks.list(a) == []
+
+    def test_the_family_of_a_story_not_there_is_refused(self, app: App) -> None:
+        with pytest.raises(Refused):
+            app.api.stories.forks.list(999)
+
 
 class TestSystem:
     def test_system_with_no_story_makes_one_and_plays_on_it(self, app: App) -> None:

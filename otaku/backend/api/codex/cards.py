@@ -237,11 +237,14 @@ class CardsResource:
             "tagline": tagline,
             "pictures": pictures,
         }
-        if not isinstance(before, Unchanged):
+        correcting = bool(changes) or any(not isinstance(p, Unchanged) for p in corrected.values())
+        moving = not isinstance(before, Unchanged)
+        if correcting and not isinstance(before, Unchanged):
             # a move that cannot be made refuses the correction with it
             domain_cards.check_move(self._app, card_id, before=before)
         said = []
-        if changes or any(not isinstance(part, Unchanged) for part in corrected.values()):
+        # given nothing at all, the domain's update refuses it
+        if correcting or not moving:
             said.append(
                 domain_cards.update_card(
                     self._app,
@@ -255,8 +258,6 @@ class CardsResource:
             )
         if not isinstance(before, Unchanged):
             said.append(domain_cards.move_card(self._app, card_id, before=before))
-        if not said:
-            raise Invalid("Nothing to change.")
         return Changed(self.get(card_id), " ".join(said))
 
     def delete(self, card_id: int) -> Changed[None]:
@@ -327,23 +328,13 @@ def as_card_summary(row: schema.Card, story_counts: dict[int, int]) -> CardSumma
 
 
 def _card(app: App, row: schema.Card) -> Card:
-    profile = domain_cards.profile_of(row)
+    profile = domain_cards.card_profile(row)
     return Card(
         id=row.id,
         name=row.name,
         aliases=row.aliases,
         tagline=row.tagline,
-        description=profile.description,
-        personality=profile.personality,
-        scenario=profile.scenario,
-        greeting=profile.greeting,
-        alternate_greetings=profile.alternate_greetings,
-        examples=profile.examples,
-        reminder=profile.reminder,
-        reminder_depth=profile.reminder_depth,
-        system_prompt=profile.system_prompt,
-        post_history_instructions=profile.post_history_instructions,
-        creator_notes=profile.creator_notes,
+        **{name: getattr(profile, name) for name in domain_cards.FIELDS},
         file_name=profile.file_name,
         pictures=row.pictures,
         stories=tuple(_story_character(r) for r in domain_cards.list_linked(app, row.id)),

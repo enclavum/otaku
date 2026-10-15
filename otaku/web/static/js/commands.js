@@ -7,7 +7,7 @@
    named in the page's client (`api/`). */
 
 import { api } from "./api/index.js";
-import { ask, closeAll, popups } from "./kit/browser.js";
+import { ask, askConfirm, closeAll, popups } from "./kit/browser.js";
 import { $ } from "./kit/dom.js";
 import * as held from "./play/held.js";
 import { openHelp, openSupport } from "./screens/help.js";
@@ -143,18 +143,7 @@ async function confirmed({ title, body, note = "", action, cancel = "Cancel", ru
   /* One question, one button that answers it. The words are set here:
      what a command is about to do to the story on screen is the page's
      to say, as the delete confirm says what a delete takes. */
-  const choice = await ask("confirm", (dialog) => {
-    $("[data-title]", dialog).textContent = title;
-    $(".otk-dialog__body", dialog).textContent = body;
-    // A second line, for a question whose answer has a consequence
-    // worth spelling out; hidden for the plain ones.
-    const aside = $("[data-note]", dialog);
-    aside.textContent = note;
-    aside.hidden = !note;
-    $('[data-choice="confirm"]', dialog).textContent = action;
-    $('[data-choice="cancel"]', dialog).textContent = cancel;
-  });
-  if (choice !== "confirm") return;
+  if ((await askConfirm({ title, body, note, action, cancel })) !== "confirm") return;
   // Now the screens go: the story is about to change under them, and the
   // sentence that says so belongs in the flow.
   closeAll();

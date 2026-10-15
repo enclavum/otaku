@@ -84,8 +84,8 @@ def parse_story(text: str) -> ExportedStory | None:
         elif header == "System":
             system = _unescape(_strip_edges(body))
         elif header == "Cast":
-            # The roster's bullets, then one `#### Name` archive block per
-            # imported card — split first, so an archive's own bullet- or
+            # The roster's bullets, then one `#### Name` profile block per
+            # imported card — split first, so a profile's own bullet- or
             # heading-shaped lines can never read as roster rows.
             roster, card_secs = _split_by_header(body, "#### ")
             cards = {name.strip(): _unescape(_strip_edges(cbody)) for name, cbody in card_secs}

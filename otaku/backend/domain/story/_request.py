@@ -111,16 +111,16 @@ def _all_injections(
     profile at request time, so a correction reaches the next request
     and an undone import takes them with it. A profile that is no TOML
     asks nothing; one card brought in twice asks once."""
-    profiles = {c.id: c.profile for c in app._store.characters.list(story_id) if c.profile}
+    carded = {c.id: c for c in app._store.characters.list(story_id) if c.profile}
     asked: list[Injection] = []
     seen: set[int] = set()
     for message in chain:
-        profile = profiles.get(message.speaker_id or 0) if message.kind == "card" else None
-        if profile is None or message.speaker_id in seen:
+        who = carded.get(message.speaker_id or 0) if message.kind == "card" else None
+        if who is None or not who.profile or message.speaker_id in seen:
             continue
         seen.add(message.speaker_id or 0)
         try:
-            asked += card_injections(profile)
+            asked += card_injections(who.profile, char=who.name)
         except tomllib.TOMLDecodeError:
             continue
     return settings.injections + tuple(asked)

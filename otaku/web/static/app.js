@@ -15,7 +15,7 @@
    - Bodies arrive verbatim. Nothing on this side rewrites the text. */
 
 import { api, login, whenUnauthorized } from "./js/api/index.js";
-import { closeAll } from "./js/kit/browser.js";
+import { closeAll, topmost } from "./js/kit/browser.js";
 import { editTurn, keepsScreen, openCodex, openTab, run as runCommand } from "./js/commands.js";
 import { showSignOut, signIn, signOut } from "./js/screens/login.js";
 import { draft, focusComposer, primeHistory, submit, wire as wireComposer } from "./js/composer.js";
@@ -184,20 +184,22 @@ function start() {
     dialog.addEventListener("close", () => {
       if (!$("dialog[open]")) focusComposer();
     });
-    // The scrim closes it, as a scrim does. A click on the dialog's own
-    // padding reports the dialog as its target too, so the test is where
-    // the pointer WAS: outside the panel's box, or not a pointer at all
-    // (a keyboard-activated button reports the button, never this).
+    /* The scrim closes it, as a scrim does — pressed AND let go there: a
+       selection dragged past the edge is let go on the dialog too. Never
+       while a field in it is being edited, which would lose the words. A
+       click on the dialog's own padding reports the dialog as its target
+       too, so the test is where the pointer WAS: outside the panel's box
+       (a keyboard-activated button reports the button, never this). */
+    let pressedOutside = false;
+    dialog.addEventListener("pointerdown", (event) => {
+      pressedOutside = onScrim(dialog, event);
+    });
     dialog.addEventListener("click", (event) => {
+      const outside = pressedOutside && onScrim(dialog, event);
+      pressedOutside = false;
       // A fixed dialog has nothing behind it to fall back to.
-      if (event.target !== dialog || dialog.hasAttribute("data-fixed")) return;
-      const box = dialog.getBoundingClientRect();
-      const outside =
-        event.clientX < box.left ||
-        event.clientX > box.right ||
-        event.clientY < box.top ||
-        event.clientY > box.bottom;
-      if (outside) dialog.close();
+      if (!outside || dialog.hasAttribute("data-fixed")) return;
+      if (!$(".otk-edit[data-editing]", dialog)) dialog.close();
     });
   }
 
@@ -246,10 +248,9 @@ function onKey(event) {
     return;
   }
   if (event.key === "Escape") {
-    // The one on TOP, which is the one holding focus — `dialog[open]`
-    // in markup order would close whatever happens to be written first.
-    const open = $$("dialog[open]");
-    const dialog = open.find((d) => d.contains(document.activeElement)) ?? open.at(-1);
+    // The one on TOP — `dialog[open]` in markup order would close
+    // whatever happens to be written first.
+    const dialog = topmost();
     if (!dialog) {
       foldRail();
       return;
@@ -263,6 +264,19 @@ function onKey(event) {
     dialog.close();
     return;
   }
+}
+
+/** Whether a pointer event on a dialog fell on its scrim: the dialog
+    itself the target, the point outside its box. */
+function onScrim(dialog, event) {
+  if (event.target !== dialog) return false;
+  const box = dialog.getBoundingClientRect();
+  return (
+    event.clientX < box.left ||
+    event.clientX > box.right ||
+    event.clientY < box.top ||
+    event.clientY > box.bottom
+  );
 }
 
 start();

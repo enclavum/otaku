@@ -11,7 +11,7 @@
 
 import { api } from "../api/index.js";
 import { ask, askWriting, edited, editable, footnote, guard } from "../kit/browser.js";
-import { $, element, span } from "../kit/dom.js";
+import { $, element, span, switchButton } from "../kit/dom.js";
 import { KEY_MASK } from "./models.js";
 import { landed } from "../play/shell.js";
 
@@ -97,12 +97,7 @@ function feature(view, setting, sharedText, openPlacement) {
   box.dataset.on = String(setting.enabled);
   box.dataset.setting = setting.name;
   const head = element("div", "otk-feature__head");
-  const toggle = element("button", "otk-switch otk-switch--h");
-  toggle.type = "button";
-  toggle.setAttribute("role", "switch");
-  toggle.setAttribute("aria-checked", String(setting.enabled));
-  toggle.setAttribute("aria-label", setting.label);
-  toggle.append(span("otk-switch__knob"));
+  const toggle = switchButton(setting.label, setting.enabled);
   toggle.onclick = guard(async () => {
     const wanted = toggle.getAttribute("aria-checked") !== "true";
     const answer = await saveSetting(view, setting, { enabled: wanted });
@@ -137,8 +132,9 @@ function feature(view, setting, sharedText, openPlacement) {
     );
   } else if (setting.reminder_text !== null) {
     box.append(
+      // the field's editor says a refusal itself: written, not said here
       reminderBody(view, setting.reminder_text, (typed) =>
-        saveSetting(view, setting, { reminder_text: typed }),
+        writeSetting(view, setting, { reminder_text: typed }),
       ),
     );
   }
@@ -300,12 +296,7 @@ function shownSwitch(view, setting) {
      switch on the row, its own label beside it. The transcript is read
      again when it moves, since what it draws just changed. */
   const box = element("span", "otk-feature__shown");
-  const toggle = element("button", "otk-switch otk-switch--h");
-  toggle.type = "button";
-  toggle.setAttribute("role", "switch");
-  toggle.setAttribute("aria-checked", String(setting.display_notes));
-  toggle.setAttribute("aria-label", "Display notes");
-  toggle.append(span("otk-switch__knob"));
+  const toggle = switchButton("Display notes", setting.display_notes);
   toggle.onclick = guard(async () => {
     const wanted = toggle.getAttribute("aria-checked") !== "true";
     const answer = await saveSetting(view, setting, { display_notes: wanted });
@@ -512,11 +503,17 @@ function maskedKey(input, set) {
 }
 
 async function saveSetting(view, setting, fields) {
-  /* One field of one setting, the rest left as it stands; what the
-     backend says of it is the footnote, and a refusal keeps the
-     control where it was. */
-  const answer = await api.stories.settings.update(view.subject.id, setting.name, fields);
+  /* One field of one setting written (`writeSetting`), and what the
+     backend says of it the footnote. */
+  const answer = await writeSetting(view, setting, fields);
   footnote(view.popup, answer.notice, answer.refused);
+  return answer;
+}
+
+async function writeSetting(view, setting, fields) {
+  /* One field of one setting, the rest left as it stands; a refusal
+     keeps the control where it was. */
+  const answer = await api.stories.settings.update(view.subject.id, setting.name, fields);
   if (!answer.refused) Object.assign(setting, fields);
   return answer;
 }

@@ -17,10 +17,11 @@ from typing import Any, Literal, overload
 from otaku.backend.api._writes import UNCHANGED, Changed, Unchanged
 from otaku.backend.api.codex.cards import CharacterLinkCheck
 from otaku.backend.domain.app import App
-from otaku.backend.domain.story import cards as domain_cards
+from otaku.backend.domain.codex.cards import FIELDS, story_profile
 from otaku.backend.domain.story import lore as domain_lore
 from otaku.backend.domain.story.lore import ExtractionState, Memory
 from otaku.backend.errors import Invalid
+from otaku.context.cards import CARD_PROVIDER
 from otaku.store import schema
 
 
@@ -315,28 +316,16 @@ def _character(held: Memory, row: schema.Character) -> Character:
         provider=row.provider,
         # a card made it, not a model: the file it came from is no model's
         # name, and the profile keeps it
-        model=None if row.provider == domain_cards.CARD_PROVIDER else row.model,
+        model=None if row.provider == CARD_PROVIDER else row.model,
         updated_at=row.updated_at,
     )
 
 
 def _profile_fields(row: schema.Character) -> ProfileFields | None:
-    profile = domain_lore.profile_of(row)
+    profile = story_profile(row)
     if profile is None:
         return None
-    return ProfileFields(
-        description=profile.description,
-        personality=profile.personality,
-        scenario=profile.scenario,
-        greeting=profile.greeting,
-        alternate_greetings=profile.alternate_greetings,
-        examples=profile.examples,
-        reminder=profile.reminder,
-        reminder_depth=profile.reminder_depth,
-        system_prompt=profile.system_prompt,
-        post_history_instructions=profile.post_history_instructions,
-        creator_notes=profile.creator_notes,
-    )
+    return ProfileFields(**{name: getattr(profile, name) for name in FIELDS})
 
 
 def _journal(held: Memory, row: schema.Journal) -> Journal:

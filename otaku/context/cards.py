@@ -1,7 +1,8 @@
 """Character cards as context material: a card's `CharacterProfile`,
-normalized, and its two TOML shapes — a codex card's and a story
-character's copy, which adds the names it binds — written and read back
-in ONE place (`to_toml`, `from_toml`); macro binding; the wire block
+normalized, and its TOML — a codex card's, or a story character's copy,
+which adds the persona it binds — written and read back in ONE place
+(`to_toml`, `from_toml`), the name always the row's own; macro binding;
+the wire block
 composed back out of a story character's profile, and what a card
 injects besides its block (`card_injections`). FILE decoding (PNG
 chunks, JSON) lives with the other wild formats, in
@@ -34,15 +35,23 @@ _RETIRED_REMINDER = "depth_note"
 # The card template's `{field}` holes (`card_to_wire`).
 _PLACEHOLDER = re.compile(r"\{(\w+)\}")
 
+# Who made what a card brings into a story — its character, its row,
+# its greeting — as `provider` records it (`schema`): the card, no model.
+CARD_PROVIDER = "card"
+
 
 @dataclass(frozen=True)
 class CharacterProfile:
     """Who a character is, as a card says it: its name and the card's
     fields, normalized — what a codex card and a story character's copy
-    each keep as TOML (their `profile` columns). `name` is the only
-    required field; text fields keep their macros."""
+    each keep as TOML (their `profile` columns) — and, in a story's copy,
+    who `{{user}}` binds to there. `name` is the only required field;
+    text fields keep their macros."""
 
     name: str
+    # The persona a story brought the card in with; "" in the codex, which
+    # binds nobody: a story's, not the card's to say.
+    user: str = ""
     description: str = ""
     personality: str = ""
     scenario: str = ""
@@ -62,17 +71,18 @@ class CharacterProfile:
     @classmethod
     def from_toml(cls, toml_text: str, *, name: str) -> Self:
         """The profile a TOML text holds — a codex card's or a story
-        character's copy alike — under `name`: every key of the profile's
-        vocabulary but `name` read back, a list as a tuple, `depth_note`
-        as the reminder 0.7.0 and before wrote; anything else (`user`, a
-        key a later feature added) left out. Raises
-        `tomllib.TOMLDecodeError` for a text that is no TOML."""
+        character's copy alike — under `name`, its row's: every key of the
+        profile's vocabulary but the name read back, a list as a tuple,
+        `depth_note` as the reminder 0.7.0 and before wrote; anything else
+        (the `name` line a copy before 0.8.0 carries, a key a later feature
+        added) left out. Raises `tomllib.TOMLDecodeError` for a text that
+        is no TOML."""
         data = tomllib.loads(toml_text) if toml_text else {}
-        if _RETIRED_REMINDER in data:
-            data.setdefault("reminder", data[_RETIRED_REMINDER])
         values: dict[str, Any] = {}
         for field in fields(cls):
             value = data.get(field.name)
+            if field.name == "reminder" and value is None:
+                value = data.get(_RETIRED_REMINDER)
             if field.name == "name" or value is None:
                 continue
             if isinstance(value, str):
@@ -83,19 +93,18 @@ class CharacterProfile:
                 values[field.name] = value
         return cls(name=name, **values)
 
-    def to_toml(self, *, user: str | None = None) -> str:
+    def to_toml(self) -> str:
         """The profile as user-readable TOML, "the fields the prompt was
-        built from": every non-empty field, macros intact, so a later
-        feature can re-compose or re-bind — a codex card's, its name kept
-        in a column of its own; with `user`, a story character's copy,
-        `name` and `user` first (the names it binds, recorded as data).
-        One blank line between fields, so it reads in the lore view.
-        Round-trips through `from_toml` field for field. Edge-clean: no
-        trailing newline, so it is exactly what a document round-trip
-        (which trims body edges) gives back."""
+        built from": every non-empty field but the name, which its row
+        keeps, macros intact, so a later feature can re-compose or re-bind
+        — a story's `user` first where it binds one. One blank line between
+        fields, so it reads in the lore view. Round-trips through
+        `from_toml` field for field. Edge-clean: no trailing newline, so it
+        is exactly what a document round-trip (which trims body edges)
+        gives back."""
         lines = _field_pairs(self)
-        if user is not None:
-            lines = [_toml_pair("name", self.name), _toml_pair("user", user), *lines]
+        if self.user:
+            lines = [_toml_pair("user", self.user), *lines]
         return "\n\n".join(lines)
 
 
@@ -115,16 +124,16 @@ def binds(macro: str) -> bool:
     return any(pattern.fullmatch(macro) for pattern in (_CHAR_MACRO, _USER_MACRO, _ORIGINAL_MACRO))
 
 
-def card_injections(toml_text: str) -> tuple[Injection, Injection]:
+def card_injections(toml_text: str, *, char: str) -> tuple[Injection, Injection]:
     """What a card asks of the request besides its own row, read from a
     story character's profile: its system prompt, joined to the story's
     system message, and its reminder, sent before the reader's
-    `reminder_depth`-th message from the end — each bound to the
-    profile's names, empty (so not sent) where the card has none. Raises
-    `tomllib.TOMLDecodeError` for a text that is no TOML."""
-    data = tomllib.loads(toml_text)
-    char, user = str(data.get("name", "")), str(data.get("user", ""))
+    `reminder_depth`-th message from the end — each bound to `char`, the
+    character's name, and the profile's `user`, empty (so not sent) where
+    the card has none. Raises `tomllib.TOMLDecodeError` for a text that
+    is no TOML."""
     card = CharacterProfile.from_toml(toml_text, name=char)
+    user = card.user
     return (
         Injection(
             f"{char}'s system prompt",
@@ -139,16 +148,17 @@ def card_injections(toml_text: str) -> tuple[Injection, Injection]:
     )
 
 
-def card_to_wire(toml_text: str, template: str) -> str:
+def card_to_wire(toml_text: str, template: str, *, char: str) -> str:
     """What a card row sends: the template's `{field}` placeholders
-    filled from the story character's profile, every text bound to its
-    recorded `name`/`user` on the way — at WIRE time, so a correction to
-    the profile reaches every future request. One pass, so braces inside
+    filled from the story character's profile, `{name}` with `char` — its
+    name — and every text bound to it and to the profile's `user` on the
+    way — at WIRE time, so a correction to the profile reaches every
+    future request. One pass, so braces inside
     card text are never re-read as placeholders; a template line whose
     placeholders ALL came up empty is dropped — a card without a
     scenario ships no dangling `Scenario:` label."""
     data = tomllib.loads(toml_text)
-    char, user = str(data.get("name", "")), str(data.get("user", ""))
+    user = str(data.get("user", ""))
     # Every card field answers, empty when the profile omitted it — an
     # absent scenario must drop its template line, not survive as a
     # literal `{scenario}`. Only names outside the card's vocabulary are
@@ -163,6 +173,7 @@ def card_to_wire(toml_text: str, template: str) -> str:
             values[key] = bind(joined, char=char, user=user)
         elif isinstance(value, int) and not isinstance(value, bool):
             values[key] = str(value)
+    values["name"] = char
     values[_RETIRED_REMINDER] = ""
     out = []
     for line in template.split("\n"):
@@ -175,11 +186,12 @@ def card_to_wire(toml_text: str, template: str) -> str:
 
 
 def _field_pairs(profile: CharacterProfile) -> list[str]:
-    """Every non-empty field but the name as a TOML row, in the profile's
-    order, macros intact — a number where it is not its default."""
+    """Every non-empty field but the two names as a TOML row, in the
+    profile's order, macros intact — a number where it is not its
+    default."""
     lines = []
     for field in fields(CharacterProfile):
-        if field.name == "name":
+        if field.name in ("name", "user"):
             continue
         value = getattr(profile, field.name)
         if isinstance(value, str) and value:

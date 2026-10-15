@@ -49,14 +49,14 @@ def _create(api: Api, ask: Ask) -> Any:
         return Created(changed(promoted), f"/api/cards/{promoted.value.id}")
     made = api.cards.create(
         name=ask.need("name") if "name" in ask.body else None,
-        aliases=_strings(ask, "aliases"),
+        aliases=ask.strings("aliases"),
         tagline=ask.text("tagline"),
         description=ask.text("description"),
         personality=ask.text("personality"),
         scenario=ask.text("scenario"),
         greeting=ask.text("greeting"),
-        alternate_greetings=_strings(ask, "alternate_greetings"),
-        examples=_strings(ask, "examples"),
+        alternate_greetings=ask.strings("alternate_greetings"),
+        examples=ask.strings("examples"),
         reminder=ask.text("reminder"),
         reminder_depth=ask.integer("reminder_depth") if "reminder_depth" in ask.body else 2,
         system_prompt=ask.text("system_prompt"),
@@ -75,7 +75,7 @@ def _update(api: Api, ask: Ask) -> Any:
         return ask.need(key) if key in ask.body else UNCHANGED
 
     def strings(key: str) -> tuple[str, ...] | Unchanged:
-        return _strings(ask, key) if key in ask.body else UNCHANGED
+        return ask.strings(key) if key in ask.body else UNCHANGED
 
     return changed(
         api.cards.update(
@@ -109,15 +109,6 @@ def _add_picture(api: Api, ask: Ask) -> Any:
     picked as — added after the card's others."""
     file = RawFile(base64.b64decode(ask.need("data"), validate=True), ask.text("name"))
     return changed(api.cards.pictures.create(ask.id("card"), file=file))
-
-
-def _strings(ask: Ask, name: str) -> tuple[str, ...]:
-    """A body field that is a JSON list of strings, () where the body
-    leaves it out; anything else is a malformed request."""
-    value = ask.body.get(name, [])
-    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-        raise TypeError(f"{name} is not a list of strings")
-    return tuple(value)
 
 
 # ---------- the rows ----------

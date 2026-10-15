@@ -89,7 +89,6 @@ const ROUTES = {
         aliases: [...found.aliases],
         copy: found,
         greeting: _bind(found.greeting, found.name, persona),
-        fileName: found.file_name,
       };
     });
     ids(b, "card_pictures");
@@ -271,7 +270,8 @@ function ids(body, name) {
 
 /* A card's parts as the body carries them (`web.api.codex.cards`): the
    texts, the lists and the reminder's depth — and, for a correction, its
-   name, tagline, aliases and pictures besides. */
+   name, tagline, aliases and pictures besides, and the card it now goes
+   before. */
 function cardFields(body, correcting = false) {
   const fields = {};
   const texts = [
@@ -294,13 +294,9 @@ function copyBody(value) {
     throw new Fault(400, "TypeError: profile_fields is not an object");
   }
   for (const [name, field] of Object.entries(value)) {
-    if (name === "alternate_greetings" || name === "examples") {
-      if (!Array.isArray(field) || !field.every((item) => typeof item === "string")) {
-        throw new Fault(400, `TypeError: ${name} is not a list of strings`);
-      }
-    } else if (name === "reminder_depth") {
-      if (!Number.isInteger(field)) throw new Fault(400, "TypeError: reminder_depth is not an integer");
-    } else if (typeof field !== "string") {
+    if (name === "alternate_greetings" || name === "examples") strings(value, name);
+    else if (name === "reminder_depth") integer(value, name);
+    else if (typeof field !== "string") {
       throw new Fault(400, `TypeError: ${name} is not a string`);
     }
   }
@@ -408,7 +404,7 @@ const etag = (head) => `"${head ?? 0}"`;
    numbers always are. */
 
 const _PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
-const _LARGE_CARD_TOKENS = 4000; // the same warning threshold as `backend.api.cards`
+const _LARGE_CARD_TOKENS = 4000; // the warning threshold of `backend.domain.story.cards`
 const _CHAR_MACRO = /\{\{\s*char\s*\}\}|<BOT>/gi;
 const _USER_MACRO = /\{\{\s*user\s*\}\}|<USER>/gi;
 const _ANY_MACRO = /\{\{[^{}]{1,40}\}\}/g;
@@ -555,8 +551,6 @@ async function _loadCard(bytes, fileName) {
   return { card, notes };
 }
 
-
-
 /** A card FILE read: the card it holds, what reading it noted, and
     whether it carries a picture — or the product's refusal. */
 async function readCardFile(data, fileName) {
@@ -665,7 +659,6 @@ async function card(story, query, body, ask) {
     aliases: [brought.name, ...brought.aliases],
     copy: storyCard,
     greeting: _bind(storyCard.greeting, name, speaking),
-    fileName: storyCard.file_name,
     line: fromFile ? `/card ${fileName}` + (rename ? ` ${rename}` : "") : `/card ${name}`,
     persona: speaking,
     report: report.join(" · "),
@@ -875,7 +868,8 @@ window.fetch = async (input, init = {}) => {
     const headers = {};
     if (answer?._location) headers.Location = answer._location;
     // An answer inside a story says the head it stands at; a deleted
-    // story's and a fork's — an answer about the copy — are aside.
+    // story's, and the forks' — a copy made, or the stories forks join
+    // it to — are aside.
     const aside = (method === "DELETE" && path === `/api/stories/${story}`) || path.endsWith("/forks");
     if (story !== null && !aside) {
       try {

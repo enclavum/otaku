@@ -23,7 +23,6 @@ import hashlib
 import json
 import tomllib
 from collections.abc import Iterable, Mapping, Sequence
-from contextlib import suppress
 from dataclasses import asdict, dataclass, fields, replace
 from typing import Any
 
@@ -36,9 +35,12 @@ from otaku.store.files import Owner
 from otaku.store.ops.lore import CastListing
 from otaku.store.schema import Card, Character
 
-# The fields a reader writes; the name has a column of its own, and the
-# file a card came from is a record, not a field anyone corrects.
-FIELDS = tuple(f.name for f in fields(CharacterProfile) if f.name not in ("name", "file_name"))
+# The fields a reader writes; the name has a column of its own, the
+# `user` a story binds is the story's, and the file a card came from is a
+# record, not a field anyone corrects.
+FIELDS = tuple(
+    f.name for f in fields(CharacterProfile) if f.name not in ("name", "user", "file_name")
+)
 
 # What a card made by hand is called where no name is given: the page
 # makes one so, and opens it on its name for the reader to type over.
@@ -96,11 +98,6 @@ def get_card(app: App, card_id: int) -> Card:
     return card
 
 
-def profile_of(card: Card) -> CharacterProfile:
-    """A card's profile, under its name."""
-    return CharacterProfile.from_toml(card.profile, name=card.name)
-
-
 def get_story_counts(app: App) -> dict[int, int]:
     """How many stories each card is in — one linked character in each —
     by the card's id; a card in none is absent."""
@@ -123,7 +120,7 @@ def create_card(
         name,
         aliases=_clean_aliases(aliases, name),
         tagline=_clean_tagline(tagline),
-        profile=checked_profile(replace(profile, name=name)).to_toml(),
+        profile=_checked_profile(replace(profile, name=name)).to_toml(),
     )
     return card_id, f"Added {name} to the codex."
 
@@ -151,10 +148,7 @@ def update_card(
     new_name = _clean_name(name) if name is not None else card.name
     new_profile: str | None = None
     if changes:
-        unknown = sorted(set(changes) - set(FIELDS))
-        if unknown:
-            raise Invalid(f"A card has no {', '.join(unknown)}.")
-        new_profile = checked_profile(replace(profile_of(card), **changes)).to_toml()
+        new_profile = corrected_profile(card_profile(card), changes).to_toml()
     ordered = None
     if pictures is not None:
         by_name = {picture.file: picture for picture in card.pictures}
@@ -184,15 +178,6 @@ def move_card(app: App, card_id: int, *, before: int | None) -> str:
     order.insert(order.index(before) if before is not None else len(order), card_id)
     app._store.cards.set_order(order)
     return f"Moved {card.name}."
-
-
-def checked_profile(profile: CharacterProfile) -> CharacterProfile:
-    """A profile as the reader wrote it — a codex card's, or a story's
-    copy of one — refused where a number is out of its range: a
-    reminder goes before one of the reader's messages, the newest 1."""
-    if type(profile.reminder_depth) is not int or profile.reminder_depth < 1:
-        raise Invalid("A reminder's depth is a whole number from 1.")
-    return profile
 
 
 def check_move(app: App, card_id: int, *, before: int | None) -> Card:
@@ -241,6 +226,45 @@ def merge_cards(app: App, card_id: int, *, into: int) -> str:
         )
     app._store.cards.merge(source.id, target.id)
     return f"Merged {source.name} into {target.name} ('{source.name}' is now an alias)."
+
+
+# ---------- profiles ----------
+
+
+def card_profile(card: Card) -> CharacterProfile:
+    """A card's profile, under its name."""
+    return CharacterProfile.from_toml(card.profile, name=card.name)
+
+
+def story_profile(character: Character) -> CharacterProfile | None:
+    """A story character's profile — its copy of its card's, under the
+    name it came in as, and the `user` it binds; None for a character no
+    card brought, or one whose profile is no TOML."""
+    if not character.profile:
+        return None
+    try:
+        return CharacterProfile.from_toml(character.profile, name=character.name)
+    except tomllib.TOMLDecodeError:
+        return None
+
+
+def corrected_profile(profile: CharacterProfile, changes: Mapping[str, Any]) -> CharacterProfile:
+    """A profile with the reader's corrections laid over it, by field name
+    (`FIELDS`) — a codex card's, or a story's copy of one. Raises Refused
+    for a field a card has not and a reminder's depth below 1."""
+    unknown = sorted(set(changes) - set(FIELDS))
+    if unknown:
+        raise Invalid(f"A card has no {', '.join(unknown)}.")
+    return _checked_profile(replace(profile, **changes))
+
+
+def _checked_profile(profile: CharacterProfile) -> CharacterProfile:
+    """A profile as the reader wrote it — a codex card's, or a story's
+    copy of one — refused where a number is out of its range: a
+    reminder goes before one of the reader's messages, the newest 1."""
+    if type(profile.reminder_depth) is not int or profile.reminder_depth < 1:
+        raise Invalid("A reminder's depth is a whole number from 1.")
+    return profile
 
 
 # ---------- a card's pictures ----------
@@ -348,11 +372,9 @@ def promote_character(
     that is not there, Conflict for one linked already."""
     character = _promotable(app, story_id, character_id)
     taken = [copy for _, copy in find_copies(app, story_id, character)] if with_copies else []
-    profile = CharacterProfile(name=character.name)
-    if character.profile:
-        # A copy edited past reading leaves the description to stand in.
-        with suppress(tomllib.TOMLDecodeError):
-            profile = CharacterProfile.from_toml(character.profile, name=character.name)
+    # A copy edited past reading leaves the description to stand in; the
+    # persona its story binds is the story's, not the card's.
+    profile = replace(story_profile(character) or CharacterProfile(name=character.name), user="")
     if not profile.description:
         profile = replace(profile, description=character.description)
     card_id = app._store.cards.add(
@@ -447,8 +469,11 @@ def _read(data: bytes, file_name: str) -> tuple[CharacterProfile, list[str]]:
 def _digest(profile: CharacterProfile) -> str:
     """What tells one card file's card from another's: its profile as
     read, the file's name left out — the same card saved as PNG or as
-    JSON, or under another name, is one card."""
-    text = json.dumps(asdict(replace(profile, file_name="")), sort_keys=True, ensure_ascii=False)
+    JSON, or under another name, is one card. `user` is no card's (and
+    left out, so a digest reads as it did before it was a field)."""
+    data = asdict(replace(profile, file_name=""))
+    del data["user"]
+    text = json.dumps(data, sort_keys=True, ensure_ascii=False)
     return hashlib.blake2b(text.encode(), digest_size=16).hexdigest()
 
 

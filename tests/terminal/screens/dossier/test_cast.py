@@ -13,8 +13,11 @@ class TestCharFields:
         assert (first.kind, first.editable) == ("description", True)
 
     def test_an_imported_card_is_a_row_of_its_own_to_correct(self) -> None:
-        fields = char_fields(_lore(_character(card="[card]")), 7)
-        assert [(f.kind, f.editable) for f in fields][:2] == [("description", True), ("card", True)]
+        fields = char_fields(_lore(_character(profile="[card]")), 7)
+        assert [(f.kind, f.editable) for f in fields][:2] == [
+            ("description", True),
+            ("profile", True),
+        ]
 
     def test_states_are_never_editable_and_entries_always_are(self) -> None:
         # Through every scene, the newest record included: a state is
@@ -60,18 +63,21 @@ def _lore(character: Character, *, journals: tuple[int, ...] = (11, 12)) -> Lore
 
 
 def _character(
-    *, card: str | None = None, history: str = "", history_journal_id: int | None = None
+    *, profile: str | None = None, history: str = "", history_journal_id: int | None = None
 ) -> Character:
     return Character(
         id=7,
         name="Keeper",
         aliases=(),
         description="Keeps the light.",
-        card=card,
+        profile=profile,
+        profile_fields=None,
         history=history,
         history_journal_id=history_journal_id,
         card_id=None,
         card_name=None,
+        card_portrait=None,
+        portrait_sent=None,
         provider=None,
         model=None,
         updated_at="",

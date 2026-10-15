@@ -14,6 +14,8 @@ import pytest
 
 from otaku.backend.api import Refused
 from otaku.backend.api.codex.cards import RawFile
+from otaku.backend.domain.codex.cards import NEW_CARD_NAME
+from otaku.store.schema import Message
 from scenarios.support.harness import App
 
 FIXTURES = Path(__file__).parents[2] / "fixtures"
@@ -44,6 +46,10 @@ class TestCards:
         (row,) = app.api.cards.list()
         assert (row.id, row.story_count, row.pictures) == (card.id, 0, ())
 
+    def test_a_card_made_with_nothing_takes_the_name_kept_for_one(self, app: App) -> None:
+        # the page makes one so, and opens it on its name to be typed over
+        assert app.api.cards.create().value.name == NEW_CARD_NAME
+
     def test_a_name_is_needed_and_a_tagline_is_one_line(self, app: App) -> None:
         with pytest.raises(Refused):
             app.api.cards.create(name="  ")
@@ -60,11 +66,12 @@ class TestCards:
             app.api.cards.update(card.id, reminder_depth=0)
         assert app.api.cards.get(card.id).reminder_depth == 2
 
-    def test_the_list_is_by_name_and_answers_a_query(self, app: App) -> None:
+    def test_the_list_is_the_readers_order_and_answers_a_query(self, app: App) -> None:
+        # a card made goes last
         app.api.cards.create(name="zed")
         app.api.cards.create(name="Alma", aliases=("the river",))
         app.api.cards.create(name="Bo", tagline="keeps the river clean")
-        assert [card.name for card in app.api.cards.list()] == ["Alma", "Bo", "zed"]
+        assert [card.name for card in app.api.cards.list()] == ["zed", "Alma", "Bo"]
         # a name, an alias or the tagline, cased as the reader likes
         assert [card.name for card in app.api.cards.list(query="RIVER")] == ["Alma", "Bo"]
 
@@ -97,6 +104,38 @@ class TestCards:
         assert (kept.name, kept.card_id) == ("Mira", None)
         with pytest.raises(Refused):
             app.api.cards.get(card.id)
+
+
+class TestOrder:
+    """The reader's own order of the codex: a card made goes last, and a
+    card moves just before another, or last."""
+
+    def test_a_card_goes_just_before_another_or_last(self, app: App) -> None:
+        a, _, c = (app.api.cards.create(name=name).value.id for name in ("A", "B", "C"))
+        app.api.cards.update(c, before=a)
+        assert _names(app) == ["C", "A", "B"]
+        app.api.cards.update(c, before=None)
+        assert _names(app) == ["A", "B", "C"]
+        app.api.cards.update(a, before=c)
+        assert _names(app) == ["B", "A", "C"]
+
+    def test_a_move_that_cannot_be_made_takes_the_correction_with_it(self, app: App) -> None:
+        a = app.api.cards.create(name="A").value.id
+        with pytest.raises(Refused):
+            app.api.cards.update(a, tagline="first", before=a)  # before itself
+        with pytest.raises(Refused):
+            app.api.cards.update(a, tagline="first", before=999)  # no such card
+        assert app.api.cards.get(a).tagline == ""
+
+    def test_a_correction_and_a_move_land_together(self, app: App) -> None:
+        a, b = (app.api.cards.create(name=name).value.id for name in ("A", "B"))
+        app.api.cards.update(b, tagline="first", before=a)
+        assert (_names(app), app.api.cards.get(b).tagline) == (["B", "A"], "first")
+
+    def test_nothing_to_change_is_refused(self, app: App) -> None:
+        a = app.api.cards.create(name="A").value.id
+        with pytest.raises(Refused):
+            app.api.cards.update(a)
 
 
 class TestCardFiles:
@@ -278,6 +317,29 @@ class TestPromote:
         with pytest.raises(Refused):
             app.api.cards.create(story_id=story, character_id=999)
 
+    def test_a_promotion_takes_the_copies_in_forked_stories_when_asked(self, app: App) -> None:
+        story = app.ensure_story()
+        app.store.stories.append(story, Message(role="user", body="I enter."), after=None)
+        keeper = app.store.characters.add(story, "Keeper", description="keeps the gate")
+        fork = app.api.stories.forks.create(story).value.id
+        again = app.api.stories.forks.create(fork).value.id
+        vetted = app.api.cards.create(story_id=story, character_id=keeper, validate_only=True)
+        assert vetted.copies == 2
+        assert app.api.cards.list() == []  # vetted, nothing made
+        card = app.api.cards.create(story_id=story, character_id=keeper, with_copies=True).value
+        linked = [app.store.characters.list(each)[0].card_id for each in (story, fork, again)]
+        assert linked == [card.id] * 3
+
+    def test_a_promotion_keeps_the_storys_persona_out_of_the_codex(self, app: App) -> None:
+        card = app.api.cards.create(name="Mira", description="the codex's").value
+        story = app.ensure_story()
+        app.api.stories.cards.create(story, card_id=card.id, persona="Alex", expected_head=None)
+        (character,) = app.store.characters.list(story)
+        app.api.stories.characters.update(story, character.id, card_id=None)
+        made = app.api.cards.create(story_id=story, character_id=character.id).value
+        assert "Alex" not in app.store.cards.get(made.id).profile
+        assert made.description == "the codex's"
+
 
 class TestUnlinked:
     def test_every_storys_unlinked_character_the_most_written_about_first(self, app: App) -> None:
@@ -307,3 +369,7 @@ class TestUnlinked:
             found = app.api.cards.unlinked.list(query=query)
             assert [row.name for row in found] == ["Keeper"], query
         assert not app.api.cards.unlinked.list(query="the moon")
+
+
+def _names(app: App) -> list[str]:
+    return [card.name for card in app.api.cards.list()]

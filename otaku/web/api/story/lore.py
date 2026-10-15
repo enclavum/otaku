@@ -7,7 +7,15 @@ starts, polls and stops — kept by the backend, per story."""
 from typing import Any
 
 from otaku.backend.api import UNCHANGED, Api, Unchanged
-from otaku.web.api._request import Accepted, Ask, Route, changed, plain
+from otaku.web.api._request import (
+    Accepted,
+    Ask,
+    Route,
+    changed,
+    checked_integer,
+    checked_strings,
+    plain,
+)
 from otaku.web.api.story.stories import tagged
 
 
@@ -75,12 +83,9 @@ def _profile_fields(value: object) -> dict[str, object]:
         raise TypeError("profile_fields is not an object")
     for name, field in value.items():
         if name in ("alternate_greetings", "examples"):
-            if not isinstance(field, list) or not all(isinstance(item, str) for item in field):
-                raise TypeError(f"{name} is not a list of strings")
-            value[name] = tuple(field)
+            value[name] = checked_strings(field, name)
         elif name == "reminder_depth":
-            if type(field) is not int:
-                raise TypeError("reminder_depth is not an integer")
+            checked_integer(field, name)
         elif not isinstance(field, str):
             raise TypeError(f"{name} is not a string")
     return value

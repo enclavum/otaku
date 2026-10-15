@@ -18,7 +18,14 @@ import pytest
 
 from otaku.backend.api import Changed, InjectionPosition
 from otaku.formatting import Money
-from otaku.web.api._request import Ask, changed, etag, plain
+from otaku.web.api._request import (
+    Ask,
+    changed,
+    checked_integer,
+    checked_strings,
+    etag,
+    plain,
+)
 
 MALFORMED = (KeyError, TypeError, ValueError)
 
@@ -52,6 +59,13 @@ class TestAsk:
             with pytest.raises(MALFORMED):
                 Ask(body={"head": value}).integer("head")
 
+    def test_strings_are_a_json_list_of_strings_or_none_given(self) -> None:
+        assert Ask(body={"aliases": ["a", "b"]}).strings("aliases") == ("a", "b")
+        assert Ask().strings("aliases") == ()
+        for value in ("a", ["a", 1], None):
+            with pytest.raises(MALFORMED):
+                Ask(body={"aliases": value}).strings("aliases")
+
     def test_a_query_flag_is_true_or_false_or_its_default(self) -> None:
         assert Ask(query={"probe": "false"}).query_flag("probe", True) is False
         assert Ask(query={"probe": "true"}).query_flag("probe", False) is True
@@ -64,6 +78,23 @@ class TestAsk:
         assert Ask().query_id("story") is None
         with pytest.raises(MALFORMED):
             Ask(query={"story": "five"}).query_id("story")
+
+
+class TestChecked:
+    """A value the body holds anywhere — inside an object as well as at
+    its top — checked for its shape the way `Ask` checks a field."""
+
+    def test_an_integer_is_a_json_integer_and_never_a_boolean(self) -> None:
+        assert checked_integer(3, "reminder_depth") == 3
+        for value in (True, "3", None, 3.0):
+            with pytest.raises(MALFORMED):
+                checked_integer(value, "reminder_depth")
+
+    def test_strings_are_a_json_list_of_strings(self) -> None:
+        assert checked_strings(["x: 1"], "examples") == ("x: 1",)
+        for value in ("x: 1", ["x", 1], None):
+            with pytest.raises(MALFORMED):
+                checked_strings(value, "examples")
 
 
 class TestEtag:

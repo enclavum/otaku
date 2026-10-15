@@ -96,9 +96,6 @@ const state = {
   cards: new Map(), // id → a codex card, as `Card` minus the stories it is in; in the reader's order
   nextCard: 1,
   cardDigests: new Map(), // id → the digests of the card files it was made from
-  // a story character's card copy: the name it came in as, the {{user}}
-  // it binds and its file — what its profile is written again from
-  copies: new Map(),
 };
 
 export function seed(fixtures) {
@@ -760,11 +757,10 @@ function familyOf(id) {
 }
 
 /* A story made at once — and, given codex cards (`cards`: each its id,
-   name, aliases, the card its copy is of, greeting and file, composed by
-   the router), one
-   started with them as `cards.bring_in_cards` starts it: a card row and a
-   character each, linked, then the first card's greeting; an untitled one
-   named for them. */
+   name, aliases, the card its copy is of and its greeting, composed by
+   the router), one started with them as `cards.bring_in_cards` starts
+   it: a card row and a character each, linked, then the first card's
+   greeting; an untitled one named for them. */
 export function createStory({ title = "", premise = "", cards = [], persona = "" } = {}) {
   if (new Set(cards.map((card) => card.id)).size !== cards.length) throw invalid("A card is picked twice.");
   const seen = new Set();
@@ -786,7 +782,7 @@ export function createStory({ title = "", premise = "", cards = [], persona = ""
     record(story.id, "assistant", greeter.greeting, {
       speaker: greeter.name,
       provider: "card",
-      model: greeter.fileName || null,
+      model: greeter.copy.file_name || null,
     });
   }
   return {
@@ -1099,9 +1095,6 @@ export function checkLink(id, characterId, cardId) {
   return { copies: copiesOf(id, row, card.id).length };
 }
 
-/* A story character's profile corrected field by field and its TOML
-   written again, the {{user}} it binds kept
-   (`domain.story.lore.update_profile`). */
 /* Whether a character's card picture rides its card row
    (`domain.story.lore.set_portrait_sent`): refused where no card row
    brought it in, or there is no picture to send. */
@@ -1114,16 +1107,33 @@ function sendPortrait(row, sent) {
   return "Saved.";
 }
 
+/* A story character's profile corrected field by field and its TOML
+   written again, the names it binds and its file kept
+   (`domain.story.lore.update_profile`). */
 function correctCopy(row, changes) {
   if (!Object.keys(changes).length) throw invalid("Nothing to change.");
+  if (!row.profile_fields) throw invalid(`${row.name} has no card to correct.`);
   const unknown = Object.keys(changes).filter((key) => !CARD_FIELDS.includes(key)).sort();
   if (unknown.length) throw invalid(`A card has no ${unknown.join(", ")}.`);
-  const copy = state.copies.get(row.id);
-  if (!row.profile_fields || !copy) throw invalid(`${row.name} has no card to correct.`);
   checkDepth(changes);
+  const { user, file_name: fileName } = boundOf(row.profile);
   row.profile_fields = { ...row.profile_fields, ...structuredClone(changes) };
-  row.profile = profileToml({ name: copy.name, ...row.profile_fields, file_name: copy.file_name }, copy.user);
+  row.profile = profileToml({ ...row.profile_fields, file_name: fileName }, user);
   return "Saved.";
+}
+
+/* The persona a story character's profile binds and the file it came
+   from, read back off its TOML (`CharacterProfile.from_toml`): one line
+   each, a literal or a JSON-quoted string as either writer writes it. */
+function boundOf(profile) {
+  const found = {};
+  for (const line of (profile ?? "").split("\n")) {
+    const match = /^(user|file_name) = (.*)$/.exec(line);
+    if (!match || match[1] in found) continue;
+    const raw = match[2];
+    found[match[1]] = raw.startsWith("'") ? raw.slice(1, -1) : JSON.parse(raw);
+  }
+  return { user: found.user ?? "", file_name: found.file_name ?? "" };
 }
 
 /* A story's character linked to a codex card — its copies too where
@@ -1139,11 +1149,17 @@ function linkCharacter(id, row, cardId, withCopies = false) {
   }
   const card = linkable(id, row, cardId);
   const found = withCopies ? copiesOf(id, row, card.id) : [];
-  for (const each of [row, ...found.map(copyRow)]) {
+  linkRows([row, ...found.map(copyRow)], card);
+  return `Linked ${row.name} to ${card.name}.${linkedCopies(found.length)}`;
+}
+
+/* Story characters linked to a codex card, its name beside each as a
+   character answers it. */
+function linkRows(rows, card) {
+  for (const each of rows) {
     each.card_id = card.id;
     each.card_name = card.name;
   }
-  return `Linked ${row.name} to ${card.name}.${linkedCopies(found.length)}`;
 }
 
 /* The card a link joins, refused as `domain.story.lore._linkable` says. */
@@ -1292,22 +1308,18 @@ export function personaOf(id) {
   return held(id).persona;
 }
 
-/* The card's three writes, as `domain.story.cards.import_card` makes them:
-   the typed /card row, speaker-linked; the cast row with the card's
-   profile, made by the card; the greeting as the character's own first
-   words. Answered as the two rows and the report. */
 /* The card's three writes, the codex card `card` brought in: the typed
    /card row, speaker-linked; the cast row with the card's profile, made by
    the card and linked to it; the greeting as the character's own first
    words. Answered as the two rows, the codex card and the report. */
-export function importCard(id, expected, { card, name, aliases, copy, greeting, fileName, line, persona, report }) {
+export function importCard(id, expected, { card, name, aliases, copy, greeting, line, persona, report }) {
   const story = held(id);
   checkHead(id, expected);
   ensureFree(id, name, card);
-  const { characterId, typed } = bringIn(story, { id: card, name, aliases, copy, user: persona, fileName, line });
+  const { characterId, typed } = bringIn(story, { id: card, name, aliases, copy, user: persona, line });
   story.persona = persona;
   const said = greeting
-    ? record(id, "assistant", greeting, { speaker: name, provider: "card", model: fileName || null })
+    ? record(id, "assistant", greeting, { speaker: name, provider: "card", model: copy.file_name || null })
     : null;
   return {
     value: { character_id: characterId, card_id: card, line: typed, greeting: said, report },
@@ -1328,23 +1340,22 @@ export function ensureFree(id, name, cardId = null) {
   if (linked) throw conflict(`${cardRow(cardId).name} is in this story already, as ${linked.name}.`);
 }
 
-function bringIn(story, { id: cardId, name, aliases = [], copy, user, fileName = "", line }) {
+function bringIn(story, { id: cardId, name, aliases = [], copy, user, line }) {
   const characterId = state.nextLore++;
   const fields = copyFields(copy);
-  state.copies.set(characterId, { name: copy.name, user, file_name: copy.file_name ?? "" });
   story.lore.characters.push({
     id: characterId,
     name,
     aliases: aliases.filter((alias) => alias.toLowerCase() !== name.toLowerCase()),
     description: "",
-    profile: profileToml({ name: copy.name, ...fields, file_name: copy.file_name }, user),
+    profile: profileToml({ ...fields, file_name: copy.file_name }, user),
     profile_fields: fields,
     history: "",
     history_journal_id: null,
     card_id: cardId,
     card_name: state.cards.get(cardId)?.name ?? null,
-    // the demo keeps no pictures: none to show, none riding
-    card_portrait: state.cards.get(cardId)?.pictures[0] ?? null,
+    // the demo keeps no pictures (`addCardPicture`): none to show, none riding
+    card_portrait: null,
     portrait_sent: false,
     // a card made it, and is answered with no model
     // (`backend.api.story.lore._character`)
@@ -1359,28 +1370,19 @@ function bringIn(story, { id: cardId, name, aliases = [], copy, user, fileName =
 /* A card's own fields as a story character's profile answers them
    (`ProfileFields`): every one, an empty one empty. */
 function copyFields(card) {
-  const fields = {};
-  for (const key of CARD_FIELDS) {
-    const empty = key === "reminder_depth" ? 2 : key === "alternate_greetings" || key === "examples" ? [] : "";
-    fields[key] = structuredClone(card[key] ?? empty);
-  }
-  return fields;
+  return Object.fromEntries(CARD_FIELDS.map((key) => [key, structuredClone(card[key])]));
 }
 
 export function profileToml(card, user) {
   // A story character's profile, its keys in `CharacterProfile.to_toml`'s
-  // order; the demo writes plain TOML — the same fields, its own formatting.
+  // order — the persona it binds first where there is one, the name its
+  // row's; the demo writes plain TOML — the same fields, its own formatting.
   const pair = (key, value) =>
     Array.isArray(value)
       ? `${key} = [${value.map((item) => JSON.stringify(item)).join(", ")}]`
       : `${key} = ${JSON.stringify(value)}`;
-  const lines = [pair("name", card.name), pair("user", user)];
-  const keys = [
-    "description", "personality", "scenario", "greeting", "alternate_greetings",
-    "examples", "reminder", "reminder_depth", "system_prompt", "post_history_instructions",
-    "creator_notes", "file_name",
-  ];
-  for (const key of keys) {
+  const lines = user ? [pair("user", user)] : [];
+  for (const key of [...CARD_FIELDS, "file_name"]) {
     const value = card[key];
     // a number where it is not its default, as the product writes it
     if (key === "reminder_depth" ? value == null || value === 2 : value == null || value.length === 0) continue;
@@ -1474,7 +1476,7 @@ const cleanAliases = (aliases, name) => [
 ];
 
 /* A reminder goes before one of the reader's messages, the newest 1
-   (`backend.domain.codex.cards._checked`). */
+   (`backend.domain.codex.cards._checked_profile`). */
 function checkDepth(fields) {
   const depth = fields.reminder_depth;
   if (depth !== undefined && !(Number.isInteger(depth) && depth >= 1)) {
@@ -1523,13 +1525,15 @@ export function updateCard(id, { before, ...fields }) {
   return { value: cardOf(card), notice: said.join(" ") };
 }
 
-/* A card put just before `before`, or last for null
-   (`backend.domain.codex.cards.move_card`). */
+/* A move refused before anything is written, as
+   `backend.domain.codex.cards.check_move` refuses it. */
 function checkMove(card, before) {
   if (before === card.id) throw invalid("A card cannot go before itself.");
   if (before !== null) cardRow(before);
 }
 
+/* A card put just before `before`, or last for null
+   (`backend.domain.codex.cards.move_card`). */
 function moveCard(card, before) {
   const order = [...state.cards.values()].filter((each) => each.id !== card.id);
   const at = before === null ? order.length : order.findIndex((each) => each.id === before);
@@ -1649,10 +1653,7 @@ export function promote(storyId, characterId, { withCopies = false } = {}) {
   const row = promotable(storyId, characterId);
   const found = withCopies ? copiesOf(storyId, row) : [];
   const made = makeCard({ name: row.name, aliases: row.aliases, fields: { description: row.description } });
-  for (const each of [row, ...found.map(copyRow)]) {
-    each.card_id = made.id;
-    each.card_name = made.name;
-  }
+  linkRows([row, ...found.map(copyRow)], made);
   return {
     value: cardOf(made),
     notice: `Added ${row.name} to the codex, linked to this story's character.${linkedCopies(found.length)}`,

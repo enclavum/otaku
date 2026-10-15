@@ -285,14 +285,14 @@ class TestExport:
     ) -> None:
         """A card row exports as its typed `/card` line, and the archive
         it composes from rides the Cast section — so a re-import restores
-        the dualism whole: the typed line stored, `characters.card` back
+        the dualism whole: the typed line stored, `characters.profile` back
         in the cast, and the wire composed from the archive, never the
         literal command line."""
         monkeypatch.chdir(tmp_path)
         card = Path(__file__).parents[2] / "fixtures" / "seraphina.png"
         app.play(f"/card {card}")
         app.play("/title Glade")
-        archive = app.store.characters.find(app.story_id, "Seraphina").card
+        archive = app.store.characters.find(app.story_id, "Seraphina").profile
         app.play("/export")
         document = (tmp_path / "glade.md").read_text()
         assert f"/card {card}" in document
@@ -301,7 +301,7 @@ class TestExport:
         app.play("/new")
         app.play(f"/import {tmp_path / 'glade.md'}")
         restored = app.store.characters.find(app.story_id, "Seraphina")
-        assert restored is not None and restored.card == archive
+        assert restored is not None and restored.profile == archive
         assert app.messages[0].body == f"/card {card}"
         app.play("I sit up slowly.")
         wire = "\n".join(str(m["content"]) for m in app.server.requests[-1]["messages"])

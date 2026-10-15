@@ -67,10 +67,12 @@ class Ask:
     def integer(self, name: str) -> int:
         """A body field that is a JSON integer; a boolean, a string or a
         null is a malformed request."""
-        value = self.body[name]
-        if isinstance(value, bool) or not isinstance(value, int):
-            raise TypeError(f"{name} is not an integer")
-        return value
+        return checked_integer(self.body[name], name)
+
+    def strings(self, name: str) -> tuple[str, ...]:
+        """A body field that is a JSON list of strings, () where the body
+        leaves it out; anything else is a malformed request."""
+        return checked_strings(self.body.get(name, []), name)
 
     def query_flag(self, name: str, default: bool) -> bool:
         """A query parameter that is `true` or `false`; `default` where
@@ -141,6 +143,23 @@ class PreconditionRequired(Exception):  # noqa: N818 — a 428 is the client's f
     client owed the head it last read. A fault — the server answers
     `428` — not a refusal: the page that sent it is wrong, not the
     reader."""
+
+
+def checked_integer(value: object, name: str) -> int:
+    """`value`, a JSON integer the body names `name` — at its top or
+    inside an object; a boolean, a string or a null is a malformed
+    request."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{name} is not an integer")
+    return value
+
+
+def checked_strings(value: object, name: str) -> tuple[str, ...]:
+    """`value`, a JSON list of strings the body names `name`; anything
+    else is a malformed request."""
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise TypeError(f"{name} is not a list of strings")
+    return tuple(value)
 
 
 def etag(head: int | None) -> str:

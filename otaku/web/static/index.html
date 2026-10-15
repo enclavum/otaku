@@ -253,7 +253,7 @@
         <label class="otk-label" for="otk-filter-unlinked" hidden>Filter</label>
         <input class="otk-filter" id="otk-filter-unlinked" type="search" placeholder="filter story characters" data-filter-unlinked>
       </div>
-      <button type="button" class="otk-unlinked__strip otk-unlinked__toggle"><span class="otk-unlinked__striplabel" data-unlinked-strip>Unlinked story characters</span></button>
+      <button type="button" class="otk-unlinked__strip otk-unlinked__toggle"><span class="otk-unlinked__striplabel" data-unlinked-strip></span></button>
     </aside>
   </div>
 
@@ -539,7 +539,6 @@
   </div>
 </dialog>
 
-<!-- a story to start, and the one thing worth saying up front -->
 <!-- a tool's instruction, edited whole: what the model is told about the
      tool, one text for every story. Esc discards; Save writes prompts.toml. -->
 <dialog class="otk-dialog otk-dialog--wide" data-dialog="instruction" aria-labelledby="otk-instruction-title">
@@ -579,6 +578,7 @@
   </div>
 </dialog>
 
+<!-- a story to start, and the one thing worth saying up front -->
 <dialog class="otk-dialog" data-dialog="new-story" aria-labelledby="otk-new-title">
   <span class="otk-eyebrow" data-title id="otk-new-title">New story</span>
   <div class="otk-dialog__field">

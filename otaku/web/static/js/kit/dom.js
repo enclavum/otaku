@@ -3,6 +3,16 @@
 export const $ = (selector, root = document) => root.querySelector(selector);
 export const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 
+// The stroke of the page's line icons drawn in script: a picture's flip
+// chevrons, the mark that opens a card.
+export const LINE_STROKE = {
+  fill: "none",
+  stroke: "currentColor",
+  "stroke-width": "1.45",
+  "stroke-linecap": "round",
+  "stroke-linejoin": "round",
+};
+
 export function element(tag, className, text) {
   const el = document.createElement(tag);
   if (className) el.className = className;
@@ -29,6 +39,25 @@ export function actionButton(label, { kind = "", off = false, onclick } = {}) {
   button.type = "button";
   button.disabled = off;
   if (onclick) button.onclick = onclick;
+  return button;
+}
+
+/** An SVG element and its attributes. */
+export function svgElement(tag, attributes) {
+  const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value);
+  return node;
+}
+
+/** A switch, on or off by `aria-checked` as `checked` says, named for a
+    screen reader by `label`; what pressing it does is the caller's. */
+export function switchButton(label, checked) {
+  const button = element("button", "otk-switch otk-switch--h");
+  button.type = "button";
+  button.setAttribute("role", "switch");
+  button.setAttribute("aria-checked", String(checked));
+  button.setAttribute("aria-label", label);
+  button.append(span("otk-switch__knob"));
   return button;
 }
 

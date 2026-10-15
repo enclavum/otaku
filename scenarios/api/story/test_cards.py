@@ -19,12 +19,14 @@ from pathlib import Path
 import pytest
 
 from otaku.backend.api import HeadMoved, Refused
+from otaku.backend.api.codex.cards import RawFile
 from otaku.backend.domain.story import _request
 from scenarios.support.harness import App
 
 SERAPHINA = Path(__file__).parents[2] / "fixtures" / "seraphina.png"
 
 MINIMAL = Path(__file__).parents[2] / "fixtures" / "spec_v2_minimal.json"
+CAT = Path(__file__).parents[2] / "fixtures" / "cat.jpg"
 
 
 class TestImport:
@@ -37,8 +39,8 @@ class TestImport:
         assert row.body == f"/card {SERAPHINA}" and row.template is None
         (character,) = app.store.characters.list(app.story_id)
         assert character.name == "Seraphina"
-        # Made by the card, spelled as the greeting spells its source.
-        assert (character.provider, character.model) == ("card", "seraphina.png")
+        # Made by the card, no model: the file it came from is in its profile.
+        assert (character.provider, character.model) == ("card", None)
         # Both rows carry the speaker link; the card row's is the compose key.
         assert (row.speaker, row.speaker_id) == ("Seraphina", character.id)
         assert (greeting.speaker, greeting.speaker_id) == ("Seraphina", character.id)
@@ -47,11 +49,12 @@ class TestImport:
         assert (greeting.provider, greeting.model) == ("card", "seraphina.png")
         assert "{{" not in greeting.body  # macros bound
 
-    def test_the_archive_records_the_bindings(self, app: App) -> None:
+    def test_the_profile_records_the_persona_and_the_row_the_name(self, app: App) -> None:
         app.play(f"/card {SERAPHINA} Warden")
         (character,) = app.store.characters.list(app.story_id)
-        data = tomllib.loads(character.card)
-        assert (data["name"], data["user"]) == ("Warden", "you")
+        data = tomllib.loads(character.profile)
+        assert (character.name, data["user"]) == ("Warden", "you")
+        assert "name" not in data  # the row keeps it, and a rename changes the row
         assert data["file_name"] == "seraphina.png"
 
     def test_a_card_without_a_greeting_imports_the_block_alone(self, app: App) -> None:
@@ -97,8 +100,8 @@ class TestImport:
         # edit of the card TOML changes what every later request sends.
         app.play(f"/card {SERAPHINA}")
         (character,) = app.store.characters.list(app.story_id)
-        edited = character.card.replace("Seraphina's Personality", "Seraphina's Nature")
-        app.store.characters.set_card(character.id, edited)
+        edited = character.profile.replace("Seraphina's Personality", "Seraphina's Nature")
+        app.store.characters.set_profile(character.id, edited)
         app.play("I sit up slowly.")
         wire = "\n".join(str(m["content"]) for m in app.server.requests[-1]["messages"])
         assert "Seraphina's Nature" in wire
@@ -192,7 +195,7 @@ class TestThroughTheCodex:
         ).value
         assert brought.card_id == echo.id
         (character,) = app.store.characters.list(story)
-        assert tomllib.loads(character.card)["description"] == "the codex's own"
+        assert tomllib.loads(character.profile)["description"] == "the codex's own"
 
 
 class TestInvite:
@@ -210,8 +213,8 @@ class TestInvite:
         assert rows[0].body == "/card Seraphina"
         (character,) = app.store.characters.list(story)
         assert (brought.card_id, character.card_id) == (card.id, card.id)
-        data = tomllib.loads(character.card)
-        assert (data["name"], data["user"]) == ("Seraphina", "Alex")
+        data = tomllib.loads(character.profile)
+        assert (character.name, data["user"]) == ("Seraphina", "Alex")
         assert "{{" not in rows[1].body  # the greeting bound
 
     def test_the_copy_is_the_storys_own(self, app: App) -> None:
@@ -220,7 +223,7 @@ class TestInvite:
         app.api.stories.cards.create(story, card_id=card.id, persona="you", expected_head=None)
         app.api.cards.update(card.id, description="after")
         (character,) = app.store.characters.list(story)
-        assert tomllib.loads(character.card)["description"] == "before"
+        assert tomllib.loads(character.profile)["description"] == "before"
 
     def test_a_card_in_the_story_already_is_refused(self, app: App) -> None:
         card = app.api.cards.create(name="Mira").value
@@ -254,6 +257,95 @@ class TestInvite:
         app.api.stories.undos.create(story, expected_head=app.head())
         assert app.store.characters.list(story) == []
         assert [row.id for row in app.api.cards.list()] == [card.id]
+
+
+class TestTheStorysCopy:
+    """A story character's copy of its card's profile, read field by field
+    and corrected a field at a time — the persona it binds kept — and,
+    where it no longer reads, mended whole."""
+
+    def test_the_copy_reads_field_by_field(self, app: App) -> None:
+        story, character = _invited(app, description="keeps the light", reminder="short")
+        fields = app.api.stories.characters.get(story, character).profile_fields
+        assert fields is not None
+        assert (fields.description, fields.reminder, fields.scenario) == (
+            "keeps the light",
+            "short",
+            "",
+        )
+
+    def test_a_field_corrected_keeps_the_rest_and_the_persona(self, app: App) -> None:
+        story, character = _invited(app, description="keeps the light", reminder="short")
+        changed = app.api.stories.characters.update(
+            story, character, profile_fields={"scenario": "a lighthouse"}
+        ).value
+        assert changed.profile_fields is not None
+        assert (changed.profile_fields.scenario, changed.profile_fields.description) == (
+            "a lighthouse",
+            "keeps the light",
+        )
+        stored = tomllib.loads(app.store.characters.list(story)[0].profile or "")
+        assert (stored["user"], stored["scenario"]) == ("Alex", "a lighthouse")
+
+    def test_what_a_card_has_not_or_a_depth_below_one_is_refused(self, app: App) -> None:
+        story, character = _invited(app, description="keeps the light")
+        before = app.store.characters.list(story)[0].profile
+        for changes in ({"colour": "grey"}, {"reminder_depth": 0}):
+            with pytest.raises(Refused):
+                app.api.stories.characters.update(story, character, profile_fields=changes)
+        assert app.store.characters.list(story)[0].profile == before
+
+    def test_a_character_no_card_brought_has_no_fields_to_correct(self, app: App) -> None:
+        story = app.ensure_story()
+        keeper = app.store.characters.add(story, "Keeper")
+        assert app.api.stories.characters.get(story, keeper).profile_fields is None
+        with pytest.raises(Refused):
+            app.api.stories.characters.update(story, keeper, profile_fields={"scenario": "x"})
+
+    def test_a_profile_that_no_longer_reads_is_mended_whole(self, app: App) -> None:
+        story, character = _invited(app, description="keeps the light")
+        app.store.characters.set_profile(character, "description = = 'broken'")
+        assert app.api.stories.characters.get(story, character).profile_fields is None
+        with pytest.raises(Refused):
+            app.api.stories.characters.update(story, character, profile_fields={"scenario": "x"})
+        with pytest.raises(Refused):
+            app.api.stories.characters.update(story, character, profile="still = = broken")
+        mended = app.api.stories.characters.update(
+            story, character, profile="user = 'Alex'\n\ndescription = 'mended'"
+        ).value
+        assert mended.profile_fields is not None and mended.profile_fields.description == "mended"
+
+
+class TestThePortrait:
+    """Whether a card's picture rides the row that brought its character
+    in: switched on, the row carries the card's portrait; off, nothing."""
+
+    def test_the_portrait_rides_the_card_row_when_asked(self, app: App) -> None:
+        card = app.api.cards.create(name="Mira").value.id
+        app.api.cards.pictures.create(card, file=RawFile(CAT.read_bytes(), "cat.jpg"))
+        portrait = app.api.cards.get(card).pictures[0]
+        story = app.ensure_story()
+        app.api.stories.cards.create(story, card_id=card, persona="you", expected_head=None)
+        (character,) = app.api.stories.characters.list(story)
+        assert (character.portrait_sent, character.card_portrait) == (False, portrait)
+        on = app.api.stories.characters.update(story, character.id, portrait_sent=True).value
+        assert on.portrait_sent is True
+        assert _card_row(app, story).attachments == (portrait,)
+        off = app.api.stories.characters.update(story, character.id, portrait_sent=False).value
+        assert off.portrait_sent is False
+        assert _card_row(app, story).attachments == ()
+
+    def test_a_card_with_no_picture_has_none_to_send(self, app: App) -> None:
+        story, character = _invited(app)
+        with pytest.raises(Refused):
+            app.api.stories.characters.update(story, character, portrait_sent=True)
+
+    def test_a_character_no_card_row_brought_has_no_portrait_to_send(self, app: App) -> None:
+        story = app.ensure_story()
+        keeper = app.store.characters.add(story, "Keeper")
+        assert app.api.stories.characters.get(story, keeper).portrait_sent is None
+        with pytest.raises(Refused):
+            app.api.stories.characters.update(story, keeper, portrait_sent=False)
 
 
 class TestWhatACardInjects:
@@ -292,7 +384,9 @@ class TestWhatACardInjects:
         )
         app.api.cards.update(card.value.id, reminder="Songs.")  # the codex's, not the story's
         (character,) = app.store.characters.list(story)
-        app.store.characters.set_card(character.id, character.card.replace("Riddles.", "Rhymes."))
+        app.store.characters.set_profile(
+            character.id, character.profile.replace("Riddles.", "Rhymes.")
+        )
         app.play("I knock.")
         wire = "\n".join(str(m["content"]) for m in app.server.requests[-1]["messages"])
         assert "Rhymes." in wire
@@ -359,3 +453,19 @@ class TestExtraction:
         # scene rightly remembers them.
         assert "Seraphina joins the story" not in extraction
         assert "You wake with a start" in extraction
+
+
+def _invited(app: App, **fields: str) -> tuple[int, int]:
+    """A codex card with `fields`, invited into a new story for Alex; the
+    story and the character it became."""
+    card = app.api.cards.create(name="Mira", **fields).value.id
+    story = app.ensure_story()
+    brought = app.api.stories.cards.create(
+        story, card_id=card, persona="Alex", expected_head=None
+    ).value
+    return story, brought.character_id
+
+
+def _card_row(app: App, story: int):
+    """The story's card row."""
+    return next(m for m in app.store.stories.get_messages(story) if m.kind == "card")

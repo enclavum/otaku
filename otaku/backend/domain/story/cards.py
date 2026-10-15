@@ -17,9 +17,7 @@ card file's name for a model — the source, spelled the way generated
 rows spell theirs: the card introduces the character and the character
 answers, so the model continues the voice."""
 
-import tomllib
 from collections.abc import Collection, Sequence
-from contextlib import suppress
 from dataclasses import dataclass, replace
 
 from otaku.backend.domain.app import App
@@ -28,12 +26,8 @@ from otaku.backend.domain.story import _chain
 from otaku.backend.domain.story.settings import settings_of
 from otaku.backend.errors import NO_SUCH_STORY, Conflict, HeadMoved, Invalid, NotFound
 from otaku.context.assembler import estimate_tokens
-from otaku.context.cards import CharacterProfile, bind, card_to_wire
+from otaku.context.cards import CARD_PROVIDER, CharacterProfile, bind, card_to_wire
 from otaku.store.schema import Card, Message, StoryMode
-
-# What a row a card made names as its maker, where a generated row names
-# its engine; its `model` is the card file's name.
-CARD_PROVIDER = "card"
 
 # A card block above roughly this many tokens gets a warning: it rides
 # every request verbatim and never leaves the context, so on a small
@@ -88,12 +82,12 @@ def check_card(
     if data is not None:
         checked = codex_cards.check_card_file(app, data, file_name)
         same = checked.same_card
-        profile = codex_cards.profile_of(same) if same is not None else checked.profile
+        profile = codex_cards.card_profile(same) if same is not None else checked.profile
         notes, has_picture, similar = checked.notes, checked.has_picture, checked.similar_cards
     elif card_id is not None:
         same = codex_cards.get_card(app, card_id)
         profile, notes, has_picture, similar = (
-            codex_cards.profile_of(same),
+            codex_cards.card_profile(same),
             (),
             bool(same.pictures),
             (),
@@ -259,7 +253,7 @@ def _bring_in(
     aliases, linked to the card — and the row's speaker link. Answered
     with the profile as the story holds it, which its greeting speaks
     from."""
-    profile = replace(codex_cards.profile_of(card), name=name)
+    profile = replace(codex_cards.card_profile(card), name=name, user=persona)
     row = _chain.append_message(
         app,
         story_id,
@@ -277,14 +271,13 @@ def _bring_in(
         for alias in dict.fromkeys([card.name, *card.aliases])
         if alias.casefold() != name.casefold()
     )
-    # Made by the card, spelled as the greeting spells its source below.
+    # Made by the card, no model — the file it came from is in its profile.
     character_id = app._store.characters.add(
         story_id,
         name,
         aliases=aliases,
-        profile=profile.to_toml(user=persona),
+        profile=profile.to_toml(),
         provider=CARD_PROVIDER,
-        model=profile.file_name or None,
         card_id=card.id,
     )
     # The speaker link is the compose key: the row was recorded before
@@ -361,7 +354,11 @@ def _block_tokens(app: App, profile: CharacterProfile, persona: str) -> int:
     """The composed block's cost estimate, over the persona the ask
     defaults to — the answer only swaps a name, never the size class."""
     return estimate_tokens(
-        card_to_wire(profile.to_toml(user=persona or "you"), app._prompts().card_framing)
+        card_to_wire(
+            replace(profile, user=persona or "you").to_toml(),
+            app._prompts().card_framing,
+            char=profile.name,
+        )
     )
 
 
@@ -373,10 +370,7 @@ def _remembered_persona(app: App, story_id: int | None) -> str:
     if story_id is None:
         return ""
     for character in reversed(app._store.characters.list(story_id)):
-        if not character.profile:
-            continue
-        with suppress(tomllib.TOMLDecodeError):
-            user = tomllib.loads(character.profile).get("user")
-            if isinstance(user, str) and user:
-                return user
+        profile = codex_cards.story_profile(character)
+        if profile is not None and profile.user:
+            return profile.user
     return ""

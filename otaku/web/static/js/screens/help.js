@@ -13,7 +13,7 @@
    full sentence. */
 
 import { api } from "../api/index.js";
-import { footnote, popups, wiring } from "../kit/browser.js";
+import { footnote, guard, popups, wiring } from "../kit/browser.js";
 import { $, element, span } from "../kit/dom.js";
 import { opens, prose, rows as syntaxRows } from "../play/language.js";
 
@@ -136,7 +136,8 @@ export function openSupport() {
   footnote(popup, "");
   send.addEventListener(
     "click",
-    async () => {
+    // a fault is a bug, not an answer: `guard` gives the console it, the reader a sentence
+    guard(async () => {
       if (popup.dataset.sent !== undefined) {
         popup.close();
         return;
@@ -153,14 +154,10 @@ export function openSupport() {
         send.textContent = "Close";
         // out of sight but not of the row: Close stands where Send stood
         cancel.style.visibility = "hidden";
-      } catch (e) {
-        // a fault is a bug, not an answer: the console gets it, the reader a sentence
-        console.error(e);
-        footnote(popup, String(e.message ?? e), true);
       } finally {
         send.disabled = false;
       }
-    },
+    }),
     { signal },
   );
   if (!popup.open) popup.showModal();

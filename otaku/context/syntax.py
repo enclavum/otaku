@@ -5,7 +5,7 @@ to whatever opened it — a direction (/me, /you, /ooc) or prose when
 nothing did. Writing: `to_wire` is the ONE dispatch turning a stored turn into wire
 text, whatever its kind — prose parses for its syntax, a direction's
 stored template fills, a card row takes the block composed from its
-archive, a recap row IS its text.
+character's profile, a recap row IS its text.
 
 A line is stored exactly as typed and read again whenever the turn is
 used. Templates are data on the turn (`Message.template`); at RECORD
@@ -291,8 +291,8 @@ def spans(line: str) -> list[tuple[str, bool]]:
 
 def to_wire(message: Message, *, is_last: bool, card_block: str | None = None) -> str:
     """What one stored turn sends. A card row sends `card_block` (the
-    caller owns the archive lookup and composition; a row with no
-    reachable archive sends its body). Every other row parses its stored
+    caller owns the profile lookup and composition; a row with no
+    reachable profile sends its body). Every other row parses its stored
     line and fills its stored template. Two body shapes reach this, and
     the body tells them apart: turns written before the syntax existed
     hold prose with their prefix already stripped and their name already

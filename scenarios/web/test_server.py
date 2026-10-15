@@ -24,9 +24,11 @@ import pytest
 from otaku.backend.api import Layout
 from otaku.backend.domain.app._paths import Paths
 from otaku.backend.domain.app.models import PARAMETERS, THINK_MENU
+from otaku.backend.domain.codex.cards import NEW_CARD_NAME
 from otaku.integrations import SupportDesk
 from otaku.settings import models as models_file
 from otaku.store.files import Owner
+from otaku.store.schema import Message
 from scenarios.support import server as scripted
 from scenarios.support.harness import MODEL, set_config, set_config_provider
 from scenarios.support.server import ModelServer
@@ -252,7 +254,8 @@ class TestReading:
         lore = page.get(f"/api/stories/{story}/lore")
         assert [(s["provider"], s["model"]) for s in lore["scenes"]] == [("p", "m")]
         made = [(c["provider"], c["model"]) for c in lore["characters"]]
-        assert made == [("card", "maren.png"), (None, None)]
+        # a card made the first — no model, whatever its row once recorded
+        assert made == [("card", None), (None, None)]
 
     def test_the_context_fill_is_the_preview_s_own_figure(self, tmp_path: Path) -> None:
         # Not known while the model is not loaded; once a turn loaded it,
@@ -1377,6 +1380,52 @@ class TestTheCodexOverTheWire:
 
     def test_a_card_id_is_digits(self, page: Page) -> None:
         assert page.status("/api/cards/mira") == 404
+
+    def test_a_card_made_with_nothing_is_named_for_the_reader_to_replace(self, page: Page) -> None:
+        status, _, made = page.answer("POST", "/api/cards", {})
+        assert status == 201 and made["value"]["name"] == NEW_CARD_NAME
+
+    def test_a_card_moves_in_the_readers_order(self, page: Page) -> None:
+        a, b, c = (page.post("/api/cards", {"name": n})["value"]["id"] for n in "ABC")
+        page.patch(f"/api/cards/{c}", {"before": a})
+        assert [row["id"] for row in page.get("/api/cards")["items"]] == [c, a, b]
+        page.patch(f"/api/cards/{c}", {"before": None})
+        assert [row["id"] for row in page.get("/api/cards")["items"]] == [a, b, c]
+        # a move that cannot be made takes the correction with it
+        assert page.refused("PATCH", f"/api/cards/{a}", {"tagline": "x", "before": a})
+        assert page.get(f"/api/cards/{a}")["tagline"] == ""
+        body = json.dumps({"before": "B"}).encode()
+        assert page.status(f"/api/cards/{a}", method="PATCH", data=body) == 400
+
+    def test_a_link_and_a_promotion_vetted_count_the_copies(self, page: Page) -> None:
+        story = page.made()
+        page.store.stories.append(story, Message(role="user", body="I enter."), after=None)
+        maren = page.store.characters.add(story, "Maren")
+        fork = page.post(f"/api/stories/{story}/forks", {})["value"]["id"]
+        assert [row["id"] for row in page.get(f"/api/stories/{story}/forks")["items"]] == [fork]
+        card = page.post("/api/cards", {"name": "Maren"})["value"]["id"]
+        path = f"/api/stories/{story}/characters/{maren}"
+        assert page.patch(f"{path}?validate_only=true", {"card_id": card}) == {"copies": 1}
+        assert page.get(path)["card_id"] is None  # vetted, nothing stored
+        promoting = {"story_id": story, "character_id": maren}
+        assert page.post("/api/cards?validate_only=true", promoting) == {"copies": 1}
+        page.patch(path, {"card_id": card, "with_copies": True})
+        (copy,) = page.get(f"/api/stories/{fork}/characters")["items"]
+        assert copy["card_id"] == card
+
+    def test_a_copy_is_read_and_corrected_field_by_field(self, page: Page) -> None:
+        story = page.made()
+        mira = page.store.characters.add(
+            story, "Mira", profile="user = 'you'\n\ndescription = 'keeps the light'"
+        )
+        path = f"/api/stories/{story}/characters/{mira}"
+        read = page.get(path)
+        assert read["profile_fields"]["description"] == "keeps the light"
+        changed = page.patch(path, {"profile_fields": {"scenario": "a lighthouse"}})["value"]
+        assert changed["profile_fields"]["scenario"] == "a lighthouse"
+        assert "user = 'you'" in changed["profile"]
+        bad = json.dumps({"profile_fields": {"examples": "one"}}).encode()
+        assert page.status(path, method="PATCH", data=bad) == 400
 
 
 class TestTheNovelOverTheWire:

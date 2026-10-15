@@ -671,7 +671,9 @@ _PAGE = {
     "stories": {"api", "browser", "dom", "dossier", "format", "held", "shell", "transfer"},
     # `format` for a model's size and window, written as the catalogs write them.
     "models": {"api", "browser", "dom", "format", "shell"},
-    "settings": {"api", "browser", "dom"},
+    # `shell` to draw the story's facts and context use again after a
+    # setting that changes them.
+    "settings": {"api", "browser", "dom", "shell"},
     "reports": {"api", "browser", "dom", "format", "held"},
     "transfer": {"api", "browser", "dom", "held", "shell", "status"},
     # The sign-in dialog and the rail's way out: `app` hands it to

@@ -620,9 +620,7 @@ paths:
         card staying. The page sends the file both times: nothing waits on
         the server between the two.
       parameters:
-        - name: validate_only
-          in: query
-          schema: { type: boolean, default: false }
+        - $ref: "#/components/parameters/ValidateOnly"
         - $ref: "#/components/parameters/IfMatch"
       requestBody:
         required: true
@@ -857,9 +855,7 @@ paths:
       summary: Correct a character, or link it to a codex card
       description: The description, and the profile an imported one carries — whole as TOML (`profile`; emptied to nothing included) or field by field (`profile_fields`, a field emptied leaving it) — and the codex card it is linked to (`card_id`; null unlinks), which changes nothing else on either. A link takes the character's copies along with `with_copies` — in every story forks join its own to, the one unlinked character of its very name, a story where the card links another already passed over. With `validate_only`, a link alone is vetted, nothing stored, answered with how many copies.
       parameters:
-        - name: validate_only
-          in: query
-          schema: { type: boolean, default: false }
+        - $ref: "#/components/parameters/ValidateOnly"
       requestBody:
         required: true
         content:
@@ -1155,9 +1151,7 @@ paths:
         hand (`201`): with no `name`, the card is called "New card", for the
         reader to replace.
       parameters:
-        - name: validate_only
-          in: query
-          schema: { type: boolean, default: false }
+        - $ref: "#/components/parameters/ValidateOnly"
       requestBody:
         required: true
         content:
@@ -2152,7 +2146,6 @@ components:
       { name: setting, in: path, required: true, schema: { type: string }, description: "A story setting's name: use_shared_reminder, use_story_reminder, allow_assistant_notes, allow_questions, allow_system_info, allow_web_search, emulate_text_completion, layout." }
     Tool:
       { name: tool, in: path, required: true, schema: { type: string }, description: "A tool's name, as a story setting's `tool` names it: question, note, system-info, web-search." }
-
     Prompt:
       { name: prompt, in: path, required: true, schema: { type: string }, description: "A prompt's prompts.toml key, as a story setting's `prompt_name` names it — one no tool owns: emulate_text_completion_prompt." }
     Card:
@@ -2168,6 +2161,8 @@ components:
         (`"<head>"`, `"0"` for none), or `*` for the head as it stands.
         Required by every write that moves the head — a PATCH only when
         it names `head`, a card import only without `validate_only`.
+    ValidateOnly:
+      { name: validate_only, in: query, schema: { type: boolean, default: false }, description: "Vet the write and store nothing: a refusal is the one the write would meet." }
 
   headers:
     ETag:
@@ -2296,23 +2291,14 @@ components:
           description: The cards of the same name the reader may say it is (`reuse`).
 
     CardFields:
-      type: object
-      description: A card's parts as a reader writes them.
-      properties:
-        name: { type: string }
-        aliases: { type: array, items: { type: string } }
-        tagline: { type: string, description: "One line." }
-        description: { type: string }
-        personality: { type: string }
-        scenario: { type: string }
-        greeting: { type: string }
-        alternate_greetings: { type: array, items: { type: string } }
-        examples: { type: array, items: { type: string } }
-        reminder: { type: string, description: "A standing rule, sent on its own before the reader's `reminder_depth`-th message from the end." }
-        reminder_depth: { type: integer, minimum: 1, default: 2, description: "Before which of the reader's messages from the end the reminder goes, 1 the newest." }
-        system_prompt: { type: string, description: "Joined to the system message of a story the card is in, after its premise." }
-        post_history_instructions: { type: string, description: "Kept, sent nowhere." }
-        creator_notes: { type: string }
+      description: A card's parts as a reader writes them — its name, aliases and tagline, and its profile's fields.
+      allOf:
+        - type: object
+          properties:
+            name: { type: string }
+            aliases: { type: array, items: { type: string } }
+            tagline: { type: string, description: "One line." }
+        - $ref: "#/components/schemas/ProfileFields"
 
     CardImport:
       type: object
@@ -2798,7 +2784,7 @@ components:
 
     ProfileFields:
       type: object
-      description: A story character's profile, a copy of its card's, field by field.
+      description: A character's profile, field by field — a codex card's, or a story character's copy of one.
       properties:
         description: { type: string }
         personality: { type: string }
@@ -2806,10 +2792,10 @@ components:
         greeting: { type: string }
         alternate_greetings: { type: array, items: { type: string } }
         examples: { type: array, items: { type: string } }
-        reminder: { type: string }
-        reminder_depth: { type: integer, minimum: 1 }
-        system_prompt: { type: string }
-        post_history_instructions: { type: string }
+        reminder: { type: string, description: "A standing rule, sent on its own before the reader's `reminder_depth`-th message from the end." }
+        reminder_depth: { type: integer, minimum: 1, default: 2, description: "Before which of the reader's messages from the end the reminder goes, 1 the newest." }
+        system_prompt: { type: string, description: "Joined to the system message of a story the card is in, after its premise." }
+        post_history_instructions: { type: string, description: "Kept, sent nowhere." }
         creator_notes: { type: string }
 
     Prompt:

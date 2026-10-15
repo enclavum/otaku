@@ -94,7 +94,8 @@ def _memory(*scenes: Scene) -> Memory:
         cast=(),
         journals=(),
         ordinal={mid: mid for mid in range(1, 101)},
-        card_names={},
+        linked_cards={},
+        portraits_sent={},
     )
 
 
@@ -115,5 +116,6 @@ def _peopled(*, history: tuple[str, str]) -> Memory:
             Journal(id=12, scene_id=2, character_id=7, entry="e2", state="s2", history=history[1]),
         ),
         ordinal={n: n for n in range(1, 5)},
-        card_names={},
+        linked_cards={},
+        portraits_sent={},
     )

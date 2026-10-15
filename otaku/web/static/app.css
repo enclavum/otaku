@@ -1072,7 +1072,7 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 .otk-lightbox__arrow--prev { left: 10px; }
 .otk-lightbox__arrow--next { right: 10px; }
 .otk-lightbox__arrow:hover, .otk-lightbox__arrow:focus-visible { border-color: var(--otk-ink); }
-.otk-lightbox__arrow[aria-disabled="true"] { opacity: 0.35; cursor: default; }
+.otk-lightbox__arrow[aria-disabled="true"], .otk-tile__nav[aria-disabled="true"] { opacity: 0.35; cursor: default; }
 .otk-lightbox__count { color: var(--otk-body); font-variant-numeric: tabular-nums; }
 /* At its own size on the well, downsized to the frame when it is too big,
    never upsized to fill it. Its own size is the row's measure, written on
@@ -1722,7 +1722,7 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 .otk-seg__btn[aria-pressed="true"] { background: var(--otk-ink); color: var(--otk-paper); }
 .otk-seg__btn--glyph { width: 36px; height: 30px; padding: 0; display: flex; align-items: center; justify-content: center; line-height: 0; }
 
-.otk-chars { flex: 1; min-height: 0; position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 270px; border-top: var(--otk-hair) solid var(--otk-line-soft); }
+.otk-chars { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 270px; border-top: var(--otk-hair) solid var(--otk-line-soft); }
 /* the one head with a rule straight under it: as much room below as above */
 .otk-panel--chars .otk-panel__head { padding-bottom: 14px; }
 .otk-chars[data-unlinked="closed"] { grid-template-columns: minmax(0, 1fr) 44px; }
@@ -1752,16 +1752,15 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 .otk-tile__pic > img, .otk-charrow__pic > img, .otk-picsend__thumb > img, .otk-pics__thumb > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .otk-tile__empty { position: relative; font-family: var(--otk-font-mono); font-size: var(--otk-size-foot); color: var(--otk-faint); }
 .otk-tile__nav { position: absolute; z-index: 1; top: 50%; transform: translateY(-50%); width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; background: color-mix(in oklch, var(--otk-paper) 88%, transparent); border: var(--otk-hair) solid var(--otk-line-soft); color: var(--otk-ink); }
-.otk-tile__nav[aria-disabled="true"] { opacity: 0.35; cursor: default; }
 .otk-tile__nav--prev { left: 4px; }
 .otk-tile__nav--next { right: 4px; }
 .otk-tile__count { position: absolute; z-index: 1; right: 6px; bottom: 6px; padding: 1px 4px; background: color-mix(in oklch, var(--otk-paper) 88%, transparent); font-family: var(--otk-font-mono); font-size: var(--otk-size-foot); color: var(--otk-muted); }
 .otk-tile__name { font-family: var(--otk-font-display); font-size: 15px; font-weight: 600; color: var(--otk-ink); }
-.otk-tile__tag { font-family: var(--otk-font-prose); font-size: 14px; font-style: italic; line-height: 1.35; color: var(--otk-muted); }
+/* a tagline is one line wherever it stands, cut with an ellipsis */
+.otk-tile__tag { font-family: var(--otk-font-prose); font-size: 14px; font-style: italic; line-height: 1.35; color: var(--otk-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .otk-tile__meta { font-family: var(--otk-font-mono); font-size: var(--otk-size-label); color: var(--otk-faint); white-space: nowrap; }
 /* in a tile the tagline and the line under it stop at its edge, cut short
    rather than wrapped */
-.otk-tile > .otk-tile__tag { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .otk-tile > .otk-tile__meta { overflow: hidden; text-overflow: ellipsis; }
 
 /* picked for Start a story: the tick the sign-in checkbox draws, in the
@@ -1777,7 +1776,6 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 .otk-charrow:hover { background: var(--otk-accent-tint); }
 .otk-charrow__pic { position: relative; overflow: hidden; width: 34px; height: 42px; flex: none; border: var(--otk-hair) solid var(--otk-line-soft); background: repeating-linear-gradient(135deg, var(--otk-band) 0 5px, var(--otk-well) 5px 10px); }
 .otk-charrow__text { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 0 1 440px; }
-.otk-charrow__text .otk-tile__tag { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* the counts at the row's far end */
 .otk-charrow > .otk-tile__meta { margin-left: auto; }
 
@@ -1792,12 +1790,11 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 .otk-unlinked__item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; cursor: pointer; }
 .otk-unlinked__item:hover { background: var(--otk-paper); }
 .otk-unlinked__text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.otk-unlinked__text .otk-tile__tag { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .otk-unlinked__count { font-family: var(--otk-font-mono); font-size: var(--otk-size-label); color: var(--otk-faint); }
 .otk-grip { flex: none; width: 8px; height: 13px; cursor: grab; background: radial-gradient(circle, var(--otk-faint) 1.2px, transparent 1.4px) 0 0 / 4px 4.5px; }
 .otk-unlinked__pinned { flex: none; padding: 11px 12px; border-top: var(--otk-hair) solid var(--otk-line-soft); }
 .otk-unlinked__pinned .otk-filter { width: 100%; }
-.otk-unlinked__strip { display: none; flex-direction: column; align-items: center; gap: 10px; padding-top: 16px; font-family: var(--otk-font-mono); font-size: var(--otk-size-mono-sm); color: var(--otk-muted); }
+.otk-unlinked__strip { display: none; flex-direction: column; align-items: center; padding-top: 16px; font-family: var(--otk-font-mono); }
 .otk-unlinked__striplabel { writing-mode: vertical-rl; transform: rotate(180deg); font-size: var(--otk-size-label); letter-spacing: 0.18em; text-transform: uppercase; color: var(--otk-ink); }
 .otk-chars[data-unlinked="closed"] .otk-unlinked > :not(.otk-unlinked__strip) { display: none; }
 .otk-chars[data-unlinked="closed"] .otk-unlinked__strip { display: flex; height: 100%; }
@@ -1826,7 +1823,6 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 .otk-sheet__body { flex: 1; min-height: 0; display: grid; grid-template-columns: 230px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 24px; padding: 20px 0 0 24px; }
 .otk-sheet__body > .otk-pics { min-height: 0; overflow-y: auto; padding-bottom: 20px; }
 .otk-sheet__body > .otk-sheet__fields { min-height: 0; overflow-y: auto; padding: 0 24px 20px 0; scrollbar-gutter: stable; }
-.otk-sheet__body[hidden], .otk-sheet__journals[hidden] { display: none; }
 .otk-sheet__fields { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .otk-sheet__tagline { font-style: italic; color: var(--otk-muted); }
 .otk-sheet__section { padding-bottom: 5px; border-bottom: var(--otk-hair) solid var(--otk-line-soft); }
@@ -1903,7 +1899,7 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 .otk-pickrow { flex: none; display: flex; align-items: center; gap: 12px; width: 100%; padding-top: 8px; padding-bottom: 8px; text-align: left; }
 .otk-pickrow > .otk-charrow__pic { height: auto; aspect-ratio: 4 / 5; }
 .otk-pickrow > .otk-tile__name { flex: none; }
-.otk-pickrow > .otk-tile__tag { flex: 1 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.otk-pickrow > .otk-tile__tag { flex: 1 1 auto; min-width: 0; }
 .otk-chosen { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--otk-well); border: var(--otk-hair) dashed var(--otk-line); }
 
 /* the drop target that turns an unlinked story character into a new card —
@@ -1970,12 +1966,11 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
   display: inline-flex; align-items: center; gap: 8px; min-width: 0;
   font-family: var(--otk-font-mono); font-size: var(--otk-size-foot);
   letter-spacing: var(--otk-track-foot); text-transform: uppercase;
-  color: var(--otk-danger); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  color: var(--otk-danger); white-space: nowrap; overflow: hidden;
 }
 .otk-alert::before { content: ""; width: 7px; height: 7px; background: var(--otk-danger); flex: none; }
 /* the reason in a box of its own, where a long one can end in an ellipsis */
 .otk-alert > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.otk-panel__foot > .otk-alert:last-child { margin-left: 0; }
 
 .otk-panel__foot--error, .otk-docket__foot--error, .otk-dialog__foot--error, .otk-sheet__foot--error { position: relative; isolation: isolate; }
 .otk-panel__foot--error::before, .otk-docket__foot--error::before, .otk-dialog__foot--error::before, .otk-sheet__foot--error::before {

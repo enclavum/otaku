@@ -61,7 +61,7 @@ _LENS_SPLIT = (1, 1)
 
 # Every field a detail view shows, by the resource and field it is.
 # Hand-editable is what is written once and read from then on (titles,
-# summaries, entries, descriptions, cards); the extractor's own — `state`
+# summaries, entries, descriptions, profiles); the extractor's own — `state`
 # (superseded by the next scene's row), `history` and `scene-history`
 # (rebuilt from the primitives) — is shown and has no write.
 FieldKind = Literal[
@@ -69,7 +69,7 @@ FieldKind = Literal[
     "scene-summary",
     "scene-history",
     "description",
-    "card",
+    "profile",
     "entry",
     "state",
     "history",
@@ -279,8 +279,8 @@ class DossierBase(ListScreen):
             return [("class:preview.muted", "nothing to preview")]
         out: StyleAndTextTuples = []
         f = self.fields[self.cursor]
-        if f.kind == "card" and f.text:
-            # The archive reads as TOML: keys and macros in the command
+        if f.kind == "profile" and f.text:
+            # The profile reads as TOML: keys and macros in the command
             # color — highlighted after the wrap, so the widths stay
             # honest (escapes take no columns the wrap could count).
             wrapped = "\n".join(wrap_text(f.text, width))

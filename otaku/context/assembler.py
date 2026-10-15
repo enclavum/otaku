@@ -55,7 +55,7 @@ from enum import Enum
 from typing import Protocol
 
 from otaku.context import syntax, tool_calls
-from otaku.context.cards import card_to_wire
+from otaku.context.cards import CARD_PROVIDER, card_to_wire
 from otaku.context.injections import ROW_KIND, Injection, inject_into_system, inject_into_tail
 from otaku.providers import PicturesRide
 from otaku.providers.openai.templates import TextTemplate
@@ -275,7 +275,7 @@ def get_join_type(previous: Message | None, next: Message) -> JoinType:
         return JoinType.PARAGRAPH
     # A card's line and greeting stand alone in any mode: nobody wrote
     # them into the text.
-    if any(row.kind == "card" or row.provider == "card" for row in rows):
+    if any(row.kind == "card" or row.provider == CARD_PROVIDER for row in rows):
         return JoinType.PARAGRAPH
     if previous.body.rstrip(" \t").endswith("\n") or next.body.lstrip(" \t").startswith("\n"):
         return JoinType.PARAGRAPH
@@ -705,9 +705,11 @@ def _composed_cards(
     typed-row shape, or the link is gone — sends its body as it stands."""
     if story_id is None or all(m.kind != "card" for m in messages):
         return messages
-    profiles = {c.id: c.profile for c in store.characters.list(story_id) if c.profile}
+    carded = {c.id: c for c in store.characters.list(story_id) if c.profile}
     out: list[Message] = []
     for m in messages:
-        toml = profiles.get(m.speaker_id) if m.kind == "card" and m.speaker_id else None
-        out.append(replace(m, body=card_to_wire(toml, card_framing)) if toml else m)
+        who = carded.get(m.speaker_id) if m.kind == "card" and m.speaker_id else None
+        if who is not None and who.profile:
+            m = replace(m, body=card_to_wire(who.profile, card_framing, char=who.name))
+        out.append(m)
     return out

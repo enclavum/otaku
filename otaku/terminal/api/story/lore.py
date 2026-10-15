@@ -8,6 +8,7 @@ from otaku.backend.api.story.lore import Character as Character
 from otaku.backend.api.story.lore import Extraction as Extraction
 from otaku.backend.api.story.lore import Journal as Journal
 from otaku.backend.api.story.lore import Lore as Lore
+from otaku.backend.api.story.lore import ProfileFields as ProfileFields
 from otaku.backend.api.story.lore import Scene as Scene
 
 

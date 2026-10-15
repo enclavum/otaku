@@ -29,10 +29,10 @@ FULL = ExportedStory(
             "Кассиан",
             ("Кас",),
             "усталый наёмник",
-            # Deliberately structure-shaped content: the archive block must
+            # Deliberately structure-shaped content: the profile block must
             # survive lines that look like the document's own headings and
             # roster bullets.
-            card='name = "Кассиан"\n\ndescription = """\n### Глава\n- **точка** списка\n"""',
+            profile='name = "Кассиан"\n\ndescription = """\n### Глава\n- **точка** списка\n"""',
         ),
         ExportedCharacter("Элоиза"),
     ),

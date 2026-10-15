@@ -30,19 +30,18 @@ export function closeAll() {
 export function footnote(popup, text, refused = false) {
   /* The footer's fact slot: the panel's standing fact, and what a WRITE
      answered with — carried into the redraw the write triggers, or the
-     standing fact goes back over the answer milliseconds later. Answers
-     whether there was a slot: an ask dialog has no footer, and its
-     notices go to the flow instead. A `refused` answer is an error, and
-     said where the reader is looking (`report`). */
+     standing fact goes back over the answer milliseconds later. A
+     `refused` answer is an error, said where the reader is looking
+     (`report`) whatever `popup` is: where a caller knows it refuses, it
+     calls `report` itself. */
   if (refused && text) {
     report(text);
-    return true;
+    return;
   }
   const foot = footOf(popup);
   if (foot) calm(foot);
   const slot = foot && $("[data-note]", foot);
   if (slot) slot.textContent = text;
-  return Boolean(slot);
 }
 
 /** A refusal or a failure, said where the reader is looking: in the foot
@@ -744,6 +743,22 @@ function storedOffset(stored, drawn, at) {
     runs on any answer but Cancel or a dismissal and returns the backend's
     answer, or null for nothing to write; that answer is what this
     resolves to, null where nothing was written. */
+/** The confirm dialog asked: its title and body, a second line for a
+    question whose answer has a consequence worth spelling out (`note`;
+    hidden for the plain ones), and its two buttons' words. Answers as
+    `ask` does: "confirm", "cancel", or null for Esc and the scrim. */
+export function askConfirm({ title, body, note = "", action, cancel = "Cancel" }) {
+  return ask("confirm", (dialog) => {
+    $("[data-title]", dialog).textContent = title;
+    $(".otk-dialog__body", dialog).textContent = body;
+    const aside = $("[data-note]", dialog);
+    aside.textContent = note;
+    aside.hidden = !note;
+    $('[data-choice="confirm"]', dialog).textContent = action;
+    $('[data-choice="cancel"]', dialog).textContent = cancel;
+  });
+}
+
 export async function askWriting(name, fill, write) {
   let refused = null;
   for (;;) {

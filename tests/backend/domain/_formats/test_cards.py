@@ -16,7 +16,6 @@ import zlib
 import pytest
 
 from otaku.backend.domain._formats.cards import CardError, load_card
-from otaku.context.cards import card_toml
 
 
 class TestLoadCard:
@@ -111,11 +110,11 @@ class TestLoadCard:
     def test_the_file_name_rides_as_reference(self) -> None:
         card, _ = load_card(_json(_v2(name="E")), file_name="seraphina.png")
         assert card.file_name == "seraphina.png"
-        data = tomllib.loads(card_toml(card, user="U"))
+        data = tomllib.loads(card.to_toml())
         assert data["file_name"] == "seraphina.png"
         # And absent when the caller had none — never an empty key.
         bare, _ = load_card(_json(_v2(name="E")))
-        assert "file_name" not in card_toml(bare, user="U")
+        assert "file_name" not in bare.to_toml()
 
     def test_macros_nothing_binds_are_reported(self) -> None:
         payload = _v2(name="Elara", description="roll {{roll:d20}} for {{char}}")
@@ -188,7 +187,7 @@ class TestNormalization:
         payload = _v2(name="E", chat="private-chat-name", char_persona="undefined undefined")
         card, _ = load_card(_json(payload))
         assert not hasattr(card, "chat")
-        assert "private-chat-name" not in card_toml(card, user="you")
+        assert "private-chat-name" not in card.to_toml()
 
 
 def _v2(**data: object) -> dict:

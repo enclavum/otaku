@@ -130,7 +130,7 @@ def char_fields(view: Lore, character_id: int) -> list[Field]:
         return []
     out = [Field("description", "description", char.description, char.id, True)]
     if char.profile is not None:
-        out.append(Field("card", "card", char.profile, char.id, True))
+        out.append(Field("card", "profile", char.profile, char.id, True))
     scenes = {s.id: s for s in view.scenes}
     position = {s.id: i for i, s in enumerate(view.scenes)}
     rows = sorted(

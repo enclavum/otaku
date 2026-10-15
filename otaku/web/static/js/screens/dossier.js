@@ -24,6 +24,7 @@
 import { api } from "../api/index.js";
 import {
   ask,
+  askConfirm,
   browser,
   closeAll,
   edited,
@@ -31,8 +32,20 @@ import {
   footnote,
   guard,
   popups,
+  report,
 } from "../kit/browser.js";
-import { $, $$, actionButton, element, pickFile, row, span } from "../kit/dom.js";
+import {
+  $,
+  $$,
+  LINE_STROKE,
+  actionButton,
+  element,
+  pickFile,
+  row,
+  span,
+  svgElement,
+  switchButton,
+} from "../kit/dom.js";
 import { ago, excerpt, label } from "../kit/format.js";
 import * as held from "../play/held.js";
 import { thumbs } from "../kit/pictures.js";
@@ -101,15 +114,10 @@ export async function openStory({ story = null, tab = "messages", allStories } =
     the rail's /fork and the story browser's button — before a story is
     made. `run` fires only on the answer, after the screens go. */
 export async function confirmFork(run) {
-  const choice = await ask("confirm", (dialog) => {
-    $("[data-title]", dialog).textContent = "Fork this story?";
-    $(".otk-dialog__body", dialog).textContent =
-      "A copy from here on. The original stays as it is, and play continues in the copy.";
-    const aside = $("[data-note]", dialog);
-    aside.textContent = "";
-    aside.hidden = true;
-    $('[data-choice="confirm"]', dialog).textContent = "Fork";
-    $('[data-choice="cancel"]', dialog).textContent = "Cancel";
+  const choice = await askConfirm({
+    title: "Fork this story?",
+    body: "A copy from here on. The original stays as it is, and play continues in the copy.",
+    action: "Fork",
   });
   if (choice !== "confirm") return;
   closeAll();
@@ -714,12 +722,10 @@ function pictureSwitch(view, character) {
   /* Whether the card's picture rides the row that brought the character
      in — chosen at a start or an invite, changed here. What the next
      request costs changes with it. */
-  const toggle = element("button", "otk-switch otk-switch--h");
-  toggle.type = "button";
-  toggle.setAttribute("role", "switch");
-  toggle.setAttribute("aria-checked", String(character.portrait_sent));
-  toggle.setAttribute("aria-label", `Send ${character.name}'s picture along with the card`);
-  toggle.append(span("otk-switch__knob"));
+  const toggle = switchButton(
+    `Send ${character.name}'s picture along with the card`,
+    character.portrait_sent,
+  );
   toggle.onclick = guard(async () => {
     const answer = await api.stories.characters.update(view.subject.id, character.id, {
       portrait_sent: !character.portrait_sent,
@@ -796,7 +802,7 @@ function heading(view, character) {
   }
   const openCard = guard(async () => {
     const refused = await openCardWindow(character.card_id);
-    if (refused) footnote(view.popup, refused, true);
+    if (refused) report(refused);
     else await reread(view, character.id);
   });
   name.append(character.name);
@@ -817,20 +823,9 @@ function heading(view, character) {
   open.type = "button";
   open.title = "Open the card";
   open.setAttribute("aria-label", "Open the card");
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("viewBox", "0 0 16 16");
-  svg.setAttribute("aria-hidden", "true");
-  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-  const mark = {
-    d: "M12 9.5v3.5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3.5M9.5 2H14v4.5M14 2 7.5 8.5",
-    fill: "none",
-    stroke: "currentColor",
-    "stroke-width": "1.45",
-    "stroke-linecap": "round",
-    "stroke-linejoin": "round",
-  };
-  for (const [key, value] of Object.entries(mark)) path.setAttribute(key, value);
-  svg.append(path);
+  const svg = svgElement("svg", { viewBox: "0 0 16 16", "aria-hidden": "true" });
+  const mark = "M12 9.5v3.5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3.5M9.5 2H14v4.5M14 2 7.5 8.5";
+  svg.append(svgElement("path", { d: mark, ...LINE_STROKE }));
   open.append(svg);
   open.onclick = openCard;
   name.append(open);

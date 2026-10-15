@@ -19,9 +19,9 @@ def read_story(store: Store, story_id: int) -> ExportedStory:
     """The story out of the store as an `ExportedStory`: its current chain
     and current scenes, ready for `render_story`. Bodies export as
     stored — a card row keeps its typed `/card` line — and each cast
-    row's card archive travels with the cast, so a re-import restores
+    row's card profile travels with the cast, so a re-import restores
     the dualism intact: the typed line on screen, the block composed
-    from the archive on the wire."""
+    from the profile on the wire."""
     story = store.stories.get(story_id)
     # A tool's turns stay out until the format decides their place.
     messages = [m for m in store.stories.get_messages(story_id) if m.role != "tool"]
@@ -105,7 +105,7 @@ def render_story(export: ExportedStory, *, otaku_version: str, model: str, expor
                 desc = f" — {character.description}" if character.description else ""
                 out.append(f"- **{character.name}**{aka}{desc}")
             out.append("")
-            # A card archive under its carrier, escaped like any body —
+            # A card profile under its carrier, escaped like any body —
             # card text is free to hold heading-shaped lines of its own.
             for character in export.cast:
                 if character.profile:

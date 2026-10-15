@@ -11,7 +11,7 @@
    and the parameters. */
 
 import { api } from "../api/index.js";
-import { editable, footnote, guard, popups, wiring } from "../kit/browser.js";
+import { editable, footnote, guard, popups, report, wiring } from "../kit/browser.js";
 import { $, $$, element, span } from "../kit/dom.js";
 import { facts, showContextUse, showFacts } from "../play/shell.js";
 
@@ -319,7 +319,7 @@ async function setKnob(name, value) {
     say (`browser.editable`). */
 async function pressKnob(name, value) {
   const answer = await setKnob(name, value);
-  if (answer.refused) footnote(popups.get("/set"), answer.notice, true);
+  if (answer.refused) report(answer.notice);
   return answer;
 }
 

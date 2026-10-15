@@ -8,13 +8,15 @@
 
    Every write goes out through its endpoint (`api.cards`, a story's
    characters) and what stands after it is read again; the sentence a
-   write answers with is the panel's footnote. A story character is
+   write answers with is said in the foot of the window it came from — a
+   card's while one is open, else the panel's. A story character is
    dragged onto a card to link it — and, where there is no dragging (a
    touch screen, the keyboard), its own sheet has the same two doors. */
 
 import { api } from "../api/index.js";
 import {
   ask,
+  askConfirm,
   closeAll,
   edited,
   editable,
@@ -24,7 +26,18 @@ import {
   report,
   wiring,
 } from "../kit/browser.js";
-import { $, $$, actionButton, element, encodeFile, pickFiles, span } from "../kit/dom.js";
+import {
+  $,
+  $$,
+  LINE_STROKE,
+  actionButton,
+  element,
+  encodeFile,
+  pickFiles,
+  span,
+  svgElement,
+  switchButton,
+} from "../kit/dom.js";
 import { label } from "../kit/format.js";
 import { openPicture } from "../kit/pictures.js";
 import * as held from "../play/held.js";
@@ -64,13 +77,6 @@ const _SCROLLERS = ".otk-sheet__body, .otk-pics, .otk-sheet__fields, .otk-sheet_
 // The picture viewer's chevrons (`.otk-lightbox__arrow` in `index.html`),
 // by way, drawn on a picture's flip buttons.
 const _CHEVRONS = { prev: "M10 2.5 4.5 8 10 13.5", next: "M6 2.5 11.5 8 6 13.5" };
-const _CHEVRON_STROKE = {
-  fill: "none",
-  stroke: "currentColor",
-  "stroke-width": "1.45",
-  "stroke-linecap": "round",
-  "stroke-linejoin": "round",
-};
 
 /* A card's fields as the sheet edits them, in the card's own order: the
    texts, the two lists — edited as one text, their items between lines
@@ -247,9 +253,8 @@ export async function pick({
 
 function wireChrome(popup) {
   /* The panel's own controls, wired once per opening: the view switch,
-     the fold, Import, the filters, the picked bar — and a click outside
-     an open sheet, or Esc, which puts it down before it reaches the
-     panel. */
+     the fold, the filters, the picked bar and Start — and the panel
+     closing puts an open sheet down with it. */
   const signal = wiring(popup);
   const chars = $(".otk-chars", popup);
   for (const button of $$(".otk-seg__btn", popup)) {
@@ -380,12 +385,13 @@ function keep(key, value) {
 async function redraw(popup, answer = null) {
   const answered = answer?.notice ?? "";
   const refused = Boolean(answer?.refused);
-  // a card's window on its own has no panel under it to draw: its answer
-  // is said on the card
-  if (!popup.open) {
-    if (answered && sheetOf("card").open) footnote(sheetOf("card"), answered, refused);
-    return;
-  }
+  // An answer is said where the reader is looking: on the card's window
+  // when one is open — alone, with no panel under it to draw, or over
+  // the panel, which then says what it stands at.
+  const card = sheetOf("card");
+  const onCard = Boolean(answered) && card.open;
+  if (onCard) footnote(card, answered, refused);
+  if (!popup.open) return;
   const [cards, unlinked] = await Promise.all([
     api.cards.list({ query: state.query }),
     api.cards.unlinked.list({ query: state.unlinkedQuery }),
@@ -402,39 +408,34 @@ async function redraw(popup, answer = null) {
   const { cards: n, unlinked: m } = state.total;
   const standing =
     `${n} ${n === 1 ? "card" : "cards"} · ${m} unlinked story ${m === 1 ? "character" : "characters"}`;
-  // an answer is said where the reader is looking: on the open card
-  const card = sheetOf("card");
-  if (answered && card.open && footnote(card, answered, refused)) footnote(popup, standing);
-  else footnote(popup, answered || standing, refused);
+  footnote(popup, onCard ? standing : answered || standing, !onCard && refused);
 }
 
 function drawCards(popup) {
-  const gallery = $("[data-gallery]", popup);
-  const rows = $("[data-rows]", popup);
-  const cards = state.cards;
-  const tiles = cards.map((card) => tile(popup, card));
-  const lines = cards.map((card) => listRow(popup, card));
-  // with no card yet, the new card stands alone, first in its place
+  drawView(popup, state.cards, "gallery");
+  drawView(popup, state.cards, "list");
+  drawPicked(popup);
+}
+
+function drawView(popup, cards, view) {
+  /* One view of the cards — the gallery's tiles or the list's rows —
+     ending in the new card; with no card yet, it stands alone, first in
+     its place. Dragged among the others, a card takes its place in the
+     reader's order — the whole of it only: under a filter, where the
+     cards between are hidden, a place is not one the reader can see. */
+  const gallery = view === "gallery";
+  const box = $(gallery ? "[data-gallery]" : "[data-rows]", popup);
+  const items = cards.map((card) => (gallery ? tile(popup, card) : listRow(popup, card)));
   const none =
     !cards.length && state.query
       ? empty("No card matches that.", `clear the filter to see all ${state.total.cards}`)
       : null;
-  gallery.replaceChildren(...(none ? [none] : []), ...tiles, newCard(popup, "otk-tile otk-tile--new"));
-  rows.replaceChildren(
-    ...(none ? [none.cloneNode(true)] : []),
-    ...lines,
-    newCard(popup, "otk-charrow otk-charrow--new"),
-  );
-  /* Dragged among the others, a card takes its place in the reader's
-     order — the whole of it only: under a filter, where the cards between
-     are hidden, a place is not one the reader can see. */
+  const made = newCard(popup, gallery ? "otk-tile otk-tile--new" : "otk-charrow otk-charrow--new");
+  box.replaceChildren(...(none ? [none] : []), ...items, made);
   if (!state.query) {
-    const moved = (order, from) => moveCard(popup, cards, order, from);
-    for (const each of [...tiles, ...lines]) each.draggable = true;
-    reorderable(gallery, tiles, _CARD, moved);
-    reorderable(rows, lines, _CARD, moved);
+    for (const each of items) each.draggable = true;
+    reorderable(box, items, _CARD, (order, from) => moveCard(popup, cards, order, from));
   }
-  drawPicked(popup);
 }
 
 async function moveCard(popup, cards, order, from) {
@@ -452,17 +453,8 @@ async function moveCard(popup, cards, order, from) {
     await redraw(popup, answer);
     return;
   }
-  const ordered = order.map((index) => cards[index]);
-  state.cards = ordered;
-  const listed = state.view === "list";
-  const other = $(listed ? "[data-gallery]" : "[data-rows]", popup);
-  const drawn = ordered.map((card) => (listed ? tile(popup, card) : listRow(popup, card)));
-  for (const each of drawn) each.draggable = true;
-  other.replaceChildren(
-    ...drawn,
-    newCard(popup, listed ? "otk-tile otk-tile--new" : "otk-charrow otk-charrow--new"),
-  );
-  reorderable(other, drawn, _CARD, (again, moved) => moveCard(popup, ordered, again, moved));
+  state.cards = order.map((index) => cards[index]);
+  drawView(popup, state.cards, state.view === "list" ? "gallery" : "list");
   footnote(popup, answer.notice);
 }
 
@@ -597,13 +589,19 @@ function newCard(popup, className) {
 }
 
 function filesDropped(target, onDrop) {
-  /* Files dragged in from outside the page, and nothing else: a story
-     character or a card dragged here is another handler's. */
-  const carries = (event) => event.dataTransfer?.types.includes("Files");
+  // files dragged in from outside the page
+  dropsOn(target, "Files", "copy", (data) => onDrop([...data.files]));
+}
+
+function dropsOn(target, type, effect, onDrop) {
+  /* A target for one kind of drag — `type`, as `dataTransfer.types`
+     names it — and nothing else: anything else dragged here is another
+     target's. `onDrop` is handed what was dropped. */
+  const carries = (event) => event.dataTransfer?.types.includes(type);
   target.addEventListener("dragover", (event) => {
     if (!carries(event)) return;
     event.preventDefault();
-    event.dataTransfer.dropEffect = "copy";
+    event.dataTransfer.dropEffect = effect;
     target.classList.add("is-dragover");
   });
   target.addEventListener("dragleave", () => target.classList.remove("is-dragover"));
@@ -613,7 +611,7 @@ function filesDropped(target, onDrop) {
       target.classList.remove("is-dragover");
       if (!carries(event)) return;
       event.preventDefault();
-      await onDrop([...event.dataTransfer.files]);
+      await onDrop(event.dataTransfer);
     }),
   );
 }
@@ -625,13 +623,19 @@ async function importCards(popup, files) {
      refused stopping the rest and saying why; the panel says the last
      answer. */
   if (!files.length) return;
+  const answer = await sendEach(files, ({ name, data }) => api.cards.create({ data, file_name: name }));
+  await redraw(popup, answer);
+}
+
+async function sendEach(files, send) {
+  /* Each file encoded and sent in turn (`send`), the first refused
+     stopping the rest: the last answer, which says why. */
   let answer = null;
   for (const file of files) {
-    const { name, data } = await encodeFile(file);
-    answer = await api.cards.create({ data, file_name: name });
+    answer = await send(await encodeFile(file));
     if (answer.refused) break;
   }
-  await redraw(popup, answer);
+  return answer;
 }
 
 function tick(popup, card, { inline = false } = {}) {
@@ -705,25 +709,8 @@ function linksDropped(popup, target, card) {
 }
 
 function dropTarget(target, onDrop) {
-  /* A story character from the unlinked column, and nothing else: a file
-     or a text dragged in is not this target's. */
-  const carries = (event) => event.dataTransfer?.types.includes(_CHARACTER);
-  target.addEventListener("dragover", (event) => {
-    if (!carries(event)) return;
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "link";
-    target.classList.add("is-dragover");
-  });
-  target.addEventListener("dragleave", () => target.classList.remove("is-dragover"));
-  target.addEventListener(
-    "drop",
-    guard(async (event) => {
-      target.classList.remove("is-dragover");
-      if (!carries(event)) return;
-      event.preventDefault();
-      await onDrop(JSON.parse(event.dataTransfer.getData(_CHARACTER)));
-    }),
-  );
+  // a story character from the unlinked column
+  dropsOn(target, _CHARACTER, "link", (data) => onDrop(JSON.parse(data.getData(_CHARACTER))));
 }
 
 async function link(popup, character, cardId) {
@@ -761,19 +748,16 @@ async function takeCopies(popup, vetted) {
   }
   const n = check.copies;
   if (!n) return false;
-  const choice = await ask("confirm", (dialog) => {
-    $("[data-title]", dialog).textContent = "Also in forked stories";
-    $(".otk-dialog__body", dialog).textContent =
+  const choice = await askConfirm({
+    title: "Also in forked stories",
+    body:
       n === 1
         ? "The character also appears in 1 other story that was forked, link it too? " +
           "You can review and unlink it if needed in the card later."
         : `The character also appears in ${n} other stories that were forked, link them all? ` +
-          "You can review and unlink them if needed in the card later.";
-    const aside = $("[data-note]", dialog);
-    aside.textContent = "";
-    aside.hidden = true;
-    $('[data-choice="confirm"]', dialog).textContent = "Link all";
-    $('[data-choice="cancel"]', dialog).textContent = "Only this one";
+          "You can review and unlink them if needed in the card later.",
+    action: "Link all",
+    cancel: "Only this one",
   });
   return choice === null ? null : choice === "confirm";
 }
@@ -785,7 +769,7 @@ async function newCardByHand(popup) {
      put down just as it was made, it goes again, never having shown. */
   const made = await api.cards.create({});
   if (made.refused) {
-    footnote(popup, made.notice, true);
+    report(made.notice);
     return;
   }
   await openCard(popup, made.value.id, { naming: true });
@@ -830,27 +814,9 @@ function closeSheets(kept = null) {
 
 function showSheet(sheet) {
   /* A sheet is a window of its own, over the panel or (a card from the
-     dossier's cast) over whatever is open: Esc puts it down (a field
-     editor open in it takes its own Esc first), and so does a click on
-     the scrim around it — but not one pressed inside it and let go
-     outside (a selection dragged past its edge), nor while one of its
-     fields is being edited, which would lose the words. */
-  if (sheet.open) return;
-  const signal = wiring(sheet);
-  let pressedOutside = false;
-  sheet.addEventListener("pointerdown", (event) => (pressedOutside = event.target === sheet), {
-    signal,
-  });
-  sheet.addEventListener(
-    "click",
-    (event) => {
-      const outside = pressedOutside && event.target === sheet;
-      pressedOutside = false;
-      if (outside && !$(".otk-edit[data-editing]", sheet)) sheet.close();
-    },
-    { signal },
-  );
-  sheet.showModal();
+     dossier's cast) over whatever is open: Esc and the scrim put it down
+     as they do every window (`app.js`). */
+  if (!sheet.open) sheet.showModal();
 }
 
 async function openCard(popup, cardId, { tab = "card", storyId = null, naming = false } = {}) {
@@ -860,7 +826,7 @@ async function openCard(popup, cardId, { tab = "card", storyId = null, naming = 
      selected whole: a card just made, to be named. */
   const card = await api.cards.get(cardId);
   if (card.refused) {
-    if (popup.open) footnote(popup, card.notice, true);
+    if (popup.open) report(card.notice);
     return card;
   }
   const sheet = sheetOf("card");
@@ -1023,21 +989,7 @@ function pictures(popup, card) {
       api.cards.update(card.id, { pictures: order.map((i) => card.pictures[i].file) }),
     ),
   );
-  box.addEventListener("dragover", (event) => {
-    if (!event.dataTransfer.types.includes("Files")) return;
-    event.preventDefault();
-    box.classList.add("is-dragover");
-  });
-  box.addEventListener("dragleave", () => box.classList.remove("is-dragover"));
-  box.addEventListener(
-    "drop",
-    guard(async (event) => {
-      box.classList.remove("is-dragover");
-      if (!event.dataTransfer.types.includes("Files")) return;
-      event.preventDefault();
-      await addPictures(popup, card.id, [...event.dataTransfer.files]);
-    }),
-  );
+  filesDropped(box, (files) => addPictures(popup, card.id, files));
   box.append(
     main,
     strip,
@@ -1139,11 +1091,7 @@ async function addPictures(popup, cardId, files = null) {
      what stands. */
   const taken = files ?? (await pickFiles("image/*"));
   if (!taken.length) return;
-  let answer = null;
-  for (const file of taken) {
-    answer = await api.cards.pictures.create(cardId, await encodeFile(file));
-    if (answer.refused) break;
-  }
+  const answer = await sendEach(taken, (encoded) => api.cards.pictures.create(cardId, encoded));
   await redraw(popup, answer);
   if (sheetOf("card").open) await openCard(popup, cardId);
 }
@@ -1151,15 +1099,10 @@ async function addPictures(popup, cardId, files = null) {
 async function removePicture(popup, card, at) {
   const picture = card.pictures[at];
   if (!picture) return;
-  const choice = await ask("confirm", (dialog) => {
-    $("[data-title]", dialog).textContent = "Remove this picture?";
-    $(".otk-dialog__body", dialog).textContent =
-      `It goes from ${card.name}'s pictures. A story it was sent to keeps its copy.`;
-    const aside = $("[data-note]", dialog);
-    aside.textContent = "";
-    aside.hidden = true;
-    $('[data-choice="confirm"]', dialog).textContent = "Remove";
-    $('[data-choice="cancel"]', dialog).textContent = "Cancel";
+  const choice = await askConfirm({
+    title: "Remove this picture?",
+    body: `It goes from ${card.name}'s pictures. A story it was sent to keeps its copy.`,
+    action: "Remove",
   });
   if (choice !== "confirm") return;
   await reopenAfter(popup, card, api.cards.pictures.delete(card.id, picture.file));
@@ -1195,14 +1138,20 @@ export function cardFieldEditors(values, save, className = "otk-passage__body") 
         : kind === "number"
           ? String(values[key])
           : values[key];
-    const input = editable(className, {
+    return fieldEditor(className, name, {
       text,
       line: kind === "number",
       save: (value) => save({ [key]: write(value) }),
     });
-    input.placeholder = "\u2014";
-    return edited(input, name);
   });
+}
+
+function fieldEditor(className, name, options) {
+  /* One field edited where it is read (`editable`, `options` its own),
+     an empty one reading as a dash. */
+  const input = editable(className, options);
+  input.placeholder = "\u2014";
+  return edited(input, name);
 }
 
 function fields(popup, card) {
@@ -1211,24 +1160,22 @@ function fields(popup, card) {
      empty one reads as a dash. The stories it is in close the column, each
      row a door to its journals. */
   const box = element("div", "otk-sheet__fields");
-  const field = (className, key, name, text, { line = false, write = (value) => value } = {}) => {
-    const input = editable(className, {
-      text,
-      line,
-      save: (value) => saveCard(popup, card, { [key]: write(value) }),
-    });
-    input.placeholder = "\u2014";
-    return edited(input, name);
-  };
   box.append(
-    field("otk-reading__lede otk-sheet__tagline", "tagline", "tagline", card.tagline, { line: true }),
-    field("otk-passage__body", "aliases", "aliases", card.aliases.join(" · "), {
+    fieldEditor("otk-reading__lede otk-sheet__tagline", "tagline", {
+      text: card.tagline,
       line: true,
-      write: (value) =>
-        value
-          .split(/[·,\n]/)
-          .map((alias) => alias.trim())
-          .filter(Boolean),
+      save: (value) => saveCard(popup, card, { tagline: value }),
+    }),
+    fieldEditor("otk-passage__body", "aliases", {
+      text: card.aliases.join(" · "),
+      line: true,
+      save: (value) =>
+        saveCard(popup, card, {
+          aliases: value
+            .split(/[·,\n]/)
+            .map((alias) => alias.trim())
+            .filter(Boolean),
+        }),
     }),
     ...cardFieldEditors(card, (changes) => saveCard(popup, card, changes)),
   );
@@ -1343,15 +1290,10 @@ async function mergeCard(popup, card) {
 }
 
 async function deleteCard(popup, card) {
-  const choice = await ask("confirm", (dialog) => {
-    $("[data-title]", dialog).textContent = `Delete ${card.name}?`;
-    $(".otk-dialog__body", dialog).textContent =
-      "The card and its pictures go from All characters. Its characters in stories stay, unlinked.";
-    const aside = $("[data-note]", dialog);
-    aside.textContent = "";
-    aside.hidden = true;
-    $('[data-choice="confirm"]', dialog).textContent = "Delete";
-    $('[data-choice="cancel"]', dialog).textContent = "Cancel";
+  const choice = await askConfirm({
+    title: `Delete ${card.name}?`,
+    body: "The card and its pictures go from All characters. Its characters in stories stay, unlinked.",
+    action: "Delete",
   });
   if (choice !== "confirm") return;
   const answer = await api.cards.delete(card.id);
@@ -1428,12 +1370,7 @@ async function startStory(popup) {
       box.firstElementChild,
       ...picturedCards.map((card) => {
         const line = element("div", "otk-picsend");
-        const toggle = element("button", "otk-switch otk-switch--h");
-        toggle.type = "button";
-        toggle.setAttribute("role", "switch");
-        toggle.setAttribute("aria-checked", "false");
-        toggle.setAttribute("aria-label", `Send ${card.name}'s picture to the model`);
-        toggle.append(span("otk-switch__knob"));
+        const toggle = switchButton(`Send ${card.name}'s picture to the model`, false);
         toggle.onclick = () => {
           const on = !sending.has(card.id);
           if (on) sending.add(card.id);
@@ -1469,7 +1406,7 @@ async function startStory(popup) {
     persona: persona.value.trim(),
   });
   if (made.refused) {
-    footnote(popup, made.notice, true);
+    report(made.notice);
     return;
   }
   held.hold(made.value.id);
@@ -1569,16 +1506,10 @@ function navButton(className, name, way, onclick) {
   button.type = "button";
   button.setAttribute("aria-label", name);
   const svg = svgElement("svg", { viewBox: "0 0 16 16", width: "14", height: "14", "aria-hidden": "true" });
-  svg.append(svgElement("path", { d: _CHEVRONS[way], ..._CHEVRON_STROKE }));
+  svg.append(svgElement("path", { d: _CHEVRONS[way], ...LINE_STROKE }));
   button.append(svg);
   button.onclick = onclick;
   return button;
-}
-
-function svgElement(tag, attributes) {
-  const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
-  for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value);
-  return node;
 }
 
 function closeButton(sheet) {

@@ -10,7 +10,7 @@ is refused with directions, never guessed at.
 The document is one Markdown file, readable as prose and parseable as
 data — a metadata comment (recognition + versions), the optional
 `# title` heading, a `## Story` section (story so far, system, cast — an
-imported card's archive TOML as a `#### Name` block under the roster),
+imported card's profile TOML as a `#### Name` block under the roster),
 `## Scenes` (span, summary, per-character journals), and `## Messages` —
 one `### n · role (kind) · speaker · "template"` header per message, the
 kind, speaker, and JSON-quoted template present only when they exist,

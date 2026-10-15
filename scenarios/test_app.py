@@ -7,12 +7,13 @@ principle, not a stub: sealed bytes on disk, a wrong key refused, a
 missing keystore refused BEFORE the ceremony could mint over it."""
 
 import base64
+import itertools
 import re
 import secrets
 import sqlite3
 import subprocess
 import tomllib
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -33,7 +34,7 @@ from otaku.settings.migrations import surgery
 from otaku.settings.migrations.prompt_texts import CARD_FRAMING_0_7_0, EXTRACT_0_2_2
 from otaku.store import DatabaseError, Store, is_encrypted
 from otaku.store import migrations as store_migrations
-from otaku.store.database import check_value
+from otaku.store.database import Database, check_value
 from otaku.store.files import FileStore, Owner
 from otaku.store.migrations import v2 as store_v2
 from otaku.store.migrations import v3 as store_v3
@@ -41,7 +42,17 @@ from otaku.store.migrations import v4 as store_v4
 from otaku.store.migrations import v5 as store_v5
 from otaku.store.migrations import v6 as store_v6
 from otaku.store.migrations import v10 as store_v10
-from otaku.store.schema import SCHEMA_DDL, Attachment, Message, StoryMode, StorySettingDB
+from otaku.store.migrations import v11 as store_v11
+from otaku.store.migrations import v12 as store_v12
+from otaku.store.migrations import v13 as store_v13
+from otaku.store.schema import (
+    SCHEMA_DDL,
+    SCHEMA_VERSION,
+    Attachment,
+    Message,
+    StoryMode,
+    StorySettingDB,
+)
 from otaku.terminal.tty import BOLD, RESET
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch, run_otaku, set_config, set_config_provider
@@ -254,7 +265,7 @@ class TestSchemaMigration:
         paths = _v1_database(tmp_path / "state")
         store = _open(paths)
         try:
-            assert any("Database migrated (v1 → v10)" in note.show for note in store.notes)
+            assert any(f"(v1 → v{SCHEMA_VERSION})" in note.show for note in store.notes)
             (message,) = store.stories.get_messages(1)
             # The v1 `framing` column reads back through the renamed one.
             assert (message.body, message.template) == ("I enter.", "TPL")
@@ -262,9 +273,9 @@ class TestSchemaMigration:
             # which is a turn without pictures.
             assert message.attachments == ()
             # The v1 character reads whole through the widened row: the
-            # added `card` column trails, so nothing shifted into it.
+            # added `profile` column trails, so nothing shifted into it.
             (keeper,) = store.characters.list(1)
-            assert (keeper.name, keeper.description, keeper.card) == (
+            assert (keeper.name, keeper.description, keeper.profile) == (
                 "Keeper",
                 "warden of the gate",
                 None,
@@ -301,6 +312,9 @@ class TestSchemaMigration:
             card = store.cards.add("Keeper")
             store.characters.set_card_id(keeper.id, card)
             assert store.characters.list(1)[0].card_id == card
+            # The v12 fork point trails the story's row: a v1 story was
+            # forked from nothing, and reads NULL there.
+            assert store.stories.get(1).forked_from_message_id is None
         finally:
             store.close()
         # Step 7 wrote nothing into the rows it found: a record shorter
@@ -312,7 +326,7 @@ class TestSchemaMigration:
         finally:
             conn.close()
         assert read == [(1, "chat"), (2, "chat"), (3, "chat")]
-        assert _meta_version(paths) == "10"
+        assert _meta_version(paths) == SCHEMA_VERSION
 
     def test_a_migration_that_ran_is_reported_at_launch(
         self, server: ModelServer, tmp_path
@@ -479,10 +493,81 @@ class TestSchemaMigration:
         monkeypatch.setitem(store_migrations._STEPS, 3, store_v3.to_3)
         resumed = _open(paths)
         try:
-            assert any("Database migrated (v2 → v10)" in note.show for note in resumed.notes)
+            assert any(f"(v2 → v{SCHEMA_VERSION})" in note.show for note in resumed.notes)
         finally:
             resumed.close()
-        assert _meta_version(paths) == "10"
+        assert _meta_version(paths) == SCHEMA_VERSION
+
+    def test_step_11_orders_the_cards_as_they_were_made(self, tmp_path) -> None:
+        # A version-10 codex had no order of the reader's: the step numbers
+        # its cards in the order they were made — a later move it cannot know.
+        paths = _state(tmp_path)
+        store = _open(paths)
+        try:
+            ids = [store.cards.add(name) for name in ("zed", "Alma", "Bo")]
+            store.cards.set_order([ids[2], ids[0], ids[1]])
+        finally:
+            store.close()
+        _taken_back(paths, 10)
+        store = _open(paths)
+        try:
+            assert [card.name for card in store.cards.list()] == ["zed", "Alma", "Bo"]
+        finally:
+            store.close()
+
+    def test_step_12_finds_where_each_fork_was_cut(self, tmp_path, monkeypatch) -> None:
+        # No fork before step 12 recorded its cut: the step works it out
+        # from the copies — through a branch of the source's own beside
+        # the copied chain, a fork's own turns after it, and a fork of a
+        # fork — and leaves it unknown where the source is gone.
+        _ticking(monkeypatch)
+        paths = _state(tmp_path)
+        store = _open(paths)
+        try:
+            source = store.stories.add("A")
+            ids = [_say(store, source, f"turn {n}") for n in range(1, 5)]
+            store.stories.set_head(source, ids[1], expected_head=ids[-1])
+            _say(store, source, "another third turn")
+            fork = store.stories.fork(source, from_message_id=ids[2])
+            on = _say(store, fork, "the fork goes on")
+            again = store.stories.fork(fork)
+            gone = store.stories.fork(source, from_message_id=ids[0])
+            orphan = store.stories.fork(gone)
+            store.stories.delete(gone)
+            cuts = {fork: ids[2], again: on, orphan: None}
+            # a fork records its own cut from now on
+            assert {f: store.stories.get(f).forked_from_message_id for f in (fork, again)} == {
+                fork: ids[2],
+                again: on,
+            }
+        finally:
+            store.close()
+        _taken_back(paths, 11)
+        store = _open(paths)
+        try:
+            assert {f: store.stories.get(f).forked_from_message_id for f in cuts} == cuts
+        finally:
+            store.close()
+
+    def test_step_13_keeps_each_profile_under_its_new_name(self, tmp_path) -> None:
+        # A rename in place: a codex card's fields and a story character's
+        # copy read back whole under `profile`.
+        paths = _state(tmp_path)
+        store = _open(paths)
+        try:
+            card = store.cards.add("Maren", profile="description = 'A keeper.'")
+            story = store.stories.add("A")
+            copy = "user = 'Ada'\n\ndescription = 'A keeper.'"
+            store.characters.add(story, "Maren", profile=copy, card_id=card)
+        finally:
+            store.close()
+        _taken_back(paths, 12)
+        store = _open(paths)
+        try:
+            assert store.cards.get(card).profile == "description = 'A keeper.'"
+            assert [c.profile for c in store.characters.list(story)] == [copy]
+        finally:
+            store.close()
 
 
 class TestFilesFolder:
@@ -1403,6 +1488,51 @@ def _insert_row(conn, role: str, kind: str) -> None:
     )
     # fmt: on
     conn.commit()
+
+
+def _say(store: Store, story_id: int, body: str) -> int:
+    """A turn played on from the story's head; its id."""
+    head = store.stories.get_head(story_id)
+    return store.stories.append(story_id, Message(role="user", body=body), after=head)
+
+
+def _ticking(monkeypatch) -> None:
+    """The store's clock a second on at every write, as turns played by
+    hand are — step 12 tells a copy from a turn of its own by the second."""
+    clock = itertools.count()
+    start = datetime(2026, 1, 1).astimezone()
+
+    def now() -> str:
+        return (start + timedelta(seconds=next(clock))).isoformat(timespec="seconds")
+
+    monkeypatch.setattr(Database, "now", staticmethod(now))
+
+
+def _taken_back(paths: Paths, version: int) -> None:
+    """A database this build wrote, put back to what `version` shipped:
+    each later step's tables as the step found them — the record format is
+    positional, so the rows read as that version's — the fork points step
+    12 works out emptied, and the stamp set: what the ladder takes up."""
+    undo = {
+        13: (("cards", store_v13._V12_CARDS), ("characters", store_v13._V12_CHARACTERS)),
+        12: (("stories", store_v12._V11_STORIES),),
+        11: (("cards", store_v11._V10_CARDS),),
+    }
+    conn = sqlite3.connect(paths.database_file)
+    if version < 12:
+        conn.execute("UPDATE stories SET forked_from_message_id = NULL")
+    conn.execute("PRAGMA writable_schema = ON")
+    for step in range(int(SCHEMA_VERSION), version, -1):
+        for table, ddl in undo[step]:
+            conn.execute(
+                "UPDATE sqlite_master SET sql = ? WHERE type = 'table' AND name = ?", (ddl, table)
+            )
+    (cookie,) = conn.execute("PRAGMA schema_version").fetchone()
+    conn.execute(f"PRAGMA schema_version = {cookie + 1}")
+    conn.execute("PRAGMA writable_schema = OFF")
+    conn.execute("UPDATE meta SET value = ? WHERE key = 'schema_version'", (str(version),))
+    conn.commit()
+    conn.close()
 
 
 def _raise(conn) -> None:

@@ -11,7 +11,17 @@
    set. */
 
 import { api } from "../api/index.js";
-import { ask, browser, closeAll, footnote, guard, popups, wiring } from "../kit/browser.js";
+import {
+  ask,
+  askConfirm,
+  browser,
+  closeAll,
+  footnote,
+  guard,
+  popups,
+  report,
+  wiring,
+} from "../kit/browser.js";
 import { $, $$, actionButton, element, row, span } from "../kit/dom.js";
 import { contextLabel, gigabytes } from "../kit/format.js";
 import { landed } from "../play/shell.js";
@@ -129,7 +139,7 @@ function buildModels(state, notice) {
     const answer = await api.app.update({ model });
     // refused, the picker stays, saying why
     if (answer.refused) {
-      footnote(popup, answer.notice, true);
+      report(answer.notice);
       return;
     }
     closeAll();
@@ -141,16 +151,12 @@ function buildModels(state, notice) {
     /* Asked first, as the terminal's picker asks: a load takes the
        engine's memory and its time, and `u` sits one key beside `l`. */
     const verb = wanted ? "Load" : "Unload";
-    const choice = await ask("confirm", (dialog) => {
-      $("[data-title]", dialog).textContent = `${verb} ${entry.model.name}?`;
-      $(".otk-dialog__body", dialog).textContent = wanted
+    const choice = await askConfirm({
+      title: `${verb} ${entry.model.name}?`,
+      body: wanted
         ? "The engine loads it into memory, which can take a while."
-        : "The engine frees its memory; picking the model later loads it again.";
-      const aside = $("[data-note]", dialog);
-      aside.textContent = "";
-      aside.hidden = true;
-      $('[data-choice="confirm"]', dialog).textContent = verb;
-      $('[data-choice="cancel"]', dialog).textContent = "Cancel";
+        : "The engine frees its memory; picking the model later loads it again.",
+      action: verb,
     });
     if (choice !== "confirm") return;
     const answer = await api.providers.models.update(entry.provider.id, entry.model.name, {
@@ -562,7 +568,7 @@ function saveOnEnter(state, input, provider, attr) {
       const answer = await api.providers.update(provider.id, { [attr]: value });
       // refused, the field keeps what was typed, to be corrected
       if (answer.refused) {
-        footnote(state.popup, answer.notice, true);
+        report(answer.notice);
         return;
       }
       await refreshProvider(state, provider, answer.notice);
@@ -590,7 +596,7 @@ async function saveProvider(state, provider) {
     const answer = await api.providers.update(provider.id, { [attr]: value });
     // refused, the fields keep what was typed, to be corrected
     if (answer.refused) {
-      footnote(state.popup, answer.notice, true);
+      report(answer.notice);
       return;
     }
     notices.push(answer.notice);
@@ -637,7 +643,7 @@ function testProvider(state, provider) {
     or — refused — the standing one, the refusal said over it. */
 function built(state, tab, answer) {
   state.build(tab, answer.refused ? "" : answer.notice);
-  if (answer.refused) footnote(state.popup, answer.notice, true);
+  if (answer.refused) report(answer.notice);
 }
 
 async function refreshProvider(state, provider, notice) {

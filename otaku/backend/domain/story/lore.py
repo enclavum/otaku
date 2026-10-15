@@ -15,7 +15,6 @@ from otaku.backend.domain.app._runs import WorkerRun
 from otaku.backend.domain.codex import cards as codex_cards
 from otaku.backend.domain.story import _request
 from otaku.backend.errors import NO_MODEL_HINT, NO_SUCH_STORY, Conflict, Invalid, NotFound
-from otaku.context.cards import CharacterProfile
 from otaku.store.schema import Attachment, Card, Character, Journal, Scene
 
 # A row of a story's memory, as `_theirs` finds it.
@@ -295,20 +294,6 @@ def update_character(
     return "Saved."
 
 
-def profile_of(character: Character) -> CharacterProfile | None:
-    """A story character's profile — its copy of its card's — read back
-    field by field: every field, an empty one empty, under the name it
-    came in as; None for a character no card brought, or one whose
-    profile is no TOML."""
-    if not character.profile:
-        return None
-    try:
-        data = tomllib.loads(character.profile)
-    except tomllib.TOMLDecodeError:
-        return None
-    return CharacterProfile.from_toml(character.profile, name=str(data.get("name", character.name)))
-
-
 def update_profile(app: App, story_id: int, character_id: int, changes: Mapping[str, Any]) -> str:
     """The author's correction of a story character's profile, field by
     field (`codex.cards.FIELDS`), written back with the name it binds
@@ -320,15 +305,11 @@ def update_profile(app: App, story_id: int, character_id: int, changes: Mapping[
     character = get_character(app, story_id, character_id)
     if not changes:
         raise Invalid("Nothing to change.")
-    unknown = sorted(set(changes) - set(codex_cards.FIELDS))
-    if unknown:
-        raise Invalid(f"A card has no {', '.join(unknown)}.")
-    profile = profile_of(character)
+    profile = codex_cards.story_profile(character)
     if profile is None:
         raise Invalid(f"{character.name} has no card to correct.")
-    user = str(tomllib.loads(character.profile or "").get("user", ""))
-    corrected = codex_cards.checked_profile(replace(profile, **changes))
-    app._store.characters.set_profile(character_id, corrected.to_toml(user=user))
+    corrected = codex_cards.corrected_profile(profile, changes)
+    app._store.characters.set_profile(character_id, corrected.to_toml())
     return "Saved."
 
 
@@ -337,8 +318,11 @@ def set_portrait_sent(app: App, story_id: int, character_id: int, sent: bool) ->
     in, on the story's current timeline, to the model: its linked card's
     portrait, or none. Raises Refused for a character no card row there
     brought in, a picture asked for with no card linked or one without a
-    picture, and a character not in the cast — nothing written."""
-    character = get_character(app, story_id, character_id)
+    picture, and a character not in the cast — nothing written. Reads
+    the cast row and the chain's card rows alone, not the whole memory."""
+    if not app._store.stories.exists(story_id):
+        raise NotFound(NO_SUCH_STORY)
+    character = _theirs(app._store.characters.list(story_id), character_id, "character")
     chain = set(app._store.stories.get_messages_ids(story_id))
     rows = [
         row_id
