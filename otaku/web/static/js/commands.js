@@ -36,7 +36,7 @@ const SCREENS = {
       const forked = await api.stories.forks.create(story);
       // play goes on in the copy
       if (!forked.refused) held.hold(forked.value.id);
-      await landed(forked.notice, { redraw: "always" });
+      await landed(forked.notice, { redraw: "always", refused: forked.refused });
     }),
   /* The story dossier answers three commands, one tab each — the bare
      token opens it there; `/system some text` is answered by the
@@ -129,7 +129,7 @@ async function newStory() {
   closeAll();
   const made = await api.stories.create({ title: field.value.trim() });
   if (!made.refused) held.hold(made.value.id);
-  await landed(made.notice, { redraw: "always" });
+  await landed(made.notice, { redraw: "always", refused: made.refused });
 }
 
 async function importStory() {
@@ -173,7 +173,7 @@ export async function playLine(line, files = []) {
        every line after it moves the count. No notice: the
        reply IS the answer — unless the line was refused, and then the
        refusal stands through the landing rather than being wiped by it. */
-    await landed(refused ?? "", { kind: refused ? "otk-error" : "", keepPlace: true });
+    await landed(refused ?? "", { refused: Boolean(refused), keepPlace: true });
   } catch (e) {
     if (e?.answered) tell(String(e.message ?? e), "otk-error");
   }
@@ -207,7 +207,7 @@ async function undo() {
     story === null ? { notice: _NOTHING_TO_UNDO, refused: true } : await api.stories.undos.create(story);
   if (!answer.refused) takeBack(await api.stories.messages.list(story), answer.value.question);
   await landed("");
-  if (answer.refused) tell(answer.notice);
+  if (answer.refused) tell(answer.notice, "otk-error");
 }
 
 /* What the backend says with no exchange to take back — COPIED, as the
@@ -271,8 +271,12 @@ async function extractNow() {
     api.stories.lore.get(story).catch(() => null),
     api.settings.get().catch(() => null),
   ]);
+  if (memory?.refused) {
+    tell(memory.notice, "otk-error");
+    return;
+  }
   // the messages past the last one a scene closed
-  const pending = memory?.refused ? 0 : (memory?.message_count ?? 0) - (memory?.extracted_up_to ?? 0);
+  const pending = (memory?.message_count ?? 0) - (memory?.extracted_up_to ?? 0);
   if (!pending) {
     tell("Every message already belongs to a scene. There is nothing to extract.");
     return;
@@ -304,6 +308,6 @@ function idleSpan(seconds) {
 async function extract(story) {
   const started = await api.stories.extraction.create(story);
   closeAll();
-  tell(started.notice);
+  tell(started.notice, started.refused ? "otk-error" : "");
   if (started.value?.status === "running") watchExtraction(story);
 }

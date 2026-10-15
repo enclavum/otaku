@@ -95,7 +95,7 @@ class StoryCardsResource:
             )
             story_counts = get_story_counts(app)
             return StoryCardCheck(
-                name=checked.card.name,
+                name=checked.profile.name,
                 notes=checked.notes,
                 block_tokens=checked.block_tokens,
                 large=checked.large,

@@ -32,8 +32,21 @@ def _update_scene(api: Api, ask: Ask) -> Any:
 
 
 def _update_character(api: Api, ask: Ask) -> Any:
-    """A character's description and card archive, and its link to a
-    codex card — `card_id`, a card's id or null to unlink."""
+    """A character's description and profile — whole as TOML, or field by
+    field (`profile_fields`) — whether its card's picture rides
+    (`portrait_sent`), and its link to a codex card: `card_id`, a card's
+    id or null to unlink, its copies in forked stories linked too where
+    `with_copies` is true. A link alone is vetted with `?validate_only=true`,
+    answered with how many copies."""
+    if ask.query_flag("validate_only", False):
+        return plain(
+            api.stories.characters.update(
+                ask.id("story"),
+                ask.id("character"),
+                card_id=ask.integer("card_id"),
+                validate_only=True,
+            )
+        )
     card_id: int | Unchanged | None = UNCHANGED
     if "card_id" in ask.body:
         card_id = None if ask.body["card_id"] is None else ask.integer("card_id")
@@ -42,10 +55,35 @@ def _update_character(api: Api, ask: Ask) -> Any:
             ask.id("story"),
             ask.id("character"),
             description=ask.need("description") if "description" in ask.body else UNCHANGED,
-            card=ask.need("card") if "card" in ask.body else UNCHANGED,
+            profile=ask.need("profile") if "profile" in ask.body else UNCHANGED,
             card_id=card_id,
+            profile_fields=_profile_fields(ask.body["profile_fields"])
+            if "profile_fields" in ask.body
+            else UNCHANGED,
+            portrait_sent=ask.flag("portrait_sent") if "portrait_sent" in ask.body else UNCHANGED,
+            with_copies=ask.flag("with_copies") if "with_copies" in ask.body else False,
         )
     )
+
+
+def _profile_fields(value: object) -> dict[str, object]:
+    """A card's fields as the body carries them: an object of texts, the
+    two lists of texts, the reminder's depth a whole number. A field
+    the card has not passes, for the backend to refuse by name; anything
+    else is a malformed request."""
+    if not isinstance(value, dict):
+        raise TypeError("profile_fields is not an object")
+    for name, field in value.items():
+        if name in ("alternate_greetings", "examples"):
+            if not isinstance(field, list) or not all(isinstance(item, str) for item in field):
+                raise TypeError(f"{name} is not a list of strings")
+            value[name] = tuple(field)
+        elif name == "reminder_depth":
+            if type(field) is not int:
+                raise TypeError("reminder_depth is not an integer")
+        elif not isinstance(field, str):
+            raise TypeError(f"{name} is not a string")
+    return value
 
 
 def _update_journal(api: Api, ask: Ask) -> Any:

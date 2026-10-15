@@ -10,7 +10,7 @@
    on screen is this screen's to say. */
 
 import { api } from "../api/index.js";
-import { ask, browser, footnote, guard, popups } from "../kit/browser.js";
+import { ask, askWriting, browser, footnote, guard, popups, report } from "../kit/browser.js";
 import { $, actionButton, element, row, span } from "../kit/dom.js";
 import { ago, label, since, when } from "../kit/format.js";
 import * as held from "../play/held.js";
@@ -136,15 +136,18 @@ async function renameStory(story) {
   if (!story) return;
   const dialog = $('dialog[data-dialog="rename"]');
   const field = $("input", dialog);
-  const choice = await ask("rename", () => {
-    $(".otk-dialog__body", dialog).textContent = `Renaming: ${label(story.label) || "(untitled)"}`;
-    field.value = story.label || "";
-  });
-  if (choice !== "rename") return;
-  const { notice } = await api.stories.update(story.id, { title: field.value });
+  const answer = await askWriting(
+    "rename",
+    () => {
+      $(".otk-dialog__body", dialog).textContent = `Renaming: ${label(story.label) || "(untitled)"}`;
+      field.value = story.label || "";
+    },
+    () => api.stories.update(story.id, { title: field.value }),
+  );
+  if (!answer) return;
   // The shell carries the open story's title, and this may be it.
   await landed("");
-  openStories(notice, { selectId: story.id });
+  openStories(answer.notice, { selectId: story.id });
 }
 
 async function confirmDelete(story) {
@@ -160,8 +163,13 @@ async function confirmDelete(story) {
   });
   if (choice !== "delete") return;
   const { notice, refused } = await api.stories.delete(story.id);
+  // refused, the story stands, and the list says why
+  if (refused) {
+    report(notice);
+    return;
+  }
   // the story this page played is gone: it holds none until the next landing
-  if (!refused && story.id === held.story()) held.hold(null);
+  if (story.id === held.story()) held.hold(null);
   await landed(notice, { redraw: "always" });
   openStories();
 }

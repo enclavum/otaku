@@ -6,16 +6,17 @@ extraction pass, started through the worker, kept per story while it
 runs and after (a run is read without the app's thread), and given up."""
 
 import tomllib
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from otaku.backend.domain.app import App
 from otaku.backend.domain.app._runs import WorkerRun
 from otaku.backend.domain.codex import cards as codex_cards
 from otaku.backend.domain.story import _request
 from otaku.backend.errors import NO_MODEL_HINT, NO_SUCH_STORY, Conflict, Invalid, NotFound
-from otaku.store.schema import Character, Journal, Scene
+from otaku.context.cards import CharacterProfile
+from otaku.store.schema import Attachment, Card, Character, Journal, Scene
 
 # A row of a story's memory, as `_theirs` finds it.
 R = TypeVar("R", Scene, Character, Journal)
@@ -35,8 +36,10 @@ class ExtractionState:
 class Memory:
     """A story's memory loaded whole: how many messages its chain holds,
     its current scenes, the cast in appearance order, the current
-    timeline's journal records, each chain message's ordinal by id, and
-    the name of each codex card the cast is linked to, by its id."""
+    timeline's journal records, each chain message's ordinal by id, each
+    codex card the cast is linked to, by its id, and — for each character
+    a card row on the chain brought in, by its id — whether that row
+    carries its card's picture."""
 
     story_id: int
     total_messages: int
@@ -44,7 +47,8 @@ class Memory:
     cast: tuple[Character, ...]
     journals: tuple[Journal, ...]
     ordinal: dict[int, int]
-    card_names: dict[int, str]
+    linked_cards: dict[int, Card]
+    portraits_sent: dict[int, bool]
 
     def scene_no(self, scene_id: int) -> int:
         """1-based position of a scene in story order — the number every
@@ -191,6 +195,12 @@ def get_lore(app: App, story_id: int) -> Memory:
     # the story introduced it.
     cast = tuple(store.characters.list(story_id))
     linked = {c.card_id for c in cast if c.card_id is not None}
+    chain = set(ids)
+    sent = {
+        speaker: bool(pictures)
+        for row_id, speaker, pictures in store.messages.get_card_rows(story_id)
+        if row_id in chain and speaker is not None
+    }
     return Memory(
         story_id=story_id,
         total_messages=len(ids),
@@ -198,7 +208,8 @@ def get_lore(app: App, story_id: int) -> Memory:
         cast=cast,
         journals=tuple(j for j in store.journals.list(story_id) if j.scene_id in current),
         ordinal={mid: i + 1 for i, mid in enumerate(ids)},
-        card_names={card_id: codex_cards.get_card(app, card_id).name for card_id in linked},
+        linked_cards={card_id: codex_cards.get_card(app, card_id) for card_id in linked},
+        portraits_sent=sent,
     )
 
 
@@ -260,50 +271,141 @@ def update_character(
     character_id: int,
     *,
     description: str | None = None,
-    card: str | None = None,
+    profile: str | None = None,
 ) -> str:
     """The author's correction of a story's character — its description,
-    and the card archive an imported one carries (emptied to nothing
-    included). Checked to be that story's as `update_scene` checks.
-    Raises Refused for nothing to change, a card that is no TOML, and a
-    character not in the cast — nothing written."""
+    and the profile an imported one carries, whole as TOML (emptied to
+    nothing included). Checked to be that story's as `update_scene`
+    checks. Raises Refused for nothing to change, a profile that is no
+    TOML, and a character not in the cast — nothing written."""
     get_character(app, story_id, character_id)
-    if description is None and card is None:
+    if description is None and profile is None:
         raise Invalid("Nothing to change.")
-    if card is not None:
+    if profile is not None:
         try:
-            tomllib.loads(card)
+            tomllib.loads(profile)
         except tomllib.TOMLDecodeError as e:
-            # The archive is data other features parse — a broken edit is
+            # The profile is data other features parse — a broken edit is
             # refused the way an emptied summary is.
             raise Invalid(f"Not valid TOML — not saved: {e}") from e
     if description is not None:
         app._store.characters.set_description(character_id, description)
-    if card is not None:
-        app._store.characters.set_card(character_id, card)
+    if profile is not None:
+        app._store.characters.set_profile(character_id, profile)
     return "Saved."
 
 
-def set_card_id(app: App, story_id: int, character_id: int, card_id: int | None) -> str:
-    """A story's character linked to a codex card, or unlinked with None —
+def profile_of(character: Character) -> CharacterProfile | None:
+    """A story character's profile — its copy of its card's — read back
+    field by field: every field, an empty one empty, under the name it
+    came in as; None for a character no card brought, or one whose
+    profile is no TOML."""
+    if not character.profile:
+        return None
+    try:
+        data = tomllib.loads(character.profile)
+    except tomllib.TOMLDecodeError:
+        return None
+    return CharacterProfile.from_toml(character.profile, name=str(data.get("name", character.name)))
+
+
+def update_profile(app: App, story_id: int, character_id: int, changes: Mapping[str, Any]) -> str:
+    """The author's correction of a story character's profile, field by
+    field (`codex.cards.FIELDS`), written back with the name it binds
+    `{{user}}` to kept — a field emptied leaves the TOML, which keeps
+    what a card holds. Raises Refused for nothing to change, a field a
+    card has not, a character no card brought or a profile that is no
+    TOML, a reminder's depth below 1, and a character not in the cast —
+    nothing written."""
+    character = get_character(app, story_id, character_id)
+    if not changes:
+        raise Invalid("Nothing to change.")
+    unknown = sorted(set(changes) - set(codex_cards.FIELDS))
+    if unknown:
+        raise Invalid(f"A card has no {', '.join(unknown)}.")
+    profile = profile_of(character)
+    if profile is None:
+        raise Invalid(f"{character.name} has no card to correct.")
+    user = str(tomllib.loads(character.profile or "").get("user", ""))
+    corrected = codex_cards.checked_profile(replace(profile, **changes))
+    app._store.characters.set_profile(character_id, corrected.to_toml(user=user))
+    return "Saved."
+
+
+def set_portrait_sent(app: App, story_id: int, character_id: int, sent: bool) -> str:
+    """Whether a character's picture rides the card row that brought it
+    in, on the story's current timeline, to the model: its linked card's
+    portrait, or none. Raises Refused for a character no card row there
+    brought in, a picture asked for with no card linked or one without a
+    picture, and a character not in the cast — nothing written."""
+    character = get_character(app, story_id, character_id)
+    chain = set(app._store.stories.get_messages_ids(story_id))
+    rows = [
+        row_id
+        for row_id, speaker, _ in app._store.messages.get_card_rows(story_id)
+        if speaker == character_id and row_id in chain
+    ]
+    if not rows:
+        raise Invalid(f"{character.name} came into this story with no card.")
+    pictures: tuple[Attachment, ...] = ()
+    if sent:
+        card = (
+            codex_cards.get_card(app, character.card_id) if character.card_id is not None else None
+        )
+        if card is None or not card.pictures:
+            raise Invalid(f"{character.name}'s card has no picture to send.")
+        pictures = card.pictures[:1]
+    for row_id in rows:
+        app._store.messages.set_attachments(row_id, pictures)
+    return "Saved."
+
+
+def set_card_id(
+    app: App, story_id: int, character_id: int, card_id: int | None, *, with_copies: bool = False
+) -> str:
+    """A story's character linked to a codex card — with `with_copies`, its
+    copies too (`codex_cards.find_copies`) — or unlinked with None, alone;
     nothing else on either changes: the character keeps its own copy of
     whatever it holds. Checked to be that story's as `update_scene`
     checks; raises Refused for no such card, nothing to change, and a
     card another of the story's characters is linked to already."""
+    if card_id is not None:
+        character, card = _linkable(app, story_id, character_id, card_id)
+        found = (
+            codex_cards.find_copies(app, story_id, character, card_id=card.id)
+            if with_copies
+            else ()
+        )
+        app._store.characters.set_card_id(character.id, card.id, copies=[c for _, c in found])
+        return f"Linked {character.name} to {card.name}." + codex_cards.linked_copies(len(found))
+    character = get_character(app, story_id, character_id)
+    if character.card_id is None:
+        raise Invalid("Nothing to change.")
+    was = codex_cards.get_card(app, character.card_id)
+    app._store.characters.set_card_id(character.id, None)
+    return f"Unlinked {character.name} from {was.name}."
+
+
+def check_card_link(
+    app: App, story_id: int, character_id: int, card_id: int
+) -> tuple[tuple[int, int], ...]:
+    """A link vetted before it is made, refused as `set_card_id` would
+    be: the copies it may take along."""
+    character, card = _linkable(app, story_id, character_id, card_id)
+    return codex_cards.find_copies(app, story_id, character, card_id=card.id)
+
+
+def _linkable(app: App, story_id: int, character_id: int, card_id: int) -> tuple[Character, Card]:
+    """The character and the card a link joins, refused as `set_card_id`
+    says."""
     character = get_character(app, story_id, character_id)
     if card_id == character.card_id:
         raise Invalid("Nothing to change.")
-    if card_id is None:
-        assert character.card_id is not None
-        was = codex_cards.get_card(app, character.card_id)
-        app._store.characters.set_card_id(character.id, None)
-        return f"Unlinked {character.name} from {was.name}."
     card = codex_cards.get_card(app, card_id)
     other = next((c for c in app._store.characters.list(story_id) if c.card_id == card.id), None)
     if other is not None:
         raise Conflict(f"{other.name} in this story is linked to {card.name} already.")
-    app._store.characters.set_card_id(character.id, card.id)
-    return f"Linked {character.name} to {card.name}."
+    return character, card
 
 
 def update_journal(app: App, story_id: int, journal_id: int, *, entry: str | None = None) -> str:
@@ -322,7 +424,7 @@ def merge_characters(app: App, story_id: int, character_id: int, *, into: int) -
     """Fold a story's character into another — speakers and journals
     follow, the one folded becomes an alias of `into`, the character
     and the sentence. Refused toward the direction that would destroy an
-    imported card's archive."""
+    imported card's profile."""
     _ensure_cast_idle(app, story_id)
     # Resolved against THAT story's cast, so an id from another story is
     # as refused as an id that is not there at all.
@@ -332,11 +434,11 @@ def merge_characters(app: App, story_id: int, character_id: int, *, into: int) -
         raise NotFound("No such character in this story (see /cast).")
     if source.id == target.id:
         raise Invalid(f"'{source.name}' and '{target.name}' are already the same character.")
-    if source.card:
-        # A merge deletes the source row, its card archive with it — and
+    if source.profile:
+        # A merge deletes the source row, its card's profile with it — and
         # the card rows pointing at the target would send their typed
         # line instead of the composed block. Refused toward the
-        # direction that keeps the archive.
+        # direction that keeps the profile.
         raise Conflict(
             f"{source.name} carries an imported card, which a merge would destroy — "
             f"merge the other direction (/merge {target.name} into {source.name}) "
@@ -354,10 +456,10 @@ def delete_character(app: App, story_id: int, character_id: int) -> str:
     Prose that mentions them (summaries, other characters' entries)
     stays, and a later pass may make them again from new messages.
     Refused for a character carrying an imported card: the greeting
-    composes its block from that archive."""
+    composes its block from that profile."""
     _ensure_cast_idle(app, story_id)
     character = _theirs(app._store.characters.list(story_id), character_id, "character")
-    if character.card:
+    if character.profile:
         raise Conflict(
             f"{character.name} carries an imported card — "
             f"only an extracted character can be deleted."

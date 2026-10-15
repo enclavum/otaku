@@ -44,7 +44,7 @@ def read_story(store: Store, story_id: int) -> ExportedStory:
         title=story.title if story else "",
         system=story.system if story else "",
         cast=tuple(
-            ExportedCharacter(c.name, c.aliases, c.description, c.card or "")
+            ExportedCharacter(c.name, c.aliases, c.description, c.profile or "")
             for c in store.characters.list(story_id)
         ),
         scenes=tuple(
@@ -108,8 +108,8 @@ def render_story(export: ExportedStory, *, otaku_version: str, model: str, expor
             # A card archive under its carrier, escaped like any body —
             # card text is free to hold heading-shaped lines of its own.
             for character in export.cast:
-                if character.card:
-                    out += [f"#### {character.name}", "", _escape(character.card), ""]
+                if character.profile:
+                    out += [f"#### {character.name}", "", _escape(character.profile), ""]
 
     if export.scenes:
         out += ["## Scenes", ""]

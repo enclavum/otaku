@@ -54,7 +54,9 @@ stylesheet that reaches past the contract accepts the breakage itself.
 | `--otk-accent-ink` | accent used as text: links, rubrics, tokens |
 | `--otk-accent-tint` | the ground of a selected row |
 | `--otk-ok` | answering, resident, loaded |
-| `--otk-danger` | delete, stop, and failures — nothing else |
+| `--otk-danger` | delete, stop, refusals and failures — nothing else |
+| `--otk-danger-tint` | the ground of a window's foot holding an error |
+| `--otk-danger-flash` | the one flash of that ground as the error arrives |
 | `--otk-chat-story` | the rule on the story's side in the chat layout |
 | `--otk-chat-you` | the rule on the reader's side in the chat layout |
 
@@ -272,10 +274,11 @@ in classes, so a stylesheet can name it the same way the scripts do.
 | `.is-offline` | `.otk-app` | the server stopped answering |
 | `.is-loaded` / `.is-dim` | `.otk-row` | a model resident in memory, or not |
 | `.is-dragover` / `.is-filled` | `.otk-dropzone` | a file over the drop zone, and one dropped |
-| `.is-dragover` | `.otk-tile`, `.otk-charrow`, `.otk-pics` | a story character over a card or over new card; pictures over a card's |
-| `.is-dragging` | `.otk-pics__thumb` | a card's picture being moved to another place |
+| `.is-dragover` | `.otk-tile`, `.otk-charrow`, `.otk-pics` | a story character over a card or over new card, a card file over new card; pictures over a card's |
+| `.is-dragging` | `.otk-pics__thumb`, `.otk-tile`, `.otk-charrow` | a card's picture, or a card, being moved to another place |
 | `.is-out` | `.otk-editable` | a value outside its bounds, while typed |
 | `.is-waiting` | `.otk-docket` | a report's slip with nothing to show yet |
 | `.otk-generating--idle` | the generating block | the reply landed; the slot keeps its height |
 | `.otk-status--working` / `--offline` / `--idle` | `.otk-status` | which of the three the one status line shows |
-| `.otk-status--said` / `--error` | `.otk-status` | the sentence on it is news, or a failure |
+| `.otk-status--said` / `--error` | `.otk-status` | the sentence on it is news, or a refusal or a failure — an error, gone after ten seconds |
+| `.otk-panel__foot--error` / `.otk-docket__foot--error` / `.otk-dialog__foot--error` / `.otk-sheet__foot--error` | a window's foot | an error stands in it: one `.otk-alert` over its usual words, its ground flashed once and then tinted, until the foot says something else, the window closes, or ten seconds pass |

@@ -37,8 +37,8 @@ import { ago, excerpt, label } from "../kit/format.js";
 import * as held from "../play/held.js";
 import { thumbs } from "../kit/pictures.js";
 import { typeset } from "../kit/prose.js";
-import { facts, landed, resume } from "../play/shell.js";
-import { chooseLink, inviteCard, openCharacters } from "./characters.js";
+import { facts, landed, resume, showContextUse } from "../play/shell.js";
+import { cardFieldEditors, inviteCard, openCardWindow, pick } from "./characters.js";
 import { buildTools } from "./tools.js";
 
 /* What a premise may be read from: the two shapes a person keeps prose
@@ -135,7 +135,7 @@ export async function land(storyId, messageId, action) {
       : await api.stories.update(storyId, { head: messageId });
   if (!answer.refused) held.hold(answer.value.id);
   closeAll();
-  await landed(answer.notice, { redraw: "always" });
+  await landed(answer.notice, { redraw: "always", refused: answer.refused });
 }
 
 /** One story as the dossier draws it: its facts, its messages and its
@@ -187,9 +187,9 @@ function memoryOf(lore) {
     })),
     characters: lore.characters.map((character) => ({
       ...character,
-      // the archive an imported character carries; "" for one the
+      // the profile an imported character carries; "" for one the
       // extractor named out of the story itself
-      card: character.card ?? "",
+      profile: character.profile ?? "",
       journals: records.filter((record) => record.character === character.id),
     })),
   };
@@ -589,27 +589,31 @@ function sceneIndex(view, rail, currentId, { onPick }) {
   rail.replaceChildren(...parts);
 }
 
-function extractBlock(view) {
+function extractBlock(view, { adding = false } = {}) {
   /* The pass is a background job, so it needs a state and not only a
      button: how much is unread, and the control that reads it now. At
-     the foot of the index, the column a pass fills. */
+     the foot of the index, the column a pass fills — the cast's with
+     the other door into the cast beside it (`adding`). */
   const box = element("div", "otk-extract");
   const line = element("div", "otk-extract__line");
   const unread = view.memory?.unread ?? 0;
   line.append(
     element("span", unread ? "otk-dot otk-dot--off" : "otk-dot"),
-    span("otk-extract__state", unread ? `${unread} not extracted` : "all extracted"),
+    span(
+      "otk-extract__state",
+      unread ? `${unread} ${unread === 1 ? "message" : "messages"} not extracted` : "all extracted",
+    ),
   );
   // Two doors into the cast: a card from All characters — or, by its
   // picker's Import…, from a file — and the pass.
-  const importing = actionButton("Invite", { onclick: guard(inviteCard) });
+  const importing = adding ? [actionButton("Add character", { onclick: guard(inviteCard) })] : [];
   const button = element("button", "otk-btn", "Extract now");
   button.type = "button";
   button.dataset.command = "/extract";
   // Nothing open, nothing to read: the verb is greyed rather than
   // answered with a notice behind the dossier.
   button.disabled = !unread;
-  box.append(line, importing, button);
+  box.append(line, ...importing, button);
   return box;
 }
 
@@ -636,7 +640,7 @@ function buildCast(view, pane, characterId = null) {
     list.append(item);
   }
   const parts = [head, list];
-  if (view.inside) parts.push(extractBlock(view));
+  if (view.inside) parts.push(extractBlock(view, { adding: true }));
   rail.replaceChildren(...parts);
   view.select.cast = (id) => {
     const character = cast.find((entry) => entry.id === id) ?? cast[0];
@@ -662,14 +666,16 @@ function drawCharacter(view, pane, character) {
   }
 
   reading.replaceChildren(
+    // where they are, once they are anywhere
     span(
       "otk-label otk-label--accent",
-      `Character · ${inScenes(character)}`,
+      sceneCount(character) ? `Character · ${inScenes(character)}` : "Character",
     ),
     /* A name is the extractor's own — the cast is keyed by it, and
        `/merge` is how two become one — so it takes the label line
-       without the verbs, in the box a scene's title sits in. */
-    edited(element("h3", "otk-reading__title", character.name), "name", "otk-edit--title"),
+       without the verbs, in the box a scene's title sits in; linked to a
+       codex card, the way to it follows the name. */
+    edited(heading(view, character), "name", "otk-edit--title"),
     ...lede(view, {
       text: character.description,
       empty: "(no description yet)",
@@ -686,12 +692,6 @@ function drawCharacter(view, pane, character) {
   );
 
   const facts = [];
-  facts.push(
-    marginFact(
-      "aliases",
-      element("p", "otk-derived", character.aliases.join(" · ") || "none recorded"),
-    ),
-  );
   if (character.model) facts.push(madeBy(character));
   /* Their arc so far, the counterpart of the scene's own: same block,
      same rule above it, so the two lenses read as one apparatus. */
@@ -703,67 +703,138 @@ function drawCharacter(view, pane, character) {
       ),
     );
   }
-  facts.push(cardFact(view, character));
-  /* The card ARCHIVE: hand-kept source, so it wears a plain face and the
-     same verbs every corrected field wears — inert until `edit` is taken.
-     The fact's key already names it, so the hint line carries only the
-     verbs, anchored right. */
-  facts.push(
-    character.card
-      ? marginFact("card text", edited(editable("otk-card", {
-          text: character.card,
-          save: (text) => saveField(
-            view,
-            () => api.stories.characters.update(view.subject.id, character.id, { card: text }),
-            () => (character.card = text),
-          ),
-        }), ""))
-      : marginFact(
-          "card text",
-          element("p", "otk-derived", "none — extracted from the story, not imported"),
-        ),
-  );
-  margin.replaceChildren(
-    span("otk-label", "Apparatus"),
-    ...facts,
-    marginFoot("The facts above are rewritten on every pass."),
-    manageBlock(view, character),
-  );
-}
-
-function cardFact(view, character) {
-  /* The codex card this character is linked to: its name opens it in All
-     characters, "unlink" lets it go; not linked, "link…" picks one —
-     a link changes nothing else on either. Shown on a narrow screen too,
-     where the other facts give way. */
-  const line = element("p", "otk-margin__row");
-  if (character.card_id != null) {
-    const name = element("button", "otk-margin__value otk-card-link", character.card_name ?? "");
-    name.type = "button";
-    name.onclick = guard(() => openCharacters({ cardId: character.card_id }));
-    const unlink = element("button", "otk-margin__link otk-margin__link--quiet", "unlink");
-    unlink.type = "button";
-    unlink.onclick = guard(() => relink(view, character, null));
-    line.append(name, unlink);
-  } else {
-    const link = element("button", "otk-margin__link", "link\u2026");
-    link.type = "button";
-    link.onclick = guard(async () => {
-      const cardId = await chooseLink(character.name);
-      if (cardId !== null) await relink(view, character, cardId);
-    });
-    line.append(span("otk-margin__value otk-absent", "not linked"), link);
+  if (character.card_portrait && character.portrait_sent !== null) {
+    facts.push(pictureSwitch(view, character));
   }
-  const fact = marginFact("card", line);
-  fact.classList.add("otk-margin__fact--card");
-  return fact;
+  facts.push(cardText(view, character));
+  margin.replaceChildren(span("otk-label", "Apparatus"), ...facts, manageBlock(view, character));
 }
 
-async function relink(view, character, cardId) {
-  const answer = await api.stories.characters.update(view.subject.id, character.id, {
-    card_id: cardId,
+function pictureSwitch(view, character) {
+  /* Whether the card's picture rides the row that brought the character
+     in — chosen at a start or an invite, changed here. What the next
+     request costs changes with it. */
+  const toggle = element("button", "otk-switch otk-switch--h");
+  toggle.type = "button";
+  toggle.setAttribute("role", "switch");
+  toggle.setAttribute("aria-checked", String(character.portrait_sent));
+  toggle.setAttribute("aria-label", `Send ${character.name}'s picture along with the card`);
+  toggle.append(span("otk-switch__knob"));
+  toggle.onclick = guard(async () => {
+    const answer = await api.stories.characters.update(view.subject.id, character.id, {
+      portrait_sent: !character.portrait_sent,
+    });
+    if (!answer.refused) {
+      character.portrait_sent = answer.value.portrait_sent;
+      toggle.setAttribute("aria-checked", String(character.portrait_sent));
+      await showContextUse();
+    }
+    footnote(view.popup, answer.notice, answer.refused);
   });
-  await recast(view, answer, character.id);
+  const row = element("p", "otk-margin__switch");
+  row.append(toggle, span("", "send the picture along with the card"));
+  return marginFact("picture", row);
+}
+
+function cardText(view, character) {
+  /* The card a character came in with: its copy of the card's profile,
+     field by field as the card window shows a card's, each saved on its
+     own. A profile that is no TOML reads as no fields — it is the
+     hand-kept source, then, edited whole until it reads again. */
+  const key = "card";
+  if (character.profile_fields) {
+    const box = element("div", "otk-v otk-v--sm");
+    box.append(
+      ...cardFieldEditors(
+        character.profile_fields,
+        async (changes) => {
+          const answer = await api.stories.characters.update(view.subject.id, character.id, {
+            profile_fields: changes,
+          });
+          if (!answer.refused) {
+            character.profile = answer.value.profile;
+            character.profile_fields = answer.value.profile_fields;
+            footnote(view.popup, answer.notice);
+            await showContextUse(); // the card's block is what the next request carries
+          }
+          return answer;
+        },
+        "otk-passage__body otk-prose--margin",
+      ),
+    );
+    return marginFact(key, box);
+  }
+  if (!character.profile) {
+    return marginFact(key, element("p", "otk-derived", "none — extracted from the story, not imported"));
+  }
+  return marginFact(
+    key,
+    edited(
+      editable("otk-card", {
+        text: character.profile,
+        save: (text) =>
+          saveField(
+            view,
+            () => api.stories.characters.update(view.subject.id, character.id, { profile: text }),
+            () => (character.profile = text),
+          ),
+      }),
+      "",
+    ),
+  );
+}
+
+function heading(view, character) {
+  /* The character's name — and, linked to a codex card, after it its
+     portrait where the card has one and a mark, either opening the card's
+     window on its own; renamed, merged or deleted there, the card reads
+     differently here, so the story is read again. */
+  const name = element("h3", "otk-reading__title");
+  if (character.card_id == null) {
+    name.append(character.name);
+    return name;
+  }
+  const openCard = guard(async () => {
+    const refused = await openCardWindow(character.card_id);
+    if (refused) footnote(view.popup, refused, true);
+    else await reread(view, character.id);
+  });
+  name.append(character.name);
+  if (character.card_portrait) {
+    // the mark beside it is the keyboard's way in; this, the pointer's
+    const portrait = element("button", "otk-cast-portrait");
+    portrait.type = "button";
+    portrait.tabIndex = -1;
+    portrait.setAttribute("aria-hidden", "true");
+    const image = element("img");
+    image.alt = "";
+    image.src = api.pictures.thumbnail.url(character.card_portrait.file);
+    portrait.append(image);
+    portrait.onclick = openCard;
+    name.append(portrait);
+  }
+  const open = element("button", "otk-card-open");
+  open.type = "button";
+  open.title = "Open the card";
+  open.setAttribute("aria-label", "Open the card");
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+  const mark = {
+    d: "M12 9.5v3.5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3.5M9.5 2H14v4.5M14 2 7.5 8.5",
+    fill: "none",
+    stroke: "currentColor",
+    "stroke-width": "1.45",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+  };
+  for (const [key, value] of Object.entries(mark)) path.setAttribute(key, value);
+  svg.append(path);
+  open.append(svg);
+  open.onclick = openCard;
+  name.append(open);
+  return name;
 }
 
 function manageBlock(view, character) {
@@ -786,35 +857,30 @@ function manageBlock(view, character) {
 }
 
 async function askMerge(view, character) {
-  /* Which character this one really is, picked from the list; the
-     button applies. Nothing is picked up front, so a stray Enter merges
-     nobody. */
-  let into = null;
+  /* Which character this one really is, picked from the rest of the cast
+     as a card is picked (`characters.pick`): each with its card's picture
+     where it is linked to one, found by a name or an alias. Nothing is
+     picked up front, so a stray Enter merges nobody. */
   const others = (view.memory?.characters ?? []).filter((entry) => entry.id !== character.id);
-  const choice = await ask("merge", (dialog) => {
-    $("[data-title]", dialog).textContent = `Merge ${character.name} into…`;
-    $(".otk-dialog__body", dialog).textContent =
-      `Their journals move to the one you pick, and '${character.name}' becomes an alias.`;
-    const confirm = $('[data-choice="merge"]', dialog);
-    confirm.disabled = true;
-    const list = $("[data-into]", dialog);
-    // the unpicked state: shown empty, never offered again once left
-    const unpicked = element("option");
-    unpicked.value = "";
-    unpicked.disabled = unpicked.hidden = unpicked.selected = true;
-    const options = others.map((entry) => {
-      const option = element("option", "", entry.name);
-      option.value = String(entry.id);
-      return option;
-    });
-    list.replaceChildren(unpicked, ...options);
-    list.selectedIndex = 0;
-    list.onchange = () => {
-      into = list.value ? Number(list.value) : null;
-      confirm.disabled = into === null;
-    };
+  const picked = await pick({
+    title: `Merge ${character.name} into\u2026`,
+    filtering: "filter characters",
+    rows: "Characters",
+    read: async (query) => {
+      const needle = query.toLowerCase();
+      return others
+        .filter((entry) => [entry.name, ...entry.aliases].join(" ").toLowerCase().includes(needle))
+        .map((entry) => ({
+          id: entry.id,
+          name: entry.name,
+          tagline: "",
+          pictures: entry.card_portrait ? [entry.card_portrait] : [],
+        }));
+    },
+    none: () => ["No character matches that."],
   });
-  if (choice !== "merge" || into === null) return;
+  if (!picked?.chosen) return;
+  const into = picked.chosen.id;
   const merged = await api.stories.characters.merges.create(view.subject.id, character.id, { into });
   await recast(view, merged, into);
 }
@@ -834,15 +900,19 @@ async function recast(view, answer, selectId) {
      it — a scene's "present", a message's speaker — so the story is read
      again and those tabs are built anew, the cast at once. A refusal
      changed nothing; either way the answer is the footnote. */
-  if (!answer.refused) {
-    const opened = await opening(view.subject.id);
-    view.messages = opened.messages;
-    view.memory = opened.memory;
-    view.refused = opened.refused;
-    for (const tab of ["messages", "scenes", "cast"]) view.built.delete(tab);
-    show(view, "cast", selectId);
-  }
-  footnote(view.popup, answer.notice);
+  if (!answer.refused) await reread(view, selectId);
+  footnote(view.popup, answer.notice, answer.refused);
+}
+
+async function reread(view, selectId) {
+  /* The story read again, the tabs that draw its cast built anew, and the
+     cast shown on `selectId`. */
+  const opened = await opening(view.subject.id);
+  view.messages = opened.messages;
+  view.memory = opened.memory;
+  view.refused = opened.refused;
+  for (const tab of ["messages", "scenes", "cast"]) view.built.delete(tab);
+  show(view, "cast", selectId);
 }
 
 // ---------- the field shapes both lenses share ----------
@@ -921,8 +991,12 @@ function named(rows, id, key, fallback) {
 /** How much of the story a character is in, counted from their own
     records rather than sent as a figure of its own. */
 function inScenes(character) {
-  const scenes = new Set(character.journals.map((record) => record.scene)).size;
+  const scenes = sceneCount(character);
   return `in ${scenes} ${scenes === 1 ? "scene" : "scenes"}`;
+}
+
+function sceneCount(character) {
+  return new Set(character.journals.map((record) => record.scene)).size;
 }
 
 async function saveField(view, write, shown) {
@@ -1051,20 +1125,29 @@ function buildPremise(view, pane) {
 
 async function savePremise(view, text) {
   /* A premise lives ON a story, so one written before the first message
-     has to make one, and this page plays it from then on. The view
+     has to make one — taken back where the premise is refused
+     (`held.writing`) — and this page plays it from then on. The view
      KEEPS it: a second save corrects the premise it just wrote, not
      starts another story. */
-  if (view.subject.id === null) {
-    const made = await api.stories.create();
-    if (made.refused) return made;
-    view.subject.id = made.value.id;
-    held.hold(made.value.id);
+  const write = (id) =>
+    saveField(
+      view,
+      () => api.stories.update(id, { premise: text }),
+      () => (view.premise = text),
+    );
+  let answer;
+  if (view.subject.id !== null) answer = await write(view.subject.id);
+  else {
+    try {
+      answer = await held.writing((id) => {
+        view.subject.id = id;
+        return write(id);
+      });
+    } finally {
+      // the story made for it, taken back, is none to write to
+      if (held.story() !== view.subject.id) view.subject.id = null;
+    }
   }
-  const answer = await saveField(
-    view,
-    () => api.stories.update(view.subject.id, { premise: text }),
-    () => (view.premise = text),
-  );
   if (!answer.refused) await landed("");
   return answer;
 }

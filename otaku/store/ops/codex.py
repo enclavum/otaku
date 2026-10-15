@@ -32,16 +32,17 @@ class CardOps:
         *,
         aliases: Sequence[str] = (),
         tagline: str = "",
-        fields: str = "",
+        profile: str = "",
         pictures: Sequence[Attachment] = (),
         digests: Sequence[str] = (),
     ) -> int:
+        """A card made, last in the reader's order."""
         now = self._db.now()
         with self._db.conn as conn:
             # fmt: off
             cur = conn.execute(
-                "INSERT INTO cards (name, aliases, tagline, fields, pictures, digests, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (self._db.seal(name), self._seal_aliases(aliases), self._db.seal_opt(tagline or None), self._db.seal_opt(fields or None), Attachment.to_json(pictures), _digests_json(digests), now, now),
+                "INSERT INTO cards (name, aliases, tagline, profile, pictures, digests, created_at, updated_at, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(position), -1) + 1 FROM cards))",
+                (self._db.seal(name), self._seal_aliases(aliases), self._db.seal_opt(tagline or None), self._db.seal_opt(profile or None), Attachment.to_json(pictures), _digests_json(digests), now, now),
             )
             # fmt: on
         return int(cur.lastrowid or 0)
@@ -49,17 +50,17 @@ class CardOps:
     def get(self, card_id: int) -> Card | None:
         # fmt: off
         row = self._db.conn.execute(
-            "SELECT id, name, aliases, tagline, fields, pictures, digests, updated_at FROM cards WHERE id = ?",
+            "SELECT id, name, aliases, tagline, profile, pictures, digests, updated_at FROM cards WHERE id = ?",
             (card_id,),
         ).fetchone()
         # fmt: on
         return self._card(row) if row is not None else None
 
     def list(self) -> builtins.list[Card]:
-        """Every card, in the order they were made."""
+        """Every card, in the reader's order."""
         # fmt: off
         rows = self._db.conn.execute(
-            "SELECT id, name, aliases, tagline, fields, pictures, digests, updated_at FROM cards ORDER BY id",
+            "SELECT id, name, aliases, tagline, profile, pictures, digests, updated_at FROM cards ORDER BY position, id",
         ).fetchall()
         # fmt: on
         return [self._card(row) for row in rows]
@@ -71,7 +72,7 @@ class CardOps:
         name: str | None = None,
         aliases: Sequence[str] | None = None,
         tagline: str | None = None,
-        fields: str | None = None,
+        profile: str | None = None,
     ) -> None:
         """The reader's edit of a card. None leaves a field as it is; ""
         and () clear one — but the name, which a card cannot be without."""
@@ -93,10 +94,10 @@ class CardOps:
                     "UPDATE cards SET tagline = ?, updated_at = ? WHERE id = ?",
                     (self._db.seal_opt(tagline or None), now, card_id),
                 )
-            if fields is not None:
+            if profile is not None:
                 conn.execute(
-                    "UPDATE cards SET fields = ?, updated_at = ? WHERE id = ?",
-                    (self._db.seal_opt(fields or None), now, card_id),
+                    "UPDATE cards SET profile = ?, updated_at = ? WHERE id = ?",
+                    (self._db.seal_opt(profile or None), now, card_id),
                 )
             # fmt: on
 
@@ -129,6 +130,18 @@ class CardOps:
             conn.execute(
                 "UPDATE cards SET pictures = ?, updated_at = ? WHERE id = ?",
                 (Attachment.to_json(pictures), self._db.now(), card_id),
+            )
+            # fmt: on
+
+    def set_order(self, card_ids: Sequence[int]) -> None:
+        """The reader's order: each card numbered by its place among
+        `card_ids`, the first 0; a card left out keeps its number. A
+        reorder is no edit of a card, so none is dated by it."""
+        with self._db.conn as conn:
+            # fmt: off
+            conn.executemany(
+                "UPDATE cards SET position = ? WHERE id = ?",
+                [(at, card_id) for at, card_id in enumerate(card_ids)],
             )
             # fmt: on
 
@@ -198,13 +211,13 @@ class CardOps:
     # ---------- shaping ----------
 
     def _card(self, row: Any) -> Card:
-        card_id, name, aliases, tagline, fields, pictures, digests, updated = row
+        card_id, name, aliases, tagline, profile, pictures, digests, updated = row
         return Card(
             id=int(card_id),
             name=self._db.unseal(name),
             aliases=self._unseal_aliases(aliases),
             tagline=self._db.unseal(tagline),
-            fields=self._db.unseal(fields),
+            profile=self._db.unseal(profile),
             pictures=Attachment.from_json(pictures),
             digests=tuple(json.loads(digests)) if digests else (),
             updated_at=str(updated),

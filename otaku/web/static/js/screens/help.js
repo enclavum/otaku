@@ -147,7 +147,7 @@ export function openSupport() {
           body: message.value,
           email: email.value,
         });
-        footnote(popup, answer.notice);
+        footnote(popup, answer.notice, answer.refused);
         if (answer.refused) return;
         popup.dataset.sent = "";
         send.textContent = "Close";
@@ -156,7 +156,7 @@ export function openSupport() {
       } catch (e) {
         // a fault is a bug, not an answer: the console gets it, the reader a sentence
         console.error(e);
-        footnote(popup, String(e.message ?? e));
+        footnote(popup, String(e.message ?? e), true);
       } finally {
         send.disabled = false;
       }

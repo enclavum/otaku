@@ -13,6 +13,7 @@
 import { api } from "../api/index.js";
 import { editable, footnote, guard, popups, wiring } from "../kit/browser.js";
 import { $, $$, element, span } from "../kit/dom.js";
+import { facts, showContextUse, showFacts } from "../play/shell.js";
 
 // What a knob nobody has set reads as — the model's own value, or the
 // model's own max context. Either is an absence, and is drawn like one.
@@ -61,7 +62,7 @@ export async function openSettings(answered = "") {
   for (const name of ["verbose", "autocorrect", "notification"]) {
     global.append(
       knob(
-        leader(name, toggle(knobs[name], (word) => setKnob(name, word === "on"))),
+        leader(name, toggle(knobs[name], (word) => pressKnob(name, word === "on"))),
         element("p", "otk-note", about(name)),
       ),
     );
@@ -74,12 +75,20 @@ export async function openSettings(answered = "") {
   const limit = editableLeader(
     "max_context",
     stands.max_context(knobs),
-    (value, field) =>
-      typedKnob(
+    async (value, field) => {
+      const answer = await typedKnob(
         field,
         () => api.settings.update({ context_limit: Number(value.trim() || "0") }),
         stands.max_context,
-      ),
+      );
+      // the cap is what the next request is cut to: the provider line,
+      // which says how full it is, is read again
+      if (!answer.refused) {
+        showFacts(await facts());
+        await showContextUse();
+      }
+      return answer;
+    },
     _COUNT,
   );
   limit.lastElementChild.placeholder = DEFAULT_VALUE;
@@ -96,7 +105,7 @@ export async function openSettings(answered = "") {
   const takesNone = knobs.think_levels.length <= 1 && !knobs.think_budget;
   const think = takesNone
     ? editable("", { text: "", readonly: true, line: true })
-    : ladder(knobs.think_levels, knobs.think, (level) => setKnob("think", level));
+    : ladder(knobs.think_levels, knobs.think, (level) => pressKnob("think", level));
   if (takesNone) {
     think.disabled = true;
     think.placeholder = "unsupported";
@@ -303,6 +312,14 @@ async function setKnob(name, value) {
   const answer =
     name === "think" ? await ownSettings({ think: value }) : await api.settings.update({ [name]: value });
   if (!answer.refused) await openSettings(answer.notice);
+  return answer;
+}
+
+/** A BUTTON's write, its refusal said: a field's is the field's own to
+    say (`browser.editable`). */
+async function pressKnob(name, value) {
+  const answer = await setKnob(name, value);
+  if (answer.refused) footnote(popups.get("/set"), answer.notice, true);
   return answer;
 }
 

@@ -10,7 +10,7 @@
    titled are the page's own words, in the tables below. */
 
 import { api } from "../api/index.js";
-import { ask, edited, editable, footnote, guard } from "../kit/browser.js";
+import { ask, askWriting, edited, editable, footnote, guard } from "../kit/browser.js";
 import { $, element, span } from "../kit/dom.js";
 import { KEY_MASK } from "./models.js";
 import { landed } from "../play/shell.js";
@@ -328,17 +328,19 @@ function instructionsButton(view, setting) {
     const dialog = $('dialog[data-dialog="instruction"]');
     const field = $("textarea", dialog);
     pagingCaret(field);
-    const choice = await ask("instruction", () => {
-      $("[data-title]", dialog).textContent = capitalised(`${setting.injection_label} prompt`);
-      field.value = text;
-      // Read from the top, and nothing typed by accident: the text
-      // starts at its first line and the focus rests on Cancel.
-      field.setSelectionRange(0, 0);
-      field.scrollTop = 0;
-    });
-    if (choice !== "save") return;
-    const answer = await promptOf(setting).update({ text: field.value });
-    footnote(view.popup, answer.notice);
+    const answer = await askWriting(
+      "instruction",
+      () => {
+        $("[data-title]", dialog).textContent = capitalised(`${setting.injection_label} prompt`);
+        field.value = text;
+        // Read from the top, and nothing typed by accident: the text
+        // starts at its first line and the focus rests on Cancel.
+        field.setSelectionRange(0, 0);
+        field.scrollTop = 0;
+      },
+      (choice) => (choice === "save" ? promptOf(setting).update({ text: field.value }) : null),
+    );
+    if (answer) footnote(view.popup, answer.notice);
   });
   return button;
 }
@@ -421,20 +423,24 @@ function keyButton(view) {
     const field = $("input", dialog);
     const { has_key: set } = await api.integrations.webSearch.get();
     const key = maskedKey(field, set);
-    const choice = await ask("web-search-key", () => {
-      key.arm();
-      // A key that is set opens on Cancel, its mask standing: the box is
-      // entered to replace the key, not on the way in. With none, the
-      // box has the focus, for the key to be pasted.
-      field.autofocus = !set;
-      $('[data-choice="cancel"]', dialog).autofocus = set;
-    });
+    const answer = await askWriting(
+      "web-search-key",
+      () => {
+        key.arm();
+        // A key that is set opens on Cancel, its mask standing: the box is
+        // entered to replace the key, not on the way in. With none, the
+        // box has the focus, for the key to be pasted.
+        field.autofocus = !set;
+        $('[data-choice="cancel"]', dialog).autofocus = set;
+      },
+      (choice) => {
+        const typed = choice === "save" ? key.pending() : null;
+        // null: the key stands as it was
+        return typed === null ? null : api.integrations.webSearch.update({ api_key: typed });
+      },
+    );
     key.disarm();
-    if (choice !== "save") return;
-    const typed = key.pending();
-    if (typed === null) return; // the key stands as it was
-    const answer = await api.integrations.webSearch.update({ api_key: typed });
-    footnote(view.popup, answer.notice);
+    if (answer) footnote(view.popup, answer.notice);
   });
   return button;
 }
@@ -510,7 +516,7 @@ async function saveSetting(view, setting, fields) {
      backend says of it is the footnote, and a refusal keeps the
      control where it was. */
   const answer = await api.stories.settings.update(view.subject.id, setting.name, fields);
-  footnote(view.popup, answer.notice);
+  footnote(view.popup, answer.notice, answer.refused);
   if (!answer.refused) Object.assign(setting, fields);
   return answer;
 }

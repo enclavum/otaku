@@ -130,15 +130,19 @@ A frontend touches the `App` for its life and its channels alone
 
 ### Names
 
-A BOOLEAN property is never named by a noun or a verb. One that says
-whether the object IS something is `is_…`; one that says whether it CAN
-do something is `can_…` (`can_manage`, `can_count_tokens`,
+A BOOLEAN is never named by a noun — a PLURAL noun included — or a
+verb, wherever it lives: a property, a field, a parameter, a local
+variable, a JS variable or option, an HTTP body or query field. One
+that says whether the object IS something is `is_…`; one that says
+whether it CAN do something is `can_…` (`can_manage`, `can_count_tokens`,
 `can_mark_cache`); an adjective or a participle stands on its own
-(`fresh`, `quiet`). So `manages_models` and `counts_tokens` are not
-booleans' names. The one exception is a CAPABILITY
-(`ModelCapabilities.vision`, `text_completion`): those are the trade's
-own words, spelled as every engine spells them. Applied in
-`otaku/providers` so far; a new boolean anywhere follows it.
+(`fresh`, `quiet`, `portrait_sent`); a flag asking a write to take
+something along is `with_…` (`with_pictures`, `with_copies`). So
+`manages_models`, `counts_tokens` and `copies` are not booleans' names.
+The one exception is a CAPABILITY (`ModelCapabilities.vision`,
+`text_completion`): those are the trade's own words, spelled as every
+engine spells them. Older code still breaks this in places; every
+boolean a change adds or renames follows it.
 
 A request's size is told by five numbers, each with ONE name everywhere
 the backend speaks — its code, `backend.api`, the HTTP surface and its

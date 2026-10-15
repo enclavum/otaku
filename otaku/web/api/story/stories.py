@@ -161,6 +161,9 @@ ROUTES: dict[tuple[str, str], Route] = {
     ("DELETE", "/api/stories/{story}"): lambda api, ask: changed(
         api.stories.delete(ask.id("story"))
     ),
+    ("GET", "/api/stories/{story}/forks"): lambda api, ask: {
+        "items": plain(api.stories.forks.list(ask.id("story")))
+    },
     ("POST", "/api/stories/{story}/forks"): _fork,
     ("POST", "/api/stories/{story}/undos"): tagged(_undo),
 }

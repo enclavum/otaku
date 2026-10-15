@@ -98,7 +98,7 @@ function landingLine(facts, verb = "Resumed") {
     the backend's refusal is said instead. */
 export async function resume(id) {
   const found = await api.stories.get(id);
-  if (found.refused) return landed(found.notice);
+  if (found.refused) return landed(found.notice, { refused: true });
   held.hold(id);
   await landed(landingLine(await facts()), { redraw: "always" });
 }
@@ -199,14 +199,14 @@ export async function drawPlayed(storyId, { keepPlace = false } = {}) {
 /** What a write answered with, shown where it belongs. The facts are
     always asked again; the transcript is redrawn only when the story it
     draws is no longer the one that is open, because a redraw costs the
-    reader their place. `corrected` — `[position, text]` — is one turn
+    reader their place. A `refused` notice is said as an error. `corrected` — `[position, text]` — is one turn
     corrected elsewhere, shown where the transcript draws it instead.
     `keepPlace`: what a redraw would draw is on the page already — a
     played line's turns, its story made by that line — so it moves
     nothing. */
 export async function landed(
   notice,
-  { redraw = "if-moved", corrected = null, kind = "", keepPlace = false } = {},
+  { redraw = "if-moved", corrected = null, refused = false, keepPlace = false } = {},
 ) {
   const read = await facts();
   const moved = read.story_id !== drawn;
@@ -218,7 +218,7 @@ export async function landed(
     await showCorrected(...corrected);
   }
   await using;
-  tell(notice, kind);
+  tell(notice, refused ? "otk-error" : "");
 }
 
 /* How often the page asks whether otaku is still there. Without it the
@@ -309,8 +309,10 @@ export function watchExtraction(story) {
   // Guarded like every other floating promise the page starts: a Stop
   // that cannot be delivered must say so, not fail into the console.
   const stop = guard(async () => {
-    const { notice } = await api.stories.extraction.delete(story);
-    done(notice);
+    const answer = await api.stories.extraction.delete(story);
+    // refused, the pass runs on, and the watch with it
+    if (answer.refused) return tell(answer.notice, "otk-error");
+    done(answer.notice);
   });
   working(true, stop);
   watcher = setInterval(async () => {

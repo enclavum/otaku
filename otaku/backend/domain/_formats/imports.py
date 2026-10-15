@@ -190,19 +190,19 @@ def write_story(store: Store, export: ExportedStory) -> int:
         name: str,
         aliases: tuple[str, ...] = (),
         description: str | None = None,
-        card: str | None = None,
+        profile: str | None = None,
     ) -> int:
         # Resolve-or-create by name; an existing row is enriched, never
         # overwritten (the store's own additive rule).
         found = store.characters.find(story_id, name)
         if found is not None:
-            if aliases or description or card:
+            if aliases or description or profile:
                 store.characters.update(
-                    found.id, aliases=aliases, description=description, card=card
+                    found.id, aliases=aliases, description=description, profile=profile
                 )
             return found.id
         return store.characters.add(
-            story_id, name, aliases=aliases, description=description, card=card
+            story_id, name, aliases=aliases, description=description, profile=profile
         )
 
     ids: list[int] = []
@@ -226,7 +226,7 @@ def write_story(store: Store, export: ExportedStory) -> int:
             member.name,
             aliases=member.aliases,
             description=member.description or None,
-            card=member.card or None,
+            profile=member.profile or None,
         )
 
     for scene in export.scenes:

@@ -10,10 +10,14 @@ filled in.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any, Literal, overload
 
 from otaku.backend.api._writes import UNCHANGED, Changed, Unchanged
+from otaku.backend.api.codex.cards import CharacterLinkCheck
 from otaku.backend.domain.app import App
+from otaku.backend.domain.story import cards as domain_cards
 from otaku.backend.domain.story import lore as domain_lore
 from otaku.backend.domain.story.lore import ExtractionState, Memory
 from otaku.backend.errors import Invalid
@@ -107,34 +111,83 @@ class CharactersResource:
         held = domain_lore.get_lore(self._app, story_id)
         return _character(held, held.character(character_id))
 
+    @overload
     def update(
         self,
         story_id: int,
         character_id: int,
         *,
         description: str | Unchanged = UNCHANGED,
-        card: str | Unchanged = UNCHANGED,
+        profile: str | Unchanged = UNCHANGED,
         card_id: int | Unchanged | None = UNCHANGED,
-    ) -> Changed[Character]:
+        profile_fields: Mapping[str, Any] | Unchanged = UNCHANGED,
+        portrait_sent: bool | Unchanged = UNCHANGED,
+        with_copies: bool = False,
+    ) -> Changed[Character]: ...
+
+    @overload
+    def update(
+        self, story_id: int, character_id: int, *, card_id: int, validate_only: Literal[True]
+    ) -> CharacterLinkCheck: ...
+
+    def update(
+        self,
+        story_id: int,
+        character_id: int,
+        *,
+        description: str | Unchanged = UNCHANGED,
+        profile: str | Unchanged = UNCHANGED,
+        card_id: int | Unchanged | None = UNCHANGED,
+        profile_fields: Mapping[str, Any] | Unchanged = UNCHANGED,
+        portrait_sent: bool | Unchanged = UNCHANGED,
+        with_copies: bool = False,
+        validate_only: bool = False,
+    ) -> Changed[Character] | CharacterLinkCheck:
         """The author's correction of a character — its description, and
-        the card archive an imported one carries — and its link to a
-        codex card (`card_id`; None unlinks), which changes nothing else
-        on either. Raises Refused for nothing to change, a card that is
-        no TOML, a character not in the cast, no such codex card, and a
+        the profile an imported one carries, whole or field by field
+        (`profile_fields`, by the names `ProfileFields` gives them) — whether
+        its card's picture rides the row that brought it in
+        (`portrait_sent`), and its link to a codex card (`card_id`; None
+        unlinks), which changes nothing else on either. A link takes the
+        character's copies in the stories forks join its own to along
+        with `with_copies`; asked to `validate_only`, a link alone is vetted,
+        nothing stored, and answered with how many copies. Raises Refused for
+        nothing to change, a card that is no TOML, a field a card has not
+        or a reminder's depth below 1, a character not in the cast or with
+        no card, a picture asked to ride where no card row brought the
+        character in or there is no picture, no such codex card, and a
         card another of the story's characters is linked to already."""
+        if validate_only:
+            vetted = (description, profile, profile_fields, portrait_sent)
+            if not isinstance(card_id, int) or any(v is not UNCHANGED for v in vetted):
+                raise Invalid("Only a link is vetted before it is made.")
+            found = domain_lore.check_card_link(self._app, story_id, character_id, card_id)
+            return CharacterLinkCheck(copies=len(found))
         said = []
-        if not isinstance(description, Unchanged) or not isinstance(card, Unchanged):
+        if not isinstance(description, Unchanged) or not isinstance(profile, Unchanged):
             said.append(
                 domain_lore.update_character(
                     self._app,
                     story_id,
                     character_id,
                     description=None if isinstance(description, Unchanged) else description,
-                    card=None if isinstance(card, Unchanged) else card,
+                    profile=None if isinstance(profile, Unchanged) else profile,
                 )
             )
+        if not isinstance(profile_fields, Unchanged):
+            said.append(
+                domain_lore.update_profile(self._app, story_id, character_id, profile_fields)
+            )
+        if not isinstance(portrait_sent, Unchanged):
+            said.append(
+                domain_lore.set_portrait_sent(self._app, story_id, character_id, portrait_sent)
+            )
         if not isinstance(card_id, Unchanged):
-            said.append(domain_lore.set_card_id(self._app, story_id, character_id, card_id))
+            said.append(
+                domain_lore.set_card_id(
+                    self._app, story_id, character_id, card_id, with_copies=with_copies
+                )
+            )
         if not said:
             raise Invalid("Nothing to change.")
         return Changed(self.get(story_id, character_id), " ".join(said))
@@ -157,7 +210,7 @@ class MergesResource:
         """Fold a story's character into `into` — speakers and journals
         follow, the one folded becomes an alias — answered with the
         character it went into as it now stands. Refused toward the
-        direction that would destroy an imported card's archive."""
+        direction that would destroy an imported card's profile."""
         said = domain_lore.merge_characters(self._app, story_id, character_id, into=into)
         held = domain_lore.get_lore(self._app, story_id)
         return Changed(_character(held, held.character(into)), said)
@@ -245,19 +298,44 @@ def _scene(held: Memory, row: schema.Scene) -> Scene:
 
 def _character(held: Memory, row: schema.Character) -> Character:
     history, holder = held.character_history(row.id)
+    linked = held.linked_cards.get(row.card_id) if row.card_id is not None else None
     return Character(
         id=row.id,
         name=row.name,
         aliases=row.aliases,
         description=row.description,
-        card=row.card,
+        profile=row.profile,
+        profile_fields=_profile_fields(row),
         history=history,
         history_journal_id=holder.id if holder is not None else None,
         card_id=row.card_id,
-        card_name=held.card_names.get(row.card_id) if row.card_id is not None else None,
+        card_name=linked.name if linked is not None else None,
+        card_portrait=linked.pictures[0] if linked is not None and linked.pictures else None,
+        portrait_sent=held.portraits_sent.get(row.id),
         provider=row.provider,
-        model=row.model,
+        # a card made it, not a model: the file it came from is no model's
+        # name, and the profile keeps it
+        model=None if row.provider == domain_cards.CARD_PROVIDER else row.model,
         updated_at=row.updated_at,
+    )
+
+
+def _profile_fields(row: schema.Character) -> ProfileFields | None:
+    profile = domain_lore.profile_of(row)
+    if profile is None:
+        return None
+    return ProfileFields(
+        description=profile.description,
+        personality=profile.personality,
+        scenario=profile.scenario,
+        greeting=profile.greeting,
+        alternate_greetings=profile.alternate_greetings,
+        examples=profile.examples,
+        reminder=profile.reminder,
+        reminder_depth=profile.reminder_depth,
+        system_prompt=profile.system_prompt,
+        post_history_instructions=profile.post_history_instructions,
+        creator_notes=profile.creator_notes,
     )
 
 
@@ -321,24 +399,53 @@ class Scene:
 
 
 @dataclass(frozen=True)
+class ProfileFields:
+    """A story character's profile, field by field — every field a codex
+    card has (`codex.cards.Card`), an empty one empty — what its TOML
+    (`Character.profile`) is written from, and corrected by.
+    `context.cards.CharacterProfile` less `name` and `file_name`: the
+    fields a reader writes, so an answer reads what a correction sends
+    — the name is the character's own, the file a record — and the HTTP
+    shape stays apart from the context class."""
+
+    description: str
+    personality: str
+    scenario: str
+    greeting: str
+    alternate_greetings: tuple[str, ...]
+    examples: tuple[str, ...]
+    reminder: str
+    reminder_depth: int
+    system_prompt: str
+    post_history_instructions: str
+    creator_notes: str
+
+
+@dataclass(frozen=True)
 class Character:
     """One character of a story's cast: its name and aliases, its
-    description, the card archive an imported one carries (None for one
-    the extractor made), its arc so far — the newest non-empty rollup,
-    "" before a pass has written one — and the id of the journal record
-    it was taken from (where a frontend says how old it is), the codex
-    card it is linked to and that card's name (None for none), who made
-    it, and when it was last written (for display alone)."""
+    description, the profile an imported one carries, as TOML (None for
+    one the extractor made) and field by field, its arc so far
+    — the newest non-empty rollup, "" before a pass has written one — and
+    the id of the journal record it was taken from (where a frontend says
+    how old it is), the codex card it is linked to, that card's name and
+    its portrait (None for none), whether the card row that brought it in
+    on the current timeline carries that picture (None where none did),
+    who made it — a card's, the card alone, no model
+    named — and when it was last written (for display alone)."""
 
     id: int
     name: str
     aliases: tuple[str, ...]
     description: str
-    card: str | None
+    profile: str | None
+    profile_fields: ProfileFields | None
     history: str
     history_journal_id: int | None
     card_id: int | None
     card_name: str | None
+    card_portrait: schema.Attachment | None
+    portrait_sent: bool | None
     provider: str | None
     model: str | None
     updated_at: str

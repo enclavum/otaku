@@ -23,9 +23,7 @@ from otaku.store.schema import Character, Journal, Scene
 
 # A character row's columns, as `CharacterOps._character` reads them,
 # and a row's journal count beside them (`idx_journals_rollup` serves it).
-_CHARACTER_COLUMNS = (
-    "c.id, c.name, c.aliases, c.description, c.card, c.updated_at, c.provider, c.model, c.card_id"
-)
+_CHARACTER_COLUMNS = "c.id, c.name, c.aliases, c.description, c.profile, c.updated_at, c.provider, c.model, c.card_id"
 _JOURNAL_COUNT = (
     "(SELECT COUNT(*) FROM journals j WHERE j.story_id = c.story_id AND j.character_id = c.id)"
 )
@@ -183,7 +181,7 @@ class CharacterOps:
         *,
         aliases: tuple[str, ...] = (),
         description: str | None = None,
-        card: str | None = None,
+        profile: str | None = None,
         provider: str | None = None,
         model: str | None = None,
         card_id: int | None = None,
@@ -193,8 +191,8 @@ class CharacterOps:
         with self._db.conn as conn:
             # fmt: off
             cur = conn.execute(
-                "INSERT INTO characters (story_id, name, aliases, description, card, created_at, updated_at, provider, model, card_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (story_id, self._db.seal(name), sealed_aliases, self._db.seal_opt(description), self._db.seal_opt(card), now, now, provider, model, card_id),
+                "INSERT INTO characters (story_id, name, aliases, description, profile, created_at, updated_at, provider, model, card_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (story_id, self._db.seal(name), sealed_aliases, self._db.seal_opt(description), self._db.seal_opt(profile), now, now, provider, model, card_id),
             )
             # fmt: on
         return int(cur.lastrowid or 0)
@@ -214,26 +212,26 @@ class CharacterOps:
         *,
         aliases: tuple[str, ...] = (),
         description: str | None = None,
-        card: str | None = None,
+        profile: str | None = None,
     ) -> None:
         """Fill in details for a character created bare (a speaker label
         creates the row before the extraction's own entry arrives). Strictly
-        additive: aliases merge, an existing description or card is never
+        additive: aliases merge, an existing description or profile is never
         overwritten."""
         row = self._db.conn.execute(
-            "SELECT aliases, description, card FROM characters WHERE id = ?", (character_id,)
+            "SELECT aliases, description, profile FROM characters WHERE id = ?", (character_id,)
         ).fetchone()
         if row is None:
             return
         merged = list(dict.fromkeys([*self._decode_aliases(row[0]), *aliases]))
         sealed_aliases = self._db.seal_opt(json.dumps(merged) if merged else None)
         kept_description = row[1] if row[1] is not None else self._db.seal_opt(description)
-        kept_card = row[2] if row[2] is not None else self._db.seal_opt(card)
+        kept_profile = row[2] if row[2] is not None else self._db.seal_opt(profile)
         with self._db.conn as conn:
             # fmt: off
             conn.execute(
-                "UPDATE characters SET aliases = ?, description = ?, card = ?, updated_at = ? WHERE id = ?",
-                (sealed_aliases, kept_description, kept_card, self._db.now(), character_id),
+                "UPDATE characters SET aliases = ?, description = ?, profile = ?, updated_at = ? WHERE id = ?",
+                (sealed_aliases, kept_description, kept_profile, self._db.now(), character_id),
             )
             # fmt: on
 
@@ -266,29 +264,33 @@ class CharacterOps:
             )
             # fmt: on
 
-    def set_card(self, character_id: int, card: str) -> None:
-        """The author's correction of an imported card's archive — replaces
+    def set_profile(self, character_id: int, profile: str) -> None:
+        """The author's correction of an imported card's profile — replaces
         the text, and the wire follows: the card row composes its block
-        from this archive at every request, so the correction reaches the
+        from this profile at every request, so the correction reaches the
         next one (and the next import's persona default)."""
         with self._db.conn as conn:
             # fmt: off
             conn.execute(
-                "UPDATE characters SET card = ?, updated_at = ? WHERE id = ?",
-                (self._db.seal_opt(card or None), self._db.now(), character_id),
+                "UPDATE characters SET profile = ?, updated_at = ? WHERE id = ?",
+                (self._db.seal_opt(profile or None), self._db.now(), character_id),
             )
             # fmt: on
 
-    def set_card_id(self, character_id: int, card_id: int | None) -> None:
+    def set_card_id(
+        self, character_id: int, card_id: int | None, *, copies: Sequence[int] = ()
+    ) -> None:
         """Link a cast row to a codex card, or unlink it with None —
         nothing else on either row changes: the character keeps its own
-        copy of whatever it holds. One link per card in a story: a second
-        raises `sqlite3.IntegrityError` (the unique index)."""
+        copy of whatever it holds — and `copies`, rows in other stories,
+        with it in one transaction. One link per card in a story: a
+        second raises `sqlite3.IntegrityError` (the unique index)."""
+        now = self._db.now()
         with self._db.conn as conn:
             # fmt: off
-            conn.execute(
+            conn.executemany(
                 "UPDATE characters SET card_id = ?, updated_at = ? WHERE id = ?",
-                (card_id, self._db.now(), character_id),
+                [(card_id, now, row) for row in (character_id, *copies)],
             )
             # fmt: on
 
@@ -410,13 +412,13 @@ class CharacterOps:
 
     def _character(self, row: Sequence[Any]) -> Character:
         """A row read by `_CHARACTER_COLUMNS`, unsealed."""
-        cid, name, aliases, description, card, updated, provider, model, card_id = row
+        cid, name, aliases, description, profile, updated, provider, model, card_id = row
         return Character(
             id=int(cid),
             name=self._db.unseal(name),
             aliases=self._decode_aliases(aliases),
             description=self._db.unseal(description),
-            card=self._db.unseal_opt(card),
+            profile=self._db.unseal_opt(profile),
             updated_at=str(updated),
             provider=provider,
             model=model,

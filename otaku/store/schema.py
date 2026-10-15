@@ -20,36 +20,38 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Self
 
-SCHEMA_VERSION = "10"
+SCHEMA_VERSION = "13"
 
 SCHEMA_DDL = """
 -- ---------- the codex: what every story may draw on ----------
 
 -- A story's character links to its card (`characters.card_id`) and holds
--- a COPY of its fields: an edit on either side never reaches the other.
+-- a COPY of its profile: an edit on either side never reaches the other.
 CREATE TABLE cards (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     name       BLOB NOT NULL,
     aliases    BLOB,                     -- JSON array, sealed
     tagline    BLOB,                     -- one line for the reader; never sent to the model
-    fields     BLOB,                     -- the card's fields as TOML, macros unbound
+    profile    BLOB,                     -- the card's profile as TOML, the name left to `name`; macros unbound
     pictures   TEXT,                     -- its pictures as a JSON list, see Attachment; the first the portrait; NULL when none
     digests    TEXT,                     -- the card files it was made from, as a JSON list; NULL when none
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    position   INTEGER NOT NULL DEFAULT 0 -- the reader's order, 0 first; a card made goes last
 );
 
 -- ---------- source: what was actually said ----------
 
 CREATE TABLE stories (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    forked_from_id INTEGER,              -- audit: forked from which story; deliberately NOT a FK
-    head_id        INTEGER,              -- current position in the message tree
-    title          BLOB,
-    system         BLOB,                 -- the story's system prompt
-    created_at     TEXT NOT NULL,
-    updated_at     TEXT NOT NULL,
-    settings       BLOB,                 -- the story's settings as JSON, sealed; NULL when none
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    forked_from_id         INTEGER,      -- the story it was forked from; deliberately NOT a FK
+    head_id                INTEGER,      -- current position in the message tree
+    title                  BLOB,
+    system                 BLOB,         -- the story's system prompt
+    created_at             TEXT NOT NULL,
+    updated_at             TEXT NOT NULL,
+    settings               BLOB,         -- the story's settings as JSON, sealed; NULL when none
+    forked_from_message_id INTEGER,      -- the last message it copied from that story; NOT a FK either
     FOREIGN KEY (id, head_id) REFERENCES messages(story_id, id)
 );
 
@@ -108,7 +110,7 @@ CREATE TABLE characters (
     description BLOB,
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL,
-    card        BLOB,                    -- an imported card as TOML
+    profile     BLOB,                    -- a copy of its card's profile as TOML, with the names it binds; NULL for an extracted one
     provider    TEXT,                    -- who made the row
     model       TEXT,
     card_id     INTEGER REFERENCES cards(id) ON DELETE SET NULL,  -- the codex card it is linked to
@@ -177,7 +179,7 @@ CREATE INDEX idx_token_usage_story ON token_usage (story_id);
 @dataclass(frozen=True)
 class Card:
     """A character card in the codex: a character as the reader keeps it
-    across stories. `fields` is the card's text as the TOML archive
+    across stories. `profile` is the card's text as the TOML
     `context.cards` writes and reads; the first of the pictures is the
     portrait; `digests` name the card files it was made from."""
 
@@ -185,7 +187,7 @@ class Card:
     name: str
     aliases: tuple[str, ...] = ()
     tagline: str = ""
-    fields: str = ""
+    profile: str = ""
     pictures: tuple["Attachment", ...] = ()  # the files folder holds the bytes
     digests: tuple[str, ...] = ()
     updated_at: str = ""  # audit column, surfaced for display alone
@@ -198,6 +200,7 @@ class Story:
     system: str
     head_id: int | None
     forked_from_id: int | None
+    forked_from_message_id: int | None  # the cut, in the story forked from
     settings: tuple["StorySettingDB", ...] = ()  # what the story has stored, see StorySettingDB
 
 
@@ -252,7 +255,7 @@ class Character:
     name: str
     aliases: tuple[str, ...] = ()
     description: str = ""
-    card: str | None = None  # the import archive; None for extracted characters
+    profile: str | None = None  # its card's profile, a copy; None for extracted characters
     updated_at: str = ""  # audit column, surfaced for display alone
     provider: str | None = None  # who made the row (see the DDL)
     model: str | None = None

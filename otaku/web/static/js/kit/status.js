@@ -35,16 +35,24 @@ let heard = false;
    About the MEDIUM, which is why it is the frontend's own word. */
 const _RESTING = "Ready";
 
+/** How long an error stands where nothing has been said over it, here
+    and in a window's foot (`browser.report`). */
+export const ERROR_MS = 10_000;
+let fading = 0;
+
 export function tell(sentence, kind = "") {
   /* What otaku just said. `kind` marks a refusal, which reads as one —
    the flag is the caller's, and the WORDING is always the backend's. */
   if (!text) return;
+  clearTimeout(fading);
   text.textContent = sentence || _RESTING;
   // The line is one row and cuts with an ellipsis, so the whole of it
   // has to be somewhere: hovering it is where.
   text.title = sentence || _RESTING;
   line.classList.toggle("otk-status--said", Boolean(sentence) && kind !== "otk-error");
   line.classList.toggle("otk-status--error", Boolean(sentence) && kind === "otk-error");
+  // read, an error goes; otaku gone is a state, and stands while it is true
+  if (sentence && kind === "otk-error") fading = setTimeout(() => gone || tell(""), ERROR_MS);
 }
 
 /** What refused the line just typed, where it was typed: above the box —

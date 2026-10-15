@@ -483,8 +483,8 @@ def highlight_toml(text: str) -> str:
     colors wherever it stands — both in the command color, the shade
     syntax wears everywhere else. A line inside a `'''` block is value
     text, so a `key =` shape there stays prose; the block state is read
-    off the lines themselves — exactly right for the archives `card_toml`
-    writes, and close enough for a hand edit."""
+    off the lines themselves — exactly right for the profiles
+    `CharacterProfile.to_toml` writes, and close enough for a hand edit."""
     escape = theme().command.fg
     out: list[str] = []
     in_block = False

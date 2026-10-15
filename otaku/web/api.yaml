@@ -328,6 +328,23 @@ paths:
   /api/stories/{story}/forks:
     parameters:
       - $ref: "#/components/parameters/Story"
+    get:
+      operationId: listForks
+      tags: [Stories]
+      summary: The stories forks join it to
+      description: Every other story a chain of forks joins this one to — the one it was forked from, its forks, theirs, and their siblings — most recently played first. A deleted story still joins the forks made from it.
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: The stories.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/StorySummary" }
     post:
       operationId: createFork
       tags: [Stories]
@@ -838,7 +855,11 @@ paths:
       operationId: updateCharacter
       tags: [Lore]
       summary: Correct a character, or link it to a codex card
-      description: The description, and the card an imported one carries — emptied to nothing included — and the codex card it is linked to (`card_id`; null unlinks), which changes nothing else on either.
+      description: The description, and the profile an imported one carries — whole as TOML (`profile`; emptied to nothing included) or field by field (`profile_fields`, a field emptied leaving it) — and the codex card it is linked to (`card_id`; null unlinks), which changes nothing else on either. A link takes the character's copies along with `with_copies` — in every story forks join its own to, the one unlinked character of its very name, a story where the card links another already passed over. With `validate_only`, a link alone is vetted, nothing stored, answered with how many copies.
+      parameters:
+        - name: validate_only
+          in: query
+          schema: { type: boolean, default: false }
       requestBody:
         required: true
         content:
@@ -847,20 +868,25 @@ paths:
               type: object
               properties:
                 description: { type: string }
-                card: { type: string }
+                profile: { type: string }
+                profile_fields: { $ref: "#/components/schemas/ProfileFields" }
+                portrait_sent: { type: boolean, description: "Whether the card's picture rides the row that brought the character in. Refused where no card row on the current timeline did, or there is no picture to send." }
                 card_id: { type: [integer, "null"] }
+                with_copies: { type: boolean, default: false, description: "With a card linked: its copies in forked stories linked too." }
       responses:
         default: { $ref: "#/components/responses/Failed" }
         "200":
-          description: The character as it now stands.
+          description: The character as it now stands; vetted, nothing stored (`validate_only`).
           headers:
             ETag: { $ref: "#/components/headers/ETag" }
           content:
             application/json:
               schema:
-                allOf:
-                  - $ref: "#/components/schemas/Changed"
-                  - properties: { value: { $ref: "#/components/schemas/Character" } }
+                oneOf:
+                  - allOf:
+                      - $ref: "#/components/schemas/Changed"
+                      - properties: { value: { $ref: "#/components/schemas/Character" } }
+                  - $ref: "#/components/schemas/CharacterLinkCheck"
     delete:
       operationId: deleteCharacter
       tags: [Lore]
@@ -1092,8 +1118,8 @@ paths:
     get:
       operationId: listCards
       tags: [Codex]
-      summary: The codex's character cards, by name
-      description: Every card, or those whose name, an alias or the tagline holds `query`, cased as the reader likes.
+      summary: The codex's character cards, in the reader's order
+      description: Every card in the reader's own order — a card made goes last — or those whose name, an alias or the tagline holds `query`, cased as the reader likes.
       parameters:
         - name: query
           in: query
@@ -1123,8 +1149,11 @@ paths:
         with `validate_only` the file is read and vetted and nothing stored
         — the cards the codex may hold it as already. A story's character —
         `story_id` and `character_id`: promoted, its name, aliases and
-        fields, and linked to it (`201`). Otherwise a `name` and the card's
-        fields, by hand (`201`).
+        fields, and linked to it, its copies in forked stories too with
+        `with_copies` (`201`); with `validate_only` vetted and nothing stored —
+        how many copies. Otherwise the card's fields, by
+        hand (`201`): with no `name`, the card is called "New card", for the
+        reader to replace.
       parameters:
         - name: validate_only
           in: query
@@ -1149,10 +1178,11 @@ paths:
                   properties:
                     story_id: { type: integer }
                     character_id: { type: integer }
+                    with_copies: { type: boolean, default: false, description: "Its copies in forked stories linked to the card too." }
                 - title: By hand
                   allOf:
                     - $ref: "#/components/schemas/CardFields"
-                    - required: [name]
+                    - not: { anyOf: [{ required: [data] }, { required: [story_id] }] }
       responses:
         default: { $ref: "#/components/responses/Failed" }
         "200":
@@ -1162,6 +1192,7 @@ paths:
               schema:
                 oneOf:
                   - $ref: "#/components/schemas/CardCheck"
+                  - $ref: "#/components/schemas/CharacterLinkCheck"
                   - allOf:
                       - $ref: "#/components/schemas/Changed"
                       - properties: { value: { $ref: "#/components/schemas/CardImport" } }
@@ -1219,7 +1250,7 @@ paths:
       operationId: updateCard
       tags: [Codex]
       summary: Correct a card
-      description: The parts the body carries, each replacing what stood. `pictures` are each of the card's own by name, in the order they now stand, the first the portrait; a picture is removed on its own path.
+      description: The parts the body carries, each replacing what stood. `pictures` are each of the card's own by name, in the order they now stand, the first the portrait; a picture is removed on its own path. `before` moves the card in the reader's order.
       requestBody:
         required: true
         content:
@@ -1231,6 +1262,9 @@ paths:
                     pictures:
                       type: array
                       items: { type: string }
+                    before:
+                      type: [integer, "null"]
+                      description: The card this one now goes just before in the reader's order; null puts it last. Refused for a card the codex does not hold, or this one.
       responses:
         default: { $ref: "#/components/responses/Failed" }
         "200":
@@ -2118,6 +2152,7 @@ components:
       { name: setting, in: path, required: true, schema: { type: string }, description: "A story setting's name: use_shared_reminder, use_story_reminder, allow_assistant_notes, allow_questions, allow_system_info, allow_web_search, emulate_text_completion, layout." }
     Tool:
       { name: tool, in: path, required: true, schema: { type: string }, description: "A tool's name, as a story setting's `tool` names it: question, note, system-info, web-search." }
+
     Prompt:
       { name: prompt, in: path, required: true, schema: { type: string }, description: "A prompt's prompts.toml key, as a story setting's `prompt_name` names it — one no tool owns: emulate_text_completion_prompt." }
     Card:
@@ -2314,14 +2349,31 @@ components:
           type: array
           items: { type: string }
         description: { type: string }
-        card: { type: [string, "null"], description: "The archive an imported character carries, as TOML; null for one the extractor named." }
+        profile: { type: [string, "null"], description: "The profile an imported character carries, a copy of its card's, as TOML; null for one the extractor named." }
+        profile_fields:
+          description: The same profile read field by field — every one, an empty one empty; null where there is none, or it is no TOML.
+          oneOf:
+            - $ref: "#/components/schemas/ProfileFields"
+            - type: "null"
         history: { type: string, description: 'Their arc so far — the newest rollup a pass wrote, derived, no write; "" before the first.' }
         history_journal_id: { type: [integer, "null"], description: "The id of the journal record that arc was taken from — where a page says how old it is." }
         card_id: { type: [integer, "null"], description: "The codex card it is linked to; null for none." }
         card_name: { type: [string, "null"], description: "That card's name." }
+        card_portrait:
+          description: That card's portrait, its first picture; null for none.
+          oneOf:
+            - $ref: "#/components/schemas/Attachment"
+            - type: "null"
+        portrait_sent: { type: [boolean, "null"], description: "Whether the card row that brought the character in, on the current timeline, carries the card's picture to the model; null where none did." }
         provider: { type: [string, "null"], description: "Who made the character: the engine of the pass that named them, or 'card'; null for an imported story's. An edit never changes it." }
-        model: { type: [string, "null"], description: "The pass's model, or the card's file name." }
+        model: { type: [string, "null"], description: "The pass's model; null for a card's." }
         updated_at: { type: string, description: "When the extractor last wrote them — display alone." }
+
+    CharacterLinkCheck:
+      type: object
+      description: A link to a card vetted before it is made, nothing stored — a story character linked, or promoted to a card of its own.
+      properties:
+        copies: { type: integer, description: "How many copies the write takes along with `with_copies`, in the stories forks join the character's own to." }
 
     ContextReport:
       type: object
@@ -2743,6 +2795,22 @@ components:
         status: { type: integer }
         detail: { type: string }
         head: { type: [integer, "null"], description: "A 412's: where the head stands now." }
+
+    ProfileFields:
+      type: object
+      description: A story character's profile, a copy of its card's, field by field.
+      properties:
+        description: { type: string }
+        personality: { type: string }
+        scenario: { type: string }
+        greeting: { type: string }
+        alternate_greetings: { type: array, items: { type: string } }
+        examples: { type: array, items: { type: string } }
+        reminder: { type: string }
+        reminder_depth: { type: integer, minimum: 1 }
+        system_prompt: { type: string }
+        post_history_instructions: { type: string }
+        creator_notes: { type: string }
 
     Prompt:
       type: object

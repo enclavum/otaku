@@ -18,8 +18,11 @@ def _create(api: Api, ask: Ask) -> Any:
     base64) and the `file_name` it was picked as — vetted alone with
     `?validate_only=true`, else imported, `reuse` naming the card the
     reader says it is; `story_id` and `character_id` — a story's
-    character promoted; or a `name` and the card's fields. Answered with
-    where the card lives, made now (201) or held already (200)."""
+    character promoted, its copies in forked stories linked too where
+    `with_copies` is true, vetted alone with `?validate_only=true` and
+    answered with how many copies; or a `name` and the card's fields.
+    Answered with where the card lives, made now (201) or held already
+    (200)."""
     if "data" in ask.body:
         data = base64.b64decode(ask.need("data"), validate=True)
         file_name, rename = ask.need("file_name"), ask.text("rename")
@@ -33,12 +36,19 @@ def _create(api: Api, ask: Ask) -> Any:
             return changed(imported)
         return Created(changed(imported), f"/api/cards/{imported.value.card.id}")
     if "story_id" in ask.body:
+        story_id, character_id = ask.integer("story_id"), ask.integer("character_id")
+        if ask.query_flag("validate_only", False):
+            return plain(
+                api.cards.create(story_id=story_id, character_id=character_id, validate_only=True)
+            )
         promoted = api.cards.create(
-            story_id=ask.integer("story_id"), character_id=ask.integer("character_id")
+            story_id=story_id,
+            character_id=character_id,
+            with_copies=ask.flag("with_copies") if "with_copies" in ask.body else False,
         )
         return Created(changed(promoted), f"/api/cards/{promoted.value.id}")
     made = api.cards.create(
-        name=ask.need("name"),
+        name=ask.need("name") if "name" in ask.body else None,
         aliases=_strings(ask, "aliases"),
         tagline=ask.text("tagline"),
         description=ask.text("description"),
@@ -58,7 +68,8 @@ def _create(api: Api, ask: Ask) -> Any:
 
 def _update(api: Api, ask: Ask) -> Any:
     """The parts of a card the body carries, each replacing what stood;
-    `pictures` each of the card's own by name, in their new order."""
+    `pictures` each of the card's own by name, in their new order;
+    `before` the card it now goes just before, null for last."""
 
     def text(key: str) -> str | Unchanged:
         return ask.need(key) if key in ask.body else UNCHANGED
@@ -86,6 +97,9 @@ def _update(api: Api, ask: Ask) -> Any:
             post_history_instructions=text("post_history_instructions"),
             creator_notes=text("creator_notes"),
             pictures=strings("pictures"),
+            before=(None if ask.body["before"] is None else ask.integer("before"))
+            if "before" in ask.body
+            else UNCHANGED,
         )
     )
 

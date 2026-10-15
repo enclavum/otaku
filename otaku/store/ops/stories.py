@@ -90,7 +90,7 @@ class StoryOps:
     def get(self, story_id: int) -> Story | None:
         # fmt: off
         row = self._db.conn.execute(
-            "SELECT id, title, system, head_id, forked_from_id, settings FROM stories WHERE id = ?",
+            "SELECT id, title, system, head_id, forked_from_id, settings, forked_from_message_id FROM stories WHERE id = ?",
             (story_id,),
         ).fetchone()
         # fmt: on
@@ -102,6 +102,7 @@ class StoryOps:
             system=self._db.unseal(row[2]),
             head_id=row[3],
             forked_from_id=row[4],
+            forked_from_message_id=row[6],
             settings=StorySettingDB.from_json(self._db.unseal(row[5])),
         )
 
@@ -323,7 +324,8 @@ class StoryOps:
         business here: it exists because /undo and /regen can rewind the
         newest turns, and these scenes already cleared it in the source.
         A scene the copy later undoes past simply stops being current,
-        exactly as in the story it came from. Returns the new story id."""
+        exactly as in the story it came from. The story and the message it
+        was cut at are recorded on the copy. Returns the new story id."""
         source = self.get(story_id)
         if source is None:
             raise ValueError(f"no story {story_id}")
@@ -346,20 +348,20 @@ class StoryOps:
         with self._db.conn as conn:
             # fmt: off
             cur = conn.execute(
-                "INSERT INTO stories (forked_from_id, title, system, settings, created_at, updated_at) VALUES (?, ?, ?, (SELECT settings FROM stories WHERE id = ?), ?, ?)",
-                (story_id, self._db.seal_opt(title or None), self._db.seal_opt(source.system or None), story_id, now, now),
+                "INSERT INTO stories (forked_from_id, forked_from_message_id, title, system, settings, created_at, updated_at) VALUES (?, ?, ?, ?, (SELECT settings FROM stories WHERE id = ?), ?, ?)",
+                (story_id, cut, self._db.seal_opt(title or None), self._db.seal_opt(source.system or None), story_id, now, now),
             )
             new_story = int(cur.lastrowid or 0)
 
             character_map: dict[int, int] = {}
             rows = conn.execute(
-                "SELECT id, name, aliases, description, card, provider, model, card_id FROM characters WHERE story_id = ?",
+                "SELECT id, name, aliases, description, profile, created_at, provider, model, card_id FROM characters WHERE story_id = ?",
                 (story_id,),
             ).fetchall()
-            for cid, name, aliases, description, card, c_provider, c_model, card_id in rows:
+            for cid, name, aliases, description, profile, created, c_provider, c_model, card_id in rows:
                 cur = conn.execute(
-                    "INSERT INTO characters (story_id, name, aliases, description, card, created_at, updated_at, provider, model, card_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (new_story, name, aliases, description, card, now, now, c_provider, c_model, card_id),
+                    "INSERT INTO characters (story_id, name, aliases, description, profile, created_at, updated_at, provider, model, card_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (new_story, name, aliases, description, profile, created, now, c_provider, c_model, card_id),
                 )
                 character_map[int(cid)] = int(cur.lastrowid or 0)
 
@@ -410,6 +412,27 @@ class StoryOps:
             )
             # fmt: on
         return new_story
+
+    def get_family(self, story_id: int) -> builtins.list[int]:
+        """Every other story a chain of forks joins this one to — the one
+        it was forked from, its forks, theirs, and their siblings — by id.
+        A deleted story still joins the forks made from it; the one it
+        was forked from it no longer can, its row gone."""
+        # fmt: off
+        rows = self._db.conn.execute("SELECT id, forked_from_id FROM stories").fetchall()
+        # fmt: on
+        joined: dict[int, set[int]] = {}
+        for story, source in rows:
+            if source is not None:
+                joined.setdefault(int(story), set()).add(int(source))
+                joined.setdefault(int(source), set()).add(int(story))
+        seen, waiting = {story_id}, [story_id]
+        while waiting:
+            for other in joined.get(waiting.pop(), set()) - seen:
+                seen.add(other)
+                waiting.append(other)
+        stored = {int(story) for story, _ in rows}
+        return sorted((seen & stored) - {story_id})
 
     # ---------- internals ----------
 
@@ -597,6 +620,27 @@ class MessagesOps:
         ).fetchall()
         # fmt: on
         return {str(row[0]) for row in rows if row[0] is not None}
+
+    def get_card_rows(
+        self, story_id: int
+    ) -> builtins.list[tuple[int, int | None, tuple[Attachment, ...]]]:
+        """Each of a story's card rows, on any branch (callers intersect
+        with the chain): its id, the character it brought in, and the
+        pictures it carries. Plain columns — nothing is decrypted."""
+        # fmt: off
+        rows = self._db.conn.execute(
+            "SELECT id, speaker_id, attachments FROM messages WHERE story_id = ? AND kind = 'card' ORDER BY id",
+            (story_id,),
+        ).fetchall()
+        # fmt: on
+        return [
+            (
+                int(mid),
+                int(speaker) if speaker is not None else None,
+                Attachment.from_json(pictures),
+            )
+            for mid, speaker, pictures in rows
+        ]
 
     def set_attachments(self, message_id: int, attachments: Sequence[Attachment]) -> None:
         """The pictures on one message, replaced — the rows that name

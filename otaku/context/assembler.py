@@ -319,7 +319,7 @@ def assemble_story(
     """The next request — the one door of the turn, the preview and the
     warm-up. What the caller holds is handed in (a story may not exist
     yet, a warm-up works from a snapshot), the injections built; the
-    scenes, the card archives and the pictures are read from the store.
+    scenes, the card profiles and the pictures are read from the store.
     Raises `ContextOverflowError` (case 6) when even the case-5 floor
     cannot fit."""
     scenes: list[Scene] = []
@@ -700,14 +700,14 @@ def _composed_cards(
     store: Store, story_id: int | None, messages: list[Message], card_framing: str
 ) -> list[Message]:
     """The transcript with each card row's wire text composed from its
-    character's archive (`cards.card_to_wire`), found through the row's
-    speaker link. A row with no reachable archive — the body predates the
+    character's profile (`cards.card_to_wire`), found through the row's
+    speaker link. A row with no reachable profile — the body predates the
     typed-row shape, or the link is gone — sends its body as it stands."""
     if story_id is None or all(m.kind != "card" for m in messages):
         return messages
-    archives = {c.id: c.card for c in store.characters.list(story_id) if c.card}
+    profiles = {c.id: c.profile for c in store.characters.list(story_id) if c.profile}
     out: list[Message] = []
     for m in messages:
-        toml = archives.get(m.speaker_id) if m.kind == "card" and m.speaker_id else None
+        toml = profiles.get(m.speaker_id) if m.kind == "card" and m.speaker_id else None
         out.append(replace(m, body=card_to_wire(toml, card_framing)) if toml else m)
     return out

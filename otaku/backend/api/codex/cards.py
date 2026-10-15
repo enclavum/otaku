@@ -1,9 +1,11 @@
 """The codex's character cards as a frontend reaches them
-(`CardsResource`): listed and read; made by hand, from a card file —
-or, asked to validate only, the file read and vetted and nothing stored,
-with the cards the codex may already hold it as — or from a story's
-character, promoted and linked to it; corrected, its pictures ordered
-and removed; deleted. A picture added to a card (`CardPicturesResource`),
+(`CardsResource`): listed, in the reader's order, and read; made by
+hand, from a card file — or, asked to validate only, the file read and
+vetted and nothing stored, with the cards the codex may already hold it
+as — or from a story's character, promoted and linked to it, its copies
+in forked stories with it where asked (and vetted first, to count them),
+each going last; corrected, moved in the order, its pictures ordered and removed;
+deleted. A picture added to a card (`CardPicturesResource`),
 a card folded into another (`CardMergesResource`), and every story's
 character no card claims (`UnlinkedResource`). The work is the domain's
 (`domain.codex.cards`); this answers what stands after it.
@@ -19,7 +21,7 @@ from otaku.backend.domain.app import App
 from otaku.backend.domain.app.pictures import RawFile as RawFile
 from otaku.backend.domain.codex import cards as domain_cards
 from otaku.backend.errors import Invalid
-from otaku.context.cards import StoryCard
+from otaku.context.cards import CharacterProfile
 from otaku.store import schema
 from otaku.store.schema import Attachment
 
@@ -34,8 +36,8 @@ class CardsResource:
         self.unlinked = UnlinkedResource(app)
 
     def list(self, *, query: str = "") -> list[CardSummary]:
-        """Every card by name — or those whose name, an alias or the
-        tagline holds `query`, cased as the reader likes."""
+        """Every card in the reader's order — or those whose name, an
+        alias or the tagline holds `query`, cased as the reader likes."""
         story_counts = domain_cards.get_story_counts(self._app)
         return [
             as_card_summary(row, story_counts)
@@ -51,7 +53,7 @@ class CardsResource:
     def create(
         self,
         *,
-        name: str,
+        name: str | None = None,
         aliases: tuple[str, ...] = (),
         tagline: str = "",
         description: str = "",
@@ -84,12 +86,19 @@ class CardsResource:
     ) -> Changed[CardImport]: ...
 
     @overload
-    def create(self, *, story_id: int, character_id: int) -> Changed[Card]: ...
+    def create(
+        self, *, story_id: int, character_id: int, with_copies: bool = False
+    ) -> Changed[Card]: ...
+
+    @overload
+    def create(
+        self, *, story_id: int, character_id: int, validate_only: Literal[True]
+    ) -> CharacterLinkCheck: ...
 
     def create(
         self,
         *,
-        name: str = "",
+        name: str | None = None,
         aliases: tuple[str, ...] = (),
         tagline: str = "",
         description: str = "",
@@ -109,10 +118,12 @@ class CardsResource:
         reuse: int | None = None,
         story_id: int | None = None,
         character_id: int | None = None,
+        with_copies: bool = False,
         validate_only: bool = False,
-    ) -> Changed[Card] | Changed[CardImport] | CardCheck:
-        """A card made three ways. By hand, from `name` and its fields.
-        From a card FILE's bytes (`data`, the `file_name` it was picked
+    ) -> Changed[Card] | Changed[CardImport] | CardCheck | CharacterLinkCheck:
+        """A card made three ways. By hand, from `name` — none given, the
+        card is called `NEW_CARD_NAME` for the reader to replace — and its
+        fields. From a card FILE's bytes (`data`, the `file_name` it was picked
         as; `rename` overrides its own name): a file the codex holds
         already makes nothing and answers that card, `reuse` names the
         card the reader says it is, and otherwise a card is made, a PNG's
@@ -120,19 +131,26 @@ class CardsResource:
         `validate_only`, the file read and vetted and nothing stored
         (`CardCheck`). From a story's character (`story_id`,
         `character_id`): promoted — its name, aliases and fields — and
-        linked to it. Raises Refused — no name, a tagline of more than
-        one line, a reminder's depth below 1, a file that is no card, a
-        character linked already."""
+        linked to it, and with `with_copies` to its copies in the stories forks
+        join its own to — or, with `validate_only`, vetted and nothing
+        stored, answered with how many copies (`CharacterLinkCheck`). Raises Refused —
+        an empty name, a tagline of more than one line, a reminder's depth
+        below 1, a file that is no card, a character linked already."""
         app = self._app
         if story_id is not None and character_id is not None:
-            card_id, said = domain_cards.promote_character(app, story_id, character_id)
+            if validate_only:
+                found = domain_cards.check_promotion(app, story_id, character_id)
+                return CharacterLinkCheck(copies=len(found))
+            card_id, said = domain_cards.promote_character(
+                app, story_id, character_id, with_copies=with_copies
+            )
             return Changed(self.get(card_id), said)
         if data is not None:
             if validate_only:
                 checked = domain_cards.check_card_file(app, data, file_name, rename=rename)
                 story_counts = domain_cards.get_story_counts(app)
                 return CardCheck(
-                    name=checked.card.name,
+                    name=checked.profile.name,
                     notes=checked.notes,
                     has_picture=checked.has_picture,
                     same_card=(
@@ -149,9 +167,9 @@ class CardsResource:
             )
             return Changed(CardImport(card=self.get(card_id), made=made), said)
         if validate_only:
-            raise Invalid("Only a card file is vetted before it is made.")
-        card = StoryCard(
-            name=name,
+            raise Invalid("Only a card file or a promotion is vetted before it is made.")
+        profile = CharacterProfile(
+            name=domain_cards.NEW_CARD_NAME if name is None else name,
             description=description,
             personality=personality,
             scenario=scenario,
@@ -164,7 +182,9 @@ class CardsResource:
             post_history_instructions=post_history_instructions,
             creator_notes=creator_notes,
         )
-        card_id, said = domain_cards.create_card(app, card=card, aliases=aliases, tagline=tagline)
+        card_id, said = domain_cards.create_card(
+            app, profile=profile, aliases=aliases, tagline=tagline
+        )
         return Changed(self.get(card_id), said)
 
     def update(
@@ -186,14 +206,17 @@ class CardsResource:
         post_history_instructions: str | Unchanged = UNCHANGED,
         creator_notes: str | Unchanged = UNCHANGED,
         pictures: tuple[str, ...] | Unchanged = UNCHANGED,
+        before: int | Unchanged | None = UNCHANGED,
     ) -> Changed[Card]:
         """The reader's correction of a card: the parts given, each
         replacing what stood. `pictures` are each of the card's own
         pictures by name, in the order they now stand, the first the
-        portrait. Raises Refused for nothing to change, an emptied name,
-        a tagline of more than one line, a reminder's depth below 1, and
-        an order that is not the card's pictures each once — nothing
-        written."""
+        portrait; `before` moves the card in the reader's order, just
+        before that card, or last for None. Raises Refused for nothing to
+        change, an emptied name, a tagline of more than one line, a
+        reminder's depth below 1, an order that is not the card's
+        pictures each once, and a card to go before that the codex does
+        not hold, or is this one — nothing written."""
         given = {
             "description": description,
             "personality": personality,
@@ -208,16 +231,33 @@ class CardsResource:
             "creator_notes": creator_notes,
         }
         changes = {key: value for key, value in given.items() if not isinstance(value, Unchanged)}
-        said = domain_cards.update_card(
-            self._app,
-            card_id,
-            name=None if isinstance(name, Unchanged) else name,
-            aliases=None if isinstance(aliases, Unchanged) else aliases,
-            tagline=None if isinstance(tagline, Unchanged) else tagline,
-            changes=changes or None,
-            pictures=None if isinstance(pictures, Unchanged) else pictures,
-        )
-        return Changed(self.get(card_id), said)
+        corrected = {
+            "name": name,
+            "aliases": aliases,
+            "tagline": tagline,
+            "pictures": pictures,
+        }
+        if not isinstance(before, Unchanged):
+            # a move that cannot be made refuses the correction with it
+            domain_cards.check_move(self._app, card_id, before=before)
+        said = []
+        if changes or any(not isinstance(part, Unchanged) for part in corrected.values()):
+            said.append(
+                domain_cards.update_card(
+                    self._app,
+                    card_id,
+                    name=None if isinstance(name, Unchanged) else name,
+                    aliases=None if isinstance(aliases, Unchanged) else aliases,
+                    tagline=None if isinstance(tagline, Unchanged) else tagline,
+                    changes=changes or None,
+                    pictures=None if isinstance(pictures, Unchanged) else pictures,
+                )
+            )
+        if not isinstance(before, Unchanged):
+            said.append(domain_cards.move_card(self._app, card_id, before=before))
+        if not said:
+            raise Invalid("Nothing to change.")
+        return Changed(self.get(card_id), " ".join(said))
 
     def delete(self, card_id: int) -> Changed[None]:
         """A card removed from the codex, its pictures with it; the story
@@ -287,24 +327,24 @@ def as_card_summary(row: schema.Card, story_counts: dict[int, int]) -> CardSumma
 
 
 def _card(app: App, row: schema.Card) -> Card:
-    fields = domain_cards.story_card_of(row)
+    profile = domain_cards.profile_of(row)
     return Card(
         id=row.id,
         name=row.name,
         aliases=row.aliases,
         tagline=row.tagline,
-        description=fields.description,
-        personality=fields.personality,
-        scenario=fields.scenario,
-        greeting=fields.greeting,
-        alternate_greetings=fields.alternate_greetings,
-        examples=fields.examples,
-        reminder=fields.reminder,
-        reminder_depth=fields.reminder_depth,
-        system_prompt=fields.system_prompt,
-        post_history_instructions=fields.post_history_instructions,
-        creator_notes=fields.creator_notes,
-        file_name=fields.file_name,
+        description=profile.description,
+        personality=profile.personality,
+        scenario=profile.scenario,
+        greeting=profile.greeting,
+        alternate_greetings=profile.alternate_greetings,
+        examples=profile.examples,
+        reminder=profile.reminder,
+        reminder_depth=profile.reminder_depth,
+        system_prompt=profile.system_prompt,
+        post_history_instructions=profile.post_history_instructions,
+        creator_notes=profile.creator_notes,
+        file_name=profile.file_name,
         pictures=row.pictures,
         stories=tuple(_story_character(r) for r in domain_cards.list_linked(app, row.id)),
         updated_at=row.updated_at,
@@ -393,6 +433,16 @@ class CardCheck:
     has_picture: bool
     same_card: CardSummary | None
     similar_cards: tuple[CardSummary, ...]
+
+
+@dataclass(frozen=True)
+class CharacterLinkCheck:
+    """A link to a card vetted before it is made, nothing stored — a story
+    character linked, or promoted to a card of its own: how many copies
+    the write takes along when asked to (`with_copies`), in the stories forks
+    join the character's own to."""
+
+    copies: int
 
 
 @dataclass(frozen=True)

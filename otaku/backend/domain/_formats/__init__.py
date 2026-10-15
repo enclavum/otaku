@@ -85,7 +85,7 @@ class ExportedCharacter:
     name: str
     aliases: tuple[str, ...] = ()
     description: str = ""
-    card: str = ""  # the /card archive TOML
+    profile: str = ""  # an imported card's profile, as TOML
 
 
 @dataclass(frozen=True)

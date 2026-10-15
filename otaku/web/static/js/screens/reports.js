@@ -1,6 +1,6 @@
 /* The reports: the context preview as a reading panel — the request as
    a document, its stages as live figures over the wire itself — and
-   usage, balance and info as torn docket slips. Every number and every
+   usage, balance and info as docket slips. Every number and every
    sentence in them is the backend's (`backend.api.app.reports`); which shape
    carries it is the design's.
 

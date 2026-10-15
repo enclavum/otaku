@@ -23,7 +23,8 @@ from otaku.backend.domain.story.messages import posed_question
 from otaku.backend.domain.story.settings import settings_of
 from otaku.backend.errors import NO_SUCH_STORY, OFF_CHAIN, Conflict, HeadMoved, Invalid, NotFound
 from otaku.formatting import LABEL_WIDTH, flatten, truncate_label
-from otaku.store.ops.stories import StaleHeadError, StoryListing
+from otaku.store.ops.stories import StaleHeadError
+from otaku.store.ops.stories import StoryListing as StoryListing  # what the interface lists
 from otaku.store.schema import Layout, Message, Story
 
 # An undo with no exchange to take back — no story at all included.
@@ -78,6 +79,17 @@ def list_stories(app: App, query: str = "") -> list[StoryListing]:
         if row.id in found
         or needle in f"{row.label} {row.story_so_far} {row.first_user} {row.model}".lower()
     ]
+
+
+def list_family(app: App, story_id: int) -> list[StoryListing]:
+    """Every other story a chain of forks joins this one to — the one it
+    was forked from, its forks, theirs, and their siblings — most
+    recently played first. Raises NotFound for a story that is not
+    there."""
+    if not app._store.stories.exists(story_id):
+        raise NotFound(NO_SUCH_STORY)
+    family = set(app._store.stories.get_family(story_id))
+    return [row for row in app._store.stories.list() if row.id in family]
 
 
 def exists(app: App, story_id: int) -> bool:

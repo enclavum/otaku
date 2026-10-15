@@ -12,7 +12,12 @@
    tabs hands in `root`, the pane its browser lives in. */
 
 import { $, $$, autosize, element, span } from "./dom.js";
-import { tell } from "./status.js";
+import { ERROR_MS, tell } from "./status.js";
+
+/* The feet a window speaks in, each with its error modifier,
+   `<foot>--error` (docs/web_tokens.md, "State you can style"). */
+const _FEET = ["otk-panel__foot", "otk-docket__foot", "otk-dialog__foot", "otk-sheet__foot"];
+const _FOOT = _FEET.map((name) => `.${name}`).join(", ");
 
 /* Every popup in the markup, by the command that opens it — here, so no
    screen module has to import chrome from a sibling screen module. */
@@ -22,16 +27,101 @@ export function closeAll() {
   for (const dialog of $$("dialog[open]")) dialog.close();
 }
 
-export function footnote(popup, text) {
+export function footnote(popup, text, refused = false) {
   /* The footer's fact slot: the panel's standing fact, and what a WRITE
      answered with — carried into the redraw the write triggers, or the
      standing fact goes back over the answer milliseconds later. Answers
      whether there was a slot: an ask dialog has no footer, and its
-     notices go to the flow instead. */
-  const slot = $("[data-note]", popup);
+     notices go to the flow instead. A `refused` answer is an error, and
+     said where the reader is looking (`report`). */
+  if (refused && text) {
+    report(text);
+    return true;
+  }
+  const foot = footOf(popup);
+  if (foot) calm(foot);
+  const slot = foot && $("[data-note]", foot);
   if (slot) slot.textContent = text;
   return Boolean(slot);
 }
+
+/** A refusal or a failure, said where the reader is looking: in the foot
+    of the window on top — whichever window asked — over its usual words,
+    else on the status line. It flashes once as it arrives and stands
+    until the foot says something else, the window closes, or `ERROR_MS`
+    pass. Only a failure logs (`failed`). */
+export function report(sentence) {
+  const top = topmost();
+  const foot = top && footOf(top);
+  if (!foot) {
+    tell(sentence, "otk-error");
+    return;
+  }
+  calm(foot);
+  // the foot's own slot, its words kept to come back; a foot with none
+  // (a dialog's) is given a line of its own, first
+  let line = $("[data-note]", foot);
+  if (line) line._was = [...line.childNodes];
+  else {
+    line = span("");
+    line.dataset.alert = "";
+    foot.prepend(line);
+  }
+  line.classList.add("otk-alert");
+  line.replaceChildren(span("", sentence));
+  line.title = sentence;
+  void foot.offsetWidth; // the modifier comes back new, so the flash plays again
+  foot.classList.add(errorOf(foot));
+  foot._calm = setTimeout(() => calm(foot), ERROR_MS);
+}
+
+/** The open dialog on top, which markup order is not: a card sheet
+    written before the dossier opens over it. Each is stamped as it
+    opens, the latest on top. */
+export function topmost() {
+  stamp(stacking.takeRecords());
+  let top = null;
+  for (const dialog of $$("dialog[open]")) {
+    if (!top || (dialog._raised ?? 0) > (top._raised ?? 0)) top = dialog;
+  }
+  return top;
+}
+
+let raised = 0;
+const stacking = new MutationObserver(stamp);
+stacking.observe(document.body, { subtree: true, attributeFilter: ["open"] });
+
+function stamp(records) {
+  for (const { target } of records) if (target.open) target._raised = ++raised;
+}
+
+/** A window's own foot: the last in it. */
+function footOf(popup) {
+  return popup ? $$(_FOOT, popup).at(-1) : undefined;
+}
+
+const errorOf = (foot) => `${_FEET.find((name) => foot.classList.contains(name))}--error`;
+
+/** The error a foot stands on taken down, its usual words back. */
+function calm(foot) {
+  clearTimeout(foot._calm);
+  foot.classList.remove(errorOf(foot));
+  $("[data-alert]", foot)?.remove();
+  const line = $("[data-note].otk-alert", foot);
+  if (!line) return;
+  line.classList.remove("otk-alert");
+  line.removeAttribute("title");
+  line.replaceChildren(...(line._was ?? []));
+}
+
+// An error stands no longer than its window.
+document.addEventListener(
+  "close",
+  (event) => {
+    for (const foot of $$(_FOOT, event.target)) calm(foot);
+  },
+  true,
+);
 
 /** A screen's own action, answered for. Every `on*` handler and every
     promise nobody awaits goes through here: otherwise a request that
@@ -53,17 +143,6 @@ export function guard(action) {
 function failed(e) {
   console.error(e);
   report(String(e?.message ?? e));
-}
-
-/** A sentence put where the reader is looking: the open screen's
-    footnote, else the status line. Failures and refusals share the
-    routing — said in the flow, a screen's answer is said BEHIND the
-    modal covering it, and the write that did not happen reads as a
-    click that did nothing — but only a failure logs. */
-function report(sentence, kind = "otk-error") {
-  const open = $$("dialog[open]").at(-1);
-  if (open && footnote(open, sentence)) return;
-  tell(sentence, kind);
 }
 
 /** One live wiring per OWNER — a popup, or one pane of a tabbed popup
@@ -378,7 +457,7 @@ export function editable(
     try {
       const answer = await write(typed);
       if (answer?.refused) {
-        report(answer.notice, "");
+        report(answer.notice);
         return false;
       }
       /* What was saved IS the stored text from here on. Without this,
@@ -657,6 +736,25 @@ function storedOffset(stored, drawn, at) {
   }
   if (at < drawn.length) while (j < stored.length && stored[j] !== drawn[at]) j++;
   return Math.min(j, stored.length);
+}
+
+/** `ask`, asked again while the write its answer makes is refused: the
+    dialog back as it was left — the words typed in it standing, filled
+    only the first time — with the refusal in its foot. `write(choice)`
+    runs on any answer but Cancel or a dismissal and returns the backend's
+    answer, or null for nothing to write; that answer is what this
+    resolves to, null where nothing was written. */
+export async function askWriting(name, fill, write) {
+  let refused = null;
+  for (;;) {
+    const asking = ask(name, refused ? null : fill);
+    if (refused) report(refused);
+    const choice = await asking;
+    if (choice === null || choice === "cancel") return null;
+    const answer = await write(choice);
+    if (!answer?.refused) return answer;
+    refused = answer.notice;
+  }
 }
 
 /** One of the markup's ask dialogs, by name. Its buttons carry

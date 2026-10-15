@@ -126,9 +126,14 @@ function buildModels(state, notice) {
 
   const use = async (entry) => {
     const model = { provider: entry.provider.id, name: entry.model.name };
-    const { notice: said } = await api.app.update({ model });
+    const answer = await api.app.update({ model });
+    // refused, the picker stays, saying why
+    if (answer.refused) {
+      footnote(popup, answer.notice, true);
+      return;
+    }
     closeAll();
-    await landed(said, { redraw: "always" });
+    await landed(answer.notice, { redraw: "always" });
   };
 
   const setLoaded = async (entry, wanted) => {
@@ -157,7 +162,7 @@ function buildModels(state, notice) {
        engine actually DID it — a refused load must not light a lamp on
        a model nothing loaded. */
     if (!answer.refused) entry.model.loaded = wanted;
-    state.build("models", answer.notice);
+    built(state, "models", answer);
   };
 
   /* Lore extraction pinned to this model, or — on the model pinned —
@@ -170,7 +175,7 @@ function buildModels(state, notice) {
       extraction_model: pinned ? null : { provider: entry.provider.id, name: entry.model.name },
     });
     if (!answer.refused) state.panel = { ...state.panel, extraction: pinned ? "" : spec };
-    state.build("models", answer.notice);
+    built(state, "models", answer);
   };
 
   if (!offered.length) $("[data-actions]", pane).replaceChildren();
@@ -554,8 +559,13 @@ function saveOnEnter(state, input, provider, attr) {
          key, which the route clears. */
       const value = pending(input, provider, attr);
       if (value === null) return;
-      const { notice } = await api.providers.update(provider.id, { [attr]: value });
-      await refreshProvider(state, provider, notice);
+      const answer = await api.providers.update(provider.id, { [attr]: value });
+      // refused, the field keeps what was typed, to be corrected
+      if (answer.refused) {
+        footnote(state.popup, answer.notice, true);
+        return;
+      }
+      await refreshProvider(state, provider, answer.notice);
     }),
   );
 }
@@ -577,8 +587,13 @@ async function saveProvider(state, provider) {
   for (const [input, attr] of [[url, "url"], [key, "api_key"]]) {
     const value = pending(input, provider, attr);
     if (value === null) continue;
-    const { notice } = await api.providers.update(provider.id, { [attr]: value });
-    notices.push(notice);
+    const answer = await api.providers.update(provider.id, { [attr]: value });
+    // refused, the fields keep what was typed, to be corrected
+    if (answer.refused) {
+      footnote(state.popup, answer.notice, true);
+      return;
+    }
+    notices.push(answer.notice);
   }
   await refreshProvider(state, provider, notices.join(" ") || "Nothing to save.");
 }
@@ -616,6 +631,13 @@ function testProvider(state, provider) {
   // The list catches up once the reader is done with the answer: a
   // rebuild under an open dialog would take the focus out from under it.
   return answered.then(() => state.build("providers", ""));
+}
+
+/** A tab built again on what a write answered: its notice the footnote,
+    or — refused — the standing one, the refusal said over it. */
+function built(state, tab, answer) {
+  state.build(tab, answer.refused ? "" : answer.notice);
+  if (answer.refused) footnote(state.popup, answer.notice, true);
 }
 
 async function refreshProvider(state, provider, notice) {

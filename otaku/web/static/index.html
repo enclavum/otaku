@@ -215,10 +215,10 @@
 </dialog>
 
 <!-- every character the reader keeps across stories: the codex's cards, as
-     a list or a gallery at three tile sizes (`data-view`), the stories'
-     unlinked characters in a column that folds (`data-unlinked`), and an
-     open card as a sheet over both. Built by `characters.js`. -->
-<dialog class="otk-panel otk-panel--wide" data-popup="/characters" aria-label="All characters">
+     a list or a gallery at three tile sizes (`data-view`), and the stories'
+     unlinked characters in a column that folds (`data-unlinked`); an open
+     card is a sheet over it, below. Built by `characters.js`. -->
+<dialog class="otk-panel otk-panel--wide otk-panel--chars" data-popup="/characters" aria-label="All characters">
   <header class="otk-panel__head">
     <span class="otk-eyebrow">All characters</span>
     <!-- the list, or the gallery at each tile size -->
@@ -229,7 +229,6 @@
       <button type="button" class="otk-seg__btn otk-seg__btn--glyph" data-view="large" aria-pressed="false" title="large" aria-label="large"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="1.5" width="13" height="13" fill="currentColor"/></svg></button>
     </span>
     <span class="otk-push"></span>
-    <button type="button" class="otk-btn" data-import-card>Import</button>
     <button type="button" class="otk-btn otk-close">Close <span class="otk-btn__key">esc</span></button>
   </header>
 
@@ -248,23 +247,24 @@
     </div>
 
     <aside class="otk-unlinked" aria-label="Unlinked story characters">
-      <button type="button" class="otk-unlinked__head otk-unlinked__toggle"><span class="otk-label otk-label--ink">Unlinked</span><span class="otk-index__sub" data-unlinked-count></span><span class="otk-unlinked__fold">collapse &rsaquo;</span></button>
+      <button type="button" class="otk-unlinked__head otk-unlinked__toggle"><span class="otk-label otk-label--ink">Unlinked story characters</span><span class="otk-index__sub" data-unlinked-count></span></button>
       <div class="otk-unlinked__list" data-unlinked-list></div>
       <div class="otk-unlinked__pinned">
         <label class="otk-label" for="otk-filter-unlinked" hidden>Filter</label>
         <input class="otk-filter" id="otk-filter-unlinked" type="search" placeholder="filter story characters" data-filter-unlinked>
       </div>
-      <button type="button" class="otk-unlinked__strip otk-unlinked__toggle"><span>&lsaquo;</span><span class="otk-unlinked__striplabel" data-unlinked-strip>Unlinked</span></button>
+      <button type="button" class="otk-unlinked__strip otk-unlinked__toggle"><span class="otk-unlinked__striplabel" data-unlinked-strip>Unlinked story characters</span></button>
     </aside>
-
-    <!-- the open card, and an unlinked story character read before linking
-         it: filled when one opens -->
-    <section class="otk-sheet otk-sheet--card" data-sheet="card" hidden></section>
-    <section class="otk-sheet otk-sheet--unlinked" data-sheet="unlinked" hidden></section>
   </div>
 
   <footer class="otk-panel__foot"><span data-note></span></footer>
 </dialog>
+
+<!-- the open card, and an unlinked story character read before linking it:
+     each a window of its own over All characters, filled when one opens
+     (`characters.js`) -->
+<dialog class="otk-sheet otk-sheet--card" data-sheet="card"></dialog>
+<dialog class="otk-sheet otk-sheet--unlinked" data-sheet="unlinked"></dialog>
 
 <!-- level 2: inside one story. Five tabs share this shell. -->
 <dialog class="otk-panel" data-popup="/story" aria-label="Story">
@@ -319,7 +319,7 @@
     <div class="otk-premise">
       <span class="otk-label otk-label--accent">the premise of this story</span>
       <h3 class="otk-reading__title otk-reading__title--lg">Premise</h3>
-      <p class="otk-note otk-premise__lede">Sent as the system message, ahead of the scene, the cast and the recent turns.</p>
+      <p class="otk-note otk-premise__lede"><strong>Sent as the system message</strong>, ahead of the scene, the cast and the recent turns.</p>
       <!-- the field is built like every other edited field on this
            dossier: inert until its edit verb is taken -->
       <div class="otk-premise__field" data-premise-field></div>
@@ -401,7 +401,6 @@
 <!-- a docket: usage, balance and info all use this slip -->
 <dialog data-popup="/report" aria-label="Report">
   <section class="otk-docket">
-    <div class="otk-docket__tear"></div>
     <div class="otk-docket__body" tabindex="-1" autofocus>
       <span class="otk-eyebrow" data-title></span>
       <div class="otk-tabs otk-tabs--docket" role="tablist" data-scopes hidden></div>
@@ -411,14 +410,12 @@
       <span class="otk-docket__note" data-note></span>
       <button type="button" class="otk-btn otk-close">Close <span class="otk-btn__key">esc</span></button>
     </div>
-    <div class="otk-docket__tear otk-docket__tear--bottom"></div>
   </section>
 </dialog>
 
 <!-- the settings docket: every knob is one of the /set commands -->
 <dialog data-popup="/set" aria-label="Settings">
   <section class="otk-docket">
-    <div class="otk-docket__tear"></div>
     <div class="otk-docket__body" tabindex="-1" autofocus>
       <span class="otk-eyebrow">Settings</span>
       <div class="otk-hr"></div>
@@ -428,7 +425,6 @@
       <span class="otk-docket__note" data-note></span>
       <button type="button" class="otk-btn otk-close">Close <span class="otk-btn__key">esc</span></button>
     </div>
-    <div class="otk-docket__tear otk-docket__tear--bottom"></div>
   </section>
 </dialog>
 
@@ -436,7 +432,6 @@
      otaku.sh, and the address to answer at; nothing of the story rides -->
 <dialog data-popup="/support" aria-label="Feedback / support request">
   <section class="otk-docket">
-    <div class="otk-docket__tear"></div>
     <div class="otk-docket__body" tabindex="-1" autofocus>
       <span class="otk-eyebrow">Feedback / support request</span>
       <div class="otk-hr"></div>
@@ -455,14 +450,12 @@
       <button type="button" class="otk-btn otk-close">Cancel</button>
       <button type="button" class="otk-btn otk-btn--primary" data-send>Send</button>
     </div>
-    <div class="otk-docket__tear otk-docket__tear--bottom"></div>
   </section>
 </dialog>
 
 <!-- the help docket: the keys, and the language they are typed in -->
 <dialog data-popup="/help" aria-label="Help">
   <section class="otk-docket otk-docket--wide">
-    <div class="otk-docket__tear"></div>
     <div class="otk-docket__body" tabindex="-1" autofocus>
       <span class="otk-eyebrow">Help</span>
       <div class="otk-hr"></div>
@@ -474,7 +467,6 @@
       <span class="otk-docket__note" data-note></span>
       <button type="button" class="otk-btn otk-close">Close <span class="otk-btn__key">esc</span></button>
     </div>
-    <div class="otk-docket__tear otk-docket__tear--bottom"></div>
   </section>
 </dialog>
 
@@ -484,7 +476,7 @@
      ====================================================================== -->
 
 <!-- a picture at full size, as the model saw it: esc, the desk, or Close
-     puts it down. Filled by transcript.js. -->
+     puts it down. Filled by `kit/pictures.js`. -->
 <dialog class="otk-lightbox" data-dialog="picture" aria-label="Picture">
   <div class="otk-lightbox__frame">
     <img alt="">
@@ -544,18 +536,6 @@
   <div class="otk-dialog__foot">
     <button type="button" class="otk-btn" data-choice="cancel">Cancel</button>
     <button type="button" class="otk-btn otk-btn--primary" data-choice="confirm">Fork</button>
-  </div>
-</dialog>
-
-<!-- the character this one really is: a list of the others, filled when it
-     opens (`story.askMerge`) -->
-<dialog class="otk-dialog" data-dialog="merge" aria-labelledby="otk-merge-title">
-  <span class="otk-eyebrow" data-title id="otk-merge-title"></span>
-  <p class="otk-dialog__body"></p>
-  <select class="otk-field" data-into aria-label="Merge into" autofocus></select>
-  <div class="otk-dialog__foot">
-    <button type="button" class="otk-btn" data-choice="cancel">Cancel</button>
-    <button type="button" class="otk-btn otk-btn--primary" data-choice="merge">Merge</button>
   </div>
 </dialog>
 
@@ -620,22 +600,21 @@
   <div class="otk-field-row otk-field-row--card">
     <label class="otk-label" for="otk-start-name">title</label>
     <input class="otk-field" id="otk-start-name" type="text" placeholder="optional">
-    <label class="otk-label" for="otk-start-persona">user name</label>
+    <label class="otk-label" for="otk-start-persona">persona name</label>
     <input class="otk-field" id="otk-start-persona" type="text" placeholder="who you play" required>
   </div>
   <div class="otk-v otk-v--sm" data-start-pictures>
-    <span class="otk-label" data-start-count></span>
+    <span class="otk-label" data-start-caption></span>
   </div>
   <div class="otk-dialog__foot">
-    <span class="otk-dialog__escape">each joins the story linked to its card</span>
     <button type="button" class="otk-btn" data-choice="cancel">Cancel</button>
     <button type="button" class="otk-btn otk-btn--primary" data-choice="start">Start</button>
   </div>
 </dialog>
 
-<!-- one picker for every "which card": a story character to link, a card to
-     invite, the card another is merged into. Rows built when it opens
-     (`characters.pickCard`). -->
+<!-- one picker for every "which one": a card to link a story character to,
+     to invite, to merge another into — or a story's character to merge
+     another into. Rows built when it opens (`characters.pick`). -->
 <dialog class="otk-dialog" data-dialog="pick-card" aria-labelledby="otk-pick-title">
   <span class="otk-eyebrow" data-title id="otk-pick-title">Choose a card</span>
   <div class="otk-pick" role="listbox" aria-label="Cards" data-pick></div>
@@ -646,19 +625,6 @@
     <span class="otk-push"></span>
     <button type="button" class="otk-btn" data-choice="cancel">Cancel</button>
     <button type="button" class="otk-btn otk-btn--primary" data-choice="choose">Choose</button>
-  </div>
-</dialog>
-
-<!-- a card made by hand: its name, and the card opens to be filled in -->
-<dialog class="otk-dialog" data-dialog="new-card" aria-labelledby="otk-new-card-title">
-  <span class="otk-eyebrow" id="otk-new-card-title">New card</span>
-  <div class="otk-dialog__field">
-    <label class="otk-label" for="otk-new-card-name">name</label>
-    <input class="otk-field" id="otk-new-card-name" type="text" autofocus>
-  </div>
-  <div class="otk-dialog__foot">
-    <button type="button" class="otk-btn" data-choice="cancel">Cancel</button>
-    <button type="button" class="otk-btn otk-btn--primary" data-choice="create">Create</button>
   </div>
 </dialog>
 

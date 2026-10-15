@@ -108,19 +108,19 @@ def _all_injections(
     gated on the layout), then what each card in the chain injects
     (`context.cards.card_injections`) — its system prompt after the
     premise, its reminder at its depth — read from its character's
-    archive at request time, so a correction reaches the next request
-    and an undone import takes them with it. An archive that is no TOML
+    profile at request time, so a correction reaches the next request
+    and an undone import takes them with it. A profile that is no TOML
     asks nothing; one card brought in twice asks once."""
-    archives = {c.id: c.card for c in app._store.characters.list(story_id) if c.card}
+    profiles = {c.id: c.profile for c in app._store.characters.list(story_id) if c.profile}
     asked: list[Injection] = []
     seen: set[int] = set()
     for message in chain:
-        archive = archives.get(message.speaker_id or 0) if message.kind == "card" else None
-        if archive is None or message.speaker_id in seen:
+        profile = profiles.get(message.speaker_id or 0) if message.kind == "card" else None
+        if profile is None or message.speaker_id in seen:
             continue
         seen.add(message.speaker_id or 0)
         try:
-            asked += card_injections(archive)
+            asked += card_injections(profile)
         except tomllib.TOMLDecodeError:
             continue
     return settings.injections + tuple(asked)

@@ -8,7 +8,8 @@ import { get, items, patch, post, query, remove, segment, stream } from "./_http
 // ---------- stories ----------
 
 /* The stories: the collection, one story, and the actions on one — a copy
-   (`forks`), a fresh take on its last reply (`regens`, a stream), its
+   (`forks`, which lists the stories forks join it to as well), a fresh
+   take on its last reply (`regens`, a stream), its
    trailing exchange taken back (`undos`). A write that moves the head — a
    head given, an undo, a fresh take — names the one this page last read
    (`If-Match`). */
@@ -19,7 +20,10 @@ export const stories = {
   update: (story, fields) =>
     patch(`/api/stories/${story}`, fields, { moves: "head" in fields ? story : null }),
   delete: (story) => remove(`/api/stories/${story}`),
-  forks: { create: (story, fields = {}) => post(`/api/stories/${story}/forks`, fields) },
+  forks: {
+    list: (story) => get(`/api/stories/${story}/forks`).then(items),
+    create: (story, fields = {}) => post(`/api/stories/${story}/forks`, fields),
+  },
   regens: {
     create: (story, { signal } = {}) => stream(`/api/stories/${story}/regens`, {}, { story, signal }),
   },
@@ -73,7 +77,8 @@ export const characters = {
   list: (story, { name = null } = {}) =>
     get(inside(story, `characters${query({ name })}`)).then(items),
   get: (story, character) => get(inside(story, `characters/${character}`)),
-  update: (story, character, fields) => patch(inside(story, `characters/${character}`), fields),
+  update: (story, character, fields, { validateOnly = false } = {}) =>
+    patch(inside(story, `characters/${character}${validateOnly ? "?validate_only=true" : ""}`), fields),
   delete: (story, character) => remove(inside(story, `characters/${character}`)),
   merges: {
     create: (story, character, fields) =>

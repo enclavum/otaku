@@ -36,7 +36,7 @@ from otaku.backend.domain.story import stories as domain_stories
 # to ask.
 from otaku.backend.domain.story.stories import NOTHING_TO_REGENERATE as NOTHING_TO_REGENERATE
 from otaku.backend.domain.story.stories import NOTHING_TO_UNDO as NOTHING_TO_UNDO
-from otaku.backend.domain.story.stories import StoryRecord
+from otaku.backend.domain.story.stories import StoryListing, StoryRecord
 from otaku.backend.errors import Invalid
 from otaku.context.assembler import JoinType
 from otaku.formatting import LABEL_WIDTH, flatten, truncate_label
@@ -67,19 +67,7 @@ class StoriesResource:
         finds, case-insensitive: the ONE filter rule both browsers
         promise, one call per keystroke, on a story's buried content or
         the face its listing row shows."""
-        return [
-            StorySummary(
-                id=row.id,
-                title=row.title,
-                label=row.label,
-                story_so_far=row.story_so_far,
-                first_message=row.first_user,
-                model=row.model,
-                updated_at=row.updated_at,
-                message_count=row.num_messages,
-            )
-            for row in domain_stories.list_stories(self._app, query)
-        ]
+        return [_summary(row) for row in domain_stories.list_stories(self._app, query)]
 
     def get(self, story_id: int) -> Story:
         """One story's facts. Raises NotFound for a story that is not
@@ -161,10 +149,18 @@ class StoriesResource:
 
 
 class ForksResource:
-    """/stories/{story}/forks — a story continued in a copy."""
+    """/stories/{story}/forks — a story continued in a copy, and the
+    stories forks join it to."""
 
     def __init__(self, app: App) -> None:
         self._app = app
+
+    def list(self, story_id: int) -> list[StorySummary]:
+        """Every other story a chain of forks joins this one to — the one
+        it was forked from, its forks, theirs, and their siblings — most
+        recently played first. Raises NotFound for a story that is not
+        there."""
+        return [_summary(row) for row in domain_stories.list_family(self._app, story_id)]
 
     def create(self, story_id: int, *, at: int | None = None, title: str = "") -> Changed[Story]:
         """A copy of a story — from its head, or from its message `at` on;
@@ -214,6 +210,19 @@ class UndosResource:
         with nothing to take back."""
         said = domain_stories.undo_exchange(self._app, story_id, expected_head=expected_head)
         return Changed(_story(self._app, domain_stories.get_story(self._app, story_id)), said)
+
+
+def _summary(row: StoryListing) -> StorySummary:
+    return StorySummary(
+        id=row.id,
+        title=row.title,
+        label=row.label,
+        story_so_far=row.story_so_far,
+        first_message=row.first_user,
+        model=row.model,
+        updated_at=row.updated_at,
+        message_count=row.num_messages,
+    )
 
 
 def _story(app: App, record: StoryRecord) -> Story:

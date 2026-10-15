@@ -4,11 +4,11 @@ already makes nothing) and the codex card is brought in; a codex card is
 brought in as it stands (an invite). Read and vetted for the story,
 nothing stored (`check_card`), then brought in (`import_card`), or
 several at a story's start (`bring_in_cards`): per card the typed /card
-row, the story's character — a COPY of the card's fields as the archive,
+row, the story's character — a COPY of the card's profile as its own,
 linked to the codex card — and the greeting turn; NO model call.
 
 The `/card` line lands as a `kind='card'` user turn, stored AS TYPED like
-every direction — the wire composes the card block from the archive at
+every direction — the wire composes the card block from the profile at
 request time, found through the row's speaker link, so a lore correction
 to the TOML reaches every future request. Asked to, the row carries the
 card's portrait, its first picture, by the file's name. The greeting
@@ -28,8 +28,12 @@ from otaku.backend.domain.story import _chain
 from otaku.backend.domain.story.settings import settings_of
 from otaku.backend.errors import NO_SUCH_STORY, Conflict, HeadMoved, Invalid, NotFound
 from otaku.context.assembler import estimate_tokens
-from otaku.context.cards import StoryCard, bind, card_to_wire, card_toml
+from otaku.context.cards import CharacterProfile, bind, card_to_wire
 from otaku.store.schema import Card, Message, StoryMode
+
+# What a row a card made names as its maker, where a generated row names
+# its engine; its `model` is the card file's name.
+CARD_PROVIDER = "card"
 
 # A card block above roughly this many tokens gets a warning: it rides
 # every request verbatim and never leaves the context, so on a small
@@ -39,14 +43,14 @@ _LARGE_CARD_TOKENS = 4000
 
 @dataclass(frozen=True)
 class CheckedCard:
-    """A card read and vetted for a story: the card as it would be brought
-    in, what reading it noted, the composed block's cost estimate and
+    """A card read and vetted for a story: the profile it would be brought
+    in with, what reading it noted, the composed block's cost estimate and
     whether it is worth warning about, the persona the story remembers
     ("" for none), whether a portrait could ride its row, and — for a
     file — the codex card it is already (None for none) and the codex
     cards of the same name the reader may say it is."""
 
-    card: StoryCard
+    profile: CharacterProfile
     notes: tuple[str, ...]
     block_tokens: int
     large: bool
@@ -84,24 +88,24 @@ def check_card(
     if data is not None:
         checked = codex_cards.check_card_file(app, data, file_name)
         same = checked.same_card
-        card = codex_cards.story_card_of(same) if same is not None else checked.card
+        profile = codex_cards.profile_of(same) if same is not None else checked.profile
         notes, has_picture, similar = checked.notes, checked.has_picture, checked.similar_cards
     elif card_id is not None:
         same = codex_cards.get_card(app, card_id)
-        card, notes, has_picture, similar = (
-            codex_cards.story_card_of(same),
+        profile, notes, has_picture, similar = (
+            codex_cards.profile_of(same),
             (),
             bool(same.pictures),
             (),
         )
     else:
         raise Invalid("A card is brought in from a file or from the codex.")
-    card = replace(card, name=rename.strip() or card.name)
-    _ensure_free(app, story_id, card.name, same)
+    profile = replace(profile, name=rename.strip() or profile.name)
+    _ensure_free(app, story_id, profile.name, same)
     remembered = _remembered_persona(app, story_id)
-    tokens = _block_tokens(app, card, remembered)
+    tokens = _block_tokens(app, profile, remembered)
     return CheckedCard(
-        card=card,
+        profile=profile,
         notes=tuple(notes),
         block_tokens=tokens,
         large=tokens > _LARGE_CARD_TOKENS,
@@ -132,7 +136,7 @@ def import_card(
     codex first (`reuse` the codex card the reader says it is), a codex
     card `card_id` as it stands. Then the typed row (speaker-linked to
     the new cast row, carrying the card's portrait where `with_pictures` asks
-    and it has one), the character with the card's fields as its archive,
+    and it has one), the character with a copy of the card's profile,
     linked to the codex card, and the greeting turn — answered with the
     one-line report. `/undo` takes the exchange whole — the unplayed
     character with it; the codex card stays. `line` is what the story
@@ -143,7 +147,7 @@ def import_card(
         target = checked.same_card or (
             codex_cards.get_card(app, reuse) if reuse is not None else None
         )
-        name = rename.strip() or (target.name if target is not None else checked.card.name)
+        name = rename.strip() or (target.name if target is not None else checked.profile.name)
         _ensure_free(app, story_id, name, target)
         card_id, made, _ = codex_cards.import_card_file(
             app, data, file_name, rename=rename, reuse=reuse
@@ -159,7 +163,7 @@ def import_card(
         raise Invalid("A card is brought in from a file or from the codex.")
     card = codex_cards.get_card(app, card_id)
     mode = settings_of(app, story_id).layout.mode
-    brought, story_card = _bring_in(
+    brought, profile = _bring_in(
         app,
         story_id,
         card,
@@ -171,9 +175,9 @@ def import_card(
         after=expected_head,
     )
     greeting = _greet(
-        app, story_id, brought.character_id, story_card, persona, mode, after=brought.line.id
+        app, story_id, brought.character_id, profile, persona, mode, after=brought.line.id
     )
-    tokens = _block_tokens(app, story_card, persona)
+    tokens = _block_tokens(app, profile, persona)
     verb = "imported" if data is not None else "invited"
     report = [f"{verb} {name} (card ≈ {tokens} tokens)", *notes]
     if tokens > _LARGE_CARD_TOKENS:
@@ -211,9 +215,9 @@ def bring_in_cards(
     mode = settings_of(app, story_id).layout.mode
     after: int | None = None
     brought: list[BroughtIn] = []
-    greeter: tuple[int, StoryCard] | None = None
+    greeter: tuple[int, CharacterProfile] | None = None
     for card in cards:
-        one, story_card = _bring_in(
+        one, profile = _bring_in(
             app,
             story_id,
             card,
@@ -226,12 +230,12 @@ def bring_in_cards(
         )
         brought.append(one)
         after = one.line.id
-        if greeter is None and story_card.greeting:
-            greeter = (len(brought) - 1, story_card)
+        if greeter is None and profile.greeting:
+            greeter = (len(brought) - 1, profile)
     if greeter is not None and after is not None:
-        index, story_card = greeter
+        index, profile = greeter
         greeting = _greet(
-            app, story_id, brought[index].character_id, story_card, persona, mode, after=after
+            app, story_id, brought[index].character_id, profile, persona, mode, after=after
         )
         brought[index] = replace(brought[index], greeting=greeting)
     return brought
@@ -248,14 +252,14 @@ def _bring_in(
     line: str,
     mode: StoryMode,
     after: int | None,
-) -> tuple[BroughtIn, StoryCard]:
+) -> tuple[BroughtIn, CharacterProfile]:
     """One codex card's row and character: the typed row (its portrait on
     it where asked and the card has one), the character — the card's
-    fields under `name` as its archive, the card's name and aliases its
+    profile under `name` as its copy, the card's name and aliases its
     aliases, linked to the card — and the row's speaker link. Answered
-    with the card's fields as the story holds them, which its greeting
-    speaks from."""
-    story_card = replace(codex_cards.story_card_of(card), name=name)
+    with the profile as the story holds it, which its greeting speaks
+    from."""
+    profile = replace(codex_cards.profile_of(card), name=name)
     row = _chain.append_message(
         app,
         story_id,
@@ -278,31 +282,31 @@ def _bring_in(
         story_id,
         name,
         aliases=aliases,
-        card=card_toml(story_card, user=persona),
-        provider="card",
-        model=story_card.file_name or None,
+        profile=profile.to_toml(user=persona),
+        provider=CARD_PROVIDER,
+        model=profile.file_name or None,
         card_id=card.id,
     )
     # The speaker link is the compose key: the row was recorded before
     # the cast row could exist, so the attribution follows it.
     app._store.messages.set_speaker(row.id, character_id, name)
     recorded = replace(row, speaker=name, speaker_id=character_id)
-    return BroughtIn(recorded, None, character_id, card.id), story_card
+    return BroughtIn(recorded, None, character_id, card.id), profile
 
 
 def _greet(
     app: App,
     story_id: int,
     character_id: int,
-    card: StoryCard,
+    profile: CharacterProfile,
     persona: str,
     mode: StoryMode,
     *,
     after: int,
 ) -> Message | None:
-    """The card's greeting as the character's own turn, after `after`;
+    """The profile's greeting as the character's own turn, after `after`;
     None for a card without one."""
-    greeting = bind(card.greeting, char=card.name, user=persona)
+    greeting = bind(profile.greeting, char=profile.name, user=persona)
     if not greeting:
         return None
     return _chain.append_message(
@@ -312,12 +316,12 @@ def _greet(
             role="assistant",
             body=greeting,
             kind="dialogue",
-            speaker=card.name,
+            speaker=profile.name,
             speaker_id=character_id,
             # The source, spelled the way generated rows spell theirs:
             # no model wrote this — the card's file did.
-            provider="card",
-            model=card.file_name or None,
+            provider=CARD_PROVIDER,
+            model=profile.file_name or None,
             mode=mode,
         ),
         after=after,
@@ -340,7 +344,7 @@ def _ensure_free(app: App, story_id: int, name: str, card: Card | None) -> None:
     holds the codex card, under another name."""
     existing = app._store.characters.find(story_id, name)
     if existing is not None:
-        source = "imported earlier" if existing.card else "extracted from play"
+        source = "imported earlier" if existing.profile else "extracted from play"
         raise Conflict(
             f"{existing.name} already exists in this story ({source}) — "
             f"import under another name: /card FILE NAME."
@@ -353,26 +357,26 @@ def _ensure_free(app: App, story_id: int, name: str, card: Card | None) -> None:
             raise Conflict(f"{card.name} is in this story already, as {linked.name}.")
 
 
-def _block_tokens(app: App, card: StoryCard, persona: str) -> int:
+def _block_tokens(app: App, profile: CharacterProfile, persona: str) -> int:
     """The composed block's cost estimate, over the persona the ask
     defaults to — the answer only swaps a name, never the size class."""
     return estimate_tokens(
-        card_to_wire(card_toml(card, user=persona or "you"), app._prompts().card_framing)
+        card_to_wire(profile.to_toml(user=persona or "you"), app._prompts().card_framing)
     )
 
 
 def _remembered_persona(app: App, story_id: int | None) -> str:
     """A story's memory of who the player is: the `user` binding in the
-    latest imported card's archive — so a story asks once and later
+    latest imported card's profile — so a story asks once and later
     imports default to the same name, with no setting anywhere. "" when
     none, or no story — the frontend asks with its own default then."""
     if story_id is None:
         return ""
     for character in reversed(app._store.characters.list(story_id)):
-        if not character.card:
+        if not character.profile:
             continue
         with suppress(tomllib.TOMLDecodeError):
-            user = tomllib.loads(character.card).get("user")
+            user = tomllib.loads(character.profile).get("user")
             if isinstance(user, str) and user:
                 return user
     return ""

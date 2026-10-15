@@ -935,7 +935,7 @@ def _update_field(api: Api, story_id: int, field: Field, text: str) -> None:
         case "description":
             api.stories.characters.update(story_id, field.target, description=text)
         case "card":
-            api.stories.characters.update(story_id, field.target, card=text)
+            api.stories.characters.update(story_id, field.target, profile=text)
         case "entry":
             api.stories.journals.update(story_id, field.target, entry=text)
         case _:

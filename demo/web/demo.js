@@ -79,7 +79,7 @@ const ROUTES = {
   "GET /api/stories": (p, q) => items(store.stories(q.get("query") ?? "")),
   "POST /api/stories": (p, q, b) => {
     // a story started with codex cards: each brought in as the product
-    // brings it, its archive bound to the persona — no picture rides here
+    // brings it, its profile bound to the persona — no picture rides here
     const persona = text(b, "persona");
     const cards = ids(b, "card_ids").map((id) => {
       const found = store.card(id);
@@ -87,7 +87,7 @@ const ROUTES = {
         id: found.id,
         name: found.name,
         aliases: [...found.aliases],
-        archive: _cardToml(found, persona),
+        copy: found,
         greeting: _bind(found.greeting, found.name, persona),
         fileName: found.file_name,
       };
@@ -106,6 +106,7 @@ const ROUTES = {
     return changed(store.updateStory(story, fields, expected));
   },
   "DELETE /api/stories/{story}": (p) => changed(store.deleteStory(num(p.story))),
+  "GET /api/stories/{story}/forks": (p) => items(store.forks(num(p.story))),
   "POST /api/stories/{story}/forks": (p, q, b) => {
     const at = b.at == null ? null : integer(b, "at");
     const forked = store.fork(num(p.story), { at, title: text(b, "title") });
@@ -142,8 +143,14 @@ const ROUTES = {
   "GET /api/stories/{story}/characters": (p, q) => items(store.characters(num(p.story), q.get("name"))),
   "GET /api/stories/{story}/characters/{character}": (p) => store.character(num(p.story), num(p.character)),
   "PATCH /api/stories/{story}/characters/{character}": (p, q, b) => {
-    const fields = given(b, ["description", "card"]);
+    if (q.get("validate_only") === "true") {
+      return store.checkLink(num(p.story), num(p.character), integer(b, "card_id"));
+    }
+    const fields = given(b, ["description", "profile"]);
     if ("card_id" in b) fields.card_id = b.card_id === null ? null : integer(b, "card_id");
+    if ("profile_fields" in b) fields.profile_fields = copyBody(b.profile_fields);
+    if ("portrait_sent" in b) fields.portrait_sent = flag(b, "portrait_sent");
+    if ("with_copies" in b) fields.with_copies = flag(b, "with_copies");
     return changed(store.updateCharacter(num(p.story), num(p.character), fields));
   },
   "DELETE /api/stories/{story}/characters/{character}": (p) => changed(store.deleteCharacter(num(p.story))),
@@ -275,7 +282,29 @@ function cardFields(body, correcting = false) {
   for (const name of texts) if (name in body) fields[name] = need(body, name);
   for (const name of lists) if (name in body) fields[name] = strings(body, name);
   if ("reminder_depth" in body) fields.reminder_depth = integer(body, "reminder_depth");
+  if (correcting && "before" in body) fields.before = body.before === null ? null : integer(body, "before");
   return fields;
+}
+
+/* A profile's fields as the body carries them: texts, the two lists of
+   texts, the depth a whole number — anything else a malformed request
+   (`web.api.story.lore._profile_fields`). */
+function copyBody(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Fault(400, "TypeError: profile_fields is not an object");
+  }
+  for (const [name, field] of Object.entries(value)) {
+    if (name === "alternate_greetings" || name === "examples") {
+      if (!Array.isArray(field) || !field.every((item) => typeof item === "string")) {
+        throw new Fault(400, `TypeError: ${name} is not a list of strings`);
+      }
+    } else if (name === "reminder_depth") {
+      if (!Number.isInteger(field)) throw new Fault(400, "TypeError: reminder_depth is not an integer");
+    } else if (typeof field !== "string") {
+      throw new Fault(400, `TypeError: ${name} is not a string`);
+    }
+  }
+  return value;
 }
 
 function given(body, names) {
@@ -526,27 +555,6 @@ async function _loadCard(bytes, fileName) {
   return { card, notes };
 }
 
-function _cardToml(card, user) {
-  // The archive's keys in `context.cards.card_toml`'s order; the demo
-  // writes plain TOML — the same fields, its own formatting.
-  const pair = (key, value) =>
-    Array.isArray(value)
-      ? `${key} = [${value.map((item) => JSON.stringify(item)).join(", ")}]`
-      : `${key} = ${JSON.stringify(value)}`;
-  const lines = [pair("name", card.name), pair("user", user)];
-  const keys = [
-    "description", "personality", "scenario", "greeting", "alternate_greetings",
-    "examples", "reminder", "reminder_depth", "system_prompt", "post_history_instructions",
-    "creator_notes", "file_name",
-  ];
-  for (const key of keys) {
-    const value = card[key];
-    // a number where it is not its default, as the product writes it
-    if (key === "reminder_depth" ? value == null || value === 2 : value == null || value.length === 0) continue;
-    lines.push(pair(key, value));
-  }
-  return lines.join("\n\n");
-}
 
 
 /** A card FILE read: the card it holds, what reading it noted, and
@@ -575,11 +583,14 @@ async function makeCard(query, body) {
     return answer.value.made ? created(answer, `/api/cards/${answer.value.card.id}`) : changed(answer);
   }
   if ("story_id" in body) {
-    const made = store.promote(integer(body, "story_id"), integer(body, "character_id"));
+    const [story, character] = [integer(body, "story_id"), integer(body, "character_id")];
+    if (query.get("validate_only") === "true") return store.checkPromotion(story, character);
+    const withCopies = "with_copies" in body ? flag(body, "with_copies") : false;
+    const made = store.promote(story, character, { withCopies });
     return created(made, `/api/cards/${made.value.id}`);
   }
   const made = store.createCard({
-    name: need(body, "name"),
+    name: "name" in body ? need(body, "name") : undefined,
     aliases: strings(body, "aliases"),
     tagline: text(body, "tagline"),
     fields: cardFields(body),
@@ -615,7 +626,7 @@ async function card(story, query, body, ask) {
   const name = rename || (target ? target.name : found.name);
   const fields = { ...(target ?? found), name };
   const persona = store.personaOf(story);
-  const tokens = Math.ceil(_cardToml(fields, persona || "you").length / 4);
+  const tokens = Math.ceil(store.profileToml(fields, persona || "you").length / 4);
   if (query.get("validate_only") === "true") {
     store.ensureFree(story, name, held?.id ?? null);
     return {
@@ -652,7 +663,7 @@ async function card(story, query, body, ask) {
     card: cardId,
     name,
     aliases: [brought.name, ...brought.aliases],
-    archive: _cardToml(storyCard, speaking),
+    copy: storyCard,
     greeting: _bind(storyCard.greeting, name, speaking),
     fileName: storyCard.file_name,
     line: fromFile ? `/card ${fileName}` + (rename ? ` ${rename}` : "") : `/card ${name}`,

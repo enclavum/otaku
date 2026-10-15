@@ -32,9 +32,12 @@ export function openPicture(attachments, at) {
      dialog, Close and a click on the desk do the same. The measure
      under it is the row's — width by height, and the bytes stored. A
      turn with several pictures is walked from here, by the arrows on
-     the picture's sides or the arrow keys, clamped at the ends. */
+     the picture's sides or the arrow keys, clamped at the ends — in a
+     window as tall as the tallest of them needs, so a flip never changes
+     its size. */
   const dialog = $('dialog[data-dialog="picture"]');
-  const image = $("img", dialog);
+  const frame = $(".otk-lightbox__frame", dialog);
+  const image = $("img", frame);
   const prev = $("[data-prev]", dialog);
   const next = $("[data-next]", dialog);
   const several = attachments.length > 1;
@@ -80,6 +83,18 @@ export function openPicture(attachments, at) {
   dialog.addEventListener("close", down, { signal: wired.signal });
   show(at);
   dialog.showModal();
+  frame.style.minHeight = `${tallest(attachments, frame, image)}px`;
+}
+
+/** The height `frame` needs for the tallest of `attachments`: each at its
+    own size, downsized to the frame's width where it is wider, and held
+    to the window as the stylesheet holds `image`, the one shown (its
+    `max-height`, `.otk-lightbox img`). Measured with the dialog open. */
+function tallest(attachments, frame, image) {
+  const width = frame.clientWidth;
+  const held = parseFloat(getComputedStyle(image).maxHeight) || Infinity;
+  const heights = attachments.map((each) => each.height * Math.min(1, width / each.width));
+  return Math.ceil(Math.min(held, Math.max(...heights)));
 }
 
 function sized(bytes) {
