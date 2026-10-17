@@ -16,7 +16,6 @@ The three pillars of otaku:
 - **high-quality interfaces**, in the browser and in the terminal.
 
 ![otaku web](https://raw.githubusercontent.com/enclavum/otaku/main/images/capture-web.png?v=0.8.0)
-![otaku web](images/capture-web.png?v=0.8.0)
 
 ## Demo
 
