@@ -14,10 +14,19 @@ from __future__ import annotations
 
 import builtins
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Any
 
 from otaku.store.database import Database
 from otaku.store.schema import Character, Journal, Scene
+
+# A character row's columns, as `CharacterOps._character` reads them,
+# and a row's journal count beside them (`idx_journals_rollup` serves it).
+_CHARACTER_COLUMNS = "c.id, c.name, c.aliases, c.description, c.profile, c.updated_at, c.provider, c.model, c.card_id"
+_JOURNAL_COUNT = (
+    "(SELECT COUNT(*) FROM journals j WHERE j.story_id = c.story_id AND j.character_id = c.id)"
+)
 
 
 class SceneOps:
@@ -172,17 +181,18 @@ class CharacterOps:
         *,
         aliases: tuple[str, ...] = (),
         description: str | None = None,
-        card: str | None = None,
+        profile: str | None = None,
         provider: str | None = None,
         model: str | None = None,
+        card_id: int | None = None,
     ) -> int:
         now = self._db.now()
         sealed_aliases = self._db.seal_opt(json.dumps(list(aliases)) if aliases else None)
         with self._db.conn as conn:
             # fmt: off
             cur = conn.execute(
-                "INSERT INTO characters (story_id, name, aliases, description, card, created_at, updated_at, provider, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (story_id, self._db.seal(name), sealed_aliases, self._db.seal_opt(description), self._db.seal_opt(card), now, now, provider, model),
+                "INSERT INTO characters (story_id, name, aliases, description, profile, created_at, updated_at, provider, model, card_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (story_id, self._db.seal(name), sealed_aliases, self._db.seal_opt(description), self._db.seal_opt(profile), now, now, provider, model, card_id),
             )
             # fmt: on
         return int(cur.lastrowid or 0)
@@ -190,23 +200,11 @@ class CharacterOps:
     def list(self, story_id: int) -> builtins.list[Character]:
         # fmt: off
         rows = self._db.conn.execute(
-            "SELECT id, name, aliases, description, card, updated_at, provider, model FROM characters WHERE story_id = ? ORDER BY id",
+            f"SELECT {_CHARACTER_COLUMNS} FROM characters c WHERE c.story_id = ? ORDER BY c.id",
             (story_id,),
         ).fetchall()
         # fmt: on
-        return [
-            Character(
-                id=int(cid),
-                name=self._db.unseal(name),
-                aliases=self._decode_aliases(aliases),
-                description=self._db.unseal(description),
-                card=self._db.unseal_opt(card),
-                updated_at=str(updated),
-                provider=provider,
-                model=model,
-            )
-            for cid, name, aliases, description, card, updated, provider, model in rows
-        ]
+        return [self._character(row) for row in rows]
 
     def update(
         self,
@@ -214,26 +212,26 @@ class CharacterOps:
         *,
         aliases: tuple[str, ...] = (),
         description: str | None = None,
-        card: str | None = None,
+        profile: str | None = None,
     ) -> None:
         """Fill in details for a character created bare (a speaker label
         creates the row before the extraction's own entry arrives). Strictly
-        additive: aliases merge, an existing description or card is never
+        additive: aliases merge, an existing description or profile is never
         overwritten."""
         row = self._db.conn.execute(
-            "SELECT aliases, description, card FROM characters WHERE id = ?", (character_id,)
+            "SELECT aliases, description, profile FROM characters WHERE id = ?", (character_id,)
         ).fetchone()
         if row is None:
             return
         merged = list(dict.fromkeys([*self._decode_aliases(row[0]), *aliases]))
         sealed_aliases = self._db.seal_opt(json.dumps(merged) if merged else None)
         kept_description = row[1] if row[1] is not None else self._db.seal_opt(description)
-        kept_card = row[2] if row[2] is not None else self._db.seal_opt(card)
+        kept_profile = row[2] if row[2] is not None else self._db.seal_opt(profile)
         with self._db.conn as conn:
             # fmt: off
             conn.execute(
-                "UPDATE characters SET aliases = ?, description = ?, card = ?, updated_at = ? WHERE id = ?",
-                (sealed_aliases, kept_description, kept_card, self._db.now(), character_id),
+                "UPDATE characters SET aliases = ?, description = ?, profile = ?, updated_at = ? WHERE id = ?",
+                (sealed_aliases, kept_description, kept_profile, self._db.now(), character_id),
             )
             # fmt: on
 
@@ -266,18 +264,68 @@ class CharacterOps:
             )
             # fmt: on
 
-    def set_card(self, character_id: int, card: str) -> None:
-        """The author's correction of an imported card's archive — replaces
+    def set_profile(self, character_id: int, profile: str) -> None:
+        """The author's correction of an imported card's profile — replaces
         the text, and the wire follows: the card row composes its block
-        from this archive at every request, so the correction reaches the
+        from this profile at every request, so the correction reaches the
         next one (and the next import's persona default)."""
         with self._db.conn as conn:
             # fmt: off
             conn.execute(
-                "UPDATE characters SET card = ?, updated_at = ? WHERE id = ?",
-                (self._db.seal_opt(card or None), self._db.now(), character_id),
+                "UPDATE characters SET profile = ?, updated_at = ? WHERE id = ?",
+                (self._db.seal_opt(profile or None), self._db.now(), character_id),
             )
             # fmt: on
+
+    def set_card_id(
+        self, character_id: int, card_id: int | None, *, copies: Sequence[int] = ()
+    ) -> None:
+        """Link a cast row to a codex card, or unlink it with None —
+        nothing else on either row changes: the character keeps its own
+        copy of whatever it holds — and `copies`, rows in other stories,
+        with it in one transaction. One link per card in a story: a
+        second raises `sqlite3.IntegrityError` (the unique index)."""
+        now = self._db.now()
+        with self._db.conn as conn:
+            # fmt: off
+            conn.executemany(
+                "UPDATE characters SET card_id = ?, updated_at = ? WHERE id = ?",
+                [(card_id, now, row) for row in (character_id, *copies)],
+            )
+            # fmt: on
+
+    def get_link_counts(self) -> dict[int, int]:
+        """How many story characters each linked card has, by the card's
+        id; a card with none is absent."""
+        # fmt: off
+        rows = self._db.conn.execute(
+            "SELECT card_id, COUNT(*) FROM characters WHERE card_id IS NOT NULL GROUP BY card_id",
+        ).fetchall()
+        # fmt: on
+        return {int(card_id): int(count) for card_id, count in rows}
+
+    # ---------- across the stories ----------
+
+    def list_linked(self, card_id: int) -> builtins.list[CastListing]:
+        """Every story's character linked to a codex card, by story and
+        then appearance."""
+        # fmt: off
+        rows = self._db.conn.execute(
+            f"SELECT c.story_id, {_JOURNAL_COUNT}, {_CHARACTER_COLUMNS} FROM characters c WHERE c.card_id = ? ORDER BY c.story_id, c.id",
+            (card_id,),
+        ).fetchall()
+        # fmt: on
+        return [CastListing(int(row[0]), self._character(row[2:]), int(row[1])) for row in rows]
+
+    def list_unlinked(self) -> builtins.list[CastListing]:
+        """Every story's character no codex card claims, by story and then
+        appearance."""
+        # fmt: off
+        rows = self._db.conn.execute(
+            f"SELECT c.story_id, {_JOURNAL_COUNT}, {_CHARACTER_COLUMNS} FROM characters c WHERE c.card_id IS NULL ORDER BY c.story_id, c.id",
+        ).fetchall()
+        # fmt: on
+        return [CastListing(int(row[0]), self._character(row[2:]), int(row[1])) for row in rows]
 
     # ---------- resolution and shaping ----------
 
@@ -300,15 +348,17 @@ class CharacterOps:
         wins and the source's is dropped. The merged memory is a new
         memory: every history rollup composed before the merge covered
         only one side, so they all reset and the next pass rebuilds from
-        the union of entries. Merging a character into itself is refused —
-        the reference moves and dedup below would otherwise delete it."""
+        the union of entries. The target keeps its codex link; an
+        unlinked target takes the source's. Merging a character into
+        itself is refused — the reference moves and dedup below would
+        otherwise delete it."""
         if source_id == target_id:
             raise ValueError("a character cannot be merged into itself")
         # fmt: off
         rows = {
-            int(cid): (name, aliases)
-            for cid, name, aliases in self._db.conn.execute(
-                "SELECT id, name, aliases FROM characters WHERE story_id = ? AND id IN (?, ?)",
+            int(cid): (name, aliases, card_id)
+            for cid, name, aliases, card_id in self._db.conn.execute(
+                "SELECT id, name, aliases, card_id FROM characters WHERE story_id = ? AND id IN (?, ?)",
                 (story_id, source_id, target_id),
             )
         }
@@ -326,11 +376,17 @@ class CharacterOps:
             )
         )
         now = self._db.now()
+        card_id = rows[target_id][2] if rows[target_id][2] is not None else rows[source_id][2]
         with self._db.conn as conn:
             # fmt: off
+            # The source lets go of its link first: one link per card in a story.
             conn.execute(
-                "UPDATE characters SET aliases = ?, updated_at = ? WHERE id = ?",
-                (self._db.seal(json.dumps(merged)), now, target_id),
+                "UPDATE characters SET card_id = NULL WHERE id = ?",
+                (source_id,),
+            )
+            conn.execute(
+                "UPDATE characters SET aliases = ?, card_id = ?, updated_at = ? WHERE id = ?",
+                (self._db.seal(json.dumps(merged)), card_id, now, target_id),
             )
             conn.execute(
                 "UPDATE messages SET speaker_id = ? WHERE speaker_id = ?",
@@ -354,6 +410,21 @@ class CharacterOps:
             )
             # fmt: on
 
+    def _character(self, row: Sequence[Any]) -> Character:
+        """A row read by `_CHARACTER_COLUMNS`, unsealed."""
+        cid, name, aliases, description, profile, updated, provider, model, card_id = row
+        return Character(
+            id=int(cid),
+            name=self._db.unseal(name),
+            aliases=self._decode_aliases(aliases),
+            description=self._db.unseal(description),
+            profile=self._db.unseal_opt(profile),
+            updated_at=str(updated),
+            provider=provider,
+            model=model,
+            card_id=card_id,
+        )
+
     def _decode_aliases(self, sealed: bytes | None) -> tuple[str, ...]:
         raw = self._db.unseal(sealed)
         if not raw:
@@ -362,6 +433,17 @@ class CharacterOps:
             return tuple(str(alias) for alias in json.loads(raw))
         except (json.JSONDecodeError, TypeError):
             return ()
+
+
+@dataclass(frozen=True)
+class CastListing:
+    """A story's character as a list across the stories shows it: the
+    story it is in, the character, and how many journal rows it has —
+    every one, on any of the story's timelines."""
+
+    story_id: int
+    character: Character
+    journal_count: int
 
 
 @dataclass(frozen=True)

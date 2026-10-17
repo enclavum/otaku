@@ -14,10 +14,11 @@ by default.
 Which family a model is: the engine says where it can
 (`family_of_config_type` for omlx's model type, `family_of_chat_template`
 for llama.cpp's own template), the model's name is the last resort
-(`family_of_name`), and a user's own word — the session hands over the
-model's models.toml line — is laid over both (`resolve`). BOS is spelled
-in the text only where the engine adds none of its own — omlx's engines
-— since llama.cpp adds one, and two harm the output.
+(`family_of_name`), and a user's own word — the app hands over the
+model's models.toml line — is laid over both (`resolve`). The BOS is
+the engine's: llama.cpp, KoboldCpp and omlx each add one where the
+model's tokenizer asks, and two harm the output, so a template spells it
+only where the tokenizer adds none — Gemma 4's.
 """
 
 import re
@@ -28,7 +29,8 @@ from dataclasses import dataclass, replace
 class TextTemplate:
     """One family's markers: each turn kind's opener and closer; `system`
     None where the family has no system role, and the premise rides a
-    user turn. `bos` is the token spelled at the head. `source` is where
+    user turn. `bos` is the token spelled at the head, empty where the
+    engine adds its own. `source` is where
     the word came from on the copy `resolve` hands out — "override" (the
     user's own line), "engine" (the engine's word on the model), "model"
     (the model's name) — and empty on the catalogue's own."""
@@ -82,13 +84,12 @@ TEXT_TEMPLATES: dict[str, TextTemplate] = {
         # Gemma 2 and 3: no system role; the premise rides the user turn.
         TextTemplate(
             "gemma",
-            bos="<bos>",
             user=("<start_of_turn>user\n", "<end_of_turn>\n"),
             model=("<start_of_turn>model\n", "<end_of_turn>\n"),
         ),
         # Mistral's Tekken tokenizer (Nemo): no spaces around the markers,
         # no system role, the answer straight after [/INST].
-        TextTemplate("mistral-tekken", bos="<s>", user=("[INST]", "[/INST]"), model=("", "</s>")),
+        TextTemplate("mistral-tekken", user=("[INST]", "[/INST]"), model=("", "</s>")),
         TextTemplate(
             "chatml",
             system=("<|im_start|>system\n", "<|im_end|>\n"),
@@ -97,7 +98,6 @@ TEXT_TEMPLATES: dict[str, TextTemplate] = {
         ),
         TextTemplate(
             "llama3",
-            bos="<|begin_of_text|>",
             system=("<|start_header_id|>system<|end_header_id|>\n\n", "<|eot_id|>"),
             user=("<|start_header_id|>user<|end_header_id|>\n\n", "<|eot_id|>"),
             model=("<|start_header_id|>assistant<|end_header_id|>\n\n", "<|eot_id|>"),

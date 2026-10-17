@@ -1,36 +1,44 @@
 """What the page asks for, as plain data — this frontend's whole surface
-over an open session, one table per kind of request.
+over the app, as tables of method and path.
 
-`ROUTES` is the whole of it: one entry per method and path, each
-taking the session and an `Ask` — what the path named, what the query
-asked for, what the body carried — and returning something `json` can
-write. A bare sentence back is a notice; a `Created` says a thing was
-made and where it now lives. `Pending` holds what outlives a request,
-and reaches only the rows of `FLOWS`. `play` and `regenerate`
-return the reply's event stream and `event` names each event on the
-wire. What is NOT here is HTTP: `web.server` matches a request against
-this table and carries the result, and nothing else.
+`ROUTES` is the whole of it but two: one entry per method and path, each
+taking the interface (`backend.api.Api`) and an `Ask` — what the path
+named, what the query asked for, what the body carried, the head an
+`If-Match` names — and returning what the page gets: a representation
+as JSON writes it (`plain`), a write's answer (`changed`: the thing as
+it now stands and the sentence), or one of the answers that say more —
+`Created`, `Accepted`, `Tagged`, `Blob`. `STREAMS` are the two writes
+whose answer is the reply as it arrives, each event named on the wire by
+`event`. What is NOT here is HTTP: `web.server` matches a request against
+these tables and carries the result, and nothing else.
 
-The package mirrors `backend.api`: one module per twin — `play`,
-`stories`, `lore`, `cards`, `providers`, `integrations`, `settings`,
-`reports`, `support`, `transfer` — each translating its twin's answers into the page's shapes
-and holding its own rows, and `request` for what every row is handed
-and hands back. A module calls its own twin and nothing else of
-`backend.api`; what it needs of another twin it takes from that twin's
-sibling here (`stories.story` takes the lore half of its answer from
-`lore.memory`), which is what keeps every translation of one twin in
-one module — `tests/test_architecture.py` holds it, `request` the one
-exception, importing two twins' TYPES for `Pending`. The tables here
-are the modules' rows merged, and a path in two of them is a fault at
-import: the server matches one sorted list built from both, and a
-duplicate would let the compile order decide.
+The package mirrors `backend.api`, three packages of twins: `app`, the
+installation (the app itself, `machine`, `settings`, `providers`,
+`models`, `integrations`, `history`, `pictures`, `reports`), `codex`,
+what every story may draw on (`cards`), and `story`, a story and what it
+holds (`stories`, `settings`, `messages`, `lore`, `cards`, `context`,
+`transfer`, `prompts`, `language`) — each module translating its twin's
+answers into the page's and holding its own rows — and `_request`, the
+layer's machinery: what every row is handed and hands back. A module
+calls its own twin's resources and nothing else of the interface; what
+it needs of another twin it takes from that twin's sibling here (every
+path inside a story is `story.stories.tagged`, and a write that moves a
+head asks `story.stories.expected_head`), which is what keeps every
+translation of one twin in one module. The tables here are the modules'
+rows merged, and a path in two of them is a fault at import: the server
+matches one sorted list built from all of them, and a duplicate would
+let the compile order decide.
+
+The package is the web's ONE door to the backend: nothing else in the
+web imports `otaku.backend.api` — the server takes the app, the facade,
+the refusals and its settings slice from here, its root re-exporting the
+interface's vocabulary and each twin the types the server needs of it.
 
 Nothing here decides how any of it LOOKS — where a paragraph breaks,
-what a slash token is drawn as, how a count is worded — because that is
+what a slash token is drawn as, how a count is written — because that is
 the page's business and the page is the only caller. And nothing here
-reaches past `backend`: the facts come from `backend.api.reports`, the
-language from `backend.commands`, so the web says exactly what the
-terminal says.
+reaches past `backend.api`, so the web says exactly what the terminal
+says.
 
 Bodies cross VERBATIM, exactly as they were typed or as they streamed.
 The web is the second reader of the same store, not a second author of
@@ -40,52 +48,125 @@ its text.
 from collections.abc import Mapping
 from typing import TypeVar
 
-from otaku.web.api import (
-    cards,
+from otaku.backend.api import (
+    NO_MODEL_HINT,
+    NO_STORY_HINT,
+    NO_SUCH_STORY,
+    UNCHANGED,
+    Actor,
+    Api,
+    App,
+    Attachment,
+    Changed,
+    CompletionType,
+    Conflict,
+    HeadMoved,
+    InjectionPosition,
+    Invalid,
+    JoinType,
+    KeySource,
+    Layout,
+    Locality,
+    ModelRef,
+    ModelState,
+    NotFound,
+    Refused,
+    StoryMode,
+    Unavailable,
+    Unchanged,
+)
+from otaku.web.api import app
+from otaku.web.api._request import (
+    Accepted,
+    Ask,
+    Blob,
+    Created,
+    PreconditionRequired,
+    Route,
+    Stream,
+    Tagged,
+    etag,
+)
+from otaku.web.api.app import (
+    history,
     integrations,
-    lore,
-    play,
+    machine,
+    models,
+    pictures,
     providers,
     reports,
-    settings,
+)
+from otaku.web.api.app import settings as app_settings
+from otaku.web.api.codex import cards as codex_cards
+from otaku.web.api.story import (
+    cards,
+    context,
+    language,
+    lore,
+    messages,
+    prompts,
     stories,
-    support,
     transfer,
 )
-from otaku.web.api.play import event, files_from, regenerate, syntax
-from otaku.web.api.reports import context
-from otaku.web.api.request import Ask, Blob, Created, Flow, NotFound, Pending, Route
-from otaku.web.api.stories import facts, story, story_settings
+from otaku.web.api.story import settings as story_settings
+from otaku.web.api.story.messages import event
 
-# `play`, `stories` and `settings` are the modules here; their namesake
-# functions are reached through them (`play.play`, `stories.stories`).
 __all__ = [
-    "FLOWS",
+    "NO_MODEL_HINT",
+    "NO_STORY_HINT",
+    "NO_SUCH_STORY",
     "ROUTES",
+    "STREAMS",
+    "UNCHANGED",
+    "Accepted",
+    "Actor",
+    "Api",
+    "App",
     "Ask",
+    "Attachment",
     "Blob",
+    "Changed",
+    "CompletionType",
+    "Conflict",
     "Created",
-    "Flow",
+    "HeadMoved",
+    "InjectionPosition",
+    "Invalid",
+    "JoinType",
+    "KeySource",
+    "Layout",
+    "Locality",
+    "ModelRef",
+    "ModelState",
     "NotFound",
-    "Pending",
+    "PreconditionRequired",
+    "Refused",
     "Route",
+    "StoryMode",
+    "Stream",
+    "Tagged",
+    "Unavailable",
+    "Unchanged",
+    "app",
+    "app_settings",
     "cards",
+    "codex_cards",
     "context",
+    "etag",
     "event",
-    "facts",
-    "files_from",
+    "history",
     "integrations",
+    "language",
     "lore",
-    "play",
+    "machine",
+    "messages",
+    "models",
+    "pictures",
+    "prompts",
     "providers",
-    "regenerate",
     "reports",
-    "settings",
     "stories",
-    "story",
     "story_settings",
-    "support",
-    "syntax",
     "transfer",
 ]
 
@@ -105,35 +186,37 @@ def _merged(*tables: Mapping[tuple[str, str], _Row]) -> dict[tuple[str, str], _R
     return out
 
 
-# Every path the page may ask for whose work begins and ends inside the
-# request, by METHOD and template. The method IS the lane (`web.server`):
-# a GET only reads the session and is answered in the gaps of a streaming
-# reply, and anything else takes the thread in turn. `{name}` in a
-# template is a path parameter, and reaches the handler as
-# `ask.params[name]`. The paths that span two requests are `FLOWS`, below.
+# Every path the page may ask for whose answer is a payload, by METHOD
+# and template. The method IS the lane (`web.server`): a GET only reads
+# the app and is answered in the gaps of a streaming reply, and anything
+# else takes the thread in turn. `{name}` in a template is a path
+# parameter, and reaches the handler as `ask.params[name]`.
 #
-# Four paths are NOT here, because none of them touch the session's
-# thread: `/api/status` and `/api/watch` never do, `GET .../extraction`
-# reads a run's own channel-safe poll, and the two that PLAY answer with
-# a stream rather than a payload. The server holds those itself.
+# Not here: the two writes that answer with a stream (`STREAMS`), and the
+# paths the server holds itself — `/api/app/status` and `/api/watch`,
+# which never touch the app's thread, and `/api/login`.
 ROUTES: dict[tuple[str, str], Route] = _merged(
-    play.ROUTES,
-    stories.ROUTES,
-    lore.ROUTES,
+    app.ROUTES,
+    machine.ROUTES,
+    app_settings.ROUTES,
     providers.ROUTES,
+    models.ROUTES,
     integrations.ROUTES,
-    settings.ROUTES,
+    history.ROUTES,
+    pictures.ROUTES,
     reports.ROUTES,
-    support.ROUTES,
+    codex_cards.ROUTES,
+    stories.ROUTES,
+    story_settings.ROUTES,
+    messages.ROUTES,
+    lore.ROUTES,
+    cards.ROUTES,
+    context.ROUTES,
     transfer.ROUTES,
+    prompts.ROUTES,
+    language.ROUTES,
 )
 
-# The five paths whose work outlives the request that started it — a
-# document that lands and starts a pass, a card waiting on its persona
-# answer, a pass the page polls. Matched exactly as `ROUTES` is, and
-# answered on the same lane; the third argument is the whole difference.
-FLOWS: dict[tuple[str, str], Flow] = _merged(
-    stories.FLOWS,
-    lore.FLOWS,
-    cards.FLOWS,
-)
+# The two writes whose answer is the reply as it arrives: matched as the
+# routes are, on the same lane, and answered as a stream of `event`s.
+STREAMS: dict[tuple[str, str], Stream] = _merged(messages.STREAMS, stories.STREAMS)

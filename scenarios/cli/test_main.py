@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from otaku.backend.paths import Paths
+from otaku.backend.domain.app._paths import Paths
 from otaku.settings import state as state_mod
 from otaku.terminal.tty import PROMPT_CONTINUATION
 from scenarios.support import server as scripted
@@ -107,11 +107,9 @@ class TestWeb:
         set_config_provider(state, server)
         terminal = Terminal(str(state), args=("web", "--port", str(_free_port())))
         terminal.expect("Running on", timeout=20.0)
-        terminal.send(CTRL_R, 1.0)
-        terminal.expect("Restarting")
+        _pressed_until(terminal, CTRL_R, "Restarting", timeout=20.0)
         _expect_count(terminal, "Running on", 2, timeout=20.0)
-        terminal.send(CTRL_D, 1.0)
-        terminal.expect("Shutting down")
+        _pressed_until(terminal, CTRL_D, "Shutting down", timeout=20.0)
         assert terminal.wait() == 0
 
     def test_from_the_chat_ctrl_d_ends_the_serving_and_the_prompt_returns(
@@ -291,6 +289,19 @@ def _expect_count(terminal: Terminal, marker: str, count: int, *, timeout: float
     assert terminal.transcript.count(marker) >= count, terminal.transcript[-2000:]
 
 
+def _pressed_until(terminal: Terminal, key: bytes, marker: str, *, timeout: float) -> None:
+    """Press `key` until `marker` shows. The address is said a moment
+    before the keys are watched, and a key pressed in between is the
+    terminal's own (Ctrl+R reprints the line), so a loaded machine may
+    need it twice."""
+    import time
+
+    deadline = time.time() + timeout
+    while marker not in terminal.transcript and time.time() < deadline:
+        terminal.send(key, 1.0)
+    assert marker in terminal.transcript, terminal.transcript[-2000:]
+
+
 def _listening(port: int) -> bool:
     with socket.socket() as probe:
         probe.settimeout(0.2)
@@ -300,7 +311,7 @@ def _listening(port: int) -> bool:
 def remember(root: Path) -> None:
     """state.toml pointing at the scripted model, so launch lands in the
     REPL instead of the picker."""
-    state_mod.save(Paths.resolve(root).state_file, state_mod.State(model=SPEC))
+    state_mod.save(Paths.resolve(root).state_file, state_mod.StateConfig(model=SPEC))
 
 
 def launch_remembered(

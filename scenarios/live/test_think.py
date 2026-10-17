@@ -18,7 +18,6 @@ from pathlib import Path
 
 import pytest
 
-from otaku.backend.api import settings as api_settings
 from otaku.providers.clients.omlx import OmlxClient
 from otaku.settings.providers import ProviderConfig
 from scenarios.support.live import case_key, case_model
@@ -97,7 +96,7 @@ class TestThink:
         try:
             off, _ = _levels(app)
             app.play(f"/set think {off}")
-            assert app.session.think == off
+            assert app.model_settings().think == off
             capsys.readouterr()
             app.play("Reply with one word: ready?")
             out = capsys.readouterr().out
@@ -117,7 +116,7 @@ class TestThink:
             app.play(f"/set think {on}")
             # Never refused for the provider's sake: a provider with no knob
             # takes the level too, and its request carries nothing.
-            assert app.session.think == on
+            assert app.model_settings().think == on
             app.play("Reply with one word: ready?")
             assert _replied(app)
             assert _carried(app, provider) == _expected(_KNOBS[provider], on)
@@ -132,7 +131,7 @@ def _open(tmp_path: Path, server, provider: str, url: str, key_var: str, model: 
 
 
 def _replied(app) -> bool:  # type: ignore[no-untyped-def]
-    chain = app.store.stories.get_messages(app.session.story_id)
+    chain = app.store.stories.get_messages(app.story_id)
     return len(chain) >= 2 and chain[-1].role == "assistant" and bool(chain[-1].body.strip())
 
 
@@ -142,9 +141,11 @@ def _levels(app) -> tuple[str, str]:  # type: ignore[no-untyped-def]
     high — every rung where the provider cannot say. A model that takes
     no level (Ollama's Gemma 3, whose card names no thinking) has
     nothing to smoke: the case skips, and names a model that does."""
-    words = api_settings.think_choices(app.session).levels
+    words = app.model_settings().choices.levels
     if words == ("unset",):
-        pytest.skip(f"{app.session.model} takes no thinking level (OTAKU_LIVE_<PROVIDER>_MODEL)")
+        pytest.skip(
+            f"{app.api.app.get().model.name} takes no thinking level (OTAKU_LIVE_<PROVIDER>_MODEL)"
+        )
     return ("off", "on") if "off" in words else ("none", "high")
 
 

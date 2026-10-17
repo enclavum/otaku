@@ -10,14 +10,16 @@ import sys
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
+from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 from otaku.web import api
-from otaku.web.server.assets import JSON, NO_STORE
-from otaku.web.thread import SessionRunner
+from otaku.web.api import App, HeadMoved, Invalid, NotFound, Refused, Unavailable
+from otaku.web.server.assets import JSON, NO_STORE, PROBLEM
+from otaku.web.thread import AppRunner
 
 # How a request ENDS when the reader closes a tab, reloads mid-reply or
 # stops otaku while the page is still streaming — and, under TLS, how one
@@ -42,28 +44,47 @@ LOOPBACK = ("127.0.0.1", "0.0.0.0", "::", "::1", "localhost", "")
 # alone, and so not a name anything can be checked against.
 _WILDCARD = ("0.0.0.0", "::", "")
 
+# What a request body may weigh. A turn's pictures are the heaviest thing
+# the page sends — eight of 10 MB each at most (the play's
+# `_MAX_PICTURES` and `backend.domain.app.pictures.MAX_BYTES`, copied),
+# base64 in the JSON — and nothing else comes close.
+MAX_BODY = 8 * 10 * 1024 * 1024 * 4 // 3 + 1024 * 1024
+
+# When to ask again after a 503: otaku is stopping, and a reader's Ctrl+R
+# brings it back within a second or two.
+RETRY_AFTER = "5"
+
+
+class BodyError(Exception):
+    """A request body this server will not read: too large (413), not
+    JSON by its type (415), not JSON by its bytes or not an object (400).
+    `status` is the answer; the message is what a developer reads."""
+
+    def __init__(self, status: int, reason: str) -> None:
+        super().__init__(reason)
+        self.status = status
+
 
 @dataclass(frozen=True)
 class Hooks:
     """What the serving reaches outside HTTP, injected at composition
     (`web.run.serve`) like every other frontend hook: where a request
     line worth showing goes, where a contained crash is recorded, the
-    background worker's voice for the beat — its one-line status, and
-    the sentences it has said since anybody last asked — and the ring a
-    landed reply calls the reader back with. All are callable from any
-    thread; nothing here prints conversation."""
+    background worker's one-line status for the beat, the ring a landed
+    reply calls the reader back with, and the sign-in's password check
+    (`api.settings.check_password`, Refused for a wrong one). All are
+    callable from any thread; nothing here prints conversation."""
 
     show: Callable[[str], None]
     record: Callable[[str, BaseException], str]
     working: Callable[[], str]
-    sayings: Callable[[], list[str]]
     ring: Callable[[], None]
+    check_password: Callable[[str], None]
 
 
 class Server(ThreadingHTTPServer):
     """The threading server plus what a handler needs: the runner that
-    reaches the session, the state that spans requests, where the
-    reader's own files live, and the hooks. Daemon threads because a
+    reaches the app, where the reader's own files live, and the hooks. Daemon threads because a
     held-open event stream must never outlive the interrupt that stopped
     the server."""
 
@@ -75,8 +96,7 @@ class Server(ThreadingHTTPServer):
         bound: tuple[str, int],
         handler: Any,
         *,
-        runner: SessionRunner,
-        pending: api.Pending,
+        runner: AppRunner[App],
         custom_web_dir: Path,
         hooks: Hooks,
         tls_context: ssl.SSLContext | None = None,
@@ -84,7 +104,6 @@ class Server(ThreadingHTTPServer):
     ) -> None:
         super().__init__(bound, handler)
         self.runner = runner
-        self.pending = pending
         self.custom_web_dir = custom_web_dir
         self.hooks = hooks
         self.tls_context = tls_context
@@ -104,7 +123,7 @@ class Server(ThreadingHTTPServer):
         )
         # Set when the reader asks otaku to stop. Ctrl+C is the USER
         # SPEAKING, not a crash: raising it where it lands would tear
-        # open whatever the session thread is doing — most likely a
+        # open whatever the app thread is doing — most likely a
         # reply, mid-sentence, inside the provider's own generator,
         # where the backend's cancel-and-keep can no longer run and the
         # words already on the reader's screen are lost. So the FIRST
@@ -192,19 +211,72 @@ class Wire(BaseHTTPRequestHandler):
         socket, and this ends up in a terminal."""
         return f"{self.command} {self._path()}".strip() if self.command else "?"
 
-    def _failed(self, status: int, why: Exception) -> None:
-        """A failure as a BODY, never as the status line. The reason is a
-        story title, a character name, a provider's own error text — and
-        the status line is latin-1, so putting it there answers a reader
-        writing in Cyrillic or Japanese with a dropped connection and
-        nothing else.
+    def _problem(
+        self,
+        status: int,
+        detail: str | None = None,
+        *,
+        headers: tuple[tuple[str, str], ...] = (),
+        extra: dict[str, object] | None = None,
+    ) -> None:
+        """An answer that is not a payload, as RFC 9457 problem details:
+        the status, its phrase as `title`, `detail` where there is one to
+        say, and `extra`'s members beside them. In the BODY, never the
+        status line: a detail carries a story title, a character name, a
+        provider's own error text, and the status line is latin-1 — a
+        reader writing in Cyrillic or Japanese would get a dropped
+        connection and nothing else."""
+        problem: dict[str, object] = {
+            "type": "about:blank",
+            "title": HTTPStatus(status).phrase,
+            "status": status,
+        }
+        if detail is not None:
+            problem["detail"] = detail
+        problem.update(extra or {})
+        self._send(json.dumps(problem).encode(), PROBLEM, NO_STORE, status=status, headers=headers)
 
-        Written for a DEVELOPER, not for the reader: the page logs this
-        to the console and shows a sentence of its own (`api.js`),
-        because a fault has no wording anybody chose. `refused` is
-        absent, which is what tells the two apart — a refusal is an
-        answer and comes back 200."""
-        self._json({"notice": f"{type(why).__name__}: {why}"}, status=status)
+    def _outcome(self, refused: Refused) -> None:
+        """What the backend declined, as the status that says why, its own
+        sentence the `detail` the page shows: a subject that is not there
+        (404); input it cannot take (422); a service it depends on that
+        failed it (502); a state that rules it out (409); a head that
+        moved from the one `If-Match` named (412), saying where it stands
+        now — `head`, and as the `ETag`. An ANSWER, not a fault: the
+        connection stays open."""
+        if isinstance(refused, HeadMoved):
+            self._problem(
+                412,
+                str(refused),
+                extra={"head": refused.head},
+                headers=(("ETag", api.etag(refused.head)),),
+            )
+            return
+        self._problem(_status_of(refused), str(refused))
+
+    def _fault(
+        self,
+        status: int,
+        why: Exception | None = None,
+        *,
+        headers: tuple[tuple[str, str], ...] = (),
+    ) -> None:
+        """A request this server could not answer as asked — malformed,
+        unmatched, too large, from the wrong place, a bug — as a problem
+        body, `why` in a developer's words: the page logs it, because a
+        fault has no wording anybody chose and a reader can do nothing
+        with it. The connection is closed, since what is left on it
+        cannot be trusted."""
+        self.close_connection = True
+        detail = f"{type(why).__name__}: {why}" if why is not None else None
+        self._problem(status, detail, headers=(*headers, ("Connection", "close")))
+
+    def send_error(self, code: int, message: str | None = None, explain: str | None = None) -> None:
+        """The stdlib's own refusals — a request line it could not parse,
+        a method it has no handler for — as problem bodies too, never its
+        HTML page."""
+        self.log_error("code %d, message %s", code, message)
+        self._fault(code)
 
     def _query(self) -> dict[str, str]:
         """The request's query, one value per name — a read's argument
@@ -213,21 +285,43 @@ class Wire(BaseHTTPRequestHandler):
         return {name: values[0] for name, values in parsed.items() if values}
 
     def _body(self) -> dict[str, Any]:
-        """The request's JSON object, or an empty one — a malformed body
-        is a missing field, which every caller already handles. That
-        includes a malformed LENGTH: anything that scans this port can
-        send one, and a crash here would answer nothing and file a
-        traceback in the day's error log for something that is not a
-        bug."""
+        """The request's JSON object — {} where it carries no body — or a
+        `BodyError`: a length that is no number (400), one over
+        `MAX_BODY` (413, left unread), a body that is not
+        `application/json` by its type (415) or by its bytes, or no
+        object (400). Anything that scans this port can send any of
+        these, and none is a crash to file."""
         try:
-            # Never negative: `read(-1)` reads to EOF, which for a
-            # connection a browser holds open is forever — one held
-            # thread and socket per request, answering nothing.
-            length = max(0, int(self.headers.get("Content-Length", 0) or 0))
-            parsed = json.loads(self.rfile.read(length) or b"{}")
-        except (ValueError, json.JSONDecodeError):
+            length = int(self.headers.get("Content-Length", 0) or 0)
+        except ValueError:
+            raise BodyError(400, "the Content-Length is not a number") from None
+        # Never read with a negative length: `read(-1)` reads to EOF, which
+        # for a connection a browser holds open is forever.
+        if length < 0:
+            raise BodyError(400, "the Content-Length is negative")
+        if length > MAX_BODY:
+            raise BodyError(413, f"{length} bytes is over the {MAX_BODY}-byte limit")
+        if length == 0:
             return {}
-        return parsed if isinstance(parsed, dict) else {}
+        raw = self.rfile.read(length)
+        kind = self.headers.get_content_type()
+        if kind != "application/json":
+            raise BodyError(415, f"{kind} is not application/json")
+        try:
+            parsed = json.loads(raw)
+        except ValueError as e:
+            raise BodyError(400, f"the body is not JSON: {e}") from None
+        if not isinstance(parsed, dict):
+            raise BodyError(400, "the body is not a JSON object")
+        return parsed
+
+    def _read_body(self) -> dict[str, Any] | None:
+        """The request's body, or None once its fault is answered."""
+        try:
+            return self._body()
+        except BodyError as e:
+            self._fault(e.status, e)
+            return None
 
     def _json(
         self,
@@ -272,3 +366,16 @@ class Wire(BaseHTTPRequestHandler):
             self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
+
+
+def _status_of(refused: Refused) -> int:
+    """The status a refusal answers with, by its kind: what a caller tells
+    apart is what the status says (`backend.errors`). A refusal of no
+    kind is the state ruling the request out."""
+    if isinstance(refused, NotFound):
+        return 404
+    if isinstance(refused, Invalid):
+        return 422
+    if isinstance(refused, Unavailable):
+        return 502
+    return 409

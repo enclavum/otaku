@@ -5,7 +5,7 @@ project. Read below the backend, by the assembler and the worker.
 stored turn to its wire text; `blocks` what the model writes that is
 not story (the `otk-` namespace); `injections` what otaku adds beside
 the story, and where each rides; `assembler` how it all fits the
-window; `cards` character cards as context material — the archive,
+window; `cards` character cards as context material — the profile,
 macro binding, the wire block (FILE decoding lives with the other wild
-formats, in backend.formats).
+formats, in backend.domain._formats).
 """

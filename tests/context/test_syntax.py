@@ -5,12 +5,11 @@ one — an unknown `/word` is prose, not an error. `read(line)` answers
 with the direction the line opened with, prose included, so nothing has
 to test for its absence; `request_kind` and `reply_kind` mark the two
 rows — disagreeing for `/you`, which instructs out of character but
-asks for the scene in character. `is_command` is the other side of the
-same coin: a slash word that is not a direction belongs to the command
-table. `spans` reads a line as its story and its words with the model:
-runs that join back into the line exactly, out of character all of a
-/you or /ooc line after its token and whatever follows an inliner, the
-tokens themselves story, the breaks at the line's edges read past.
+asks for the scene in character. `spans` reads a line as its story and
+its words with the model: runs that join back into the line exactly,
+out of character all of a /you or /ooc line after its token and
+whatever follows an inliner, the tokens themselves story, the breaks at
+the line's edges read past.
 
 `to_wire` composes what a stored turn sends. Two shapes reach it: a
 turn stored before the syntax existed, whose prose was already stripped
@@ -22,7 +21,7 @@ turn is the newest.
 
 import random
 
-from otaku.context.syntax import DIRECTIONS, is_command, read, roll_dice, spans, to_wire
+from otaku.context.syntax import DIRECTIONS, read, roll_dice, spans, to_wire
 from otaku.store.schema import Message
 
 # What a v2 turn stores: the template, placeholders intact.
@@ -95,22 +94,6 @@ class TestTemplateField:
         assert read("/you Elara").template_field == "you_framing"
         assert read("/ooc What genre?").template_field == "ooc_framing"
         assert read("/roll 1d6").template_field == "roll_framing"
-
-
-class TestIsCommand:
-    def test_a_slash_word_that_is_not_a_direction_is_a_command(self) -> None:
-        assert is_command("/fork my title") is True
-        assert is_command("/nonsense too") is True
-
-    def test_a_direction_is_story_not_a_command(self) -> None:
-        assert is_command("/me Elara: hi") is False
-        assert is_command("/you Elara") is False
-        assert is_command("/ooc what?") is False
-        assert is_command("/roll 1d20+5") is False
-
-    def test_prose_is_never_a_command(self) -> None:
-        assert is_command("She looks up.") is False
-        assert is_command("and/or") is False
 
 
 class TestSpans:

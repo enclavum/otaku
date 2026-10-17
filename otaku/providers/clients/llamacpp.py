@@ -213,7 +213,7 @@ class LlamaCppSingleModels(LlamaCppModels):
     def _listing(self, entries: list[dict[str, Any]], props: Any, http: Http) -> Listing:
         if not entries:
             return []
-        max_context_loaded, max_context_catalogue, size = self._meta_of(entries[0])
+        context_loaded, context_length, size = self._meta_of(entries[0])
         # Props without `modalities` are a build older than mid-2025:
         # still llama.cpp, vision and audio unknown. No props, nothing
         # is known of the modalities; the template is asked all the same.
@@ -228,8 +228,8 @@ class LlamaCppSingleModels(LlamaCppModels):
                 ModelInfo(
                     name=name,
                     size=size,
-                    max_context_catalogue=max_context_catalogue,
-                    max_context_loaded=max_context_loaded,
+                    context_length=context_length,
+                    context_loaded=context_loaded,
                     capabilities=self._capabilities_of(modalities, thinking),
                     state=ModelState.LOADED,
                     # the model's own template names its family, where a
@@ -253,12 +253,12 @@ class LlamaCppSingleModels(LlamaCppModels):
         entries = [e for e in self._entries_of(data) if not self._is_projector(e)]
         if not entries or re.split(r"[\\/]", str(entries[0]["id"]))[-1] != name:
             return None
-        max_context_loaded, max_context_catalogue, size = self._meta_of(entries[0])
+        context_loaded, context_length, size = self._meta_of(entries[0])
         return ModelInfo(
             name=name,
             size=size,
-            max_context_catalogue=max_context_catalogue,
-            max_context_loaded=max_context_loaded,
+            context_length=context_length,
+            context_loaded=context_loaded,
             state=ModelState.LOADED,
         )
 
@@ -324,15 +324,15 @@ class LlamaCppRouterModels(LlamaCppModels):
         # one, and its template is asked.
         models = []
         for entry in entries:
-            max_context_loaded, max_context_catalogue, size = self._meta_of(entry)
+            context_loaded, context_length, size = self._meta_of(entry)
             state = self._state_of(entry)
             name = str(entry["id"])
             models.append(
                 ModelInfo(
                     name=name,
                     size=size,
-                    max_context_catalogue=max_context_catalogue,
-                    max_context_loaded=max_context_loaded,
+                    context_length=context_length,
+                    context_loaded=context_loaded,
                     capabilities=self._capabilities_of(
                         self._modalities_of(entry),
                         self._thinking_of(name, http)
@@ -351,13 +351,13 @@ class LlamaCppRouterModels(LlamaCppModels):
         # The meta rides only while the model runs, and the template can
         # only be asked then: the first read after a load is where its
         # own size, max context and thinking become known.
-        max_context_loaded, max_context_catalogue, size = self._meta_of(entry)
+        context_loaded, context_length, size = self._meta_of(entry)
         state = self._state_of(entry)
         return ModelInfo(
             name=name,
             size=size,
-            max_context_catalogue=max_context_catalogue,
-            max_context_loaded=max_context_loaded,
+            context_length=context_length,
+            context_loaded=context_loaded,
             capabilities=self._capabilities_of(
                 self._modalities_of(entry), self._thinking_of(name, http)
             )

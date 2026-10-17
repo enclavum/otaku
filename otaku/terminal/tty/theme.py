@@ -35,8 +35,8 @@ import os
 import re
 from dataclasses import dataclass, replace
 
-from otaku.backend import TerminalSettings
 from otaku.terminal import tty
+from otaku.terminal.api.app.settings import TerminalSettings
 
 # A color NAME is the portable form: it compiles to one of the 16 palette
 # slots, which every terminal on every platform renders and the reader's

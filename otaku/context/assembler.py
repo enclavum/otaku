@@ -18,8 +18,8 @@ its cases so the two read side by side:
 - case 6 (nothing left to degrade): the assembly refuses —
   `ContextOverflowError`, the sentence to show riding it.
 
-The limit is the smaller of the model's max context and the
-`max_context` setting (0 = the model's), minus a reserve for the model's
+The limit is the context in force — the model's window, under the
+context limit where one is set (`context_in_force`) — minus a reserve for the model's
 reply — sized
 from the story's own recent replies, so a terse story reserves little
 and a florid one enough. Card rows are never summarized and never
@@ -55,7 +55,7 @@ from enum import Enum
 from typing import Protocol
 
 from otaku.context import syntax, tool_calls
-from otaku.context.cards import card_to_wire
+from otaku.context.cards import CARD_PROVIDER, card_to_wire
 from otaku.context.injections import ROW_KIND, Injection, inject_into_system, inject_into_tail
 from otaku.providers import PicturesRide
 from otaku.providers.openai.templates import TextTemplate
@@ -87,13 +87,14 @@ class ContextOverflowError(Exception):
     """Case 6: the story cannot fit the limit even fully degraded. The
     message is the sentence to show; the figures that did not meet ride
     with it — `tokens` the smallest the story gets, `limit` what it had
-    to fit (the context less the reply's reserve), `context` the window."""
+    to fit (the context less the reply's reserve), `context_in_force`
+    what the request was cut to."""
 
-    def __init__(self, message: str, *, tokens: int, limit: int, context: int) -> None:
+    def __init__(self, message: str, *, tokens: int, limit: int, context_in_force: int) -> None:
         super().__init__(message)
         self.tokens = tokens
         self.limit = limit
-        self.context = context
+        self.context_in_force = context_in_force
 
 
 class PromptTexts(Protocol):
@@ -119,7 +120,9 @@ class ContextShape:
 
     head_messages: int
     min_tail_messages: int  # the tail never targets fewer; case 5 lowers it in emergencies
-    max_context: int  # the context in force (`context_in_force`), or the cap alone until it is
+    # What a request is cut to (`context_in_force`) — or, in a job's
+    # shape, the limit alone until the warm-up finishes it.
+    context_in_force: int
 
 
 @dataclass(frozen=True)
@@ -163,12 +166,22 @@ class WireTurn:
 @dataclass(frozen=True)
 class InjectionSent:
     """One injection as the request carries it: whose (its `owner`, a
-    setting's name), where it was asked to go, and what it costs — in
-    `system_tokens` at the system position, in `transcript_tokens` at a
-    depth."""
+    setting's name or a card's), where it was asked to go, and what it
+    costs — in `system_tokens` at the system position, in
+    `transcript_tokens` at a depth."""
 
     owner: str
     position: InjectionPosition
+    tokens: int
+
+
+@dataclass(frozen=True)
+class CardSent:
+    """One card row as the request carries it: whose (the name it came in
+    under) and what it costs, its portrait counted — in
+    `transcript_tokens`, whether it rides verbatim or whole in the recap."""
+
+    name: str
     tokens: int
 
 
@@ -185,7 +198,7 @@ class AssembledPrompt:
     # premise, `{premise}` filled — the standing instruction a model turn
     # needs before it (a model turn with no turn before it degenerates,
     # and a new story's premise is empty). Never "": the framing stands.
-    story_system: str
+    text_completion_system: str
     messages: list[WireTurn]  # [system?] + the wire turns
 
     # The budget.
@@ -214,18 +227,20 @@ class AssembledPrompt:
 
     # The injections, in the order given — what `/context` reports of them.
     injections: tuple[InjectionSent, ...] = ()
+    # The card rows, in the order sent — what `/context` reports of them.
+    cards: tuple[CardSent, ...] = ()
 
     @property
     def total_tokens(self) -> int:
         return self.system_tokens + self.transcript_tokens
 
     def as_text(self, template: TextTemplate, opener: str = "") -> str:
-        """The request as the TEXT wire sends it: `story_system` and the
-        story (`as_story_text`, `opener` appended — a retry's paragraph
-        break) rendered in `template`'s turn markers, the story as the
-        model's own turn in progress. The one rendering: the turn sends
-        it and `/context` previews it."""
-        return template.render(self.story_system, self.as_story_text() + opener)
+        """The request as the TEXT wire sends it: `text_completion_system`
+        and the story (`as_story_text`, `opener` appended — a retry's
+        paragraph break) rendered in `template`'s turn markers, the story
+        as the model's own turn in progress. The one rendering: the turn
+        sends it and `/context` previews it."""
+        return template.render(self.text_completion_system, self.as_story_text() + opener)
 
     def as_story_text(self) -> str:
         """The story as ONE TEXT, for the text wire: the turns' bodies in
@@ -260,7 +275,7 @@ def get_join_type(previous: Message | None, next: Message) -> JoinType:
         return JoinType.PARAGRAPH
     # A card's line and greeting stand alone in any mode: nobody wrote
     # them into the text.
-    if any(row.kind == "card" or row.provider == "card" for row in rows):
+    if any(row.kind == "card" or row.provider == CARD_PROVIDER for row in rows):
         return JoinType.PARAGRAPH
     if previous.body.rstrip(" \t").endswith("\n") or next.body.lstrip(" \t").startswith("\n"):
         return JoinType.PARAGRAPH
@@ -280,13 +295,13 @@ def estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 
-def context_in_force(max_context: int | None, setting: int) -> int:
-    """The context a prompt is cut to: the model's own (`max_context`,
-    or the default where nobody states one), or the `max_context`
-    setting where it is lower — 0 for no setting. The one rule, so the
-    turn, the preview and the warm-up cut alike."""
-    max_context = max_context or _DEFAULT_CONTEXT
-    return min(max_context, setting) if setting else max_context
+def context_in_force(context_window: int | None, context_limit: int) -> int:
+    """The context a prompt is cut to: the model's window (or the
+    default where nobody states one), or the context limit where it is
+    lower — 0 for no limit. The one rule, so the turn, the preview and
+    the warm-up cut alike."""
+    window = context_window or _DEFAULT_CONTEXT
+    return min(window, context_limit) if context_limit else window
 
 
 def assemble_story(
@@ -304,7 +319,7 @@ def assemble_story(
     """The next request — the one door of the turn, the preview and the
     warm-up. What the caller holds is handed in (a story may not exist
     yet, a warm-up works from a snapshot), the injections built; the
-    scenes, the card archives and the pictures are read from the store.
+    scenes, the card profiles and the pictures are read from the store.
     Raises `ContextOverflowError` (case 6) when even the case-5 floor
     cannot fit."""
     scenes: list[Scene] = []
@@ -323,7 +338,7 @@ def assemble_story(
         files=store.files,
         pictures_ride=pictures_ride,
     )
-    limit = max(0, shape.max_context - assembly.reserve)
+    limit = max(0, shape.context_in_force - assembly.reserve)
 
     for tail_target in assembly.rungs:  # case 5
         prompt = assembly.compose(tail_target, limit)
@@ -334,12 +349,12 @@ def assemble_story(
     # the context it had to fit.
     raise ContextOverflowError(
         f"The story does not fit the context limit: it needs {prompt.total_tokens:,} tokens even "
-        f"fully summarized and with the tail reduced, and the context is {shape.max_context:,} "
-        f"tokens — "
+        f"fully summarized and with the tail reduced, and the context is "
+        f"{shape.context_in_force:,} tokens — "
         f"raise it or run /extract to close more scenes.",
         tokens=prompt.total_tokens,
         limit=limit,
-        context=shape.max_context,
+        context_in_force=shape.context_in_force,
     )
 
 
@@ -417,7 +432,13 @@ class _Assembly:
         budget = max(0, limit - system_tokens)
         head, covered, tail = self._split(tail_target)
         verbatim = head + tail
-        pictures_of, pictures_held = self._pictures(verbatim)
+        # A card row in a covered scene rides the recap whole, at every
+        # level, and its picture with it: a card's portrait outlives the
+        # summary of the scene it came in.
+        cards = [m for scene in covered for m in scene.cards]
+        pictures_of, pictures_held = self._pictures(head + cards + tail)
+        # The recap's estimate holds a card's text; its picture is added here.
+        card_pictures_tokens = IMAGE_TOKENS * sum(len(pictures_of.get(m, ())) for m in cards)
         head_tokens = sum(self._wire_tokens(m, pictures_of.get(m, ())) for m in head)
         tail_tokens = sum(
             self._wire_tokens(m, pictures_of.get(m, ()), is_last=i == len(tail) - 1)
@@ -438,7 +459,10 @@ class _Assembly:
         # is about one summary long — this loop is what that picture means
         # once every size is actually measured. Level 0 is always yielded.
         for recap in self._degrade(covered):
-            if head_tokens + recap.tokens + tail_tokens + injected_tokens <= budget:
+            if (
+                head_tokens + recap.tokens + card_pictures_tokens + tail_tokens + injected_tokens
+                <= budget
+            ):
                 break  # the first fit wins; the deepest level rides otherwise
 
         wire: list[WireTurn] = []
@@ -448,19 +472,23 @@ class _Assembly:
         wall = len(head) + len(recap.rows) if recap.rows else 0
         rows = inject_into_tail(head + recap.rows + tail, self.injections, wall)
         wire.extend(self._wire_turns(rows, pictures_of))
-        # A picture is counted only where its row stays verbatim: a
-        # summarized row's is neither sent nor missed, the summary is what
-        # remains of the turn. Omitted is what would not load — no vision,
-        # a file gone.
-        pictures_attached = sum(len(m.attachments) for m in verbatim)
+        # A picture is counted only where its row is sent whole — verbatim,
+        # or a card's row in the recap: a summarized row's is neither sent
+        # nor missed, the summary is what remains of the turn. Omitted is
+        # what would not load — no vision, a file gone.
+        pictures_attached = sum(len(m.attachments) for m in head + cards + tail)
         pictures_sent = sum(len(pictures) for pictures in pictures_of.values())
         return AssembledPrompt(
             messages=wire,
             system=self.system,
-            story_system=self.story_framing.replace("{premise}", self.system).strip(),
+            text_completion_system=self.story_framing.replace("{premise}", self.system).strip(),
             limit=limit,
             system_tokens=system_tokens,
-            transcript_tokens=head_tokens + recap.tokens + tail_tokens + injected_tokens,
+            transcript_tokens=head_tokens
+            + recap.tokens
+            + card_pictures_tokens
+            + tail_tokens
+            + injected_tokens,
             head=len(head),
             middle=len(self.messages) - len(verbatim),
             tail=len(tail),
@@ -476,6 +504,11 @@ class _Assembly:
                 InjectionSent(i.owner, i.position, estimate_tokens(i.text))
                 for i in self.injections
                 if i.text
+            ),
+            cards=tuple(
+                CardSent(m.speaker or "", self._wire_tokens(m, pictures_of.get(m, ())))
+                for m in [*head, *cards, *tail]
+                if m.kind == "card"
             ),
         )
 
@@ -517,11 +550,10 @@ class _Assembly:
                 covered[bisect_left(ends, position[m.id])].cards.append(m)
         return messages[:head_messages], covered, messages[boundary + 1 :]
 
-    def _pictures(
-        self, verbatim: list[Message]
-    ) -> tuple[dict[Message, tuple[WirePicture, ...]], int]:
-        """Which pictures ride which verbatim row, read from the folder
-        here and only here: every row's — or, where the engine gathers
+    def _pictures(self, rows: list[Message]) -> tuple[dict[Message, tuple[WirePicture, ...]], int]:
+        """Which pictures ride which row sent whole — the verbatim rows and
+        the card rows the recap carries, in story order — read from the
+        folder here and only here: every row's — or, where the engine gathers
         every picture onto the latest prompt, the newest pictured row's
         alone, so a follow-up without a picture still reaches the model
         with the picture it is about, and no second row's stacks under
@@ -530,7 +562,7 @@ class _Assembly:
         A row is its own key: a stored row's id tells it from every other."""
         if self.pictures_ride is PicturesRide.NONE:
             return {}, 0
-        pictured = [m for m in verbatim if m.attachments]
+        pictured = [m for m in rows if m.attachments]
         held = 0
         if self.pictures_ride is PicturesRide.LATEST and pictured:
             held = sum(len(m.attachments) for m in pictured[:-1])
@@ -633,9 +665,13 @@ class _Assembly:
         Consecutive same-role rows rejoin into one turn, pictures and all —
         storage granularity is otaku's bookkeeping; the model sees one
         prompt per exchange. A tool turn goes as the reader's — the chat
-        wire has two sides, and a tool's answer is what the model is told
+        wire has two sides, and a tool's result is what the model is told
         — framed by `_wire_text`. The seam between two rows is
         `get_join_type`'s, written as `as_story_text` writes it (`join`)."""
+        # A row with nothing to send — a reply that was only a call of a tool
+        # now off — is no turn: an empty one teaches a model to answer with
+        # nothing.
+        rows = [m for m in rows if self._wire_text(m) or pictures_of.get(m)]
         out: list[WireTurn] = []
         volatile = False  # from the first injected row on: it moves with the end
         for position, message in enumerate(rows):
@@ -668,14 +704,16 @@ def _composed_cards(
     store: Store, story_id: int | None, messages: list[Message], card_framing: str
 ) -> list[Message]:
     """The transcript with each card row's wire text composed from its
-    character's archive (`cards.card_to_wire`), found through the row's
-    speaker link. A row with no reachable archive — the body predates the
+    character's profile (`cards.card_to_wire`), found through the row's
+    speaker link. A row with no reachable profile — the body predates the
     typed-row shape, or the link is gone — sends its body as it stands."""
     if story_id is None or all(m.kind != "card" for m in messages):
         return messages
-    archives = {c.id: c.card for c in store.characters.list(story_id) if c.card}
+    carded = {c.id: c for c in store.characters.list(story_id) if c.profile}
     out: list[Message] = []
     for m in messages:
-        toml = archives.get(m.speaker_id) if m.kind == "card" and m.speaker_id else None
-        out.append(replace(m, body=card_to_wire(toml, card_framing)) if toml else m)
+        who = carded.get(m.speaker_id) if m.kind == "card" and m.speaker_id else None
+        if who is not None and who.profile:
+            m = replace(m, body=card_to_wire(who.profile, card_framing, char=who.name))
+        out.append(m)
     return out

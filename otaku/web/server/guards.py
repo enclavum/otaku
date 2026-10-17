@@ -10,10 +10,10 @@ change to what a LAN can do to this server."""
 import http.cookies
 from typing import Any
 
-from otaku.backend import passwords
+from otaku.web.api import Conflict, Invalid, Refused
 from otaku.web.server import auth
 from otaku.web.server.assets import ASSETS, CUSTOM_FONTS
-from otaku.web.server.base import Server, Wire
+from otaku.web.server.base import RETRY_AFTER, Server, Wire
 from otaku.web.server.streams import WATCH
 
 # Signing in, as one address with three methods: GET says whether a
@@ -23,13 +23,18 @@ from otaku.web.server.streams import WATCH
 # third has nothing to protect.
 LOGIN = "/api/login"
 
+# The challenge a 401 carries, as HTTP asks every 401 to: a scheme of
+# otaku's own, which no browser implements — so none opens its credential
+# dialog over the page, which has a sign-in of its own.
+_CHALLENGE = 'Cookie realm="otaku"'
+
 # What is answered without a credential at all, and why each is: the
 # packaged page and the reader's own files carry nothing of anybody's, and
 # the page has to LOAD before it can ask for a password; the watch stream
 # names only files the page is made of, and a refusal would end an
 # EventSource for good rather than let it retry once the reader is in.
-# `/api/status` is deliberately not here — it says what the background
-# worker is doing, which is the session's.
+# `/api/app/status` is deliberately not here — it says what the background
+# worker is doing, which is the app's.
 OPEN = set(ASSETS) | {"/custom.css", WATCH, LOGIN}
 
 
@@ -59,13 +64,12 @@ class Guards(Wire):
         connections outlive that — its heartbeat would go on being
         answered 200 by handler threads of a server that is gone, and
         the page would never learn it (sharpest after `/web` hands the
-        session back to the chat, where the process lives on). Answered
+        app back to the chat, where the process lives on). Answered
         503 with the connection closed, so the page's next attempt has
         to reconnect — which is what fails, and what tells it."""
         if not self.server.stopping.is_set():
             return True
-        self.close_connection = True
-        self.send_error(503, "otaku is stopping")
+        self._fault(503, headers=(("Retry-After", RETRY_AFTER),))
         return False
 
     def _signed_in(self) -> None:
@@ -86,25 +90,33 @@ class Guards(Wire):
         """A password in, a cookie out — the only way to get one.
 
         Answered on THIS thread and in neither lane: it never touches the
-        session, and the derivation below would otherwise queue behind a
+        app, and the derivation below would otherwise queue behind a
         reply and stop the story for as long as it takes.
 
-        The typed password is checked against the stored hash, never
-        against a password: there is none in the file to compare with. That
-        check is slow and memory-hard by design, and its cost is the whole
-        of the rate limiting — a couple of dozen guesses a second, and no
-        state to keep to do it.
+        The typed password is checked by the backend (`hooks.check_password`)
+        against the stored hash, never against a password: there is none in
+        the file to compare with. That check is slow and memory-hard by
+        design, and its cost is the whole of the rate limiting — a couple
+        of dozen guesses a second, and no state to keep to do it.
 
         A wrong password is an authentication failure and answers 401, with
-        the sentence in the body. Signing in where no password is set is
-        not: nothing is wrong with the caller, so that stays a refusal."""
+        the sentence as its `detail`. Signing in where no password is set
+        is not: nothing is wrong with the caller, so that is a refusal,
+        409."""
         password_hash = self.server.password_hash
         if password_hash is None:
-            self._json({"notice": "This otaku asks for no password.", "refused": True})
+            # The backend's own refusal (`api.settings.check_password`),
+            # copied: a server started with no password has no hash to sign
+            # a token with, whatever the file says since.
+            self._outcome(Conflict("This otaku asks for no password."))
             return
-        given = str(body.get("password", ""))
-        if not passwords.check(given, password_hash):
-            self._json({"notice": "Check the password and try again.", "refused": True}, status=401)
+        try:
+            self.server.hooks.check_password(str(body.get("password", "")))
+        except Invalid as e:
+            self._problem(401, str(e), headers=(("WWW-Authenticate", _CHALLENGE),))
+            return
+        except Refused as e:
+            self._outcome(e)
             return
         # The cookie lasts as long as the token in it, so the browser never
         # holds one the server would refuse.
@@ -147,7 +159,7 @@ class Guards(Wire):
         host = self.headers.get("Host", "")
         if not answers_to or not host or _named(host) in answers_to:
             return True
-        self.send_error(421, "Misdirected Request")
+        self._fault(421)
         return False
 
     def _authorized(self, path: str) -> bool:
@@ -158,15 +170,16 @@ class Guards(Wire):
         answered anyway, and the reader's own typefaces go with their
         stylesheet — both are files they put there themselves.
 
-        401 with NO `WWW-Authenticate`: send one and the browser opens
-        its own credential dialog over the page, which has a login of its
-        own and a name for what it is asking for."""
+        401 with a challenge in a scheme no browser implements
+        (`_CHALLENGE`): a Basic one would open the browser's own credential
+        dialog over the page, which has a login of its own and a name for
+        what it is asking for."""
         password_hash = self.server.password_hash
         if password_hash is None or path in OPEN or path.startswith(CUSTOM_FONTS):
             return True
         if auth.verify_token(self._cookie_token(), password_hash):
             return True
-        self.send_error(401, "Unauthorized")
+        self._fault(401, headers=(("WWW-Authenticate", _CHALLENGE),))
         return False
 
     def _cookie_token(self) -> str:
@@ -219,7 +232,7 @@ class Guards(Wire):
         addressed = self.headers.get("Host", "")
         if origin in (f"http://{addressed}", f"https://{addressed}"):
             return True
-        self.send_error(403, "Cross-origin request")
+        self._fault(403)
         return False
 
 

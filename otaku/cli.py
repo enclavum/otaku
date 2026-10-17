@@ -1,7 +1,7 @@
 """The process entry: argv routing and nothing else. Bare `otaku` opens
-the terminal over an open session and `otaku web` opens the page over
-one — each frontend's own `run` is its whole life, and this file only
-gets it a session and answers for what escapes. `otaku update`
+the terminal over the app and `otaku web` opens the page over
+it — each frontend's own `run` is its whole life, and this file only
+opens the app for it and answers for what escapes. `otaku update`
 self-updates (`update.py` is its machinery); `otaku logs …` pages the
 day-rotated logs (the sealed request bodies unlocked through
 `backend.launch`). The state-dir root is resolved HERE (the env var is
@@ -20,10 +20,10 @@ import click
 from otaku import __version__, logging
 from otaku import update as updater
 from otaku import web as web_frontend
-from otaku.backend import ConfigError, DatabaseError, EncryptionError
 from otaku.backend import launch as backend_launch
+from otaku.backend.launch import ConfigError, DatabaseError, EncryptionError
 from otaku.formatting import pretty_path
-from otaku.terminal import chat
+from otaku.terminal import run as terminal_frontend
 
 _ENV_VAR = "OTAKU_CONFIG_DIR"
 
@@ -57,7 +57,7 @@ def main(ctx: click.Context) -> None:
         return
     root = resolve_root()
     try:
-        session = backend_launch.open_session(root, ask_secret=getpass.getpass)
+        app = backend_launch.open_app(root, ask_secret=getpass.getpass)
     except ConfigError as e:
         click.echo(f"Config error: {e}", err=True)
         ctx.exit(2)
@@ -65,12 +65,12 @@ def main(ctx: click.Context) -> None:
         click.echo(str(e), err=True)
         ctx.exit(1)
     try:
-        chat.run(session)
+        terminal_frontend.run(app)
     except Exception as e:
         _crashed(root, e)
         ctx.exit(1)
     finally:
-        session.close()
+        app.close()
 
 
 @main.command(short_help="Serve the web interface")
@@ -87,7 +87,7 @@ def web(host: str | None, port: int | None) -> None:
     ctx = click.get_current_context()
     root = resolve_root()
     try:
-        session = backend_launch.open_session(root, ask_secret=getpass.getpass)
+        app = backend_launch.open_app(root, ask_secret=getpass.getpass)
     except ConfigError as e:
         click.echo(f"Config error: {e}", err=True)
         ctx.exit(2)
@@ -96,7 +96,7 @@ def web(host: str | None, port: int | None) -> None:
         ctx.exit(1)
     restart = False
     try:
-        restart = web_frontend.run(session, host=host, port=port)
+        restart = web_frontend.run(app, host=host, port=port)
     except web_frontend.ServeError as e:
         # An address that cannot be listened on: another otaku already
         # has it, the host does not name this machine, the port is the
@@ -107,11 +107,11 @@ def web(host: str | None, port: int | None) -> None:
         _crashed(root, e)
         ctx.exit(1)
     finally:
-        session.close()
+        app.close()
     if restart:
         # Ctrl+R: served again on fresh sources. The process is REPLACED
         # rather than a child spawned — the PID, the terminal and the
-        # shell's job stay — over the same command line, and the session
+        # shell's job stay — over the same command line, and the app
         # closed above leaves the database clean for the next.
         os.execv(sys.executable, [sys.executable, "-m", "otaku", *sys.argv[1:]])
 

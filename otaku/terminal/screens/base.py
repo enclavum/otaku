@@ -368,7 +368,7 @@ class ListScreen:
     def _preview_gap(self) -> Window:
         return Window(width=_PREVIEW_OUTER_GAP, char=" ", always_hide_cursor=True)
 
-    def _finish_app(
+    def _finish_application(
         self,
         root: AnyContainer,
         bindings: KeyBindingsBase,

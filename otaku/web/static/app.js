@@ -1,4 +1,4 @@
-/* The page over an open session: what it asks for at boot, and every
+/* The page over the story it plays: what it asks for at boot, and every
    DOM listener it ever registers — both in one place, so "what is wired
    when this loads?" is answered by reading one function.
 
@@ -14,48 +14,52 @@
      shut the whole popup. So `cancel` is refused and Esc is routed here.
    - Bodies arrive verbatim. Nothing on this side rewrites the text. */
 
-import * as api from "./js/api.js";
-import { closeAll } from "./js/browser.js";
-import { editTurn, keepsScreen, openTab, run as runCommand } from "./js/commands.js";
-import { showSignOut, signIn, signOut } from "./js/login.js";
+import { api, login, whenUnauthorized } from "./js/api/index.js";
+import { closeAll, topmost } from "./js/kit/browser.js";
+import { editTurn, keepsScreen, openCodex, openTab, run as runCommand } from "./js/commands.js";
+import { showSignOut, signIn, signOut } from "./js/screens/login.js";
 import { draft, focusComposer, primeHistory, submit, wire as wireComposer } from "./js/composer.js";
-import { $, $$, watchTextareas } from "./js/dom.js";
-import { wireLayout } from "./js/layout.js";
+import { $, $$, watchTextareas } from "./js/kit/dom.js";
+import * as held from "./js/play/held.js";
 import {
   disconnected,
   drawPlayed,
+  facts,
   landed,
   showContextUse,
   showFacts,
+  watchForChanges,
   watchServer,
   wireFullscreen,
+  wireLayout,
   wireTheme,
-} from "./js/shell.js";
-import { load as loadTable } from "./js/table.js";
-import { whenEdited } from "./js/transcript.js";
-import { watchForChanges } from "./js/watch.js";
+} from "./js/play/shell.js";
+import { load as loadLanguage } from "./js/play/language.js";
+import { whenEdited } from "./js/play/transcript.js";
 
 async function boot() {
   try {
     /* Before anything is drawn: a password asked for and this browser
        not through it means the dialog comes first, rather than four
        reads refused in the background. A cookie that runs out LATER is
-       caught at the request it refuses (`api.whenUnauthorized`). */
-    const login = await api.loginState();
-    showSignOut(login.required);
+       caught at the request it refuses (`whenUnauthorized`). */
+    const signing = await login.get();
+    showSignOut(signing.required);
     // The dialog opens as `signIn` is called, so it is already in front
     // when the shell is shown behind it.
-    const signingIn = login.required && !login.signed_in ? signIn() : null;
+    const signingIn = signing.required && !signing.signed_in ? signIn() : null;
     shown();
     if (signingIn) await signingIn;
-    const [facts, language, history] = await Promise.all([
-      api.facts(),
-      api.syntax(),
-      api.history(),
+    // the story a launch resumes — this page plays it until it lands in another
+    await held.resume();
+    const [read, language, history] = await Promise.all([
+      facts(),
+      api.language.get(),
+      api.history.list(),
     ]);
-    loadTable(language);
-    showFacts(facts);
-    await Promise.all([drawPlayed(facts.story_id), showContextUse()]);
+    loadLanguage(language);
+    showFacts(read);
+    await Promise.all([drawPlayed(read.story_id), showContextUse()]);
     primeHistory(history);
     disconnected(false);
   } catch {
@@ -70,7 +74,7 @@ function shown() {
 }
 
 function start() {
-  api.whenUnauthorized(signIn);
+  whenUnauthorized(signIn);
   // the transcript draws a turn as an editor and hands the write here
   whenEdited(editTurn);
   wireComposer();
@@ -92,7 +96,7 @@ function start() {
   watchForChanges();
   /* The heartbeat and the connected mark, both directions — the page
      finds out that otaku stopped, and that it is back, in which case
-     `boot` runs again: a restarted otaku may be open on another story. */
+     `boot` runs again: a restarted otaku may resume another story. */
   watchServer(boot);
 
   // Every command button, wherever it is: the contents, a panel's
@@ -119,6 +123,12 @@ function start() {
       signOut();
       return;
     }
+    // The contents row of a screen with no command yet: All characters.
+    if (event.target.closest("[data-characters]")) {
+      openCodex();
+      foldRail();
+      return;
+    }
     // The contents rows that are no command: a tab of the open story's
     // dossier — its messages, its tools.
     const goto = event.target.closest("button[data-goto]");
@@ -131,7 +141,7 @@ function start() {
       toggleRail();
       return;
     }
-    // A layout taken (`layout.wireLayout` writes it): the story is read
+    // A layout taken (`shell.wireLayout` writes it): the story is read
     // another way, and the next line is still typed — the caret comes
     // back to the box.
     if (event.target.closest("[data-transcript-mode]")) {
@@ -174,24 +184,38 @@ function start() {
     dialog.addEventListener("close", () => {
       if (!$("dialog[open]")) focusComposer();
     });
-    // The scrim closes it, as a scrim does. A click on the dialog's own
-    // padding reports the dialog as its target too, so the test is where
-    // the pointer WAS: outside the panel's box, or not a pointer at all
-    // (a keyboard-activated button reports the button, never this).
+    /* The scrim closes it, as a scrim does — pressed AND let go there: a
+       selection dragged past the edge is let go on the dialog too. Never
+       while a field in it is being edited, which would lose the words. A
+       click on the dialog's own padding reports the dialog as its target
+       too, so the test is where the pointer WAS: outside the panel's box
+       (a keyboard-activated button reports the button, never this). */
+    let pressedOutside = false;
+    dialog.addEventListener("pointerdown", (event) => {
+      pressedOutside = onScrim(dialog, event);
+    });
     dialog.addEventListener("click", (event) => {
+      const outside = pressedOutside && onScrim(dialog, event);
+      pressedOutside = false;
       // A fixed dialog has nothing behind it to fall back to.
-      if (event.target !== dialog || dialog.hasAttribute("data-fixed")) return;
-      const box = dialog.getBoundingClientRect();
-      const outside =
-        event.clientX < box.left ||
-        event.clientX > box.right ||
-        event.clientY < box.top ||
-        event.clientY > box.bottom;
-      if (outside) dialog.close();
+      if (!outside || dialog.hasAttribute("data-fixed")) return;
+      if (!$(".otk-edit[data-editing]", dialog)) dialog.close();
     });
   }
 
   document.addEventListener("keydown", onKey);
+  /* A file let go where no target takes it — the composer included —
+     would have the browser open it in this tab, the draft, the staged
+     pictures and every open editor going with the page. A target that
+     takes files has claimed the drag before it reaches here. */
+  document.addEventListener("dragover", (event) => {
+    if (event.defaultPrevented || !event.dataTransfer?.types.includes("Files")) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "none";
+  });
+  document.addEventListener("drop", (event) => {
+    if (!event.defaultPrevented && event.dataTransfer?.types.includes("Files")) event.preventDefault();
+  });
 }
 
 /* The contents fold away on a narrow window and the spine carries the
@@ -236,10 +260,9 @@ function onKey(event) {
     return;
   }
   if (event.key === "Escape") {
-    // The one on TOP, which is the one holding focus — `dialog[open]`
-    // in markup order would close whatever happens to be written first.
-    const open = $$("dialog[open]");
-    const dialog = open.find((d) => d.contains(document.activeElement)) ?? open.at(-1);
+    // The one on TOP — `dialog[open]` in markup order would close
+    // whatever happens to be written first.
+    const dialog = topmost();
     if (!dialog) {
       foldRail();
       return;
@@ -253,6 +276,19 @@ function onKey(event) {
     dialog.close();
     return;
   }
+}
+
+/** Whether a pointer event on a dialog fell on its scrim: the dialog
+    itself the target, the point outside its box. */
+function onScrim(dialog, event) {
+  if (event.target !== dialog) return false;
+  const box = dialog.getBoundingClientRect();
+  return (
+    event.clientX < box.left ||
+    event.clientX > box.right ||
+    event.clientY < box.top ||
+    event.clientY > box.bottom
+  );
 }
 
 start();

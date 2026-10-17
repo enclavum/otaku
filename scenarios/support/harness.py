@@ -1,15 +1,19 @@
 """The application, launched in-process over a throwaway state dir.
 
-`launch` builds the real session — `backend.launch.open_session` owns
-the config load, key ceremony, and assembly — pointed at the scripted
-server, and scenarios then speak the user's language: `app.play("…")`
-submits a line through the terminal's own `submit`, and the store and
-the server's recorded requests are open for assertions. `app.store` is
-a second read connection over the same database (WAL makes the
-concurrent read safe), so no scenario reaches into the session's
-package-private handles. The full-screen surfaces are module functions
-now — a scenario that needs one patches `screens.stories.pick` (and
-friends) at its module seam, per test.
+`launch` builds the real app — `backend.launch.open_app` owns the config
+load, key ceremony, and assembly — pointed at the scripted server, and
+scenarios then speak the user's language: `app.play("…")` submits a line
+through the terminal's own `submit`, over the terminal's own `Chat`,
+which holds the story it plays in as the terminal does. `app.api` is the
+interface a frontend holds (`backend.api.Api`) and `app.backend` the App
+it is built over, for its life alone; `app.story_id` and `app.messages`
+read the story the chat is in, `app.ensure_story()` makes it where a
+scenario needs it before its first line. `app.store` is a second read
+connection over the same database (WAL makes the concurrent read safe),
+so no scenario reaches into the app's package-private handles. The
+full-screen surfaces are module functions — a scenario that needs one
+patches `screens.stories.pick` (and friends) at its module seam, per
+test.
 """
 
 import dataclasses
@@ -21,16 +25,20 @@ from pathlib import Path
 
 from otaku import encryption
 from otaku.backend import launch as backend_launch
-from otaku.backend.api import providers as api_providers
-from otaku.backend.paths import Paths
-from otaku.backend.session import Session
+from otaku.backend.api import Api, Layout, ModelRef
+from otaku.backend.api import App as BackendApp
+from otaku.backend.api.app.models import ModelSettings
+from otaku.backend.api.story.messages import Message
+from otaku.backend.api.story.settings import DEFAULT_LAYOUT
+from otaku.backend.domain.app._paths import Paths
 from otaku.encryption import seal
 from otaku.settings import config as config_file
 from otaku.settings import providers as providers_file
 from otaku.settings import write_atomic
 from otaku.settings.providers import ProviderConfig
 from otaku.store import Store
-from otaku.terminal.chat import loop
+from otaku.terminal import run
+from otaku.terminal.chat import landing
 from otaku.terminal.chat.chat import Chat
 from scenarios.support.server import ModelServer
 
@@ -40,42 +48,93 @@ SPEC = f"{PROVIDER}/{MODEL}"
 
 
 class App:
-    """The launched session plus the scenario's view of it: the scripted
-    `server` it talks to, the terminal-side `chat`, a read `store`, and
-    `play`."""
+    """The launched app plus the scenario's view of it: the interface
+    (`api`) and the App it is built over (`backend`), the scripted
+    `server` it talks to, the terminal-side `chat` holding the story, a
+    read `store`, and `play`."""
 
     def __init__(self, root: Path, server: ModelServer, *, spec: str | None = SPEC) -> None:
         set_config_provider(root, server)
         self.server = server
         self.paths = Paths.resolve(root)
-        self.session: Session = backend_launch.open_session(root)
+        self.backend: BackendApp = backend_launch.open_app(root)
+        self.api = Api(self.backend)
         # What the launch-time picker would have settled — the same
         # switch the picker executes, and only when nothing is
         # remembered: a remembered model resumes over the pick, exactly
         # as in the real launcher.
-        if spec and not self.session.model:
+        if spec and self.api.app.get().model is None:
             provider, _, model = spec.partition("/")
-            api_providers.set_model(self.session, provider, model)
-        self.chat = Chat(self.session)
-        # What `loop.run` attaches once it owns the screen: a notice
-        # raised after the launch is SAID, not collected.
-        self.session.set_on_notice(self.chat.say)
-        self.session.start_worker()
+            self.api.app.update(model=ModelRef(provider, model))
+        self.chat = Chat(self.backend)
+        # The story the last run landed in, resumed — as `run.run` does.
+        if (resumed := self.api.settings.get().last_story) is not None:
+            self.chat.land(resumed)
+        self.backend.start_worker()
         self.store = read_store(root)
 
+    @property
+    def story_id(self) -> int | None:
+        """The story the chat is in; None before its first line."""
+        return self.chat.story_id
+
+    def ensure_story(self) -> int:
+        """The story the chat plays, made now where there is none yet —
+        as a first line or a title makes it in the terminal."""
+        return self.chat.ensure_story()
+
+    def head(self, story_id: int | None = None) -> int | None:
+        """Where a story's head stands now — the chat's own by default,
+        made where there is none — as a write that moves it names it
+        (`expected_head`)."""
+        target = self.ensure_story() if story_id is None else story_id
+        return self.api.stories.get(target).head
+
+    def model_settings(self) -> ModelSettings:
+        """The model in use's own settings, as the interface reads them."""
+        model = self.api.app.get().model
+        assert model is not None, "no model in use"
+        return self.api.providers.models.settings.get(model.provider, model.name)
+
+    @property
+    def messages(self) -> list[Message]:
+        """The chat's story as the interface reads it, root to head; []
+        while there is none."""
+        if self.chat.story_id is None:
+            return []
+        return self.api.stories.messages.list(self.chat.story_id)
+
+    @property
+    def premise(self) -> str:
+        """The premise of the chat's story as the interface reads it; none
+        while there is no story."""
+        if self.chat.story_id is None:
+            return ""
+        return self.api.stories.get(self.chat.story_id).premise
+
+    @property
+    def layout(self) -> Layout:
+        """The layout the chat's story is read in, as the interface reads
+        it — or, before its first line, the one set for it."""
+        if self.chat.story_id is None:
+            return self.chat.draft_layout or DEFAULT_LAYOUT
+        return self.api.stories.get(self.chat.story_id).layout
+
     def play(self, line: str) -> None:
-        """Submit one line exactly the way the prompt does."""
-        loop.submit(self.chat, line)
+        """Submit one line exactly the way the prompt does — the story
+        read again first, as before every prompt."""
+        landing.catch_up(self.chat)
+        run.submit(self.chat, line)
 
     def close(self) -> None:
         self.store.close()
-        self.session.close()
+        self.backend.close()
 
 
 def read_store(root: Path) -> Store:
     """A second connection over the same database, for assertions —
     unlocked the way the launch unlocks (the scripted `command` KEK
-    provider works headless), so no scenario reaches into the session's
+    provider works headless), so no scenario reaches into the app's
     package-private store. WAL makes the concurrent read safe.
 
     A connection answers only the thread that opened it, so a scenario
@@ -94,8 +153,8 @@ def read_store(root: Path) -> Store:
 
 def launch(root: Path, server: ModelServer, *, spec: str | None = SPEC) -> App:
     """The application over `root`, talking to `server`. `spec` stands in
-    for what the model picker would have returned; None opens the
-    session model-less."""
+    for what the model picker would have returned; None opens the app
+    model-less."""
     return App(root, server, spec=spec)
 
 

@@ -39,7 +39,7 @@ class TerminalSettings:
 class WebSettings:
     """Where the web frontend listens and what it asks of whoever
     reaches it — the other slice of config.toml that is a frontend's
-    business, and the only one needed before a session exists. Loopback,
+    business, and the only one needed before an app exists. Loopback,
     no TLS and no password by default: this is one person's application,
     and reaching it from another machine is a decision to make on
     purpose — the one decision that makes the other two worth taking."""
@@ -47,7 +47,7 @@ class WebSettings:
     host: str = "localhost"
     port: int = 9600
     https: bool = False
-    # The hash of `[web] password` that `backend.passwords` made, never
+    # The hash of `[web] password` that `backend.domain.app._passwords` made, never
     # the password itself: the launch hashes a typed one before anything
     # reads it. "" is no password at all.
     password: str = ""
@@ -81,7 +81,7 @@ class Config:
     # [context]
     head_messages: int = 20
     min_tail_messages: int = 150
-    max_context: int = 0
+    context_limit: int = 0  # the file's `max_context`
     # [lore_extraction]
     lore_enabled: bool = True
     idle_seconds: float = 300.0
@@ -119,7 +119,7 @@ class Config:
             "[context]",
             row(f"head_messages = {self.head_messages}", "opening messages kept verbatim in the prompt"),
             row(f"min_tail_messages = {self.min_tail_messages}", "at least this many recent messages kept verbatim"),
-            row(f"max_context = {self.max_context}", "the prompt may use at most this many tokens; 0 = the model's own max context"),
+            row(f"max_context = {self.context_limit}", "the prompt may use at most this many tokens; 0 = the model's own max context"),
             "",
             "[lore_extraction]",
             row(f"enabled = {toml_scalar(self.lore_enabled)}", "extract lore on idle (/extract always works)"),
@@ -218,7 +218,7 @@ def load(path: Path) -> Config:
             web_password=str(web.get("password", "")),
             head_messages=max(0, _int(context, "head_messages", 20)),
             min_tail_messages=max(1, _int(context, "min_tail_messages", 150)),
-            max_context=max(0, _int(context, "max_context", 0)),
+            context_limit=max(0, _int(context, "max_context", 0)),
             lore_enabled=bool(lore.get("enabled", True)),
             idle_seconds=max(0.0, _float(lore, "idle_seconds", 300.0)),
             scene_min_chars=max(1, _int(lore, "scene_min_chars", 6000)),

@@ -27,9 +27,8 @@ from typing import Any
 
 import pyte
 
-from otaku.backend import Layout
 from otaku.backend import launch as backend_launch
-from otaku.backend.api import play, providers, settings, stories
+from otaku.backend.api import Api, Layout, ModelRef
 from scenarios.support.harness import set_config_provider
 from scenarios.support.server import ModelServer
 from scenarios.support.terminal import Terminal
@@ -201,27 +200,37 @@ def story(
     *,
     verbose: bool = False,
 ) -> None:
-    """A story seeded through the backend: the chat model chosen, every
-    tool on and the notes shown, `lines` played in `layout`."""
+    """A story seeded through the backend: the chat model chosen, `lines`
+    played in `layout` — the first with every tool off, the rest with
+    every tool on and the notes shown — and the story remembered, so the
+    launch the scenario then drives resumes it."""
     set_config_provider(root, server, name="llamacpp")
-    session = backend_launch.open_session(root)
+    app = backend_launch.open_app(root)
     try:
-        providers.set_model(session, "llamacpp", TM.CHAT_MODEL)
-        stories.update_setting(session, "layout", layout=layout)
+        api = Api(app)
+        api.app.update(model=ModelRef("llamacpp", TM.CHAT_MODEL))
+        story_id = api.stories.create().value.id
+        api.stories.settings.update(story_id, "layout", layout=layout)
+        api.settings.update(last_story=story_id)
         for line in lines[:1]:
-            for _ in play.submit(session, line):
+            for _ in api.stories.messages.create(
+                story_id, line=line, expected_head=api.stories.get(story_id).head
+            ):
                 pass
-        # the story exists once its first line is played: its own settings now
         for name in ("allow_questions", "allow_system_info", "allow_web_search"):
-            stories.update_setting(session, name, enabled=True)
-        stories.update_setting(session, "allow_assistant_notes", enabled=True, display_notes=True)
+            api.stories.settings.update(story_id, name, enabled=True)
+        api.stories.settings.update(
+            story_id, "allow_assistant_notes", enabled=True, display_notes=True
+        )
         for line in lines[1:]:
-            for _ in play.submit(session, line):
+            for _ in api.stories.messages.create(
+                story_id, line=line, expected_head=api.stories.get(story_id).head
+            ):
                 pass
         if verbose:
-            settings.set_verbose(session, "on")
+            api.settings.update(verbose=True)
     finally:
-        session.close()
+        app.close()
 
 
 def fresh_root() -> Path:

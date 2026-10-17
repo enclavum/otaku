@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-from otaku.backend.api import providers as api_providers
 from otaku.settings.providers import ProviderConfig
 from scenarios.support.live import first_model
 from scenarios.support.live import live_app as build_app
@@ -20,15 +19,15 @@ pytestmark = pytest.mark.live
 class TestKoboldCpp:
     def test_a_turn_streams_and_persists(self, live_app) -> None:  # type: ignore[no-untyped-def]
         live_app.play("Reply with one word: ready?")
-        chain = live_app.store.stories.get_messages(live_app.session.story_id)
+        chain = live_app.store.stories.get_messages(live_app.story_id)
         assert chain[1].role == "assistant"
         assert chain[1].body.strip()
 
     def test_the_context_window_reads_from_the_extra_api(self, live_app) -> None:  # type: ignore[no-untyped-def]
-        rows = api_providers.get_providers(live_app.session).rows
+        rows = live_app.api.providers.list().providers
         provider = next(r for r in rows if r.id == "koboldcpp")
-        row = next(m for m in provider.models if m.name == live_app.session.model)
-        assert row.max_context_loaded  # the /api/extra window rode the listing
+        row = next(m for m in provider.models if m.name == live_app.api.app.get().model.name)
+        assert row.context_loaded  # the /api/extra window rode the listing
 
 
 @pytest.fixture

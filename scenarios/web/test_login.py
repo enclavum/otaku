@@ -20,7 +20,7 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from otaku.backend.paths import Paths
+from otaku.backend.domain.app._paths import Paths
 from otaku.web.server import auth
 from scenarios.support.server import ModelServer
 from scenarios.web.conftest import Page, serving
@@ -31,11 +31,12 @@ PASSWORD = "hunter2"
 class TestNoPassword:
     def test_an_otaku_with_no_password_asks_for_none(self, page: Page) -> None:
         assert _ask(page, "GET", "/api/login")[2] == {"required": False, "signed_in": False}
-        assert _ask(page, "GET", "/api/session")[0] == 200
+        assert _ask(page, "GET", "/api/app")[0] == 200
 
     def test_signing_in_to_it_is_a_refusal_and_sets_nothing(self, page: Page) -> None:
+        # a state that rules the request out: the sentence, and no cookie
         code, headers, answer = _ask(page, "POST", "/api/login", body={"password": "anything"})
-        assert (code, answer["refused"]) == (200, True)
+        assert code == 409 and answer["detail"]
         assert "set-cookie" not in headers
 
 
@@ -43,21 +44,26 @@ class TestSigningIn:
     def test_the_page_is_answered_and_the_api_is_not(self, guarded: Page) -> None:
         for asset in ("/", "/app.css", "/app.js", "/custom.css"):
             assert _ask(guarded, "GET", asset)[0] == 200, asset
-        for path in ("/api/session", "/api/status", "/api/stories"):
+        picture = "/api/pictures/pic-0001-20260101-deadbeef.jpg"
+        thumbnail = f"{picture}/thumbnail"
+        for path in ("/api/app", "/api/app/status", "/api/stories", picture, thumbnail):
             code, headers, _ = _ask(guarded, "GET", path)
             assert code == 401, path
-            # With one, the browser would open its own credential dialog
-            # over the page's.
-            assert "www-authenticate" not in headers, path
+            # The challenge HTTP asks of every 401, in a scheme of otaku's
+            # own: with one a browser implements, it would open its own
+            # credential dialog over the page's.
+            assert headers["www-authenticate"].startswith("Cookie "), path
 
     def test_the_page_is_told_a_password_is_asked_for(self, guarded: Page) -> None:
         assert _ask(guarded, "GET", "/api/login")[2] == {"required": True, "signed_in": False}
 
     def test_a_wrong_password_is_unauthorized_and_sets_no_cookie(self, guarded: Page) -> None:
         code, headers, answer = _ask(guarded, "POST", "/api/login", body={"password": "wrong"})
-        assert (code, answer["refused"]) == (401, True)
+        # unauthorized, its sentence the page shows — no cookie, and no
+        # challenge a browser would answer with a dialog of its own
+        assert code == 401 and answer["detail"]
         assert "set-cookie" not in headers
-        assert "www-authenticate" not in headers
+        assert headers["www-authenticate"].startswith("Cookie ")
 
     def test_the_right_password_sets_a_cookie_the_page_cannot_read(self, guarded: Page) -> None:
         code, headers, answer = _ask(guarded, "POST", "/api/login", body={"password": PASSWORD})
@@ -84,7 +90,7 @@ class TestSigningIn:
 
     def test_the_cookie_opens_the_api(self, guarded: Page) -> None:
         cookie = _signed_in(guarded)
-        assert _ask(guarded, "GET", "/api/session", cookie=cookie)[0] == 200
+        assert _ask(guarded, "GET", "/api/app", cookie=cookie)[0] == 200
         assert _ask(guarded, "GET", "/api/login", cookie=cookie)[2] == {
             "required": True,
             "signed_in": True,
@@ -96,7 +102,7 @@ class TestSigningIn:
         name = f"otaku-{urlsplit(guarded.url).port}"
         for value in ('"unterminated', "été.é.é", "a.b.c", ";;;="):
             cookie = f"{name}={value}"
-            assert _ask(guarded, "GET", "/api/session", cookie=cookie)[0] == 401, cookie
+            assert _ask(guarded, "GET", "/api/app", cookie=cookie)[0] == 401, cookie
 
     def test_signing_out_clears_the_same_cookie(self, guarded: Page) -> None:
         cookie = _signed_in(guarded)
@@ -162,9 +168,9 @@ class TestThePasswordOnDisk:
         with serving(server, tmp_path, password="another") as after:
             # The same token, under the cookie name this server reads.
             stale = f"otaku-{urlsplit(after.url).port}={token}"
-            assert _ask(after, "GET", "/api/session", cookie=stale)[0] == 401
+            assert _ask(after, "GET", "/api/app", cookie=stale)[0] == 401
             code, _, refused = _ask(after, "POST", "/api/login", body={"password": PASSWORD})
-            assert (code, refused["refused"]) == (401, True)
+            assert code == 401 and refused["detail"]
             signed_in = _ask(after, "POST", "/api/login", body={"password": "another"})
             assert "set-cookie" in signed_in[1]
 
@@ -196,8 +202,8 @@ def _ask(
 ) -> tuple[int, dict[str, str], Any]:
     """One request with the headers a browser would send, and the whole
     answer back — status, headers lower-cased, and the body parsed when
-    it is JSON. urllib keeps no cookies and hides Set-Cookie well, so
-    this goes underneath it."""
+    it is JSON, a problem's included. urllib keeps no cookies and hides
+    Set-Cookie well, so this goes underneath it."""
     where = urlsplit(page.url)
     assert where.hostname is not None and where.port is not None
     connection = (
@@ -217,8 +223,11 @@ def _ask(
         answered = {name.lower(): value for name, value in reply.getheaders()}
     finally:
         connection.close()
+    kind = answered.get("content-type", "")
     parsed = (
-        json.loads(raw) if answered.get("content-type", "").startswith("application/json") else raw
+        json.loads(raw)
+        if kind.startswith(("application/json", "application/problem+json"))
+        else raw
     )
     return reply.status, answered, parsed
 

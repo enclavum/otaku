@@ -90,7 +90,7 @@ def off_level(caps: ModelCapabilities | None) -> str | None:
     only a budget reaches it; None where nothing does, or the provider
     could not say — a knob sent blind is a 400 on Ollama and on a
     hosted model without reasoning — and then nothing is sent. The
-    same precedence as the menu's (`api.settings.think_choices`), so
+    same precedence as the menu's (`api.providers.models.settings.get`), so
     the word is always one the model takes."""
     if caps is None:
         return None

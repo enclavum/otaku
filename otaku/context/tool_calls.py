@@ -10,7 +10,7 @@ A call is a fenced code block whose info string names the tool:
     ```
 
 The namespace is the whole test of what a call is. No list of tools is
-consulted (`backend.tools` owns those): a body keeps its fences for
+consulted (`backend.domain.story._tools` owns those): a body keeps its fences for
 good while the tools come and go between builds, so "not story" has to
 be a property of the TEXT — a call stays one in a build that never
 heard of its tool. Three rules, and one piece of state, the open call:

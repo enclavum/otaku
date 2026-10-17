@@ -12,7 +12,6 @@ from pathlib import Path
 
 import pytest
 
-from otaku.backend.api import providers as api_providers
 from otaku.providers import ModelState
 from otaku.providers.clients.omlx import OmlxClient
 from scenarios.support.live import live_app as build_app
@@ -27,12 +26,12 @@ pytestmark = pytest.mark.live
 class TestOmlx:
     def test_a_turn_streams_and_persists(self, live_app) -> None:  # type: ignore[no-untyped-def]
         live_app.play("Reply with one word: ready?")
-        chain = live_app.store.stories.get_messages(live_app.session.story_id)
+        chain = live_app.store.stories.get_messages(live_app.story_id)
         assert chain[1].role == "assistant"
         assert chain[1].body.strip()
 
     def test_the_listing_marks_the_loaded_model(self, live_app) -> None:  # type: ignore[no-untyped-def]
-        providers = api_providers.get_providers(live_app.session).rows
+        providers = live_app.api.providers.list().providers
         provider = next(r for r in providers if r.id == "omlx")
         assert provider.models
         assert any(row.state is ModelState.LOADED for row in provider.models)

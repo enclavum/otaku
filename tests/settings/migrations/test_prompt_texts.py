@@ -7,6 +7,7 @@ import tomllib
 
 from otaku.formatting import toml_string
 from otaku.settings.migrations.prompt_texts import (
+    CARD_FRAMING_0_7_0,
     EXTRACT_0_2_2,
     EXTRACT_0_3_0,
     HISTORY_0_3_0,
@@ -16,6 +17,7 @@ from otaku.settings.migrations.prompt_texts import (
 )
 from otaku.settings.migrations.surgery import apply_migrations
 from otaku.settings.prompts import (
+    CARD_FRAMING_DEFAULT,
     EXTRACT_DEFAULT,
     JOURNAL_HISTORY_DEFAULT,
     SCENE_HISTORY_DEFAULT,
@@ -99,8 +101,23 @@ class TestLanguageRuleRefreshes:
         assert tomllib.loads(migrated)["scene_history_prompt"] == edited
 
 
+class TestCardFramingRefresh:
+    def test_the_block_the_shipped_text_left_open_follows_the_built_in(self) -> None:
+        migrated = apply_migrations(stub("card_framing", CARD_FRAMING_0_7_0), [refresh_card()])
+        assert tomllib.loads(migrated)["card_framing"] == CARD_FRAMING_DEFAULT
+
+    def test_an_edited_card_template_stays_theirs(self) -> None:
+        edited = CARD_FRAMING_0_7_0.replace("to play them by", "to play them as written")
+        text = stub("card_framing", edited)
+        assert apply_migrations(text, [refresh_card()]) == text
+
+
 def refresh():
     return refresh_template("extract_prompt", EXTRACT_0_2_2, EXTRACT_DEFAULT)
+
+
+def refresh_card():
+    return refresh_template("card_framing", CARD_FRAMING_0_7_0, CARD_FRAMING_DEFAULT)
 
 
 def rename():

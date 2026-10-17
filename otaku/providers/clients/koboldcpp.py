@@ -84,7 +84,7 @@ class KoboldCppModels(OpenAIModels):
         else:
             # "inactive" is the server's word for none: no name matches it.
             active = "" if named == "inactive" else named.removeprefix("koboldcpp/")
-        max_context_loaded = self._loaded_size(http)
+        context_loaded = self._loaded_size(http)
         # The server's feature flags: vision means a projector was loaded
         # beside the model, audio that it hears. A rung reaches the model
         # as a share of the context spent on thinking, a budget as
@@ -113,7 +113,7 @@ class KoboldCppModels(OpenAIModels):
             models.append(
                 ModelInfo(
                     name=name,
-                    max_context_loaded=max_context_loaded if loaded else None,
+                    context_loaded=context_loaded if loaded else None,
                     capabilities=capabilities,
                     state=ModelState.LOADED if loaded else ModelState.UNLOADED,
                 )
@@ -128,10 +128,10 @@ class KoboldCppModels(OpenAIModels):
             return ModelInfo(name=name, state=ModelState.UNKNOWN)  # a key it does not accept
         if named == "inactive" or name != named.removeprefix("koboldcpp/"):
             return ModelInfo(name=name, state=ModelState.UNLOADED)
-        max_context_loaded = self._loaded_size(http)
-        if max_context_loaded is None:
+        context_loaded = self._loaded_size(http)
+        if context_loaded is None:
             return None  # the sizing probe missed: the last word stands
-        return ModelInfo(name=name, max_context_loaded=max_context_loaded, state=ModelState.LOADED)
+        return ModelInfo(name=name, context_loaded=context_loaded, state=ModelState.LOADED)
 
     # ---------- the native surface ----------
 

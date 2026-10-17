@@ -746,7 +746,7 @@ class ScreenLedger:
         under the reply's text — a paragraph's standing blank becomes that
         line, the reply's own row now — and `text` ending its row as a
         reply does. What an undo that left the story on a question draws
-        the question back with (`bindings._pose_again`)."""
+        the question back with (`dispatch.story.stories`)."""
         entry = self._top()
         lead = "\n"
         if self._pending >= 2:

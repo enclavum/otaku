@@ -8,7 +8,7 @@ provider's name, for a failure's sentence, and the headers every
 request carries, composed once by the auth — the key in force is fixed
 for a client's life, a changed section rebuilding the client. It holds
 no state and is shared: the picker's fan-out
-and the session's turn use one at the same time. What a SEQUENCE of
+and the app's turn use one at the same time. What a SEQUENCE of
 calls needs — one budget over llama.cpp's two reads or KoboldCpp's
 five, rather than the full timeout for each, and one purpose to file a
 failure under — is a `within` view: a copy under one deadline and one
@@ -30,6 +30,13 @@ The handshake has a cap of its own: a dead but routable host — a
 mistyped LAN address, a firewalled port — hangs it, and a flat timeout
 would let it hold the whole read budget, while a host that listens at
 all completes it in milliseconds.
+
+A server on this machine is dialled apart (`_Backend`): `localhost` as
+IPv4 first, where the engines listen by default, and every loopback
+handshake under a short cap of its own. Windows answers a closed port
+only after retrying it, and tries `localhost` as IPv6 first — so an
+engine that is not installed, or one listening on IPv4 alone, would cost
+every request seconds there, where macOS and Linux refuse at once.
 """
 
 from __future__ import annotations
@@ -37,6 +44,7 @@ from __future__ import annotations
 import contextlib
 import datetime
 import email.utils
+import ipaddress
 import socket
 import ssl
 import threading
@@ -64,6 +72,13 @@ _IDLE_TICK = 0.05
 _CONNECT_TIMEOUT = 2.0  # a request that has to get through
 _STREAM_CONNECT_TIMEOUT = 5.0  # a stream
 _QUIET_CONNECT_TIMEOUT = 1.0  # a best-effort probe, which must not wait
+# A loopback handshake's own cap, every request alike: a server on this
+# machine answers in milliseconds, so what has not by then is not
+# listening — and Windows says so only after retrying (`_Backend`).
+_LOOPBACK_CONNECT_TIMEOUT = 0.5
+# The addresses a loopback name is dialled at, in order: IPv4 first,
+# where the engines listen by default.
+_LOOPBACK_ADDRESSES = {"localhost": ("127.0.0.1", "::1")}
 
 _DETAIL_WIDTH = 300  # how much of a server's explanation a sentence carries
 
@@ -290,15 +305,15 @@ class Http:
             raise
 
     def _client(self, cut: Cut | None) -> httpx.Client:
-        """A client for one stream: httpx's own, or one whose connections
-        the cut can reach. httpx takes no network backend of its own, so
-        the pool is swapped under its transport, the attribute it keeps
-        it under; the pool is built as httpx builds it, a backend added."""
-        if cut is None:
-            return httpx.Client()
+        """A client for one request or stream, its connections opened by
+        `_Backend` — a loopback server dialled apart, and every connection
+        handed to the cut where there is one. httpx takes no network
+        backend of its own, so the pool is swapped under its transport,
+        the attribute it keeps it under; the pool is built as httpx builds
+        it, the backend added."""
         transport = httpx.HTTPTransport()
         transport._pool = httpcore.ConnectionPool(
-            ssl_context=httpx.create_ssl_context(), network_backend=_Cutting(cut)
+            ssl_context=httpx.create_ssl_context(), network_backend=_Backend(cut)
         )
         return httpx.Client(transport=transport)
 
@@ -388,11 +403,14 @@ def ticking(call: Callable[[], _T], on_idle: Callable[[], bool | None], cut: Cut
     return answer[0]
 
 
-class _Cutting(httpcore.SyncBackend):
-    """httpcore's network backend, handing every socket it opens to the
-    cut — the one place a connection is reachable before its response."""
+class _Backend(httpcore.SyncBackend):
+    """httpcore's network backend, opening a connection to a server on
+    this machine at its addresses in order (`_LOOPBACK_ADDRESSES`), each
+    under the loopback's own cap, and handing every socket it opens to
+    the cut where there is one — the one place a connection is reachable
+    before its response."""
 
-    def __init__(self, cut: Cut) -> None:
+    def __init__(self, cut: Cut | None) -> None:
         self._cut = cut
 
     def connect_tcp(
@@ -403,11 +421,37 @@ class _Cutting(httpcore.SyncBackend):
         local_address: str | None = None,
         socket_options: Iterable[Any] | None = None,
     ) -> httpcore.NetworkStream:
-        stream = super().connect_tcp(
-            host, port, timeout=timeout, local_address=local_address, socket_options=socket_options
-        )
-        self._cut._arm(stream.get_extra_info("socket"))
+        addresses: tuple[str, ...] = (host,)
+        if _is_loopback(host):
+            addresses = _LOOPBACK_ADDRESSES.get(host.lower(), addresses)
+            timeout = min(timeout or _LOOPBACK_CONNECT_TIMEOUT, _LOOPBACK_CONNECT_TIMEOUT)
+        *earlier, last = addresses
+        options: dict[str, Any] = {
+            "timeout": timeout,
+            "local_address": local_address,
+            "socket_options": socket_options,
+        }
+        for address in earlier:
+            # nothing listening there: the next address may have it
+            with contextlib.suppress(httpcore.ConnectError, httpcore.ConnectTimeout):
+                return self._armed(super().connect_tcp(address, port, **options))
+        return self._armed(super().connect_tcp(last, port, **options))
+
+    def _armed(self, stream: httpcore.NetworkStream) -> httpcore.NetworkStream:
+        if self._cut is not None:
+            self._cut._arm(stream.get_extra_info("socket"))
         return stream
+
+
+def _is_loopback(host: str) -> bool:
+    """Whether `host` names this machine: `localhost`, or a loopback
+    address however it is bracketed."""
+    if host.lower() in _LOOPBACK_ADDRESSES:
+        return True
+    try:
+        return ipaddress.ip_address(host.strip("[]")).is_loopback
+    except ValueError:
+        return False
 
 
 def positive_int(value: object) -> int | None:

@@ -39,9 +39,9 @@ __all__ = [
 
 @dataclass(frozen=True)
 class Integrations:
-    """Every integration as the session holds it, by id: each bound to its
+    """Every integration as the app holds it, by id: each bound to its
     section of integrations.toml, or to the one it is founded with where
-    the file has none. A key saved rebinds one (`backend.api.integrations`)."""
+    the file has none. A key saved rebinds one (`backend.api.app.integrations`)."""
 
     by_id: Mapping[str, Integration]
 

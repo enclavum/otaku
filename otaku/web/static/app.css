@@ -68,6 +68,8 @@
   --otk-strong-weight: 600;                   /* a real cut, not a synthesised 700 */
   --otk-ok:          oklch(0.58 0.11 150);    /* connected, resident         */
   --otk-danger:      oklch(0.5 0.14 30);      /* delete, stop, and failures  */
+  --otk-danger-tint:  oklch(0.5 0.14 30 / 0.07);   /* a foot that holds an error   */
+  --otk-danger-flash: oklch(0.5 0.14 30 / 0.24);   /* the one flash as it arrives  */
   --otk-chat-story:  var(--otk-ok);           /* the story's rule, chat layout */
   --otk-chat-you:    var(--otk-accent);       /* the reader's rule, chat layout */
 
@@ -241,9 +243,10 @@ a:hover { color: var(--otk-accent); }
   *::-webkit-scrollbar-thumb:active { background: var(--otk-ink); }
   *::-webkit-scrollbar-corner { background: var(--otk-scrollbar-track); }
 }
-/* every scrolling column reserves the gutter, so columns stay aligned */
+/* every scrolling column reserves the gutter, so columns stay aligned — but a
+   docket's, one column alone, whose margins stay even while it fits */
 .otk-col__scroll, .otk-detail__scroll, .otk-index__list, .otk-reading, .otk-margin,
-.otk-transcript, .otk-docket__body, .otk-premise__body, .otk-context { scrollbar-gutter: stable; }
+.otk-margin__scroll, .otk-transcript, .otk-premise__body, .otk-context { scrollbar-gutter: stable; }
 [hidden] { display: none !important; }
 
 /* =============================================================================
@@ -331,6 +334,9 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
   font-family: var(--otk-font-mono); font-size: var(--otk-size-label);
   letter-spacing: 0.06em; text-transform: uppercase; color: var(--otk-faint);
 }
+/* a name over its field holds no verbs, so none of the row's height: it
+   sits close to what it names */
+.otk-edit__head { height: auto; margin-bottom: -3px; }
 /* anchored right, so swapping one verb for two moves neither */
 .otk-edit__verbs { margin-left: auto; display: flex; align-items: baseline; gap: 16px; }
 /* A verb is a button, and the UA stylesheet resets casing and tracking on
@@ -346,6 +352,8 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
    rather than hidden: a hidden verb is not tabbable, and while the field is
    closed it is out of the tab order, so this is the keyboard's only way in. */
 .otk-edit__verb--edit { opacity: 0; }
+/* no hover on a touch screen: the way into a field stands in view */
+@media (hover: none) { .otk-edit__verb--edit { opacity: 1; } }
 .otk-edit:hover .otk-edit__verb--edit,
 .otk-edit__verb--edit:focus-visible { opacity: 1; }
 .otk-edit__verb--save, .otk-edit__verb--cancel { display: none; }
@@ -500,7 +508,7 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 .otk-toc { flex: 1; display: flex; flex-direction: column; gap: 2px; padding: 0 30px; overflow-y: auto; counter-reset: otk-folio; }
 .otk-toc__row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; width: 100%; padding: 5px 0; font-family: var(--otk-font-prose); font-size: var(--otk-size-note); color: var(--otk-muted); counter-increment: otk-folio; }
 .otk-toc__row:hover:not(:disabled) { color: var(--otk-ink); }
-.otk-toc__row--lead { color: var(--otk-ink); font-weight: 600; }
+.otk-toc__row--lead { color: var(--otk-ink); }
 /* the folio is counted, not typed, so a new row never renumbers the rest */
 .otk-toc__row::after { content: counter(otk-folio, lower-roman); font-family: var(--otk-font-mono); font-size: var(--otk-size-foot); color: var(--otk-faint); }
 .otk-toc__gap { flex: none; min-height: 14px; }
@@ -600,7 +608,7 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 
 /* =============================================================================
    TRANSCRIPT LAYOUTS — the same turns, read three ways. Only the flow's
-   `data-transcript` changes (`layout.js`); no markup moves, and every turn
+   `data-transcript` changes (`shell.js`); no markup moves, and every turn
    keeps its rubric whether or not the layout shows it. The manuscript is
    the rules above; the two below are laid over them. The question, notes
    and thinking blocks keep their one look in all three until each layout's
@@ -950,7 +958,7 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 .otk-gap { flex: none; width: 100%; }
 
 /* which layout the transcript is read in — three glyphs above the status
-   line, the one in force pressed (`layout.js`) */
+   line, the one in force pressed (`shell.js`) */
 .otk-modes {
   flex: none; display: flex; align-items: center; gap: 4px;
   margin: 0 30px; padding: 10px 0 8px;
@@ -1069,7 +1077,7 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 .otk-lightbox__arrow--prev { left: 10px; }
 .otk-lightbox__arrow--next { right: 10px; }
 .otk-lightbox__arrow:hover, .otk-lightbox__arrow:focus-visible { border-color: var(--otk-ink); }
-.otk-lightbox__arrow[aria-disabled="true"] { opacity: 0.35; cursor: default; }
+.otk-lightbox__arrow[aria-disabled="true"], .otk-tile__nav[aria-disabled="true"] { opacity: 0.35; cursor: default; }
 .otk-lightbox__count { color: var(--otk-body); font-variant-numeric: tabular-nums; }
 /* At its own size on the well, downsized to the frame when it is too big,
    never upsized to fill it. Its own size is the row's measure, written on
@@ -1121,6 +1129,8 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
   box-shadow: var(--otk-shadow-panel);
 }
 .otk-panel--wide { width: min(var(--otk-panel-wide), calc(100vw - 48px)); }
+/* All characters: a little taller, so two rows of the large tiles fit */
+.otk-panel--chars { height: min(950px, calc(100dvh - 48px)); }
 /* the wire is the longest thing in the app: it gets the whole desk */
 .otk-panel--read { width: min(var(--otk-panel-read), calc(100vw - 48px)); height: calc(100dvh - 48px); }
 
@@ -1148,6 +1158,10 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
   .otk-panel__head > .otk-note { display: none; }
   .otk-panel__head .otk-eyebrow { display: block; text-overflow: ellipsis; }
   .otk-panel__head .otk-eyebrow::before { display: none; }
+  /* All characters' four view buttons would leave its name no room: they
+     take a line of their own under it */
+  .otk-panel--chars .otk-panel__head { flex-wrap: wrap; row-gap: 8px; }
+  .otk-panel--chars .otk-seg { order: 1; margin-left: 0; }
 }
 
 .otk-tabs { flex: none; display: flex; align-items: center; gap: 36px; padding: 0 var(--otk-panel-pad); border-bottom: var(--otk-hair) solid var(--otk-line-soft); }
@@ -1420,6 +1434,17 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 .otk-passages { display: flex; flex-direction: column; gap: 20px; border-top: var(--otk-hair) solid var(--otk-line); padding-top: 14px; }
 .otk-passage { display: flex; flex-direction: column; gap: 4px; min-width: 0; max-width: var(--otk-measure); }
 .otk-passage .otk-note { font-size: var(--otk-size-lead); line-height: 1.6; }
+/* a journal entry's verbs hold no name, so no more than their own height:
+   the state under them stays close to the entry */
+.otk-passage[data-record] > .otk-edit { gap: 0; }
+.otk-passage[data-record] > .otk-edit > .otk-edit__hint { height: auto; line-height: 1; }
+.otk-passage[data-record] > .otk-edit + .otk-note { margin-top: -8px; }
+/* open, its ground (`.otk-editable:focus`) stops at the field's foot,
+   where the verbs stand right under it: nothing moves to make room */
+.otk-passage[data-record] .otk-editable:focus {
+  box-shadow: -4px 0 0 var(--otk-edit-bg), 4px 0 0 var(--otk-edit-bg), 0 -4px 0 var(--otk-edit-bg),
+    -4px -4px 0 var(--otk-edit-bg), 4px -4px 0 var(--otk-edit-bg);
+}
 .otk-passage__rubric { font-family: var(--otk-font-mono); font-size: var(--otk-size-label); letter-spacing: var(--otk-track-tag); text-transform: uppercase; color: var(--otk-accent-ink); }
 .otk-passage__body { margin: 0; font-family: var(--otk-font-prose); font-size: var(--otk-size-read); line-height: 1.66; color: var(--otk-body); overflow-wrap: anywhere; }
 .otk-margin { flex: 0 1 var(--otk-reader-w); min-width: 180px; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding: 20px 18px; border-left: var(--otk-hair) solid var(--otk-line); }
@@ -1437,6 +1462,10 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
    here — `.otk-derived` is also a row in the message detail and a block in a
    report, and neither wants the space. */
 .otk-margin__fact > .otk-derived { margin: 8px 0; }
+/* the cast's margin: its facts scroll and its buttons stay put, as a
+   picker's verbs do (`.otk-actions`); the gutter is the scroller's */
+.otk-margin--pinned { overflow: hidden; scrollbar-gutter: auto; padding-bottom: 14px; }
+.otk-margin__scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
 /* what you do TO the character, pinned under what is known about it */
 .otk-manage { flex: none; display: flex; flex-direction: column; gap: 8px; padding-top: 14px; border-top: var(--otk-hair) solid var(--otk-line-soft); }
 .otk-manage__row { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -1468,6 +1497,7 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 .otk-panel__body--premise { display: flex; justify-content: center; padding: 26px 40px 20px; }
 .otk-premise { width: var(--otk-premise-w); max-width: 100%; display: flex; flex-direction: column; }
 .otk-premise__lede { margin-bottom: 18px; }
+.otk-premise__lede strong { font-weight: var(--otk-strong-weight); }
 .otk-premise__body {
   flex: 1; min-height: 0; width: 100%; resize: none; overflow-y: auto;
   border: 0; border-radius: 0; outline: none; background: none; padding: 0; margin: 0;
@@ -1522,9 +1552,9 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 .otk-context__wire { display: flex; flex-direction: column; gap: 20px; padding-top: 6px; }
 
 /* =============================================================================
-   DOCKET — a torn slip for every small report
+   DOCKET — a slip for every small report
    ========================================================================== */
-/* a slip is torn to length: as tall as what it has to say, bounded by the desk */
+/* a slip is as tall as what it has to say, bounded by the desk */
 .otk-docket { display: flex; flex-direction: column; width: var(--otk-docket-w); max-height: calc(100dvh - 80px); max-width: calc(100vw - 32px); background: var(--otk-paper); box-shadow: var(--otk-shadow-panel); }
 .otk-docket--narrow { --otk-docket-w: 416px; }
 .otk-docket--wide   { --otk-docket-w: 568px; }
@@ -1540,11 +1570,14 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 /* between the click and the figures: the scrim answers, and the slip arrives
    whole rather than opening small and growing */
 .otk-docket.is-waiting { visibility: hidden; }
-.otk-docket__tear { flex: 0 0 auto; height: 9px; background: radial-gradient(circle at 6px 0, transparent 0 5px, var(--otk-paper) 5.5px) 0 0/12px 9px repeat-x; }
-.otk-docket__tear--bottom { background: radial-gradient(circle at 6px 9px, transparent 0 5px, var(--otk-paper) 5.5px) 0 0/12px 9px repeat-x; }
-.otk-docket__body { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 17px; padding: 8px 34px 16px; }
+.otk-docket__body { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 17px; padding: 20px 34px 16px; }
 .otk-docket__body:focus { outline: none; }
-.otk-docket__foot { flex: 0 0 auto; display: flex; align-items: center; gap: 12px; margin: 0 34px; padding: 14px 0; border-top: var(--otk-hair) solid var(--otk-line); }
+/* the rule is drawn inside the margins, the box spans the slip: an error's
+   ground reaches both edges */
+.otk-docket__foot {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 12px; padding: 14px 34px;
+  background: linear-gradient(var(--otk-line), var(--otk-line)) 34px 0 / calc(100% - 68px) var(--otk-hair) no-repeat;
+}
 .otk-docket__foot .otk-btn:last-child { margin-left: auto; }
 /* two buttons stand together at the right: the first takes the push */
 .otk-docket__foot .otk-btn:nth-last-child(2) { margin-left: auto; }
@@ -1570,11 +1603,16 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 /* an instruction is paragraphs: the dialog widens. After the base rule,
    which would otherwise win at equal specificity. */
 .otk-dialog--wide { width: min(930px, calc(100vw - 48px)); }
+/* a dialog never outgrows the window: the box caps and scrolls */
+.otk-dialog { max-height: calc(100dvh - 48px); overflow-y: auto; }
 .otk-dialog__subject { display: flex; flex-direction: column; gap: 3px; }
 .otk-dialog__name { font-family: var(--otk-font-display); font-size: 21px; font-weight: 800; letter-spacing: -0.02em; color: var(--otk-ink); overflow-wrap: anywhere; }
 .otk-dialog__body { margin: 0; font-family: var(--otk-font-prose); font-size: var(--otk-size-note); line-height: 1.6; color: var(--otk-body); text-wrap: pretty; }
 .otk-dialog__foot { display: flex; align-items: center; gap: 8px; padding-top: 14px; border-top: var(--otk-hair) solid var(--otk-line-soft); }
 .otk-dialog__foot .otk-btn:first-of-type { margin-left: auto; }
+/* a button that leads the foot stays at its left, the first button's push
+   undone — after that rule, which weighs the same */
+.otk-dialog__foot .otk-btn.otk-btn--lead { margin-left: 0; }
 .otk-dialog__escape { font-family: var(--otk-font-mono); font-size: var(--otk-size-foot); letter-spacing: var(--otk-track-foot); text-transform: uppercase; color: var(--otk-faint); }
 /* the dialog that stands in FRONT of the page rather than over it: the
    desk flat behind it, because what it covers cannot be used yet */
@@ -1585,11 +1623,10 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 /* a squared checkbox — nothing on this page is round but the dots */
 .otk-check-row { display: flex; align-items: center; gap: 10px; cursor: pointer; }
 .otk-check { appearance: none; position: relative; width: 15px; height: 15px; margin: 0; flex: none; background: var(--otk-paper); border: var(--otk-hair) solid var(--otk-line); cursor: pointer; }
-.otk-check::before, .otk-check::after { content: ""; position: absolute; left: 1px; top: 6px; width: 11px; height: 2px; background: var(--otk-ink); opacity: 0; }
-.otk-check::before { transform: rotate(45deg); }
-.otk-check::after { transform: rotate(-45deg); }
+/* the tick: two sides of a box, turned */
+.otk-check::after { content: ""; position: absolute; left: 4px; top: 1px; width: 4px; height: 8px; border: solid var(--otk-ink); border-width: 0 2px 2px 0; transform: rotate(45deg); opacity: 0; }
 .otk-check:checked { border-color: var(--otk-ink); }
-.otk-check:checked::before, .otk-check:checked::after { opacity: 1; }
+.otk-check:checked::after { opacity: 1; }
 /* a choice between two outcomes is two boxes, not two buttons */
 .otk-choices { display: flex; flex-direction: column; gap: 8px; }
 .otk-choice { display: flex; flex-direction: column; gap: 2px; border: var(--otk-hair) solid var(--otk-line); padding: 11px 14px; }
@@ -1687,6 +1724,9 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 .otk-field-row:last-child { border-bottom: 0; }
 .otk-field-row--card { grid-template-columns: 104px minmax(0, 1fr); gap: 12px 14px; align-items: stretch; border-bottom: 0; }
 .otk-field-row--card > .otk-label { display: flex; align-items: center; }
+/* Start a story: the labels' column as wide as the longest, on one line */
+.otk-dialog[data-dialog="start"] .otk-field-row--card { grid-template-columns: max-content minmax(0, 1fr); }
+.otk-dialog[data-dialog="start"] .otk-field-row--card > .otk-label { white-space: nowrap; }
 /* in the apparatus margin the row is too narrow for two columns: the key
    stacks over its value, the way the margin's own facts stack */
 .otk-margin .otk-field-row { grid-template-columns: minmax(0, 1fr); gap: 2px; }
@@ -1695,6 +1735,287 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 .otk-empty { display: flex; flex-direction: column; align-items: center; gap: 7px; text-align: center; padding: 44px 30px; }
 .otk-empty__line { font-family: var(--otk-font-prose); font-size: var(--otk-size-lead); color: var(--otk-muted); }
 .otk-empty__hint { font-family: var(--otk-font-mono); font-size: var(--otk-size-mono-sm); letter-spacing: 0.04em; color: var(--otk-faint); }
+
+/* =============================================================================
+   ALL CHARACTERS — the codex's cards. Gallery or list on the left, the
+   stories' unlinked characters in a foldable column on the right, the open
+   card as a sheet centred over both.
+   ========================================================================== */
+.otk-seg { display: flex; border: var(--otk-hair) solid var(--otk-line); margin-left: 18px; }
+.otk-seg__btn { font-family: var(--otk-font-mono); font-size: var(--otk-size-small); padding: 6px 12px; color: var(--otk-muted); }
+.otk-seg__btn[aria-pressed="true"] { background: var(--otk-ink); color: var(--otk-paper); }
+.otk-seg__btn--glyph { width: 36px; height: 30px; padding: 0; display: flex; align-items: center; justify-content: center; line-height: 0; }
+
+.otk-chars { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 270px; border-top: var(--otk-hair) solid var(--otk-line-soft); }
+/* the one head with a rule straight under it: as much room below as above */
+.otk-panel--chars .otk-panel__head { padding-bottom: 14px; }
+.otk-chars[data-unlinked="closed"] { grid-template-columns: minmax(0, 1fr) 44px; }
+/* no room for both columns on a narrow screen (`characters.js` `_NARROW`):
+   the unlinked characters, opened, take the window, their head folding
+   them away again */
+@media (max-width: 720px), (pointer: coarse) and (max-height: 540px) {
+  .otk-chars[data-unlinked="open"] { grid-template-columns: minmax(0, 1fr); }
+  .otk-chars[data-unlinked="open"] .otk-chars__main { display: none; }
+  .otk-chars[data-unlinked="open"] .otk-unlinked { border-left: 0; }
+}
+.otk-chars__main { display: flex; flex-direction: column; min-height: 0; }
+/* tiles of one width, the view's (`characters.js` `_TILE_WIDTHS`): a wider
+   gallery holds more of them, never bigger ones */
+/* The panel is made as wide as the columns need (`characters.fitWidth`),
+   so the room either side of them is the padding, the same all round;
+   where the panel fills the screen and cannot narrow, the columns centre.
+   The scrollbar keeps a gutter of its own beside the padding, never in
+   it, held whether the gallery scrolls yet or not, so the columns stay. */
+.otk-chars__gallery { flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; padding: 20px; display: grid; grid-template-columns: repeat(auto-fill, 150px); justify-content: center; gap: 18px; align-content: start; }
+.otk-chars__list { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 0; display: none; }
+.otk-chars[data-view="list"] .otk-chars__gallery { display: none; }
+.otk-chars[data-view="list"] .otk-chars__list { display: block; }
+.otk-chars__gallery > .otk-empty { grid-column: 1 / -1; }
+.otk-chars__bar { flex: none; display: flex; align-items: center; gap: 14px; padding: 11px 22px; border-top: var(--otk-hair) solid var(--otk-line-soft); }
+.otk-chars__filter { flex: 0 1 340px; }
+.otk-chars__picked { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: var(--otk-font-mono); font-size: var(--otk-size-small); color: var(--otk-muted); white-space: nowrap; }
+.otk-chars__bar .otk-btn { flex: none; white-space: nowrap; }
+.otk-chars__clear { font-family: var(--otk-font-mono); font-size: var(--otk-size-small); color: var(--otk-accent-ink); }
+
+/* a frame with no picture in it yet: stripes stand in until one is added */
+.otk-tile { position: relative; display: flex; flex-direction: column; gap: 7px; padding: 6px; border: var(--otk-hair) solid var(--otk-line-soft); cursor: pointer; }
+.otk-tile:hover { border-color: var(--otk-line); }
+.otk-tile__pic { position: relative; aspect-ratio: 3 / 4; display: flex; align-items: flex-end; padding: 6px; overflow: hidden; border: var(--otk-hair) solid var(--otk-line-soft); background: repeating-linear-gradient(135deg, var(--otk-band) 0 7px, var(--otk-well) 7px 14px); }
+.otk-tile__pic > img, .otk-charrow__pic > img, .otk-picsend__thumb > img, .otk-pics__thumb > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.otk-tile__empty { position: relative; font-family: var(--otk-font-mono); font-size: var(--otk-size-foot); color: var(--otk-faint); }
+.otk-tile__nav { position: absolute; z-index: 1; top: 50%; transform: translateY(-50%); width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; background: color-mix(in oklch, var(--otk-paper) 88%, transparent); border: var(--otk-hair) solid var(--otk-line-soft); color: var(--otk-ink); }
+.otk-tile__nav--prev { left: 4px; }
+.otk-tile__nav--next { right: 4px; }
+.otk-tile__count { position: absolute; z-index: 1; right: 6px; bottom: 6px; padding: 1px 4px; background: color-mix(in oklch, var(--otk-paper) 88%, transparent); font-family: var(--otk-font-mono); font-size: var(--otk-size-foot); color: var(--otk-muted); }
+.otk-tile__name { font-family: var(--otk-font-display); font-size: 15px; font-weight: 600; color: var(--otk-ink); }
+/* a tagline is one line wherever it stands, cut with an ellipsis */
+.otk-tile__tag { font-family: var(--otk-font-prose); font-size: 14px; font-style: italic; line-height: 1.35; color: var(--otk-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.otk-tile__meta { font-family: var(--otk-font-mono); font-size: var(--otk-size-label); color: var(--otk-faint); white-space: nowrap; }
+/* in a tile the tagline and the line under it stop at its edge, cut short
+   rather than wrapped */
+.otk-tile > .otk-tile__meta { overflow: hidden; text-overflow: ellipsis; }
+
+/* picked for Start a story: the tick the sign-in checkbox draws, in the
+   picture's bottom corner; and a card's shown picture removed, by the cross
+   in its top corner, boxed alike — each 6px off the picture's edge,
+   measured inside its hairline */
+.otk-tick, .otk-pics__remove { position: absolute; z-index: 1; right: calc(6px - var(--otk-hair)); width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; border: var(--otk-hair) solid var(--otk-line); background: var(--otk-paper); font-size: 13px; line-height: 1; color: var(--otk-ink); }
+.otk-tick { bottom: calc(6px - var(--otk-hair)); }
+.otk-tick[aria-checked="true"]::after { content: "\2713"; }
+.otk-tick--inline { position: static; flex: none; width: 16px; height: 16px; font-size: 12px; }
+
+.otk-charrow { display: flex; align-items: center; gap: 12px; padding: 7px 22px; border-left: var(--otk-mark) solid transparent; cursor: pointer; }
+.otk-charrow:hover { background: var(--otk-accent-tint); }
+.otk-charrow__pic { position: relative; overflow: hidden; width: 33px; height: 44px; flex: none; border: var(--otk-hair) solid var(--otk-line-soft); background: repeating-linear-gradient(135deg, var(--otk-band) 0 5px, var(--otk-well) 5px 10px); }
+.otk-charrow__text { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 0 1 440px; }
+/* the counts at the row's far end */
+.otk-charrow > .otk-tile__meta { margin-left: auto; }
+
+/* a story character dragged over a card, or over "new card" */
+.otk-tile.is-dragover, .otk-charrow.is-dragover { border-color: var(--otk-accent); background: var(--otk-accent-tint); }
+
+/* the stories' unlinked characters: dragged onto a card to link */
+.otk-unlinked { display: flex; flex-direction: column; min-height: 0; background: var(--otk-band); border-left: var(--otk-hair) solid var(--otk-line); }
+.otk-unlinked__head { flex: none; display: flex; align-items: center; gap: 8px; padding: 15px 18px 10px; text-align: left; }
+.otk-unlinked__list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding: 0 8px; }
+.otk-unlinked__list > .otk-empty { padding: 30px 12px; }
+.otk-unlinked__item { display: flex; align-items: center; gap: 10px; padding: 8px 10px; cursor: pointer; }
+.otk-unlinked__item:hover { background: var(--otk-paper); }
+.otk-unlinked__text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.otk-unlinked__count { font-family: var(--otk-font-mono); font-size: var(--otk-size-label); color: var(--otk-faint); }
+.otk-grip { flex: none; width: 8px; height: 13px; cursor: grab; background: radial-gradient(circle, var(--otk-faint) 1.2px, transparent 1.4px) 0 0 / 4px 4.5px; }
+.otk-unlinked__pinned { flex: none; padding: 11px 12px; border-top: var(--otk-hair) solid var(--otk-line-soft); }
+.otk-unlinked__pinned .otk-filter { width: 100%; }
+.otk-unlinked__strip { display: none; flex-direction: column; align-items: center; padding-top: 16px; font-family: var(--otk-font-mono); }
+.otk-unlinked__striplabel { writing-mode: vertical-rl; transform: rotate(180deg); font-size: var(--otk-size-label); letter-spacing: 0.18em; text-transform: uppercase; color: var(--otk-ink); }
+.otk-chars[data-unlinked="closed"] .otk-unlinked > :not(.otk-unlinked__strip) { display: none; }
+.otk-chars[data-unlinked="closed"] .otk-unlinked__strip { display: flex; height: 100%; }
+
+/* the open card: a window of its own over the panel, sized inside it, the
+   panel under the scrim */
+.otk-sheet { display: flex; flex-direction: column; overflow: hidden; width: min(760px, calc(100vw - 88px)); height: min(876px, calc(100dvh - 92px)); background: var(--otk-paper); border: var(--otk-hair) solid var(--otk-line); box-shadow: var(--otk-shadow-panel); }
+.otk-sheet--card { width: min(1140px, calc(100vw - 88px)); }
+.otk-sheet__head { flex: none; display: flex; align-items: center; gap: 12px; padding: 16px 24px 0; }
+.otk-sheet__head .otk-detail__title { margin: 0; }
+/* the card's name sized to itself, the close button out at the end; its
+   verbs never push the tabs down: under the name at its end, out of the
+   flow — or, where under it they would land on the tabs, after it
+   (`characters.js` measures which) */
+.otk-sheet__head > .otk-edit { position: relative; flex: 0 1 auto; min-width: 0; margin: 0 auto 0 0; }
+.otk-sheet__head > .otk-edit[data-verbs="under"] > .otk-edit__hint { position: absolute; top: 100%; right: 0; width: max-content; }
+/* after it, in a row with it on the name's baseline, as wide as the verbs
+   alone — not the title line's full width, which would squeeze the name;
+   the line's own empty label and its gap go, so the padding is the whole
+   of the room */
+.otk-sheet__head > .otk-edit[data-verbs="after"] { flex-direction: row; align-items: baseline; gap: 0; }
+.otk-sheet__head > .otk-edit[data-verbs="after"] > .otk-edit__hint { flex: none; width: auto; min-width: 0; height: auto; padding-left: 13px; gap: 0; }
+.otk-sheet__head > .otk-edit[data-verbs="after"] > .otk-edit__hint > :not(.otk-edit__verbs) { display: none; }
+.otk-tabs--sheet { padding: 10px 24px 0; }
+/* only the text scrolls: the pictures stay where they are */
+.otk-sheet__body { flex: 1; min-height: 0; display: grid; grid-template-columns: 230px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 24px; padding: 20px 0 0 24px; }
+.otk-sheet__body > .otk-pics { min-height: 0; overflow-y: auto; padding-bottom: 20px; }
+.otk-sheet__body > .otk-sheet__fields { min-height: 0; overflow-y: auto; padding: 0 24px 20px 0; scrollbar-gutter: stable; }
+.otk-sheet__fields { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.otk-sheet__tagline { font-style: italic; color: var(--otk-muted); }
+.otk-sheet__section { padding-bottom: 5px; border-bottom: var(--otk-hair) solid var(--otk-line-soft); }
+.otk-sheet__foot { flex: none; display: flex; align-items: center; gap: 8px; padding: 12px 24px; border-top: var(--otk-hair) solid var(--otk-line-soft); background: var(--otk-band); }
+/* a button's words never wrap: the hint beside them gives way */
+.otk-sheet__foot .otk-btn { flex: none; white-space: nowrap; }
+.otk-sheet__foot--hint { font-family: var(--otk-font-mono); font-size: var(--otk-size-label); color: var(--otk-faint); }
+/* the card's notices at the left, set as the panel's footer sets them, its
+   verbs at the right */
+.otk-sheet__note { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--otk-font-mono); font-size: var(--otk-size-foot); letter-spacing: var(--otk-track-foot); text-transform: uppercase; color: var(--otk-faint); }
+.otk-sheet__foot--hint b { font-weight: 500; color: var(--otk-muted); }
+.otk-sheet__foot--hint > span { margin-left: auto; }
+
+.otk-pics { display: flex; flex-direction: column; gap: 8px; }
+.otk-pics__main { position: relative; aspect-ratio: 3 / 4; overflow: hidden; border: var(--otk-hair) solid var(--otk-line-soft); background: repeating-linear-gradient(135deg, var(--otk-band) 0 7px, var(--otk-well) 7px 14px); }
+.otk-pics__main > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: var(--otk-well); cursor: zoom-in; }
+.otk-pics.is-dragover .otk-pics__main { border-color: var(--otk-accent); }
+.otk-pics__thumbs { display: flex; flex-wrap: wrap; gap: 6px; }
+.otk-pics__thumb { position: relative; overflow: hidden; width: 50px; height: 50px; border: var(--otk-hair) solid var(--otk-line-soft); background: var(--otk-well); cursor: pointer; }
+.otk-pics__thumb[aria-current="true"] { border: var(--otk-mark) solid var(--otk-accent); }
+.otk-pics__thumb.is-dragging, .otk-tile.is-dragging, .otk-charrow.is-dragging { opacity: 0.4; }
+.otk-pics__add { width: 50px; height: 50px; display: flex; align-items: center; justify-content: center; border: var(--otk-hair) dashed var(--otk-line); font-family: var(--otk-font-mono); font-size: 20px; color: var(--otk-muted); }
+.otk-pics__hint { font-family: var(--otk-font-mono); font-size: var(--otk-size-label); line-height: 1.5; color: var(--otk-faint); }
+/* the cross shows while the picture is pointed at, or the cross has the
+   keys, and always on a screen with no hover */
+.otk-pics__remove { top: calc(6px - var(--otk-hair)); opacity: 0; }
+.otk-pics__main:hover > .otk-pics__remove, .otk-pics__remove:focus-visible { opacity: 1; }
+@media (hover: none) { .otk-pics__remove { opacity: 1; } }
+
+/* a linked story on the Card tab: the row itself opens its journals */
+.otk-linkrow { display: flex; align-items: baseline; gap: 10px; width: 100%; padding: 7px 0; border-bottom: var(--otk-hair) dotted var(--otk-line-soft); text-align: left; }
+.otk-linkrow__name { flex: 1; font-family: var(--otk-font-prose); font-size: var(--otk-size-note); color: var(--otk-body); }
+.otk-linkrow:hover .otk-linkrow__name { color: var(--otk-ink); }
+.otk-linkrow__count { font-family: var(--otk-font-mono); font-size: var(--otk-size-small); color: var(--otk-faint); }
+
+.otk-sheet__journals { flex: 1; min-height: 0; display: grid; grid-template-columns: 210px minmax(0, 1fr); }
+.otk-sheet__stories { display: flex; flex-direction: column; min-height: 0; background: var(--otk-band); border-right: var(--otk-hair) solid var(--otk-line-soft); }
+.otk-sheet__storylist { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 8px; display: flex; flex-direction: column; gap: 2px; }
+.otk-jstory { display: flex; flex-direction: column; gap: 1px; padding: 8px 10px; border-left: var(--otk-mark) solid transparent; text-align: left; }
+.otk-jstory[aria-selected="true"] { border-left-color: var(--otk-accent); background: var(--otk-paper); }
+.otk-jstory__name { font-family: var(--otk-font-prose); font-size: 15px; line-height: 1.3; color: var(--otk-body); }
+.otk-jstory[aria-selected="true"] .otk-jstory__name { color: var(--otk-ink); }
+.otk-sheet__pinned { flex: none; padding: 11px 10px; border-top: var(--otk-hair) solid var(--otk-line-soft); }
+.otk-sheet__pinned .otk-filter { width: 100%; }
+.otk-sheet__entries { min-height: 0; overflow-y: auto; padding: 16px 24px; display: flex; flex-direction: column; gap: 16px; scrollbar-gutter: stable; }
+.otk-sheet__entries--solo { flex: 1; }
+.otk-sheet__storyhead { display: flex; align-items: baseline; gap: 12px; padding-bottom: 10px; border-bottom: var(--otk-hair) solid var(--otk-line-soft); }
+.otk-sheet__storyname { flex: 1; font-family: var(--otk-font-prose); font-size: 18px; color: var(--otk-ink); }
+.otk-sheet--unlinked .otk-sheet__head { padding-bottom: 14px; border-bottom: var(--otk-hair) solid var(--otk-line-soft); }
+
+/* the Cast tab: a linked card's portrait after the character's name, as
+   tall as the name's line, opening the card as the mark beside it does */
+.otk-cast-portrait { display: inline-block; height: 1lh; aspect-ratio: 3 / 4; margin-left: 12px; padding: 0; overflow: hidden; vertical-align: top; border: var(--otk-hair) solid var(--otk-line-soft); cursor: pointer; }
+.otk-cast-portrait > img { display: block; width: 100%; height: 100%; object-fit: cover; }
+/* and whether that picture rides to the model, in the margin */
+.otk-margin__switch { margin: 10px 0 0; display: flex; align-items: center; gap: 10px; font-family: var(--otk-font-prose); font-size: var(--otk-size-note); color: var(--otk-body); }
+
+/* the Cast tab: a character linked to a codex card, the way to its card
+   after the name */
+.otk-card-open { position: relative; top: -1px; display: inline-flex; margin-left: 10px; vertical-align: baseline; color: var(--otk-faint); }
+.otk-card-open:hover, .otk-card-open:focus-visible { color: var(--otk-ink); }
+.otk-card-open > svg { width: 0.62em; height: 0.62em; }
+/* `clip`, not `hidden`: a clipped box keeps its text's baseline, where a
+   scroll container would sit on its bottom edge */
+.otk-cast-aka { display: inline-block; max-width: calc(100% - 10px); margin-left: 10px; padding-right: 0.15em; overflow: clip; text-overflow: ellipsis; white-space: nowrap; line-height: 1.3; font-family: var(--otk-font-prose); font-size: 21px; font-style: italic; font-weight: 400; }
+
+/* a per-character picture switch, in the card dialog and Start a story */
+.otk-picsend { display: flex; align-items: center; gap: 12px; padding: 6px 0; border-bottom: var(--otk-hair) dotted var(--otk-line-soft); }
+.otk-picsend__thumb { position: relative; overflow: hidden; width: 30px; height: 40px; flex: none; border: var(--otk-hair) solid var(--otk-line-soft); background: repeating-linear-gradient(135deg, var(--otk-band) 0 5px, var(--otk-well) 5px 10px); }
+.otk-picsend__text { flex: 1; font-family: var(--otk-font-prose); font-size: var(--otk-size-note); color: var(--otk-body); }
+
+/* the card picker, and the codex card a dialog brings in, where a file
+   would be dropped */
+.otk-pick { display: flex; flex-direction: column; max-height: 300px; overflow-y: auto; border-top: var(--otk-hair) solid var(--otk-line-soft); border-bottom: var(--otk-hair) solid var(--otk-line-soft); }
+/* a row keeps its height — the list scrolls rather than squeeze them —
+   and its portrait the card window's shape */
+.otk-pickrow { flex: none; display: flex; align-items: center; gap: 12px; width: 100%; padding-top: 8px; padding-bottom: 8px; text-align: left; }
+.otk-pickrow > .otk-charrow__pic { height: auto; aspect-ratio: 3 / 4; }
+.otk-pickrow > .otk-tile__name { flex: none; }
+.otk-pickrow > .otk-tile__tag { flex: 1 1 auto; min-width: 0; }
+.otk-chosen { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--otk-well); border: var(--otk-hair) dashed var(--otk-line); }
+
+/* the drop target that turns an unlinked story character into a new card —
+   and, clicked, a new card by hand */
+.otk-tile--new { align-items: center; justify-content: center; gap: 6px; border: var(--otk-hair) dashed var(--otk-line); text-align: center; min-height: 220px; }
+.otk-tile--new:hover { border-color: var(--otk-line); }
+
+/* three tile sizes, mid the one above; list is the fourth view */
+.otk-chars[data-view="small"] .otk-chars__gallery { grid-template-columns: repeat(auto-fill, 112px); gap: 12px; }
+.otk-chars[data-view="small"] .otk-tile { gap: 5px; padding: 5px; }
+.otk-chars[data-view="small"] .otk-tile__tag,
+.otk-chars[data-view="small"] .otk-tile__meta,
+.otk-chars[data-view="small"] .otk-tile--new__hint { display: none; }
+.otk-chars[data-view="small"] .otk-tile__name { font-size: 14px; }
+.otk-chars[data-view="small"] .otk-tick { right: calc(4px - var(--otk-hair)); bottom: calc(4px - var(--otk-hair)); }
+.otk-chars[data-view="small"] .otk-tile--new { min-height: 150px; }
+.otk-chars[data-view="large"] .otk-chars__gallery { grid-template-columns: repeat(auto-fill, 220px); gap: 24px; }
+.otk-chars[data-view="large"] .otk-tile__name { font-size: 17px; }
+.otk-chars[data-view="large"] .otk-tile__tag { font-size: 15px; }
+.otk-chars[data-view="large"] .otk-tile--new { min-height: 320px; }
+/* flipping through a card's pictures is the large tiles' alone */
+.otk-chars:not([data-view="large"]) .otk-tile__pic > .otk-tile__nav { display: none; }
+.otk-tile--new__plus { font-family: var(--otk-font-mono); font-size: 22px; line-height: 1; color: var(--otk-muted); }
+.otk-tile--new__label { font-family: var(--otk-font-display); font-size: 15px; font-weight: 600; color: var(--otk-ink); }
+.otk-tile--new__hint { font-family: var(--otk-font-mono); font-size: var(--otk-size-label); line-height: 1.4; color: var(--otk-faint); }
+/* the door to a card file, set as the hint is, a link under the pointer */
+.otk-tile--new__file { font-family: var(--otk-font-mono); font-size: var(--otk-size-label); line-height: 1.4; color: var(--otk-muted); border-bottom: var(--otk-hair) dotted var(--otk-line); }
+.otk-tile--new__file:hover, .otk-tile--new__file:focus-visible { color: var(--otk-ink); border-bottom-color: currentColor; }
+/* a small tile says the short of it: "choose a file", "+ picture" */
+.otk-chars[data-view="small"] .otk-tile__empty-verb { display: none; }
+.otk-tile--new__file-short { display: none; }
+.otk-chars[data-view="small"] .otk-tile--new__file-long { display: none; }
+.otk-chars[data-view="small"] .otk-tile--new__file-short { display: inline; }
+.otk-charrow--new { border: var(--otk-hair) dashed var(--otk-line); margin: 6px 22px; padding: 10px 16px; }
+.otk-charrow--new:hover { background: none; }
+
+/* a narrow screen: the unlinked column starts folded until the reader unfolds
+   it (`characters.js`), and an open card takes the whole screen, one column
+   that scrolls whole */
+@media (max-width: 720px), (pointer: coarse) and (max-height: 540px) {
+  .otk-chars__gallery { padding: 14px; gap: 12px; }
+  .otk-chars__bar { flex-wrap: wrap; padding: 10px 14px; }
+  .otk-chars__filter { flex: 1 1 100%; }
+  .otk-sheet { width: 100vw; height: 100dvh; border: 0; box-shadow: none; }
+  .otk-sheet__head, .otk-tabs--sheet, .otk-sheet__foot { padding-left: 16px; padding-right: 16px; }
+  .otk-sheet__body { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; overflow-y: auto; padding: 16px; }
+  .otk-sheet__body > .otk-pics, .otk-sheet__body > .otk-sheet__fields { overflow: visible; padding: 0; }
+  .otk-sheet__journals { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .otk-sheet__stories { border-right: 0; border-bottom: var(--otk-hair) solid var(--otk-line-soft); }
+  .otk-sheet__storylist { max-height: 160px; }
+  .otk-sheet__entries { padding: 16px; }
+}
+
+/* =============================================================================
+   ERRORS — one treatment for every window: its foot line takes the error.
+   Nothing moves: the foot keeps its height, the reason replaces its usual
+   words, and the ground flashes red once as it arrives, then keeps a faint
+   tint. The ground is a pseudo-element, so it can reach the window's edges
+   without changing the foot's box.
+   ========================================================================== */
+@keyframes otk-err-flash { 0% { background-color: transparent; } 18% { background-color: var(--otk-danger-flash); } 100% { background-color: var(--otk-danger-tint); } }
+
+.otk-alert {
+  display: inline-flex; align-items: center; gap: 8px; min-width: 0;
+  font-family: var(--otk-font-mono); font-size: var(--otk-size-foot);
+  letter-spacing: var(--otk-track-foot); text-transform: uppercase;
+  color: var(--otk-danger); white-space: nowrap; overflow: hidden;
+}
+.otk-alert::before { content: ""; width: 7px; height: 7px; background: var(--otk-danger); flex: none; }
+/* the reason in a box of its own, where a long one can end in an ellipsis */
+.otk-alert > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+.otk-panel__foot--error, .otk-docket__foot--error, .otk-dialog__foot--error, .otk-sheet__foot--error { position: relative; isolation: isolate; }
+.otk-panel__foot--error::before, .otk-docket__foot--error::before, .otk-dialog__foot--error::before, .otk-sheet__foot--error::before {
+  content: ""; position: absolute; z-index: -1;
+  background-color: var(--otk-danger-tint);
+  animation: otk-err-flash 0.35s ease-out;
+}
+.otk-panel__foot--error::before, .otk-docket__foot--error::before, .otk-sheet__foot--error::before { inset: 0; }
+.otk-dialog__foot--error::before { inset: 0 -28px -26px; }
+.otk-dialog__foot--error .otk-dialog__escape { display: none; }
 
 /* =============================================================================
    RESPONSIVE — the shell folds before the page does

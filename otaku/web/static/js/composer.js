@@ -17,12 +17,13 @@
    (`shell.showFacts`); whether a picture is taken is the backend's to
    refuse. */
 
-import * as api from "./api.js";
+import { api } from "./api/index.js";
 import { midReply, playLine, run } from "./commands.js";
-import { $, $$, element, encodeFile, pickFiles, setValue, span } from "./dom.js";
-import { rows as syntaxRows } from "./table.js";
-import { settle, tell } from "./status.js";
-import { draftTail, focusTail, stopPlaying, tailHost, tailText } from "./transcript.js";
+import { $, $$, element, encodeFile, pickFiles, setValue, span } from "./kit/dom.js";
+import * as held from "./play/held.js";
+import { rows as syntaxRows } from "./play/language.js";
+import { settle, tell } from "./kit/status.js";
+import { draftTail, focusTail, stopPlaying, tailHost, tailText } from "./play/transcript.js";
 
 const composer = $(".otk-composer__input textarea");
 const menu = $(".otk-prefixes");
@@ -70,8 +71,8 @@ const _MENU = {
   "/you": ["Take a turn", "speak to someone present"],
   "/ooc": ["Speak to the narrator", "a note, never played"],
   "/cue": ["Speak to the narrator", "steer the next reply"],
-  // the caption matches the shared table's group label for /roll
-  // (`commands.GROUP_LABELS["special"]`), so the two menus file it alike
+  // the caption matches the terminal's group label for /roll
+  // (`terminal.commands.GROUP_LABELS["special"]`), so the two menus file it alike
   "/roll": ["Special", "roll real dice; the model narrates"],
 };
 
@@ -132,9 +133,9 @@ export async function submit(line) {
   if ((!said && !staged.length && !continuing()) || midReply()) return;
   if (said && history.at(-1) !== said) history.push(said);
   // Into the store's history too (blanks and immediate repeats are the
-  // session's to skip) — fire-and-forget: the submission itself is the
+  // backend's to skip) — fire-and-forget: the submission itself is the
   // event, and a lost record must not delay or fail it.
-  if (said) api.recordHistory(said).catch(() => {});
+  if (said) api.history.create({ text: said }).catch(() => {});
   at = null;
   setValue(composer, "");
   typed = "";
@@ -147,7 +148,7 @@ export async function submit(line) {
   // with an unknown slash word is prose that starts with a slash. On
   // the canvas a line plays AS TYPED, the breaks at its edges its
   // paragraphs — from the text before it and to the model's continuation
-  // (`api.play.submit` records them so); a command never does.
+  // (`domain.story._play.submit_line` records them so); a command never does.
   const verbatim = continuing() && said && !said.startsWith("/");
   playLine(verbatim ? line : said, files);
 }
@@ -400,9 +401,9 @@ function _walk(step) {
 
 /* The menu offers what the caret can take: a DIRECTION while the line is
    nothing but its slash word, and the INLINE words while the slash is
-   inside a sentence. The rows come from the shared table either way, so
-   the language appears here by existing; `… ` is how the table marks the
-   inline half, and a reader types the bare word after it. */
+   inside a sentence. The rows come from the language either way, so it
+   appears here by existing; `… ` is how its rows mark the inline half,
+   and a reader types the bare word after it. */
 
 const _INLINE = "… ";
 
@@ -417,7 +418,7 @@ function _prefixes() {
 /* Cast names where a direction expects one — the RULE is the
    terminal's (`terminal.prompt.completion._cast_rows`, its home, held
    there because the two menus must offer one gesture): names come from
-   `api.lore.cast`, filter on the raw argument so spaced names match
+   `api.stories.characters.list`, filter on the raw argument so spaced names match
    whole, none are offered past a `:`, and `/me` inserts `Name: ` where
    the others insert the bare name (the hint is a colon away). */
 
@@ -443,7 +444,8 @@ async function offerNames({ token, partial }) {
   const mine = ++_castAsked;
   if (_cast === null) {
     try {
-      _cast = (await api.cast()).characters;
+      const story = held.story();
+      _cast = story === null ? [] : await api.stories.characters.list(story);
     } catch {
       _cast = [];
     }

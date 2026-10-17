@@ -3,8 +3,8 @@
 Cases 1-2: a story below the verbatim threshold, or one without covering
 summaries, goes out whole. Case 3: HEAD verbatim, the covered scenes as
 summaries, the TAIL verbatim and scene-aligned; a card is never
-summarized away. Case 4: over the limit — the smaller of the window and
-`max_context` — the oldest summaries are replaced by the story-so-far
+summarized away. Case 4: over the limit — the context in force, the
+window under the context limit — the oldest summaries are replaced by the story-so-far
 through the last replaced scene. Case 5: still over, the tail target
 steps down to its floor; past the floor the assembly refuses. Across all
 of them the wire promise holds: the model sees the stored messages and
@@ -40,18 +40,20 @@ from otaku.store.schema import Attachment, InjectionPosition, Message, Scene, St
 CAT = Attachment(file="pic-0001-20260918-a3f9c1e2.jpg", width=2, height=2, size=3)
 CAT_PICTURE = WirePicture(b"cat", "image/jpeg")
 NO_TOOLS = ToolSet()  # every call leaves the wire
+# A reply that is one call of the questions tool and nothing else.
+QUESTION = "```otk-question\nGo on?\n1. Yes\n2. No\n```"
 
 
 def assemble(
     system: str,
     messages: list[Message],
-    max_context: int | None,
+    context_window: int | None,
     *,
     scenes: tuple = (),
     recap_header: str = "",
     head_messages: int = 20,
     min_tail_messages: int = 150,
-    max_context_setting: int = 0,
+    context_limit: int = 0,
     files=None,
     newest_pictures_only: bool = False,
     injections: tuple[Injection, ...] = (),
@@ -64,7 +66,7 @@ def assemble(
     shape = ContextShape(
         head_messages=head_messages,
         min_tail_messages=min_tail_messages,
-        max_context=context_in_force(max_context, max_context_setting),
+        context_in_force=context_in_force(context_window, context_limit),
     )
     if files is None:
         pictures_ride = PicturesRide.NONE
@@ -215,6 +217,25 @@ class TestCharacterCards:
         prompt = assemble("", rows, 65536, scenes=(scene(64, "sum"),))
         assert "breathe /cue whisper softly" in "\n".join(m.body for m in prompt.messages)
 
+    def test_every_card_the_request_carries_is_listed_with_its_cost(self) -> None:
+        rows = turns(220)
+        rows[46] = replace(card(47, "((OOC: Elara joins.))"), speaker="Elara")  # in the recap
+        rows[210] = replace(card(211, "((OOC: Wren joins.))"), speaker="Wren")  # in the tail
+        scenes = (scene(42, "sum two"), scene(64, "sum three"))
+        prompt = assemble("", rows, 65536, scenes=scenes, min_tail_messages=150)
+        assert [sent.name for sent in prompt.cards] == ["Elara", "Wren"]
+        assert all(sent.tokens > 0 for sent in prompt.cards)
+
+    def test_a_cards_portrait_counts_in_its_cost(self) -> None:
+        plain = [replace(card(1, "((OOC: Elara joins.))"), speaker="Elara"), user("I wave.")]
+        pictured = [replace(plain[0], attachments=(CAT,)), plain[1]]
+        without = assemble("", plain, 8192, files=CAT_FOLDER)
+        with_it = assemble("", pictured, 8192, files=CAT_FOLDER)
+        assert with_it.cards[0].tokens - without.cards[0].tokens == IMAGE_TOKENS
+
+    def test_a_request_without_cards_lists_none(self) -> None:
+        assert assemble("", [user("I wave.")], 8192).cards == ()
+
 
 class TestRecapDegrades:
     """Case 4: over the limit, the oldest summaries are replaced by the
@@ -272,7 +293,7 @@ class TestRecapDegrades:
         sent = "\n".join(m.body for m in prompt.messages)
         assert sent.index("((OOC: Elara joins.))") < sent.index("Arc through two.")
 
-    def test_max_context_caps_a_larger_window(self) -> None:
+    def test_the_context_limit_caps_a_larger_window(self) -> None:
         # The window would hold everything; the setting caps it, the
         # reply reserve coming off the capped value.
         prompt = assemble(
@@ -282,12 +303,12 @@ class TestRecapDegrades:
             scenes=self._scenes(),
             head_messages=5,
             min_tail_messages=10,
-            max_context_setting=2524,
+            context_limit=2524,
         )
         assert prompt.history and "Arc through two." in prompt.recap
         assert prompt.limit == 1500  # the cap minus the reserve
 
-    def test_max_context_zero_means_the_whole_window(self) -> None:
+    def test_a_context_limit_of_zero_means_the_whole_window(self) -> None:
         prompt = assemble(
             "",
             turns(40),
@@ -295,7 +316,7 @@ class TestRecapDegrades:
             scenes=self._scenes(),
             head_messages=5,
             min_tail_messages=10,
-            max_context_setting=0,
+            context_limit=0,
         )
         assert not prompt.history  # everything fits — case 4 never fires
         assert prompt.scenes_summarized == 3
@@ -352,8 +373,8 @@ class TestRejected:
         with pytest.raises(ContextOverflowError) as caught:
             assemble("", rows, 2048, head_messages=5, min_tail_messages=10)
         refusal = caught.value
-        assert refusal.context == 2048
-        assert 0 < refusal.limit < refusal.context
+        assert refusal.context_in_force == 2048
+        assert 0 < refusal.limit < refusal.context_in_force
         assert refusal.tokens > refusal.limit
 
 
@@ -648,10 +669,11 @@ class TestTheStoryAsOneText:
     def test_the_text_wires_system_is_the_framing_around_the_premise(self) -> None:
         # the standing instruction stands even where the premise is empty:
         # a model turn needs a turn before it
-        assert assemble("Be brief.", exchange(), None).story_system == "<<frame Be brief.>>"
-        assert assemble("", exchange(), None).story_system == "<<frame >>"
+        brief = assemble("Be brief.", exchange(), None)
+        assert brief.text_completion_system == "<<frame Be brief.>>"
+        assert assemble("", exchange(), None).text_completion_system == "<<frame >>"
         injected = assemble("Be brief.", exchange(), None, injections=(system("ASK HOW"),))
-        assert injected.story_system == "<<frame Be brief.\n\nASK HOW>>"
+        assert injected.text_completion_system == "<<frame Be brief.\n\nASK HOW>>"
 
     def test_as_text_renders_the_framed_premise_and_the_story_in_the_template(self) -> None:
         rows = [story(user("I was waiting")), story(assistant("for the bus."))]
@@ -676,6 +698,22 @@ class TestToolCalls:
     def test_a_call_of_any_other_tool_leaves_the_wire(self) -> None:
         prompt = assemble("", noted(), 8192, tool_set=NO_TOOLS)
         assert [m.body for m in prompt.messages] == ["One.", "Two.", "Three."]
+
+    def test_a_reply_that_was_a_call_alone_leaves_no_turn_once_its_tool_is_off(self) -> None:
+        # an empty turn teaches a model to answer with nothing: the
+        # reader's lines either side rejoin, as around a reply never made
+        rows = [user("One."), assistant(QUESTION), user("Two.")]
+        prompt = assemble("", rows, 8192, tool_set=NO_TOOLS)
+        assert [(m.role, m.body) for m in prompt.messages] == [("user", "One.\n\nTwo.")]
+
+    def test_the_same_reply_goes_while_its_tool_is_on(self) -> None:
+        rows = [user("One."), assistant(QUESTION), user("Two.")]
+        prompt = assemble("", rows, 8192, tool_set=ToolSet(on=frozenset({"question"})))
+        assert [(m.role, m.body) for m in prompt.messages] == [
+            ("user", "One."),
+            ("assistant", QUESTION),
+            ("user", "Two."),
+        ]
 
     def test_a_tool_turn_goes_as_the_readers_turn_framed_by_the_prompts(self) -> None:
         # the wire has two sides, and the result is what the model is
@@ -809,6 +847,24 @@ class TestPictures:
         (with_it,) = [turn for turn in prompt.messages if turn.images]
         assert "turn 200." in with_it.body and "turn 30." not in with_it.body
         assert (prompt.pictures_sent, prompt.pictures_omitted) == (1, 0)
+
+    def test_a_card_rows_picture_rides_the_recap_with_it(self) -> None:
+        # A card row in a summarized scene rides the recap whole — and its
+        # portrait with it, costed in the fit like a verbatim row's; the
+        # summarized prose row beside it loses its picture as before.
+        story = turns(220)
+        story[29] = replace(story[29], attachments=(CAT,))
+        story[30] = replace(card(31, "Elara joins."), attachments=(CAT,))
+        scenes = (scene(25, "sum one"), scene(42, "sum two"), scene(64, "sum three"))
+        prompt = assemble("", story, 65536, scenes=scenes, min_tail_messages=150, files=CAT_FOLDER)
+        assert prompt.scenes_summarized == 3
+        (with_it,) = [turn for turn in prompt.messages if turn.images]
+        assert "Elara joins." in with_it.body and "turn 30." not in with_it.body
+        assert with_it.images == (CAT_PICTURE,)
+        assert (prompt.pictures_sent, prompt.pictures_omitted) == (1, 0)
+        plain = [replace(m, attachments=()) for m in story]
+        without = assemble("", plain, 65536, scenes=scenes, min_tail_messages=150, files=CAT_FOLDER)
+        assert prompt.transcript_tokens - without.transcript_tokens == IMAGE_TOKENS
 
     def test_with_newest_pictures_only_earlier_rows_pictures_are_held_back(self) -> None:
         # An engine that gathers every picture onto the latest prompt

@@ -12,7 +12,6 @@ from pathlib import Path
 
 import pytest
 
-from otaku.backend.api import providers as api_providers
 from otaku.settings.providers import ProviderConfig
 from scenarios.support.live import first_model
 from scenarios.support.live import live_app as build_app
@@ -27,12 +26,12 @@ pytestmark = pytest.mark.live
 class TestLmStudio:
     def test_a_turn_streams_and_persists(self, live_app) -> None:  # type: ignore[no-untyped-def]
         live_app.play("Reply with one word: ready?")
-        chain = live_app.store.stories.get_messages(live_app.session.story_id)
+        chain = live_app.store.stories.get_messages(live_app.story_id)
         assert chain[1].role == "assistant"
         assert chain[1].body.strip()
 
     def test_the_registry_lists_rich_models(self, live_app) -> None:  # type: ignore[no-untyped-def]
-        providers = api_providers.get_providers(live_app.session).rows
+        providers = live_app.api.providers.list().providers
         provider = next(r for r in providers if r.id == "lmstudio")
         assert provider.models
         assert all(row.name for row in provider.models)

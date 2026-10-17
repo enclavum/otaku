@@ -5,8 +5,9 @@ it is on the wire. This module owns what one IS and where it GOES:
 appended to the system message (`inject_into_system`), or given a row
 of its own before one of the reader's messages (`inject_into_tail`) — a
 synthesized user row, wire-only as a recap row is, which the
-assembler's one merge then joins to its neighbour. Who makes one is
-above this package (a story's settings, `backend.story`; later a
+assembler's one merge then joins to its neighbour. Who makes one is its
+owner's (a story's settings, `backend.domain.story.settings`; a card,
+`context.cards`, gathered by `backend.domain.story._request`; later a
 lorebook), and the assembler is handed them built. WHEN they go in, and
 what they cost the budget, is the assembler's.
 """
@@ -30,7 +31,9 @@ class Injection:
     recap, and never after the newest row, which keeps the last word and
     its cue."""
 
-    owner: str  # what made it — a setting's name, later a lorebook's — for whoever reports it
+    # What made it — a setting's name, a card's, later a lorebook's — for
+    # whoever reports it.
+    owner: str
     text: str
     position: InjectionPosition
 

@@ -2,12 +2,10 @@
 
 Two questions, one vocabulary. Reading: `read(line)` binds a typed line
 to whatever opened it — a direction (/me, /you, /ooc) or prose when
-nothing did — and `is_command` answers the other side of the same coin
-(a slash word that is not story syntax belongs to the command table).
-Writing: `to_wire` is the ONE dispatch turning a stored turn into wire
+nothing did. Writing: `to_wire` is the ONE dispatch turning a stored turn into wire
 text, whatever its kind — prose parses for its syntax, a direction's
 stored template fills, a card row takes the block composed from its
-archive, a recap row IS its text.
+character's profile, a recap row IS its text.
 
 A line is stored exactly as typed and read again whenever the turn is
 used. Templates are data on the turn (`Message.template`); at RECORD
@@ -22,11 +20,11 @@ on the wire, and the worker's extraction composes rows the same way
 (`numbered_chat`); both sit BELOW backend and may not reach up. And
 reading and writing are one vocabulary — the same Line classes that
 parse a typed line define how its stored turn composes — so splitting
-them across packages would put one language in two homes. `backend.commands`
-re-exports the two pieces of this module frontends may call: `is_command`,
-and `spans`, a line's story and out-of-character runs, which they draw
-apart; the language itself lives at the lowest package everything that
-speaks it can reach.
+them across packages would put one language in two homes.
+`backend.api.story.language` is what frontends may apply of it to a line not
+stored yet — its tokens, what a line opens with, and `spans`, a line's
+story and out-of-character runs, which they draw apart; the language
+itself lives at the lowest package everything that speaks it can reach.
 
 Vocabulary: syntax = this language; directions (/me /you /ooc) OPEN a
 line, inliners (/ooc /cue) CLOSE one, told apart by position (an
@@ -277,7 +275,7 @@ def spans(line: str) -> list[tuple[str, bool]]:
     token (both send an out-of-character request), and whatever follows
     an inliner to the line's end; the rest is story, the tokens
     themselves included. The breaks a line keeps at its edges are read
-    past (`api.play.submit`)."""
+    past (`domain.story._play.submit_line`)."""
     lead = len(line) - len(line.lstrip())
     words = line[lead:].split(None, 1)
     direction = DIRECTIONS.get(words[0]) if words else None
@@ -291,16 +289,10 @@ def spans(line: str) -> list[tuple[str, bool]]:
     return [(line[:at], False), (line[at:], True)]
 
 
-def is_command(line: str) -> bool:
-    """Whether the line belongs to the command table instead of the
-    story: it opens with a slash word that is not a direction."""
-    return line.startswith("/") and not read(line).token
-
-
 def to_wire(message: Message, *, is_last: bool, card_block: str | None = None) -> str:
     """What one stored turn sends. A card row sends `card_block` (the
-    caller owns the archive lookup and composition; a row with no
-    reachable archive sends its body). Every other row parses its stored
+    caller owns the profile lookup and composition; a row with no
+    reachable profile sends its body). Every other row parses its stored
     line and fills its stored template. Two body shapes reach this, and
     the body tells them apart: turns written before the syntax existed
     hold prose with their prefix already stripped and their name already
@@ -328,7 +320,7 @@ def to_wire(message: Message, *, is_last: bool, card_block: str | None = None) -
     if frame.tail and (frame.inliner == "/ooc" or (frame.inliner == "/cue" and is_last)):
         parts.append(OOC_FRAME.replace("{body}", frame.tail))
     # The breaks at a line's edges are its paragraph breaks
-    # (`assembler.get_join_type`, `api.play.submit`): the leading from the text
+    # (`assembler.get_join_type`, `domain.story._play.submit_line`): the leading from the text
     # before, the trailing to the model's continuation, both typed so in
     # the canvas and riding the wire as they stand — the reader trims them
     # off the line's text, so they are put back here. A block line has none.

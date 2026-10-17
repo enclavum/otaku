@@ -11,28 +11,27 @@ shown, and the question it stands on."""
 
 import io
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import replace
-from types import SimpleNamespace
 
 from prompt_toolkit.utils import get_cwidth
 
-from otaku.backend.story import StorySettingAssistantNotes, StorySettingQuestions
-from otaku.backend.tools import ToolQuestion
+from otaku.backend.api.story.messages import _as_messages
+from otaku.backend.domain.story._tools import ToolQuestion
+from otaku.backend.domain.story.messages import segments as split
 from otaku.store.schema import Message, StoryMode
+from otaku.terminal.api.story.messages import Message as Drawn
 from otaku.terminal.tty import DIM
 from otaku.terminal.tty.render import (
     BAR,
     BlockStream,
     QuestionStream,
-    asked,
     block,
     command_tokens,
     flow,
     flow_offsets,
     last_turns,
     message,
-    shown_tools,
     spaced,
     unit_start,
     user_block,
@@ -230,32 +229,40 @@ class TestMessage:
 
     def test_a_question_is_its_question_alone_as_a_block(self) -> None:
         body = "The door creaks.\n```otk-question\nGo in?\n1. Yes\n2. No\n```"
-        out = message(body, "assistant", shown=QUESTIONS)
+        out = message(body, "assistant", segments=split(body), shown=QUESTIONS)
         assert out == f"The door creaks.\n\n{BAR}Go in?"
 
     def test_a_question_while_its_tool_is_off_is_left_out(self) -> None:
         body = "The door creaks.\n```otk-question\nGo in?\n1. Yes\n```"
-        assert message(body, "assistant") == "The door creaks."
+        assert message(body, "assistant", segments=split(body)) == "The door creaks."
 
     def test_a_note_is_dim_while_the_story_displays_notes_and_gone_otherwise(self) -> None:
         body = "The door creaks.\n```otk-note\nKeep the key.\n```"
         assert (
-            message(body, "assistant", shown=NOTES)
+            message(body, "assistant", segments=split(body), shown=NOTES)
             == f"The door creaks.\n\n{DIM}{BAR}Keep the key.{NORMAL}"
         )
-        assert message(body, "assistant") == "The door creaks."
+        assert message(body, "assistant", segments=split(body)) == "The door creaks."
 
     def test_a_call_otaku_runs_draws_nothing(self) -> None:
         body = "Let me look.\n```otk-web-search\ntides\n```"
-        assert message(body, "assistant", shown=QUESTIONS | NOTES) == "Let me look."
+        assert (
+            message(body, "assistant", segments=split(body), shown=QUESTIONS | NOTES)
+            == "Let me look."
+        )
 
     def test_prose_after_a_block_is_set_apart_by_one_blank_line(self) -> None:
         body = "```otk-note\nKey.\n```\n\n\nThen prose."
-        assert message(body, "assistant", shown=NOTES) == f"{DIM}{BAR}Key.{NORMAL}\n\nThen prose."
+        assert (
+            message(body, "assistant", segments=split(body), shown=NOTES)
+            == f"{DIM}{BAR}Key.{NORMAL}\n\nThen prose."
+        )
 
     def test_a_block_wraps_at_the_width_given(self) -> None:
         body = "```otk-question\nDoes Mara confess tonight, or wait for the ball?\n1. Yes\n```"
-        rows = message(body, "assistant", shown=QUESTIONS, width=30).split("\n")
+        rows = message(body, "assistant", segments=split(body), shown=QUESTIONS, width=30).split(
+            "\n"
+        )
         assert len(rows) > 1 and all(row.startswith(BAR) and _columns(row) <= 30 for row in rows)
 
 
@@ -275,9 +282,10 @@ class TestToolTurn:
 
 class TestFlow:
     """`flow` — the canvas's echo: the turns as ONE text, a user row as
-    prose with no block, every row joined to the text before it by the
-    join rule (`api.play.join_type`); `flow_offsets` says where each
-    turn's own text begins, so an echoed turn can be erased in place."""
+    prose with no block, every row joined to the text before it as its
+    `join_type` says (the backend's join rule); `flow_offsets` says where
+    each turn's own text begins, so an echoed turn can be erased in
+    place."""
 
     def test_rows_join_inline_or_as_paragraphs_by_the_join_rule(self) -> None:
         rows = [
@@ -287,14 +295,14 @@ class TestFlow:
             story("assistant", "Nothing came."),
             story("user", "She shivered."),
         ]
-        assert flow(rows) == "She waited for the bus. Then?\n\nNothing came. She shivered."
+        assert flow(handed(rows)) == "She waited for the bus. Then?\n\nNothing came. She shivered."
 
     def test_chat_rows_are_paragraphs_in_the_one_text(self) -> None:
         rows = [Message(role="user", body="One"), Message(role="assistant", body="Two")]
-        assert flow(rows) == "One\n\nTwo"
+        assert flow(handed(rows)) == "One\n\nTwo"
 
     def test_a_user_row_is_prose_not_a_block(self) -> None:
-        text = flow([Message(role="user", body="I open the door.")])
+        text = flow(handed([Message(role="user", body="I open the door.")]))
         assert text == "I open the door."
         assert text != user_block(message("I open the door.", "user"))
 
@@ -304,7 +312,7 @@ class TestFlow:
             story("assistant", "the bus."),
             story("user", "\n\nThen?"),
         ]
-        text, starts = flow_offsets(rows)
+        text, starts = flow_offsets(handed(rows))
         assert text == "She waited for the bus.\n\nThen?"
         assert [text[at:] for at in starts] == [text, " the bus.\n\nThen?", "Then?"]
         # a paragraph join's blank goes with the turn BEFORE it
@@ -312,7 +320,7 @@ class TestFlow:
 
     def test_a_lines_commands_and_words_with_the_model_keep_its_text(self) -> None:
         line = '/me Mara: "Wait" /cue keep it quiet'
-        drawn = flow([story("user", line)])
+        drawn = flow(handed([story("user", line)]))
         assert _ANSI.sub("", drawn) == line
         # the commands open on an escape of their own; the words after the
         # inliner are dim, and the line's speech is typeset as story
@@ -325,28 +333,28 @@ class TestFlow:
             return [make("user", "Look it up."), result, make("assistant", "High at six.")]
 
         # in story mode the reply goes on in the paragraph the call interrupted
-        assert flow(rows(story)) == "Look it up. High at six."
+        assert flow(handed(rows(story))) == "Look it up. High at six."
         # chat rows, read in the one text, are paragraphs
-        assert flow(rows(chat)) == "Look it up.\n\nHigh at six."
+        assert flow(handed(rows(chat))) == "Look it up.\n\nHigh at six."
 
     def test_no_note_rides_the_flow_even_while_displayed(self) -> None:
         rows = [
             Message(role="user", body="One."),
             Message(role="assistant", body="Two.\n```otk-note\nKey.\n```"),
         ]
-        assert flow(rows) == "One.\n\nTwo."
-        assert flow(rows, shown=NOTES) == "One.\n\nTwo."
+        assert flow(handed(rows)) == "One.\n\nTwo."
+        assert flow(handed(rows), shown=NOTES) == "One.\n\nTwo."
 
 
 class TestUnitStart:
     """`unit_start` — where the reply ending a list of rows begins as ONE
-    unit: the reply, and where a tool turn stands right before it, that
-    turn and the reply holding its call, again and again
-    (`Session._pop_reply`'s rule)."""
+    unit, as its `unit` names it: the reply, and where a tool turn stands
+    right before it, that turn and the reply holding its call, again and
+    again (the backend's rule, the chain's `take_reply_unit`)."""
 
     def test_a_reply_alone_is_its_own_unit(self) -> None:
         rows = [chat("user", "Go."), chat("assistant", "Gone.")]
-        assert unit_start(rows, 2) == 1
+        assert unit_start(handed(rows), 2) == 1
 
     def test_a_reply_takes_its_tool_chain(self) -> None:
         rows = [
@@ -357,16 +365,16 @@ class TestUnitStart:
             tool_turn("Six."),
             chat("assistant", "High at six."),
         ]
-        assert unit_start(rows, 6) == 1
-        assert unit_start(rows, 4) == 1
+        assert unit_start(handed(rows), 6) == 1
+        assert unit_start(handed(rows), 4) == 1
 
     def test_two_replies_side_by_side_are_two_units(self) -> None:
         rows = [chat("user", "Go."), chat("assistant", "One."), chat("assistant", "Two.")]
-        assert unit_start(rows, 3) == 2
+        assert unit_start(handed(rows), 3) == 2
 
     def test_a_chain_that_opens_the_rows_starts_at_the_first(self) -> None:
         rows = [tool_turn("Tides."), chat("assistant", "High.")]
-        assert unit_start(rows, 2) == 0
+        assert unit_start(handed(rows), 2) == 0
 
 
 class TestLastTurns:
@@ -379,58 +387,12 @@ class TestLastTurns:
             Message(role="assistant", body="Two."),
             Message(role="user", body="Three."),
         ]
-        assert last_turns(rows, 2) == "Two.\n\n" + user_block(message("Three.", "user"))
+        assert last_turns(handed(rows), 2) == "Two.\n\n" + user_block(message("Three.", "user"))
 
     def test_on_the_canvas_the_one_text(self) -> None:
         rows = [story("user", "She waited for"), story("assistant", "the bus.")]
-        assert last_turns(rows, 2, is_story_mode=True) == "She waited for the bus."
-        assert last_turns(rows, 1, is_story_mode=True) == "the bus."
-
-
-class TestShownTools:
-    """`shown_tools` — the page's `displayTools` rule copied: a question
-    while its tool is on, the notes while theirs is on with its display
-    switch."""
-
-    def test_reads_the_facts_the_settings_report(self) -> None:
-        for questions, notes, display, shown in (
-            (True, False, True, {"question"}),
-            (False, True, True, {"note"}),
-            (False, True, False, set()),
-            (False, False, True, set()),
-            (True, True, True, {"question", "note"}),
-        ):
-            settings = FakeSettings(questions=questions, notes=notes, display_notes=display)
-            assert shown_tools(settings) == shown, (questions, notes, display)  # type: ignore[arg-type]
-
-    def test_a_build_without_the_tools_shows_nothing(self) -> None:
-        assert shown_tools(FakeSettings(missing=True)) == frozenset()  # type: ignore[arg-type]
-
-
-class TestAsked:
-    """`asked` — the question the story stands on, read off the newest
-    message: a reply whose last call is a question, nothing after it but
-    notes and whitespace."""
-
-    def test_a_reply_ending_on_a_question(self) -> None:
-        body = "The door.\n```otk-question\nGo in?\n1. Yes\n2. No\n```"
-        found = asked(reply(body), QUESTIONS)
-        assert found is not None and (found.question, found.options) == ("Go in?", ("Yes", "No"))
-
-    def test_none_while_the_questions_tool_is_off(self) -> None:
-        assert asked(reply("```otk-question\nGo in?\n1. Yes\n```"), frozenset()) is None
-
-    def test_notes_and_whitespace_after_it_do_not_answer_it(self) -> None:
-        body = "```otk-question\nGo in?\n1. Yes\n```\n```otk-note\nKey.\n```\n\n"
-        assert asked(reply(body), QUESTIONS) is not None
-
-    def test_prose_after_it_means_the_model_went_on(self) -> None:
-        body = "```otk-question\nGo in?\n1. Yes\n```\nIt opens."
-        assert asked(reply(body), QUESTIONS) is None
-
-    def test_a_line_of_the_readers_or_no_message_means_none(self) -> None:
-        assert asked(Message(role="user", body="Yes"), QUESTIONS) is None
-        assert asked(None, QUESTIONS) is None
+        assert last_turns(handed(rows), 2, is_story_mode=True) == "She waited for the bus."
+        assert last_turns(handed(rows), 1, is_story_mode=True) == "the bus."
 
 
 def drawn(text: str, *, width: int) -> str:
@@ -452,13 +414,16 @@ def asked_block(text: str, *, width: int) -> str:
     return out.getvalue()
 
 
+def handed(rows: Sequence[Message]) -> list[Drawn]:
+    """Store rows as the messages the terminal is handed — split, joined
+    and placed in their reply units as the backend builds them — each
+    numbered by its position."""
+    return _as_messages([replace(row, id=index + 1) for index, row in enumerate(rows)])
+
+
 def tool_turn(body: str) -> Message:
-    """A tool's result, as the session records it."""
+    """A tool's result, as the app records it."""
     return Message(role="tool", body=body, kind="tool", provider="web-search")
-
-
-def reply(body: str) -> Message:
-    return Message(role="assistant", body=body)
 
 
 def story(role: str, body: str) -> Message:
@@ -473,30 +438,3 @@ def chat(role: str, body: str) -> Message:
 
 def _columns(row: str) -> int:
     return sum(max(0, get_cwidth(ch)) for ch in row.replace(DIM, "").replace(NORMAL, ""))
-
-
-class FakeSettings:
-    """A story's settings with the questions and notes tools as asked, or
-    without them."""
-
-    def __init__(
-        self,
-        *,
-        questions: bool = False,
-        notes: bool = False,
-        display_notes: bool = True,
-        missing: bool = False,
-    ):
-        self._by_name: dict[str, object] = (
-            {}
-            if missing
-            else {
-                StorySettingQuestions.name: SimpleNamespace(enabled=questions),
-                StorySettingAssistantNotes.name: SimpleNamespace(
-                    enabled=notes, display_notes=display_notes
-                ),
-            }
-        )
-
-    def get(self, name: str) -> object:
-        return self._by_name.get(name)

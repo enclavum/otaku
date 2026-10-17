@@ -1,18 +1,22 @@
 """`Chat` — the package's namesake: what the terminal holds beside the
-backend's Session, and `say`, the ONE chokepoint command output prints
+backend's App — the story it plays among them, its own and nobody
+else's — and `say`, the ONE chokepoint command output prints
 through (the lead blank, the ledger invalidation — what keeps the
 spacing honest without stdout wrappers). Its own module because the
-dispatch topology forces it: the bindings need `Chat`, the loop needs
-the bindings — whoever routes cannot live beside this class.
+dispatch topology forces it: the commands need `Chat`, the run loop
+needs the commands — whoever routes cannot live beside this class.
 """
 
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 
-from otaku.backend import StoryMode
-from otaku.backend.api import stories as api_stories
-from otaku.backend.session import Session
+from otaku.terminal.api import NO_STORY_HINT, Api, App, Conflict, Layout, NotFound, StoryMode
+from otaku.terminal.api.story.messages import Message
+from otaku.terminal.api.story.settings import DEFAULT_LAYOUT, LAYOUT_SETTING
+from otaku.terminal.api.story.stories import Story
 from otaku.terminal.chat.ledger import ScreenLedger
-from otaku.terminal.tty.render import flow_offsets, shown_tools, turn, unit_start
+from otaku.terminal.tty.render import flow_offsets, turn, unit_start
 from otaku.terminal.tty.statusline import StatusLine
 
 # Turns echoed when a story (re)opens (the launch, a browser pick, an
@@ -22,10 +26,22 @@ RESUME_TURNS = 4
 
 
 class Chat:
-    """The terminal-side state, one per run — and the session it drives:
-    handlers take `chat` alone and reach the session through it."""
+    """The terminal-side state, one per run — and the app it drives:
+    handlers take `chat` alone and reach the interface through it
+    (`api`), the app itself only for its life and its channels."""
 
-    session: Session
+    app: App
+    api: Api
+    # The story this terminal plays — chosen here and moved by nothing
+    # else — what it last read of it (`refresh`), and its head as this
+    # terminal last drew it, which a head moved elsewhere differs from
+    # (`catch_up`). None while it plays no story yet.
+    story_id: int | None
+    story: Story | None
+    head: int | None
+    # The layout the reader set for a story not made yet, handed over
+    # when one is made (`ensure_story`); a premise makes the story itself.
+    draft_layout: Layout | None
     ledger: ScreenLedger
     status_line: StatusLine
     # The loop's exit flag: /bye (and Ctrl+D) raise it, and the run loop
@@ -37,7 +53,7 @@ class Chat:
     # the one submission, cleared with it.
     continuing: bool
     # A reply streamed this submission (`stream.show`), or an undo left
-    # the story on the question a reply ended on (`bindings._pose_again`):
+    # the story on the question a reply ended on (`dispatch.story.stories`):
     # the prompt after it may offer the answers, where one after any other
     # command, its output standing between, offers none. Cleared by the
     # loop with each submission.
@@ -51,28 +67,167 @@ class Chat:
     # How full the next request is, as the status row shows it on its
     # right ("85% of 128K"); "" while the window is not known.
     # Read again by the loop before every prompt.
-    context_use: str
+    context_fill: str
 
-    def __init__(self, session: Session) -> None:
-        self.session = session
+    def __init__(self, app: App) -> None:
+        self.app = app
+        self.api = Api(app)
+        self.story_id = None
+        self.story = None
+        self.head = None
+        self.draft_layout = None
         self.quit = False
         self.continuing = False
         self.replied = False
         self.status_note = ""
-        self.context_use = ""
+        self.context_fill = ""
         # One renderer for the prompt's toolbar and the pinned row, both
         # reading the same channels, so the line never twitches at the
         # streaming handoff.
-        self.status_line = StatusLine(session.status, lambda: self.context_use)
+        self.status_line = StatusLine(self.api.app.status.get, lambda: self.context_fill)
         # An erase the ledger makes mid-stream takes the pinned row with it.
         self.ledger = ScreenLedger(repaint=self.status_line.refresh)
 
+    # ---------- the story it plays ----------
+
+    def land(self, story_id: int) -> Story:
+        """Play `story_id` from now on: read it, take its head as drawn —
+        the caller echoes it — and remember it for the next launch."""
+        self.story_id = story_id
+        self.story = self.api.stories.get(story_id)
+        self.head = self.story.head
+        self.draft_layout = None
+        self.api.settings.update(last_story=story_id)
+        return self.story
+
+    def leave(self) -> None:
+        """Play no story — the one played is gone."""
+        self.story_id = self.story = self.head = None
+
+    def refresh(self) -> Story | None:
+        """Read the story again, its facts as they stand now; None with no
+        story, or one deleted under the terminal, which then plays none."""
+        if self.story_id is not None:
+            try:
+                self.story = self.api.stories.get(self.story_id)
+            except NotFound:
+                self.leave()
+        return self.story
+
+    def mark_drawn(self, story: Story | None = None) -> None:
+        """What the story is now is what the screen shows: `story` where
+        the caller holds it as it now stands (an undo's answer), else read
+        again — and its head taken as drawn, after this terminal's own
+        turn, take or undo."""
+        if story is not None and story.id == self.story_id:
+            self.story = story
+        else:
+            self.refresh()
+        self.head = self.story.head if self.story is not None else None
+
+    def catch_up(self) -> bool:
+        """Whether the story moved on elsewhere since this terminal last
+        drew it — read again before each prompt; the head is taken as
+        drawn either way, the caller echoing what moved."""
+        drawn = self.head
+        self.mark_drawn()
+        return self.story is not None and self.story.head != drawn
+
+    def ensure_story(self) -> int:
+        """The story this terminal plays — made now, with what was set for
+        it, when there is none yet: a first line, a title, a premise."""
+        if self.story_id is None:
+            made = self.api.stories.create()
+            if self.draft_layout is not None:
+                self.api.stories.settings.update(
+                    made.value.id, LAYOUT_SETTING, layout=self.draft_layout
+                )
+            self.land(made.value.id)
+        assert self.story_id is not None
+        return self.story_id
+
+    @contextmanager
+    def writing(self) -> Iterator[int]:
+        """The story a write lands in — made for it when there is none yet
+        (`ensure_story`), and deleted again where the write raises, refused
+        or cancelled, the layout set for it held as it was: a first write
+        that lands nothing leaves no story behind."""
+        if self.story_id is not None:
+            yield self.story_id
+            return
+        layout = self.draft_layout
+        story_id = self.ensure_story()
+        try:
+            yield story_id
+        except BaseException:
+            self.api.stories.delete(story_id)
+            self.leave()
+            self.draft_layout = layout
+            raise
+
+    def played(self) -> int:
+        """The story this terminal plays, for a command that acts on one —
+        refused with the backend's hint while there is none."""
+        if self.story_id is None:
+            raise Conflict(NO_STORY_HINT)
+        return self.story_id
+
+    def messages(self) -> list[Message]:
+        """The story's chain as it stands; [] with no story."""
+        if self.story_id is None:
+            return []
+        return self.api.stories.messages.list(self.story_id)
+
+    @property
+    def layout(self) -> Layout:
+        """The layout the terminal draws in: the story's, or what was set
+        for one not made yet — the default until then."""
+        if self.story is not None:
+            return self.story.layout
+        return self.draft_layout or DEFAULT_LAYOUT
+
+    @property
+    def is_story_mode(self) -> bool:
+        """Whether the story is read in story mode — echoed as one text
+        then (`render.flow`), the played turns' blocks otherwise."""
+        return self.layout.mode is StoryMode.STORY
+
+    @property
+    def premise(self) -> str:
+        """The story's premise; none while there is no story."""
+        return self.story.premise if self.story is not None else ""
+
+    @property
+    def can_attach(self) -> bool:
+        """Whether a picture may ride the next line in the layout drawn
+        in — per keystroke, so off what was last read; a story not made
+        yet asks the model in use (its layouts here, the canvas and the
+        manuscript, go over the chat wire alike)."""
+        if self.story is not None:
+            return self.story.can_attach
+        model = self.api.app.get().model
+        return model is not None and model.can_attach
+
     @property
     def shown_tools(self) -> frozenset[str]:
-        """The tools whose calls the open story shows (`render.shown_tools`
-        over its settings) — read as each echo draws, so an echo and the
-        ledger's measure of it agree."""
-        return shown_tools(api_stories.get_settings(self.session))
+        """The tools whose calls the story shows (`Story.shown_tools`) —
+        read as each echo draws, so an echo and the ledger's measure of
+        it agree. Empty with no story: a story not made yet has every
+        tool off."""
+        if self.story_id is None:
+            return frozenset()
+        return self.api.stories.get(self.story_id).shown_tools
+
+    @property
+    def posed(self) -> bool:
+        """Whether the story stands on a question its newest turn asked
+        (`Story.question`) — read as each echo draws, as `shown_tools`
+        is."""
+        return (
+            self.story_id is not None and self.api.stories.get(self.story_id).question is not None
+        )
+
+    # ---------- what it prints ----------
 
     def say(self, text: str) -> None:
         """Print command output below the typed line: the lead blank on
@@ -86,7 +241,7 @@ class Chat:
     def restore_tail(self, count: int, above: str = "") -> None:
         """Hand the just-echoed tail (`render.last_turns(…, count)`) to
         the ledger, grouped the way /undo pops — a reply with its tool
-        chain (`render.unit_start`) plus the one user row before it,
+        chain (`Message.unit`) plus the one user row before it,
         either alone when the other is missing — so
         the shown turns can be taken back off the screen without having
         been played. `above` names the report line printed (with its
@@ -96,7 +251,7 @@ class Chat:
         output. In the canvas the echo is one text (`render.flow`), and
         each exchange is placed in it by its offsets
         (`ledger.restore_flow`)."""
-        messages = list(self.session.messages)
+        messages = self.messages()
         shown = messages[-count:]
         offset = len(messages) - len(shown)
         # indexes into `shown`: the prompt, and the reply's unit — its first
@@ -119,8 +274,8 @@ class Chat:
             groups.append((prompt, reply, end, cut))
         drawn = self.shown_tools
         ordered = list(reversed(groups))
-        if self.session.layout.mode is StoryMode.STORY:
-            text, starts = flow_offsets(shown, shown=drawn)
+        if self.layout.mode is StoryMode.STORY:
+            text, starts = flow_offsets(shown, shown=drawn, posed=self.posed)
             for n, (prompt, reply, end, cut) in enumerate(ordered):
                 first = prompt if prompt is not None else reply
                 assert first is not None

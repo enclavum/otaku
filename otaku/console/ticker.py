@@ -1,6 +1,6 @@
 """The live tail under the `otaku web` banner.
 
-Once the browser has the session, the terminal that started it has one
+Once the browser has the app, the terminal that started it has one
 job left: showing that something is reaching the server at all. So the
 last few requests stay on screen and are REWRITTEN in place — the
 terminal is the same height after an hour as after a minute.

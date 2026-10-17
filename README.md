@@ -15,7 +15,8 @@ The three pillars of otaku:
 - **keep the context small**, even for long stories, without losing the details that matter;
 - **high-quality interfaces**, in the browser and in the terminal.
 
-![otaku web](https://raw.githubusercontent.com/enclavum/otaku/main/images/capture-web.png?v=0.7.0)
+![otaku web](https://raw.githubusercontent.com/enclavum/otaku/main/images/capture-web.png?v=0.8.0)
+![otaku web](images/capture-web.png?v=0.8.0)
 
 ## Demo
 
@@ -29,23 +30,29 @@ and see how the UI works.
 
 ## Features
 
-Writing features:
+Writing:
 
 - **chat and story modes**, with alternative UI layouts:
-  - _chat mode_ (the manuscript or chat layout in the web interface), for a dialogue-based story;
-  - _story mode_ (the canvas layout in the web interface), for writing the story as a novel
-    directly in the transcript;
+  - _chat mode_, for a dialogue-based story;
+  - _story mode_, for writing the story as a novel directly in the transcript;
 - **consistent prose**: the first 20 and the last 150 messages are always sent to the model as
   they are, to make it maintain the style;
-- **automatic summaries and context control**: as the number of messages grows, intermediate
-  messages are split into scenes and are automatically replaced by scene summaries;
+- **automatic summaries**: as the number of messages grows, intermediate messages are split into
+  scenes and are automatically summarized; when the story no longer fits the context, its middle
+  is replaced by scene summaries;
+- **custom context size limit**: you can cap the context size yourself;
+- **transparent context**: you can see what will be sent to the model with the `/context` command;
+- **attaching pictures**: if the model supports vision, you can attach pictures to your messages;
+- **helper commands**: `/ooc` and `/cue` to steer the plot, `/me` and `/you` to say who is
+  speaking.
+
+Characters and lore:
+
+- **characters library**: add and remove characters outside stories, and invite them
+  into a story;
 - **character recognition**: characters you introduce in your story are extracted automatically;
   each character keeps their own journal of what they've seen and experienced;
-- **no fixed persona**: you are free to play any character during the story;
-- **pictures**: if the model supports vision, you can attach pictures to your messages;
-- **helper commands**: `/ooc` and `/cue` to steer the plot, `/me` and `/you` to say who is
-  speaking;
-- **transparent context**: you can see what will be sent to the model with the `/context` command.
+- **no fixed persona**: you are free to play any character during the story.
 
 Injections:
 
@@ -63,14 +70,12 @@ Tools the model can use (switched on per story, in the story dossier's Tools tab
 
 Import your existing content:
 
-- **character cards** — into a story you've already started;
+- **character cards** — into the characters library, or into a story you've already started;
 - **SillyTavern chats** — creates a new story that you can continue;
 - **a plain text file** — will be split into turns, and you can play with the characters in it.
 
 Planned (a release every one to two weeks):
 
-- **a central character registry**: add and remove characters outside stories, and invite them
-  into a story;
 - **lorebooks**, including import from SillyTavern — not implemented yet, but you can import world
   info into the system message;
 - **per-character context** for better character isolation;
@@ -190,12 +195,12 @@ chat mode, you can use the helper commands `/ooc` and `/cue` to steer the story.
 
 ### Importing character cards
 
-You can import character cards into the story you are playing with the `/card` command, where
-you specify a card file to load (either PNG or JSON). The command automatically creates a
-character in the lore (see below), and the character greets you. The card is treated as a normal
-prompt — it's just that you are sending the card content as your message. The imported card can
-later be edited in the `/cast` tab of the story dossier, and the context will change
-accordingly.
+You can import character cards into the story you are playing with the `/card` command, where you
+specify a card file to load (either PNG or JSON). The command automatically creates a character in
+the lore (see below), and the character greets you. The card is also saved to the characters
+library, linked to that character. The card is treated as a normal prompt — it's just that you are
+sending the card content as your message. The imported card can later be edited in the `/cast` tab
+of the story dossier, and the context will change accordingly.
 
 ### Managing and forking stories
 
@@ -238,6 +243,7 @@ Everything lives in the state dir, `~/.otaku` by default:
   settings.
 - `configs/providers.toml` — one section per provider (URL, API key). The model picker edits it
   for you, and API keys are stored sealed.
+- `configs/integrations.toml` — the web search key, stored sealed; the Tools tab edits it for you.
 - `configs/prompts.toml` — every template otaku ever sends, editable.
 - `configs/state.toml`, `configs/models.toml` — the app's own memory of your session and
   per-model settings.
@@ -286,8 +292,8 @@ design. The custom properties it can set are listed in
 Stories live in a local SQLite database; the database is snapshotted daily into the state dir,
 the last seven kept (configurable).
 
-Pictures attached to a turn are kept beside the database, downsized and stripped of their metadata;
-they are not part of the daily snapshot.
+Pictures attached to a turn and cards' pictures are kept beside the database, downsized and
+stripped of their metadata; they are not part of the daily snapshot.
 
 Encryption at rest is disabled by default but is one config switch away (AES-256-GCM, sealed
 client-side): the key can live in your OS keychain, come from a command of your choice (a

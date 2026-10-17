@@ -80,7 +80,7 @@ packages = ["otaku"]
 
 # The README's pictures are for GitHub, not for the source tarball.
 [tool.hatch.build.targets.sdist]
-exclude = ["images/"]
+exclude = ["/images/"]
 
 [tool.ruff]
 line-length = 100
@@ -96,9 +96,9 @@ select = ["B", "E", "F", "I", "N", "RUF", "SIM", "UP", "W"]
 # SQL statements are kept on two rows with their parameters on one, whatever
 # the width (see the store modules' `# fmt: off` blocks).
 "otaku/store/*" = ["E501"]
-# The command surface: one help row per source line, whatever the width
-# (see the `# fmt: off` block).
-"otaku/backend/commands.py" = ["E501"]
+# The terminal's command table: one help row per source line, whatever
+# the width (see the `# fmt: off` block).
+"otaku/terminal/commands.py" = ["E501"]
 # The rendered config: one setting per source line, whatever the width
 # (see the `# fmt: off` block in to_toml).
 "otaku/settings/config.py" = ["E501"]

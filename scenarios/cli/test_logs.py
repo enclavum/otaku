@@ -29,9 +29,9 @@ class TestErrors:
         def boom(chat: object, raw: object) -> None:
             raise RuntimeError("boom")
 
-        from otaku.terminal.chat import bindings
+        from otaku.terminal import dispatch
 
-        monkeypatch.setitem(bindings._INTERACTIVE, "/help", boom)
+        monkeypatch.setitem(dispatch.HANDLERS, "/help", boom)
         app.play("/help")
         result = run_otaku(app.paths.root, "logs", "error")
         assert result.returncode == 0

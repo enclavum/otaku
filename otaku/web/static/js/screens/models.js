@@ -1,0 +1,720 @@
+/* The model picker: every catalog otaku can reach on one tab, and the
+   providers behind them on the other — two halves of one panel, because
+   a model that is missing is fixed on the provider side.
+
+   It opens the way the terminal's picker does: on the providers on this machine,
+   NOW, with each cloud catalog's rows merged in behind the open panel
+   when it answers. Testing a connection re-asks that same read for one
+   provider — a provider that answers the catalog IS the test.
+
+   An api key's VALUE never arrives on this side, only whether one is
+   set. */
+
+import { api } from "../api/index.js";
+import {
+  ask,
+  askConfirm,
+  browser,
+  closeAll,
+  footnote,
+  guard,
+  popups,
+  report,
+  wiring,
+} from "../kit/browser.js";
+import { $, $$, actionButton, element, row, span } from "../kit/dom.js";
+import { contextLabel, gigabytes } from "../kit/format.js";
+import { landed } from "../play/shell.js";
+
+export async function openModels(answered = "", tab = "models") {
+  const popup = popups.get("/model");
+  // The panel is up before its data: a click must answer NOW, and the
+  // modal keeps further clicks from queueing screens behind it.
+  if (!popup.open) popup.showModal();
+
+  /* One opening at a time: a catalog can take seconds, so a picker
+     closed and reopened inside that window has TWO openings in flight —
+     and the older one's answers must not rebuild the newer's panel. */
+  const epoch = ++_opening;
+  /* The tabs answer from the first moment, the listing or no: a tab
+     picked while it is still asked for is the one its answer builds. */
+  const state = { popup, panel: null, tab, picked: null };
+  const build = (wanted, notice = "") => {
+    state.tab = wanted;
+    for (const button of $$(".otk-tab", popup)) {
+      button.setAttribute("aria-selected", String(button.dataset.tab === wanted));
+    }
+    for (const pane of $$("[data-pane]", popup)) {
+      pane.hidden = pane.dataset.pane !== wanted;
+    }
+    if (!state.panel) return;
+    if (wanted === "models") buildModels(state, notice);
+    else buildProviders(state, notice);
+  };
+  state.build = build;
+  for (const button of $$(".otk-tab", popup)) {
+    button.onclick = () => build(button.dataset.tab);
+  }
+  build(tab);
+  const [local, app, machine] = await Promise.all([
+    api.providers.list({ scope: "local" }),
+    api.app.get(),
+    api.app.machine.get(),
+  ]);
+  if (epoch !== _opening) return;
+  state.panel = listingOf(local, app);
+  $("[data-memory]", popup).textContent = machine.memory || "";
+  watchMemory(popup);
+  build(state.tab, answered);
+
+  // The cloud catalogs answer at their own pace, behind the open
+  // panel — merged in and redrawn wherever the reader is by then, in
+  // the panel's own order: both phases list every provider in it, each
+  // marked `asked`, so a provider's row is the one from the phase that
+  // asked it, and the one that answers last may belong first (the
+  // generic provider).
+  api.providers.list({ scope: "cloud" }).then(
+    guard((cloud) => {
+      if (!popup.open || epoch !== _opening) return;
+      const mine = new Map(state.panel.providers.map((entry) => [entry.id, entry]));
+      state.panel = {
+        ...state.panel,
+        providers: cloud.providers
+          .map((entry) => (entry.asked ? providerOf(entry) : mine.get(entry.id)))
+          .filter(Boolean),
+      };
+      build(state.tab);
+    }),
+    // A cloud phase that could not be asked adds nothing: the local
+    // rows stand, and the heartbeat says if otaku itself is gone.
+    () => {},
+  );
+}
+
+// The opening `openModels` is on — bumped per call, so an answer that
+// arrives for a superseded one is recognised and dropped.
+let _opening = 0;
+
+// How often the gauge is re-read while the picker is open: loading a
+// model fills a machine while the reader watches, so the figure moves.
+const _MEMORY_MS = 1000;
+
+let _gauge = 0;
+
+function watchMemory(popup) {
+  /* Its own read: the picker's inventory costs every provider a probe,
+     this costs a syscall. One timer at a time, dying with the panel, so
+     a closed picker asks nothing. */
+  clearInterval(_gauge);
+  const slot = $("[data-memory]", popup);
+  _gauge = setInterval(async () => {
+    if (!popup.open) return clearInterval(_gauge);
+    /* A gauge is not worth an error. Every other floating promise here
+       goes through `guard`, which SAYS what failed; nobody asked for
+       this one, so a tick that cannot be answered leaves the last figure
+       standing and the next tick tries again. */
+    let memory = "";
+    try {
+      ({ memory } = await api.app.machine.get());
+    } catch {
+      return;
+    }
+    // Only while it is still up: a read in flight when the panel closed
+    // must not write into a slot the next screen is using.
+    if (popup.open) slot.textContent = memory || "";
+  }, _MEMORY_MS);
+}
+
+// ---------- the models tab ----------
+
+function buildModels(state, notice) {
+  const { popup, panel } = state;
+  const pane = $('[data-pane="models"]', popup);
+  const offered = panel.providers.flatMap((provider) =>
+    provider.models.map((model) => ({ provider, model, haystack: model.name.toLowerCase() })),
+  );
+  const local = offered.filter((entry) => entry.provider.locality === "local").length;
+  const remote = offered.length - local;
+  $("[data-tabs-aside]", popup).textContent =
+    `${offered.length} ${offered.length === 1 ? "model" : "models"}`;
+  footnote(popup, notice || `${local} on this machine · ${remote} over the wire`);
+
+  const use = async (entry) => {
+    const model = { provider: entry.provider.id, name: entry.model.name };
+    const answer = await api.app.update({ model });
+    // refused, the picker stays, saying why
+    if (answer.refused) {
+      report(answer.notice);
+      return;
+    }
+    closeAll();
+    await landed(answer.notice, { redraw: "always" });
+  };
+
+  const setLoaded = async (entry, wanted) => {
+    if (!entry?.provider.capabilities?.model_management) return;
+    /* Asked first, as the terminal's picker asks: a load takes the
+       engine's memory and its time, and `u` sits one key beside `l`. */
+    const verb = wanted ? "Load" : "Unload";
+    const choice = await askConfirm({
+      title: `${verb} ${entry.model.name}?`,
+      body: wanted
+        ? "The engine loads it into memory, which can take a while."
+        : "The engine frees its memory; picking the model later loads it again.",
+      action: verb,
+    });
+    if (choice !== "confirm") return;
+    const answer = await api.providers.models.update(entry.provider.id, entry.model.name, {
+      loaded: wanted,
+    });
+    /* One flag on one model changed, so that is what changes here:
+       asking the catalogs again costs every provider a round trip to
+       redraw a lamp, and moves the list under the reader. Only when the
+       engine actually DID it — a refused load must not light a lamp on
+       a model nothing loaded. */
+    if (!answer.refused) entry.model.loaded = wanted;
+    built(state, "models", answer);
+  };
+
+  /* Lore extraction pinned to this model, or — on the model pinned —
+     back to the one played with. One mark moves, so that is what changes
+     here, as a load's lamp does. */
+  const extractWith = async (entry) => {
+    const spec = `${entry.provider.id}/${entry.model.name}`;
+    const pinned = spec === state.panel.extraction;
+    const answer = await api.app.update({
+      extraction_model: pinned ? null : { provider: entry.provider.id, name: entry.model.name },
+    });
+    if (!answer.refused) state.panel = { ...state.panel, extraction: pinned ? "" : spec };
+    built(state, "models", answer);
+  };
+
+  if (!offered.length) $("[data-actions]", pane).replaceChildren();
+  /* Read BEFORE the browser paints: its first paint moves the cursor to
+     row 0 and `onMove` would overwrite what the reader was on. And only
+     the reader's own moves are remembered: the kit reports that first
+     paint and the select below as moves too, and a model that arrives
+     with the cloud phase must still be found by that rebuild — not the
+     row the paint happened to land on. */
+  const wanted = state.picked ?? panel.current;
+  let settled = false;
+  const view = browser(popup, {
+    root: pane,
+    rows: offered,
+    /* Providers in their own order, each under its caption, and only
+       the ones that ANSWERED — one with nothing to offer is dealt with
+       on the providers tab. A provider a filter emptied drops out
+       rather than captioning an empty stretch. */
+    groupOf: (entry) => entry.provider,
+    drawGroup: providerHeading,
+    drawRow: (entry) => modelRow(entry, panel),
+    drawPreview: (entry) => modelDetail(pane, entry, panel, { use, setLoaded, extractWith }),
+    onOpen: use,
+    onMove: (entry) => {
+      if (settled) state.picked = `${entry.provider.id}/${entry.model.name}`;
+    },
+    onKey: (event, entry) => {
+      if (event.key !== "l" && event.key !== "u") return false;
+      guard(setLoaded)(entry, event.key === "l");
+      return true;
+    },
+    /* Nothing to play: the filter is too narrow, or no provider has
+       answered — and the way out of that is the tab beside this list. */
+    empty: (filtered) =>
+      filtered
+        ? { line: "No model matches that.", hint: "clear the filter, or set up a provider" }
+        : { line: "No model yet.", hint: "start a local engine, or set up a provider" },
+  });
+  // Open where the reader was — or on the model in use, the way back
+  // to it.
+  view.select((entry) => `${entry.provider.id}/${entry.model.name}` === wanted);
+  settled = true;
+}
+
+function modelRow(entry, { current, extraction }) {
+  const lamp = span("otk-row__lamp", "");
+  const managed = entry.provider.capabilities?.model_management;
+  if (managed && entry.model.loaded) lamp.append(span("otk-dot otk-dot--sm", ""));
+  // What the model is to otaku — the one in use, the one pinned for
+  // extraction — as tags against the figures, beside the size.
+  const spec = `${entry.provider.id}/${entry.model.name}`;
+  const tags = [];
+  if (spec === current) tags.push(span("otk-tag otk-tag--role", "writing"));
+  if (spec === extraction) tags.push(span("otk-tag otk-tag--role", "extraction"));
+  const button = row(
+    lamp,
+    span("otk-row__title", entry.model.name),
+    ...tags,
+    span("otk-row__num otk-row__num--size", entry.model.size),
+    // what a request would get: the running instance's size while one
+    // runs, the model's own otherwise
+    span(
+      "otk-row__num otk-row__num--count",
+      entry.model.max_context_loaded || entry.model.max_context_catalogue,
+    ),
+  );
+  button.classList.add("otk-row--indent", "otk-row--mono");
+  /* Bold is loaded, dim is not, and only where loading is a thing that
+     happens: a cloud model is always "loaded", so weighting it would
+     say something true of nothing. */
+  button.classList.toggle("is-loaded", managed && entry.model.loaded);
+  button.classList.toggle("is-dim", managed && !entry.model.loaded);
+  return button;
+}
+
+function modelDetail(pane, entry, { current, extraction }, { use, setLoaded, extractWith }) {
+  const managed = entry.provider.capabilities?.model_management;
+  const where = whereItRuns(entry.provider);
+  const state = !managed ? "" : entry.model.loaded ? " · loaded" : " · not loaded";
+  const spec = `${entry.provider.id}/${entry.model.name}`;
+  const chosen = spec === current;
+  const extracting = spec === extraction;
+
+  const facts = element("div", "otk-detail__section");
+  if (entry.model.size) facts.append(fact("size", entry.model.size));
+  if (entry.model.max_context_catalogue) facts.append(fact("max context", entry.model.max_context_catalogue));
+  // the running instance's size, where it is known and is not the model's
+  // own — the info report's rule (`backend.api.app.reports`)
+  const loaded = entry.model.max_context_loaded;
+  if (loaded && loaded !== entry.model.max_context_catalogue) facts.append(fact("served max context", loaded));
+  // how its thinking is set, and what else it can do: the info report's
+  // two rows, in the report's own words (`backend.api.app.reports`)
+  facts.append(fact("reasoning", entry.model.reasoning_words));
+  facts.append(fact("capabilities", entry.model.capability_words));
+  facts.append(fact("provider", entry.provider.label));
+
+  // Pinned under the pane: the row above is a name of any length, and
+  // the button must not move with it.
+  const verbs = [
+    actionButton("Use for this story", {
+      kind: "otk-btn--primary",
+      onclick: guard(() => use(entry)),
+    }),
+    actionButton(extracting ? "Unset extraction model" : "Use for extraction", {
+      onclick: guard(() => extractWith(entry)),
+    }),
+  ];
+  if (managed) {
+    verbs.push(
+      actionButton(entry.model.loaded ? "Unload" : "Load", {
+        onclick: guard(() => setLoaded(entry, !entry.model.loaded)),
+      }),
+    );
+  }
+  $("[data-actions]", pane).replaceChildren(...verbs);
+
+  return [
+    span("otk-label otk-label--accent", `${where}${state}`),
+    element("h3", "otk-detail__title", entry.model.name),
+    chosen && element("p", "otk-note otk-accent-ink", "chosen for this story"),
+    extracting && element("p", "otk-note otk-accent-ink", "used for lore extraction"),
+    facts,
+  ].filter(Boolean);
+}
+
+function providerHeading(provider) {
+  /* A caption per provider: the lamp, its name, and what it holds. */
+  const heading = element("h3", "otk-group");
+  heading.append(
+    element("span", provider.connected ? "otk-dot" : "otk-dot otk-dot--off"),
+    span("otk-group__name", provider.label),
+    span("otk-group__count", `${provider.models.length} ${whereItRuns(provider)}`),
+  );
+  return [heading, element("div", "otk-rule")];
+}
+
+// ---------- the providers tab ----------
+
+function buildProviders(state, notice) {
+  const { popup, panel } = state;
+  const pane = $('[data-pane="providers"]', popup);
+  const connected = panel.providers.filter((provider) => provider.connected);
+  $("[data-tabs-aside]", popup).textContent =
+    `${connected.length} of ${panel.providers.length} connected`;
+  footnote(popup, notice || `${connected.length} ${connected.length === 1 ? "provider" : "providers"} connected`);
+
+  /* In the registry's order (`providers.registry.ALL_CLIENTS`), which is the
+     terminal's picker's: a frontend that re-sorted them would invent an
+     order the other does not have. */
+  const rows = panel.providers.map((provider) => ({ provider, haystack: provider.label.toLowerCase() }));
+  // Read before the paint, for the same reason the models tab does.
+  const wanted = state.pickedProvider;
+
+  const view = browser(popup, {
+    root: pane,
+    rows,
+    drawRow: (entry) => {
+      // A two-line row (`otk-row--stack`): the dot centres on the name's
+      // line, the caption on the whole row; a provider without a url still
+      // gets its second line, so every row stands as tall.
+      const lamp = element("span", "otk-row__lamp");
+      lamp.append(element("span", entry.provider.connected ? "otk-dot" : "otk-dot otk-dot--off"));
+      const stack = element("span", "otk-stack");
+      stack.append(
+        span("otk-choice__name", entry.provider.label),
+        span("otk-index__sub", entry.provider.url || "(missing)"),
+      );
+      const item = row(
+        lamp,
+        stack,
+        span("otk-row__num", entry.provider.connected ? "connected" : "not connected"),
+      );
+      item.classList.add("otk-row--stack");
+      return item;
+    },
+    drawPreview: (entry) => providerDetail(state, pane, entry.provider),
+    onOpen: () => $("[data-detail] input", pane)?.focus(),
+    onMove: (entry) => (state.pickedProvider = entry.provider.id),
+  });
+  // A rebuild — a save's, a test's, a tab switched away and back —
+  // stays on the provider it was about.
+  if (wanted) view.select((entry) => entry.provider.id === wanted);
+}
+
+function providerDetail(state, pane, provider) {
+  const models = provider.models.length;
+  const head = span(
+    "otk-label",
+    provider.connected ? `connected · ${models} ${models === 1 ? "model" : "models"}` : "not connected",
+  );
+
+  const fields = element("div", "otk-detail__section");
+  const url = urlField(state, provider);
+  const key = keyField(state, provider);
+  fields.append(span("otk-margin__key", "url"), url);
+  fields.append(span("otk-margin__key", "api key"), key);
+  fields.append(
+    element(
+      "p",
+      "otk-note",
+      "The key is kept in the state dir on this machine and sent only to this provider.",
+    ),
+  );
+
+  const save = actionButton("Save", {
+    kind: "otk-btn--primary",
+    onclick: guard(() => saveProvider(state, provider)),
+  });
+  /* A test asks the CONFIGURED provider, and its answer redraws the
+     panel: with changes pending it would test the old values and throw
+     the new ones away. So the two verbs take turns — Save while
+     something is pending, Test while nothing is — marked rather than
+     removed (`aria-disabled` keeps a verb in the row and out of reach),
+     and a door that does nothing should not look like one.
+
+     HIDDEN for now: a save re-asks the provider and redraws the row
+     with its answer, so the button tested nothing Save had not. It
+     comes back when it can test the fields as typed, unsaved — which
+     needs a probe door of its own (its transport is the open question:
+     a GET would put the key in the request line, a POST files a read
+     in the write lane). */
+  const test = actionButton("Test connection", {
+    onclick: guard(() => {
+      if (test.getAttribute("aria-disabled") === "true") return undefined;
+      return testProvider(state, provider);
+    }),
+  });
+  test.hidden = true;
+  const settle = () => {
+    const pending = dirty(state.popup, provider);
+    save.setAttribute("aria-disabled", String(!pending));
+    test.setAttribute("aria-disabled", String(pending));
+  };
+  settle();
+  for (const input of [url, key]) input.addEventListener("input", settle);
+  $("[data-actions]", pane).replaceChildren(save, test);
+
+  return [head, element("h3", "otk-detail__title", provider.label), fields];
+}
+
+function urlField(state, provider) {
+  /* A local URL is editable — a port moves. A cloud URL is the
+     provider's own and shown dim, because reading it is useful and
+     changing it is not. */
+  const input = element("input", "otk-field otk-field--mono");
+  input.type = "url";
+  input.dataset.provider = "url";
+  input.value = provider.url;
+  input.disabled = provider.locality === "remote";
+  if (!input.disabled) saveOnEnter(state, input, provider, "url");
+  return input;
+}
+
+/* Where a provider's server runs, as its client knows it (`providers.Locality`):
+   the generic provider is a url and cannot say, so its caption says
+   neither. The footnote's count above puts the unknowns with the
+   remote ones — the side that may cost money. */
+function whereItRuns(provider) {
+  if (provider.locality === "local") return "on this machine";
+  if (provider.locality === "remote") return "over the wire";
+  return "wherever the url points";
+}
+
+// What a key that is SET looks like. The value never arrives on this
+// side, so these stand for it: cleared when the field is entered, and
+// never saved back. The web search key's dialog wears it too (`tools.keyButton`).
+export const KEY_MASK = "••••••";
+
+// How long "Checking" stands before it is allowed to become the answer.
+// A reader who pressed Test has to see that the question was asked.
+const _ASKING_MS = 1000;
+
+const _beat = (ms) => new Promise((wake) => setTimeout(wake, ms));
+
+function keyField(state, provider) {
+  /* One shape whether a key is set or not: a password field, empty for a
+     provider with no key, masked for one that has it in its section, and
+     captioned for one the shell carries. Entering clears
+     the stand-in so a new key can be typed; leaving without typing one
+     puts it back, the key still being there. Delete or Backspace on the
+     bare field marks the key to be FORGOTTEN: the field stays bare with
+     a caption saying so, and Save (or Enter) applies it — the terminal's
+     Del, one save later. Typing a key instead replaces it. */
+  const input = element("input", "otk-field otk-field--mono");
+  input.type = "password";
+  input.dataset.provider = "api_key";
+  if (provider.key_source === "env") {
+    /* A key the shell carries: nothing here to mask or forget, so the
+       field stays bare and says where the key is until one is typed
+       over it — the terminal's caption for the same fact
+       (`terminal.screens.models`). */
+    input.dataset.rest = "(from environment)";
+    keepKey(input);
+  }
+  if (provider.key_source === "config") {
+    const mask = () => {
+      input.value = KEY_MASK;
+      input.dataset.mask = "yes";
+    };
+    mask();
+    input.addEventListener("focus", () => {
+      if (!input.dataset.mask) return;
+      delete input.dataset.mask;
+      input.value = "";
+    });
+    input.addEventListener("blur", () => {
+      if (!input.value && !input.dataset.forget) mask();
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.key !== "Delete" && event.key !== "Backspace") return;
+      // Erasing typed characters is ordinary editing; the bare field is
+      // where the key itself is meant.
+      if (input.value && !input.dataset.mask) return;
+      event.preventDefault();
+      forgetKey(input);
+      input.dispatchEvent(new Event("input"));
+    });
+    input.addEventListener("input", () => {
+      if (input.value) keepKey(input);
+    });
+  }
+  saveOnEnter(state, input, provider, "api_key");
+  return input;
+}
+
+function forgetKey(input) {
+  delete input.dataset.mask;
+  input.value = "";
+  input.dataset.forget = "yes";
+  input.placeholder = "cleared";
+}
+
+function keepKey(input) {
+  delete input.dataset.forget;
+  input.placeholder = input.dataset.rest ?? "";
+}
+
+/** What a field would write, or null for nothing: a url that differs
+    from the configured one — emptied included, which clears it — a
+    typed key, or "" for a key marked to be forgotten. */
+function pending(input, provider, attr) {
+  if (!input || input.disabled) return null;
+  if (attr === "url") {
+    const value = input.value.trim();
+    return value === provider.url ? null : value;
+  }
+  if (input.dataset.forget) return "";
+  return input.value.trim() && !input.dataset.mask ? input.value : null;
+}
+
+function saveOnEnter(state, input, provider, attr) {
+  /* Enter saves the field it is in, as Save saves both. A field left
+     without saving is left alone: a half-typed URL must not become the
+     configuration because the reader clicked elsewhere. */
+  input.addEventListener(
+    "keydown",
+    guard(async (event) => {
+      /* Esc unwinds one layer, innermost first: the field, not the list
+         or the panel behind it. Stopped here, or the popup's own Esc
+         takes the whole picker with the half-typed key. */
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        input.value = attr === "url" ? provider.url : "";
+        if (attr === "api_key") keepKey(input);
+        input.dispatchEvent(new Event("input"));
+        $("[data-list]", input.closest("[data-pane]"))?.focus();
+        return;
+      }
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      /* What the field would write (`pending`): nothing for an unchanged
+         url — writing it anyway makes the no-op surgery answer with a
+         could-not-write warning for a value that needed no saving — or
+         for a key nobody typed; "" for an emptied url or a forgotten
+         key, which the route clears. */
+      const value = pending(input, provider, attr);
+      if (value === null) return;
+      const answer = await api.providers.update(provider.id, { [attr]: value });
+      // refused, the field keeps what was typed, to be corrected
+      if (answer.refused) {
+        report(answer.notice);
+        return;
+      }
+      await refreshProvider(state, provider, answer.notice);
+    }),
+  );
+}
+
+function dirty(popup, provider) {
+  /* Whether a save would write anything (`pending`): a moved or emptied
+     url, a typed key, a key marked to be forgotten. */
+  const url = $('[data-detail] input[data-provider="url"]', popup);
+  const key = $('[data-detail] input[data-provider="api_key"]', popup);
+  return pending(url, provider, "url") !== null || pending(key, provider, "api_key") !== null;
+}
+
+async function saveProvider(state, provider) {
+  /* Both fields at once, skipping what did not change; an emptied one
+     is cleared. Saving nothing is an answer too. */
+  const url = $('[data-detail] input[data-provider="url"]', state.popup);
+  const key = $('[data-detail] input[data-provider="api_key"]', state.popup);
+  const notices = [];
+  for (const [input, attr] of [[url, "url"], [key, "api_key"]]) {
+    const value = pending(input, provider, attr);
+    if (value === null) continue;
+    const answer = await api.providers.update(provider.id, { [attr]: value });
+    // refused, the fields keep what was typed, to be corrected
+    if (answer.refused) {
+      report(answer.notice);
+      return;
+    }
+    notices.push(answer.notice);
+  }
+  await refreshProvider(state, provider, notices.join(" ") || "Nothing to save.");
+}
+
+function testProvider(state, provider) {
+  /* The test IS the catalog read for this one provider — the same read
+     the picker draws from, no new backend door. The dialog opens FIRST:
+     a dead host answers by timing out, and the reader who pressed Test
+     must not be left looking at an unchanged screen. */
+  const dialog = $('dialog[data-dialog="told"]');
+  const answered = ask("told", () => {
+    $("[data-title]", dialog).textContent = "Checking";
+    $(".otk-dialog__body", dialog).textContent = `Asking ${provider.label} at ${provider.url}…`;
+  });
+  // A local engine answers in milliseconds, and a question asked and
+  // answered inside one frame reads as nothing having happened.
+  const asking = Promise.all([asked(provider), _beat(_ASKING_MS)]).then(([found]) => found);
+  asking.then(
+    guard((found) => {
+      patch(state, provider, found);
+      const models = found?.models.length ?? 0;
+      // The dialog the reader is already looking at becomes the answer.
+      $("[data-title]", dialog).textContent = found?.connected ? "Connected" : "No answer";
+      $(".otk-dialog__body", dialog).textContent = found?.connected
+        ? `${provider.label} answered with ${models} ${models === 1 ? "model" : "models"}.`
+        : `${provider.label} did not answer at ${provider.url}.`;
+    }),
+    guard(() => {
+      // The question itself could not be asked — the dialog still
+      // becomes the answer, never a "Checking" frozen forever.
+      $("[data-title]", dialog).textContent = "No answer";
+      $(".otk-dialog__body", dialog).textContent = `${provider.label} could not be asked — otaku did not answer.`;
+    }),
+  );
+  // The list catches up once the reader is done with the answer: a
+  // rebuild under an open dialog would take the focus out from under it.
+  return answered.then(() => state.build("providers", ""));
+}
+
+/** A tab built again on what a write answered: its notice the footnote,
+    or — refused — the standing one, the refusal said over it. */
+function built(state, tab, answer) {
+  state.build(tab, answer.refused ? "" : answer.notice);
+  if (answer.refused) report(answer.notice);
+}
+
+async function refreshProvider(state, provider, notice) {
+  /* One provider re-asked and patched into the panel, wherever it now
+     stands — the terminal's own one-provider refresh, over the wire. */
+  patch(state, provider, await asked(provider));
+  state.build("providers", notice);
+}
+
+function patch(state, provider, found) {
+  /* One provider's row replaced in place — the rest of the panel is
+     what it was, and the list keeps its order and its cursor. */
+  if (!found) return;
+  state.panel = {
+    ...state.panel,
+    providers: state.panel.providers.map((entry) => (entry.id === provider.id ? found : entry)),
+  };
+}
+
+function fact(key, value) {
+  // Clipped, never wrapped: the pane keeps its width, and a value too
+  // long for it — a ladder of levels — shows as far as it fits, whole
+  // in its hover hint. Measured once the pane holds it: the kit
+  // attaches the preview right after drawing it, before the microtask.
+  const line = element("p", "otk-fact otk-fact--clip");
+  const shown = span("", value);
+  line.append(span("", key), shown);
+  queueMicrotask(() => {
+    if (shown.isConnected && shown.scrollWidth > shown.clientWidth) shown.title = String(value);
+  });
+  return line;
+}
+
+/** One provider asked again — the listing's own read, scoped to it — as
+    this picker draws it; none where it is not in the panel. */
+async function asked(provider) {
+  const fresh = await api.providers.list({ scope: provider.id });
+  const found = fresh.providers?.find((entry) => entry.id === provider.id);
+  return found ? providerOf(found) : null;
+}
+
+// ---------- the listing as this picker draws it ----------
+
+/** A phase of the listing as the picker draws it: the providers it asked
+    — the cloud catalogs arrive with their own phase — and the models in
+    use as "provider/name", the name as the provider lists it: the one
+    played with (`current`), the one pinned for lore extraction
+    (`extraction`, "" while it follows). */
+function listingOf(listing, app) {
+  const spec = (model) => (model ? `${model.provider}/${model.listed_name}` : "");
+  return {
+    ...listing,
+    current: spec(app.model),
+    extraction: app.extraction_model?.pinned ? spec(app.extraction_model) : "",
+    providers: listing.providers.filter((entry) => entry.asked).map(providerOf),
+  };
+}
+
+/** A provider as a card reads it — whether it answered (`connected`) —
+    each model with whether it is loaded, and its size and windows written
+    as the catalogs write them (`format.js`). */
+function providerOf(entry) {
+  return {
+    ...entry,
+    connected: entry.answered,
+    models: entry.models.map((model) => ({
+      ...model,
+      loaded: model.state === "loaded",
+      size: gigabytes(model.size),
+      max_context_catalogue: contextLabel(model.context_length),
+      max_context_loaded: contextLabel(model.context_loaded),
+    })),
+  };
+}

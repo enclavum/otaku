@@ -37,7 +37,7 @@ class TestServingOverTls:
         # The same lanes and the same answers: a read is still answered
         # off the session, and the heartbeat still says both its things.
         assert secure.status("/api/stories") == 200
-        assert set(secure.get("/api/status")) == {"status", "notices"}
+        assert set(secure.get("/api/app/status")) == {"status", "notices"}
 
     def test_a_plain_address_writes_no_certificate(self, page: Page) -> None:
         # Nothing to serve under means nothing to generate, and a state

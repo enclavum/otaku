@@ -22,6 +22,8 @@ CSS = "text/css; charset=utf-8"
 JS = "text/javascript; charset=utf-8"
 EVENT_STREAM = "text/event-stream"
 JSON = "application/json; charset=utf-8"
+# An answer that is not a payload: RFC 9457 problem details.
+PROBLEM = "application/problem+json; charset=utf-8"
 WOFF2 = "font/woff2"
 MANIFEST = "application/manifest+json"
 
@@ -29,6 +31,9 @@ MANIFEST = "application/manifest+json"
 # per Plex release and their names change with them.
 NO_STORE = "no-store, no-cache, must-revalidate, max-age=0"
 IMMUTABLE = "public, max-age=31536000, immutable"
+# A message's picture never changes either, but it sits behind the sign-in:
+# kept by the browser that asked for it, never by a cache between.
+PRIVATE_IMMUTABLE = "private, max-age=31536000, immutable"
 
 # Where the reader's own typefaces are asked for, and what may be one.
 # Under a prefix of its own rather than `/fonts/`, so a name of theirs can
@@ -40,7 +45,9 @@ FONT_SUFFIXES = {".woff2": WOFF2, ".woff": "font/woff", ".ttf": "font/ttf", ".ot
 
 def _packaged(*where: str, suffix: str) -> tuple[str, ...]:
     """Every packaged file of one kind, listed from the directory it
-    lives in — sorted, so the table is built the same way twice.
+    lives in and the folders below it (the page's modules are in
+    `js/api/`, `js/kit/`, `js/play/`, `js/screens/`) — sorted, so the table is built
+    the same way twice.
 
     Read at import, which is what makes the table below CLOSED: its keys
     are exactly the files that shipped, and a request path is looked up
@@ -54,7 +61,11 @@ def _packaged(*where: str, suffix: str) -> tuple[str, ...]:
     if not directory.is_dir():
         return ()
     return tuple(
-        sorted(f"{prefix}{found.name}" for found in directory.iterdir() if found.suffix == suffix)
+        sorted(
+            f"{prefix}{found.relative_to(directory).as_posix()}"
+            for found in directory.rglob(f"*{suffix}")
+            if found.is_file()
+        )
     )
 
 

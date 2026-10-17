@@ -64,7 +64,7 @@ _HANDOVER_AFTER = ",.!?…:;"
 
 _DEFAULT_FG = "\x1b[39m"
 
-# The TOML archive's working parts (`highlight_toml`): a `key =` opening a
+# A TOML profile's working parts (`highlight_toml`): a `key =` opening a
 # line, and a `{{macro}}` wherever it stands.
 _TOML_KEY = re.compile(r"^(\s*)([A-Za-z0-9_-]+)(\s*=)")
 _TOML_MACRO = re.compile(r"\{\{[^{}]+\}\}")
@@ -478,13 +478,13 @@ def command_pieces(text: str, commands: tuple[str, ...]) -> list[tuple[str, bool
 
 
 def highlight_toml(text: str) -> str:
-    """A TOML archive with its working parts picked out, key-agnostic:
+    """A TOML profile with its working parts picked out, key-agnostic:
     whatever opens a line as `key =` colors as a key, and a `{{macro}}`
     colors wherever it stands — both in the command color, the shade
     syntax wears everywhere else. A line inside a `'''` block is value
     text, so a `key =` shape there stays prose; the block state is read
-    off the lines themselves — exactly right for the archives `card_toml`
-    writes, and close enough for a hand edit."""
+    off the lines themselves — exactly right for the profiles
+    `CharacterProfile.to_toml` writes, and close enough for a hand edit."""
     escape = theme().command.fg
     out: list[str] = []
     in_block = False

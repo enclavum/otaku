@@ -1,73 +1,38 @@
-"""THE BACKEND — the one surface the user-driven frontends call.
+"""THE BACKEND — what both frontends stand on, reached through ONE
+package: `backend.api`. A frontend imports `backend.api` and nothing
+else of the backend (cli adds `backend.launch`, the door it opens the
+app through).
 
-The map (mirroring the web API sketch):
+The map:
 
-- `backend.api` — the OPERATIONS: one module per API tag, every function
-  taking the `Session` first, its result types beside it. The frontends'
-  whole write surface; the boundary is one grep: `backend.api.`
-- `backend.session` — `Session`, `Refused`, `TerminalSettings`, the /set
-  vocabulary constants.
-- `backend.launch` — `open_session` (the front door) and cli's log
-  accessors.
-- `backend.commands` — the shared command table.
-- `backend.formats`, `backend.paths` — substrate the operations drive.
+- `backend.api` — THE INTERFACE: resource classes over the domain, each
+  method one of the five verbs answering with an entity; the story's
+  language for text not stored yet (`api.story.language`), the one
+  exception; and, re-exported at its root, the vocabulary a frontend
+  passes, holds or catches — the refusals, the `App` handle, a write's
+  answer, `Changed`.
+- `backend.launch` — `open_app`, the door: the composition of one state
+  dir into a running app, above the interface (it seeds the samples
+  through it); and cli's log accessors.
+- `backend.domain` — what otaku does: every rule and every store access,
+  below the interface, which it never imports.
+- `backend.errors` — the refusal channel: `Refused` and its kinds, the
+  shared refusal sentences.
 
-Every name is imported from its home module; re-exported HERE is only
-the bridge — the types defined BELOW backend that frontends render or
-catch, so that `terminal` and `web` never import a lower package and the
-arrow rule stays absolute.
+The interface and the domain are laid out alike, in three packages each:
+`app`, the installation — the App itself, its settings, the providers
+and their models, the integrations, the history, the machine, the
+pictures, the reports — `codex`, what every story may draw on and no
+story owns, and `story`, a story and what it holds. A module in one has
+a TWIN of its name in the other, which an interface module imports as
+`domain_<name>`. What has no twin is a layer's MACHINERY, protected by
+its name (`api._writes`; `domain._formats`, `domain.app._paths`,
+`_passwords`, `_runs`, `domain.story._chain`, `_request`, `_play`,
+`_tools`): its own layer imports it, the layer above never does — the
+launch, which composes the app, excepted.
 
-Expected refusals raise `session.Refused`, whose message is the sentence
-to show; wording both frontends display verbatim is composed in this
-package; the frontends own only the wording about their own medium.
-
-Internal rule: backend modules import each other as
-`otaku.backend.<module>` / `otaku.backend.api.<module>`, never a
-package root.
+Inside, imports point one way: `errors` ← `domain.app` ← `domain.codex`
+← `domain.story` ← `api` ← `launch`, `domain._formats` beside
+`domain.story`. Backend modules import each other by their own module
+path, never through a package root's re-exports.
 """
-
-from otaku.encryption import EncryptionError
-from otaku.providers import (
-    KeySource,
-    Locality,
-    ModelInfo,
-    ModelState,
-    ProviderConfig,
-    ProviderInfo,
-)
-from otaku.settings.config import ConfigError, TerminalSettings, WebSettings
-from otaku.store import DatabaseError
-from otaku.store.ops.stories import StoryListing
-from otaku.store.schema import (
-    Character,
-    CompletionType,
-    InjectionPosition,
-    Journal,
-    Layout,
-    Message,
-    Scene,
-    StoryMode,
-)
-
-__all__ = [
-    "Character",
-    "CompletionType",
-    "ConfigError",
-    "DatabaseError",
-    "EncryptionError",
-    "InjectionPosition",
-    "Journal",
-    "KeySource",
-    "Layout",
-    "Locality",
-    "Message",
-    "ModelInfo",
-    "ModelState",
-    "ProviderConfig",
-    "ProviderInfo",
-    "Scene",
-    "StoryListing",
-    "StoryMode",
-    "TerminalSettings",
-    "WebSettings",
-]

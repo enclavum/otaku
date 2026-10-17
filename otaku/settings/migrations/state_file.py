@@ -24,7 +24,7 @@ def move_think(state_path: Path, models_path: Path) -> None:
     launch that wrote models.toml and could not rewrite state.toml).
     The old spelling of unset ("default") is read as unset, and unset
     is the ABSENCE of a row, so it is not written; any other word moves
-    as spelled, and the session reads it back against the wire's ladder
+    as spelled, and the app reads it back against the wire's ladder
     as it reads every saved level. The key leaves state.toml only once
     the level has landed, so a write that failed is retried."""
     if not state_path.exists():

@@ -76,7 +76,7 @@ class OpenRouterModels(OpenAIModels):
         )
         return replace(
             model,
-            max_context_loaded=self._top_provider_int(top, "context_length"),
+            context_loaded=self._top_provider_int(top, "context_length"),
             max_output_tokens=self._top_provider_int(top, "max_completion_tokens"),
             capabilities=ModelCapabilities(
                 vision="image" in modalities if isinstance(modalities, list) else None,
