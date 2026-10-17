@@ -222,7 +222,7 @@ def merge_cards(app: App, card_id: int, *, into: int) -> str:
     if shared:
         raise Conflict(
             f'"{shared[0].story_label}" has characters linked to both {source.name} and '
-            f"{target.name} — merge them in the story first."
+            f"{target.name}."
         )
     app._store.cards.merge(source.id, target.id)
     return f"Merged {source.name} into {target.name} ('{source.name}' is now an alias)."

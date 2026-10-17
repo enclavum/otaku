@@ -36,15 +36,9 @@ export async function openModels(answered = "", tab = "models") {
      closed and reopened inside that window has TWO openings in flight —
      and the older one's answers must not rebuild the newer's panel. */
   const epoch = ++_opening;
-  const [local, app, machine] = await Promise.all([
-    api.providers.list({ scope: "local" }),
-    api.app.get(),
-    api.app.machine.get(),
-  ]);
-  if (epoch !== _opening) return;
-  const state = { popup, panel: listingOf(local, app), tab, picked: null };
-  $("[data-memory]", popup).textContent = machine.memory || "";
-  watchMemory(popup);
+  /* The tabs answer from the first moment, the listing or no: a tab
+     picked while it is still asked for is the one its answer builds. */
+  const state = { popup, panel: null, tab, picked: null };
   const build = (wanted, notice = "") => {
     state.tab = wanted;
     for (const button of $$(".otk-tab", popup)) {
@@ -53,6 +47,7 @@ export async function openModels(answered = "", tab = "models") {
     for (const pane of $$("[data-pane]", popup)) {
       pane.hidden = pane.dataset.pane !== wanted;
     }
+    if (!state.panel) return;
     if (wanted === "models") buildModels(state, notice);
     else buildProviders(state, notice);
   };
@@ -60,7 +55,17 @@ export async function openModels(answered = "", tab = "models") {
   for (const button of $$(".otk-tab", popup)) {
     button.onclick = () => build(button.dataset.tab);
   }
-  build(tab, answered);
+  build(tab);
+  const [local, app, machine] = await Promise.all([
+    api.providers.list({ scope: "local" }),
+    api.app.get(),
+    api.app.machine.get(),
+  ]);
+  if (epoch !== _opening) return;
+  state.panel = listingOf(local, app);
+  $("[data-memory]", popup).textContent = machine.memory || "";
+  watchMemory(popup);
+  build(state.tab, answered);
 
   // The cloud catalogs answer at their own pace, behind the open
   // panel — merged in and redrawn wherever the reader is by then, in
@@ -294,11 +299,6 @@ function modelDetail(pane, entry, { current, extraction }, { use, setLoaded, ext
       actionButton(entry.model.loaded ? "Unload" : "Load", {
         onclick: guard(() => setLoaded(entry, !entry.model.loaded)),
       }),
-      element(
-        "p",
-        "otk-note otk-actions__note",
-        "A model can be chosen without being loaded; the engine loads it on the first reply.",
-      ),
     );
   }
   $("[data-actions]", pane).replaceChildren(...verbs);

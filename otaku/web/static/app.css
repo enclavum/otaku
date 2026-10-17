@@ -246,7 +246,7 @@ a:hover { color: var(--otk-accent); }
 /* every scrolling column reserves the gutter, so columns stay aligned — but a
    docket's, one column alone, whose margins stay even while it fits */
 .otk-col__scroll, .otk-detail__scroll, .otk-index__list, .otk-reading, .otk-margin,
-.otk-transcript, .otk-premise__body, .otk-context { scrollbar-gutter: stable; }
+.otk-margin__scroll, .otk-transcript, .otk-premise__body, .otk-context { scrollbar-gutter: stable; }
 [hidden] { display: none !important; }
 
 /* =============================================================================
@@ -334,6 +334,9 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
   font-family: var(--otk-font-mono); font-size: var(--otk-size-label);
   letter-spacing: 0.06em; text-transform: uppercase; color: var(--otk-faint);
 }
+/* a name over its field holds no verbs, so none of the row's height: it
+   sits close to what it names */
+.otk-edit__head { height: auto; margin-bottom: -3px; }
 /* anchored right, so swapping one verb for two moves neither */
 .otk-edit__verbs { margin-left: auto; display: flex; align-items: baseline; gap: 16px; }
 /* A verb is a button, and the UA stylesheet resets casing and tracking on
@@ -349,6 +352,8 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
    rather than hidden: a hidden verb is not tabbable, and while the field is
    closed it is out of the tab order, so this is the keyboard's only way in. */
 .otk-edit__verb--edit { opacity: 0; }
+/* no hover on a touch screen: the way into a field stands in view */
+@media (hover: none) { .otk-edit__verb--edit { opacity: 1; } }
 .otk-edit:hover .otk-edit__verb--edit,
 .otk-edit__verb--edit:focus-visible { opacity: 1; }
 .otk-edit__verb--save, .otk-edit__verb--cancel { display: none; }
@@ -1153,6 +1158,10 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
   .otk-panel__head > .otk-note { display: none; }
   .otk-panel__head .otk-eyebrow { display: block; text-overflow: ellipsis; }
   .otk-panel__head .otk-eyebrow::before { display: none; }
+  /* All characters' four view buttons would leave its name no room: they
+     take a line of their own under it */
+  .otk-panel--chars .otk-panel__head { flex-wrap: wrap; row-gap: 8px; }
+  .otk-panel--chars .otk-seg { order: 1; margin-left: 0; }
 }
 
 .otk-tabs { flex: none; display: flex; align-items: center; gap: 36px; padding: 0 var(--otk-panel-pad); border-bottom: var(--otk-hair) solid var(--otk-line-soft); }
@@ -1425,6 +1434,17 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 .otk-passages { display: flex; flex-direction: column; gap: 20px; border-top: var(--otk-hair) solid var(--otk-line); padding-top: 14px; }
 .otk-passage { display: flex; flex-direction: column; gap: 4px; min-width: 0; max-width: var(--otk-measure); }
 .otk-passage .otk-note { font-size: var(--otk-size-lead); line-height: 1.6; }
+/* a journal entry's verbs hold no name, so no more than their own height:
+   the state under them stays close to the entry */
+.otk-passage[data-record] > .otk-edit { gap: 0; }
+.otk-passage[data-record] > .otk-edit > .otk-edit__hint { height: auto; line-height: 1; }
+.otk-passage[data-record] > .otk-edit + .otk-note { margin-top: -8px; }
+/* open, its ground (`.otk-editable:focus`) stops at the field's foot,
+   where the verbs stand right under it: nothing moves to make room */
+.otk-passage[data-record] .otk-editable:focus {
+  box-shadow: -4px 0 0 var(--otk-edit-bg), 4px 0 0 var(--otk-edit-bg), 0 -4px 0 var(--otk-edit-bg),
+    -4px -4px 0 var(--otk-edit-bg), 4px -4px 0 var(--otk-edit-bg);
+}
 .otk-passage__rubric { font-family: var(--otk-font-mono); font-size: var(--otk-size-label); letter-spacing: var(--otk-track-tag); text-transform: uppercase; color: var(--otk-accent-ink); }
 .otk-passage__body { margin: 0; font-family: var(--otk-font-prose); font-size: var(--otk-size-read); line-height: 1.66; color: var(--otk-body); overflow-wrap: anywhere; }
 .otk-margin { flex: 0 1 var(--otk-reader-w); min-width: 180px; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding: 20px 18px; border-left: var(--otk-hair) solid var(--otk-line); }
@@ -1442,6 +1462,10 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
    here — `.otk-derived` is also a row in the message detail and a block in a
    report, and neither wants the space. */
 .otk-margin__fact > .otk-derived { margin: 8px 0; }
+/* the cast's margin: its facts scroll and its buttons stay put, as a
+   picker's verbs do (`.otk-actions`); the gutter is the scroller's */
+.otk-margin--pinned { overflow: hidden; scrollbar-gutter: auto; padding-bottom: 14px; }
+.otk-margin__scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
 /* what you do TO the character, pinned under what is known about it */
 .otk-manage { flex: none; display: flex; flex-direction: column; gap: 8px; padding-top: 14px; border-top: var(--otk-hair) solid var(--otk-line-soft); }
 .otk-manage__row { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -1726,6 +1750,14 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 /* the one head with a rule straight under it: as much room below as above */
 .otk-panel--chars .otk-panel__head { padding-bottom: 14px; }
 .otk-chars[data-unlinked="closed"] { grid-template-columns: minmax(0, 1fr) 44px; }
+/* no room for both columns on a narrow screen (`characters.js` `_NARROW`):
+   the unlinked characters, opened, take the window, their head folding
+   them away again */
+@media (max-width: 720px), (pointer: coarse) and (max-height: 540px) {
+  .otk-chars[data-unlinked="open"] { grid-template-columns: minmax(0, 1fr); }
+  .otk-chars[data-unlinked="open"] .otk-chars__main { display: none; }
+  .otk-chars[data-unlinked="open"] .otk-unlinked { border-left: 0; }
+}
 .otk-chars__main { display: flex; flex-direction: column; min-height: 0; }
 /* tiles of one width, the view's (`characters.js` `_TILE_WIDTHS`): a wider
    gallery holds more of them, never bigger ones */
@@ -1774,7 +1806,7 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 
 .otk-charrow { display: flex; align-items: center; gap: 12px; padding: 7px 22px; border-left: var(--otk-mark) solid transparent; cursor: pointer; }
 .otk-charrow:hover { background: var(--otk-accent-tint); }
-.otk-charrow__pic { position: relative; overflow: hidden; width: 34px; height: 42px; flex: none; border: var(--otk-hair) solid var(--otk-line-soft); background: repeating-linear-gradient(135deg, var(--otk-band) 0 5px, var(--otk-well) 5px 10px); }
+.otk-charrow__pic { position: relative; overflow: hidden; width: 33px; height: 44px; flex: none; border: var(--otk-hair) solid var(--otk-line-soft); background: repeating-linear-gradient(135deg, var(--otk-band) 0 5px, var(--otk-well) 5px 10px); }
 .otk-charrow__text { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 0 1 440px; }
 /* the counts at the row's far end */
 .otk-charrow > .otk-tile__meta { margin-left: auto; }
@@ -1837,7 +1869,7 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 .otk-sheet__foot--hint > span { margin-left: auto; }
 
 .otk-pics { display: flex; flex-direction: column; gap: 8px; }
-.otk-pics__main { position: relative; aspect-ratio: 4 / 5; overflow: hidden; border: var(--otk-hair) solid var(--otk-line-soft); background: repeating-linear-gradient(135deg, var(--otk-band) 0 7px, var(--otk-well) 7px 14px); }
+.otk-pics__main { position: relative; aspect-ratio: 3 / 4; overflow: hidden; border: var(--otk-hair) solid var(--otk-line-soft); background: repeating-linear-gradient(135deg, var(--otk-band) 0 7px, var(--otk-well) 7px 14px); }
 .otk-pics__main > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: var(--otk-well); cursor: zoom-in; }
 .otk-pics.is-dragover .otk-pics__main { border-color: var(--otk-accent); }
 .otk-pics__thumbs { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -1885,10 +1917,13 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 .otk-card-open { position: relative; top: -1px; display: inline-flex; margin-left: 10px; vertical-align: baseline; color: var(--otk-faint); }
 .otk-card-open:hover, .otk-card-open:focus-visible { color: var(--otk-ink); }
 .otk-card-open > svg { width: 0.62em; height: 0.62em; }
+/* `clip`, not `hidden`: a clipped box keeps its text's baseline, where a
+   scroll container would sit on its bottom edge */
+.otk-cast-aka { display: inline-block; max-width: calc(100% - 10px); margin-left: 10px; padding-right: 0.15em; overflow: clip; text-overflow: ellipsis; white-space: nowrap; line-height: 1.3; font-family: var(--otk-font-prose); font-size: 21px; font-style: italic; font-weight: 400; }
 
 /* a per-character picture switch, in the card dialog and Start a story */
 .otk-picsend { display: flex; align-items: center; gap: 12px; padding: 6px 0; border-bottom: var(--otk-hair) dotted var(--otk-line-soft); }
-.otk-picsend__thumb { position: relative; overflow: hidden; width: 32px; height: 40px; flex: none; border: var(--otk-hair) solid var(--otk-line-soft); background: repeating-linear-gradient(135deg, var(--otk-band) 0 5px, var(--otk-well) 5px 10px); }
+.otk-picsend__thumb { position: relative; overflow: hidden; width: 30px; height: 40px; flex: none; border: var(--otk-hair) solid var(--otk-line-soft); background: repeating-linear-gradient(135deg, var(--otk-band) 0 5px, var(--otk-well) 5px 10px); }
 .otk-picsend__text { flex: 1; font-family: var(--otk-font-prose); font-size: var(--otk-size-note); color: var(--otk-body); }
 
 /* the card picker, and the codex card a dialog brings in, where a file
@@ -1897,7 +1932,7 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 /* a row keeps its height — the list scrolls rather than squeeze them —
    and its portrait the card window's shape */
 .otk-pickrow { flex: none; display: flex; align-items: center; gap: 12px; width: 100%; padding-top: 8px; padding-bottom: 8px; text-align: left; }
-.otk-pickrow > .otk-charrow__pic { height: auto; aspect-ratio: 4 / 5; }
+.otk-pickrow > .otk-charrow__pic { height: auto; aspect-ratio: 3 / 4; }
 .otk-pickrow > .otk-tile__name { flex: none; }
 .otk-pickrow > .otk-tile__tag { flex: 1 1 auto; min-width: 0; }
 .otk-chosen { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--otk-well); border: var(--otk-hair) dashed var(--otk-line); }

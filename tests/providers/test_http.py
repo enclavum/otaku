@@ -12,6 +12,7 @@ from otaku.providers import UnreachableError
 from otaku.providers.http import (
     Cut,
     Http,
+    _is_loopback,
     explanation,
     positive_int,
     retry_after,
@@ -32,6 +33,20 @@ class TestPositiveInt:
         # True is an int to Python; a flag read as a count would be 1.
         assert positive_int(True) is None
         assert positive_int(False) is None
+
+
+class TestIsLoopback:
+    @pytest.mark.parametrize(
+        "host", ["localhost", "LocalHost", "127.0.0.1", "127.8.9.10", "::1", "[::1]"]
+    )
+    def test_a_name_or_address_of_this_machine(self, host: str) -> None:
+        assert _is_loopback(host)
+
+    @pytest.mark.parametrize(
+        "host", ["example.com", "localhost.example.com", "192.168.1.10", "10.0.0.1", "::2", ""]
+    )
+    def test_any_other_host(self, host: str) -> None:
+        assert not _is_loopback(host)
 
 
 class _Sink:

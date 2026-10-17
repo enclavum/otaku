@@ -37,7 +37,7 @@ const _RESTING = "Ready";
 
 /** How long an error stands where nothing has been said over it, here
     and in a window's foot (`browser.report`). */
-export const ERROR_MS = 10_000;
+export const ERROR_MS = 30_000;
 let fading = 0;
 
 export function tell(sentence, kind = "") {

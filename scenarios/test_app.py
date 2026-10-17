@@ -1170,7 +1170,7 @@ class TestFirstLaunch:
             story = app.store.stories.get(story_id)
             assert story.title == "The River That Forgot Its Name"
             assert len(app.messages) == 16
-            # The sample's pictures, shipped beside its document, landed
+            # The sample's pictures, shipped in the samples' images, landed
             # on the message they are named for, through the app's own
             # intake: the files and their thumbnails are in the folder.
             pictured = app.messages[14]
@@ -1212,8 +1212,9 @@ class TestFirstLaunch:
 
     def test_the_samples_characters_are_kept_in_all_characters(self, server, tmp_path) -> None:
         # The samples' manifest names their main characters: each a card
-        # made from its story's character and linked to it, its tagline
-        # set; the rest stay unlinked, for a first look at linking one.
+        # made from its story's character and linked to it, the fields its
+        # row gives set and its portrait added; the rest stay unlinked, for
+        # a first look at linking one.
         set_config(tmp_path / "state", seed_sample=True)
         app = launch(tmp_path / "state", server)
         try:
@@ -1224,10 +1225,22 @@ class TestFirstLaunch:
             cards = app.api.cards.list()
             assert {card.name: card.tagline for card in cards} == named
             assert all(card.story_count == 1 for card in cards)
+            rows = {row["name"]: row for row in manifest["card"]}
             for card in cards:
-                (linked,) = app.api.cards.get(card.id).stories
+                whole = app.api.cards.get(card.id)
+                (linked,) = whole.stories
                 assert linked.name == card.name
-                assert app.api.cards.get(card.id).description  # the story's own
+                assert whole.description  # the row's, else the story's own
+                row = rows[card.name]
+                for key in ("description", "personality", "scenario", "greeting"):
+                    if key in row:
+                        assert getattr(whole, key) == row[key]
+                if "examples" in row:
+                    assert whole.examples == tuple(row["examples"])
+                # its portrait, where the row names one, through the intake
+                assert len(whole.pictures) == (1 if "picture" in row else 0)
+                for picture in whole.pictures:
+                    assert app.store.files.get(picture.file) is not None
             unlinked = app.api.cards.unlinked.list()
             assert unlinked and not {row.name for row in unlinked} & set(named)
             assert app.server.requests == []  # still no model called

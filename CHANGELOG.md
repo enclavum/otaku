@@ -2,6 +2,21 @@
 
 See also the tentative roadmap: [ROADMAP.md](https://github.com/enclavum/otaku/blob/main/ROADMAP.md)
 
+## [0.8.0] - 2026-10-17
+
+Characters library (in the web interface only for now; the terminal will follow in the next
+releases).
+
+The library works both ways:
+
+- you can add cards to the library and start stories with them, or
+- you can start a story from scratch, and after characters are extracted automatically from your
+  story, you'll be able to create a card in the library from the character, or link to an existing
+  card.
+
+You can add pictures to the cards, and the main picture of each card can be sent to the LLM along
+with the card, so the model knows what the character looks like.
+
 ## [0.7.0] - 2026-10-06
 
 Story mode:

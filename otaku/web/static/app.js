@@ -204,6 +204,18 @@ function start() {
   }
 
   document.addEventListener("keydown", onKey);
+  /* A file let go where no target takes it — the composer included —
+     would have the browser open it in this tab, the draft, the staged
+     pictures and every open editor going with the page. A target that
+     takes files has claimed the drag before it reaches here. */
+  document.addEventListener("dragover", (event) => {
+    if (event.defaultPrevented || !event.dataTransfer?.types.includes("Files")) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "none";
+  });
+  document.addEventListener("drop", (event) => {
+    if (!event.defaultPrevented && event.dataTransfer?.types.includes("Files")) event.preventDefault();
+  });
 }
 
 /* The contents fold away on a narrow window and the spine carries the

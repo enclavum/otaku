@@ -128,7 +128,7 @@ class TestContextInjections:
         capsys.readouterr()
         app.play("/context")
         out = capsys.readouterr().out
-        assert "  injected:\n  - questions (2nd last, ~" in out
+        assert "  injected:\n  - questions (6th last, ~" in out
 
 
 class TestContextUse:

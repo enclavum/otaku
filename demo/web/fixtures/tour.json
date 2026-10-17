@@ -6804,8 +6804,8 @@
    "injection_label": "assistant notes",
    "prompt_name": "tool_assistant_notes_prompt",
    "injection_position": {
-    "value": 1,
-    "text": "2nd last"
+    "value": 5,
+    "text": "6th last"
    },
    "allowed_positions": [
     {
@@ -6857,8 +6857,8 @@
    "injection_label": "questions",
    "prompt_name": "tool_questions_prompt",
    "injection_position": {
-    "value": 1,
-    "text": "2nd last"
+    "value": 5,
+    "text": "6th last"
    },
    "allowed_positions": [
     {
@@ -6910,8 +6910,8 @@
    "injection_label": "system info",
    "prompt_name": "tool_system_info_prompt",
    "injection_position": {
-    "value": 1,
-    "text": "2nd last"
+    "value": 5,
+    "text": "6th last"
    },
    "allowed_positions": [
     {
@@ -6963,8 +6963,8 @@
    "injection_label": "web search",
    "prompt_name": "tool_web_search_prompt",
    "injection_position": {
-    "value": 1,
-    "text": "2nd last"
+    "value": 5,
+    "text": "6th last"
    },
    "allowed_positions": [
     {
@@ -7302,7 +7302,12 @@
     "history_journal_id": 194,
     "card_id": 4,
     "card_name": "Odalric Vane",
-    "card_portrait": null,
+    "card_portrait": {
+     "file": "crd-0004-20260101-7ef6e873.jpg",
+     "width": 768,
+     "height": 1024,
+     "size": 32761
+    },
     "portrait_sent": false,
     "provider": null,
     "model": null,
@@ -7333,7 +7338,12 @@
     "history_journal_id": 202,
     "card_id": 5,
     "card_name": "Mirelle Sorel",
-    "card_portrait": null,
+    "card_portrait": {
+     "file": "crd-0005-20260101-65648033.jpg",
+     "width": 768,
+     "height": 1024,
+     "size": 63581
+    },
     "portrait_sent": false,
     "provider": null,
     "model": null,
@@ -7364,7 +7374,12 @@
     "history_journal_id": 199,
     "card_id": 6,
     "card_name": "Casimir Prewick",
-    "card_portrait": null,
+    "card_portrait": {
+     "file": "crd-0006-20260101-7e5d102d.jpg",
+     "width": 768,
+     "height": 1024,
+     "size": 50200
+    },
     "portrait_sent": false,
     "provider": null,
     "model": null,
@@ -7395,7 +7410,12 @@
     "history_journal_id": 193,
     "card_id": 7,
     "card_name": "Emeran Falk",
-    "card_portrait": null,
+    "card_portrait": {
+     "file": "crd-0007-20260101-721daf50.jpg",
+     "width": 768,
+     "height": 1024,
+     "size": 122703
+    },
     "portrait_sent": false,
     "provider": null,
     "model": null,
@@ -7416,7 +7436,12 @@
     "history_journal_id": 192,
     "card_id": 3,
     "card_name": "Bell Harrow",
-    "card_portrait": null,
+    "card_portrait": {
+     "file": "crd-0003-20260101-19ab7992.jpg",
+     "width": 768,
+     "height": 1024,
+     "size": 55892
+    },
     "portrait_sent": null,
     "provider": null,
     "model": null,

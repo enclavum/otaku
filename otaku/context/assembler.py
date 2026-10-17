@@ -198,7 +198,7 @@ class AssembledPrompt:
     # premise, `{premise}` filled — the standing instruction a model turn
     # needs before it (a model turn with no turn before it degenerates,
     # and a new story's premise is empty). Never "": the framing stands.
-    story_system: str
+    text_completion_system: str
     messages: list[WireTurn]  # [system?] + the wire turns
 
     # The budget.
@@ -235,12 +235,12 @@ class AssembledPrompt:
         return self.system_tokens + self.transcript_tokens
 
     def as_text(self, template: TextTemplate, opener: str = "") -> str:
-        """The request as the TEXT wire sends it: `story_system` and the
-        story (`as_story_text`, `opener` appended — a retry's paragraph
-        break) rendered in `template`'s turn markers, the story as the
-        model's own turn in progress. The one rendering: the turn sends
-        it and `/context` previews it."""
-        return template.render(self.story_system, self.as_story_text() + opener)
+        """The request as the TEXT wire sends it: `text_completion_system`
+        and the story (`as_story_text`, `opener` appended — a retry's
+        paragraph break) rendered in `template`'s turn markers, the story
+        as the model's own turn in progress. The one rendering: the turn
+        sends it and `/context` previews it."""
+        return template.render(self.text_completion_system, self.as_story_text() + opener)
 
     def as_story_text(self) -> str:
         """The story as ONE TEXT, for the text wire: the turns' bodies in
@@ -481,7 +481,7 @@ class _Assembly:
         return AssembledPrompt(
             messages=wire,
             system=self.system,
-            story_system=self.story_framing.replace("{premise}", self.system).strip(),
+            text_completion_system=self.story_framing.replace("{premise}", self.system).strip(),
             limit=limit,
             system_tokens=system_tokens,
             transcript_tokens=head_tokens
@@ -668,6 +668,10 @@ class _Assembly:
         wire has two sides, and a tool's result is what the model is told
         — framed by `_wire_text`. The seam between two rows is
         `get_join_type`'s, written as `as_story_text` writes it (`join`)."""
+        # A row with nothing to send — a reply that was only a call of a tool
+        # now off — is no turn: an empty one teaches a model to answer with
+        # nothing.
+        rows = [m for m in rows if self._wire_text(m) or pictures_of.get(m)]
         out: list[WireTurn] = []
         volatile = False  # from the first injected row on: it moves with the end
         for position, message in enumerate(rows):

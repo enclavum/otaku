@@ -111,8 +111,9 @@ export async function openStory({ story = null, tab = "messages", allStories } =
 }
 
 /** The fork question, asked the same way from every door that forks —
-    the rail's /fork and the story browser's button — before a story is
-    made. `run` fires only on the answer, after the screens go. */
+    the rail's /fork, the story browser's button and the Messages tab's
+    Fork here — before a story is made. `run` fires only on the answer,
+    after the screens go. */
 export async function confirmFork(run) {
   const choice = await askConfirm({
     title: "Fork this story?",
@@ -364,7 +365,7 @@ function drawReader(view, pane, message, edit) {
   // without the whitespace at its edges, the row's join, which the save
   // keeps (`stories.update_message`), as the transcript's field does.
   const body = element("div", "otk-detail__section");
-  body.append(edited(reader(message.body.trim(), (text) => saveMessage(view, message, text)), "message"));
+  body.append(edited(reader(message.body.trim(), (text) => saveMessage(view, message, text)), ""));
 
   const out = [head, body];
 
@@ -408,7 +409,7 @@ function drawReader(view, pane, message, edit) {
     }),
     actionButton("Edit", { onclick: () => edit() }),
     actionButton("Fork here", {
-      onclick: guard(() => land(view.subject.id, message.id, "fork")),
+      onclick: guard(() => confirmFork(() => land(view.subject.id, message.id, "fork"))),
     }),
   );
   return out;
@@ -699,23 +700,28 @@ function drawCharacter(view, pane, character) {
     ),
   );
 
-  const facts = [];
-  if (character.model) facts.push(madeBy(character));
-  /* Their arc so far, the counterpart of the scene's own: same block,
-     same rule above it, so the two lenses read as one apparatus. */
+  /* Two heads, each where it has something under it: their arc so far
+     and the model that wrote them; then, under the rule a scene's history
+     stands under, the card they came in with, its picture's switch
+     first. */
+  const history = [];
   if (character.history) {
-    facts.push(
-      marginBlock(
-        `${character.name}'s history so far`,
-        element("p", "otk-passage__body otk-prose--margin", character.history),
-      ),
-    );
+    history.push(element("p", "otk-passage__body otk-prose--margin", character.history));
   }
+  if (character.model) history.push(madeBy(character));
+  const card = [];
   if (character.card_portrait && character.portrait_sent !== null) {
-    facts.push(pictureSwitch(view, character));
+    card.push(pictureSwitch(view, character));
   }
-  facts.push(cardText(view, character));
-  margin.replaceChildren(span("otk-label", "Apparatus"), ...facts, manageBlock(view, character));
+  if (character.profile) card.push(cardText(view, character));
+  const cardHead = span(history.length ? "otk-label otk-margin__block" : "otk-label", "Card");
+  // the facts scroll; the buttons stay pinned under them
+  const known = element("div", "otk-margin__scroll");
+  known.append(
+    ...(history.length ? [span("otk-label", "History"), ...history] : []),
+    ...(card.length ? [cardHead, ...card] : []),
+  );
+  margin.replaceChildren(known, manageBlock(view, character));
 }
 
 function pictureSwitch(view, character) {
@@ -744,10 +750,10 @@ function pictureSwitch(view, character) {
 
 function cardText(view, character) {
   /* The card a character came in with: its copy of the card's profile,
-     field by field as the card window shows a card's, each saved on its
-     own. A profile that is no TOML reads as no fields — it is the
-     hand-kept source, then, edited whole until it reads again. */
-  const key = "card";
+     field by field as the card window shows a card's, each name over its
+     field and each saved on its own. A profile that is no TOML reads as
+     no fields — it is the hand-kept source, then, edited whole until it
+     reads again. */
   if (character.profile_fields) {
     const box = element("div", "otk-v otk-v--sm");
     box.append(
@@ -768,25 +774,19 @@ function cardText(view, character) {
         "otk-passage__body otk-prose--margin",
       ),
     );
-    return marginFact(key, box);
+    return box;
   }
-  if (!character.profile) {
-    return marginFact(key, element("p", "otk-derived", "none — extracted from the story, not imported"));
-  }
-  return marginFact(
-    key,
-    edited(
-      editable("otk-card", {
-        text: character.profile,
-        save: (text) =>
-          saveField(
-            view,
-            () => api.stories.characters.update(view.subject.id, character.id, { profile: text }),
-            () => (character.profile = text),
-          ),
-      }),
-      "",
-    ),
+  return edited(
+    editable("otk-card", {
+      text: character.profile,
+      save: (text) =>
+        saveField(
+          view,
+          () => api.stories.characters.update(view.subject.id, character.id, { profile: text }),
+          () => (character.profile = text),
+        ),
+    }),
+    "",
   );
 }
 
@@ -794,18 +794,28 @@ function heading(view, character) {
   /* The character's name — and, linked to a codex card, after it its
      portrait where the card has one and a mark, either opening the card's
      window on its own; renamed, merged or deleted there, the card reads
-     differently here, so the story is read again. */
+     differently here, so the story is read again. Its aliases close it,
+     "(aka …)". */
   const name = element("h3", "otk-reading__title");
-  if (character.card_id == null) {
-    name.append(character.name);
-    return name;
+  name.append(character.name);
+  if (character.card_id != null) name.append(...cardLinks(view, character));
+  if (character.aliases.length) {
+    // one line, cut where it is wider than the column: the whole of it on hover
+    const aka = span("otk-cast-aka", `(aka ${character.aliases.join(", ")})`);
+    aka.title = aka.textContent;
+    name.append(aka);
   }
+  return name;
+}
+
+function cardLinks(view, character) {
+  /* The ways from a linked character into its card's window. */
+  const links = [];
   const openCard = guard(async () => {
     const refused = await openCardWindow(character.card_id);
     if (refused) report(refused);
     else await reread(view, character.id);
   });
-  name.append(character.name);
   if (character.card_portrait) {
     // the mark beside it is the keyboard's way in; this, the pointer's
     const portrait = element("button", "otk-cast-portrait");
@@ -817,7 +827,7 @@ function heading(view, character) {
     image.src = api.pictures.thumbnail.url(character.card_portrait.file);
     portrait.append(image);
     portrait.onclick = openCard;
-    name.append(portrait);
+    links.push(portrait);
   }
   const open = element("button", "otk-card-open");
   open.type = "button";
@@ -828,8 +838,8 @@ function heading(view, character) {
   svg.append(svgElement("path", { d: mark, ...LINE_STROKE }));
   open.append(svg);
   open.onclick = openCard;
-  name.append(open);
-  return name;
+  links.push(open);
+  return links;
 }
 
 function manageBlock(view, character) {
@@ -956,20 +966,19 @@ function journalPassages(view, journals, nameOf, rubricOf) {
     // what a correction finds the record's other passage by (`reentry`)
     passage.dataset.record = String(record.id);
     passage.append(span("otk-passage__rubric", rubricOf(nameOf(record))));
-    passage.append(
-      edited(
-        editable("otk-passage__body", {
-          text: record.entry,
-          save: (text) =>
-            saveField(
-              view,
-              () => api.stories.journals.update(view.subject.id, record.id, { entry: text }),
-              () => reentry(view, record.id, text),
-            ),
-        }),
-        "entry",
-      ),
+    const entry = edited(
+      editable("otk-passage__body", {
+        text: record.entry,
+        save: (text) =>
+          saveField(
+            view,
+            () => api.stories.journals.update(view.subject.id, record.id, { entry: text }),
+            () => reentry(view, record.id, text),
+          ),
+      }),
+      "",
     );
+    passage.append(entry);
     if (record.state) passage.append(element("p", "otk-note", record.state));
     box.append(passage);
   }
@@ -1100,7 +1109,7 @@ function buildPremise(view, pane) {
     save: (text) => savePremise(view, text),
   });
   field.placeholder = "(no premise yet)";
-  const box = edited(field, "premise");
+  const box = edited(field, "");
   $("[data-premise-field]", pane).replaceChildren(box);
   const importing = $("[data-import-system]", pane);
   // pressing it is not a click away: the text it reads lands in the open editor

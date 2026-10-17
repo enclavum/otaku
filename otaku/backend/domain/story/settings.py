@@ -197,9 +197,10 @@ class ToolSetting(InjectingSetting):
 
     tool: ClassVar[type[Tool]] = Tool  # narrowed: a tool's switch always has one
     prompt_name: ClassVar[str] = ""  # narrowed: a tool's switch always sends one
-    # Before the reader's newest message: all the recency, and nothing to
-    # re-read.
-    default_position = InjectionPosition(1)
+    # Five of the reader's messages back: just before the newest, a small
+    # model took a tool's instruction for the task and wrote the call
+    # alone, or nothing.
+    default_position = InjectionPosition(5)
     allowed_positions = _TOOL_POSITIONS
 
     prompt: str

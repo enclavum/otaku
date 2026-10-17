@@ -40,6 +40,8 @@ from otaku.store.schema import Attachment, InjectionPosition, Message, Scene, St
 CAT = Attachment(file="pic-0001-20260918-a3f9c1e2.jpg", width=2, height=2, size=3)
 CAT_PICTURE = WirePicture(b"cat", "image/jpeg")
 NO_TOOLS = ToolSet()  # every call leaves the wire
+# A reply that is one call of the questions tool and nothing else.
+QUESTION = "```otk-question\nGo on?\n1. Yes\n2. No\n```"
 
 
 def assemble(
@@ -667,10 +669,11 @@ class TestTheStoryAsOneText:
     def test_the_text_wires_system_is_the_framing_around_the_premise(self) -> None:
         # the standing instruction stands even where the premise is empty:
         # a model turn needs a turn before it
-        assert assemble("Be brief.", exchange(), None).story_system == "<<frame Be brief.>>"
-        assert assemble("", exchange(), None).story_system == "<<frame >>"
+        brief = assemble("Be brief.", exchange(), None)
+        assert brief.text_completion_system == "<<frame Be brief.>>"
+        assert assemble("", exchange(), None).text_completion_system == "<<frame >>"
         injected = assemble("Be brief.", exchange(), None, injections=(system("ASK HOW"),))
-        assert injected.story_system == "<<frame Be brief.\n\nASK HOW>>"
+        assert injected.text_completion_system == "<<frame Be brief.\n\nASK HOW>>"
 
     def test_as_text_renders_the_framed_premise_and_the_story_in_the_template(self) -> None:
         rows = [story(user("I was waiting")), story(assistant("for the bus."))]
@@ -695,6 +698,22 @@ class TestToolCalls:
     def test_a_call_of_any_other_tool_leaves_the_wire(self) -> None:
         prompt = assemble("", noted(), 8192, tool_set=NO_TOOLS)
         assert [m.body for m in prompt.messages] == ["One.", "Two.", "Three."]
+
+    def test_a_reply_that_was_a_call_alone_leaves_no_turn_once_its_tool_is_off(self) -> None:
+        # an empty turn teaches a model to answer with nothing: the
+        # reader's lines either side rejoin, as around a reply never made
+        rows = [user("One."), assistant(QUESTION), user("Two.")]
+        prompt = assemble("", rows, 8192, tool_set=NO_TOOLS)
+        assert [(m.role, m.body) for m in prompt.messages] == [("user", "One.\n\nTwo.")]
+
+    def test_the_same_reply_goes_while_its_tool_is_on(self) -> None:
+        rows = [user("One."), assistant(QUESTION), user("Two.")]
+        prompt = assemble("", rows, 8192, tool_set=ToolSet(on=frozenset({"question"})))
+        assert [(m.role, m.body) for m in prompt.messages] == [
+            ("user", "One."),
+            ("assistant", QUESTION),
+            ("user", "Two."),
+        ]
 
     def test_a_tool_turn_goes_as_the_readers_turn_framed_by_the_prompts(self) -> None:
         # the wire has two sides, and the result is what the model is

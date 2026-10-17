@@ -54,7 +54,7 @@ EMULATING = StorySettingDB(EMULATION, enabled=True)
 class TestAsItStands:
     def test_a_story_that_stored_nothing_has_the_setting_off_at_its_default(self) -> None:
         assert not questions().enabled
-        assert questions().injection_position == InjectionPosition(1)
+        assert questions().injection_position == InjectionPosition(5)
         assert reminder().injection_position == InjectionPosition(2)
         assert reminder().reminder_text == ""
         assert notes().display_notes is True
@@ -82,7 +82,7 @@ class TestAsItStands:
     def test_a_position_the_setting_may_not_take_reads_as_its_default(self) -> None:
         assert questions(
             StorySettingDB("allow_questions", position=InjectionPosition(9))
-        ).injection_position == InjectionPosition(1)
+        ).injection_position == InjectionPosition(5)
         stored = StorySettingDB("use_story_reminder", position=SYSTEM)
         assert reminder(stored).injection_position == InjectionPosition(2)
         stored = StorySettingDB(EMULATION, position=InjectionPosition(9))
@@ -146,13 +146,13 @@ class TestAsItStands:
 class TestToDb:
     def test_nothing_given_is_the_row_as_it_stands(self) -> None:
         assert questions().to_db() == StorySettingDB(
-            "allow_questions", position=InjectionPosition(1)
+            "allow_questions", position=InjectionPosition(5)
         )
         assert reminder().to_db() == StorySettingDB(
             "use_story_reminder", position=InjectionPosition(2), reminder_text=""
         )
         assert notes().to_db() == StorySettingDB(
-            "allow_assistant_notes", position=InjectionPosition(1), display_notes=True
+            "allow_assistant_notes", position=InjectionPosition(5), display_notes=True
         )
         assert emulation().to_db() == StorySettingDB(EMULATION, position=SYSTEM)
 
@@ -167,7 +167,7 @@ class TestToDb:
         )
         row = notes().to_db(display_notes=False)
         assert row == StorySettingDB(
-            "allow_assistant_notes", position=InjectionPosition(1), display_notes=False
+            "allow_assistant_notes", position=InjectionPosition(5), display_notes=False
         )
         row = emulation().to_db(enabled=False, position=InjectionPosition(1))
         assert row == StorySettingDB(EMULATION, enabled=False, position=InjectionPosition(1))
@@ -258,7 +258,7 @@ class TestInjection:
         assert (found.owner, found.text, found.position) == (
             "allow_questions",
             "((OOC: ASK HOW))",
-            InjectionPosition(1),
+            InjectionPosition(5),
         )
 
     def test_a_tool_in_the_system_message_is_bare(self) -> None:

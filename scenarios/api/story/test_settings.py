@@ -298,10 +298,10 @@ class TestToolsTab:
         # the depth; Enter opens the closed list, ↓ picks the next place,
         # Enter sets it; Esc back to the list, Esc quits.
         self.tools(app, ENTER + DOWN + ENTER + DOWN + ENTER + ESC + ESC)
-        assert self.setting(app, "allow_questions").injection_position == InjectionPosition(2)
+        assert self.setting(app, "allow_questions").injection_position == InjectionPosition(6)
         # Tab is the other way in, and never a way back
         self.tools(app, TAB + DOWN + ENTER + DOWN + ENTER + ESC + ESC)
-        assert self.setting(app, "allow_questions").injection_position == InjectionPosition(3)
+        assert self.setting(app, "allow_questions").injection_position == InjectionPosition(7)
 
     def test_the_story_reminder_edits_in_place(self, app: App) -> None:
         app.play("I push the door.")

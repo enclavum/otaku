@@ -1,14 +1,17 @@
-"""The samples' pure rules: the shipped layout of a sample's pictures.
+"""The samples' pure rules: the shipped layout of a sample's pictures,
+and what a card's manifest row sets on its card.
 
-A sample's pictures ship beside its document, named
+A sample's pictures ship in the samples' images folder, named
 `<stem>.<message>.<order>.<ext>`: `_sample_pictures` picks out the ones
-for a stem among a directory's names, each with the message number it
-belongs to, in message and then picture order; anything else in the
-directory — the documents, another sample's pictures, a name that does
-not follow the rule — is left alone.
+for a stem among the folder's names, each with the message number it
+belongs to, in message and then picture order; anything else there —
+another sample's pictures, a card's portrait, a name that does not
+follow the rule — is left alone. A manifest row's fields
+(`_card_fields`) are the ones it gives, each as the card's update takes
+it; one it leaves out keeps what the story's character brought.
 """
 
-from otaku.backend.samples import _sample_pictures
+from otaku.backend.samples import _card_fields, _sample_pictures
 
 
 class TestSamplePictures:
@@ -34,3 +37,25 @@ class TestSamplePictures:
             "river.15.2.jpg",
             "river.15.10.jpg",
         ]
+
+
+class TestCardFields:
+    def test_a_rows_fields_as_the_cards_update_takes_them(self) -> None:
+        row = {
+            "story": "river",
+            "name": "Maren",
+            "picture": "maren.jpg",
+            "tagline": "Maps",
+            "description": "A cartographer.",
+            "examples": ["{{user}}: Hi.\n{{char}}: Hello.", "{{user}}: Bye."],
+        }
+        assert _card_fields(row) == {
+            "tagline": "Maps",
+            "description": "A cartographer.",
+            "examples": ("{{user}}: Hi.\n{{char}}: Hello.", "{{user}}: Bye."),
+        }
+
+    def test_a_field_left_out_or_left_empty_is_not_set(self) -> None:
+        assert (
+            _card_fields({"story": "river", "name": "Maren", "greeting": "", "examples": []}) == {}
+        )

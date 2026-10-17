@@ -583,7 +583,14 @@ function newCard(popup, className) {
     choose,
   );
   opens(box, () => newCardByHand(popup));
-  dropTarget(box, (dropped) => promote(popup, dropped));
+  dropTarget(box, async (dropped) => {
+    const choice = await askConfirm({
+      title: `Register ${dropped.name} as a card?`,
+      body: `A new card is made from ${dropped.name} in "${storyName(dropped)}" and linked to it.`,
+      action: "Register",
+    });
+    if (choice === "confirm") await promote(popup, dropped);
+  });
   filesDropped(box, (files) => importCards(popup, files));
   return box;
 }
@@ -705,7 +712,21 @@ function drawUnlinked(popup) {
 // ---------- links: dropped, picked, made ----------
 
 function linksDropped(popup, target, card) {
-  dropTarget(target, (dropped) => link(popup, dropped, card.id));
+  /* Asked first, as the drop on New card is: let go a moment early, or
+     over the next tile, a drop links where it was not meant to. */
+  dropTarget(target, async (dropped) => {
+    const choice = await askConfirm({
+      title: `Link ${dropped.name} to ${card.name}?`,
+      body: `${dropped.name} in "${storyName(dropped)}" will show this card's picture in its Cast tab.`,
+      action: "Link",
+    });
+    if (choice === "confirm") await link(popup, dropped, card.id);
+  });
+}
+
+/** A story character's story as a card's lists name it. */
+function storyName(row) {
+  return label(row.story_label) || "(untitled)";
 }
 
 function dropTarget(target, onDrop) {
@@ -1148,10 +1169,10 @@ export function cardFieldEditors(values, save, className = "otk-passage__body") 
 
 function fieldEditor(className, name, options) {
   /* One field edited where it is read (`editable`, `options` its own),
-     an empty one reading as a dash. */
+     its name over it and an empty one reading as a dash. */
   const input = editable(className, options);
   input.placeholder = "\u2014";
-  return edited(input, name);
+  return edited(input, name, "", { headed: true });
 }
 
 function fields(popup, card) {
@@ -1231,6 +1252,12 @@ async function drawJournals(popup, card, pane, storyId) {
   const unlink = actionButton("Unlink", {
     kind: "otk-btn--quiet",
     onclick: guard(async () => {
+      const choice = await askConfirm({
+        title: `Unlink ${chosen.name} from ${card.name}?`,
+        body: `${chosen.name} in "${storyName(chosen)}" keeps its profile; drop it on the card to relink.`,
+        action: "Unlink",
+      });
+      if (choice !== "confirm") return;
       const answer = await api.stories.characters.update(chosen.story_id, chosen.character_id, {
         card_id: null,
       });

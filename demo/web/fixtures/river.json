@@ -498,8 +498,8 @@
    "injection_label": "assistant notes",
    "prompt_name": "tool_assistant_notes_prompt",
    "injection_position": {
-    "value": 1,
-    "text": "2nd last"
+    "value": 5,
+    "text": "6th last"
    },
    "allowed_positions": [
     {
@@ -551,8 +551,8 @@
    "injection_label": "questions",
    "prompt_name": "tool_questions_prompt",
    "injection_position": {
-    "value": 1,
-    "text": "2nd last"
+    "value": 5,
+    "text": "6th last"
    },
    "allowed_positions": [
     {
@@ -604,8 +604,8 @@
    "injection_label": "system info",
    "prompt_name": "tool_system_info_prompt",
    "injection_position": {
-    "value": 1,
-    "text": "2nd last"
+    "value": 5,
+    "text": "6th last"
    },
    "allowed_positions": [
     {
@@ -657,8 +657,8 @@
    "injection_label": "web search",
    "prompt_name": "tool_web_search_prompt",
    "injection_position": {
-    "value": 1,
-    "text": "2nd last"
+    "value": 5,
+    "text": "6th last"
    },
    "allowed_positions": [
     {
@@ -813,7 +813,12 @@
     "history_journal_id": 3,
     "card_id": 1,
     "card_name": "Maren",
-    "card_portrait": null,
+    "card_portrait": {
+     "file": "crd-0001-20260101-8aeeff74.jpg",
+     "width": 768,
+     "height": 1024,
+     "size": 133429
+    },
     "portrait_sent": null,
     "provider": null,
     "model": null,
@@ -832,7 +837,12 @@
     "history_journal_id": 4,
     "card_id": 2,
     "card_name": "Tallis",
-    "card_portrait": null,
+    "card_portrait": {
+     "file": "crd-0002-20260101-3c1e7abb.jpg",
+     "width": 768,
+     "height": 1024,
+     "size": 125673
+    },
     "portrait_sent": null,
     "provider": null,
     "model": null,
@@ -914,14 +924,14 @@
    "total_tokens": 1641,
    "used": 5
   },
-  "lede": "Context preview — the exact request to be sent. Context summary:\n\n  ~1,641 tokens projected · 5% of the 32,574 limit\n  system 73 · transcript 1,568\n  16 messages verbatim\n  2 pictures on the verbatim messages not sent: the model cannot see, or the file is gone\n  injected:\n  - questions (2nd last, ~180 tokens)",
+  "lede": "Context preview — the exact request to be sent. Context summary:\n\n  ~1,641 tokens projected · 5% of the 32,574 limit\n  system 73 · transcript 1,568\n  16 messages verbatim\n  2 pictures on the verbatim messages not sent: the model cannot see, or the file is gone\n  injected:\n  - questions (6th last, ~180 tokens)",
   "note": "",
   "cards": [],
   "injections": [
    {
     "label": "questions",
-    "position": 1,
-    "position_text": "2nd last",
+    "position": 5,
+    "position_text": "6th last",
     "tokens": 180
    }
   ],
@@ -963,7 +973,7 @@
    },
    {
     "role": "user",
-    "body": "\"Uphill,\" I repeat, and I write it in my notebook where he can watch me do it. \"I take you at your word, Tallis. Show me.\"",
+    "body": "((OOC: You may ask the reader ONE question when a choice is theirs to make rather than\nyours. Write it as the last thing in your reply, in a fenced code block marked\notk-question: the question on the first line, then the answers for the reader\nto pick from as numbered lines, at least two. Like this, from an unrelated\nstory:\n```otk-question\nDoes Mara confess tonight, or wait for the ball?\n1. She confesses tonight\n2. She waits for the ball\n3. She confesses, but to the wrong person\n```\nThe reader's next message is the answer.\nClose the block before anything else follows, never put a block inside another,\nand stop after the closing fence. Never mention the block's marker. Never write\nit outside the block itself.))\n\"Uphill,\" I repeat, and I write it in my notebook where he can watch me do it. \"I take you at your word, Tallis. Show me.\"",
     "pictures": 0
    },
    {
@@ -1003,7 +1013,7 @@
    },
    {
     "role": "user",
-    "body": "((OOC: You may ask the reader ONE question when a choice is theirs to make rather than\nyours. Write it as the last thing in your reply, in a fenced code block marked\notk-question: the question on the first line, then the answers for the reader\nto pick from as numbered lines, at least two. Like this, from an unrelated\nstory:\n```otk-question\nDoes Mara confess tonight, or wait for the ball?\n1. She confesses tonight\n2. She waits for the ball\n3. She confesses, but to the wrong person\n```\nThe reader's next message is the answer.\nClose the block before anything else follows, never put a block inside another,\nand stop after the closing fence. Never mention the block's marker. Never write\nit outside the block itself.))\nI hold the lantern over my map, then over the chamber floor, and look from one to the other.",
+    "body": "I hold the lantern over my map, then over the chamber floor, and look from one to the other.",
     "pictures": 0
    },
    {

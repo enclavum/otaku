@@ -280,5 +280,5 @@ in classes, so a stylesheet can name it the same way the scripts do.
 | `.is-waiting` | `.otk-docket` | a report's slip with nothing to show yet |
 | `.otk-generating--idle` | the generating block | the reply landed; the slot keeps its height |
 | `.otk-status--working` / `--offline` / `--idle` | `.otk-status` | which of the three the one status line shows |
-| `.otk-status--said` / `--error` | `.otk-status` | the sentence on it is news, or a refusal or a failure — an error, gone after ten seconds |
-| `.otk-panel__foot--error` / `.otk-docket__foot--error` / `.otk-dialog__foot--error` / `.otk-sheet__foot--error` | a window's foot | an error stands in it: one `.otk-alert` over its usual words, its ground flashed once and then tinted, until the foot says something else, the window closes, or ten seconds pass |
+| `.otk-status--said` / `--error` | `.otk-status` | the sentence on it is news, or a refusal or a failure — an error, gone after thirty seconds |
+| `.otk-panel__foot--error` / `.otk-docket__foot--error` / `.otk-dialog__foot--error` / `.otk-sheet__foot--error` | a window's foot | an error stands in it: one `.otk-alert` over its usual words, its ground flashed once and then tinted, until the foot says something else, the window closes, or thirty seconds pass |

@@ -759,9 +759,10 @@ function familyOf(id) {
 /* A story made at once — and, given codex cards (`cards`: each its id,
    name, aliases, the card its copy is of and its greeting, composed by
    the router), one started with them as `cards.bring_in_cards` starts
-   it: a card row and a character each, linked, then the first card's
+   it: a card row and a character each, linked — the row carrying the
+   card's portrait for a card in `pictures` — then the first card's
    greeting; an untitled one named for them. */
-export function createStory({ title = "", premise = "", cards = [], persona = "" } = {}) {
+export function createStory({ title = "", premise = "", cards = [], persona = "", pictures = [] } = {}) {
   if (new Set(cards.map((card) => card.id)).size !== cards.length) throw invalid("A card is picked twice.");
   const seen = new Set();
   for (const card of cards) {
@@ -774,7 +775,12 @@ export function createStory({ title = "", premise = "", cards = [], persona = ""
   const story = hold(state.nextStory++, { title: named, premise });
   let greeter = null;
   for (const card of cards) {
-    const { characterId } = bringIn(story, { ...card, user: persona, line: `/card ${card.name}` });
+    const { characterId } = bringIn(story, {
+      ...card,
+      user: persona,
+      line: `/card ${card.name}`,
+      withPictures: pictures.includes(card.id),
+    });
     if (!greeter && card.greeting) greeter = { ...card, characterId };
   }
   if (cards.length) story.persona = persona;
@@ -1082,7 +1088,7 @@ export function updateCharacter(
     said.push("Saved.");
   }
   if (changes !== undefined) said.push(correctCopy(row, changes));
-  if (sent !== undefined) said.push(sendPortrait(row, sent));
+  if (sent !== undefined) said.push(sendPortrait(held(id), row, sent));
   if (cardId !== undefined) said.push(linkCharacter(id, row, cardId, withCopies));
   return { value: structuredClone(row), notice: said.join(" ") };
 }
@@ -1098,11 +1104,16 @@ export function checkLink(id, characterId, cardId) {
 /* Whether a character's card picture rides its card row
    (`domain.story.lore.set_portrait_sent`): refused where no card row
    brought it in, or there is no picture to send. */
-function sendPortrait(row, sent) {
+function sendPortrait(story, row, sent) {
   if (row.portrait_sent === null || row.portrait_sent === undefined) {
     throw invalid(`${row.name} came into this story with no card.`);
   }
   if (sent && !row.card_portrait) throw invalid(`${row.name}'s card has no picture to send.`);
+  for (const typed of story.messages) {
+    if (typed.kind === "card" && typed.speaker === row.name) {
+      typed.attachments = sent ? [structuredClone(row.card_portrait)] : [];
+    }
+  }
   row.portrait_sent = sent;
   return "Saved.";
 }
@@ -1144,7 +1155,7 @@ function linkCharacter(id, row, cardId, withCopies = false) {
     if (row.card_id == null) throw invalid("Nothing to change.");
     const was = cardRow(row.card_id);
     row.card_id = null;
-    row.card_name = null;
+    showCard(row, null);
     return `Unlinked ${row.name} from ${was.name}.`;
   }
   const card = linkable(id, row, cardId);
@@ -1153,13 +1164,24 @@ function linkCharacter(id, row, cardId, withCopies = false) {
   return `Linked ${row.name} to ${card.name}.${linkedCopies(found.length)}`;
 }
 
-/* Story characters linked to a codex card, its name beside each as a
-   character answers it. */
+/* Story characters linked to a codex card, its name and portrait beside
+   each as a character answers it. */
 function linkRows(rows, card) {
   for (const each of rows) {
     each.card_id = card.id;
-    each.card_name = card.name;
+    showCard(each, card);
   }
+}
+
+/* What a story character shows of its linked card — its name and its
+   first picture (`backend.api.story.lore._character`) — or of none. */
+function showCard(row, card) {
+  row.card_name = card?.name ?? null;
+  row.card_portrait = portraitOf(card);
+}
+
+function portraitOf(card) {
+  return card?.pictures.length ? structuredClone(card.pictures[0]) : null;
 }
 
 /* The card a link joins, refused as `domain.story.lore._linkable` says. */
@@ -1312,11 +1334,11 @@ export function personaOf(id) {
    /card row, speaker-linked; the cast row with the card's profile, made by
    the card and linked to it; the greeting as the character's own first
    words. Answered as the two rows, the codex card and the report. */
-export function importCard(id, expected, { card, name, aliases, copy, greeting, line, persona, report }) {
+export function importCard(id, expected, { card, name, aliases, copy, greeting, line, persona, withPictures, report }) {
   const story = held(id);
   checkHead(id, expected);
   ensureFree(id, name, card);
-  const { characterId, typed } = bringIn(story, { id: card, name, aliases, copy, user: persona, line });
+  const { characterId, typed } = bringIn(story, { id: card, name, aliases, copy, user: persona, line, withPictures });
   story.persona = persona;
   const said = greeting
     ? record(id, "assistant", greeting, { speaker: name, provider: "card", model: copy.file_name || null })
@@ -1340,9 +1362,12 @@ export function ensureFree(id, name, cardId = null) {
   if (linked) throw conflict(`${cardRow(cardId).name} is in this story already, as ${linked.name}.`);
 }
 
-function bringIn(story, { id: cardId, name, aliases = [], copy, user, line }) {
+function bringIn(story, { id: cardId, name, aliases = [], copy, user, line, withPictures = false }) {
   const characterId = state.nextLore++;
   const fields = copyFields(copy);
+  const card = state.cards.get(cardId) ?? null;
+  // the card's portrait rides its row where asked and it has one
+  const riding = withPictures ? portraitOf(card) : null;
   story.lore.characters.push({
     id: characterId,
     name,
@@ -1353,17 +1378,22 @@ function bringIn(story, { id: cardId, name, aliases = [], copy, user, line }) {
     history: "",
     history_journal_id: null,
     card_id: cardId,
-    card_name: state.cards.get(cardId)?.name ?? null,
-    // the demo keeps no pictures (`addCardPicture`): none to show, none riding
-    card_portrait: null,
-    portrait_sent: false,
+    card_name: card?.name ?? null,
+    card_portrait: portraitOf(card),
+    portrait_sent: riding !== null,
     // a card made it, and is answered with no model
     // (`backend.api.story.lore._character`)
     provider: "card",
     model: null,
     updated_at: now(),
   });
-  const typed = record(story.id, "user", line, { kind: "card", speaker: name, provider: null, model: null });
+  const typed = record(story.id, "user", line, {
+    kind: "card",
+    speaker: name,
+    provider: null,
+    model: null,
+    attachments: riding ? [riding] : [],
+  });
   return { characterId, typed };
 }
 
@@ -1396,8 +1426,9 @@ export function profileToml(card, user) {
 /* All characters, as `backend.domain.codex.cards` keeps them: the cards,
    the stories each is in read off the casts as the store reads them, the
    digest of each card file a card was made from, and the stories'
-   characters no card claims. A card's picture is not in the demo: it has
-   nowhere to keep one. */
+   characters no card claims. A picture added to a card is not kept: the
+   demo has nowhere to keep one, and the samples' portraits come with the
+   fixtures. */
 
 const NO_SUCH_CARD = "No such card.";
 // a card's fields as `CardsResource.update` takes them, the name and the
@@ -1561,7 +1592,7 @@ function correctCard(card, fields) {
   card.aliases = cleanAliases(fields.aliases ?? card.aliases, name);
   for (const key of CARD_FIELDS) if (fields[key] !== undefined) card[key] = structuredClone(fields[key]);
   card.updated_at = now();
-  renamed(card);
+  reachCasts(card);
   return "Saved.";
 }
 
@@ -1572,7 +1603,7 @@ export function deleteCard(id) {
     for (const row of story.lore.characters) {
       if (row.card_id === id) {
         row.card_id = null;
-        row.card_name = null;
+        showCard(row, null);
       }
     }
   }
@@ -1591,20 +1622,18 @@ export function mergeCard(id, into) {
   const shared = linkedTo(target.id).find((row) => stories.has(row.story_id));
   if (shared) {
     throw conflict(
-      `"${shared.story_label}" has characters linked to both ${source.name} and ${target.name} — merge them in the story first.`,
+      `"${shared.story_label}" has characters linked to both ${source.name} and ${target.name}.`,
     );
   }
   for (const story of state.stories.values()) {
     for (const row of story.lore.characters) {
-      if (row.card_id === source.id) {
-        row.card_id = target.id;
-        row.card_name = target.name;
-      }
+      if (row.card_id === source.id) row.card_id = target.id;
     }
   }
   target.aliases = cleanAliases([...target.aliases, source.name, ...source.aliases], target.name);
   const kept = new Set(target.pictures.map((picture) => picture.file));
   target.pictures = [...target.pictures, ...source.pictures.filter((picture) => !kept.has(picture.file))];
+  reachCasts(target);
   state.cardDigests.set(target.id, [...new Set([...(state.cardDigests.get(target.id) ?? []), ...(state.cardDigests.get(source.id) ?? [])])]);
   state.cards.delete(source.id);
   state.cardDigests.delete(source.id);
@@ -1624,6 +1653,7 @@ export function removeCardPicture(id, name) {
   if (kept.length === card.pictures.length) throw notFound(`${card.name} has no such picture.`);
   card.pictures = kept;
   card.updated_at = now();
+  reachCasts(card);
   return { value: cardOf(card), notice: "Picture removed." };
 }
 
@@ -1723,11 +1753,11 @@ export function importCardFile(found, notes, hasPicture, { rename = "", reuse = 
   return { value: { card: cardOf(made), made: true }, notice: sentence.endsWith(".") ? sentence : `${sentence}.` };
 }
 
-/** The stories' casts name the cards they are linked to: a rename reaches
-    them. */
-function renamed(card) {
+/** The stories' casts show the cards they are linked to (`showCard`): a
+    rename or a new first picture reaches them. */
+function reachCasts(card) {
   for (const story of state.stories.values()) {
-    for (const row of story.lore.characters) if (row.card_id === card.id) row.card_name = card.name;
+    for (const row of story.lore.characters) if (row.card_id === card.id) showCard(row, card);
   }
 }
 
@@ -1848,11 +1878,13 @@ export function importDocument(text, fileName) {
 // ---------- the pictures ----------
 
 /** The file names a sample's messages carry — what the demo can serve. */
+/** Every stored picture's name: the messages' and the cards'. */
 export function pictureNames() {
   const names = new Set();
   for (const story of state.stories.values()) {
     for (const row of story.messages) for (const picture of row.attachments) names.add(picture.file);
   }
+  for (const card of state.cards.values()) for (const picture of card.pictures) names.add(picture.file);
   return names;
 }
 

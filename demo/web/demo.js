@@ -79,7 +79,8 @@ const ROUTES = {
   "GET /api/stories": (p, q) => items(store.stories(q.get("query") ?? "")),
   "POST /api/stories": (p, q, b) => {
     // a story started with codex cards: each brought in as the product
-    // brings it, its profile bound to the persona — no picture rides here
+    // brings it, its profile bound to the persona, its portrait riding its
+    // row where `card_pictures` names it
     const persona = text(b, "persona");
     const cards = ids(b, "card_ids").map((id) => {
       const found = store.card(id);
@@ -91,8 +92,8 @@ const ROUTES = {
         greeting: _bind(found.greeting, found.name, persona),
       };
     });
-    ids(b, "card_pictures");
-    const made = store.createStory({ title: text(b, "title"), premise: text(b, "premise"), cards, persona });
+    const pictures = ids(b, "card_pictures");
+    const made = store.createStory({ title: text(b, "title"), premise: text(b, "premise"), cards, persona, pictures });
     return created(made, `/api/stories/${made.value.id}`);
   },
   "GET /api/stories/{story}": (p) => store.story(num(p.story)),
@@ -178,9 +179,9 @@ const ROUTES = {
   },
   "DELETE /api/cards/{card}/pictures/{name}": (p) => changed(store.removeCardPicture(num(p.card), p.name)),
   "POST /api/cards/{card}/merges": (p, q, b) => changed(store.mergeCard(num(p.card), integer(b, "into"))),
-  // a message's pictures: the sample's own, shipped with the fixtures and
-  // served as the product serves a stored file — a name nothing is stored
-  // under answers 404, as it does there
+  // a stored picture: a sample message's or a sample card's, shipped with
+  // the fixtures and served as the product serves a stored file — a name
+  // nothing is stored under answers 404, as it does there
   "GET /api/pictures/{name}": (p) => picture(p.name, false),
   "GET /api/pictures/{name}/thumbnail": (p) => picture(p.name, true),
 };
@@ -661,6 +662,7 @@ async function card(story, query, body, ask) {
     greeting: _bind(storyCard.greeting, name, speaking),
     line: fromFile ? `/card ${fileName}` + (rename ? ` ${rename}` : "") : `/card ${name}`,
     persona: speaking,
+    withPictures: "with_pictures" in body ? flag(body, "with_pictures") : false,
     report: report.join(" · "),
   });
   return created(imported, `/api/stories/${story}/characters/${imported.value.character_id}`);
@@ -791,26 +793,44 @@ function picture(name, thumbnail) {
   return realFetch(new URL(`./fixtures/files/${file}`, import.meta.url));
 }
 
-/* A message's picture is loaded by the browser itself, as an <img>, never
-   through fetch — so the fake reaches it on the image element's `src`: a
-   stored file's address, as the page spells it (`api.pictures.url`, its
-   `thumbnail.url`), becomes the fixture's copy of it. */
-const realSrc = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, "src");
-Object.defineProperty(HTMLImageElement.prototype, "src", {
-  configurable: true,
-  get() {
-    return realSrc.get.call(this);
-  },
-  set(value) {
-    const found = /^\/api\/pictures\/([^/]+?)(\/thumbnail)?$/.exec(String(value));
-    if (found) {
-      const name = decodeURIComponent(found[1]);
-      const file = found[2] ? `${name.replace(/\.[^.]+$/, "")}-thumb.jpg` : name;
-      value = new URL(`./fixtures/files/${file}`, import.meta.url).href;
-    }
-    realSrc.set.call(this, value);
-  },
-});
+/* A message's or a card's picture is loaded by the browser itself, as an
+   <img>, never through fetch — so the fake reaches it on the image
+   element's `src` and `srcset` (a gallery tile offers the thumbnail and
+   the picture whole): a stored file's address, as the page spells it
+   (`api.pictures.url`, its `thumbnail.url`), becomes the fixture's copy
+   of it. */
+function fixtureAddress(address) {
+  const found = /^\/api\/pictures\/([^/]+?)(\/thumbnail)?$/.exec(address);
+  if (!found) return address;
+  const name = decodeURIComponent(found[1]);
+  const file = found[2] ? `${name.replace(/\.[^.]+$/, "")}-thumb.jpg` : name;
+  return new URL(`./fixtures/files/${file}`, import.meta.url).href;
+}
+
+const _IMAGE_ADDRESSES = {
+  src: (value) => fixtureAddress(String(value)),
+  // comma-separated candidates, each an address and its width
+  srcset: (value) =>
+    String(value)
+      .split(",")
+      .map((candidate) => {
+        const [address, ...descriptor] = candidate.trim().split(/\s+/);
+        return [fixtureAddress(address), ...descriptor].join(" ");
+      })
+      .join(", "),
+};
+for (const [property, rewrite] of Object.entries(_IMAGE_ADDRESSES)) {
+  const real = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, property);
+  Object.defineProperty(HTMLImageElement.prototype, property, {
+    configurable: true,
+    get() {
+      return real.get.call(this);
+    },
+    set(value) {
+      real.set.call(this, rewrite(value));
+    },
+  });
+}
 
 // ---------- the patch ----------
 

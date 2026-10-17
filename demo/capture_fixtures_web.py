@@ -56,7 +56,7 @@ PINNED_AT = "2026-01-01T00:00:00+00:00"
 # A picture's file name carries the day it was stored (`store.files`);
 # pinned to PINNED_AT's day in the payloads and on the copied files alike,
 # so the fixture's names never move with the capture's date.
-_PICTURE_NAME = re.compile(r"(pic-\d{4}-)\d{8}(-[0-9a-f]+(?:-thumb)?\.[a-z0-9]+)")
+_PICTURE_NAME = re.compile(r"((?:pic|crd)-\d{4}-)\d{8}(-[0-9a-f]+(?:-thumb)?\.[a-z0-9]+)")
 _PINNED_DAY = PINNED_AT[:10].replace("-", "")
 
 
@@ -196,19 +196,20 @@ def _write(fixtures: dict[str, Any], root_str: str, engine_url: str) -> None:
 
 
 def _copy_pictures(fixtures: dict[str, Any], root: Path) -> None:
-    """The sample's pictures as the store holds them — the file and its
-    thumbnail, their day pinned — for the demo's `/api/pictures`. The
-    folder is rebuilt whole, so a picture the sample dropped does not
-    linger."""
+    """The samples' pictures as the store holds them — the river's turns'
+    and the cards' portraits, each file and its thumbnail, their day
+    pinned — for the demo's `/api/pictures`. The folder is rebuilt whole,
+    so a picture the samples dropped does not linger."""
     files = FIXTURES / "files"
     shutil.rmtree(files, ignore_errors=True)
     files.mkdir()
     held = root / "database" / "files"
-    for message in fixtures["river"]["messages"]:
-        for picture in message.get("attachments") or []:
-            stem = Path(picture["file"]).stem
-            for stored in (picture["file"], f"{stem}-thumb.jpg"):
-                shutil.copyfile(held / stored, files / _PICTURE_NAME.sub(rf"\g<1>{_PINNED_DAY}\g<2>", stored))
+    pictures = [p for message in fixtures["river"]["messages"] for p in message.get("attachments") or []]
+    pictures += [p for card in fixtures["codex"]["card"].values() for p in card["pictures"]]
+    for picture in pictures:
+        stem = Path(picture["file"]).stem
+        for stored in (picture["file"], f"{stem}-thumb.jpg"):
+            shutil.copyfile(held / stored, files / _PICTURE_NAME.sub(rf"\g<1>{_PINNED_DAY}\g<2>", stored))
     print(f"wrote {files} ({len(list(files.iterdir()))} files)")
 
 

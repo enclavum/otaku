@@ -306,10 +306,12 @@
     <aside class="otk-margin" data-margin></aside>
   </div>
 
+  <!-- the cast's margin scrolls its facts and pins its buttons under them,
+       so a longer or shorter card never moves the button a reader is aiming at -->
   <div class="otk-panel__body otk-panel__body--dossier" data-pane="cast" hidden>
     <div class="otk-index" data-index aria-label="Cast"></div>
     <div class="otk-reading" data-reading></div>
-    <aside class="otk-margin" data-margin></aside>
+    <aside class="otk-margin otk-margin--pinned" data-margin></aside>
   </div>
 
   <!-- premise: no index, one reading measure. The two ways the text gets

@@ -106,8 +106,8 @@
    "injection_label": "assistant notes",
    "prompt_name": "tool_assistant_notes_prompt",
    "injection_position": {
-    "value": 1,
-    "text": "2nd last"
+    "value": 5,
+    "text": "6th last"
    },
    "allowed_positions": [
     {
@@ -159,8 +159,8 @@
    "injection_label": "questions",
    "prompt_name": "tool_questions_prompt",
    "injection_position": {
-    "value": 1,
-    "text": "2nd last"
+    "value": 5,
+    "text": "6th last"
    },
    "allowed_positions": [
     {
@@ -212,8 +212,8 @@
    "injection_label": "system info",
    "prompt_name": "tool_system_info_prompt",
    "injection_position": {
-    "value": 1,
-    "text": "2nd last"
+    "value": 5,
+    "text": "6th last"
    },
    "allowed_positions": [
     {
@@ -265,8 +265,8 @@
    "injection_label": "web search",
    "prompt_name": "tool_web_search_prompt",
    "injection_position": {
-    "value": 1,
-    "text": "2nd last"
+    "value": 5,
+    "text": "6th last"
    },
    "allowed_positions": [
     {

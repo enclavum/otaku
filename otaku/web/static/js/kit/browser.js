@@ -527,12 +527,18 @@ export function editable(
     that cannot be edited at all — then it takes the label line and no
     verbs, which is how a name only the extractor writes keeps the same
     box as the title beside it. */
-export function edited(field, name, extra = "", { opening = null, opened = null, closing = null } = {}) {
+export function edited(
+  field,
+  name,
+  extra = "",
+  { opening = null, opened = null, closing = null, headed = false } = {},
+) {
   /* `opening` runs as the editor opens, before the field is sized and
      focused — where a frame is put on the value (`editable`'s `_frame`);
      `opened` once it is sized, handed the reading's height as it stood
      before the editor took its place; `closing` as it closes, before the
-     reading is painted again — where the frame comes off. */
+     reading is painted again — where the frame comes off. `headed` puts
+     the name over the field, the verbs staying under it. */
   const box = element("div", `otk-edit ${extra}`.trim());
   const input = field.matches("textarea") ? field : $("textarea.otk-editable", field);
   if (!input) {
@@ -636,8 +642,15 @@ export function edited(field, name, extra = "", { opening = null, opened = null,
   const verbs = element("span", "otk-edit__verbs");
   verbs.append(open, save, cancel);
   const hint = element("span", "otk-edit__hint");
-  hint.append(span("", name), verbs);
-  box.append(shown, hint);
+  if (headed) {
+    const head = element("span", "otk-edit__hint otk-edit__head");
+    head.append(span("", name));
+    hint.append(verbs);
+    box.append(head, shown, hint);
+  } else {
+    hint.append(span("", name), verbs);
+    box.append(shown, hint);
+  }
   box._close();
   return box;
 }
