@@ -80,7 +80,7 @@ packages = ["otaku"]
 
 # The README's pictures are for GitHub, not for the source tarball.
 [tool.hatch.build.targets.sdist]
-exclude = ["images/"]
+exclude = ["/images/"]
 
 [tool.ruff]
 line-length = 100
