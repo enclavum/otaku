@@ -4,7 +4,7 @@ what each account has left, /info what otaku knows of this run.
 
 import re
 
-from otaku.backend.api.app.reports import InfoReport
+from otaku.backend.app.reports.schemas import InfoReport
 from otaku.formatting import format_context
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch, set_config, set_config_provider

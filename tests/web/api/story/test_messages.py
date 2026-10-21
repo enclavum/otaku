@@ -11,7 +11,8 @@ from dataclasses import replace
 from typing import get_args
 
 from otaku.backend.api import Actor, JoinType
-from otaku.backend.api.story.messages import (
+from otaku.backend.story.messages.resources import _as_messages
+from otaku.backend.story.messages.schemas import (
     AssistantMessage,
     AssistantReasoning,
     AssistantText,
@@ -23,9 +24,8 @@ from otaku.backend.api.story.messages import (
     ReplyReport,
     ToolMessage,
     UserMessage,
-    _as_messages,
 )
-from otaku.backend.api.story.messages import Message as Handed
+from otaku.backend.story.messages.schemas import Message as Handed
 from otaku.providers import Stats
 from otaku.store.schema import Message
 from otaku.web.api.story.messages import event

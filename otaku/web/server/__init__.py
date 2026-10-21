@@ -161,7 +161,7 @@ def bind(
     before this was called — nothing here can fail for want of one.
 
     `password_hash` is the hash of `[web] password` the launch made —
-    never the typed password (`backend.domain.app._passwords`). None is the default
+    never the typed password (`backend.app.passwords`). None is the default
     configuration, where nobody is asked for anything."""
     return Server(
         (config.host, config.port),

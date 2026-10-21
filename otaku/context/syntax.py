@@ -21,7 +21,7 @@ on the wire, and the worker's extraction composes rows the same way
 reading and writing are one vocabulary — the same Line classes that
 parse a typed line define how its stored turn composes — so splitting
 them across packages would put one language in two homes.
-`backend.api.story.language` is what frontends may apply of it to a line not
+`backend.story.language` is what frontends may apply of it to a line not
 stored yet — its tokens, what a line opens with, and `spans`, a line's
 story and out-of-character runs, which they draw apart; the language
 itself lives at the lowest package everything that speaks it can reach.
@@ -275,7 +275,7 @@ def spans(line: str) -> list[tuple[str, bool]]:
     token (both send an out-of-character request), and whatever follows
     an inliner to the line's end; the rest is story, the tokens
     themselves included. The breaks a line keeps at its edges are read
-    past (`domain.story._play.submit_line`)."""
+    past (`backend.story.play.submit_line`)."""
     lead = len(line) - len(line.lstrip())
     words = line[lead:].split(None, 1)
     direction = DIRECTIONS.get(words[0]) if words else None
@@ -320,7 +320,7 @@ def to_wire(message: Message, *, is_last: bool, card_block: str | None = None) -
     if frame.tail and (frame.inliner == "/ooc" or (frame.inliner == "/cue" and is_last)):
         parts.append(OOC_FRAME.replace("{body}", frame.tail))
     # The breaks at a line's edges are its paragraph breaks
-    # (`assembler.get_join_type`, `domain.story._play.submit_line`): the leading from the text
+    # (`assembler.get_join_type`, `backend.story.play.submit_line`): the leading from the text
     # before, the trailing to the model's continuation, both typed so in
     # the canvas and riding the wire as they stand — the reader trims them
     # off the line's text, so they are put back here. A block line has none.

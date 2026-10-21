@@ -6,7 +6,7 @@ the wire block
 composed back out of a story character's profile, and what a card
 injects besides its block (`card_injections`). FILE decoding (PNG
 chunks, JSON) lives with the other wild formats, in
-`backend.domain._formats.cards`; this module never touches bytes.
+`backend.formats.cards`; this module never touches bytes.
 `{{char}}`/`{{user}}` macros stay unbound until `bind` applies the names
 only the import knows. Everything here is pure, over strings.
 """
@@ -119,7 +119,7 @@ def bind(text: str, *, char: str, user: str) -> str:
 
 def binds(macro: str) -> bool:
     """Whether `bind` would resolve this exact `{{…}}` (or TavernAI-era)
-    token — the vocabulary question `backend.domain._formats.cards` asks to
+    token — the vocabulary question `backend.formats.cards` asks to
     report macros nothing will bind."""
     return any(pattern.fullmatch(macro) for pattern in (_CHAR_MACRO, _USER_MACRO, _ORIGINAL_MACRO))
 

@@ -71,7 +71,7 @@ from prompt_toolkit.styles import Style
 
 from otaku.formatting import flatten, truncate
 from otaku.terminal.api import Api, Refused
-from otaku.terminal.api.story import prompts as api_prompts
+from otaku.terminal.api import prompts as api_prompts
 from otaku.terminal.screens.base import base_style, bordered_box, page_step, text_line
 from otaku.terminal.screens.dossier.base import Field, Tab
 from otaku.terminal.screens.dossier.cast import CastTab, char_fields

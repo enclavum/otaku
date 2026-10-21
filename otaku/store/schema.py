@@ -288,7 +288,7 @@ class StorySettingDB:
     layout the story is read in — the last three each one setting's, the
     others every injecting setting's.
     WHICH settings there are, and what each may take, is no business of
-    the column's (`backend.domain.story.settings`)."""
+    the column's (`backend.story.settings.services`)."""
 
     name: str
     enabled: bool = False

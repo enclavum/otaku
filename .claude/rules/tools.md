@@ -3,11 +3,10 @@ paths:
   - "otaku/context/tool_calls.py"
   - "otaku/context/injections.py"
   - "otaku/context/assembler.py"
-  - "otaku/backend/domain/story/_tools.py"
-  - "otaku/backend/domain/story/_play.py"
-  - "otaku/backend/domain/story/messages.py"
-  - "otaku/backend/domain/story/settings.py"
-  - "otaku/backend/api/story/messages.py"
+  - "otaku/backend/story/tools.py"
+  - "otaku/backend/story/play.py"
+  - "otaku/backend/story/messages/*.py"
+  - "otaku/backend/story/settings/*.py"
   - "otaku/web/api/story/messages.py"
   - "otaku/settings/prompts.py"
   - "otaku/terminal/tty/render.py"
@@ -35,7 +34,7 @@ frontend draws it — the reader sees what the model reads.
 
 ## The tools
 
-The tools are `backend.domain.story._tools`'. "Answer" is the question
+The tools are `backend.story.tools`'. "Answer" is the question
 tool's word alone: the user's. A tool otaku runs is handed the whole app
 (`run(app)`), so a tool to come finds what it needs.
 
@@ -49,8 +48,8 @@ shipped: `otk-note`, Notes, `allow_assistant_notes`.
 
 ## The play
 
-The play's events are `_play`'s own, told as the interface's by
-`as_events` (`backend.api.story.messages`); the wire names them the same
+The play's events are `play`'s own, told as the interface's by
+`as_events` (`backend.story.messages`); the wire names them the same
 in snake case (`web.api.story.messages.event`: `user_message`, …). A
 reply cut at the length limit keeps its call open.
 

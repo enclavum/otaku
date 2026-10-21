@@ -687,7 +687,7 @@ def _seed_state_dir(root: Path) -> None:
     one scripted provider, smoothing off (the pacing is the script's),
     idle extraction off (a browser tab has no worker thread to run it —
     /extract is the demo's door), samples on."""
-    from otaku.backend.domain.app._paths import Paths
+    from otaku.backend.app.paths import Paths
     from otaku.settings import config as config_file
     from otaku.settings import providers as providers_file
     from otaku.settings import write_atomic
@@ -733,7 +733,7 @@ def main() -> None:
     from prompt_toolkit.application import create_app_session
 
     import otaku.terminal.dispatch as dispatch
-    import otaku.terminal.dispatch.story.context as story_context
+    import otaku.terminal.dispatch.context as dispatch_context
     import otaku.terminal.tty as tty_mod
     from otaku.backend import launch as backend_launch
     from otaku.backend.api import Api, ModelRef
@@ -771,7 +771,7 @@ def main() -> None:
 
     dispatch.HANDLERS["/card"] = demo_card
     # /context pages through `less`; the terminal here scrolls instead.
-    story_context.click = SimpleNamespace(
+    dispatch_context.click = SimpleNamespace(
         echo_via_pager=lambda text, color=True: (
             sys.stdout.write(text if text.endswith("\n") else text + "\n"),
             sys.stdout.flush(),

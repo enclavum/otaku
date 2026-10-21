@@ -184,7 +184,7 @@ Rules:
 """
 
 # The tools' prompts: what tells the model how a tool is used
-# (`backend.domain.story._tools`). Sent as an injection while the tool is switched on
+# (`backend.story.tools`). Sent as an injection while the tool is switched on
 # for the story — bare in the system message, inside the OOC enclosure
 # in chat — so neither carries an enclosure of its own.
 TOOL_QUESTIONS_DEFAULT = """\

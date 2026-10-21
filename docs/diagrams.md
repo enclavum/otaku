@@ -25,7 +25,7 @@ under the graph state the edges ASCII cannot draw cleanly.
              both ─► console   ▼
             ┌─────────────────────────┐   schedules  ┌──────────────────────┐
             │         backend         │ ───────────► │        agents        │ ◄── idle deadline
-            │  api · domain · launch  │              │ extraction · warm-up │
+            │ api · groups · launch   │              │ extraction · warm-up │
             └─┬──┬──┬──┬──┬──┬──┬─────┘              └──┬────┬────┬────┬────┘
               │  │  │  │  │  │  └► integrations         │    │    │    │
               │  │  │  │  │  └───► settings             │    │    │    │
@@ -36,9 +36,11 @@ under the graph state the edges ASCII cannot draw cleanly.
               │                      │ reads                           │
               └──────────────────► store ◄─────────────────────────────┘
 
-    backend: a frontend reaches it through `backend.api` alone (cli adds
-             `backend.launch`); inside, `errors` ◄ `domain.app` ◄ `domain.codex`
-             ◄ `domain.story` ◄ `api` ◄ `launch` — `docs/code_structure.md`,
+    backend: a frontend reaches it through the interface alone — `backend.api`
+             and the resources' and schemas' modules (cli adds `backend.launch`);
+             inside, a resource folder per resource in the groups `app`, `codex`,
+             `story`; the services `errors` ◄ `app` ◄ `codex` ◄ `story`, then the
+             schemas, the resources, `api` ◄ `launch` — `docs/code_structure.md`,
              "The backend"
     sealing: store · logging ─► encryption — the DATA plane (one session cipher
              for the database and the request log, BY DESIGN); backend ─► encryption

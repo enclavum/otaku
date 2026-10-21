@@ -325,7 +325,7 @@ def run(app: App) -> None:
             else:
                 chat.ledger.typed(prefix + line + "\n")
             # in the canvas the line plays as typed, the breaks at its edges
-            # its paragraphs (`domain.story._play.submit_line`); every other line is trimmed
+            # its paragraphs (`backend.story.play.submit_line`); every other line is trimmed
             result = assembler.feed(line, verbatim=is_story_mode)
             if result is None:
                 if in_text:

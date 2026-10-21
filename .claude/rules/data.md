@@ -1,7 +1,7 @@
 ---
 paths:
   - "otaku/store/**/*"
-  - "otaku/backend/domain/app/pictures.py"
+  - "otaku/backend/app/pictures/*.py"
   - "otaku/terminal/screens/dossier/**/*"
   - "otaku/web/static/js/screens/dossier.js"
 ---
@@ -25,7 +25,7 @@ the page's margin (`dossier.js` `madeBy`), the terminal's preview
 
 A message's pictures and a codex card's are files beside the database
 (`store/files.py`, named by their `Owner`), coming in through one reader
-below both frontends (`backend.domain.app.pictures`), and swept
+below both frontends (`backend.app.pictures.services`), and swept
 against what both tables name (`Store.sweep_files`). The daily snapshot
 is of the database file alone: the folder is not backed up.
 

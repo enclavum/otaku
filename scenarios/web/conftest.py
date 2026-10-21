@@ -31,7 +31,7 @@ import pytest
 
 from otaku.backend import launch as backend_launch
 from otaku.backend.api import Api, ModelRef, Refused
-from otaku.backend.domain.app._paths import Paths
+from otaku.backend.app.paths import Paths
 from otaku.console.banner import address
 from otaku.settings.config import WebSettings
 from otaku.store import Store

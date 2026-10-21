@@ -7,7 +7,7 @@ reads the typed argument, makes the interface call and answers the
 sentence. INTERACTIVE is a sequence the terminal owns — a screen, an
 ask, paging — every state touch still an interface call. SYNTAX is the story's language, typed inside a played
 line and read by the backend at play: its tokens and argument shapes are
-the backend's (`backend.api.story.language`), its captions this table's.
+the backend's (`backend.story.language`), its captions this table's.
 
 Nothing here is shared: the page has no commands — a button calls an
 endpoint — and what both frontends say alike is the language's alone. A
@@ -20,7 +20,7 @@ import sys
 from dataclasses import dataclass
 from typing import NamedTuple
 
-from otaku.terminal.api.story import language as api_language
+from otaku.terminal.api import language as api_language
 
 # The row /help opens the playing group with — prose is the surface's
 # real first row. It is not a command and has no spec: what a help page

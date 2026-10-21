@@ -20,8 +20,8 @@ from collections.abc import Iterator
 from typing import Any, Self, TextIO
 
 from otaku.console.sound import ring
-from otaku.terminal.api import Actor, JoinType, StoryMode
-from otaku.terminal.api.story.messages import (
+from otaku.terminal.api import (
+    Actor,
     AssistantMessage,
     AssistantReasoning,
     AssistantText,
@@ -29,7 +29,9 @@ from otaku.terminal.api.story.messages import (
     Declined,
     Done,
     Failed,
+    JoinType,
     PlayEvent,
+    StoryMode,
     ToolMessage,
     UserMessage,
 )

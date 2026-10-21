@@ -22,11 +22,8 @@ from prompt_toolkit.layout.containers import (
 )
 
 from otaku.formatting import flatten, truncate
-from otaku.terminal.api import Api
-from otaku.terminal.api.app.integrations import WebSearch
-from otaku.terminal.api.story.lore import Lore
-from otaku.terminal.api.story.messages import Message
-from otaku.terminal.api.story.settings import StorySetting
+from otaku.terminal.api import Api, Message, StorySetting, WebSearch
+from otaku.terminal.api.lore import Lore
 from otaku.terminal.screens.base import (
     ListScreen,
     ansi_fragments,

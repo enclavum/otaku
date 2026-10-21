@@ -8,7 +8,7 @@ import pytest
 
 from otaku.backend.api import Refused
 from otaku.settings.prompts import Prompts
-from otaku.terminal.api.story.prompts import write_prompt
+from otaku.terminal.api.prompts import write_prompt
 from scenarios.api.story.test_stories import HOW_TO_ASK, messages, prompt_of, with_prompt
 from scenarios.support.harness import App
 

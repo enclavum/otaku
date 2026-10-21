@@ -200,7 +200,7 @@ async function undo() {
 }
 
 /* What the backend says with no exchange to take back — COPIED, as the
-   page has no story to ask (`backend.domain.story.stories.NOTHING_TO_UNDO`). */
+   page has no story to ask (`backend.story.stories.services.NOTHING_TO_UNDO`). */
 const _NOTHING_TO_UNDO = "Nothing to undo.";
 
 async function regenerate() {
@@ -240,7 +240,7 @@ export async function editTurn(position, drawn, text) {
 /* What the backend says when there is no story to act on. COPIED,
    because the page cannot ask: these endpoints address a story by id,
    and with no story there is no id for the path. Their homes are
-   `backend.domain.story.stories.fork_story` and `backend.errors.NO_STORY_HINT`. */
+   `backend.story.stories.services.fork_story` and `backend.errors.NO_STORY_HINT`. */
 const _NO_STORY = {
   fork: "Nothing to fork yet — send a message first.",
   extract: "No story yet — send a message first.",

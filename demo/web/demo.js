@@ -396,7 +396,7 @@ const etag = (head) => `"${head ?? 0}"`;
 // ---------- character cards ----------
 
 /* The real import, one layer down: the parse mirrors
-   `otaku/backend/domain/_formats/cards.py` — the PNG text chunks and JSON,
+   `otaku/backend/formats/cards.py` — the PNG text chunks and JSON,
    ccv3 preferred, the same allowlist, the same refusal sentences — and the
    flow mirrors `web.api.story.cards`: the file vetted with
    `?validate_only=true` and nothing stored, then imported by the same
@@ -405,7 +405,7 @@ const etag = (head) => `"${head ?? 0}"`;
    numbers always are. */
 
 const _PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
-const _LARGE_CARD_TOKENS = 4000; // the warning threshold of `backend.domain.story.cards`
+const _LARGE_CARD_TOKENS = 4000; // the warning threshold of `backend.story.cards.services`
 const _CHAR_MACRO = /\{\{\s*char\s*\}\}|<BOT>/gi;
 const _USER_MACRO = /\{\{\s*user\s*\}\}|<USER>/gi;
 const _ANY_MACRO = /\{\{[^{}]{1,40}\}\}/g;
@@ -478,7 +478,7 @@ function _normalizeCard(payload) {
       ? extensions.depth_prompt
       : {};
   // SillyTavern counts every message, otaku the reader's
-  // (`backend.domain._formats.cards._reminder_depth`)
+  // (`backend.formats.cards._reminder_depth`)
   const depth = Number.isInteger(prompt.depth) ? prompt.depth : 4;
   return {
     name,
@@ -593,7 +593,7 @@ async function makeCard(query, body) {
   return created(made, `/api/cards/${made.value.id}`);
 }
 
-/* A card into a story, always through the codex (`domain.story.cards`):
+/* A card into a story, always through the codex (`story.cards.services`):
    a file goes into the codex first — a file the codex holds brings its
    card in, `reuse` names the one the reader says it is — and a codex
    card (`card_id`) is invited as it stands. The head is checked before

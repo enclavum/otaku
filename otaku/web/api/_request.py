@@ -17,7 +17,7 @@ from datetime import datetime
 from typing import Any
 
 from otaku.backend.api import Api, Changed, InjectionPosition
-from otaku.backend.api.story.messages import PlayEvent
+from otaku.backend.story.messages.schemas import PlayEvent
 from otaku.formatting import Money
 
 

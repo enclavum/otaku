@@ -45,8 +45,9 @@ The state dir defaults to `~/.otaku`, relocatable via the
 ## Architecture
 
 The code's layout is `docs/code_structure.md`: the layers and what each
-may import, the backend's interface over its domain, the mirror of `app`,
-`codex` and `story` twins in five places, the machinery, each frontend's door,
+may import, the backend's resource folders — each one's resources,
+schemas and services — and the mirror of `app`, `codex` and `story` in
+three places, the machinery, each frontend's door,
 the terminal's, the web's and the page's layouts, how the two frontends'
 parts correspond, and a call followed from either frontend down to the
 store. Read it before moving code or adding a module.
@@ -93,7 +94,7 @@ is read below both.
 What a typed argument MEANS is the terminal's door's (`terminal.api`),
 since typing a command is its medium and the page reaches every one by a
 button; what a model's own settings take is the backend's, for both
-(`backend.domain.app.models`), the page's fields passed through as typed.
+(`backend.app.models.services`), the page's fields passed through as typed.
 
 ### The story a client holds
 
@@ -112,13 +113,13 @@ frontends read the model in use's `capabilities.vision` instead
 ### The interface, as a client uses it
 
 How the backend is reached — one door per frontend, the interface's
-resource classes and their verbs, its entities and `Changed`, the domain
-below it and the machinery beside both — is `docs/code_structure.md`'s
-("The interface", "The domain", "Machinery", "A frontend's api
+resource classes and their verbs, its schemas and `Changed`, the services
+below them and the machinery beside — is `docs/code_structure.md`'s
+("The interface", "The services", "Machinery", "A frontend's api
 package"). A representation carries everything a client needs to show
 it, so a client CALLS THE RESOURCES AND NOTHING ELSE — no helper, rule or
 vocabulary of the backend's beside them, the story's language
-(`backend.api.story.language`) the one exception — and what a client
+(`backend.story.language`) the one exception — and what a client
 finds missing is a representation's field to add, never a function to
 export. A check before a write is the write asked to validate only
 (`api.stories.cards.create(…, validate_only=True)`; over HTTP
@@ -218,9 +219,10 @@ Order within a module: constants, then classes, then functions — public
 before protected. Logical grouping wins over the order: a private helper
 that belongs to a public function stays beside it, and a section comment
 names each group when a module has several. Two layouts are fixed by
-their layer: an interface module holds its resource classes, then their
-builders, then the entities they answer (`docs/code_structure.md`, "The
-interface"), and a `web.api` module ends with its rows (`ROUTES`,
+their layer: a resource folder holds its resource classes in
+`resources.py`, the schemas they answer and their builders in
+`schemas.py`, and its rules in `services.py` (`docs/code_structure.md`,
+"The backend"), and a `web.api` module ends with its rows (`ROUTES`,
 `STREAMS`).
 
 A name is protected (`_leading_underscore`) when nothing outside its

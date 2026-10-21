@@ -19,9 +19,9 @@ from typing import Any
 import pytest
 
 from otaku.backend.api import ModelRef, Refused
-from otaku.backend.api.story.lore import Extraction
-from otaku.backend.domain._formats import exports, imports
-from otaku.backend.domain.app._paths import Paths
+from otaku.backend.app.paths import Paths
+from otaku.backend.formats import exports, imports
+from otaku.backend.story.lore.schemas import Extraction
 from otaku.store.schema import Message
 from otaku.terminal.screens import dossier as screen_dossier
 from scenarios.api.story.test_pictures import _cat, _play, _seeing

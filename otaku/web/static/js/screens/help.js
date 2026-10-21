@@ -112,7 +112,7 @@ function keys(...parts) {
 
 /* The support docket, opened from the help docket's footer: a message to
    otaku's author, and the address to answer at where the reader gives
-   one, sent through the site (`backend.api.app.integrations`) — nothing
+   one, sent through the site (`backend.app.integrations`) — nothing
    of the story attached. A refusal (no message, an address that is none,
    a send that failed) is the backend's sentence in the footer, the docket
    left open with what was typed. A request sent stays on screen, the

@@ -87,8 +87,8 @@ The info string carries the namespace: what makes a block a call is the `otk-` p
 nothing else, no list of tools consulted, so a call stays one in a build that never heard of its
 tool, and a body keeps its fences for good while the tools come and go between builds. Which
 tools there are, who answers each, and how its inside is read is the backend's
-(`backend.domain.story._tools`); what a call is, is `context`'s. Whether a tool is on, and the prompt that
-teaches the model to use it, is a story setting's (`backend.domain.story.settings`).
+(`backend.story.tools`); what a call is, is `context`'s. Whether a tool is on, and the prompt that
+teaches the model to use it, is a story setting's (`backend.story.settings.services`).
 
 A tool that is off does not exist for the model: its prompt is not injected, and every call of
 it leaves the wire, past ones included — the wire carries the calls of the tools that are on and

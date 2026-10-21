@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from otaku.backend.domain.app._paths import Paths
+from otaku.backend.app.paths import Paths
 from otaku.settings import state as state_mod
 from otaku.terminal.tty import PROMPT_CONTINUATION
 from scenarios.support import server as scripted

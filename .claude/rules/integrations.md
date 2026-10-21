@@ -4,12 +4,11 @@ paths:
   - "otaku/providers/**/*"
   - "otaku/settings/integrations.py"
   - "otaku/settings/migrations/integrations_file.py"
-  - "otaku/backend/domain/app/integrations.py"
-  - "otaku/backend/domain/app/providers.py"
-  - "otaku/backend/domain/app/reports.py"
-  - "otaku/backend/api/app/integrations.py"
+  - "otaku/backend/app/integrations/*.py"
+  - "otaku/backend/app/providers/*.py"
+  - "otaku/backend/app/reports/*.py"
   - "otaku/web/api/app/integrations.py"
-  - "otaku/backend/domain/story/_tools.py"
+  - "otaku/backend/story/tools.py"
   - "otaku/terminal/screens/dossier/tools.py"
   - "otaku/web/static/js/screens/tools.js"
   - "otaku/agents/**/*"
@@ -46,6 +45,6 @@ has no boolean shortcut on purpose.
 ## Pictures on the wire
 
 Where a picture rides is answered once, `client.pictures_ride(model)`,
-and asked alike by the assembler (through `_request.assemble`) and the
+and asked alike by the assembler (through `request.assemble`) and the
 lore pass (`extraction._scene_pictures`); an engine's quirk lives on its
 client (`OpenAICompletion.pictures_ride`), never as a capability.

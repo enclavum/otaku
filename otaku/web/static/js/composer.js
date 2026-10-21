@@ -148,7 +148,7 @@ export async function submit(line) {
   // with an unknown slash word is prose that starts with a slash. On
   // the canvas a line plays AS TYPED, the breaks at its edges its
   // paragraphs — from the text before it and to the model's continuation
-  // (`domain.story._play.submit_line` records them so); a command never does.
+  // (`backend.story.play.submit_line` records them so); a command never does.
   const verbatim = continuing() && said && !said.startsWith("/");
   playLine(verbatim ? line : said, files);
 }

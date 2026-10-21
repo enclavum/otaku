@@ -16,11 +16,11 @@ from dataclasses import replace
 
 from prompt_toolkit.utils import get_cwidth
 
-from otaku.backend.api.story.messages import _as_messages
-from otaku.backend.domain.story._tools import ToolQuestion
-from otaku.backend.domain.story.messages import segments as split
+from otaku.backend.story.messages.resources import _as_messages
+from otaku.backend.story.messages.services import segments as split
+from otaku.backend.story.tools import ToolQuestion
 from otaku.store.schema import Message, StoryMode
-from otaku.terminal.api.story.messages import Message as Drawn
+from otaku.terminal.api import Message as Drawn
 from otaku.terminal.tty import DIM
 from otaku.terminal.tty.render import (
     BAR,

@@ -1,12 +1,13 @@
 """The code's structure, held as a test (`docs/code_structure.md`): the
 import table between the packages, the one-way orders inside the backend
-and the terminal, the mirror — five places with one module list — and
-the aliases its twins are imported under, the machinery's privacy, the
-doors, the interface's resource classes (their verbs, what they answer,
-the call path every route follows), the privacy of the `App`'s members,
-the HTTP surface against its spec, every command reached by both
-frontends, and the web page's own module graph — JavaScript, read as
-text.
+and the terminal, the backend's resource folders — each one its
+resources, its schemas and its services — and the mirror, three places
+with one list of them, the aliases a resource's services are imported
+under, the machinery's privacy, the doors, the interface's resource
+classes (their verbs, what they answer, the call path every route
+follows), the privacy of the `App`'s members, the HTTP surface against
+its spec, every command reached by both frontends, and the web page's
+own module graph — JavaScript, read as text.
 
 A deliberate exception to the unit suite's pure-function rule: the
 subject here IS the source tree, so the test reads it — and nothing else
@@ -28,10 +29,10 @@ import typing
 from pathlib import Path
 
 import otaku.backend.api
-from otaku.backend.api import Changed
-from otaku.backend.api.app.settings import SettingsResource
-from otaku.backend.api.story import language
-from otaku.backend.api.story.messages import PlayEvent
+from otaku.backend.api import Changed, Resource, Schema
+from otaku.backend.app.settings.resources import SettingsResource
+from otaku.backend.story.language import schemas as language
+from otaku.backend.story.messages.schemas import PlayEvent
 from otaku.terminal.commands import COMMANDS, CommandType
 from otaku.terminal.dispatch import HANDLERS
 from otaku.web import api as web_api
@@ -46,9 +47,10 @@ _STATIC = _SRC / "web" / "static"
 
 # The doc's import table. formatting is the stdlib-like leaf — anyone
 # above may use it — so it is listed per package to keep the table
-# explicit. Outside the backend, an arrow into it names the backend
-# package it reaches: `backend.api` (the interface) or `backend.launch`
-# (the door the app is opened through).
+# explicit. Outside the backend, an arrow into it names what it reaches:
+# `backend.api`, the interface — the facade, its base, and the resources'
+# and schemas' modules, never a service — or `backend.launch`, the door
+# the app is opened through.
 _ALLOWED = {
     # `python -m otaku`: the module entry, which only calls the real one.
     "__main__": {"cli"},
@@ -84,22 +86,54 @@ _ALLOWED = {
     "formatting": set(),
 }
 
-# Inside the backend, one way: `errors` ← `domain.app` ← `domain.codex`
-# ← `domain.story` ← `api` ← `samples` ← `launch`, `domain._formats`
-# beside `domain.story` needing none of them — the codex reads a card
-# file through it too. The launch composes the app, the domain's
-# machinery included; the two package roots hold nothing.
+# Inside the backend, one way. A group's units are its resource folders'
+# files of one kind — `story.services` every story service and the
+# story's machinery, `story.schemas`, `story.resources`. The services are
+# the domain, in its own order: `errors` ← `app` ← `codex` ← `story`,
+# `formats` beside them needing none — the codex reads a card file through
+# it too; they import nothing of the interface. Above them all, the
+# schemas, then the resources, each group's over the groups below it;
+# then the facade (`api`), the samples and the launch, which composes the
+# app. `base` names the App for type checking alone; the group roots hold
+# nothing.
+_DOMAIN = {"errors", "formats", "app.services", "codex.services", "story.services"}
 _BACKEND = {
     "backend": set(),
+    "app": set(),
+    "codex": set(),
+    "story": set(),
     "errors": set(),
-    "domain": set(),
-    "domain.app": {"errors"},
-    "domain._formats": set(),
-    "domain.codex": {"errors", "domain.app", "domain._formats"},
-    "domain.story": {"errors", "domain.app", "domain.codex", "domain._formats"},
-    "api": {"errors", "domain.app", "domain.codex", "domain.story"},
-    "samples": {"errors", "domain.app", "domain.story", "api"},
-    "launch": {"errors", "domain.app", "domain.story", "domain._formats", "api", "samples"},
+    "formats": set(),
+    "base": {"app.services"},
+    "app.services": {"errors"},
+    "codex.services": {"errors", "app.services", "formats"},
+    "story.services": {"errors", "app.services", "codex.services", "formats"},
+    "app.schemas": {"base"} | _DOMAIN,
+    "codex.schemas": {"base", "app.schemas"} | _DOMAIN,
+    "story.schemas": {"base", "app.schemas", "codex.schemas"} | _DOMAIN,
+    "app.resources": {"base", "app.schemas"} | _DOMAIN,
+    "codex.resources": {"base", "app.schemas", "codex.schemas", "app.resources"} | _DOMAIN,
+    "story.resources": {
+        "base",
+        "app.schemas",
+        "codex.schemas",
+        "story.schemas",
+        "app.resources",
+        "codex.resources",
+    }
+    | _DOMAIN,
+    "api": {
+        "base",
+        "app.schemas",
+        "codex.schemas",
+        "story.schemas",
+        "app.resources",
+        "codex.resources",
+        "story.resources",
+    }
+    | _DOMAIN,
+    "samples": {"api"} | _DOMAIN,
+    "launch": {"api", "samples", "base"} | _DOMAIN,
 }
 
 # Inside the terminal, one way: `api` ← `commands` ← `tty` ← {`prompt`,
@@ -165,17 +199,20 @@ class TestTerminal:
 
 # ---------- the mirror ----------
 
-# The four places of modules laid out alike, each as its directory and
-# its modules' suffix; the fifth, the page's client, writes the list in its
-# own shape — a package one module (`app.js`, `story.js`), a twin a
-# section of it headed with the twin's name (`_client_twins`).
-_PLACES = {
-    "backend.domain": (_SRC / "backend" / "domain", ".py"),
-    "backend.api": (_SRC / "backend" / "api", ".py"),
-    "web.api": (_SRC / "web" / "api", ".py"),
-    "terminal.api": (_SRC / "terminal" / "api", ".py"),
-}
+# The backend's groups of resource folders. A folder holds its resources,
+# its schemas and its services beside an empty root; a group holds its
+# folders and, beside them, the machinery they share — a module, its place
+# its mark.
 _TWINS = ("app", "codex", "story")
+_RESOURCE_FILES = {"__init__.py", "resources.py", "schemas.py", "services.py"}
+# The app's own resources: `core` in the three places, `app` in the
+# terminal's flat ones.
+_APP_OWN = "core"
+# The other places laid out alike — the web's door, as its directory and
+# its modules' suffix, and the page's client, which writes the list in its
+# own shape: a package one module (`app.js`, `story.js`), a twin a section
+# of it headed with the twin's name (`_client_twins`).
+_WEB_DOOR = (_SRC / "web" / "api", ".py")
 _PACKAGE_ROOTS = {"__init__.py", "index.js"}
 _CLIENT = _STATIC / "js" / "api"
 # A section of the client, headed with its twin's name.
@@ -183,49 +220,101 @@ _SECTION = re.compile(r"^// -{10} (\w+) -{10}$", re.M)
 
 
 class TestMirror:
-    def test_the_five_places_hold_one_module_list(self) -> None:
-        domain = _twins(*_PLACES["backend.domain"])
-        places = {place: _twins(*where) for place, where in _PLACES.items()}
-        for place, found in {**places, "web/static/js/api": _client_twins()}.items():
-            assert found == domain, (
-                f"{place}: missing {sorted(domain - found)}, beyond {sorted(found - domain)}"
+    def test_the_three_places_hold_one_list(self) -> None:
+        backend = _backend_twins()
+        for place, found in {
+            "web.api": _twins(*_WEB_DOOR),
+            "web/static/js/api": _client_twins(),
+        }.items():
+            assert found == backend, (
+                f"{place}: missing {sorted(backend - found)}, beyond {sorted(found - backend)}"
             )
 
+    def test_a_resource_folder_holds_its_resources_schemas_and_services(self) -> None:
+        wrong = []
+        for twin in _TWINS:
+            for folder in _resource_folders(twin):
+                files = set(_listing(folder)) - {"__pycache__"}
+                if files != _RESOURCE_FILES:
+                    wrong.append(f"backend.{twin}.{folder.name}: {sorted(files ^ _RESOURCE_FILES)}")
+        assert not wrong, "\n".join(wrong)
+
     def test_a_place_holds_nothing_beside_its_twins_but_its_machinery(self) -> None:
-        for place, (directory, suffix) in _PLACES.items():
-            assert _strays(directory, suffix, subdirectories=set(_TWINS)) == [], place
-            for twin in _TWINS:
-                assert _strays(directory / twin, suffix, subdirectories=set()) == [], (
-                    f"{place}/{twin}"
-                )
+        directory, suffix = _WEB_DOOR
+        assert _strays(directory, suffix, subdirectories=set(_TWINS)) == [], "web.api"
+        for twin in _TWINS:
+            assert _strays(directory / twin, suffix, subdirectories=set()) == [], f"web.api/{twin}"
+            # a group: its folders, its root, and the machinery they share,
+            # marked by its place and never by an underscore
+            group = _SRC / "backend" / twin
+            folders = {folder.name for folder in _resource_folders(twin)}
+            strays = sorted(
+                name
+                for name in _listing(group)
+                if name not in folders | _PACKAGE_ROOTS | {"__pycache__"}
+                and not (name.endswith(".py") and not name.startswith("_"))
+            )
+            assert strays == [], f"backend.{twin}: {strays}"
         # the client: a module per package, the facade and its machinery
         assert _strays(_CLIENT, ".js", subdirectories=set()) == []
         packages = {path.stem for path in _CLIENT.glob("*.js")} - {"index"}
         assert {name for name in packages if not name.startswith("_")} == set(_TWINS)
 
-    def test_a_codex_and_a_story_root_hold_nothing(self) -> None:
-        # nothing in any `codex` or `story`: their modules are imported by
-        # their paths
-        for package in ("codex", "story"):
-            for place, (directory, _) in _PLACES.items():
-                body = ast.parse((directory / package / "__init__.py").read_text()).body
-                assert all(_is_docstring(node) for node in body), f"{place}.{package}"
-            # the client's package has no section of its own name
+    def test_a_package_root_holds_nothing(self) -> None:
+        # nothing in a group's root or a resource folder's, nor in the web's
+        # packages: their modules are imported by their paths
+        roots = []
+        for twin in _TWINS:
+            roots.append(_SRC / "backend" / twin / "__init__.py")
+            roots += [folder / "__init__.py" for folder in _resource_folders(twin)]
+            roots.append(_WEB_DOOR[0] / twin / "__init__.py")
+        for root in roots:
+            body = ast.parse(root.read_text()).body
+            assert all(_is_docstring(node) for node in body), root.relative_to(_ROOT)
+        # the client's package has no section of its own name
+        for package in _TWINS:
             assert package not in _SECTION.findall((_CLIENT / f"{package}.js").read_text())
 
-    def test_dispatch_follows_the_layout_for_the_resources_with_commands(self) -> None:
+    def test_dispatch_is_flat_its_one_table_in_its_root(self) -> None:
+        # a module of handlers is named after the resource its commands
+        # reach, `app` the app's own; no package inside it, and no table
+        # but the root's
         dispatch = _SRC / "terminal" / "dispatch"
-        assert _twins(dispatch, ".py") <= _twins(*_PLACES["backend.domain"])
-        assert _strays(dispatch, ".py", subdirectories=set(_TWINS)) == []
+        modules = {path.stem for path in dispatch.glob("*.py")} - {"__init__"}
+        assert modules <= _flat_names(), (
+            f"named after no resource: {sorted(modules - _flat_names())}"
+        )
+        assert _strays(dispatch, ".py", subdirectories=set()) == []
+        tables = [
+            path.name
+            for path in dispatch.glob("*.py")
+            if path.name != "__init__.py" and "HANDLERS" in _assigned(path)
+        ]
+        assert tables == [], f"a table outside the root: {tables}"
+
+    def test_the_terminal_door_is_flat_a_module_where_it_translates(self) -> None:
+        # a module of the door is named after the resource it translates
+        # for, `app` the app's own; no package inside it
+        door = _SRC / "terminal" / "api"
+        modules = {path.stem for path in door.glob("*.py")} - {"__init__"}
+        assert modules <= _flat_names(), (
+            f"named after no resource: {sorted(modules - _flat_names())}"
+        )
+        assert _strays(door, ".py", subdirectories=set()) == []
 
     def test_a_twin_from_the_layer_below_is_imported_under_its_layers_name(self) -> None:
-        # an interface module imports a domain module as `domain_<name>`,
+        # the interface imports a resource's services as `domain_<folder>`,
         # and the terminal a module of its door as `api_<name>`
         wrong = []
-        for path in _python_files(_SRC / "backend" / "api"):
+        for path in _interface_files():
             for found in _imports(path):
-                if found.module and found.target.startswith(f"{PACKAGE}.backend.domain."):
-                    wrong += _misnamed(path, found, "domain_")
+                if found.module and found.target.endswith(".services"):
+                    want = "domain_" + found.target.split(".")[-2]
+                    if found.alias != want:
+                        wrong.append(
+                            f"{_module_of(path)}:{found.line}: {found.target} as {found.alias},"
+                            f" not {want}"
+                        )
         door = _SRC / "terminal" / "api"
         for path in _python_files(_SRC / "terminal"):
             if path.is_relative_to(door):
@@ -242,17 +331,20 @@ class TestMirror:
 class TestMachinery:
     def test_machinery_is_imported_by_its_own_layer_alone(self) -> None:
         # the layer above never does, but for the launch, which composes
-        # the app out of the domain's parts
+        # the app out of the domain's parts. The backend's machinery, a
+        # module beside a group's folders, is the domain's: its services and
+        # its machinery import it, the interface never does
         violations = []
         for path in _python_files():
             importer = _module_of(path)
             for found in _imports(path):
                 layer = _layer_of(found.target)
-                if layer is None or importer == layer or importer.startswith(f"{layer}."):
+                if layer is None:
                     continue
-                if importer == f"{PACKAGE}.backend.launch" and layer.startswith(
-                    f"{PACKAGE}.backend."
-                ):
+                if layer.startswith(f"{PACKAGE}.backend."):
+                    if _is_domain(importer) or importer == f"{PACKAGE}.backend.launch":
+                        continue
+                elif importer == layer or importer.startswith(f"{layer}."):
                     continue
                 violations.append(f"{importer} -> {found.target}  (line {found.line})")
         assert not violations, "machinery imported from outside its layer:\n" + "\n".join(
@@ -277,38 +369,50 @@ class TestDoors:
         assert not violations, "\n".join(violations)
 
     def test_a_door_module_imports_its_own_twin_alone(self) -> None:
-        # What it needs of another twin it takes from that twin's sibling
-        # in its own door; the root's vocabulary is everyone's.
+        # What it needs of another resource it takes from that resource's
+        # module in its own door; the facade is everyone's, and no door
+        # reaches a service. A door's root takes schemas alone: the
+        # terminal's re-exports those of several resources.
         violations = []
         for frontend in ("terminal", "web"):
             door = _SRC / frontend / "api"
             for path in _python_files(door):
-                if _layer_of(_module_of(path)) is not None:
+                module = _module_of(path)
+                if _layer_of(module) is not None:
                     continue  # the door's machinery
-                twin = f"{PACKAGE}.backend.api" + _module_of(path).removeprefix(
-                    f"{PACKAGE}.{frontend}.api"
-                )
+                twins = _door_twins(frontend, module)
                 for found in _imports(path):
                     reached = found.target
-                    if reached.startswith(f"{PACKAGE}.backend.api") and reached not in {
-                        f"{PACKAGE}.backend.api",
-                        twin,
-                    }:
-                        violations.append(f"{_module_of(path)} -> {reached}  (line {found.line})")
+                    if not reached.startswith(f"{PACKAGE}.backend") or reached == (
+                        f"{PACKAGE}.backend.api"
+                    ):
+                        continue
+                    allowed = (
+                        reached.endswith(".schemas")
+                        if not twins
+                        else reached.rpartition(".")[0] in twins
+                        and reached.endswith((".schemas", ".resources"))
+                    )
+                    if not allowed:
+                        violations.append(f"{module} -> {reached}  (line {found.line})")
         assert not violations, "\n".join(violations)
 
-    def test_the_terminal_door_re_exports_every_type_its_twin_defines(self) -> None:
-        # everything its twin answers, so the terminal imports from its door alone
+    def test_a_terminal_door_module_re_exports_what_its_resource_answers(self) -> None:
+        # everything its resource's schemas define, so the terminal imports
+        # from its door alone
         missing = []
-        for module in _interface_modules():
-            if module is otaku.backend.api or _layer_of(module.__name__) is not None:
-                continue  # the root's vocabulary is the door root's; machinery has no twin
-            door = importlib.import_module(
-                module.__name__.replace(f"{PACKAGE}.backend.api", f"{PACKAGE}.terminal.api", 1)
-            )
-            for name, obj in vars(module).items():
-                if _is_answered_type(module, name, obj) and getattr(door, name, None) is not obj:
-                    missing.append(f"{door.__name__}.{name}")
+        for path in sorted((_SRC / "terminal" / "api").glob("*.py")):
+            if path.name == "__init__.py":
+                continue
+            door = importlib.import_module(_module_of(path))
+            for twin in _door_twins("terminal", door.__name__):
+                schemas = importlib.import_module(f"{twin}.schemas")
+                for name, obj in vars(schemas).items():
+                    if (
+                        _is_answered_type(schemas, name, obj)
+                        and getattr(door, name, None) is not obj
+                    ):
+                        missing.append(f"{door.__name__}.{name}")
         assert not missing, "\n".join(missing)
 
     def test_the_webs_thread_imports_nothing_of_the_app(self) -> None:
@@ -338,13 +442,16 @@ _FIVE = ("list", "get", "create", "update", "delete")
 
 
 class TestInterface:
-    def test_the_root_re_exports_only_inert_data_but_the_facade_and_the_app(self) -> None:
+    def test_the_root_re_exports_only_inert_data_but_the_facade_the_app_and_the_bases(
+        self,
+    ) -> None:
         # Nothing else with state or behavior can be laundered through it
-        # into a frontend.
+        # into a frontend; the base classes are there to be named.
+        named = {"Api", "App", "Resource", "Schema", "Report"}
         alive = [
             name
             for name in otaku.backend.api.__all__
-            if name not in {"Api", "App"} and not _is_inert(getattr(otaku.backend.api, name))
+            if name not in named and not _is_inert(getattr(otaku.backend.api, name))
         ]
         assert not alive, f"backend.api re-exports with behavior: {alive}"
 
@@ -372,24 +479,25 @@ class TestInterface:
 
     def test_a_resource_holds_the_app_and_its_sub_resources_alone(self) -> None:
         wrong = []
-        for path in _python_files(_SRC / "backend" / "api"):
+        for path in _interface_files(kinds=("resources.py",), with_facade=False):
             for node in ast.parse(path.read_text()).body:
-                if isinstance(node, ast.ClassDef) and node.name.endswith("Resource"):
+                if isinstance(node, ast.ClassDef):
                     wrong += [f"{node.name}: {problem}" for problem in _holds_more(node)]
         assert not wrong, "\n".join(wrong)
 
-    def test_a_modules_entities_follow_its_resources(self) -> None:
-        late = []
-        for path in _python_files(_SRC / "backend" / "api"):
-            entity = None
-            for node in ast.parse(path.read_text()).body:
-                if not isinstance(node, ast.ClassDef):
-                    continue
-                if not node.name.endswith("Resource"):
-                    entity = entity or node.name
-                elif entity is not None:
-                    late.append(f"{_module_of(path)}: {node.name} after {entity}")
-        assert not late, "\n".join(late)
+    def test_a_resources_module_holds_resources_and_a_schemas_module_schemas(self) -> None:
+        # each class of its kind, on its base: a `Resource`, a `Schema`
+        wrong = []
+        for path in _interface_files(with_facade=False):
+            module = importlib.import_module(_module_of(path))
+            base = Resource if path.name == "resources.py" else Schema
+            for name, obj in vars(module).items():
+                own = inspect.isclass(obj) and obj.__module__ == module.__name__
+                if own and (
+                    not issubclass(obj, base) or (base is Resource) != name.endswith("Resource")
+                ):
+                    wrong.append(f"{module.__name__}.{name}")
+        assert not wrong, "\n".join(wrong)
 
     def test_every_resource_is_reached_from_the_facade(self) -> None:
         reached, waiting = set(), ["Api"]
@@ -423,12 +531,12 @@ class TestAppPrivacy:
         # composes the app, the samples' seeding with it; nothing else
         # touches its members — the suites included, which assert through
         # a second Store connection.
-        # the handle, never a module path (`domain.app._paths`); split: never matches itself
+        # the handle, never a module path (`otaku.backend…`); split: never matches itself
         needle = re.compile(r"(?<![.\w])(?:app|backend)" + r"\._[a-z]")
         uses = []
         for tree in (PACKAGE, "tests", "scenarios"):
             for path in sorted((_ROOT / tree).rglob("*.py")):
-                if "__pycache__" in path.parts or path.is_relative_to(_SRC / "backend" / "domain"):
+                if "__pycache__" in path.parts or _is_domain(_module_of(path)):
                     continue
                 if path in (
                     _SRC / "backend" / "launch.py",
@@ -874,8 +982,9 @@ def _children(directory: Path) -> set[str]:
 
 def _edges() -> list[tuple[str, str, str]]:
     """Every import across the top-level packages as (source, target,
-    file:line) — into the backend from outside it, the target naming the
-    backend package it reaches (`backend.api`)."""
+    file:line) — into the backend from outside it, the target naming what
+    it reaches: `backend.api` for the interface (the facade, its base, a
+    resources or schemas module), else the backend's module itself."""
     out = []
     for path in _python_files():
         src = _top(_module_of(path))
@@ -884,8 +993,12 @@ def _edges() -> list[tuple[str, str, str]]:
             if dst is None or dst == src:
                 continue
             if dst == "backend":
+                interface = found.target in {
+                    f"{PACKAGE}.backend.api",
+                    f"{PACKAGE}.backend.base",
+                } or found.target.endswith((".resources", ".schemas"))
                 parts = found.target.split(".")
-                dst = ".".join(parts[1:3]) if len(parts) > 2 else "backend"
+                dst = "backend.api" if interface else ".".join(parts[1:3])
             out.append((src, dst, f"{path.relative_to(_ROOT)}:{found.line}"))
     return out
 
@@ -912,14 +1025,96 @@ def _inner_edges(package: str, unit: typing.Callable[[str], str]) -> list[tuple[
 
 
 def _backend_unit(module: str) -> str:
-    """The backend unit a module belongs to: `api`, `launch`, `errors`,
-    each package of the domain (`domain.story`), or a package root."""
+    """The backend unit a module belongs to: `api`, `base`, `launch`,
+    `errors`, `formats`, `samples`; in a group, its files of one kind
+    (`story.schemas`), its machinery counting as services; or a package
+    root (`backend`, `story`, a folder's own)."""
     parts = module.split(".")[2:]
     if not parts:
         return "backend"
-    if parts[0] == "domain" and len(parts) > 1:
-        return f"domain.{parts[1]}"
-    return parts[0]
+    if parts[0] not in _TWINS:
+        return parts[0]
+    group, rest = parts[0], parts[1:]
+    if rest and _is_machinery(group, rest[0]):
+        return f"{group}.services"
+    if len(rest) < 2:
+        return group  # the group's root, or a resource folder's
+    return f"{group}.{rest[1]}"
+
+
+def _resource_folders(twin: str) -> list[Path]:
+    """A group's resource folders, its machinery left out."""
+    group = _SRC / "backend" / twin
+    return sorted(
+        group / name
+        for name in _listing(group)
+        if not name.startswith("_") and "__init__.py" in _listing(group / name)
+    )
+
+
+def _is_machinery(twin: str, name: str) -> bool:
+    """Whether a group's member is its machinery: a module beside its
+    folders."""
+    return (
+        twin in _TWINS and name != "__init__" and f"{name}.py" in _listing(_SRC / "backend" / twin)
+    )
+
+
+def _backend_twins() -> set[tuple[str, str]]:
+    """The backend's resource folders as (group, folder)."""
+    return {(twin, folder.name) for twin in _TWINS for folder in _resource_folders(twin)}
+
+
+def _flat_names() -> set[str]:
+    """The names a module of the terminal's flat places may take: a
+    resource folder's, `app` for the app's own."""
+    return {name for _, name in _backend_twins() if name != _APP_OWN} | {"app"}
+
+
+def _assigned(path: Path) -> set[str]:
+    """The names a module assigns at its top level."""
+    out = set()
+    for node in ast.parse(path.read_text()).body:
+        targets = node.targets if isinstance(node, ast.Assign) else [getattr(node, "target", None)]
+        out |= {target.id for target in targets if isinstance(target, ast.Name)}
+    return out
+
+
+def _interface_files(
+    kinds: tuple[str, ...] = ("resources.py", "schemas.py"), *, with_facade: bool = True
+) -> list[Path]:
+    """The interface's files: every folder's resources and schemas, of the
+    kinds asked, the facade first unless left out."""
+    files = [path for path in _python_files(_SRC / "backend") if path.name in kinds]
+    return ([_SRC / "backend" / "api.py"] if with_facade else []) + files
+
+
+def _is_domain(module: str) -> bool:
+    """Whether a module is the domain's: a service, or a group's
+    machinery."""
+    parts = module.split(".")
+    if parts[:2] != [PACKAGE, "backend"] or len(parts) < 4 or parts[2] not in _TWINS:
+        return False
+    return parts[-1] == "services" or (len(parts) == 4 and _is_machinery(parts[2], parts[3]))
+
+
+def _door_twins(frontend: str, module: str) -> set[str]:
+    """The resource folders a door module stands for — none for a door's
+    root or a group's; the terminal's flat modules, by name, the one they
+    import where two groups have a folder of it."""
+    rel = module.removeprefix(f"{PACKAGE}.{frontend}.api").lstrip(".")
+    if frontend == "web":
+        return {f"{PACKAGE}.backend.{rel}"} if "." in rel else set()
+    if not rel:
+        return set()
+    if rel == "app":
+        return {f"{PACKAGE}.backend.app.{_APP_OWN}"}
+    candidates = {
+        f"{PACKAGE}.backend.{twin}.{name}" for twin, name in _backend_twins() if name == rel
+    }
+    path = _SRC / "terminal" / "api" / f"{rel}.py"
+    reached = {found.target.rpartition(".")[0] for found in _imports(path)}
+    return (candidates & reached) or candidates
 
 
 def _terminal_unit(module: str) -> str:
@@ -928,11 +1123,13 @@ def _terminal_unit(module: str) -> str:
 
 
 def _layer_of(module: str) -> str | None:
-    """The layer whose machinery a module is — the path before its first
-    protected part, at most three deep (`otaku.backend.domain`,
-    `otaku.web.api`, `otaku.encryption`); None for a module of a
-    surface."""
+    """The layer whose machinery a module is — a backend group for a
+    module beside its folders (`otaku.backend.story`), elsewhere the path
+    before its first protected part, at most three deep (`otaku.web.api`,
+    `otaku.encryption`); None for a module of a surface."""
     parts = module.split(".")
+    if parts[:2] == [PACKAGE, "backend"] and len(parts) > 3 and _is_machinery(*parts[2:4]):
+        return ".".join(parts[:3])
     for at, part in enumerate(parts):
         if part.startswith("_") and not part.startswith("__"):
             return ".".join(parts[: min(at, 3)])
@@ -941,13 +1138,11 @@ def _layer_of(module: str) -> str | None:
 
 def _client_twins() -> set[tuple[str, str]]:
     """The page's client's twins as (package, module), read off its
-    sections — the `app` section the app root's resources, left out as a
-    package root is."""
+    sections."""
     return {
         (twin, name)
         for twin in _TWINS
         for name in _SECTION.findall((_CLIENT / f"{twin}.js").read_text())
-        if name != twin
     }
 
 
@@ -988,11 +1183,8 @@ def _misnamed(path: Path, found: _Import, prefix: str) -> list[str]:
 
 @functools.cache
 def _interface_modules() -> tuple[types.ModuleType, ...]:
-    """The interface's modules, its root first."""
-    return tuple(
-        importlib.import_module(_module_of(path))
-        for path in _python_files(_SRC / "backend" / "api")
-    )
+    """The interface's modules, the facade first."""
+    return tuple(importlib.import_module(_module_of(path)) for path in _interface_files())
 
 
 @functools.cache
@@ -1017,7 +1209,7 @@ def _attributes() -> dict[str, dict[str, str]]:
     attributes holds — `self.messages = MessagesResource(app)` — read off
     its `__init__`."""
     out: dict[str, dict[str, str]] = {}
-    for path in _python_files(_SRC / "backend" / "api"):
+    for path in _interface_files():
         for node in ast.parse(path.read_text()).body:
             if not isinstance(node, ast.ClassDef):
                 continue
@@ -1042,30 +1234,29 @@ def _init_of(node: ast.ClassDef) -> list[ast.stmt]:
 
 
 def _holds_more(node: ast.ClassDef) -> list[str]:
-    """What a resource class holds beyond the app and its sub-resources."""
+    """What a resource class holds beyond the app, which its base keeps, and
+    its sub-resources — built after the base has the app."""
+    problems = []
+    if [ast.unparse(base) for base in node.bases] != ["Resource"]:
+        problems.append("is not a Resource")
     init = next(
         (f for f in node.body if isinstance(f, ast.FunctionDef) and f.name == "__init__"), None
     )
     if init is None:
-        return ["no __init__"]
-    problems = []
+        return problems  # the base's: the app alone
     if [arg.arg for arg in init.args.args] != ["self", "app"] or init.args.kwonlyargs:
         problems.append("is built over something besides the app")
-    for statement in init.body:
-        if _is_docstring(statement):
-            continue
-        holds_app = (
-            isinstance(statement, ast.Assign)
-            and ast.unparse(statement.targets[0]) == "self._app"
-            and ast.unparse(statement.value) == "app"
-        )
+    body = [statement for statement in init.body if not _is_docstring(statement)]
+    if not body or ast.unparse(body[0]) != "super().__init__(app)":
+        problems.append("does not hand the app to its base first")
+    for statement in body[1:]:
         holds_child = (
             isinstance(statement, ast.Assign)
             and isinstance(statement.value, ast.Call)
             and ast.unparse(statement.value.func).endswith("Resource")
             and ast.unparse(statement.value).endswith("(app)")
         )
-        if not (holds_app or holds_child):
+        if not holds_child:
             problems.append(f"holds {ast.unparse(statement)}")
     return problems
 
@@ -1095,15 +1286,18 @@ def _verb(method: str, resource: type, at_id: bool) -> str:
 
 
 def _is_data(answer: object) -> bool:
-    """An entity, a list of them, a sentence: data a client shows."""
+    """A schema, a list of them, a sentence: data a client shows — or a
+    frozen dataclass a package below the backend defines, a frontend's own
+    settings slice (`TerminalSettings`), answered as it is."""
     if answer is str:
         return True
     if typing.get_origin(answer) in (list, tuple):
         return all(arg is Ellipsis or _is_data(arg) for arg in typing.get_args(answer))
-    return (
-        isinstance(answer, type)
-        and dataclasses.is_dataclass(answer)
-        and answer.__dataclass_params__.frozen  # type: ignore[attr-defined]
+    return isinstance(answer, type) and (
+        issubclass(answer, Schema)
+        or (
+            dataclasses.is_dataclass(answer) and answer.__dataclass_params__.frozen  # type: ignore[attr-defined]
+        )
     )
 
 

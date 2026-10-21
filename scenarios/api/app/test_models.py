@@ -11,10 +11,10 @@ import tomllib
 import pytest
 
 from otaku.backend.api import NotFound, Refused
-from otaku.backend.api.app.models import ParameterSetting
-from otaku.backend.domain.app._paths import Paths
-from otaku.backend.domain.app.models import PARAMETERS, THINK_MENU
-from otaku.terminal.api.app import models as api_models
+from otaku.backend.app.models.schemas import ParameterSetting
+from otaku.backend.app.models.services import PARAMETERS, THINK_MENU
+from otaku.backend.app.paths import Paths
+from otaku.terminal.api import models as api_models
 from otaku.terminal.screens import models as screen_models
 from scenarios.api.app.test_app import (
     _DOWN,

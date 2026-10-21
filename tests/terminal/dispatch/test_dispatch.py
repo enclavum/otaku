@@ -5,16 +5,13 @@
 for the /set family; the inliner rows never match a line's start — they
 close a line, they do not open one. `raw_argument` cuts the argument off
 the line, and `unknown_notice` is the sentence for a line no row
-answers. The handlers' modules merge into one table, a token two of them
-answer a fault at import (`_merged`). What a row's `args` shape means for a MENU — whether accepting
+answers. What a row's `args` shape means for a MENU — whether accepting
 it leaves the line open — is the menu's rule, held beside the menu that
 acts on it.
 """
 
-import pytest
-
 from otaku.terminal.commands import COMMANDS, CommandType
-from otaku.terminal.dispatch import _merged, find, raw_argument, unknown_notice
+from otaku.terminal.dispatch import find, raw_argument, unknown_notice
 
 
 class TestFind:
@@ -91,16 +88,3 @@ class TestUnknownNotice:
         for spec in COMMANDS:
             if spec.token.startswith("/set "):
                 assert spec.token in sentence
-
-
-class TestMerged:
-    def test_the_modules_rows_are_one_table(self) -> None:
-        assert _merged({"/a": _handler}, {"/b": _handler}) == {"/a": _handler, "/b": _handler}
-
-    def test_a_token_two_modules_answer_is_a_fault(self) -> None:
-        with pytest.raises(AssertionError):
-            _merged({"/a": _handler}, {"/a": _handler})
-
-
-def _handler(chat: object, argument: str) -> str | None:
-    return None

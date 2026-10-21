@@ -4,8 +4,8 @@ value edited in place, its one home — each remembered across a
 relaunch.
 """
 
-from otaku.backend.api.app.settings import Settings
-from otaku.backend.api.story.messages import Done
+from otaku.backend.app.settings.schemas import Settings
+from otaku.backend.story.messages.schemas import Done
 from otaku.terminal.chat import stream
 from scenarios.support.harness import App, launch, set_config, set_config_provider
 from scenarios.support.server import ModelServer

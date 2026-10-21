@@ -47,7 +47,7 @@ class WebSettings:
     host: str = "localhost"
     port: int = 9600
     https: bool = False
-    # The hash of `[web] password` that `backend.domain.app._passwords` made, never
+    # The hash of `[web] password` that `backend.app.passwords` made, never
     # the password itself: the launch hashes a typed one before anything
     # reads it. "" is no password at all.
     password: str = ""

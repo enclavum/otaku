@@ -32,9 +32,8 @@ from typing import TextIO
 from prompt_toolkit.utils import get_cwidth
 
 from otaku.formatting import printable
-from otaku.terminal.api import JoinType
-from otaku.terminal.api.story.language import is_option, spans
-from otaku.terminal.api.story.messages import Message
+from otaku.terminal.api import JoinType, Message
+from otaku.terminal.api import language as api_language
 from otaku.terminal.commands import COMMANDS
 from otaku.terminal.tty import DIM, user_block
 from otaku.terminal.tty.cursor import terminal_width
@@ -182,7 +181,7 @@ class QuestionStream(BlockStream):
 
     def close(self) -> str:
         held = ""
-        if not self._options and not self._decided and not is_option(self._line):
+        if not self._options and not self._decided and not api_language.is_option(self._line):
             held = self._pass(self._line)  # a last line without its newline, the question's
         self._line = ""
         self._out.write(held)
@@ -194,7 +193,7 @@ class QuestionStream(BlockStream):
         if ch == "\n":
             out = ""
             if not self._decided:
-                if is_option(self._line):
+                if api_language.is_option(self._line):
                     self._options = True
                     return ""
                 out = self._pass(self._line)
@@ -205,7 +204,11 @@ class QuestionStream(BlockStream):
         self._line += ch
         # At the first token's end, the line tells: an option's head keeps
         # it held to its newline; anything else is the question's, and flows.
-        if ch.isspace() and self._line.strip() and not is_option(self._line.strip() + " x"):
+        if (
+            ch.isspace()
+            and self._line.strip()
+            and not api_language.is_option(self._line.strip() + " x")
+        ):
             self._decided = True
             return self._pass(self._line)
         return ""
@@ -247,7 +250,7 @@ def message(
             f"{DIM}{highlight_commands(run, tokens)}{_NORMAL}"
             if ooc
             else highlight_commands(run, tokens)
-            for run, ooc in spans(text)
+            for run, ooc in api_language.spans(text)
         )
         if pictures:
             marker = f"{DIM}{pictures_note(pictures)}{_NORMAL}"
@@ -504,7 +507,7 @@ def typeset_line(streamer: Streamer, text: str) -> None:
     streamer.feed(lead)
     tokens = command_tokens()
     command = theme().command.fg
-    for run, ooc in spans(core):
+    for run, ooc in api_language.spans(core):
         if ooc:
             streamer.aside(run, DIM)
             continue

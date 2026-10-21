@@ -26,8 +26,11 @@ from otaku.backend.api import (
     Refused,
     StoryMode,
 )
-from otaku.backend.api.app import ModelInUse
-from otaku.backend.api.story.messages import (
+from otaku.backend.app.core.schemas import ModelInUse
+from otaku.backend.app.paths import Paths
+from otaku.backend.formats import EXPORT_MARKER
+from otaku.backend.story import request as story_request
+from otaku.backend.story.messages.schemas import (
     AssistantMessage,
     AssistantText,
     AssistantToolCall,
@@ -36,11 +39,8 @@ from otaku.backend.api.story.messages import (
     ToolMessage,
     UserMessage,
 )
-from otaku.backend.api.story.stories import Story
-from otaku.backend.domain._formats import EXPORT_MARKER
-from otaku.backend.domain.app._paths import Paths
-from otaku.backend.domain.story import _request
-from otaku.backend.domain.story._play import NO_PICTURE_ON_TEXT, NOTHING_TO_SEND
+from otaku.backend.story.play import NO_PICTURE_ON_TEXT, NOTHING_TO_SEND
+from otaku.backend.story.stories.schemas import Story
 from otaku.context.assembler import JoinType, estimate_tokens
 from otaku.settings import models as models_file
 from otaku.store.schema import Message
@@ -1015,7 +1015,7 @@ class TestTheNovel:
             reply = app.store.stories.get_messages(app.story_id)[-1]
             assert reply.body == "\n\nThe rain fell."
             assert (
-                _request.assemble(app.backend, app.story_id, None)
+                story_request.assemble(app.backend, app.story_id, None)
                 .as_story_text()
                 .endswith("It was late.\n\nThe rain fell.")
             )
@@ -1125,8 +1125,8 @@ class TestTheCanvasOverTheChatWire:
         _layout(app, Layout.CANVAS)
         _emulating(app)
         app.play("One.")
-        turn = [i.owner for i in _request.assemble(app.backend, app.story_id, None).injections]
-        job = [i.owner for i in _request.build_job(app.backend, app.story_id).injections]
+        turn = [i.owner for i in story_request.assemble(app.backend, app.story_id, None).injections]
+        job = [i.owner for i in story_request.build_job(app.backend, app.story_id).injections]
         assert turn == job == ["emulate_text_completion"]
 
     def test_a_reply_goes_on_in_the_paragraph_it_follows(self, app: App) -> None:

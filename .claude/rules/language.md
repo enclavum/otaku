@@ -2,9 +2,8 @@
 paths:
   - "otaku/terminal/**/*"
   - "otaku/context/syntax.py"
-  - "otaku/backend/domain/story/language.py"
-  - "otaku/backend/domain/story/_tools.py"
-  - "otaku/backend/api/story/language.py"
+  - "otaku/backend/story/language/*.py"
+  - "otaku/backend/story/tools.py"
   - "otaku/web/static/js/play/language.js"
   - "otaku/web/static/js/play/transcript.js"
   - "otaku/web/static/js/composer.js"
@@ -19,7 +18,7 @@ paths:
 ## The story's language
 
 `context.syntax` owns the story's typed language, and says why it lives
-in `context`; `backend.api.story.language` is what a client applies of
+in `context`; `backend.story.language` is what a client applies of
 it to a line not stored yet.
 
 A played line reads in both frontends, in every layout and in the

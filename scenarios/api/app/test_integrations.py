@@ -24,7 +24,7 @@ import pytest
 from otaku import __version__
 from otaku.backend import launch as backend_launch
 from otaku.backend.api import Api, Refused
-from otaku.backend.api.app.integrations import WebSearch
+from otaku.backend.app.integrations.schemas import WebSearch
 from otaku.encryption import unseal
 from otaku.integrations import SupportDesk, web_search
 from scenarios.api.story.test_messages import _after_the_tool

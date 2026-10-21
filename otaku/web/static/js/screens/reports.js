@@ -1,7 +1,7 @@
 /* The reports: the context preview as a reading panel — the request as
    a document, its stages as live figures over the wire itself — and
    usage, balance and info as docket slips. Every number and every
-   sentence in them is the backend's (`backend.api.app.reports`); which shape
+   sentence in them is the backend's (`backend.app.reports`); which shape
    carries it is the design's.
 
    A slip is figures on dotted leaders, ruled where the reader should
@@ -19,7 +19,7 @@ import * as held from "../play/held.js";
 const _NO_STORY = "No story yet — send a message first.";
 
 /* The usage report's two scopes, a tab each — the backend's own
-   (`backend.api.app.reports.USAGE_SCOPES`), copied: the answer names the
+   (`backend.app.reports.USAGE_SCOPES`), copied: the answer names the
    scope it covers, and the page offers the other. */
 const _SCOPES = [
   { key: "", label: "this story" },

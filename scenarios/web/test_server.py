@@ -22,9 +22,9 @@ from urllib.parse import urlsplit
 import pytest
 
 from otaku.backend.api import Layout
-from otaku.backend.domain.app._paths import Paths
-from otaku.backend.domain.app.models import PARAMETERS, THINK_MENU
-from otaku.backend.domain.codex.cards import NEW_CARD_NAME
+from otaku.backend.app.models.services import PARAMETERS, THINK_MENU
+from otaku.backend.app.paths import Paths
+from otaku.backend.codex.cards.services import NEW_CARD_NAME
 from otaku.integrations import SupportDesk
 from otaku.settings import models as models_file
 from otaku.store.files import Owner

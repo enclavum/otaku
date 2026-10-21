@@ -11,10 +11,19 @@ import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from otaku.terminal.api import NO_STORY_HINT, Api, App, Conflict, Layout, NotFound, StoryMode
-from otaku.terminal.api.story.messages import Message
-from otaku.terminal.api.story.settings import DEFAULT_LAYOUT, LAYOUT_SETTING
-from otaku.terminal.api.story.stories import Story
+from otaku.terminal.api import (
+    DEFAULT_LAYOUT,
+    LAYOUT_SETTING,
+    NO_STORY_HINT,
+    Api,
+    App,
+    Conflict,
+    Layout,
+    Message,
+    NotFound,
+    StoryMode,
+)
+from otaku.terminal.api.stories import Story
 from otaku.terminal.chat.ledger import ScreenLedger
 from otaku.terminal.tty.render import flow_offsets, turn, unit_start
 from otaku.terminal.tty.statusline import StatusLine
@@ -53,7 +62,7 @@ class Chat:
     # the one submission, cleared with it.
     continuing: bool
     # A reply streamed this submission (`stream.show`), or an undo left
-    # the story on the question a reply ended on (`dispatch.story.stories`):
+    # the story on the question a reply ended on (`dispatch.stories`):
     # the prompt after it may offer the answers, where one after any other
     # command, its output standing between, offers none. Cleared by the
     # loop with each submission.

@@ -9,9 +9,8 @@ from typing import Literal
 
 from prompt_toolkit.formatted_text import StyleAndTextTuples
 
-from otaku.terminal.api import UNCHANGED, InjectionPosition, Refused
-from otaku.terminal.api.story import prompts as api_prompts
-from otaku.terminal.api.story.settings import StorySetting
+from otaku.terminal.api import UNCHANGED, InjectionPosition, Refused, StorySetting
+from otaku.terminal.api import prompts as api_prompts
 from otaku.terminal.screens.base import (
     wrap_text,
 )

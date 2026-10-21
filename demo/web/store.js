@@ -309,7 +309,7 @@ export function app() {
 }
 
 /* The model in use and the one lore extraction is pinned to — the
-   product's sentences (`domain.app.providers`), its refusals. */
+   product's sentences (`app.providers.services`), its refusals. */
 export function updateApp({ model, extraction_model: pin } = {}) {
   const said = [];
   if (model !== undefined) {
@@ -373,7 +373,7 @@ export function settings() {
   return structuredClone(state.settings);
 }
 
-/* The fields given, each with its sentence (`domain.app.settings`). */
+/* The fields given, each with its sentence (`app.settings.services`). */
 export function updateSettings(fields) {
   const said = [];
   for (const name of ["verbose", "autocorrect", "notification"]) {
@@ -591,7 +591,7 @@ export function modelSettings(providerName, name) {
 }
 
 /* A model's thinking level and its parameters, read against the model's
-   vocabulary (`domain.app.models`) — the levels the template carries, the
+   vocabulary (`app.models.services`) — the levels the template carries, the
    bounds each parameter states. */
 export function updateModelSettings(providerName, name, { think, parameters }) {
   const held = modelSettings(providerName, name);
@@ -727,7 +727,7 @@ export function story(id) {
 }
 
 /** Every other story a chain of forks joins this one to, most recently
-    played first (`domain.story.stories.list_family`). */
+    played first (`story.stories.services.list_family`). */
 export function forks(id) {
   held(id);
   const family = familyOf(id);
@@ -987,7 +987,7 @@ function knownSetting(story, name) {
 }
 
 /* One setting, the fields given laid over it — what it takes decided and
-   said as `domain.story.settings` decides and says it, copied. */
+   said as `story.settings.services` decides and says it, copied. */
 export function updateStorySetting(id, name, fields) {
   const story = held(id);
   const setting = knownSetting(story, name);
@@ -1102,7 +1102,7 @@ export function checkLink(id, characterId, cardId) {
 }
 
 /* Whether a character's card picture rides its card row
-   (`domain.story.lore.set_portrait_sent`): refused where no card row
+   (`story.lore.services.set_portrait_sent`): refused where no card row
    brought it in, or there is no picture to send. */
 function sendPortrait(story, row, sent) {
   if (row.portrait_sent === null || row.portrait_sent === undefined) {
@@ -1120,7 +1120,7 @@ function sendPortrait(story, row, sent) {
 
 /* A story character's profile corrected field by field and its TOML
    written again, the names it binds and its file kept
-   (`domain.story.lore.update_profile`). */
+   (`story.lore.services.update_profile`). */
 function correctCopy(row, changes) {
   if (!Object.keys(changes).length) throw invalid("Nothing to change.");
   if (!row.profile_fields) throw invalid(`${row.name} has no card to correct.`);
@@ -1148,7 +1148,7 @@ function boundOf(profile) {
 }
 
 /* A story's character linked to a codex card — its copies too where
-   asked — or unlinked with null, alone, as `domain.story.lore.set_card_id`
+   asked — or unlinked with null, alone, as `story.lore.services.set_card_id`
    links it: nothing else on either changes. */
 function linkCharacter(id, row, cardId, withCopies = false) {
   if (cardId === null) {
@@ -1174,7 +1174,7 @@ function linkRows(rows, card) {
 }
 
 /* What a story character shows of its linked card — its name and its
-   first picture (`backend.api.story.lore._character`) — or of none. */
+   first picture (`backend.story.lore._character`) — or of none. */
 function showCard(row, card) {
   row.card_name = card?.name ?? null;
   row.card_portrait = portraitOf(card);
@@ -1184,7 +1184,7 @@ function portraitOf(card) {
   return card?.pictures.length ? structuredClone(card.pictures[0]) : null;
 }
 
-/* The card a link joins, refused as `domain.story.lore._linkable` says. */
+/* The card a link joins, refused as `story.lore.services._linkable` says. */
 function linkable(id, row, cardId) {
   if (cardId === row.card_id) throw invalid("Nothing to change.");
   const card = cardRow(cardId);
@@ -1193,7 +1193,7 @@ function linkable(id, row, cardId) {
   return card;
 }
 
-/* A story character's copies (`domain.codex.cards.find_copies`): in every
+/* A story character's copies (`codex.cards.services.find_copies`): in every
    story forks join its own to, the one unlinked character of its very
    name — a story holding two passed over, as is one where `cardId`
    links another already. */
@@ -1213,7 +1213,7 @@ function copyRow({ story_id: story, character_id: character }) {
 }
 
 /* What a link says of the copies it took along
-   (`domain.codex.cards.linked_copies`). */
+   (`codex.cards.services.linked_copies`). */
 function linkedCopies(count) {
   return count ? ` Linked in ${count} other ${count === 1 ? "story" : "stories"} too.` : "";
 }
@@ -1382,7 +1382,7 @@ function bringIn(story, { id: cardId, name, aliases = [], copy, user, line, with
     card_portrait: portraitOf(card),
     portrait_sent: riding !== null,
     // a card made it, and is answered with no model
-    // (`backend.api.story.lore._character`)
+    // (`backend.story.lore._character`)
     provider: "card",
     model: null,
     updated_at: now(),
@@ -1423,7 +1423,7 @@ export function profileToml(card, user) {
 
 // ---------- the codex ----------
 
-/* All characters, as `backend.domain.codex.cards` keeps them: the cards,
+/* All characters, as `backend.codex.cards.services` keeps them: the cards,
    the stories each is in read off the casts as the store reads them, the
    digest of each card file a card was made from, and the stories'
    characters no card claims. A picture added to a card is not kept: the
@@ -1507,7 +1507,7 @@ const cleanAliases = (aliases, name) => [
 ];
 
 /* A reminder goes before one of the reader's messages, the newest 1
-   (`backend.domain.codex.cards._checked_profile`). */
+   (`backend.codex.cards.services._checked_profile`). */
 function checkDepth(fields) {
   const depth = fields.reminder_depth;
   if (depth !== undefined && !(Number.isInteger(depth) && depth >= 1)) {
@@ -1535,7 +1535,7 @@ function makeCard({ name, aliases = [], tagline = "", fields = {}, fileName = ""
 }
 
 // What a card made by hand is called where no name is given
-// (`backend.domain.codex.cards.NEW_CARD_NAME`).
+// (`backend.codex.cards.services.NEW_CARD_NAME`).
 const NEW_CARD_NAME = "New card";
 
 export function createCard({ name = NEW_CARD_NAME, aliases = [], tagline = "", fields = {} }) {
@@ -1557,14 +1557,14 @@ export function updateCard(id, { before, ...fields }) {
 }
 
 /* A move refused before anything is written, as
-   `backend.domain.codex.cards.check_move` refuses it. */
+   `backend.codex.cards.services.check_move` refuses it. */
 function checkMove(card, before) {
   if (before === card.id) throw invalid("A card cannot go before itself.");
   if (before !== null) cardRow(before);
 }
 
 /* A card put just before `before`, or last for null
-   (`backend.domain.codex.cards.move_card`). */
+   (`backend.codex.cards.services.move_card`). */
 function moveCard(card, before) {
   const order = [...state.cards.values()].filter((each) => each.id !== card.id);
   const at = before === null ? order.length : order.findIndex((each) => each.id === before);

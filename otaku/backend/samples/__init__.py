@@ -11,10 +11,10 @@ from pathlib import Path
 from typing import Any
 
 from otaku.backend.api import Api
-from otaku.backend.domain.app import App
-from otaku.backend.domain.app.pictures import RawFile, read_picture, save
-from otaku.backend.domain.story.settings import StorySettingQuestions
+from otaku.backend.app.core.services import App
+from otaku.backend.app.pictures.services import RawFile, read_picture, save
 from otaku.backend.errors import NotFound, Refused
+from otaku.backend.story.settings.services import StorySettingQuestions
 from otaku.store.files import Owner
 from otaku.store.schema import Attachment
 

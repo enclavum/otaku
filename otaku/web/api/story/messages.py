@@ -9,7 +9,7 @@ from dataclasses import asdict
 from typing import Any
 
 from otaku.backend.api import Api
-from otaku.backend.api.story.messages import (
+from otaku.backend.story.messages.schemas import (
     AssistantMessage,
     AssistantReasoning,
     AssistantText,
@@ -21,7 +21,7 @@ from otaku.backend.api.story.messages import (
     ToolMessage,
     UserMessage,
 )
-from otaku.backend.api.story.messages import PlayEvent as PlayEvent
+from otaku.backend.story.messages.schemas import PlayEvent as PlayEvent
 from otaku.web.api._request import Ask, Route, Stream, changed, plain
 from otaku.web.api.story.stories import expected_head, tagged
 

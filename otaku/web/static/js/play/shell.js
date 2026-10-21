@@ -84,7 +84,7 @@ function factsOf(app, story) {
 
 /** The line a landing says when nothing was written to say it — a story
     resumed as it stands: "Story: …. Resumed at message 14." The rule
-    `Story.landed_line` holds (`backend.api.story.stories`), copied: the
+    `Story.landed_line` holds (`backend.story.stories`), copied: the
     page lands without asking, so there is no answer to carry it. */
 function landingLine(facts, verb = "Resumed") {
   const name = label(facts.story);

@@ -5,7 +5,7 @@
 
 import { get, items, patch, post, query, segment } from "./_http.js";
 
-// ---------- app ----------
+// ---------- core ----------
 
 /* The app itself — its version, what its launch had to say, the model in
    use and the one lore extraction asks — switched or pinned by an update

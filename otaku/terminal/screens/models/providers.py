@@ -11,8 +11,8 @@ from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import StyleAndTextTuples
 
 from otaku.terminal.api import KeySource, Locality, ModelState, Refused
-from otaku.terminal.api.app import providers as api_providers
-from otaku.terminal.api.app.providers import ListedProvider
+from otaku.terminal.api import providers as api_providers
+from otaku.terminal.api.providers import ListedProvider
 from otaku.terminal.screens.models.base import ModelEntry, ModelPickerBase
 
 _FIELD_LABELS = {"url": "URL:", "api_key": "API key:"}

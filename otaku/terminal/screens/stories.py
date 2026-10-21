@@ -30,7 +30,7 @@ from prompt_toolkit.layout.dimension import D
 
 from otaku.formatting import flatten, human_age, truncate
 from otaku.terminal.api import Api
-from otaku.terminal.api.story.stories import StorySummary
+from otaku.terminal.api.stories import StorySummary
 from otaku.terminal.screens.base import bordered_box, wrap_text
 from otaku.terminal.screens.dossier import Dossier
 from otaku.terminal.tty import latin_key

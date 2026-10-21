@@ -4,7 +4,7 @@ the local server that hands it over.
 The medium is the only difference from `terminal` — every command the
 terminal types is reached here through a screen or an endpoint, and the
 one thing both frontends TYPE, the story's language, is the backend's
-(`backend.api.story.language`). What the frontend
+(`backend.story.language`). What the frontend
 owns is how that looks: `static/` is the design
 in its finished form — the token contract in `docs/web_tokens.md`, the
 page and its modules beside it.

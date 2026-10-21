@@ -33,27 +33,38 @@ serve the app it holds (`/web`); the web knows nothing of the terminal.
 ## The backend
 
     backend/
-      api/        the interface: what a frontend calls
-      domain/     what otaku does: every rule and every store access
+      api.py      the facade: `Api`, and the vocabulary its resources share
+      base.py     what every resource and schema is built on, and what a write takes and answers
       errors.py   the refusals, raised below and caught above
+      formats/    the story document and the foreign formats: every wild file otaku reads
       launch.py   one state dir opened as the app
       samples/    the sample stories, their pictures and cards, seeded at a first launch
+      app/  codex/  story/    the groups of resource folders
 
-Inside, imports point one way: `errors` ← `domain.app` ← `domain.codex` ← `domain.story` ← `api` ←
-`samples` ← `launch`, with `domain._formats` beside `domain.story`. A module imports another by its own module
-path, never through a package root. A package root holds its namesake or nothing: the facade and the
-vocabulary its resources share in `api`, the app's own resources in `api.app`, the `App` in
-`domain.app`, nothing in any `codex` or `story`.
+A group holds a resource folder for each of its resources, and a folder holds three modules:
+
+    story/messages/
+      resources.py    the interface: the resource classes a frontend calls
+      schemas.py      what they answer, and the builders that make it from the services' values
+      services.py     the domain: every rule and every store access
+
+Inside, imports point one way. The services are the domain, in its own order — `errors` ← `app` ←
+`codex` ← `story`, with `formats` beside them — and import nothing of the interface. Above them all
+the schemas, then the resources, each group's over the groups below it; then the facade, `samples`
+and `launch`. `base` names the `App` for type checking alone. A module imports another by its own
+module path, never through a package root. A package root holds its namesake or nothing: the facade
+and the vocabulary its resources share in `api`, nothing in a group's root or a folder's — the `App`
+is `app.core.services`, the app's own folder.
 
 ## The mirror
 
-Five places are laid out alike — the domain (`backend.domain`), the interface (`backend.api`), each
-frontend's api package (`web.api`, `terminal.api`), and the page's api client
-(`web/static/js/api/`) — in three packages of twins, `app` for the installation, `codex` for what
-every story may draw on and no story owns, and `story` for a story and what it holds:
+Three places are laid out alike — the backend's resource folders, the web's api package (`web.api`),
+and the page's api client (`web/static/js/api/`) — in three groups, `app` for the installation,
+`codex` for what every story may draw on and no story owns, and `story` for a story and what it
+holds:
 
     app/                                    story/
-      __init__       the app itself           stories    the stories, the actions on one
+      core           the app itself           stories    the stories, the actions on one
       machine        the memory a model fills settings   a story's settings
       settings       the installation's       messages   its messages, a line played
       providers      the providers            lore       its memory
@@ -68,48 +79,49 @@ every story may draw on and no story owns, and `story` for a story and what it h
     codex/
       cards          a character card, kept across stories
 
-The five hold the same module list in the same structure: the same three packages, the same modules
-in each under the same names, and each package root holding its namesake or nothing. The page's
-client writes the list in its own shape: a package is one module (`app.js`, `codex.js`, `story.js`)
-and a twin a section of it, headed with the twin's name, in the order above — the `app` root's
-resources its `app` section, the `codex` and `story` roots' none. A module is added to all five or
-to none, and a place holds nothing beside its twins but its own machinery. The terminal's `dispatch`
-follows the same layout with a module for each resource that has commands — a resource without one
-has nothing to carry out there.
+The three hold the same list in the same structure: the same three groups and the same names in
+each — a folder in the backend, a module in `web.api`. The page's client writes the list in its own
+shape: a group is one module (`app.js`, `codex.js`, `story.js`) and a resource a section of it,
+headed with its name, in the order above. A resource is added to all three or to none, and a place
+holds nothing beside its list but its own machinery. Two more places take names from the list,
+flat and only where there is work, the app's own named `app`: the terminal's `dispatch`, a module for
+each resource whose commands do more than call the door, and the terminal's door, a module for each
+resource the terminal's own input means something to ("A frontend's api package").
 
-A module imports a twin from the layer below under an alias that names the layer: an interface
-module imports `domain_<name>` — any other domain module too — and the terminal imports a module of
-its door as `api_<name>`.
+A module imports what it reaches of the layer below under an alias that names the layer: a resources
+or schemas module imports its folder's services as `domain_<folder>` — the app's own as
+`domain_core` — and the terminal imports a module of its door as `api_<name>`.
 
 The layout is the code's; the call paths are the interface's. A call spells its path through the
-facade's attributes (`api.stories.regens.create`) wherever its class lives (`story/stories.py`),
-and the HTTP path follows the call path.
+facade's attributes (`api.stories.regens.create`) wherever its class lives
+(`story/stories/resources.py`), and the HTTP path follows the call path.
 
 ## Machinery
 
-A module with no twin is its layer's machinery, and the underscore in its name says so:
+A module that serves more than one place, and no frontend, is its layer's machinery. In the backend
+its place says so — a module in a group beside the resource folders; in the web's door and the
+page's client, where every other module is named after a resource, the underscore in its name does:
 
-    backend.api._writes             a write's answer: Changed, UNCHANGED
-    backend.domain._formats         the documents, in and out
-    backend.domain.app._paths       what one state dir holds
-    backend.domain.app._passwords   the web password's hash
-    backend.domain.app._runs        a forced extraction pass, as it runs
-    backend.domain.story._chain     a story's chain: appended, popped, its head moved
-    backend.domain.story._request   a story's next request, and the worker's job over it
-    backend.domain.story._play      the play: a line recorded, its reply streamed
-    backend.domain.story._tools     the tools a reply may call
+    backend.app.paths               what one state dir holds
+    backend.app.passwords           the web password's hash
+    backend.app.runs                a forced extraction pass, as it runs
+    backend.story.chain             a story's chain: appended, popped, its head moved
+    backend.story.request           a story's next request, and the worker's job over it
+    backend.story.play              the play: a line recorded, its reply streamed
+    backend.story.tools             the tools a reply may call
     web.api._request                what a route is handed and hands back
     web/static/js/api/_http.js      the page's HTTP: the head a write names, a refusal, a stream
-    terminal.dispatch._files        a typed path, read on this side
 
 Its own layer imports it; the layer above never does, but for the launch, which composes the app out
-of the domain's parts. What the layer above needs of the machinery, a twin re-exports: the play's
-entry and its events through `domain.story.messages`, a fresh take on a reply through
-`domain.story.stories`.
+of the domain's parts. In the backend the machinery is the services': they import it, and a
+resources or schemas module never does — what the interface needs of it, a folder's services
+re-export: the play's entry and its events through `story.messages.services`, a fresh take on a
+reply through `story.stories.services`.
 
 ## The interface
 
-`backend.api` is what a frontend calls, in-process, with no transport.
+`backend.api` and the resources' and schemas' modules are what a frontend calls, in-process, with
+no transport.
 
 A frontend builds one `Api` over the app it is handed and holds it. The facade has a resource per
 top-level path — `app`, `settings`, `tools`, `prompts`, `shared_reminder`, `providers`, `cards`,
@@ -117,29 +129,32 @@ top-level path — `app`, `settings`, `tools`, `prompts`, `shared_reminder`, `pr
 — and a sub-resource is an attribute of its parent, so a call spells its URL:
 `api.stories.messages.create(5, line=…)` is `POST /api/stories/5/messages`.
 
-A resource class, `<Noun>Resource`, holds the app and nothing else — no story, no cache. Its methods
-are the five verbs: `list`, `get`, `create`, `update`, `delete`. The ids of what a method acts on
-come first, in path order, and its fields by keyword. An `update` changes the fields it is given:
-each defaults to `UNCHANGED`, so `None` can clear one. One method stands outside the five,
+A resource class, `<Noun>Resource`, is a `Resource`: its base holds the app, and the class nothing
+else — no story, no cache; one with sub-resources builds them after handing its base the app. Its
+methods are the five verbs: `list`, `get`, `create`, `update`, `delete`. The ids of what a method
+acts on come first, in path order, and its fields by keyword. An `update` changes the fields it is
+given: each defaults to `UNCHANGED`, so `None` can clear one. One method stands outside the five,
 `SettingsResource.check_password`.
 
-A read answers data: an entity, or a list. A write answers `Changed[T]`: the thing as it now stands
+A read answers data: a schema, or a list. A write answers `Changed[T]`: the thing as it now stands
 and the sentence that says what was done, `Changed[None]` where nothing stands. A stream is a
 `create` that answers an iterator of events. Nothing answers a live object, a handle to poll, or a
 bare `None`.
 
-An entity is a frozen dataclass, defined in its resource's module after the resource classes, every
-derived fact a field: a client calls the resources and needs nothing else. The one kind of method an
-entity keeps is a text form — a report's `text()`, `Story.landed_line`.
+A schema is a `Schema`, which makes every subclass a frozen dataclass — so it carries no decorator of
+its own — every derived fact a field: a client calls the resources and needs nothing else. The one
+kind of method a schema keeps is a text form — a `Report`'s `text()`, `Story.landed_line`. A
+frontend's own settings slice is answered as the settings package defines it (`TerminalSettings`).
 
-A resource is thin: the domain call, then its entity built — never the store, never an `app._`
-member. A builder a sibling module needs is `as_<entity>` (`as_model`, `as_events`), and no
-operation.
+A resource is thin: its folder's service called, then its schema built — never the store, never an
+`app._` member. A builder a sibling module needs is `as_<schema>` (`as_model`, `as_events`), in its
+folder's schemas, and no operation.
 
-The root re-exports `Api`, the write's answer, the refusals, the hints, and the vocabulary several
-resources share (`Layout`, `StoryMode`, `InjectionPosition`, …). The one exception to "a client
-calls the resources" is `story.language`: the story's language as a client applies it to text not
-stored yet — a line being typed, a reply still arriving — which no entity can carry.
+The root re-exports `Api`, the write's answer, the refusals, the hints, the base classes, and the
+vocabulary several resources share (`Layout`, `StoryMode`, `InjectionPosition`, …). The one
+exception to "a client calls the resources" is `story.language`: the story's language as a client
+applies it to text not stored yet — a line being typed, a reply still arriving — which no schema can
+carry.
 
 The app holds no story. Every call that acts on one names it; a call that moves a story's head
 names the head the caller last saw (`expected_head`), and the store moves it by compare-and-set — a
@@ -147,20 +162,21 @@ head moved meanwhile is `HeadMoved`, and nothing is written. Which story a clien
 client's to hold. An operation safe from any thread says so; every other one runs on the app's own
 thread.
 
-## The domain
+## The services
 
-`backend.domain` holds every rule and every store access. It returns its own values — store rows,
-small records, its own events — and raises the refusals; a write answers the sentence that says
-what it did. It never imports `backend.api`.
+The services — every folder's `services.py`, and the machinery beside them — hold every rule and
+every store access. They return their own values — store rows, small records, their own events —
+and raise the refusals; a write answers the sentence that says what it did. They never import the
+interface.
 
 A function behind one operation takes the operation's verb and its noun: `get_story`,
 `list_messages`, `update_scene` — a bare `list` would shadow the builtin. A named action keeps its
 verb: `fork_story`, `undo_exchange`, `regenerate_reply`, `submit_line`, `switch_model`. A field
 written alone is `set_<field>`.
 
-The `App` (`domain.app`) is what one opened state dir is made of. Its underscore members are the
-domain's: the domain's modules use them, the launch composes them — the samples' seeding with it —
-and nothing above the domain touches them.
+The `App` (`app.core.services`) is what one opened state dir is made of. Its underscore members are
+the services': they use them, the launch composes them — the samples' seeding with it — and nothing
+above the services touches them.
 
 `backend.errors` holds `Refused` and its kinds — `NotFound`, `Conflict` (`HeadMoved` among them),
 `Invalid`, `Unavailable` — and the refusal sentences more than one module says.
@@ -168,19 +184,22 @@ and nothing above the domain touches them.
 ## A frontend's api package
 
 Each frontend reaches the interface through one package of its own, the only part of it that
-imports `backend.api`; the page reaches `web.api` through its own client.
+imports the backend; the page reaches `web.api` through its own client.
 
-`web.api` is the page's proxy: an HTTP request in, the call out, JSON back. Each twin holds its own
-routes; the root merges them into `ROUTES` and `STREAMS` — a path in two modules is a fault at
-import — and re-exports the interface's vocabulary, and a twin re-exports the types the server needs
-of it (`WebSettings`, `PlayEvent`). `_request` is what every route is handed and hands back.
+`web.api` is the page's proxy: an HTTP request in, the call out, JSON back. Each module holds its
+resource's routes; the root merges them into `ROUTES` and `STREAMS` — a path in two modules is a
+fault at import — and re-exports the interface's vocabulary, and a module re-exports the types the
+server needs of its resource (`WebSettings`, `PlayEvent`). A module imports its own resource's
+resources and schemas alone, besides the facade. `_request` is what every route is handed and hands
+back.
 
-`terminal.api` is the terminal's door. Its root re-exports the interface's vocabulary; each module
-re-exports everything its twin answers and holds what the terminal's own input means to that
-resource — a typed argument and the sentence it is answered with (`app.model`,
-`app.models.set_think`, `story.stories.title`), a setting's prompt (`story.prompts`), a provider's
-field (`app.providers`). A plain call is made on the facade, `Api`; the door adds a function only
-where it translates.
+`terminal.api` is the terminal's door, flat. Its root re-exports the interface's vocabulary, the
+schemas the terminal draws and passes on (a message and the play's events, a story setting, the web
+search's key) and the story's language as a module (`language`). A module of it exists only where
+the terminal's own input means something to a resource, and is named after that resource: it
+re-exports what the resource answers and holds the translation — a typed argument and the sentence
+it is answered with (`app.model`, `models.set_think`, `stories.title`), a setting's prompt
+(`prompts`), a provider's field (`providers`). A plain call is made on the facade, `Api`.
 
 The page's api client, `web/static/js/api/`, is the page's door to `web.api`. Each section of
 `app.js` and `story.js` holds its resource's routes as the functions the page calls, its own verbs
@@ -206,9 +225,10 @@ Imports point one way: `api` ← `commands` ← `tty` ← {`prompt`, `screens`, 
 door's, the routing in `dispatch`'s, the medium's own words in `tty`'s.
 
 `dispatch` is the routing and the handlers. Its root splits a line into its command and its
-argument, merges the handlers into one table — a token two modules answer is a fault at import —
-and answers the four commands that reach no interface, `/help`, `/web`, `/clear` and `/bye`, as the
-web's server holds its own paths. A handler takes the chat and the argument as typed, asks the door,
+argument, and holds every command's handler in one table: a module's function where the command
+does more than call the door, a lambda where it is one call, its answer the sentence, and its own
+for the four commands that reach no interface, `/help`, `/web`, `/clear` and `/bye`, as the web's
+server holds its own paths. A handler takes the chat and the argument as typed, asks the door,
 then draws, lands or opens a screen; it answers the sentence to say, or `None` where it said its
 own.
 
@@ -299,12 +319,12 @@ from the page:
     web.api.story.messages           the row: the line and its pictures read from the body,
                                      If-Match as the expected head
     ──────────────────────────────── both frontends' calls arrive here ────────────────────────────
-    backend.api.story.messages       MessagesResource.create(5, line=…): the domain's events
+    backend.story.messages.resources MessagesResource.create(5, line=…): the domain's events
                                      answered as the interface's
-    backend.domain.story.messages    submit_line, the play's entry
-    backend.domain.story._play       the line checked and recorded, the reply asked of the model
+    backend.story.messages.services  submit_line, the play's entry
+    backend.story.play              the line checked and recorded, the reply asked of the model
                                      and streamed, then recorded the same way
-    backend.domain.story._chain      append_message, from the head the caller saw
+    backend.story.chain             append_message, from the head the caller saw
     store.ops.stories                StoryOps.append: the message added and the head moved in one
                                      statement
     store.schema                     the messages table
@@ -318,12 +338,12 @@ From the terminal:
                                      the facade the door re-exports
     terminal.chat.stream             the reply drawn as its events arrive
     ──────────────────────────────── both frontends' calls arrive here ────────────────────────────
-    backend.api.story.messages       MessagesResource.create(5, line=…): the domain's events
+    backend.story.messages.resources MessagesResource.create(5, line=…): the domain's events
                                      answered as the interface's
-    backend.domain.story.messages    submit_line, the play's entry
-    backend.domain.story._play       the line checked and recorded, the reply asked of the model
+    backend.story.messages.services  submit_line, the play's entry
+    backend.story.play              the line checked and recorded, the reply asked of the model
                                      and streamed, then recorded the same way
-    backend.domain.story._chain      append_message, from the head the caller saw
+    backend.story.chain             append_message, from the head the caller saw
     store.ops.stories                StoryOps.append: the message added and the head moved in one
                                      statement
     store.schema                     the messages table
@@ -332,7 +352,7 @@ The rule is where the two calls converge. Above it each frontend does its medium
 across HTTP and the terminal in-process, and both end in the same call:
 `api.stories.messages.create(5, line=…)` on the interface. Below it there is one path, line for
 line the same whichever frontend sent the message. A door that translates stands above the rule
-too: the terminal's `/title` goes through `terminal.api.story.stories.title`, which reads what its
+too: the terminal's `/title` goes through `terminal.api.stories.title`, which reads what its
 typed argument means and makes the `api.stories.update` call itself.
 
 The store is laid out by table, not by resource: one `*Ops` class per table, held by `Store` under
@@ -343,8 +363,8 @@ tables and the files folder, `sweep_files`. Only the domain touches it, through 
 
 ## Protected names
 
-The underscore marks what is not part of a surface, at three sizes. A protected module is its
-layer's machinery. A protected module-level name is used by nothing outside its module; the moment
+The underscore marks what is not part of a surface, at three sizes. A protected module is the
+machinery of a place whose other modules are named after resources. A protected module-level name is used by nothing outside its module; the moment
 another module needs it, it is public. A protected member is its class hierarchy's: a hook a base
 declares is filled by its subclasses, and the `App`'s members are the domain's.
 
@@ -352,7 +372,7 @@ declares is filled by its subclasses, and the `App`'s members are the domain's.
 
 Over HTTP the interface keeps its shape: a route for every call path, under `/api`, the method the
 verb, a row id in a path digits. A collection answers `{"items": […]}` and a write
-`{"value": …, "notice": …}`; an entity made answers 201 and names where it lives in `Location`,
+`{"value": …, "notice": …}`; a thing made answers 201 and names where it lives in `Location`,
 work started answers 202 and names where it is polled. An answer inside a story carries the head the
 story stands at as its `ETag` — `"0"` before the first message — but a stream's and a deleted
 story's. A write that moves the head names the one it moves from in `If-Match`: 428 without it, 412
@@ -362,12 +382,13 @@ lists every route.
 ## Tests
 
 `tests/` mirrors the package tree: a module's test is `test_` and its name, a protected one's
-keeping its underscore (`tests/backend/domain/app/test__passwords.py` covers `_passwords.py`), and a
-package root's named for its package (`tests/terminal/dispatch/test_dispatch.py`).
+keeping its underscore (`tests/web/api/test__request.py` covers `_request.py`, and
+`tests/backend/story/messages/test_services.py` a folder's services), and a package root's named
+for its package (`tests/terminal/dispatch/test_dispatch.py`).
 `tests/test_architecture.py` reads the source tree and holds the rules a scan of it can check: the
-import table, the one-way orders inside the backend, the terminal and the page, the mirror and its
-twins, the machinery's privacy, the doors, the resource classes' verbs and answers, the call path
-every route follows, and the spec against the routes.
+import table, the one-way orders inside the backend, the terminal and the page, the resource
+folders and the mirror, the machinery's privacy, the doors, the resource classes' bases, verbs and
+answers, the call path every route follows, and the spec against the routes.
 
 The scenarios that play the app in-process, `scenarios/api/`, are laid out as the interface is:
-`app/`, `codex/` and `story/`, a module for each twin a story reaches.
+`app/`, `codex/` and `story/`, a module for each resource a story reaches.

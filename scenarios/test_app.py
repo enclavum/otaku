@@ -22,9 +22,9 @@ from otaku import encryption
 from otaku import logging as otaku_logging
 from otaku.backend import launch as backend_launch
 from otaku.backend.api import Api, ModelRef
-from otaku.backend.api.story.messages import RawFile
-from otaku.backend.domain.app import pictures as backend_files
-from otaku.backend.domain.app._paths import Paths
+from otaku.backend.app.paths import Paths
+from otaku.backend.app.pictures import services as backend_files
+from otaku.backend.story.messages.schemas import RawFile
 from otaku.encryption import Cipher, EncryptionError, PlainCipher
 from otaku.formatting import toml_string
 from otaku.settings import config as config_mod

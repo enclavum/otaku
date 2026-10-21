@@ -274,11 +274,11 @@ function modelDetail(pane, entry, { current, extraction }, { use, setLoaded, ext
   if (entry.model.size) facts.append(fact("size", entry.model.size));
   if (entry.model.max_context_catalogue) facts.append(fact("max context", entry.model.max_context_catalogue));
   // the running instance's size, where it is known and is not the model's
-  // own — the info report's rule (`backend.api.app.reports`)
+  // own — the info report's rule (`backend.app.reports`)
   const loaded = entry.model.max_context_loaded;
   if (loaded && loaded !== entry.model.max_context_catalogue) facts.append(fact("served max context", loaded));
   // how its thinking is set, and what else it can do: the info report's
-  // two rows, in the report's own words (`backend.api.app.reports`)
+  // two rows, in the report's own words (`backend.app.reports`)
   facts.append(fact("reasoning", entry.model.reasoning_words));
   facts.append(fact("capabilities", entry.model.capability_words));
   facts.append(fact("provider", entry.provider.label));

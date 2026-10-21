@@ -21,8 +21,9 @@ from otaku import encryption
 from otaku.agents import Worker
 from otaku.backend import samples
 from otaku.backend.api import Api
-from otaku.backend.domain.app import App, LaunchFacts, _passwords
-from otaku.backend.domain.app._paths import Paths
+from otaku.backend.app import passwords
+from otaku.backend.app.core.services import App, LaunchFacts
+from otaku.backend.app.paths import Paths
 from otaku.backend.errors import NO_MODEL_HINT
 from otaku.encryption import AskSecret, Cipher, SealedError
 
@@ -217,17 +218,17 @@ def _load_config(
     secrets = Secrets(
         seal=_sealer(paths),
         is_sealed=encryption.is_sealed,
-        hash=_passwords.hash,
-        is_hashed=_passwords.is_hashed,
+        hash=passwords.hash,
+        is_hashed=passwords.is_hashed,
     )
     migrations.migrate(paths.settings_files, secrets, autoconfigure(), default_sections())
     config = config_file.load(paths.config_file)
-    if config.web_password and not _passwords.is_hashed(config.web_password):
+    if config.web_password and not passwords.is_hashed(config.web_password):
         # The migration left it plain — the file could not be written, or
         # the value is not a string: hashed in memory for this run, and
         # in the file by the next launch that can. Nothing past this line
         # sees it typed.
-        config = replace(config, web_password=_passwords.hash(config.web_password))
+        config = replace(config, web_password=passwords.hash(config.web_password))
     providers, key_warnings = _resolve_api_keys(paths, providers_file.load(paths.providers_file))
     integration_settings = integrations_file.load(paths.integrations_file)
     integrations, more_warnings = _resolve_api_keys(paths, integration_settings.integrations)

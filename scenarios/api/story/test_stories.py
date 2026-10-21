@@ -18,9 +18,9 @@ from pathlib import Path
 import pytest
 
 from otaku.backend.api import Api, Layout, Refused
-from otaku.backend.api.codex.cards import RawFile
-from otaku.backend.domain.app._paths import Paths
-from otaku.terminal.api.story.prompts import read_prompt
+from otaku.backend.app.paths import Paths
+from otaku.backend.codex.cards.schemas import RawFile
+from otaku.terminal.api.prompts import read_prompt
 from otaku.terminal.screens import stories as screen_stories
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch, set_config

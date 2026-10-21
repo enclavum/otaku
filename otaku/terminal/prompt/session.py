@@ -30,7 +30,7 @@ from prompt_toolkit.styles import Style
 
 from otaku.formatting import flatten, truncate
 from otaku.terminal.api import Api
-from otaku.terminal.api.app.models import ModelSettings
+from otaku.terminal.api.models import ModelSettings
 from otaku.terminal.prompt.answers import AnswerMenu
 from otaku.terminal.prompt.caret import Caret, caret_painter
 from otaku.terminal.prompt.completion import SlashCompleter

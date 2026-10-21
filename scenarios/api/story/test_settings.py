@@ -19,9 +19,9 @@ from otaku.backend.api import (
     Layout,
     Refused,
 )
-from otaku.backend.api.app.integrations import WebSearch
-from otaku.backend.api.story.settings import LAYOUT_SETTING, StorySetting
-from otaku.backend.domain.app._paths import Paths
+from otaku.backend.app.integrations.schemas import WebSearch
+from otaku.backend.app.paths import Paths
+from otaku.backend.story.settings.schemas import LAYOUT_SETTING, StorySetting
 from otaku.settings import models as models_file
 from otaku.store.schema import StorySettingDB
 from otaku.terminal.screens import dossier as screen_dossier

@@ -6,8 +6,8 @@ extraction asks, pinned for it or following the model in use.
 import pytest
 
 from otaku.backend.api import ModelRef, Refused
-from otaku.backend.api.app import AppInfo, ModelInUse
-from otaku.backend.domain.app._paths import Paths
+from otaku.backend.app.core.schemas import AppInfo, ModelInUse
+from otaku.backend.app.paths import Paths
 from otaku.terminal.screens import models as screen_models
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch, set_config, set_config_provider

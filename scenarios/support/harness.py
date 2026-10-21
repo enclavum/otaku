@@ -27,10 +27,10 @@ from otaku import encryption
 from otaku.backend import launch as backend_launch
 from otaku.backend.api import Api, Layout, ModelRef
 from otaku.backend.api import App as BackendApp
-from otaku.backend.api.app.models import ModelSettings
-from otaku.backend.api.story.messages import Message
-from otaku.backend.api.story.settings import DEFAULT_LAYOUT
-from otaku.backend.domain.app._paths import Paths
+from otaku.backend.app.models.schemas import ModelSettings
+from otaku.backend.app.paths import Paths
+from otaku.backend.story.messages.schemas import Message
+from otaku.backend.story.settings.schemas import DEFAULT_LAYOUT
 from otaku.encryption import seal
 from otaku.settings import config as config_file
 from otaku.settings import providers as providers_file

@@ -9,7 +9,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from otaku.backend.domain.app._paths import Paths
+from otaku.backend.app.paths import Paths
 from otaku.providers import ALL_CLIENTS, ModelState, UnreachableError
 from otaku.providers.clients.omlx import OmlxClient
 from otaku.settings import config as config_mod

@@ -29,7 +29,7 @@ import { complain, settle, tell, working } from "../kit/status.js";
 import { isToken } from "./language.js";
 
 /* What the backend says with nothing to take again — COPIED, as the page
-   has no story to ask (`backend.domain.story.stories.NOTHING_TO_REGENERATE`). */
+   has no story to ask (`backend.story.stories.services.NOTHING_TO_REGENERATE`). */
 const _NOTHING_TO_REGENERATE = "Nothing to regenerate.";
 
 const transcript = $(".otk-transcript");
@@ -126,7 +126,7 @@ export function takeBack(turns, question = null) {
   shelved = null;
   // the question the story stands on again once its answer is taken back
   // (`Story.question`, the undo's answer): posed anew, as the terminal
-  // poses it (`dispatch.story.stories._pose_again`)
+  // poses it (`dispatch.stories._pose_again`)
   const call = question;
   const drawn = storedTurns();
   const same = turns.every(
@@ -221,7 +221,7 @@ function askBox({ question, options }, { armed }) {
 
 // An answer to pick from, as the tool reads one: `1.` `1)` `a.` `a)` at the
 // head of a line, then the answer. The RULE is `ToolQuestion._OPTION`'s
-// (`backend.domain.story._tools`), copied for the page to read a question as
+// (`backend.story.tools`), copied for the page to read a question as
 // it streams — the language barrier being the one reason a rule exists twice.
 const _OPTION = /^\s*(?:\d{1,2}|[A-Za-z])[.)]\s+(\S.*)$/;
 // A line still arriving that may yet turn out an option: its head not
@@ -1850,7 +1850,7 @@ function endTurn(turn) {
       /* The reply landed, so the story is one turn longer than the rubric
          counted. The STORED turn is the test, not the block: a declined or
          failed attempt keeps its block to say so but stores no message
-         (`backend.domain.story._play._land_reply` records a reply row only when
+         (`backend.story.play._land_reply` records a reply row only when
          some text arrived), and counting it would number every later turn
          one too high. */
       ordinal += 1;

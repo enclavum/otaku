@@ -1,28 +1,39 @@
 """A typed command carried out. The routing: the line split into its
 command and its argument (`find`, `raw_argument`), the sentence for one
-no row answers (`unknown_notice`), and every handler merged into one
-table (`HANDLERS` — a token two modules answer is a fault at import).
-The handlers are laid out as the door is (`terminal.api`), a module for
-each resource that has commands (`app`, `story`) — what the terminal
-does with a command: the door's call, then what is drawn, where it
-lands, which screen opens — and the four the terminal answers itself
-are here, as the web's server holds its own paths: the /help page, the
-app served to a browser (/web), the screen cleared, the session ended.
-A handler takes the chat and the argument as typed, and answers the
-sentence to say — or None, where it said its own."""
+no row answers (`unknown_notice`), and every command's handler in one
+table (`HANDLERS`). A resource whose commands do more than call the
+door has a module of handlers, flat as the door is (`terminal.api`),
+named after it, `app` the app's own — what the terminal does with a
+command: the door's call, then what is drawn, where it lands, which
+screen opens. A command that is one call is its row's lambda, and the
+four the terminal answers itself are here, as the web's server holds
+its own paths: the /help page, the app served to a browser (/web), the
+screen cleared, the session ended. A handler takes the chat and the
+argument as typed, and answers the sentence to say — or None, where it
+said its own."""
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 
 from otaku import web as web_frontend
 from otaku.terminal import help as help_page
 from otaku.terminal.api import Refused
+from otaku.terminal.api import lore as api_lore
+from otaku.terminal.api import models as api_models
+from otaku.terminal.api import reports as api_reports
+from otaku.terminal.api import settings as api_settings
+from otaku.terminal.api import stories as api_stories
 from otaku.terminal.chat.chat import Chat
 from otaku.terminal.commands import COMMANDS, SHORTCUTS, CommandSpec, is_command
-from otaku.terminal.dispatch import app
-from otaku.terminal.dispatch.app import integrations, models, reports
-from otaku.terminal.dispatch.app import settings as app_settings
-from otaku.terminal.dispatch.story import cards, context, lore, messages, stories, transfer
-from otaku.terminal.dispatch.story import settings as story_settings
+from otaku.terminal.dispatch import (
+    app,
+    cards,
+    context,
+    lore,
+    messages,
+    settings,
+    stories,
+    transfer,
+)
 from otaku.terminal.tty import error_line
 from otaku.terminal.tty.render import command_tokens
 from otaku.terminal.tty.typography import highlight_commands
@@ -155,31 +166,54 @@ def _bye(chat: Chat, raw: str) -> None:
 # ---------- the rows ----------
 
 
-def _merged(*tables: Mapping[str, Handler]) -> dict[str, Handler]:
-    """The command modules' rows as one table; a token two modules claim
-    is a bug, caught here rather than by whichever import ran last."""
-    out: dict[str, Handler] = {}
-    for table in tables:
-        twice = set(out) & set(table)
-        if twice:
-            raise AssertionError(f"a command in two modules: {sorted(twice)}")
-        out.update(table)
-    return out
-
-
-# Every command the terminal answers, by its token.
-HANDLERS: dict[str, Handler] = _merged(
-    {"/help": _help, "/web": _web, "/clear": _clear, "/bye": _bye},
-    app.HANDLERS,
-    models.HANDLERS,
-    app_settings.HANDLERS,
-    reports.HANDLERS,
-    integrations.HANDLERS,
-    stories.HANDLERS,
-    story_settings.HANDLERS,
-    messages.HANDLERS,
-    lore.HANDLERS,
-    cards.HANDLERS,
-    context.HANDLERS,
-    transfer.HANDLERS,
-)
+# Every command the terminal answers, by its token, under the resource it
+# reaches; a command that is one call of the door is a lambda, the door's
+# answer (a report's `text()`) the sentence.
+HANDLERS: dict[str, Handler] = {
+    # the terminal's own
+    "/help": _help,
+    "/web": _web,
+    "/clear": _clear,
+    "/bye": _bye,
+    # the app itself (`backend.app.core`)
+    "/model": app.model,
+    # the installation's settings (`backend.app.settings`)
+    "/set verbose": lambda chat, raw: api_settings.set_verbose(chat.api, raw),
+    "/set autocorrect": lambda chat, raw: api_settings.set_autocorrect(chat.api, raw),
+    "/set notification": lambda chat, raw: api_settings.set_notification(chat.api, raw),
+    "/set max_context": lambda chat, raw: api_settings.set_max_context(chat.api, raw),
+    # the model in use's own settings (`backend.app.models`)
+    "/set think": lambda chat, raw: api_models.set_think(chat.api, raw),
+    "/set parameter": lambda chat, raw: api_models.set_parameter(chat.api, raw),
+    # a support request (`backend.app.integrations`): the whole line, an
+    # address to answer at included
+    "/support": lambda chat, raw: chat.api.integrations.support_requests.create(body=raw).notice,
+    # the reports (`backend.app.reports`)
+    "/usage": lambda chat, raw: api_reports.usage(chat.api, chat.story_id, raw).text(),
+    "/info": lambda chat, raw: chat.api.info.get(story_id=chat.story_id).text(),
+    "/balance": lambda chat, raw: chat.api.balance.get().text(),
+    # the stories (`backend.story.stories`)
+    "/stories": stories.stories,
+    "/new": stories.new,
+    "/fork": stories.fork,
+    "/title": lambda chat, raw: api_stories.title(chat.api, chat.story_id, raw, make=chat.writing),
+    "/system": stories.system,
+    "/regen": stories.regen,
+    "/undo": stories.undo,
+    # a story's settings (`backend.story.settings`)
+    "/set mode": settings.set_mode,
+    # its messages (`backend.story.messages`)
+    "/last": messages.last,
+    # its lore (`backend.story.lore`)
+    "/lore": lore.lore,
+    "/cast": lore.cast,
+    "/extract": lore.extract,
+    "/merge": lambda chat, raw: api_lore.merge(chat.api, chat.played(), raw),
+    # a character card brought in (`backend.story.cards`)
+    "/card": cards.card,
+    # its next request (`backend.story.context`)
+    "/context": context.context,
+    # the story in and out as a document (`backend.story.transfer`)
+    "/import": transfer.import_,
+    "/export": transfer.export,
+}

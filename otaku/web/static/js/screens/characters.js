@@ -53,7 +53,7 @@ const _FOLD_KEY = "otaku-characters-unlinked";
    — which a tile's picture is chosen for. */
 const _TILE_WIDTHS = { small: 112, mid: 150, large: 220 };
 /* A thumbnail's long edge, as the HTTP spec promises it (`getThumbnail`;
-   `backend.domain.app.pictures.THUMB_EDGE`). */
+   `backend.app.pictures.services.THUMB_EDGE`). */
 const _THUMB_EDGE = 512;
 /* The drag between the unlinked column and the cards: a story character,
    by its story and its id. */

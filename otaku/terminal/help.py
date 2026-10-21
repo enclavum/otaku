@@ -18,7 +18,7 @@ import textwrap
 from collections.abc import Mapping
 
 from otaku.terminal import commands
-from otaku.terminal.api.story import language as api_language
+from otaku.terminal.api import language as api_language
 from otaku.terminal.tty.cursor import terminal_width
 
 # /help spells a few rows shorter than the table does: its command
