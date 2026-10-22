@@ -4,7 +4,7 @@ Not the terminal frontend — that is `terminal`, a whole medium of its
 own. This is the little that both frontends print into the shell that
 started them, and neither may own: the banner each frontend opens with
 (`banner`) — the mark and three lines for `otaku`, the address for
-`otaku web` — the live tail of requests under it (`ticker`), which the web frontend keeps
+`otaku serve` — the live tail of requests under it (`ticker`), which the web frontend keeps
 while a browser has the app, and the notification ring (`sound`),
 which a landed reply plays into the same shell whichever frontend the
 reply landed in.

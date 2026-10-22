@@ -2,6 +2,15 @@
 
 See also the tentative roadmap: [ROADMAP.md](https://github.com/enclavum/otaku/blob/main/ROADMAP.md)
 
+## [0.9.0] - ...
+
+Renames:
+
+- The `otaku web` command is renamed to `otaku serve`, with the former command staying as an
+  alias.
+- The `/web` command is replaced with `/set serve on|off`, and the web interface can now run
+  alongside the terminal instead of blocking it.
+
 ## [0.8.0] - 2026-10-17
 
 Characters library (in the web interface only for now; the terminal will follow in the next

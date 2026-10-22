@@ -11,17 +11,18 @@ page and its modules beside it.
 
 `cli` opens the app and hands it over, and `web.run` is this
 frontend's whole life over it — as `terminal.run.run` is the terminal's;
-`web.run_shared` serves an app the terminal already has open (`/web`). What this package reads
+`web.run_beside` serves an app the terminal holds, beside its chat
+(`/set serve`). What this package reads
 of the state dir is its own medium and nothing else: where to listen
 (the `[web]` slice of config.toml, `web.settings`) and the reader's own
 `web/` directory.
 
-Five parts, one job each: `run` is the life (the banner, the tail,
+Four parts, one job each: `run` is the life (the banner, the tail,
 Ctrl+C, and the wiring of everything below); `server` is HTTP; `api` is
-what the page may ask, as tables; `thread` is the one that owns the
-app; `cert` is the TLS pair it serves under.
+what the page may ask, as tables; `cert` is the TLS pair it serves
+under. The thread that owns the app is the backend's (`App.run`).
 """
 
-from otaku.web.run import ServeError, run, run_shared, serve, settings
+from otaku.web.run import ServeError, Server, run, run_beside, settings
 
-__all__ = ["ServeError", "run", "run_shared", "serve", "settings"]
+__all__ = ["ServeError", "Server", "run", "run_beside", "settings"]

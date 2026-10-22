@@ -141,10 +141,12 @@ def make_bindings(
     # entry.
     @kb.add("up")
     def _up(event: Any) -> None:
+        carry.recalled = carry.recalled or not event.current_buffer.complete_state
         _menu_or_history_up(event.current_buffer, event.arg)
 
     @kb.add("down")
     def _down(event: Any) -> None:
+        carry.recalled = carry.recalled or not event.current_buffer.complete_state
         _menu_or_history_down(event.current_buffer, event.arg)
 
     # PROTOTYPE: in the canvas Up/Down walk the history across both places
@@ -171,6 +173,7 @@ def make_bindings(
             text = entries[at]
             command = text.startswith("/")
         if command == carry.command_paragraph:
+            carry.recalled = at != -1
             buffer.document = Document(text, len(text))
             return
         # the other place: the prompt hands over, as `/` and Esc do, and

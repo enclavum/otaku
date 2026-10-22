@@ -1,4 +1,4 @@
-"""What may reach the terminal from the tail under `otaku web`.
+"""What may reach the terminal from the tail under `otaku serve`.
 
 The lines it draws are made from bytes off a socket — any page in any
 browser can ask a loopback server for a path of escape sequences — so

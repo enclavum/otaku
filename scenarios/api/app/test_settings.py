@@ -1,8 +1,12 @@
 """The installation's settings: /set verbose and /set notification, kept
 in the app's own state, and /set max_context, config.toml's [context]
 value edited in place, its one home — each remembered across a
-relaunch.
+relaunch; and /set serve, the page served beside the chat, its switch
+in config.toml's [web].
 """
+
+import socket
+import urllib.request
 
 from otaku.backend.app.settings.schemas import Settings
 from otaku.backend.story.messages.schemas import Done
@@ -115,6 +119,82 @@ class TestMaxContext:
         app.play("We continue.")
         assert len(app.server.requests) == before  # nothing was sent
         assert "does not fit the context limit" in capsys.readouterr().out
+
+
+class TestServe:
+    """`/set serve`: the page served beside the chat, on the address
+    config.toml's [web] names — a free port here, so no test ever reaches
+    a real otaku's — and the switch kept there (`terminal_serve`), off
+    until asked."""
+
+    def test_on_serves_the_page_and_off_stops_it(self, app: App, monkeypatch) -> None:
+        port = _free_port(monkeypatch)
+        app.play("/set serve on")
+        assert _answers(port)
+        app.play("/set serve off")
+        assert not _listening(port)
+
+    def test_the_switch_lands_in_config_toml(self, app: App, monkeypatch) -> None:
+        _free_port(monkeypatch)
+        app.play("/set serve on")
+        assert "terminal_serve = true" in app.paths.config_file.read_text()
+        app.play("/set serve off")
+        assert "terminal_serve = false" in app.paths.config_file.read_text()
+
+    def test_the_page_is_served_again_right_after_off(self, app: App, monkeypatch) -> None:
+        # the closed connections still linger on the port when it is asked
+        # for again
+        port = _free_port(monkeypatch)
+        app.play("/set serve on")
+        assert _answers(port)
+        app.play("/set serve off")
+        app.play("/set serve on")
+        assert _answers(port)
+
+    def test_a_port_already_held_serves_nothing_and_keeps_the_switch(
+        self, app: App, monkeypatch
+    ) -> None:
+        port = _free_port(monkeypatch)
+        with socket.socket() as holder:
+            holder.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            holder.bind(("127.0.0.1", port))
+            holder.listen()
+            app.play("/set serve on")
+        assert not _listening(port)  # nothing of otaku's took it
+        assert app.api.settings.terminal.get().terminal_serve is True
+
+    def test_a_config_from_before_the_switch_gets_it_at_the_launch(self, app: App) -> None:
+        config = app.paths.config_file
+        config.write_text(
+            "".join(
+                row for row in config.read_text().splitlines(True) if "terminal_serve" not in row
+            )
+        )
+        relaunched = launch(app.paths.root, app.server)
+        assert "terminal_serve = false" in config.read_text()
+        assert relaunched.api.settings.terminal.get().terminal_serve is False
+        relaunched.close()
+
+
+def _free_port(monkeypatch) -> int:
+    """A port nothing listens on, made the one the page is served at —
+    `OTAKU_WEB_PORT`, the override a development server moves by."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = int(probe.getsockname()[1])
+    monkeypatch.setenv("OTAKU_WEB_PORT", str(port))
+    return port
+
+
+def _answers(port: int) -> bool:
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/app/status", timeout=5) as reply:
+        return bool(reply.status == 200)
+
+
+def _listening(port: int) -> bool:
+    with socket.socket() as probe:
+        probe.settimeout(0.2)
+        return probe.connect_ex(("127.0.0.1", port)) == 0
 
 
 def _record_rings(monkeypatch) -> list[str]:

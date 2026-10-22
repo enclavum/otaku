@@ -127,6 +127,7 @@ class App:
         run.submit(self.chat, line)
 
     def close(self) -> None:
+        self.chat.stop_serving()
         self.store.close()
         self.backend.close()
 
@@ -135,10 +136,7 @@ def read_store(root: Path) -> Store:
     """A second connection over the same database, for assertions —
     unlocked the way the launch unlocks (the scripted `command` KEK
     provider works headless), so no scenario reaches into the app's
-    package-private store. WAL makes the concurrent read safe.
-
-    A connection answers only the thread that opened it, so a scenario
-    that serves on another thread opens its own here."""
+    package-private store. WAL makes the concurrent read safe."""
     paths = Paths.resolve(root)
     cfg = config_file.load(paths.config_file)
     cipher = encryption.unlock(

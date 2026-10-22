@@ -634,28 +634,29 @@ class TestPromptCache:
 
 
 class TestCancelAndKeep:
-    def test_a_ctrl_c_in_the_wait_keeps_the_partial_with_smoothing_on(
+    def test_a_cancel_in_the_wait_keeps_the_partial_with_smoothing_on(
         self, server, tmp_path
     ) -> None:
         # With smoothing on, the wait is the wrapper's own tick inside the
-        # play's frame, and that is where a Ctrl+C lands: what streamed
-        # must be recorded all the same, the way a closed stream's is.
+        # play's frame, and that is where a cancel is seen — a Ctrl+C
+        # closes the stream, and the app's thread, asked through its idle
+        # hook, answers that nobody reads it any more: what streamed must
+        # be recorded all the same.
         server.script = lambda body: "The light went out, and something stirred in the dark. " * 8
         server.chunk_size = 6
         server.chunk_delay = 0.03
         set_config(tmp_path / "state", smooth_streaming=True)
         app = launch(tmp_path / "state", server)
         try:
-            ticks = 0
-
-            def interrupt() -> None:
-                nonlocal ticks
-                ticks += 1
-                if ticks == 40:  # some 0.8 s into the reply: words have streamed
-                    raise KeyboardInterrupt
-
-            app.backend.set_on_idle(interrupt)
-            app.play("I enter the hall.")
+            events = app.api.stories.messages.create(
+                app.ensure_story(), line="I enter the hall.", expected_head=app.head()
+            )
+            pieces = 0
+            for event in events:
+                pieces += isinstance(event, AssistantText)
+                if pieces == 10:  # words have streamed
+                    break
+            events.close()  # type: ignore[attr-defined]
             reply = app.store.stories.get_messages(app.story_id)[-1]
             assert reply.role == "assistant"
             assert 0 < len(reply.body) < len(server.script({}))

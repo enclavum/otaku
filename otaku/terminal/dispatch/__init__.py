@@ -6,15 +6,13 @@ door has a module of handlers, flat as the door is (`terminal.api`),
 named after it, `app` the app's own — what the terminal does with a
 command: the door's call, then what is drawn, where it lands, which
 screen opens. A command that is one call is its row's lambda, and the
-four the terminal answers itself are here, as the web's server holds
-its own paths: the /help page, the app served to a browser (/web), the
-screen cleared, the session ended. A handler takes the chat and the
-argument as typed, and answers the sentence to say — or None, where it
-said its own."""
+three the terminal answers itself are here, as the web's server holds
+its own paths: the /help page, the screen cleared, the session ended. A
+handler takes the chat and the argument as typed, and answers the
+sentence to say — or None, where it said its own."""
 
 from collections.abc import Callable
 
-from otaku import web as web_frontend
 from otaku.terminal import help as help_page
 from otaku.terminal.api import Refused
 from otaku.terminal.api import lore as api_lore
@@ -34,7 +32,6 @@ from otaku.terminal.dispatch import (
     stories,
     transfer,
 )
-from otaku.terminal.tty import error_line
 from otaku.terminal.tty.render import command_tokens
 from otaku.terminal.tty.typography import highlight_commands
 
@@ -128,31 +125,6 @@ def _help(chat: Chat, raw: str) -> None:
     chat.say(highlight_commands(help_page.text(captions), command_tokens()))
 
 
-def _web(chat: Chat, raw: str) -> None:
-    """Serve this app to a browser and stand here until the reader
-    stops it, then carry on at the prompt below. One app throughout:
-    the other frontend is handed the open one rather than opening its
-    own, and closing it stays cli's either way.
-
-    This is the one place the terminal reaches the other frontend, and
-    the arrow points only this way — a page has nowhere to send anybody
-    back to."""
-    # The other frontend prints into this terminal itself, which is
-    # printing PAST `say` — so the say protocol is announced here
-    # instead: the blank under the typed line, the stack invalidated
-    # (what it prints lands past every row the ledger was counting), and
-    # the gap before the next prompt earned. Without this the banner
-    # opens flush against `/web` and the loop prints no gap at all.
-    print(chat.ledger.said(), end="")
-    try:
-        web_frontend.run_shared(chat.app)
-    except web_frontend.ServeError as e:
-        # The address is configuration, and a reader who cannot have the
-        # browser keeps the chat: a sentence, not a crash. The
-        # reason is web's own words, under this medium's.
-        chat.say(error_line(f"The web interface could not start: {e}"))
-
-
 def _clear(chat: Chat, raw: str) -> None:
     """Wipe the screen; the story is untouched and /last brings the
     scene back. The next prompt opens at the top."""
@@ -172,7 +144,6 @@ def _bye(chat: Chat, raw: str) -> None:
 HANDLERS: dict[str, Handler] = {
     # the terminal's own
     "/help": _help,
-    "/web": _web,
     "/clear": _clear,
     "/bye": _bye,
     # the app itself (`backend.app.core`)
@@ -182,6 +153,7 @@ HANDLERS: dict[str, Handler] = {
     "/set autocorrect": lambda chat, raw: api_settings.set_autocorrect(chat.api, raw),
     "/set notification": lambda chat, raw: api_settings.set_notification(chat.api, raw),
     "/set max_context": lambda chat, raw: api_settings.set_max_context(chat.api, raw),
+    "/set serve": settings.set_serve,
     # the model in use's own settings (`backend.app.models`)
     "/set think": lambda chat, raw: api_models.set_think(chat.api, raw),
     "/set parameter": lambda chat, raw: api_models.set_parameter(chat.api, raw),

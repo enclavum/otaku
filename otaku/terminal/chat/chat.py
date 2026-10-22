@@ -11,6 +11,7 @@ import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 
+from otaku import web as web_frontend
 from otaku.terminal.api import (
     DEFAULT_LAYOUT,
     LAYOUT_SETTING,
@@ -26,12 +27,15 @@ from otaku.terminal.api import (
 from otaku.terminal.api.stories import Story
 from otaku.terminal.chat.ledger import ScreenLedger
 from otaku.terminal.tty.render import flow_offsets, turn, unit_start
-from otaku.terminal.tty.statusline import StatusLine
+from otaku.terminal.tty.statusline import SERVING_DOT, SERVING_LABEL, StatusLine
 
 # Turns echoed when a story (re)opens (the launch, a browser pick, an
 # import), so the scene is on screen before the prompt — terminal
 # presentation policy, the web re-renders the story itself.
 RESUME_TURNS = 4
+# The width the context size stands in on the status row ("999% of 128K"),
+# so what stands left of it does not move as it changes.
+_FILL_WIDTH = 12
 
 
 class Chat:
@@ -77,6 +81,9 @@ class Chat:
     # right ("85% of 128K"); "" while the window is not known.
     # Read again by the loop before every prompt.
     context_fill: str
+    # The server of the page served beside the chat (`/set serve`), while
+    # it serves.
+    server: web_frontend.Server | None
 
     def __init__(self, app: App) -> None:
         self.app = app
@@ -90,10 +97,11 @@ class Chat:
         self.replied = False
         self.status_note = ""
         self.context_fill = ""
+        self.server = None
         # One renderer for the prompt's toolbar and the pinned row, both
         # reading the same channels, so the line never twitches at the
         # streaming handoff.
-        self.status_line = StatusLine(self.api.app.status.get, lambda: self.context_fill)
+        self.status_line = StatusLine(self.api.app.status.get, self.aside, self.served_at)
         # An erase the ledger makes mid-stream takes the pinned row with it.
         self.ledger = ScreenLedger(repaint=self.status_line.refresh)
 
@@ -235,6 +243,47 @@ class Chat:
         return (
             self.story_id is not None and self.api.stories.get(self.story_id).question is not None
         )
+
+    # ---------- the page served beside it ----------
+
+    def serve(self) -> str | None:
+        """Serve the page beside the chat, the app shared with it
+        (`web.run_beside`); the sentence where it cannot be served,
+        nothing served. Serving already, nothing to do."""
+        if self.server is None:
+            try:
+                self.server = web_frontend.run_beside(self.app)
+            except web_frontend.ServeError as e:
+                # the web's own sentence, made a sentence here (it is bare
+                # for `otaku serve`'s `otaku: …` line)
+                said = str(e).rstrip(".")
+                return f"{said[:1].upper()}{said[1:]}."
+        return None
+
+    def stop_serving(self) -> None:
+        """Stop serving the page, where it is served."""
+        if self.server is not None:
+            self.server.stop()
+            self.server = None
+
+    def aside(self) -> str:
+        """The status row's right: the page served, its label a link to it
+        where the row is drawn (`served_at`), then how full the next request
+        is, at a fixed width."""
+        if self.server is None:
+            return f"{self.context_fill:>{_FILL_WIDTH}}" if self.context_fill else ""
+        mark = f"{SERVING_DOT} {SERVING_LABEL}"
+        if not self.context_fill:
+            return f"{mark}{'':{_FILL_WIDTH + 3}}"
+        # the two set apart by a vertical line in the middle of the gap, the
+        # whole a fixed width, so the mark stands still as the size changes
+        gap = max(2, _FILL_WIDTH + 2 - len(self.context_fill))
+        left = gap // 2
+        return f"{mark}{' ' * left}|{' ' * (gap - left)}{self.context_fill}"
+
+    def served_at(self) -> str:
+        """Where the page is served, the status row's link; "" for none."""
+        return self.server.address if self.server is not None else ""
 
     # ---------- what it prints ----------
 

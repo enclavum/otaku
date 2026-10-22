@@ -16,7 +16,7 @@ from otaku.backend.app.core.services import App
 from otaku.backend.app.machine.resources import MachineResource
 from otaku.backend.app.models import services as domain_models
 from otaku.backend.app.providers import services as domain_providers
-from otaku.backend.base import UNCHANGED, Changed, Resource, Unchanged
+from otaku.backend.base import UNCHANGED, Changed, Resource, Unchanged, any_thread
 from otaku.backend.errors import Invalid
 from otaku.backend.story.settings.services import StorySettingLayout
 from otaku.settings.state import ModelRef
@@ -100,6 +100,7 @@ class AppResource(Resource):
 class StatusResource(Resource):
     """/app/status — the background worker's one line."""
 
+    @any_thread
     def get(self) -> str:
         """The worker's one-line account; "" when idle. Safe from any
         thread."""

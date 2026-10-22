@@ -22,9 +22,9 @@ The map:
   rule and every store access — which imports neither of the other two.
   A resources module imports its folder's services as `domain_<folder>`.
   What serves several folders is MACHINERY, a module beside them in
-  their group (`app.paths`, `passwords`, `runs`; `story.chain`,
-  `request`, `play`, `tools`): services import it, the interface never
-  does — the launch, which composes the app, excepted.
+  their group (`app.paths`, `passwords`, `runs`, `thread`;
+  `story.chain`, `request`, `play`, `tools`): services import it, the
+  interface never does — the launch, which composes the app, excepted.
 - `backend.formats` — the story document and the foreign formats: every
   wild file otaku reads is decoded there.
 - `backend.launch` — `open_app`, the door: the composition of one state

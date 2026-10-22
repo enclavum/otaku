@@ -164,6 +164,9 @@ def open_app(root: str | Path | None = None, *, ask_secret: AskSecret | None = N
         notices += samples.seed(app)
         hint = samples.HINT if Api(app).settings.get().last_story is not None else ""
     app._launch_facts = LaunchFacts(tuple(notices), hint)
+    # Everything above ran on the caller's thread; from here every call
+    # runs on the app's own (`backend.app.thread`).
+    app._thread.start()
     return app
 
 

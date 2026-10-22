@@ -48,6 +48,10 @@ class Carry:
         self.walk_draft = ""
         self.walk_draft_command = False
         self.recall: str | None = None
+        # The line stands as the history gave it, nothing typed on it
+        # since: the menu does not open on its own there, so no rows are
+        # kept free under the line for it (`session.build_prompt`)
+        self.recalled = False
 
     def end_walk(self) -> None:
         """A line was sent, or dropped: the next walk starts from the
@@ -56,6 +60,7 @@ class Carry:
         self.walk_draft = ""
         self.walk_draft_command = False
         self.recall = None
+        self.recalled = False
 
     def take_text(self) -> str:
         text, self.text = self.text, ""

@@ -33,6 +33,7 @@ _SPELLINGS: dict[str, tuple[str, str]] = {
     "/set autocorrect": ("", ""),
     "/set notification": ("", ""),
     "/set max_context": ("", ""),
+    "/set serve": ("", ""),
 }
 
 # The keys the prompt itself answers to — no command of their own, so

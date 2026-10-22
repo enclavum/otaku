@@ -84,8 +84,18 @@ class TerminalSettingsResource(Resource):
     """/settings/terminal — the terminal frontend's slice of config.toml."""
 
     def get(self) -> TerminalSettings:
-        """Its looks."""
+        """Its looks, and whether it serves the web interface beside it."""
         return domain_settings.get_terminal_settings(self._app)
+
+    def update(self, *, terminal_serve: bool | Unchanged = UNCHANGED) -> Changed[TerminalSettings]:
+        """Whether the chat serves the web interface beside it, written to
+        config.toml; the serving itself is the terminal's. Raises
+        Unavailable where the file could not be written: nothing
+        changed."""
+        said = []
+        if not isinstance(terminal_serve, Unchanged):
+            said.append(domain_settings.set_terminal_serve(self._app, terminal_serve))
+        return Changed(self.get(), " ".join(said))
 
 
 class WebSettingsResource(Resource):

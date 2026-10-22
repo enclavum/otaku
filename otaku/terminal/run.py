@@ -50,13 +50,15 @@ from otaku.terminal.tty.render import last_turns
 def run(app: App) -> None:
     """The whole terminal life over the app, until /bye or EOF: settle
     the theme (before anything draws — the background ask reads stdin,
-    which belongs to prompt_toolkit from the first prompt on), print what
-    its launch had to say (`AppInfo.launch`: the notices, the bold hint
-    over the resumed scene), then the banner, open the model picker
+    which belongs to prompt_toolkit from the first prompt on), serve the
+    page beside the chat where the reader asked for it (`/set serve`),
+    print what its launch had to say (`AppInfo.launch`: the notices, the
+    bold hint over the resumed scene), then the banner, open the model picker
     when the app arrived model-less (nothing remembered — the launch-time
     pick is THIS loop's, not the backend's), echo the resumed scene into
     the ledger, start the worker with the repaint hook, then prompt →
-    submit. `app.close()` stays the caller's (cli's)."""
+    submit; the serving stops with the chat. `app.close()` stays the
+    caller's (cli's)."""
     api = Api(app)
     launch_facts = api.app.get().launch
     looks = api.settings.terminal.get()
@@ -72,10 +74,15 @@ def run(app: App) -> None:
         chat.land(resumed)
     # The launch's reports — created files, stale settings, keys that
     # would not open — before anything else draws, one blank line after
-    # the lot.
-    for report in launch_facts.notices:
+    # the lot; the page served beside the chat where the reader asked for
+    # it (`/set serve`), one that cannot be served said among them, the
+    # setting standing.
+    reports = list(launch_facts.notices)
+    if looks.terminal_serve and (failure := chat.serve()) is not None:
+        reports.append(failure)
+    for report in reports:
         print(report)
-    if launch_facts.notices:
+    if reports:
         print()
     # The launch-time pick, before the banner names the model: the picker
     # runs only when nothing is remembered — Esc is not a cancel, the
@@ -105,7 +112,8 @@ def run(app: App) -> None:
         story=lambda: chat.story_id,
         can_attach=lambda: chat.can_attach,
         shortcuts=SHORTCUTS,
-        aside=lambda: chat.context_fill,
+        aside=chat.aside,
+        served_at=chat.served_at,
         note=lambda: chat.status_note,
     )
 
@@ -154,7 +162,7 @@ def run(app: App) -> None:
 
     while not chat.quit:
         # The story as it stands: played on, or deleted, elsewhere since
-        # this terminal last drew it — the page while /web served it.
+        # this terminal last drew it — the page served beside it above all.
         landing.catch_up(chat)
         # How full the next request is, read again before every prompt —
         # so after a turn, a story switch, an undo, a switched model —
@@ -276,6 +284,7 @@ def run(app: App) -> None:
                 prompt_session.app.erase_when_done = False
             carry.command_paragraph = True
             # the slash typed, or the command a history walk recalled
+            carry.recalled = carry.recall is not None
             carry.text = carry.recall if carry.recall is not None else "/"
             carry.recall = None
             continue
@@ -288,6 +297,7 @@ def run(app: App) -> None:
             prompt_session.app.erase_when_done = False
             if carry.recall is not None:
                 # a history walk crossed back into the story's text
+                carry.recalled = True
                 carry.text, carry.recall = carry.recall, None
                 carry.draft = ""
             else:
@@ -364,6 +374,7 @@ def run(app: App) -> None:
         # to draw when it opens on a question's answers, so the question's
         # block runs on into them.
         answers.top_row = chat.ledger.gap(deferred=answers.posed)
+    chat.stop_serving()
 
 
 def submit(chat: Chat, line: str) -> None:
@@ -386,10 +397,11 @@ def submit(chat: Chat, line: str) -> None:
         # naming a picture leaves the line and rides the turn as bytes.
         # Whether the model can see is the backend's to refuse.
         line, files = pictures.extract_pictures(line)
+        to_drop = stream.question_to_drop(chat)
         try:
             # A first line makes the story it lands in, and one refused
             # leaves none behind (`Chat.writing`).
-            with chat.writing() as story_id:
+            with stream.waiting(), chat.writing() as story_id:
                 events = chat.api.stories.messages.create(
                     story_id, line=line, files=files, expected_head=chat.head
                 )
@@ -401,13 +413,14 @@ def submit(chat: Chat, line: str) -> None:
             return
         # in story mode the question this line answers leaves the text
         # before the stream takes the terminal
-        stream.drop_past_question(chat)
+        stream.drop_question(chat, to_drop)
         while stream.show(chat, events):
             # the take stopped for a fresh one is recorded as its stream
             # closes, unseen here: the fresh one goes from the head as it stands
             story_id = chat.ensure_story()
             standing = chat.api.stories.get(story_id).head
-            events = chat.api.stories.regens.create(story_id, expected_head=standing)
+            with stream.waiting():
+                events = chat.api.stories.regens.create(story_id, expected_head=standing)
         chat.mark_drawn()
     except KeyboardInterrupt:
         raise  # ^C is the user speaking, not a crash — the loop handles it

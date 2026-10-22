@@ -45,6 +45,7 @@ from otaku.terminal.tty import (
     SCROLL_ALL,
     UP_ONE,
 )
+from otaku.terminal.tty.theme import theme
 
 
 def _terminal() -> TextIO:
@@ -57,6 +58,12 @@ def _terminal() -> TextIO:
 
 
 LABEL = " background task: "
+# The mark of the page served beside the chat (`Chat.aside`): the dot,
+# painted in the theme's error color where the line is drawn, and the
+# label after it, a link to the page where the terminal makes links.
+SERVING_DOT = "●"
+SERVING_LABEL = "web server on ↗"
+
 # How long a note stands at least once shown: a call that ends at once —
 # a tool otaku runs in no time — still reads.
 _NOTE_SECONDS = 1.0
@@ -82,6 +89,13 @@ def render(status: str, aside: str = "", width: int = 0, note: str = "") -> str:
     return left + " " * (space - len(left)) + aside
 
 
+def link_ends(url: str) -> tuple[str, str]:
+    """The two halves of a terminal link (OSC 8) to `url`, written around
+    its text: a terminal that makes links opens `url` from it, one that
+    does not shows the text alone. They take no width."""
+    return f"\x1b]8;;{url}\x1b\\", "\x1b]8;;\x1b\\"
+
+
 class StatusLine:
     """Reserves the bottom terminal row and paints `read()` into it, with
     `aside()` against its right edge. Long-lived: the REPL builds one per
@@ -89,9 +103,15 @@ class StatusLine:
     `refresh()` (safe from the worker thread) is a no-op whenever the row
     isn't held."""
 
-    def __init__(self, read: Callable[[], str], aside: Callable[[], str]) -> None:
+    def __init__(
+        self,
+        read: Callable[[], str],
+        aside: Callable[[], str],
+        served_at: Callable[[], str] = lambda: "",
+    ) -> None:
         self._read = read
         self._aside = aside
+        self._served_at = served_at  # where the page is served, the label's link; "" for none
         self._note = ""  # what the reply streaming is doing, while it streams
         self._noted_at = 0.0  # when the note standing was shown
         self._clearing: threading.Timer | None = None  # a clear waiting out the minimum
@@ -202,6 +222,10 @@ class StatusLine:
                     f"{SAVE_CURSOR}{SCROLL_ABOVE.format(self._rows - 1)}{RESTORE_CURSOR}"
                 )
             body = render(self._read(), self._aside(), size.columns, self._note)
+            body = body.replace(SERVING_DOT, f"{theme().error.fg}{SERVING_DOT}{RESET}{DIM}")
+            if url := self._served_at():
+                opening, closing = link_ends(url)
+                body = body.replace(SERVING_LABEL, f"{opening}{SERVING_LABEL}{closing}")
             _terminal().write(
                 f"{SAVE_CURSOR}{GOTO_ROW.format(self._rows)}{ERASE_LINE}{DIM}{body}{RESET}{RESTORE_CURSOR}"
             )

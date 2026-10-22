@@ -246,6 +246,14 @@ class TestModeMenu:
         assert _offered("/set mode story ") == []
 
 
+class TestSwitchMenu:
+    """The /set switches offer the two words a switch takes."""
+
+    def test_every_switch_offers_on_and_off(self) -> None:
+        for switch in ("verbose", "autocorrect", "notification", "serve"):
+            assert _offered(f"/set {switch} ") == ["on", "off"], switch
+
+
 class TestCastSuggestions:
     """The commands whose argument is a character offer the cast, shaped
     per command: /me inserts `Name:` and the prompt follows, /you inserts

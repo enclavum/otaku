@@ -102,7 +102,7 @@ class Paths:
         frontend answers with an empty stylesheet."""
         return self.root / "web"
 
-    # cert/ — what `otaku web` serves under when https is on
+    # cert/ — what `otaku serve` serves under when https is on
 
     @property
     def cert_dir(self) -> Path:

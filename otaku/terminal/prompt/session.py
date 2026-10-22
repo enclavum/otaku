@@ -93,6 +93,7 @@ def build_prompt(
     shortcuts: Mapping[str, tuple[str, str]],
     aside: Callable[[], str],
     note: Callable[[], str] = lambda: "",
+    served_at: Callable[[], str] = lambda: "",
 ) -> tuple[PromptSession[str], AnswerMenu]:
     """The assembled prompt session and the answer menu it draws above
     its line: history, menu, style, the activity toolbar reading `note()`
@@ -133,12 +134,20 @@ def build_prompt(
         completer=completer,
         lexer=_CommandLexer(),
         key_bindings=make_bindings(carry, menu_line, shortcuts, answers, api.history.list),
-        complete_while_typing=menu_line,
+        # The menu's rows are kept free under a command line being typed,
+        # never under one the history recalled, which opens no menu.
+        complete_while_typing=menu_line & ~Condition(lambda: carry.recalled),
         enable_history_search=False,
         style=_prompt_style(),
         cursor=Caret(carry),
-        bottom_toolbar=_activity_toolbar(api, aside, note),
+        bottom_toolbar=_activity_toolbar(api, aside, note, served_at),
     )
+
+    def typed(_buffer: Buffer) -> None:
+        """A character typed on a recalled line makes it the reader's."""
+        carry.recalled = False
+
+    prompt_session.default_buffer.on_text_insert += typed
     # A prompt standing in the story's text (`Carry.in_text`) ends leaving
     # what it drew, the caret back where its drawing began: the ledger
     # writes the text's last line over itself and erases what follows in
@@ -261,7 +270,7 @@ def _prompt_style() -> Style:
 
 
 def _activity_toolbar(
-    api: Api, aside: Callable[[], str], note: Callable[[], str]
+    api: Api, aside: Callable[[], str], note: Callable[[], str], served_at: Callable[[], str]
 ) -> Callable[[], FormattedText]:
     """The prompt's activity line: `note()` — the last reply's stats in
     story mode — and what the background worker is doing, either blank,
@@ -274,9 +283,32 @@ def _activity_toolbar(
     def render() -> FormattedText:
         width = get_app().output.get_size().columns
         line = statusline.render(api.app.status.get(), aside(), width, note())
-        return FormattedText([("class:bottom-toolbar.text", line)])
+        return FormattedText(_served_parts(line, served_at()))
 
     return render
+
+
+def _served_parts(line: str, url: str) -> StyleAndTextTuples:
+    """The activity line as the toolbar draws it: the served mark's dot in
+    the theme's error color, and its label a link to `url`, the link's ends
+    taking no width (prompt_toolkit has no links of its own)."""
+    text = "class:bottom-toolbar.text"
+    before, dot, rest = line.partition(statusline.SERVING_DOT)
+    if not dot:
+        return [(text, line)]
+    parts: StyleAndTextTuples = [(text, before), (f"{text} fg:{theme().error.style}", dot)]
+    middle, label, after = rest.partition(statusline.SERVING_LABEL)
+    if not (label and url):
+        return [*parts, (text, rest)]
+    opening, closing = statusline.link_ends(url)
+    return [
+        *parts,
+        (text, middle),
+        ("[ZeroWidthEscape]", opening),
+        (text, label),
+        ("[ZeroWidthEscape]", closing),
+        (text, after),
+    ]
 
 
 # ---------- the completion menu ----------

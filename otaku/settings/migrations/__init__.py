@@ -102,7 +102,7 @@ _CONFIG_MIGRATIONS: list[Migration] = [
             "network — set https and a password first",
         )
         + "\n"
-        + row("port = 9600", "the port `otaku web` listens on"),
+        + row("port = 9600", "the port `otaku serve` listens on"),
         after="terminal",
     ),
     # 0.4.0 — the background stops being guessed in silence. The ask
@@ -173,6 +173,17 @@ _CONFIG_MIGRATIONS: list[Migration] = [
             "replaced by its hash at the next launch",
         ),
         after="https",
+    ),
+    # 0.9.0 — the chat learns to serve the web interface beside it, off
+    # until asked (`/set serve`).
+    ensure_key(
+        "web",
+        "terminal_serve",
+        row(
+            "terminal_serve = false",
+            "the terminal UI also serves the web interface while it runs (/set serve)",
+        ),
+        after="password",
     ),
 ]
 

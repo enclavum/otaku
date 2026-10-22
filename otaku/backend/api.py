@@ -18,9 +18,10 @@ language as a client applies it to text not stored yet. A resource is
 thin: its folder's service called (`services`), then its schema built —
 never the store, never an `app._` member.
 
-Re-exported here: `Api`, a write's answer, the refusals, the base
-classes, and the vocabulary several resources share. A resource's own
-schemas are imported from its folder's `schemas`.
+Re-exported here: `Api`, a write's answer, the refusals and
+`StoppingError`, the base classes, and the vocabulary several resources
+share. A resource's own schemas are imported from its folder's
+`schemas`.
 """
 
 from otaku.backend.app.core.resources import AppResource
@@ -42,6 +43,7 @@ from otaku.backend.errors import (
     Invalid,
     NotFound,
     Refused,
+    StoppingError,
     Unavailable,
 )
 from otaku.backend.story.language.resources import LanguageResource
@@ -116,6 +118,7 @@ __all__ = [
     "Report",
     "Resource",
     "Schema",
+    "StoppingError",
     "StoryMode",
     "Unavailable",
     "Unchanged",

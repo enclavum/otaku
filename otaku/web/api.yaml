@@ -103,12 +103,12 @@ info:
     name: otaku
     url: https://otaku.sh
   description: |
-    The API `otaku web` serves the app over, on loopback by default. One
+    The API `otaku serve` serves the app over, on loopback by default. One
     intended client — the packaged page — so it is small, unversioned,
     and free to change with the app.
 
-    **Lanes.** One thread owns the app — a sqlite connection answers only
-    the thread that opened it — and the METHOD is the lane. A `GET` only
+    **Lanes.** One thread owns the app — the backend's own, every request
+    handed to it — and the METHOD is the lane. A `GET` only
     reads, so it is answered in the gaps of a streaming reply: between
     two frames, and on a tick while the first token is still awaited,
     which is why a screen opens while the model talks. Every other method

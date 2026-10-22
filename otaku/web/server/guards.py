@@ -63,8 +63,8 @@ class Guards(Wire):
         closes its LISTENING socket, but a page's pooled keep-alive
         connections outlive that — its heartbeat would go on being
         answered 200 by handler threads of a server that is gone, and
-        the page would never learn it (sharpest after `/web` hands the
-        app back to the chat, where the process lives on). Answered
+        the page would never learn it (sharpest after `/set serve off`,
+        where the process lives on with the chat). Answered
         503 with the connection closed, so the page's next attempt has
         to reconnect — which is what fails, and what tells it."""
         if not self.server.stopping.is_set():

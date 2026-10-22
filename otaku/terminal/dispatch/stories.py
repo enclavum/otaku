@@ -90,15 +90,16 @@ def regen(chat: Chat, raw: str) -> None:
         if chat.story_id is None:
             raise Conflict(NOTHING_TO_REGENERATE)
         story_id = chat.story_id
-        events = chat.api.stories.regens.create(story_id, expected_head=chat.head)
+        with stream.waiting():
+            events = chat.api.stories.regens.create(story_id, expected_head=chat.head)
     except Refused as e:
         chat.ledger.invalidate()
         chat.say(str(e))
         return
-    # The prompt the take re-runs, read BEFORE the stream starts (the
-    # generator drops the standing reply on its first pull): the last
-    # user row once the trailing reply goes — absent when the story is a
-    # promptless reply, which regenerates on its own.
+    # The prompt the take re-runs: the last user row once the trailing
+    # reply goes — read while the fresh take may already have dropped it,
+    # so either chain gives it. Absent when the story is a promptless
+    # reply, which regenerates on its own.
     msgs = chat.messages()
     if msgs and msgs[-1].role == "assistant":
         msgs.pop()
@@ -130,7 +131,8 @@ def regen(chat: Chat, raw: str) -> None:
         # the take stopped for a fresh one is recorded as its stream
         # closes, unseen here: the fresh one goes from the head as it stands
         standing = chat.api.stories.get(story_id).head
-        events = chat.api.stories.regens.create(story_id, expected_head=standing)
+        with stream.waiting():
+            events = chat.api.stories.regens.create(story_id, expected_head=standing)
     chat.mark_drawn()
 
 
@@ -166,7 +168,7 @@ def _pose_again(chat: Chat, *, drawn: bool) -> None:
     """An undo that leaves the story on a question offers its answers
     again (`Chat.replied`): the story is back where it was asked. In
     story mode an in-place undo draws the question back too — answering
-    took it out of the text (`stream.drop_past_question`); `drawn` says
+    took it out of the text (`stream.drop_question`); `drawn` says
     the screen shows it already (a re-echo)."""
     question = chat.story.question if chat.story is not None else None
     if question is None:

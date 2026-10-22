@@ -22,7 +22,7 @@ from __future__ import annotations
 from collections.abc import Iterator, Sequence
 
 from otaku.backend.app.pictures.services import RawFile
-from otaku.backend.base import Changed, Resource
+from otaku.backend.base import Changed, Resource, streams
 from otaku.backend.story.messages import services as domain_messages
 from otaku.backend.story.messages.schemas import Message, PlayEvent, _as_message, as_events
 from otaku.store import schema
@@ -55,6 +55,7 @@ class MessagesResource(Resource):
         said = domain_messages.update_message(self._app, story_id, message_id, body=body)
         return Changed(self.get(story_id, message_id), said)
 
+    @streams
     def create(
         self,
         story_id: int,

@@ -11,17 +11,18 @@ The boundary is the DOMAIN: its modules use the underscore names, and
 nothing above it does but the launch that composes the app (the
 architecture test holds it: no `app._` outside the services and their machinery).
 
-Concurrency: the backend is single-threaded by contract — operations
-run one at a time on the caller's one app thread (the web runs every
-call on a single executor). The exceptions are the channels, safe from
-any thread: `note_typing`, `note_submission`, `api.app.status.get` — and
-a `WorkerRun`'s `wait`/`poll`/`cancel`, which touch only the run's own
-event. Frontends inherit this rule from here.
+Concurrency: from the end of the launch the app has a thread of its own
+(`backend.app.thread`), and every verb of the interface runs on it, one
+at a time, whichever thread calls — `run` makes several calls one unit,
+`stream` hands a reply's events across. The exceptions run on their
+caller's thread: the channels below, the verbs marked `any_thread`
+(`backend.base`), and a `WorkerRun`'s `wait`/`poll`/`cancel`, which touch
+only the run's own event.
 """
 
 import contextlib
 import threading
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Iterator, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Self, TypeVar, cast
@@ -32,6 +33,7 @@ from otaku.backend.app.models import services as models
 from otaku.backend.app.models.services import SavedModelSettings
 from otaku.backend.app.paths import Paths
 from otaku.backend.app.runs import WorkerRun
+from otaku.backend.app.thread import AppThread
 from otaku.backend.errors import Refused, Unavailable
 from otaku.formatting import pretty_path
 from otaku.integrations import Integrations
@@ -53,6 +55,7 @@ from otaku.settings.state import ModelRef, StateConfig
 from otaku.store import Store
 
 T = TypeVar("T")
+E = TypeVar("E")
 
 
 class App:
@@ -67,6 +70,8 @@ class App:
     _providers: Registry
     _integrations: Integrations  # as bound
     _worker: Worker
+    # The app's own thread, and the queue every call goes through.
+    _thread: AppThread
     # What its launch had to say — set by `open_app` once it is said.
     _launch_facts: "LaunchFacts"
     # The forced extraction passes asked for, the newest per story.
@@ -76,9 +81,9 @@ class App:
     # on the first search, reset by every chain write (`backend.story.chain`).
     _file_cache: dict[Path, tuple[tuple[int, int, int] | None, Any]]
     _search_index: dict[int, str] | None
-    # What to do with this thread while a reply is waited on — a frontend
-    # that runs its own work on it attaches one (`set_on_idle`).
-    _on_idle: Callable[[], bool | None] | None
+    # What a wait on the model does with the app's thread: the reads
+    # queued answered, and False once the caller gave up (`AppThread.idle`).
+    _on_idle: Callable[[], bool]
     _closed: bool
 
     @classmethod
@@ -103,20 +108,23 @@ class App:
         app._providers = providers
         app._integrations = integrations
         app._worker = worker
+        app._thread = AppThread()
         app._launch_facts = LaunchFacts()
         app._extraction_runs = {}
         app._file_cache = {paths.config_file: (_file_key(paths.config_file), config)}
         app._search_index = None
-        app._on_idle = None
+        app._on_idle = app._thread.idle
         app._closed = False
         return app
 
     def close(self) -> None:
-        """Shut the worker down (non-blocking) and close the store.
-        Idempotent."""
+        """Stop the app's thread — the job in hand given up on and waited
+        out, every call still queued answered StoppingError — shut the
+        worker down (non-blocking) and close the store. Idempotent."""
         if self._closed:
             return
         self._closed = True
+        self._thread.close()
         self._worker.shutdown()
         self._store.close()
 
@@ -127,9 +135,8 @@ class App:
         (`open_app` builds it unstarted so no status line races the first
         draw) — `on_status` repainting where the worker's line shows
         (`api.app.get_status`), thread-safe on the caller's side. A second
-        call is a frontend attaching to a worker already running (`/web`
-        from the terminal): it starts nothing, and keeps the repaint hook
-        it was given before."""
+        call starts nothing, and keeps the repaint hook it was given
+        before."""
         if on_status is not None:
             self._worker.on_status = on_status
         self._worker.start()
@@ -153,25 +160,19 @@ class App:
         except Exception:
             return ""
 
-    def set_on_idle(
-        self, tick: Callable[[], bool | None] | None
-    ) -> Callable[[], bool | None] | None:
-        """What to do with this thread while a reply is being waited on.
-        Called on the app's OWN thread, many times a second, from
-        the moment a request goes out until the last token — a frontend
-        that shares that thread (the web serves its reads on it) uses
-        this to stay answerable while the model talks. It may answer
-        False to say nobody reads the reply any more (a page that hung
-        up): the reply ends at once, its request cut and what arrived
-        kept. The terminal needs no answer, its Ctrl+C lands in the wait
-        itself. Whatever the hook raises is swallowed: it may not break
-        a reply.
+    def run(self, work: Callable[[], T], *, reading: bool = False) -> T:
+        """`work` as ONE unit on the app's thread, nothing else running
+        beside it — several calls that must see one state — the caller
+        waiting for its answer or what it raised. `reading` promises it
+        only reads, so it may run between a reply's events. Any thread;
+        where it is on the app's own."""
+        return self._thread.run(work, reading=reading)
 
-        Returns the hook it replaces, so a frontend borrowing the
-        app for a while (`/web`) can put the owner's back."""
-        previous = self._on_idle
-        self._on_idle = tick
-        return previous
+    def stream(self, start: Callable[[], Iterator[E]]) -> Iterator[E]:
+        """A reply on the app's thread, its events handed to the caller
+        as they come: `start` refuses before the first, and closing the
+        answer cancels the reply, what arrived kept. Any thread."""
+        return self._thread.stream(start)
 
     # ---------- primitives (backend package internal): the settings files ----------
 

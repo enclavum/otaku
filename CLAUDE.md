@@ -126,8 +126,9 @@ export. A check before a write is the write asked to validate only
 `?validate_only=true`).
 
 A frontend touches the `App` for its life and its channels alone
-(`start_worker`, `note_typing`, `note_submission`, `record_crash`,
-`set_on_idle`) and asks everything else through the facade.
+(`start_worker`, `note_typing`, `note_submission`, `record_crash`, and
+`run` for several calls as one unit on its thread) and asks everything
+else through the facade.
 
 ### Names
 

@@ -12,7 +12,7 @@ from otaku.backend.app.models.schemas import as_model
 from otaku.backend.app.models.services import EFFORT_LEVELS, PARAMETERS
 from otaku.backend.app.providers import services as domain_providers
 from otaku.backend.app.providers.schemas import ListedProvider, Provider, ProviderListing
-from otaku.backend.base import UNCHANGED, Changed, Resource, Unchanged
+from otaku.backend.base import UNCHANGED, Changed, Resource, Unchanged, any_thread
 from otaku.providers import ALL_CLIENTS, Locality
 
 
@@ -24,6 +24,7 @@ class ProvidersResource(Resource):
         super().__init__(app)
         self.models = ModelsResource(app)
 
+    @any_thread
     def list(self, *, scope: str = "", probe: bool = True) -> ProviderListing:
         """Every provider in the panel's order, those in `scope` asked for
         their models — "" all of them, "local" all but the hosted

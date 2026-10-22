@@ -14,7 +14,7 @@ from collections.abc import Iterator
 
 from otaku.backend.app.core.services import App
 from otaku.backend.app.models import services as domain_models
-from otaku.backend.base import UNCHANGED, Changed, Resource, Unchanged
+from otaku.backend.base import UNCHANGED, Changed, Resource, Unchanged, streams
 from otaku.backend.errors import Invalid
 from otaku.backend.story.cards.resources import StoryCardsResource
 from otaku.backend.story.context.resources import ContextResource
@@ -170,6 +170,7 @@ class ForksResource(Resource):
 class RegensResource(Resource):
     """/stories/{story}/regens — a fresh take on the last prompt."""
 
+    @streams
     def create(self, story_id: int, *, expected_head: int | None) -> Iterator[PlayEvent]:
         """Re-run a story's last prompt: the standing reply becomes a
         sibling and the fresh take streams (the reply's pieces and its

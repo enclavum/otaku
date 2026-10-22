@@ -1,5 +1,5 @@
 """The process entry: argv routing and nothing else. Bare `otaku` opens
-the terminal over the app and `otaku web` opens the page over
+the terminal over the app and `otaku serve` opens the page over
 it — each frontend's own `run` is its whole life, and this file only
 opens the app for it and answers for what escapes. `otaku update`
 self-updates (`update.py` is its machinery); `otaku logs …` pages the
@@ -81,7 +81,7 @@ def main(ctx: click.Context) -> None:
     type=click.IntRange(1, 65535),
     help="Override port from settings.",
 )
-def web(host: str | None, port: int | None) -> None:
+def serve(host: str | None, port: int | None) -> None:
     """Serve otaku's web interface until interrupted, address and port
     are configured in ~/.otaku/configs/config.toml."""
     ctx = click.get_current_context()
@@ -114,6 +114,13 @@ def web(host: str | None, port: int | None) -> None:
         # shell's job stay — over the same command line, and the app
         # closed above leaves the database clean for the next.
         os.execv(sys.executable, [sys.executable, "-m", "otaku", *sys.argv[1:]])
+
+
+# The command's name before 0.9.0, kept so a script or a habit still works;
+# hidden from --help.
+main.add_command(
+    click.Command("web", callback=serve.callback, params=serve.params, help=serve.help, hidden=True)
+)
 
 
 def _crashed(root: Path | None, e: Exception) -> None:

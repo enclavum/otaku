@@ -19,6 +19,7 @@ from pathlib import Path
 from otaku.backend.app import passwords
 from otaku.backend.app.core.services import App
 from otaku.backend.errors import Conflict, Invalid, Unavailable
+from otaku.formatting import toml_scalar
 from otaku.settings import row
 from otaku.settings.config import TerminalSettings, WebSettings
 from otaku.settings.migrations import surgery
@@ -133,6 +134,27 @@ def set_context_limit(app: App, tokens: int) -> str:
         raise Unavailable("Not saved — config.toml could not be written.")
     # fmt: on
     return f"Max context: {context_limit_text(tokens)}."
+
+
+def set_terminal_serve(app: App, on: bool) -> str:
+    """Whether the chat serves the web interface beside it — written into
+    config.toml's [web], surgically, the pre-edit file backed up; the
+    serving itself is the frontend's. Raises Unavailable where the file
+    could not be written: nothing changed."""
+    # fmt: off
+    if on != app._config().web_terminal_serve and not surgery.update_config(
+        app._paths.config_file,
+        app._paths.config_backups_dir,
+        [
+            surgery.set_key("web", "terminal_serve", row(
+                f"terminal_serve = {toml_scalar(on)}",
+                "the terminal UI also serves the web interface while it runs (/set serve)",
+            ))
+        ],
+    ):
+        raise Unavailable("Not saved — config.toml could not be written.")
+    # fmt: on
+    return f"Serve: {_word(on)}."
 
 
 def context_limit_text(tokens: int) -> str:

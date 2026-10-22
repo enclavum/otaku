@@ -5,6 +5,7 @@ managed engine's models.
 """
 
 import contextlib
+import threading
 import time
 import tomllib
 
@@ -713,24 +714,23 @@ class TestManagedPicker:
         finally:
             app.close()
 
-    def test_a_turns_load_ticks_the_idle_hook(self, tmp_path) -> None:
-        # The hook the session was handed — the web's one thread
-        # answering its reads — is ticked through a cold model's load,
-        # as through the reply after it.
+    def test_a_read_is_answered_while_a_turn_loads_a_cold_model(self, tmp_path) -> None:
+        # The app's one thread spends a cold model's load answering the
+        # reads queued meanwhile, as it does the reply after it: a screen
+        # opened mid-load opens at once, not when the model is up.
         app, server = self.launch_managed(tmp_path)
-        server.load_delay = 0.4
-        ticks = 0
-
-        def tick() -> None:
-            nonlocal ticks
-            ticks += 1
-
-        app.backend.set_on_idle(tick)
+        server.load_delay = 1.0
+        story = app.ensure_story()
+        playing = threading.Thread(target=app.play, args=("I enter the hall.",))
         try:
-            app.play("I enter the hall.")
+            playing.start()
+            time.sleep(0.3)  # into the load
+            app.api.stories.get(story)
+            assert playing.is_alive()  # answered while the turn still loads
+            playing.join()
             assert "/api/generate" in server.posts
-            assert ticks > 0
         finally:
+            playing.join()
             app.close()
 
     def test_l_loads_the_model_after_a_confirm(self, tmp_path) -> None:

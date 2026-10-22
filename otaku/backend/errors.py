@@ -1,6 +1,7 @@
 """The backend's one refusal channel: `Refused`, and the kinds a caller
 tells apart — each a `Refused`, so catching the base still catches all —
-with the sentences more than one door refuses with, each spelled once."""
+with the sentences more than one door refuses with, each spelled once;
+and `StoppingError`, the answer of a call the closing app will not run."""
 
 # What every model-facing door says while no model is selected, and
 # every story-facing one while nothing has been played — each spelled
@@ -50,3 +51,9 @@ class HeadMoved(Conflict):
     def __init__(self, head: int | None) -> None:
         super().__init__("The story moved on since you last saw it — nothing was changed.")
         self.head = head
+
+
+class StoppingError(Exception):
+    """The app is closing: the call will not be run. Neither a refusal
+    nor a crash — the one answer a call can get that nothing should be
+    recorded for."""

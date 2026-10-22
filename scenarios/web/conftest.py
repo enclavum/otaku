@@ -5,25 +5,21 @@ against `web.serve` over an app opened for it — and, as the page does,
 the story it plays held on its side (`Page.story`), made by its first
 line, since the server holds none.
 
-The app is opened ON the serving thread, because that is where `otaku
-web` opens it — a sqlite connection answers only its own thread, and the
-whole of `web.thread` exists to keep every touch of the app there. So the
-test thread never holds the app: it holds `page`, and it reads the store
-through its own connection (`harness.read_store`), the way every other
-scenario asserts.
+The app is opened as `otaku serve` opens it and served beside the test
+(`web.run_beside`), every call running on the app's own thread
+(`backend.app.thread`). The test holds `page`, and reads the store
+through a connection of its own (`harness.read_store`), the way every
+other scenario asserts.
 """
 
 import contextlib
 import json
-import queue
 import socket
 import ssl
-import threading
 import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Iterator
-from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -32,11 +28,9 @@ import pytest
 from otaku.backend import launch as backend_launch
 from otaku.backend.api import Api, ModelRef, Refused
 from otaku.backend.app.paths import Paths
-from otaku.console.banner import address
-from otaku.settings.config import WebSettings
 from otaku.store import Store
-from otaku.web import serve
-from scenarios.support.harness import MODEL, PROVIDER, read_store, set_config_provider
+from otaku.web import run_beside
+from scenarios.support.harness import MODEL, PROVIDER, read_store, set_config, set_config_provider
 from scenarios.support.server import ModelServer
 
 
@@ -48,7 +42,7 @@ class Page:
         self,
         url: str,
         store: Store,
-        stop: threading.Event,
+        stop: Callable[[], None],
         root: Path,
         context: ssl.SSLContext | None = None,
     ) -> None:
@@ -67,10 +61,9 @@ class Page:
         self.story: int | None = None
 
     def stop(self) -> None:
-        """Stop the server the way Ctrl+C does, and wait for it to be
-        over — for the stories that are about what happens next."""
-        self._stop.set()
-        time.sleep(0.5)
+        """Stop the server the way Ctrl+C does, over once this returns —
+        for the stories that are about what happens next."""
+        self._stop()
 
     def get(self, path: str) -> Any:
         with urllib.request.urlopen(self.url + path, timeout=10, context=self.context) as reply:
@@ -308,71 +301,45 @@ def _serving(
 ) -> Iterator[Page]:
     root = tmp_path / "state"
     set_config_provider(root, server, name=provider)
+    # A port of the OS's picking, taken and given back before the server
+    # asks for it: `otaku serve` serves where the configuration says, and
+    # a test that wants a free port has to find one the same way anybody
+    # writing that configuration would.
+    port = _free_port()
+    set_config(root, web_host=host, web_port=port, web_https=https)
     if password:
         type_password(root, password)
     if prepare is not None:
         prepare(root)
-    stop = threading.Event()
-    serving: queue.Queue[str] = queue.Queue()
-    failed: queue.Queue[BaseException] = queue.Queue()
-    # A port of the OS's picking, taken and given back before the server
-    # asks for it: `otaku web` serves where the configuration says, and
-    # a test that wants a free port has to find one the same way anybody
-    # writing that configuration would.
-    where = WebSettings(host=host, port=_free_port(), https=https)
     # Nothing can verify a certificate otaku signed itself, so the test
     # does what a reader does at the interstitial: goes on anyway.
     context = ssl._create_unverified_context() if https else None
-
-    def run() -> None:
+    app = backend_launch.open_app(root)
+    try:
+        # A story that launches twice over one state dir finds the model
+        # already remembered: an answer, never a fault.
+        with contextlib.suppress(Refused):
+            Api(app).app.update(model=ModelRef(provider, MODEL))
+        # The worker `otaku serve` starts as it serves.
+        app.start_worker()
+        server = run_beside(app)
         try:
-            app = backend_launch.open_app(root)
-            # A story that launches twice over one state dir finds the
-            # model already remembered: an answer, never a fault.
-            with contextlib.suppress(Refused):
-                Api(app).app.update(model=ModelRef(provider, MODEL))
+            url = server.address + "/"
+            if host in ("0.0.0.0", "::"):
+                # The address READS as the host for a wildcard bind; the
+                # test reaches it on loopback, and the Host header is what
+                # the stories vary.
+                url = f"{'https' if https else 'http'}://127.0.0.1:{port}/"
+            _reachable(url, context)
+            store = read_store(root)
             try:
-                web = Api(app).settings.web.get()
-                serving.put(address(where))
-                serve(
-                    app,
-                    # The password hash the launch made, the typed password
-                    # having never reached anything past the file.
-                    replace(where, password=web.config.password),
-                    web.custom_dir,
-                    web.cert_dir,
-                    stop=stop,
-                )
+                yield Page(url, store, server.stop, root, context)
             finally:
-                app.close()
-        except BaseException as e:  # carried to the test, never swallowed
-            failed.put(e)
-
-    served = threading.Thread(target=run, name="scenario-web", daemon=True)
-    served.start()
-    try:
-        url = serving.get(timeout=15)
-    except queue.Empty as never:
-        # Whatever stopped it before it could serve — the launch above
-        # all — is the test's answer, not a timeout.
-        if not failed.empty():
-            raise failed.get_nowait() from never
-        raise AssertionError("the server never started") from never
-    if host in ("0.0.0.0", "::"):
-        # The address READS as `localhost` for a wildcard bind, which is
-        # where the test reaches it; the Host header is what the stories
-        # vary.
-        url = f"{'https' if https else 'http'}://127.0.0.1:{where.port}/"
-    _reachable(url, failed, context)
-    store = read_store(root)
-    try:
-        yield Page(url, store, stop, root, context)
+                store.close()
+        finally:
+            server.stop()
     finally:
-        stop.set()
-        served.join(timeout=10)
-        store.close()
-        if not failed.empty():
-            raise failed.get_nowait()
+        app.close()
 
 
 def type_password(root: Path, password: str) -> None:
@@ -396,15 +363,11 @@ def _free_port() -> int:
         return int(probe.getsockname()[1])
 
 
-def _reachable(
-    url: str, failed: "queue.Queue[BaseException]", context: ssl.SSLContext | None = None
-) -> None:
-    """Wait until the socket answers. The address is known before the
-    server binds — it is the configuration's, not the socket's answer —
-    so the first request can otherwise arrive a moment early."""
+def _reachable(url: str, context: ssl.SSLContext | None = None) -> None:
+    """Wait until the socket answers: the server is bound by the time it
+    is handed back, but its loop may not have taken the first request
+    yet."""
     for _ in range(150):
-        if not failed.empty():
-            raise failed.get_nowait()
         try:
             with urllib.request.urlopen(url, timeout=1, context=context) as reply:
                 reply.read()

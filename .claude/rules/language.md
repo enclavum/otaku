@@ -39,7 +39,7 @@ button calls an endpoint — and what both frontends type is the story's
 language. A new command is a row in the terminal's table, a handler in
 `terminal.dispatch`, and a row of `_ON_THE_PAGE` in
 `tests/test_architecture.py` — a screen, an endpoint, or a deliberate gap
-with the reason it is one (`/web`: the page is already there); the suite
+with the reason it is one (`/set serve`: the page is already served); the suite
 fails until all three exist.
 
 The `@` sigil in a command argument exists ONLY to trigger path

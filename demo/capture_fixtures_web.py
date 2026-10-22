@@ -18,13 +18,11 @@ Run from the repo root:  conda run -n otaku python demo/capture_fixtures_web.py
 """
 
 import json
-import queue
 import re
 import shutil
 import socket
 import sys
 import tempfile
-import threading
 import time
 import urllib.error
 import urllib.request
@@ -35,8 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from otaku.backend import launch as backend_launch
 from otaku.backend.api import Api, ModelRef
-from otaku.settings.config import WebSettings
-from otaku.web import serve
+from otaku.web import run_beside
 from scenarios.support.harness import set_config, set_config_provider
 from scenarios.support.server import ModelServer
 
@@ -116,7 +113,7 @@ def _capture(url: str) -> dict[str, Any]:
             "history": read("/api/history"),
             "web_search": read("/api/integrations/web-search"),
             "shared_reminder": read("/api/shared-reminder"),
-            "providers": read(f"/api/providers?scope=local"),
+            "providers": read("/api/providers?scope=local"),
             "provider": read(f"/api/providers/{ENGINE}"),
             "models": read(f"/api/providers/{ENGINE}/models"),
             "model_settings": read(f"/api/providers/{ENGINE}/models/{MODEL}/settings"),
@@ -226,39 +223,25 @@ def _pin_timestamps(payload: Any) -> Any:
 
 
 class _served:
-    """`otaku web` over `root` on a free port, the app opened on the
-    serving thread — where `otaku web` opens it — and stopped on exit."""
+    """`otaku serve` over `root` on a free port, served beside the capture
+    (`web.run_beside`) and stopped on exit."""
 
     def __init__(self, root: Path) -> None:
         self._root = root
-        self._stop = threading.Event()
-        self._thread: threading.Thread | None = None
+        self._app: Any = None
+        self._server: Any = None
 
     def __enter__(self) -> str:
         with socket.socket() as probe:
             probe.bind(("127.0.0.1", 0))
             port = int(probe.getsockname()[1])
-        where = WebSettings(host="127.0.0.1", port=port)
-        failed: queue.Queue[BaseException] = queue.Queue()
-
-        def run() -> None:
-            try:
-                app = backend_launch.open_app(self._root)
-                try:
-                    Api(app).app.update(model=ModelRef(ENGINE, MODEL))
-                    web = Api(app).settings.web.get()
-                    serve(app, where, web.custom_dir, web.cert_dir, stop=self._stop)
-                finally:
-                    app.close()
-            except BaseException as e:  # carried to the capture, never swallowed
-                failed.put(e)
-
-        self._thread = threading.Thread(target=run, name="demo-capture", daemon=True)
-        self._thread.start()
+        set_config(self._root, web_host="127.0.0.1", web_port=port)
+        self._app = backend_launch.open_app(self._root)
+        Api(self._app).app.update(model=ModelRef(ENGINE, MODEL))
+        self._app.start_worker()
+        self._server = run_beside(self._app)
         url = f"http://127.0.0.1:{port}"
         for _ in range(150):
-            if not failed.empty():
-                raise failed.get_nowait()
             try:
                 with urllib.request.urlopen(url + "/api/app/status", timeout=1) as reply:
                     reply.read()
@@ -268,9 +251,10 @@ class _served:
         raise SystemExit("the server never answered")
 
     def __exit__(self, *exc: object) -> None:
-        self._stop.set()
-        if self._thread is not None:
-            self._thread.join(timeout=10)
+        if self._server is not None:
+            self._server.stop()
+        if self._app is not None:
+            self._app.close()
 
 
 if __name__ == "__main__":

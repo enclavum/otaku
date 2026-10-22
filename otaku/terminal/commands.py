@@ -41,7 +41,6 @@ GROUP_LABELS: dict[str, str] = {
     "transfer": "Import/export",
     "settings": "Models and settings",
     "special": "Special",
-    "web": "Web UI",
     "meta": "Meta",
 }
 
@@ -131,10 +130,10 @@ COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("/set autocorrect", "on|off", "Settle a character name you type in /you and /me commands to the cast's own spelling", "settings", CommandType.OPERATION),
     CommandSpec("/set notification", "on|off", "Play a sound when a reply lands (the sound is configs/config.toml's notification_sound)", "settings", CommandType.OPERATION),
     CommandSpec("/set max_context", "<tokens>", "Cap the prompt at this many tokens; 0 = the model's own max context", "settings", CommandType.OPERATION),
+    CommandSpec("/set serve", "on|off", "Serve the web interface while the terminal runs", "settings", CommandType.OPERATION),
     # Special
     _syntax("/roll", "Roll real dice (1d20+5, 3d6, 2d20kh1) — the model narrates exactly what fell", "special"),
     # Meta
-    CommandSpec("/web", "", "Open this session in a browser", "web", CommandType.INTERACTIVE),
     CommandSpec("/support", "TEXT", "Send feedback or a support request — leave your email to get an answer", "meta", CommandType.OPERATION),
     CommandSpec("/help", "", "Show this help", "meta", CommandType.INTERACTIVE),
     CommandSpec("/bye", "", "Exit", "meta", CommandType.INTERACTIVE),

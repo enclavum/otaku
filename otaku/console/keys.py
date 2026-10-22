@@ -1,5 +1,5 @@
 """Single keys off the terminal while a frontend owns the screen — what
-`otaku web` answers Ctrl+D and Ctrl+R with. The terminal is taken out
+`otaku serve` answers Ctrl+D and Ctrl+R with. The terminal is taken out
 of line mode for the watch, so a key arrives as it is pressed rather
 than after Enter, and given back after; Ctrl+C stays the signal it is.
 Nothing is read where stdin is not a terminal, so a piped launch is

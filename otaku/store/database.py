@@ -57,7 +57,10 @@ class Database:
     def connect(path: Path) -> sqlite3.Connection:
         """A connection with the session pragmas; refuses a file that is
         not SQLite with a curated DatabaseError."""
-        conn = sqlite3.connect(path)
+        # Used by one thread at a time, not only by the one that opened it:
+        # the app's main connection passes from the launch to the app's own
+        # thread (`backend.app.thread`), whose queue keeps it to one.
+        conn = sqlite3.connect(path, check_same_thread=False)
         # journal_mode=WAL persists in the file header; the rest are
         # per-connection and must be set on every open.
         try:

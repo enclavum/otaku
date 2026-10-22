@@ -6,6 +6,7 @@ process lifecycle) live here.
 """
 
 import socket
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -96,42 +97,60 @@ class TestChat:
         assert terminal.quit() == 0
 
 
-class TestWeb:
+class TestServe:
     def test_ctrl_r_serves_again_and_ctrl_d_stops(
         self, server: ModelServer, tmp_path: Path
     ) -> None:
-        """`otaku web` answers the keys at the terminal it runs in: Ctrl+R
+        """`otaku serve` answers the keys at the terminal it runs in: Ctrl+R
         stops and comes back on fresh sources — a new process, the
         address said again — and Ctrl+D stops for good, as Ctrl+C does."""
         state = tmp_path / "state"
         set_config_provider(state, server)
-        terminal = Terminal(str(state), args=("web", "--port", str(_free_port())))
+        terminal = Terminal(str(state), args=("serve", "--port", str(_free_port())))
         terminal.expect("Running on", timeout=20.0)
         _pressed_until(terminal, CTRL_R, "Restarting", timeout=20.0)
         _expect_count(terminal, "Running on", 2, timeout=20.0)
         _pressed_until(terminal, CTRL_D, "Shutting down", timeout=20.0)
         assert terminal.wait() == 0
 
-    def test_from_the_chat_ctrl_d_ends_the_serving_and_the_prompt_returns(
+    def test_the_old_name_still_serves(self, server: ModelServer, tmp_path: Path) -> None:
+        """`otaku web`, the command's name before 0.9.0, still serves."""
+        state = tmp_path / "state"
+        set_config_provider(state, server)
+        port = _free_port()
+        terminal = Terminal(str(state), args=("web", "--port", str(port)))
+        _waited(lambda: _listening(port))
+        _pressed_until(terminal, CTRL_D, "Shutting down", timeout=20.0)
+        assert terminal.wait() == 0
+
+    def test_set_serve_serves_beside_the_chat_and_off_stops_it(
         self, server: ModelServer, tmp_path: Path
     ) -> None:
-        """`/web` hands the session to a browser and stands until the
-        reader stops it; Ctrl+D does what Ctrl+C does there, and the
-        chat carries on below. Ctrl+R is not a key here: the process is
-        the chat's."""
-        terminal = launch_remembered(
-            server, tmp_path / "state", env={"OTAKU_WEB_PORT": str(_free_port())}
-        )
-        play(terminal, "I enter the hall.", "stirred")
-        terminal.send("/web")
+        """`/set serve on` serves the page and the chat keeps its prompt —
+        a line plays while it serves; `/set serve off` stops it, and the
+        chat carries on."""
+        port = _free_port()
+        terminal = launch_remembered(server, tmp_path / "state", env={"OTAKU_WEB_PORT": str(port)})
+        terminal.send("/set serve on")
         terminal.send(ENTER, 1.0)
-        terminal.expect("Running on")
-        terminal.send(CTRL_R, 1.0)  # not a key here: the serving goes on
-        terminal.send(CTRL_D, 1.0)
-        terminal.expect("Shutting down")
-        assert "Restarting" not in terminal.transcript
+        _waited(lambda: _listening(port))
+        play(terminal, "I enter the hall.", "stirred")
+        terminal.send("/set serve off")
+        terminal.send(ENTER, 1.0)
+        _waited(lambda: not _listening(port))
         play(terminal, "I look around.", "stirred")
         assert terminal.quit() == 0
+
+    def test_a_launch_with_the_switch_on_serves_until_the_chat_ends(
+        self, server: ModelServer, tmp_path: Path
+    ) -> None:
+        state = tmp_path / "state"
+        set_config(state, web_terminal_serve=True)
+        port = _free_port()
+        terminal = launch_remembered(server, state, env={"OTAKU_WEB_PORT": str(port)})
+        _waited(lambda: _listening(port))
+        assert terminal.quit() == 0
+        assert not _listening(port)
 
 
 class TestHelpVersion:
@@ -139,6 +158,13 @@ class TestHelpVersion:
         result = run_otaku(tmp_path / "state", "--version")
         assert result.returncode == 0
         assert "otaku" in result.stdout
+
+    def test_help_names_serve_and_keeps_its_old_name_out(self, tmp_path: Path) -> None:
+        listing = run_otaku(tmp_path / "state", "--help").stdout.split("Commands:", 1)[1]
+        names = [row.split()[0] for row in listing.splitlines() if row.strip()]
+        assert "serve" in names
+        assert "web" not in names
+        assert run_otaku(tmp_path / "state", "web", "--help").returncode == 0
 
     def test_help_names_the_subcommands(self, tmp_path: Path) -> None:
         result = run_otaku(tmp_path / "state", "--help")
@@ -300,6 +326,16 @@ def _pressed_until(terminal: Terminal, key: bytes, marker: str, *, timeout: floa
     while marker not in terminal.transcript and time.time() < deadline:
         terminal.send(key, 1.0)
     assert marker in terminal.transcript, terminal.transcript[-2000:]
+
+
+def _waited(holds: Callable[[], bool], timeout: float = 20.0) -> None:
+    """Wait until `holds` does — a port answering, or let go."""
+    import time
+
+    deadline = time.time() + timeout
+    while not holds():
+        assert time.time() < deadline, "never came"
+        time.sleep(0.1)
 
 
 def _listening(port: int) -> bool:

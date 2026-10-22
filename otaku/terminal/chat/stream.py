@@ -30,6 +30,7 @@ from otaku.terminal.api import (
     Done,
     Failed,
     JoinType,
+    Message,
     PlayEvent,
     StoryMode,
     ToolMessage,
@@ -61,6 +62,20 @@ except ImportError:
     tty = None  # type: ignore[assignment]
 
 _CTRL_R = b"\x12"
+
+
+@contextlib.contextmanager
+def waiting() -> Iterator[None]:
+    """The spinner while a reply is asked for: accepting the line may
+    itself wait, behind a reply another frontend is streaming. A call
+    answered at once draws nothing (`Spinner` draws after its first
+    interval)."""
+    spinner = Spinner()
+    spinner.start()
+    try:
+        yield
+    finally:
+        spinner.stop()
 
 
 def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
@@ -254,7 +269,7 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                             width = terminal_width()
                             if event.name == "question" and is_story_mode:
                                 # where the prose ends, for the answer to take
-                                # the question back to (`drop_past_question`)
+                                # the question back to (`drop_question`)
                                 streamer.flush()
                                 chat.ledger.question_begins()
                             if event.name == "question":
@@ -485,20 +500,30 @@ def _end_row(chat: Chat, out: TextIO, *, story_mode: bool) -> None:
         out.write("\n")
 
 
-def drop_past_question(chat: Chat) -> None:
+def question_to_drop(chat: Chat) -> list[Message] | None:
+    """The story as it stands, where a line about to be played answers —
+    or a continue goes past — the question its newest turn asked, in
+    story mode; None otherwise. Read BEFORE the line is sent: the reply
+    starts the moment the line is accepted, and records the line first."""
+    if chat.layout.mode is not StoryMode.STORY or not chat.posed:
+        return None
+    return chat.messages()
+
+
+def drop_question(chat: Chat, rows: list[Message] | None) -> None:
     """In story mode the question a line is about to answer — or a
     continue to go past — is past, and a past question is no part of the
     one text (`render.flow`): the reply that asked it, with its tool
     chain, is taken off the screen (/regen's erase) and drawn again
     without it, ended as a
     finished reply ends — its newline, the blank under it — so what
-    comes next goes on from the reply's prose. Called before the stream
-    starts: inside it the key watcher owns the terminal's answers, which
-    the erase asks for. Where the erase cannot be proven, the question
-    stays."""
-    if chat.layout.mode is not StoryMode.STORY or not chat.posed:
+    comes next goes on from the reply's prose. `rows` is the story as
+    `question_to_drop` read it, before the line; None draws nothing. Called
+    before the stream is shown: inside it the key watcher owns the
+    terminal's answers, which the erase asks for. Where the erase cannot
+    be proven, the question stays."""
+    if rows is None:
         return
-    rows = chat.messages()
     # the question alone, where the stream noted its start: the prose above
     # it stands as it is, the answer going on from its end
     if chat.ledger.take_question():

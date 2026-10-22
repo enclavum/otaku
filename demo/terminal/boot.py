@@ -551,6 +551,7 @@ def _patch_threads() -> None:
     import otaku.terminal.screens.models as screens_models
     from otaku.agents import Worker
     from otaku.agents.extraction import Extractor, PassResult, Report
+    from otaku.backend.app.thread import AppThread
     from otaku.providers import smoothing
     from otaku.providers.registry import Registry
 
@@ -592,6 +593,10 @@ def _patch_threads() -> None:
 
     chat_stream.Spinner = DemoSpinner
     chat_stream._StreamWatcher = DemoStreamWatcher
+
+    # The app's own thread cannot start either: with none started, every
+    # call runs where it is made (`AppThread`), on the demo's one thread.
+    AppThread.start = lambda self: None  # type: ignore[method-assign]
 
     # The worker's two daemon threads cannot start; the demo never
     # schedules idle passes (lore_enabled=False), and a FORCED pass —
@@ -747,14 +752,14 @@ def main() -> None:
     providers_registry.ALL_CLIENTS[PROVIDER] = _build_demo_client()
     _patch_threads()
 
-    # Two doors a tab cannot honor: /web binds a socket, and /bye — with
+    # Two doors a tab cannot honor: /set serve binds a socket, and /bye — with
     # Ctrl+D, the app's own shortcut submitting /bye on an empty line —
     # would end a session only a reload can restart. Both answer with
     # one sentence instead.
     def demo_disabled(chat, raw: str) -> None:
         chat.say("This command is disabled in the demo.")
 
-    dispatch.HANDLERS["/web"] = demo_disabled
+    dispatch.HANDLERS["/set serve"] = demo_disabled
     dispatch.HANDLERS["/bye"] = demo_disabled
 
     # /card is REAL here — parser, persona ask, join, greeting all run —

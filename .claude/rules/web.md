@@ -4,6 +4,7 @@ paths:
   - "demo/**/*"
   - "scenarios/web/**/*"
   - "otaku/cli.py"
+  - "otaku/backend/app/thread.py"
 ---
 
 # The web
@@ -14,13 +15,15 @@ modules, the page and the demo, held by `scenarios/web`.
 
 ## The one thread
 
-ONE THREAD owns the app (`web.thread`): a handler reaches it only
-through `AppRunner.run` or a `Hooks` callable (`web.server.base`), each
-safe from any thread. The METHOD is the lane (`web.server`): a route is
-a GET exactly when its call only reads, since a read is answered between
-a reply's frames, and the page sends every read as a GET
-(`js/api/_http.js`) — a read filed as a POST would queue behind a reply
-and leave every screen dead while the model talks.
+ONE THREAD owns the app, and it is the backend's (`backend.app.thread`):
+a handler runs each route as one unit on it (`App.run`) or calls a
+`Hooks` callable (`web.server.base`), each safe from any thread, and a
+reply's frames are written on the handler's own thread as the events are
+handed across. The METHOD is the lane (`web.server`): a route is a GET
+exactly when its call only reads, since a read is answered between a
+reply's frames and while the model is silent, and the page sends every
+read as a GET (`js/api/_http.js`) — a read filed as a POST would queue
+behind a reply and leave every screen dead while the model talks.
 
 ## The HTTP conventions
 

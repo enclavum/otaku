@@ -14,7 +14,7 @@ from collections.abc import Mapping
 from typing import Any, Literal, overload
 
 from otaku.backend.app.core.services import App
-from otaku.backend.base import UNCHANGED, Changed, Resource, Unchanged
+from otaku.backend.base import UNCHANGED, Changed, Resource, Unchanged, any_thread
 from otaku.backend.codex.cards.schemas import CharacterLinkCheck
 from otaku.backend.codex.cards.services import FIELDS, story_profile
 from otaku.backend.errors import Invalid
@@ -259,6 +259,7 @@ class ExtractionResource(Resource):
         state, said = domain_lore.create_extraction(self._app, story_id)
         return Changed(_extraction(story_id, state), said)
 
+    @any_thread
     def get(self, story_id: int) -> Extraction:
         """A story's forced pass as it stands — the one running, or the
         last one asked for. Safe from any thread: a run is read without

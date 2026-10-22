@@ -4,8 +4,8 @@ and the terminal, the backend's resource folders — each one its
 resources, its schemas and its services — and the mirror, three places
 with one list of them, the aliases a resource's services are imported
 under, the machinery's privacy, the doors, the interface's resource
-classes (their verbs, what they answer, the call path every route
-follows), the privacy of the `App`'s members, the HTTP surface against
+classes (their verbs, what they answer, the thread each runs on, the
+call path every route follows), the privacy of the `App`'s members, the HTTP surface against
 its spec, every command reached by both frontends, and the web page's
 own module graph — JavaScript, read as text.
 
@@ -55,8 +55,9 @@ _ALLOWED = {
     # `python -m otaku`: the module entry, which only calls the real one.
     "__main__": {"cli"},
     "cli": {"terminal", "web", "backend.launch", "logging", "update", "formatting"},
-    # `web` because `/web` serves this app to a browser and waits: the
-    # arrow only points this way, so `web` knows nothing of `terminal`.
+    # `web` because `/set serve` serves this app to a browser beside the
+    # chat: the arrow only points this way, so `web` knows nothing of
+    # `terminal`.
     "terminal": {"console", "backend.api", "web", "formatting"},
     "web": {"console", "backend.api", "formatting"},
     # What a frontend draws in the terminal it was LAUNCHED from — a leaf,
@@ -181,6 +182,11 @@ class TestBackend:
     def test_every_backend_unit_has_a_declared_row(self) -> None:
         units = {_backend_unit(_module_of(path)) for path in _python_files(_SRC / "backend")}
         assert units <= set(_BACKEND), f"undeclared: {sorted(units - set(_BACKEND))}"
+
+    def test_the_apps_thread_knows_nothing_of_the_app(self) -> None:
+        # a queue and a thread, generic over the work it is handed
+        reached = {found.target for found in _imports(_SRC / "backend" / "app" / "thread.py")}
+        assert reached <= {f"{PACKAGE}.backend.errors"}
 
 
 class TestTerminal:
@@ -415,12 +421,8 @@ class TestDoors:
                         missing.append(f"{door.__name__}.{name}")
         assert not missing, "\n".join(missing)
 
-    def test_the_webs_thread_imports_nothing_of_the_app(self) -> None:
-        # its runner is generic over the app it is handed
-        assert _imports(_SRC / "web" / "thread.py") == []
-
     def test_the_webs_api_knows_no_thread_and_no_http(self) -> None:
-        forbidden = (f"{PACKAGE}.web.server", f"{PACKAGE}.web.thread")
+        forbidden = (f"{PACKAGE}.web.server",)
         for path in _python_files(_SRC / "web" / "api"):
             assert not any(found.target.startswith(forbidden) for found in _imports(path)), path
             modules = {
@@ -506,6 +508,25 @@ class TestInterface:
             reached.add(name)
             waiting += [child for child in _attributes()[name].values() if child not in reached]
         assert set(_resources()) - reached == set()
+
+    def test_a_verb_answering_events_streams_and_no_other(self) -> None:
+        # its reply runs on the app's thread, the events handed across as
+        # they come (`backend.base.streams`)
+        wrong = [
+            f"{owner}.{verb.name}"
+            for owner, verb, marks in _verbs()
+            if ("streams" in marks)
+            != ast.unparse(verb.returns or ast.Constant(None)).startswith("Iterator[")
+        ]
+        assert not wrong, "\n".join(wrong)
+
+    def test_the_verbs_on_their_callers_thread_are_the_documented_ones(self) -> None:
+        # never queued (`backend.base.any_thread`): each says in its
+        # docstring why any thread is safe — none touches the store
+        marked = {
+            f"{owner}.{verb.name}" for owner, verb, marks in _verbs() if "any_thread" in marks
+        }
+        assert marked == {"StatusResource.get", "ProvidersResource.list", "ExtractionResource.get"}
 
     def test_every_route_follows_its_call_path(self) -> None:
         # `api.stories.messages.create(5, …)` is POST /api/stories/5/messages:
@@ -627,8 +648,8 @@ _ON_THE_PAGE = {
     "/support": "screen:/support",
     "/help": "screen:/help",
     # The one gap that can never be filled: this command's whole purpose
-    # is to reach the page, and the reader of the page is already there.
-    "/web": "none:the page IS this — there is nowhere for it to send anyone",
+    # is to serve the page, and the reader of the page is already there.
+    "/set serve": "none:the page IS what it serves — it cannot serve itself",
     "/bye": "screen:/bye",
 }
 
@@ -1087,6 +1108,21 @@ def _interface_files(
     kinds asked, the facade first unless left out."""
     files = [path for path in _python_files(_SRC / "backend") if path.name in kinds]
     return ([_SRC / "backend" / "api.py"] if with_facade else []) + files
+
+
+def _verbs() -> list[tuple[str, ast.FunctionDef, set[str]]]:
+    """Every verb of every resource class, as (its class, its definition,
+    the names it is decorated with)."""
+    found = []
+    for path in _interface_files(kinds=("resources.py",), with_facade=False):
+        for node in ast.parse(path.read_text()).body:
+            if not isinstance(node, ast.ClassDef):
+                continue
+            for verb in node.body:
+                if isinstance(verb, ast.FunctionDef) and verb.name in _FIVE:
+                    marks = {d.id for d in verb.decorator_list if isinstance(d, ast.Name)}
+                    found.append((node.name, verb, marks))
+    return found
 
 
 def _is_domain(module: str) -> bool:

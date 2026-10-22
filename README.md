@@ -128,7 +128,7 @@ otaku update
 In the terminal, type one of the two commands:
 
 - `otaku` — opens the terminal UI;
-- `otaku web` — makes the web interface available at http://localhost:9600 (can be
+- `otaku serve` — makes the web interface available at http://localhost:9600 (can be
   [configured](#web-interface-settings)).
 
 On first start, you choose a provider and a model. Otaku automatically detects local LLM

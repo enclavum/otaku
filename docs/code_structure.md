@@ -28,7 +28,7 @@ declared dependencies:
 The calls point the same way as the imports: nothing imports upward, and every arrow is exercised by
 a call in its own direction. A frontend reaches the backend through `backend.api` and nothing else;
 cli adds `backend.launch`, the door it opens the app through. The terminal reaches the web only to
-serve the app it holds (`/web`); the web knows nothing of the terminal.
+serve the app it holds beside the chat (`/set serve`); the web knows nothing of the terminal.
 
 ## The backend
 
@@ -105,6 +105,7 @@ page's client, where every other module is named after a resource, the underscor
     backend.app.paths               what one state dir holds
     backend.app.passwords           the web password's hash
     backend.app.runs                a forced extraction pass, as it runs
+    backend.app.thread              the app's own thread: every call queued onto it, in two lanes
     backend.story.chain             a story's chain: appended, popped, its head moved
     backend.story.request           a story's next request, and the worker's job over it
     backend.story.play              the play: a line recorded, its reply streamed
@@ -159,8 +160,13 @@ carry.
 The app holds no story. Every call that acts on one names it; a call that moves a story's head
 names the head the caller last saw (`expected_head`), and the store moves it by compare-and-set — a
 head moved meanwhile is `HeadMoved`, and nothing is written. Which story a client is in is the
-client's to hold. An operation safe from any thread says so; every other one runs on the app's own
-thread.
+client's to hold.
+
+The app has a thread of its own (`backend.app.thread`), and every verb runs on it, one at a time,
+whichever thread calls: the caller waits for the answer, a reply's events are handed across as they
+come (`App.stream`), and several calls are made one unit by `App.run`. A verb marked `any_thread`
+runs on its caller's thread instead. A read is answered between a reply's events and while the
+model is silent; a write waits its turn.
 
 ## The services
 
@@ -227,7 +233,7 @@ door's, the routing in `dispatch`'s, the medium's own words in `tty`'s.
 `dispatch` is the routing and the handlers. Its root splits a line into its command and its
 argument, and holds every command's handler in one table: a module's function where the command
 does more than call the door, a lambda where it is one call, its answer the sentence, and its own
-for the four commands that reach no interface, `/help`, `/web`, `/clear` and `/bye`, as the web's
+for the three commands that reach no interface, `/help`, `/clear` and `/bye`, as the web's
 server holds its own paths. A handler takes the chat and the argument as typed, asks the door,
 then draws, lands or opens a screen; it answers the sentence to say, or `None` where it said its
 own.
@@ -239,14 +245,13 @@ own.
       server/    HTTP: the dispatcher, the socket and its hooks, who may ask (`guards`), the two
                  answers that stream (`streams`), what may be served (`assets`), the watch, the
                  sign-in token
-      thread.py  the one thread that owns the app
       cert.py    the TLS pair
       run.py     the frontend's life, and the one module that prints
       static/    the page (below)
 
-Three secrets, one home each: `thread` is when work runs, `api` what may be asked, `server` how it
-arrives. `thread` imports nothing — its runner is generic over the app it is handed; `api` knows no
-thread and no HTTP; `server` is the one that knows both at work, and `run` the one that starts them.
+Two secrets, one home each: `api` is what may be asked, `server` how it arrives; when work runs is
+the backend's, its own thread (`App.run`). `api` knows no thread and no HTTP; `server` is the one
+that knows both at work, and `run` the one that starts it.
 
 ## The page
 
@@ -314,7 +319,7 @@ from the page:
     static/js/play/held.js           writing: a story made where this is its first line
     static/js/api/story.js           messages.create: POST /api/stories/5/messages, If-Match the
                                      head the page last read
-    web.server                       the route matched among the streams, the call made on the
+    web.server                       the route matched among the streams, the reply run on the
                                      app's thread, its events written back as they come
     web.api.story.messages           the row: the line and its pictures read from the body,
                                      If-Match as the expected head
@@ -322,9 +327,9 @@ from the page:
     backend.story.messages.resources MessagesResource.create(5, line=…): the domain's events
                                      answered as the interface's
     backend.story.messages.services  submit_line, the play's entry
-    backend.story.play              the line checked and recorded, the reply asked of the model
+    backend.story.play               the line checked and recorded, the reply asked of the model
                                      and streamed, then recorded the same way
-    backend.story.chain             append_message, from the head the caller saw
+    backend.story.chain              append_message, from the head the caller saw
     store.ops.stories                StoryOps.append: the message added and the head moved in one
                                      statement
     store.schema                     the messages table
@@ -341,9 +346,9 @@ From the terminal:
     backend.story.messages.resources MessagesResource.create(5, line=…): the domain's events
                                      answered as the interface's
     backend.story.messages.services  submit_line, the play's entry
-    backend.story.play              the line checked and recorded, the reply asked of the model
+    backend.story.play               the line checked and recorded, the reply asked of the model
                                      and streamed, then recorded the same way
-    backend.story.chain             append_message, from the head the caller saw
+    backend.story.chain              append_message, from the head the caller saw
     store.ops.stories                StoryOps.append: the message added and the head moved in one
                                      statement
     store.schema                     the messages table
@@ -387,8 +392,9 @@ keeping its underscore (`tests/web/api/test__request.py` covers `_request.py`, a
 for its package (`tests/terminal/dispatch/test_dispatch.py`).
 `tests/test_architecture.py` reads the source tree and holds the rules a scan of it can check: the
 import table, the one-way orders inside the backend, the terminal and the page, the resource
-folders and the mirror, the machinery's privacy, the doors, the resource classes' bases, verbs and
-answers, the call path every route follows, and the spec against the routes.
+folders and the mirror, the machinery's privacy, the doors, the resource classes' bases, verbs,
+answers and the thread each verb runs on, the call path every route follows, and the spec against
+the routes.
 
 The scenarios that play the app in-process, `scenarios/api/`, are laid out as the interface is:
 `app/`, `codex/` and `story/`, a module for each resource a story reaches.
