@@ -136,9 +136,13 @@ COMMANDS: tuple[CommandSpec, ...] = (
     # Meta
     CommandSpec("/support", "TEXT", "Send feedback or a support request — leave your email to get an answer", "meta", CommandType.OPERATION),
     CommandSpec("/help", "", "Show this help", "meta", CommandType.INTERACTIVE),
-    CommandSpec("/bye", "", "Exit", "meta", CommandType.INTERACTIVE),
+    CommandSpec("/quit", "", "Exit", "meta", CommandType.INTERACTIVE),
 )
 # fmt: on
+
+# Other names a command answers to, hidden: typed, each runs its command,
+# but no menu and no /help offers it.
+ALIASES: dict[str, str] = {"/bye": "/quit", "/exit": "/quit"}
 
 # The terminal's shortcut keys, by the token they run.
 SHORTCUTS: dict[str, Shortcut] = {
@@ -147,7 +151,7 @@ SHORTCUTS: dict[str, Shortcut] = {
     "/stories": Shortcut("c-t", "Ctrl+T"),
     "/lore": Shortcut("c-l", "Ctrl+L"),
     "/model": Shortcut("c-o", "Ctrl+O"),  # Ctrl+M is unusable — the terminal sends it as Enter
-    "/bye": Shortcut("c-d", "Ctrl+D"),
+    "/quit": Shortcut("c-d", "Ctrl+D"),
 }
 
 

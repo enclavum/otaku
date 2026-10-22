@@ -26,7 +26,7 @@ _CONTROL_ENTER = ("\x1b[27;5;13~", "\x1b[13;5u")
 for _sequence in _CONTROL_ENTER:
     ANSI_SEQUENCES[_sequence] = (Keys.Escape, Keys.ControlJ)
 
-# Ctrl+D submits /bye only on an empty line — the terminal convention.
+# Ctrl+D submits /quit only on an empty line — the terminal convention.
 # With a draft on the line it falls through to delete-forward, so readline
 # muscle memory can never quit the app over a draft.
 _EMPTY_LINE = Condition(lambda: not get_app().current_buffer.text)

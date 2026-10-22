@@ -36,8 +36,9 @@ from otaku.terminal.prompt.caret import Caret, caret_painter
 from otaku.terminal.prompt.completion import SlashCompleter
 from otaku.terminal.prompt.keys import make_bindings
 from otaku.terminal.prompt.lines import Carry, LineAssembler
-from otaku.terminal.tty import HIDE_CURSOR, statusline
+from otaku.terminal.tty import HIDE_CURSOR
 from otaku.terminal.tty.render import message
+from otaku.terminal.tty.statusline import StatusLine
 from otaku.terminal.tty.theme import theme
 
 # The empty line's hint in chat mode; story mode shows its caret instead
@@ -91,14 +92,12 @@ def build_prompt(
     story: Callable[[], int | None],
     can_attach: Callable[[], bool],
     shortcuts: Mapping[str, tuple[str, str]],
-    aside: Callable[[], str],
-    note: Callable[[], str] = lambda: "",
-    served_at: Callable[[], str] = lambda: "",
+    status_line: StatusLine,
 ) -> tuple[PromptSession[str], AnswerMenu]:
     """The assembled prompt session and the answer menu it draws above
-    its line: history, menu, style, the activity toolbar reading `note()`
-    and the worker's line with `aside()` against its right edge, and the
-    shortcut keybindings — the story played read off `story()`, and
+    its line: history, menu, style, the status row as its toolbar
+    (`status_line`, which owns how it reads), and the shortcut
+    keybindings — the story played read off `story()`, and
     whether a picture may ride the line off `can_attach()`, both the
     caller's to know;
     `shortcuts` maps a command token to its key in both spellings, the
@@ -140,7 +139,7 @@ def build_prompt(
         enable_history_search=False,
         style=_prompt_style(),
         cursor=Caret(carry),
-        bottom_toolbar=_activity_toolbar(api, aside, note, served_at),
+        bottom_toolbar=status_line.fragments,
     )
 
     def typed(_buffer: Buffer) -> None:
@@ -267,48 +266,6 @@ def _prompt_style() -> Style:
             "answer.current": accent,
         }
     )
-
-
-def _activity_toolbar(
-    api: Api, aside: Callable[[], str], note: Callable[[], str], served_at: Callable[[], str]
-) -> Callable[[], FormattedText]:
-    """The prompt's activity line: `note()` — the last reply's stats in
-    story mode — and what the background worker is doing, either blank,
-    and `aside()` against the right edge. Always present —
-    the row is reserved for the whole prompt, so it never reflows the
-    screen. `statusline.render`, not a local format string: the pinned row
-    draws the same line on the same terminal row, and any difference shows
-    as a twitch when a reply starts streaming."""
-
-    def render() -> FormattedText:
-        width = get_app().output.get_size().columns
-        line = statusline.render(api.app.status.get(), aside(), width, note())
-        return FormattedText(_served_parts(line, served_at()))
-
-    return render
-
-
-def _served_parts(line: str, url: str) -> StyleAndTextTuples:
-    """The activity line as the toolbar draws it: the served mark's dot in
-    the theme's error color, and its label a link to `url`, the link's ends
-    taking no width (prompt_toolkit has no links of its own)."""
-    text = "class:bottom-toolbar.text"
-    before, dot, rest = line.partition(statusline.SERVING_DOT)
-    if not dot:
-        return [(text, line)]
-    parts: StyleAndTextTuples = [(text, before), (f"{text} fg:{theme().error.style}", dot)]
-    middle, label, after = rest.partition(statusline.SERVING_LABEL)
-    if not (label and url):
-        return [*parts, (text, rest)]
-    opening, closing = statusline.link_ends(url)
-    return [
-        *parts,
-        (text, middle),
-        ("[ZeroWidthEscape]", opening),
-        (text, label),
-        ("[ZeroWidthEscape]", closing),
-        (text, after),
-    ]
 
 
 # ---------- the completion menu ----------

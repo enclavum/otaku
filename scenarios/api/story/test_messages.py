@@ -1513,7 +1513,7 @@ class Prompting:
                 story=lambda: chat.story_id,
                 can_attach=lambda: chat.can_attach,
                 shortcuts=SHORTCUTS,
-                aside=lambda: "",
+                status_line=chat.status_line,
             )
             answers.top_row = top_row
 

@@ -23,7 +23,7 @@
 #   are the story's own typed language, part of the line being played
 #   and read at the far end; a line goes through verbatim. Commands are
 #   the terminal's: a button here calls a resource, and `/last`, `/clear`
-#   and `/bye` have no path and never will — they redraw, or they say
+#   and `/quit` have no path and never will — they redraw, or they say
 #   something about the tab.
 #
 # CONVENTIONS

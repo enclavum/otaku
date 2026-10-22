@@ -1,4 +1,4 @@
-# otaku — an LLM frontend for creative writing and roleplay
+# otaku — an LLM frontend for roleplay and creative writing
 
 [![PyPI](https://img.shields.io/pypi/v/otaku.svg)](https://pypi.org/project/otaku/)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](https://github.com/enclavum/otaku/blob/main/LICENSE)
@@ -15,7 +15,13 @@ The three pillars of otaku:
 - **keep the context small**, even for long stories, without losing the details that matter;
 - **high-quality interfaces**, in the browser and in the terminal.
 
+Web interface:
+
 ![otaku web](https://raw.githubusercontent.com/enclavum/otaku/main/images/capture-web.png?v=0.8.0)
+
+Terminal interface:
+
+![otaku terminal](https://raw.githubusercontent.com/enclavum/otaku/main/images/capture-terminal.png?v=0.9.0)
 
 ## Demo
 

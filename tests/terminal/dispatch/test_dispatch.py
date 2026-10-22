@@ -19,6 +19,11 @@ class TestFind:
         spec = find("/fork my title")
         assert spec is not None and spec.token == "/fork"
 
+    def test_a_hidden_alias_finds_its_commands_row(self) -> None:
+        for typed in ("/bye", "/exit", "/exit now"):
+            spec = find(typed)
+            assert spec is not None and spec.token == "/quit", typed
+
     def test_the_longest_match_wins_for_the_set_family(self) -> None:
         spec = find("/set think medium")
         assert spec is not None and spec.token == "/set think"

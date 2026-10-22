@@ -61,8 +61,8 @@ const SCREENS = {
   "/last": () => refresh(),
   "/clear": () => clear(),
   // A tab is not the server: closing one must not stop a server the
-  // reader may be using from another, so /bye says where the exit is.
-  "/bye": () => tell("Close the tab. The server stops in the terminal."),
+  // reader may be using from another, so /quit says where the exit is.
+  "/quit": () => tell("Close the tab. The server stops in the terminal."),
 };
 
 export async function run(token) {

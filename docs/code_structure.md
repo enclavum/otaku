@@ -233,7 +233,7 @@ door's, the routing in `dispatch`'s, the medium's own words in `tty`'s.
 `dispatch` is the routing and the handlers. Its root splits a line into its command and its
 argument, and holds every command's handler in one table: a module's function where the command
 does more than call the door, a lambda where it is one call, its answer the sentence, and its own
-for the three commands that reach no interface, `/help`, `/clear` and `/bye`, as the web's
+for the three commands that reach no interface, `/help`, `/clear` and `/quit`, as the web's
 server holds its own paths. A handler takes the chat and the argument as typed, asks the door,
 then draws, lands or opens a screen; it answers the sentence to say, or `None` where it said its
 own.

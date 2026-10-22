@@ -1,10 +1,16 @@
-"""A status line pinned to the bottom row while the model streams.
+"""The status row: the one line the terminal keeps on its bottom row —
+what the reply streaming is doing or how the last one ended, what the
+background worker is doing, the page served beside the chat, and how
+full the next request is — composed and painted here alone, for the two
+places it is drawn, so the two never differ.
 
-prompt_toolkit's bottom toolbar only exists while its prompt application
-is running, so it vanishes the moment you submit — which is exactly when
-the background worker is most likely to still be running (a pass in flight
-is no longer cancelled by submitting). This keeps the same line visible
-across that gap.
+While the prompt is up the row is the prompt's own bottom toolbar
+(`fragments`, which the prompt asks for). prompt_toolkit's toolbar only
+exists while its prompt application is running, so it vanishes the
+moment a line is sent — which is exactly when a reply streams, a command
+prints, and the background worker is most likely to still be running (a
+pass in flight is no longer cancelled by submitting). For that gap the
+same line is pinned to the bottom row (`pinned`).
 
 The mechanism is the one `apt` uses: DECSTBM. Setting the terminal's
 scroll region to rows 1..H-1 means everything printed scrolls *within*
@@ -12,13 +18,16 @@ those rows and never touches row H, so the status sits there untouched
 with no cursor arithmetic per chunk and no interference with wrapped or
 styled output.
 
-Deliberately scoped to the streaming window rather than the whole session:
-prompt_toolkit sizes its layout from the full terminal height and would
-happily draw over a reserved row. Reserving only while prompt_toolkit is
-NOT running means the two never overlap — and because both sit on the
-bottom row, the line looks continuous across the handoff.
+Deliberately scoped to the windows without a prompt rather than the
+whole session: prompt_toolkit sizes its layout from the full terminal
+height and would happily draw over a reserved row, and erase it on every
+redraw. Reserving only while prompt_toolkit is NOT running means the two
+never overlap — and because both sit on the bottom row, the line looks
+continuous across the handoff. The row is held past the block that pins
+it until the next prompt opens and takes it over (`hand_over`), so the
+handoff leaves no gap: the prompt's own first draw is what erases it.
 
-Everything is a no-op off a TTY, so piped and redirected output stays
+The pinned row is a no-op off a TTY, so piped and redirected output stays
 clean.
 """
 
@@ -31,6 +40,8 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 from typing import TextIO
+
+from prompt_toolkit.formatted_text import StyleAndTextTuples
 
 from otaku.formatting import truncate
 from otaku.terminal.tty import (
@@ -47,71 +58,47 @@ from otaku.terminal.tty import (
 )
 from otaku.terminal.tty.theme import theme
 
-
-def _terminal() -> TextIO:
-    """The real terminal stream — past every `sys.stdout` wrapper. A
-    repaint is not command output: written through a dispatch window's
-    wrapper it would fire the armed lead blank or invalidate the screen
-    ledger from the repaint thread (the same rule terminal queries
-    follow)."""
-    return sys.__stdout__ if sys.__stdout__ is not None else sys.stdout
-
-
-LABEL = " background task: "
-# The mark of the page served beside the chat (`Chat.aside`): the dot,
-# painted in the theme's error color where the line is drawn, and the
-# label after it, a link to the page where the terminal makes links.
-SERVING_DOT = "●"
-SERVING_LABEL = "web server on ↗"
+_LABEL = " background task: "
+# The mark of the page served beside the chat: the dot, painted in the
+# theme's error color, and the label after it, a link to the page where
+# the terminal makes links.
+_SERVING_DOT = "●"
+_SERVING_LABEL = "web server on ↗"
+# The width the context size stands in ("999% of 128K"), so what stands
+# left of it does not move as it changes.
+_FILL_WIDTH = 12
+# The style the prompt's toolbar draws its text in (`session._prompt_style`).
+_TOOLBAR = "class:bottom-toolbar.text"
 
 # How long a note stands at least once shown: a call that ends at once —
 # a tool otaku runs in no time — still reads.
 _NOTE_SECONDS = 1.0
 
 
-def render(status: str, aside: str = "", width: int = 0, note: str = "") -> str:
-    """The line's text: `note`, what the reply streaming is doing — a tool
-    call — then what the background worker is doing, either blank when
-    idle, and `aside` against the right edge of `width` columns, the
-    words on the left giving way where both do not fit. The last column
-    stays empty, so the row never wraps. ONE owner, because the prompt
-    toolbar and this pinned row draw the same line on the same terminal
-    row, and any difference between them shows up as the line twitching
-    the moment a reply starts streaming."""
-    worker = f"{LABEL}{status}" if status else ""
-    left = f" {note}" + (f" ·{worker}" if worker else "") if note else worker
-    room = width - 1
-    if not aside or room <= len(aside):
-        return left[: max(0, room)] if width else left
-    space = room - len(aside)
-    if len(left) > space - 2:
-        left = truncate(left, max(0, space - 2))
-    return left + " " * (space - len(left)) + aside
-
-
-def link_ends(url: str) -> tuple[str, str]:
-    """The two halves of a terminal link (OSC 8) to `url`, written around
-    its text: a terminal that makes links opens `url` from it, one that
-    does not shows the text alone. They take no width."""
-    return f"\x1b]8;;{url}\x1b\\", "\x1b]8;;\x1b\\"
-
-
 class StatusLine:
-    """Reserves the bottom terminal row and paints `read()` into it, with
-    `aside()` against its right edge. Long-lived: the REPL builds one per
-    session; `pinned()` holds the row for a streaming window, and
-    `refresh()` (safe from the worker thread) is a no-op whenever the row
-    isn't held."""
+    """The status row over the facts it shows, each read when it is drawn:
+    `worker`, the background worker's line; `fill`, how full the next
+    request is ("85% of 128K", "" while unknown); `served_at`, where the
+    page beside the chat is served ("" for nowhere); `last_note`, what the
+    last reply ended on, under the prompt in story mode. Long-lived: the
+    REPL builds one per session. The prompt's toolbar draws `fragments`;
+    `pinned()` holds the bottom row while no prompt runs and `hand_over()`
+    gives it to the prompt opening, `set_note` says what the reply
+    streaming is doing there, and `refresh()` (safe from the worker
+    thread) is a no-op whenever the row isn't held."""
 
     def __init__(
         self,
-        read: Callable[[], str],
-        aside: Callable[[], str],
-        served_at: Callable[[], str] = lambda: "",
+        *,
+        worker: Callable[[], str],
+        fill: Callable[[], str],
+        served_at: Callable[[], str],
+        last_note: Callable[[], str],
     ) -> None:
-        self._read = read
-        self._aside = aside
-        self._served_at = served_at  # where the page is served, the label's link; "" for none
+        self._worker = worker
+        self._fill = fill
+        self._served_at = served_at
+        self._last_note = last_note
         self._note = ""  # what the reply streaming is doing, while it streams
         self._noted_at = 0.0  # when the note standing was shown
         self._clearing: threading.Timer | None = None  # a clear waiting out the minimum
@@ -119,12 +106,37 @@ class StatusLine:
         self._rows = 0
         self._open = False
 
+    def fragments(self) -> StyleAndTextTuples:
+        """The row as the prompt's toolbar draws it, the terminal's width
+        as the pinned row measures it: the dot in the theme's error color,
+        the label a link — its ends taking no width, prompt_toolkit having
+        no links of its own. The toolbar's row is held for the whole
+        prompt, so drawing it never reflows the screen."""
+        line = self._line(shutil.get_terminal_size().columns, self._last_note())
+        marked = self._marked(line)
+        if not marked:
+            return [(_TOOLBAR, line)]
+        before, between, after, url = marked
+        opening, closing = _link_ends(url)
+        return [
+            (_TOOLBAR, before),
+            (f"{_TOOLBAR} fg:{theme().error.style}", _SERVING_DOT),
+            (_TOOLBAR, between),
+            ("[ZeroWidthEscape]", opening),
+            (_TOOLBAR, _SERVING_LABEL),
+            ("[ZeroWidthEscape]", closing),
+            (_TOOLBAR, after),
+        ]
+
     @contextlib.contextmanager
     def pinned(self) -> Iterator[None]:
-        """Hold the status line on the bottom row for the block. A no-op
-        off a TTY. The region is always released, including on Ctrl+C — a
-        stray region would leave the terminal scrolling in a short
-        window."""
+        """Hold the status line on the bottom row for the block, and on
+        past it until the next prompt takes it over (`hand_over`): released
+        at the block's end, the row would stand blank until the prompt drew
+        its toolbar, and the blank line printed before the prompt would
+        open it on the bottom row. A no-op off a TTY. Past a Ctrl+C too the
+        region is released by the next prompt, or at exit — a stray region
+        would leave the terminal scrolling in a short window."""
         if not _terminal().isatty() or os.environ.get("TERM") == "dumb":
             yield
             return
@@ -132,7 +144,7 @@ class StatusLine:
         try:
             yield
         finally:
-            self.close()
+            self._drop_note()
 
     def open(self) -> None:
         with self._lock:
@@ -170,6 +182,18 @@ class StatusLine:
             _terminal().flush()
         atexit.unregister(self.close)
 
+    def hand_over(self) -> None:
+        """Release the row to the prompt opening, before its first draw,
+        leaving it painted: that draw erases from the prompt's line down,
+        the row with it, in the same write."""
+        with self._lock:
+            if not self._open:
+                return
+            self._open = False
+            _terminal().write(f"{SAVE_CURSOR}{SCROLL_ALL}{RESTORE_CURSOR}")
+            _terminal().flush()
+        atexit.unregister(self.close)
+
     def set_note(self, note: str) -> None:
         """Say what the reply streaming is doing — a tool being called —
         ahead of the worker's words, "" for nothing; repainted when it
@@ -192,6 +216,68 @@ class StatusLine:
             self._note = note
         self.refresh()
 
+    def refresh(self) -> None:
+        """Repaint. Safe to call from the worker thread, and a no-op when
+        the row isn't held — the same callback serves the prompt toolbar."""
+        with self._lock:
+            if not self._open:
+                return
+            size = shutil.get_terminal_size()
+            if size.lines != self._rows and size.lines >= 3:
+                # Resized under us: re-reserve against the new height.
+                self._rows = size.lines
+                _terminal().write(
+                    f"{SAVE_CURSOR}{SCROLL_ABOVE.format(self._rows - 1)}{RESTORE_CURSOR}"
+                )
+            line = self._line(size.columns, self._note)
+            if marked := self._marked(line):
+                before, between, after, url = marked
+                opening, closing = _link_ends(url)
+                dot = f"{theme().error.fg}{_SERVING_DOT}{RESET}{DIM}"
+                line = f"{before}{dot}{between}{opening}{_SERVING_LABEL}{closing}{after}"
+            _terminal().write(
+                f"{SAVE_CURSOR}{GOTO_ROW.format(self._rows)}{ERASE_LINE}{DIM}{line}{RESET}{RESTORE_CURSOR}"
+            )
+            _terminal().flush()
+
+    def _line(self, width: int, note: str) -> str:
+        return _render(self._worker(), self._right_part(), width, note)
+
+    def _right_part(self) -> str:
+        """The row's right: the page served, where it is, then how full the
+        next request is at a fixed width, the two set apart by a vertical
+        line in the middle of the gap — the whole a fixed width, so the
+        mark stands still as the size changes."""
+        fill = self._fill()
+        if not self._served_at():
+            return f"{fill:>{_FILL_WIDTH}}" if fill else ""
+        mark = f"{_SERVING_DOT} {_SERVING_LABEL}"
+        if not fill:
+            return f"{mark}{'':{_FILL_WIDTH + 3}}"
+        gap = max(2, _FILL_WIDTH + 2 - len(fill))
+        left = gap // 2
+        return f"{mark}{' ' * left}|{' ' * (gap - left)}{fill}"
+
+    def _marked(self, line: str) -> tuple[str, str, str, str] | None:
+        """The line split around the served mark — what stands before the
+        dot, between it and the label, and after the label — with the
+        label's link; None where the line shows no mark."""
+        url = self._served_at()
+        before, dot, rest = line.partition(_SERVING_DOT)
+        between, label, after = rest.partition(_SERVING_LABEL)
+        if not (url and dot and label):
+            return None
+        return before, between, after, url
+
+    def _drop_note(self) -> None:
+        """End the reply's note with its window, at once."""
+        with self._lock:
+            self._cancel_clearing()
+            if not self._note:
+                return
+            self._note = ""
+        self.refresh()
+
     def _clear_note(self) -> None:
         """The waiting clear, on its timer's thread — unless a note set
         since, or the row's release, took it over."""
@@ -208,25 +294,37 @@ class StatusLine:
             self._clearing.cancel()
             self._clearing = None
 
-    def refresh(self) -> None:
-        """Repaint. Safe to call from the worker thread, and a no-op when
-        the row isn't held — the same callback serves the prompt toolbar."""
-        with self._lock:
-            if not self._open:
-                return
-            size = shutil.get_terminal_size()
-            if size.lines != self._rows and size.lines >= 3:
-                # Resized under us: re-reserve against the new height.
-                self._rows = size.lines
-                _terminal().write(
-                    f"{SAVE_CURSOR}{SCROLL_ABOVE.format(self._rows - 1)}{RESTORE_CURSOR}"
-                )
-            body = render(self._read(), self._aside(), size.columns, self._note)
-            body = body.replace(SERVING_DOT, f"{theme().error.fg}{SERVING_DOT}{RESET}{DIM}")
-            if url := self._served_at():
-                opening, closing = link_ends(url)
-                body = body.replace(SERVING_LABEL, f"{opening}{SERVING_LABEL}{closing}")
-            _terminal().write(
-                f"{SAVE_CURSOR}{GOTO_ROW.format(self._rows)}{ERASE_LINE}{DIM}{body}{RESET}{RESTORE_CURSOR}"
-            )
-            _terminal().flush()
+
+def _render(status: str, aside: str = "", width: int = 0, note: str = "") -> str:
+    """The line's text: `note`, then what the background worker is doing,
+    either blank when idle, and `aside` against the right edge of `width`
+    columns, the words on the left giving way where both do not fit. The
+    last column stays empty, so the row never wraps. ONE owner, because
+    the prompt toolbar and the pinned row draw the same line on the same
+    terminal row, and any difference between them shows up as the line
+    twitching the moment a reply starts streaming."""
+    worker = f"{_LABEL}{status}" if status else ""
+    left = f" {note}" + (f" ·{worker}" if worker else "") if note else worker
+    room = width - 1
+    if not aside or room <= len(aside):
+        return left[: max(0, room)] if width else left
+    space = room - len(aside)
+    if len(left) > space - 2:
+        left = truncate(left, max(0, space - 2))
+    return left + " " * (space - len(left)) + aside
+
+
+def _link_ends(url: str) -> tuple[str, str]:
+    """The two halves of a terminal link (OSC 8) to `url`, written around
+    its text: a terminal that makes links opens `url` from it, one that
+    does not shows the text alone. They take no width."""
+    return f"\x1b]8;;{url}\x1b\\", "\x1b]8;;\x1b\\"
+
+
+def _terminal() -> TextIO:
+    """The real terminal stream — past every `sys.stdout` wrapper. A
+    repaint is not command output: written through a dispatch window's
+    wrapper it would fire the armed lead blank or invalidate the screen
+    ledger from the repaint thread (the same rule terminal queries
+    follow)."""
+    return sys.__stdout__ if sys.__stdout__ is not None else sys.stdout

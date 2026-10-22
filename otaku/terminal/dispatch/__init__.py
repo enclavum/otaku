@@ -11,6 +11,7 @@ its own paths: the /help page, the screen cleared, the session ended. A
 handler takes the chat and the argument as typed, and answers the
 sentence to say — or None, where it said its own."""
 
+import contextlib
 from collections.abc import Callable
 
 from otaku.terminal import help as help_page
@@ -21,7 +22,14 @@ from otaku.terminal.api import reports as api_reports
 from otaku.terminal.api import settings as api_settings
 from otaku.terminal.api import stories as api_stories
 from otaku.terminal.chat.chat import Chat
-from otaku.terminal.commands import COMMANDS, SHORTCUTS, CommandSpec, is_command
+from otaku.terminal.commands import (
+    ALIASES,
+    COMMANDS,
+    SHORTCUTS,
+    CommandSpec,
+    CommandType,
+    is_command,
+)
 from otaku.terminal.dispatch import (
     app,
     cards,
@@ -56,7 +64,13 @@ def dispatch(chat: Chat, line: str) -> bool:
         return False
     spec = find(line)
     token = spec.token if spec else line.split()[0]
-    with chat.ledger.command_output(manages_screen=token in _PLAYING):
+    # A command that only prints keeps the status row standing through its
+    # run, as a reply does: the prompt's toolbar is gone the moment the
+    # line is sent. One that draws on the screen itself — erases rows,
+    # opens a screen, pages, asks — is left the whole terminal.
+    printing = spec is None or spec.kind is CommandType.OPERATION
+    row = chat.status_line.pinned() if printing else contextlib.nullcontext()
+    with chat.ledger.command_output(manages_screen=token in _PLAYING), row:
         try:
             if spec is None:
                 chat.say(unknown_notice(line))
@@ -74,8 +88,11 @@ def find(token: str) -> CommandSpec | None:
     "/set think medium" finds the "/set think" row; None for an unknown
     command (bare "/set" included: the family's usage line is `unknown_notice`'s
     to compose, below). Inliner rows (`… /ooc`) never match — they close
-    a line, they do not open one."""
+    a line, they do not open one. A hidden alias finds its command's row
+    (`commands.ALIASES`)."""
     words = token.split()
+    if words and words[0] in ALIASES:
+        words[0] = ALIASES[words[0]]
     for depth in (2, 1):
         head = " ".join(words[:depth])
         for spec in COMMANDS:
@@ -131,7 +148,7 @@ def _clear(chat: Chat, raw: str) -> None:
     chat.ledger.clear()
 
 
-def _bye(chat: Chat, raw: str) -> None:
+def _quit(chat: Chat, raw: str) -> None:
     chat.quit = True
 
 
@@ -145,7 +162,7 @@ HANDLERS: dict[str, Handler] = {
     # the terminal's own
     "/help": _help,
     "/clear": _clear,
-    "/bye": _bye,
+    "/quit": _quit,
     # the app itself (`backend.app.core`)
     "/model": app.model,
     # the installation's settings (`backend.app.settings`)

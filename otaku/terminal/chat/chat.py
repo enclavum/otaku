@@ -27,15 +27,12 @@ from otaku.terminal.api import (
 from otaku.terminal.api.stories import Story
 from otaku.terminal.chat.ledger import ScreenLedger
 from otaku.terminal.tty.render import flow_offsets, turn, unit_start
-from otaku.terminal.tty.statusline import SERVING_DOT, SERVING_LABEL, StatusLine
+from otaku.terminal.tty.statusline import StatusLine
 
 # Turns echoed when a story (re)opens (the launch, a browser pick, an
 # import), so the scene is on screen before the prompt — terminal
 # presentation policy, the web re-renders the story itself.
 RESUME_TURNS = 4
-# The width the context size stands in on the status row ("999% of 128K"),
-# so what stands left of it does not move as it changes.
-_FILL_WIDTH = 12
 
 
 class Chat:
@@ -57,7 +54,7 @@ class Chat:
     draft_layout: Layout | None
     ledger: ScreenLedger
     status_line: StatusLine
-    # The loop's exit flag: /bye (and Ctrl+D) raise it, and the run loop
+    # The loop's exit flag: /quit (and Ctrl+D) raise it, and the run loop
     # leaves after the current submission instead of unwinding mid-command.
     quit: bool
     # The submission being played is the canvas's CONTINUE — an empty
@@ -101,7 +98,12 @@ class Chat:
         # One renderer for the prompt's toolbar and the pinned row, both
         # reading the same channels, so the line never twitches at the
         # streaming handoff.
-        self.status_line = StatusLine(self.api.app.status.get, self.aside, self.served_at)
+        self.status_line = StatusLine(
+            worker=self.api.app.status.get,
+            fill=lambda: self.context_fill,
+            served_at=lambda: self.server.address if self.server is not None else "",
+            last_note=lambda: self.status_note,
+        )
         # An erase the ledger makes mid-stream takes the pinned row with it.
         self.ledger = ScreenLedger(repaint=self.status_line.refresh)
 
@@ -253,6 +255,7 @@ class Chat:
         if self.server is None:
             try:
                 self.server = web_frontend.run_beside(self.app)
+                self.status_line.refresh()  # the mark, on the row pinned meanwhile
             except web_frontend.ServeError as e:
                 # the web's own sentence, made a sentence here (it is bare
                 # for `otaku serve`'s `otaku: …` line)
@@ -265,25 +268,7 @@ class Chat:
         if self.server is not None:
             self.server.stop()
             self.server = None
-
-    def aside(self) -> str:
-        """The status row's right: the page served, its label a link to it
-        where the row is drawn (`served_at`), then how full the next request
-        is, at a fixed width."""
-        if self.server is None:
-            return f"{self.context_fill:>{_FILL_WIDTH}}" if self.context_fill else ""
-        mark = f"{SERVING_DOT} {SERVING_LABEL}"
-        if not self.context_fill:
-            return f"{mark}{'':{_FILL_WIDTH + 3}}"
-        # the two set apart by a vertical line in the middle of the gap, the
-        # whole a fixed width, so the mark stands still as the size changes
-        gap = max(2, _FILL_WIDTH + 2 - len(self.context_fill))
-        left = gap // 2
-        return f"{mark}{' ' * left}|{' ' * (gap - left)}{self.context_fill}"
-
-    def served_at(self) -> str:
-        """Where the page is served, the status row's link; "" for none."""
-        return self.server.address if self.server is not None else ""
+            self.status_line.refresh()
 
     # ---------- what it prints ----------
 

@@ -121,7 +121,7 @@ class Otaku:
         # typed into that window can be swallowed — settle before quitting.
         self._drain(1.5)
         try:
-            self.send("/bye", 0.3)
+            self.send("/quit", 0.3)
             self.send(ENTER, 0.5)
         except OSError:
             pass  # already gone

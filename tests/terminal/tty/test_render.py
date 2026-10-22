@@ -46,8 +46,13 @@ NOTES = frozenset({"note"})
 class TestCommandTokens:
     def test_names_every_command_the_help_lists(self) -> None:
         tokens = command_tokens()
-        for command in ("/me", "/you", "/ooc", "/cue", "/undo", "/set", "/info", "/bye"):
+        for command in ("/me", "/you", "/ooc", "/cue", "/undo", "/set", "/info", "/quit"):
             assert command in tokens, command
+
+    def test_names_the_hidden_aliases_too(self) -> None:
+        # typed, an alias runs its command, so it reads as one
+        tokens = command_tokens()
+        assert "/bye" in tokens and "/exit" in tokens
 
     def test_holds_each_name_once(self) -> None:
         # `/ooc` is written twice — opening a line, and inside one.

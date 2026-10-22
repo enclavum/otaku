@@ -144,7 +144,8 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
     watcher = _StreamWatcher()
     # The activity line survives the prompt's absence: entering `pinned`
     # reserves the bottom terminal row and paints the worker's status
-    # there for the whole stream; leaving it releases the row.
+    # there for the whole stream, and on until the next prompt takes the
+    # row over.
     # A failure or a refusal in story mode ends the row it broke off,
     # after every last write of the stream's own — a style reset among
     # them — has landed.

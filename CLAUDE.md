@@ -11,7 +11,7 @@ of its own, `docs/code_structure.md`, and the rules of each area one in
 
 ## What otaku is
 
-An LLM frontend for creative writing and roleplay, talking to
+An LLM frontend for roleplay and creative writing, talking to
 OpenAI-compatible servers (Ollama, omlx, KoboldCpp, and others). Chats
 are stories that can be branched from any message. A background pass
 extracts lore from played messages — scenes, characters, journals — and

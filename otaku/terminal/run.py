@@ -45,10 +45,11 @@ from otaku.terminal.tty import (
 )
 from otaku.terminal.tty.cursor import measure, terminal_width
 from otaku.terminal.tty.render import last_turns
+from otaku.terminal.tty.statusline import StatusLine
 
 
 def run(app: App) -> None:
-    """The whole terminal life over the app, until /bye or EOF: settle
+    """The whole terminal life over the app, until /quit or EOF: settle
     the theme (before anything draws — the background ask reads stdin,
     which belongs to prompt_toolkit from the first prompt on), serve the
     page beside the chat where the reader asked for it (`/set serve`),
@@ -112,9 +113,7 @@ def run(app: App) -> None:
         story=lambda: chat.story_id,
         can_attach=lambda: chat.can_attach,
         shortcuts=SHORTCUTS,
-        aside=chat.aside,
-        served_at=chat.served_at,
-        note=lambda: chat.status_note,
+        status_line=chat.status_line,
     )
 
     if launch_facts.hint:
@@ -223,7 +222,11 @@ def run(app: App) -> None:
                 placeholder=placeholder,
                 default=carry.take_text(),
                 pre_run=functools.partial(
-                    _opening, answers, prompt_session, command=carry.command_paragraph
+                    _opening,
+                    answers,
+                    prompt_session,
+                    chat.status_line,
+                    command=carry.command_paragraph,
                 ),
             )
         except EOFError:
@@ -455,9 +458,18 @@ def _plain(text: str) -> str:
     return _ESCAPE.sub("", text)
 
 
-def _opening(answers: AnswerMenu, prompt_session: PromptSession[str], *, command: bool) -> None:
-    """As each prompt opens: the question's answers read; and the command
-    paragraph's menu shown at once, its slash typed (PROTOTYPE)."""
+def _opening(
+    answers: AnswerMenu,
+    prompt_session: PromptSession[str],
+    status_line: StatusLine,
+    *,
+    command: bool,
+) -> None:
+    """As each prompt opens: the status row taken over from the reply or
+    the command that held it, before the prompt draws; the question's
+    answers read; and the command paragraph's menu shown at once, its
+    slash typed (PROTOTYPE)."""
+    status_line.hand_over()
     answers.open()
     if command:
         prompt_session.default_buffer.start_completion(select_first=False)

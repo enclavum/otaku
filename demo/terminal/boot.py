@@ -752,15 +752,15 @@ def main() -> None:
     providers_registry.ALL_CLIENTS[PROVIDER] = _build_demo_client()
     _patch_threads()
 
-    # Two doors a tab cannot honor: /set serve binds a socket, and /bye — with
-    # Ctrl+D, the app's own shortcut submitting /bye on an empty line —
+    # Two doors a tab cannot honor: /set serve binds a socket, and /quit — with
+    # Ctrl+D, the app's own shortcut submitting /quit on an empty line —
     # would end a session only a reload can restart. Both answer with
     # one sentence instead.
     def demo_disabled(chat, raw: str) -> None:
         chat.say("This command is disabled in the demo.")
 
     dispatch.HANDLERS["/set serve"] = demo_disabled
-    dispatch.HANDLERS["/bye"] = demo_disabled
+    dispatch.HANDLERS["/quit"] = demo_disabled
 
     # /card is REAL here — parser, persona ask, join, greeting all run —
     # so a bare /card points at the card the demo ships instead of

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "otaku"
 dynamic = ["version"]
-description = "LLM frontend for creative writing and roleplay"
+description = "LLM frontend for roleplay and creative writing"
 readme = "README.md"
 license = "AGPL-3.0-only"
 license-files = ["LICENSE"]

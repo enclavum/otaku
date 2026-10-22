@@ -34,7 +34,7 @@ from prompt_toolkit.utils import get_cwidth
 from otaku.formatting import printable
 from otaku.terminal.api import JoinType, Message
 from otaku.terminal.api import language as api_language
-from otaku.terminal.commands import COMMANDS
+from otaku.terminal.commands import ALIASES, COMMANDS
 from otaku.terminal.tty import DIM, user_block
 from otaku.terminal.tty.cursor import terminal_width
 from otaku.terminal.tty.theme import theme
@@ -524,6 +524,7 @@ def command_tokens() -> tuple[str, ...]:
     """Every slash word the app answers to, in table order — the commands
     typed at a line's start and the inliners typed inside one. What
     display reads to tell a command from prose: `/me` is one, `and/or`
-    is not, so a highlighter never has to guess from the slash alone."""
-    found = (word for spec in COMMANDS for word in spec.token.split())
+    is not, so a highlighter never has to guess from the slash alone. A
+    hidden alias is one too: typed, it runs its command."""
+    found = [word for spec in COMMANDS for word in spec.token.split()] + list(ALIASES)
     return tuple(dict.fromkeys(word for word in found if _COMMAND_WORD.match(word)))

@@ -650,7 +650,7 @@ _ON_THE_PAGE = {
     # The one gap that can never be filled: this command's whole purpose
     # is to serve the page, and the reader of the page is already there.
     "/set serve": "none:the page IS what it serves — it cannot serve itself",
-    "/bye": "screen:/bye",
+    "/quit": "screen:/quit",
 }
 
 

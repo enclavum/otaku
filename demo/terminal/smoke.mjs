@@ -35,13 +35,13 @@ let smokeDone = false; // set when the harness itself ends the run
 const started = Date.now();
 
 // One batch per prompt, in prompt order. The demo cannot be quit —
-// /bye answers a refusal — so once the last step's prompt has come
+// /quit answers a refusal — so once the last step's prompt has come
 // back, the bridge ends the run itself with the SMOKE-DONE throw.
 const PROMPT_STEPS = [
   { send: "Hello, river.\r", note: "play a line" },
   { send: "/regen\r", note: "regenerate" },
   { send: "/extract\r", note: "forced pass" },
-  { send: "/bye\r", note: "quit refused" },
+  { send: "/quit\r", note: "quit refused" },
 ];
 
 const count = (hay, needle) => hay.split(needle).length - 1;
@@ -68,7 +68,7 @@ const bridge = {
     if (Date.now() - started > 150000) throw new Error("smoke watchdog: 150s elapsed");
     autoRespond();
     if (sent === PROMPT_STEPS.length && count(raw, "\x1b[5 q") > sent) {
-      smokeDone = true; // the prompt after the refused /bye: the session lives on
+      smokeDone = true; // the prompt after the refused /quit: the session lives on
       throw new Error("SMOKE-DONE");
     }
     if (!inbox.length && ms !== 0) {
