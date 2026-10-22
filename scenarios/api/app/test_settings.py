@@ -2,13 +2,17 @@
 in the app's own state, and /set max_context, config.toml's [context]
 value edited in place, its one home — each remembered across a
 relaunch; and /set serve, the page served beside the chat, its switch
-in config.toml's [web].
+in config.toml's [web]. The environment's variables over the file's:
+the web's host, port, password and https, and the terminal's serving.
 """
 
 import socket
 import urllib.request
 
+import pytest
+
 from otaku.backend.app.settings.schemas import Settings
+from otaku.backend.errors import Invalid
 from otaku.backend.story.messages.schemas import Done
 from otaku.terminal.chat import stream
 from scenarios.support.harness import App, launch, set_config, set_config_provider
@@ -173,6 +177,60 @@ class TestServe:
         relaunched = launch(app.paths.root, app.server)
         assert "terminal_serve = false" in config.read_text()
         assert relaunched.api.settings.terminal.get().terminal_serve is False
+        relaunched.close()
+
+
+class TestVariables:
+    """Each web setting is the environment's where a variable sets it —
+    read with every call — and config.toml's otherwise; the file is
+    never written."""
+
+    def test_the_web_settings_are_the_variables_over_the_file(self, app: App, monkeypatch) -> None:
+        before = app.api.settings.web.get().config
+        assert (before.host, before.port, before.https) == ("localhost", 9600, False)
+        monkeypatch.setenv("OTAKU_WEB_HOST", "0.0.0.0")
+        monkeypatch.setenv("OTAKU_WEB_PORT", "9601")
+        monkeypatch.setenv("OTAKU_WEB_HTTPS", "on")
+        after = app.api.settings.web.get().config
+        assert (after.host, after.port, after.https) == ("0.0.0.0", 9601, True)
+        config = app.paths.root / "configs" / "config.toml"
+        assert 'host = "localhost"' in config.read_text()
+
+    def test_off_turns_off_what_the_file_turns_on(self, app: App, monkeypatch) -> None:
+        set_config(app.paths.root, web_https=True, web_terminal_serve=True)
+        monkeypatch.setenv("OTAKU_WEB_HTTPS", "off")
+        monkeypatch.setenv("OTAKU_TERMINAL_SERVE", "off")
+        assert app.api.settings.web.get().config.https is False
+        assert app.api.settings.terminal.get().terminal_serve is False
+
+    def test_the_terminal_serves_where_the_variable_says_so(self, app: App, monkeypatch) -> None:
+        monkeypatch.setenv("OTAKU_TERMINAL_SERVE", "on")
+        assert app.api.settings.terminal.get().terminal_serve is True
+
+    def test_the_variables_password_signs_in_and_stays_out_of_the_file(
+        self, app: App, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("OTAKU_WEB_PASSWORD", "under the stairs")
+        assert app.api.settings.web.get().config.password
+        app.api.settings.check_password("under the stairs")
+        with pytest.raises(Invalid):
+            app.api.settings.check_password("over the hills")
+        config = app.paths.root / "configs" / "config.toml"
+        assert "under the stairs" not in config.read_text()
+
+    def test_a_value_a_variable_cannot_hold_is_passed_over_and_said(
+        self, app: App, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("OTAKU_WEB_PORT", "99999")
+        monkeypatch.setenv("OTAKU_WEB_HTTPS", "yes")
+        monkeypatch.setenv("OTAKU_TERMINAL_SERVE", "sometimes")
+        relaunched = launch(app.paths.root, app.server)
+        web = relaunched.api.settings.web.get().config
+        assert (web.port, web.https) == (9600, False)
+        assert relaunched.api.settings.terminal.get().terminal_serve is False
+        notices = " ".join(relaunched.api.app.get().launch.notices)
+        for name in ("OTAKU_WEB_PORT", "OTAKU_WEB_HTTPS", "OTAKU_TERMINAL_SERVE"):
+            assert name in notices, name
         relaunched.close()
 
 

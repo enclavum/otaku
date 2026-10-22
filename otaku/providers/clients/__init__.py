@@ -1,10 +1,12 @@
 """One module per engine; the registry's `ALL_CLIENTS` maps their ids to
 the classes in the panel's canonical order. Beside them, what a local
 engine's `autoconfigure` consults about this machine: an app's own
-config file, and the command lines of the engines running now."""
+config file, the command lines of the engines running now, and the host
+its section names."""
 
 import functools
 import json
+import os
 import re
 import subprocess
 import sys
@@ -16,6 +18,15 @@ from typing import Any
 # own: theirs, never an engine to configure.
 _NOT_AN_ENGINE = ("Ollama.app", "LM Studio.app", ".lmstudio")
 _PORT_FLAG = re.compile(r"(?:^|\s)--port[= ](\d+)\b")
+# Where otaku runs apart from its engines — in a container — the name of
+# the machine they run on (the Dockerfile sets it).
+_LOCAL_ENGINES_HOST_VAR = "OTAKU_LOCAL_ENGINES_HOST"
+
+
+def local_engines_host() -> str:
+    """The host a local engine's section names: `localhost`, or the
+    machine `OTAKU_LOCAL_ENGINES_HOST` names (`host.docker.internal`)."""
+    return os.environ.get(_LOCAL_ENGINES_HOST_VAR, "").strip() or "localhost"
 
 
 def read_home_json(relative: str) -> dict[str, Any]:

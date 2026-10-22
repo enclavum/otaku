@@ -78,9 +78,10 @@ path = "otaku/__init__.py"
 [tool.hatch.build.targets.wheel]
 packages = ["otaku"]
 
-# The README's pictures are for GitHub, not for the source tarball.
+# The README's pictures are for GitHub and the container's files for a
+# checkout, not for the source tarball.
 [tool.hatch.build.targets.sdist]
-exclude = ["/images/"]
+exclude = ["/images/", "/Dockerfile", "/compose.yaml", "/.dockerignore"]
 
 [tool.ruff]
 line-length = 100

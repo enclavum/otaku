@@ -13,11 +13,17 @@ does not, so a picker cancelled without a word leaves the screen exactly
 as it was.
 """
 
+import contextlib
 import functools
 import re
+import signal
 import sys
+import threading
+from typing import Any
 
 from prompt_toolkit import PromptSession
+from prompt_toolkit.application import Application
+from prompt_toolkit.application.current import get_app_or_none
 from prompt_toolkit.formatted_text import ANSI, StyleAndTextTuples, to_formatted_text
 
 from otaku.console import banner
@@ -49,7 +55,38 @@ from otaku.terminal.tty.statusline import StatusLine
 
 
 def run(app: App) -> None:
-    """The whole terminal life over the app, until /quit or EOF: settle
+    """The whole terminal life over the app (`_run`), SIGTERM — a
+    `docker stop`, a `kill` — quitting it as /quit does (`_terminate`)."""
+    terminated = threading.Event()
+    previous = signal.signal(signal.SIGTERM, functools.partial(_terminate, terminated))
+    try:
+        _run(app, terminated)
+    except KeyboardInterrupt:
+        if not terminated.is_set():
+            raise
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+
+def _terminate(terminated: threading.Event, *_: object) -> None:
+    """SIGTERM: the loop ends. A prompt or a screen up is closed as Ctrl+C
+    closes it; anything else — a reply streaming above all — is cut as
+    Ctrl+C cuts it, what streamed kept."""
+    terminated.set()
+    running = get_app_or_none()
+    if running is not None and running.is_running and running.loop is not None:
+        running.loop.call_soon_threadsafe(_interrupt, running)
+    else:
+        raise KeyboardInterrupt
+
+
+def _interrupt(running: Application[Any]) -> None:
+    with contextlib.suppress(Exception):  # already on its way out
+        running.exit(exception=KeyboardInterrupt())
+
+
+def _run(app: App, terminated: threading.Event) -> None:
+    """The whole terminal life over the app, until /quit, EOF or SIGTERM: settle
     the theme (before anything draws — the background ask reads stdin,
     which belongs to prompt_toolkit from the first prompt on), serve the
     page beside the chat where the reader asked for it (`/set serve`),
@@ -159,7 +196,7 @@ def run(app: App) -> None:
     prompt_session.default_buffer.on_text_changed += lambda _buf: app.note_typing()
     app.start_worker(on_status=repaint)
 
-    while not chat.quit:
+    while not chat.quit and not terminated.is_set():
         # The story as it stands: played on, or deleted, elsewhere since
         # this terminal last drew it — the page served beside it above all.
         landing.catch_up(chat)

@@ -167,7 +167,7 @@ def bind(
         (config.host, config.port),
         Handler,
         app=app,
-        address=banner.address(config),
+        address=banner.link_target(config),
         custom_web_dir=custom_web_dir,
         hooks=hooks,
         tls_context=tls_context,

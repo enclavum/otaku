@@ -74,14 +74,7 @@ def main(ctx: click.Context) -> None:
 
 
 @main.command(short_help="Serve the web interface")
-@click.option("--host", metavar="HOST", help="Override host from settings.")
-@click.option(
-    "--port",
-    metavar="PORT",
-    type=click.IntRange(1, 65535),
-    help="Override port from settings.",
-)
-def serve(host: str | None, port: int | None) -> None:
+def serve() -> None:
     """Serve otaku's web interface until interrupted, address and port
     are configured in ~/.otaku/configs/config.toml."""
     ctx = click.get_current_context()
@@ -96,7 +89,7 @@ def serve(host: str | None, port: int | None) -> None:
         ctx.exit(1)
     restart = False
     try:
-        restart = web_frontend.run(app, host=host, port=port)
+        restart = web_frontend.run(app)
     except web_frontend.ServeError as e:
         # An address that cannot be listened on: another otaku already
         # has it, the host does not name this machine, the port is the

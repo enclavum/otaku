@@ -5,13 +5,16 @@ only journeys that need the real REPL (keybindings, pickers on screen,
 process lifecycle) live here.
 """
 
+import signal
 import socket
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
+from otaku.backend.api import Api
 from otaku.backend.app.paths import Paths
+from otaku.backend.launch import open_app
 from otaku.settings import state as state_mod
 from otaku.terminal.tty import PROMPT_CONTINUATION
 from scenarios.support import server as scripted
@@ -106,7 +109,7 @@ class TestServe:
         address said again — and Ctrl+D stops for good, as Ctrl+C does."""
         state = tmp_path / "state"
         set_config_provider(state, server)
-        terminal = Terminal(str(state), args=("serve", "--port", str(_free_port())))
+        terminal = Terminal(str(state), args=("serve",), env={"OTAKU_WEB_PORT": str(_free_port())})
         terminal.expect("Running on", timeout=20.0)
         _pressed_until(terminal, CTRL_R, "Restarting", timeout=20.0)
         _expect_count(terminal, "Running on", 2, timeout=20.0)
@@ -118,7 +121,7 @@ class TestServe:
         state = tmp_path / "state"
         set_config_provider(state, server)
         port = _free_port()
-        terminal = Terminal(str(state), args=("web", "--port", str(port)))
+        terminal = Terminal(str(state), args=("web",), env={"OTAKU_WEB_PORT": str(port)})
         _waited(lambda: _listening(port))
         _pressed_until(terminal, CTRL_D, "Shutting down", timeout=20.0)
         assert terminal.wait() == 0
@@ -150,6 +153,49 @@ class TestServe:
         terminal = launch_remembered(server, state, env={"OTAKU_WEB_PORT": str(port)})
         _waited(lambda: _listening(port))
         assert terminal.quit() == 0
+        assert not _listening(port)
+
+
+class TestSigterm:
+    """SIGTERM — a `docker stop`, a `kill` — is an orderly stop in both
+    frontends: the chat quits as /quit does, a reply streaming kept as far
+    as it came; `otaku serve` shuts down as at the first Ctrl+C."""
+
+    def test_at_the_prompt_the_chat_quits(self, server: ModelServer, tmp_path: Path) -> None:
+        terminal = launch_remembered(server, tmp_path / "state")
+        terminal.settle()
+        terminal.send_signal(signal.SIGTERM)
+        assert terminal.wait() == 0
+
+    def test_mid_reply_what_streamed_is_kept(self, server: ModelServer, tmp_path: Path) -> None:
+        state = tmp_path / "state"
+        terminal = launch_remembered(server, state)
+        server.chunk_delay = 0.4  # a slow model — the reply arrives in beats
+        server.script = lambda body: "The corridor stretches on, deeper into the dark."
+        terminal.send("I walk the corridor.")
+        terminal.send(ENTER, 0.2)
+        terminal.expect("The corridor")  # streaming has begun
+        terminal.send_signal(signal.SIGTERM)
+        assert terminal.wait() == 0
+        app = open_app(state)
+        try:
+            api = Api(app)
+            story = api.settings.get().last_story
+            assert story is not None
+            reply = api.stories.messages.list(story)[-1]
+            assert reply.role == "assistant"
+            assert reply.body.startswith("The corridor")
+        finally:
+            app.close()
+
+    def test_otaku_serve_shuts_down(self, server: ModelServer, tmp_path: Path) -> None:
+        state = tmp_path / "state"
+        set_config_provider(state, server)
+        port = _free_port()
+        terminal = Terminal(str(state), args=("serve",), env={"OTAKU_WEB_PORT": str(port)})
+        _waited(lambda: _listening(port))
+        terminal.send_signal(signal.SIGTERM)
+        assert terminal.wait() == 0
         assert not _listening(port)
 
 

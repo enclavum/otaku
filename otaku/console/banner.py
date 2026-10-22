@@ -27,6 +27,10 @@ _MARK = """
  █▌▐█
 """
 
+# The spellings of "every interface" — `web.server.base._WILDCARD`'s, as
+# `console` imports nothing above it.
+_WILDCARD = ("0.0.0.0", "::", "")
+
 
 @dataclass(frozen=True)
 class AppFacts:
@@ -111,7 +115,11 @@ def render_web(where: WebFacts) -> str:
     warning."""
     style = _style()
     note = f"{style.dim} (password set){style.reset}" if where.password else ""
-    rows = [_name(style), f"{style.dim}Running on{style.reset} {address(where)}{note}"]
+    shown = address(where)
+    if style is _COLOUR:  # a link where escapes are written at all
+        opening, closing = link_ends(link_target(where))
+        shown = f"{opening}{shown}{closing}"
+    rows = [_name(style), f"{style.dim}Running on{style.reset} {shown}{note}"]
     if _is_public(where.host):
         missing = [
             name
@@ -151,8 +159,28 @@ def address(where: WebFacts) -> str:
     """The URL the banner prints and a reader pastes: the host as
     configured, `127.0.0.1` read as `localhost`, the scheme's own port
     left unsaid."""
+    return _url(where.host, where)
+
+
+def link_target(where: WebFacts) -> str:
+    """The URL a link to the page opens: `address`, but for a wildcard
+    host — every interface, no machine a browser can open — `localhost`,
+    where the page answers too. Shown, the address stays the wildcard: it
+    says the page is public."""
+    host = "localhost" if where.host.strip("[]") in _WILDCARD else where.host
+    return _url(host, where)
+
+
+def link_ends(url: str) -> tuple[str, str]:
+    """The two halves of a terminal link (OSC 8) to `url`, written around
+    its text: a terminal that makes links opens `url` from it, one that
+    does not shows the text alone. They take no width."""
+    return f"\x1b]8;;{url}\x1b\\", "\x1b]8;;\x1b\\"
+
+
+def _url(host: str, where: WebFacts) -> str:
     scheme = "https" if where.https else "http"
-    reachable = "localhost" if where.host == "127.0.0.1" else where.host
+    reachable = "localhost" if host == "127.0.0.1" else host
     if where.port == (443 if where.https else 80):
         return f"{scheme}://{reachable}"
     return f"{scheme}://{reachable}:{where.port}"

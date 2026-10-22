@@ -97,18 +97,14 @@ key.
 
 ## Installation
 
-The script first installs the `uv` package manager — if you don't have it yet — and then
-installs otaku with it.
-
-macOS and Linux:
+The recommended way is the installation script, which first installs the `uv` package manager — if
+you don't have it yet — and then installs otaku with it.
 
 ```bash
+# macOS and Linux
 curl -LsSf https://otaku.sh/install.sh | sh
-```
 
-Windows:
-
-```powershell
+# Windows
 irm https://otaku.sh/install.ps1 | iex
 ```
 
@@ -118,9 +114,24 @@ Other ways to install:
 # directly with uv
 uv tool install otaku
 
-# alternatively, via Homebrew
+# with Homebrew
 brew trust enclavum/tap
 brew install enclavum/tap/otaku
+
+# run in docker with the repo checked out
+docker compose up -d
+
+# run in docker without checking out the repo
+docker compose -f https://github.com/enclavum/otaku.git up -d
+```
+
+Note: when running otaku in docker, you can also attach to its terminal interface with the command
+below, but it doesn't work as intended there, because the docker TTY is not a proper terminal. To
+use the terminal interface, install otaku without docker.
+
+```bash
+# Ctrl+D leaves the terminal interface; otaku keeps running
+docker compose attach --detach-keys=ctrl-d otaku
 ```
 
 How to update:

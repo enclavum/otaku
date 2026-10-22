@@ -8,6 +8,7 @@ does is the caller's.
 """
 
 import contextlib
+import errno
 import os
 import select
 import sys
@@ -91,7 +92,13 @@ def _unlined(fd: int) -> Iterator[None]:
         yield
         return
     before = termios.tcgetattr(fd)
-    tty.setcbreak(fd)
+    while True:
+        try:
+            tty.setcbreak(fd)
+            break
+        except termios.error as e:
+            if e.args[0] != errno.EINTR:  # a signal landed mid-call: again
+                raise
     try:
         yield
     finally:

@@ -43,6 +43,7 @@ from typing import TextIO
 
 from prompt_toolkit.formatted_text import StyleAndTextTuples
 
+from otaku.console.banner import link_ends
 from otaku.formatting import truncate
 from otaku.terminal.tty import (
     DIM,
@@ -117,7 +118,7 @@ class StatusLine:
         if not marked:
             return [(_TOOLBAR, line)]
         before, between, after, url = marked
-        opening, closing = _link_ends(url)
+        opening, closing = link_ends(url)
         return [
             (_TOOLBAR, before),
             (f"{_TOOLBAR} fg:{theme().error.style}", _SERVING_DOT),
@@ -232,7 +233,7 @@ class StatusLine:
             line = self._line(size.columns, self._note)
             if marked := self._marked(line):
                 before, between, after, url = marked
-                opening, closing = _link_ends(url)
+                opening, closing = link_ends(url)
                 dot = f"{theme().error.fg}{_SERVING_DOT}{RESET}{DIM}"
                 line = f"{before}{dot}{between}{opening}{_SERVING_LABEL}{closing}{after}"
             _terminal().write(
@@ -312,13 +313,6 @@ def _render(status: str, aside: str = "", width: int = 0, note: str = "") -> str
     if len(left) > space - 2:
         left = truncate(left, max(0, space - 2))
     return left + " " * (space - len(left)) + aside
-
-
-def _link_ends(url: str) -> tuple[str, str]:
-    """The two halves of a terminal link (OSC 8) to `url`, written around
-    its text: a terminal that makes links opens `url` from it, one that
-    does not shows the text alone. They take no width."""
-    return f"\x1b]8;;{url}\x1b\\", "\x1b]8;;\x1b\\"
 
 
 def _terminal() -> TextIO:

@@ -125,6 +125,10 @@ class Terminal:
         missing = [m for m in markers if m not in self.transcript]
         raise AssertionError(f"never saw {missing!r} in:\n{self.transcript[-2000:]}")
 
+    def send_signal(self, sig: int) -> None:
+        """Send `sig` to the app — a `docker stop`'s SIGTERM, say."""
+        self._proc.send_signal(sig)
+
     def quit(self, *, timeout: float = 10.0) -> int:
         """End the session (Ctrl+D past any open UI) and return the exit
         code."""

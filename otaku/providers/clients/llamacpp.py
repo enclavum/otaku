@@ -21,7 +21,7 @@ import time
 from collections.abc import Callable, Sequence
 from typing import Any, ClassVar
 
-from otaku.providers.clients import launched_port
+from otaku.providers.clients import launched_port, local_engines_host
 from otaku.providers.errors import ProviderError, StatusError, UnreachableError
 from otaku.providers.http import ASK_TIMEOUT, PROBE_TIMEOUT, Cut, Http, StreamCut, positive_int
 from otaku.providers.openai import reasoning, templates
@@ -521,4 +521,4 @@ class LlamaCppClient(OpenAIClient):
         # own flag is read, else the standard default. The server is
         # `llama-server`, or the unified binary's `llama serve`.
         port = launched_port("llama-server") or launched_port("llama serve") or 8080
-        return ProviderConfig(name=cls.id, url=f"http://localhost:{port}/v1")
+        return ProviderConfig(name=cls.id, url=f"http://{local_engines_host()}:{port}/v1")

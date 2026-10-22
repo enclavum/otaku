@@ -11,7 +11,7 @@ not say, so no effort is reported as honoured or not.
 
 from typing import Any, ClassVar
 
-from otaku.providers.clients import read_home_json
+from otaku.providers.clients import local_engines_host, read_home_json
 from otaku.providers.errors import StatusError
 from otaku.providers.http import PROBE_TIMEOUT, Cut, Http, positive_int
 from otaku.providers.openai import reasoning
@@ -208,5 +208,5 @@ class LmStudioClient(OpenAIClient):
         """The first-run section, its port from LM Studio's own server
         config file."""
         port = read_home_json(".lmstudio/.internal/http-server-config.json").get("port")
-        url = f"http://localhost:{port if isinstance(port, int) else 1234}/v1"
+        url = f"http://{local_engines_host()}:{port if isinstance(port, int) else 1234}/v1"
         return ProviderConfig(name=cls.id, url=url)

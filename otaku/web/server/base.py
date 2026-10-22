@@ -89,7 +89,7 @@ class Hooks:
 class Server(ThreadingHTTPServer):
     """The threading server plus what a handler needs: the app and the
     interface over it, where the reader's own files live, and the hooks —
-    and where it is (`address`), as the banner says it, and its `stop`.
+    and where it is (`address`), as a link to it opens it, and its `stop`.
     Daemon threads because a held-open event stream must never outlive the
     interrupt that stopped the server."""
 

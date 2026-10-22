@@ -1,0 +1,9 @@
+# The build context is what the install reads and nothing else, so a
+# checkout's private and generated files never reach a builder.
+*
+!pyproject.toml
+!README.md
+!LICENSE
+!otaku/
+**/__pycache__
+**/*.py[cod]

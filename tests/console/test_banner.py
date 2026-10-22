@@ -6,7 +6,7 @@ with — so the cases that matter are the ones nobody runs.
 
 import pytest
 
-from otaku.console.banner import _is_public, address, render_web
+from otaku.console.banner import _is_public, address, link_target, render_web
 from otaku.settings.config import WebSettings
 
 
@@ -38,6 +38,25 @@ class TestAddress:
 
     def test_there_is_no_trailing_slash(self) -> None:
         assert not address(WebSettings()).endswith("/")
+
+
+class TestLinkTarget:
+    """`banner.link_target` — the url a link to the page opens: the
+    address, but a wildcard — every interface, no machine a browser can
+    open — opened as `localhost`, where the page answers too."""
+
+    def test_a_wildcard_opens_as_localhost(self) -> None:
+        for host in ("0.0.0.0", "::", "[::]"):
+            assert link_target(WebSettings(host=host)) == "http://localhost:9600", host
+
+    def test_every_other_host_opens_as_the_address_reads(self) -> None:
+        for host in ("localhost", "127.0.0.1", "192.168.1.5", "otaku.local"):
+            settings = WebSettings(host=host)
+            assert link_target(settings) == address(settings), host
+
+    def test_the_scheme_and_the_port_are_the_addresses(self) -> None:
+        assert link_target(WebSettings(host="0.0.0.0", https=True)) == "https://localhost:9600"
+        assert link_target(WebSettings(host="0.0.0.0", port=80)) == "http://localhost"
 
 
 class TestRenderWeb:

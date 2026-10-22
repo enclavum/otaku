@@ -24,6 +24,7 @@ from otaku.backend.api import Api
 from otaku.backend.app import passwords
 from otaku.backend.app.core.services import App, LaunchFacts
 from otaku.backend.app.paths import Paths
+from otaku.backend.app.settings import services as domain_settings
 from otaku.backend.errors import NO_MODEL_HINT
 from otaku.encryption import AskSecret, Cipher, SealedError
 
@@ -159,6 +160,7 @@ def open_app(root: str | Path | None = None, *, ask_secret: AskSecret | None = N
     if stale:
         app._update_state_config(best_effort=True, **stale)
     notices += app._make_current()
+    notices += domain_settings.unusable_variables()
     hint = ""
     if fresh and config.seed_sample:
         notices += samples.seed(app)

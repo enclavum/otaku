@@ -46,9 +46,8 @@ behind a reply and leave every screen dead while the model talks.
   fault and the credential guard's 401 never carry a `detail`.
 - **A port outside 1–65535 never reaches the bind**, whichever source
   names it: the file's is clamped at load (`settings.config`),
-  `OTAKU_WEB_PORT`'s is rejected (`web.run.settings`), `--port` is
-  refused by the parser (`cli`) — the address is printed before the
-  bind.
+  `OTAKU_WEB_PORT`'s is passed over (`settings.services.get_web_settings`)
+  and the launch says so — the address is printed before the bind.
 - **The state dir's `web/`** (`custom.css`, `fonts/`) is the reader's
   alone, never written by the app; the `--otk-*` tokens and documented
   hooks are a public contract (`docs/web_tokens.md`), a rename a

@@ -3,8 +3,9 @@ last landed in, the /set switches), config.toml's (the context limit,
 how long the prompt stands idle, the two frontends' slices) and the
 settings table's shared reminder — read fresh, written over the file as
 it stands, a write that cannot land refused (`Unavailable`), the last
-story alone best effort. And the web sign-in's check, against the hash
-config.toml holds.
+story alone best effort. And the web's slice in force, the command line
+and the environment over the file (`get_web_settings`), with the sign-in's
+check against its password.
 
 The context limit LIVES in config.toml's [context], as `max_context`,
 beside head_messages and min_tail_messages (docs/context_design.md's
@@ -13,7 +14,9 @@ provider-field saves are the precedent — rather than shadowed from a
 second file.
 """
 
-from dataclasses import dataclass
+import functools
+import os
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from otaku.backend.app import passwords
@@ -23,6 +26,15 @@ from otaku.formatting import toml_scalar
 from otaku.settings import row
 from otaku.settings.config import TerminalSettings, WebSettings
 from otaku.settings.migrations import surgery
+
+# The web's host, port, sign-in password and https (on/off), and whether
+# the terminal serves the web beside it (on/off), from the environment,
+# over config.toml's.
+_TERMINAL_SERVE_VAR = "OTAKU_TERMINAL_SERVE"
+_WEB_HOST_VAR = "OTAKU_WEB_HOST"
+_WEB_PORT_VAR = "OTAKU_WEB_PORT"
+_WEB_PASSWORD_VAR = "OTAKU_WEB_PASSWORD"
+_WEB_HTTPS_VAR = "OTAKU_WEB_HTTPS"
 
 
 @dataclass(frozen=True)
@@ -59,23 +71,68 @@ def get_settings(app: App) -> AppSettings:
 
 
 def get_terminal_settings(app: App) -> TerminalSettings:
-    """The terminal frontend's slice of config.toml: its looks."""
-    return app._config().terminal
+    """The terminal frontend's slice of config.toml: its looks, and
+    whether it serves the web beside it — `OTAKU_TERMINAL_SERVE` (on/off)
+    over the file's, read with every call."""
+    terminal = app._config().terminal
+    env_serve = os.environ.get(_TERMINAL_SERVE_VAR, "").strip().lower()
+    if env_serve in ("on", "off"):
+        terminal = replace(terminal, terminal_serve=env_serve == "on")
+    return terminal
 
 
 def get_web_settings(app: App) -> tuple[WebSettings, Path, Path]:
-    """The web frontend's slice of config.toml, and the two directories
-    it serves from: the reader's own (custom.css, fonts/) and the TLS
-    pair's."""
-    return app._config().web, app._paths.custom_web_dir, app._paths.cert_dir
+    """The web frontend's slice in force, and the two directories it
+    serves from: the reader's own (custom.css, fonts/) and the TLS pair's.
+    Each setting is the environment's where a variable sets it — read
+    with every call, so one set while otaku runs is the next server's —
+    and config.toml's otherwise. A variable that holds no value — a port
+    out of range, https neither on nor off — is passed over, and the
+    launch says so (`unusable_variables`)."""
+    web = app._config().web
+    env_host = os.environ.get(_WEB_HOST_VAR, "").strip()
+    if env_host:
+        web = replace(web, host=env_host)
+    env_port = os.environ.get(_WEB_PORT_VAR, "").strip()
+    if env_port.isdigit() and 1 <= int(env_port) <= 65535:
+        web = replace(web, port=int(env_port))
+    env_password = os.environ.get(_WEB_PASSWORD_VAR, "")
+    if env_password:
+        web = replace(web, password=_hashed(env_password))
+    env_https = os.environ.get(_WEB_HTTPS_VAR, "").strip().lower()
+    if env_https in ("on", "off"):
+        web = replace(web, https=env_https == "on")
+    return web, app._paths.custom_web_dir, app._paths.cert_dir
+
+
+def unusable_variables() -> list[str]:
+    """A sentence for each settings variable set to what it cannot hold,
+    the file's value used in its place — for the launch to say."""
+    said = []
+    port = os.environ.get(_WEB_PORT_VAR, "").strip()
+    if port and not (port.isdigit() and 1 <= int(port) <= 65535):
+        said.append(f"{_WEB_PORT_VAR}={port!r} is not a port; config.toml's is used.")
+    for name in (_WEB_HTTPS_VAR, _TERMINAL_SERVE_VAR):
+        value = os.environ.get(name, "").strip()
+        if value and value.lower() not in ("on", "off"):
+            said.append(f"{name}={value!r} is neither on nor off; config.toml's is used.")
+    return said
+
+
+@functools.cache
+def _hashed(password: str) -> str:
+    """The environment's password hashed once per run: hashing is slow on
+    purpose and `get_web_settings` runs on every read of the slice, and
+    one hash keeps sign-ins valid across `/set serve off` and `on`."""
+    return passwords.hash(password)
 
 
 def check_password(app: App, password: str) -> None:
-    """Check `password` against the web sign-in's, whose hash config.toml
-    holds — slow on purpose. Safe from any thread: it reads the config
-    alone. Raises Conflict where no password is set, Invalid where it is
-    not the one."""
-    password_hash = app._config().web.password
+    """Check `password` against the web sign-in's, whose hash the slice
+    in force holds (`get_web_settings`) — slow on purpose. Safe from any
+    thread: it reads the config alone. Raises Conflict where no password
+    is set, Invalid where it is not the one."""
+    password_hash = get_web_settings(app)[0].password
     if not password_hash:
         raise Conflict("This otaku asks for no password.")
     if not passwords.check(password, password_hash):

@@ -16,21 +16,18 @@ orderly stop are all wired here — so `server` stays HTTP. The app's
 thread is the backend's own (`App.run`): this one only waits for the
 stop.
 
-`settings` is where this frontend listens: the app's own `[web]`
-slice, with the development port override laid over it. The address is
-the medium, like a key binding or a column width — so a frontend reads
-one slice and only its own, and gets it the way the terminal gets its
-looks, off the app rather than out of the file.
+Where it listens is the app's own `[web]` slice in force
+(`api.settings.web.get`), the environment's over the file's. The address is the medium, like a key
+binding or a column width — so a frontend reads one slice and only its
+own, and gets it the way the terminal gets its looks, off the app rather
+than out of the file.
 """
 
 import contextlib
-import os
 import signal
 import ssl
-import sys
 import threading
 from collections.abc import Callable
-from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -40,16 +37,11 @@ from otaku.web.api.app.settings import WebSettings
 from otaku.web.cert import CertError, get_context
 from otaku.web.server import Hooks, Server, bind
 
-__all__ = ["ServeError", "Server", "run", "run_beside", "settings"]
+__all__ = ["ServeError", "Server", "run", "run_beside"]
 
 # How often the serving thread polls its wait for the stop (`server.stopping`)
 # — a stop no event announces, the timeout is what notices it.
 _STOP_POLL_INTERVAL = 0.25
-
-# For working ON otaku, and deliberately unadvertised (`settings`).
-# There is no host variable to match — which interface a server answers
-# on is a decision, and a decision belongs in the file.
-_PORT_VAR = "OTAKU_WEB_PORT"
 
 
 class ServeError(Exception):
@@ -62,7 +54,7 @@ class ServeError(Exception):
 # ---------- its two lives ----------
 
 
-def run(app: App, *, host: str | None = None, port: int | None = None) -> bool:
+def run(app: App) -> bool:
     """This frontend's whole life over the app, as `chat.run` is the
     terminal's: what its launch had to say, where the page is, and
     the tail of requests until the reader stops it. Everything printed
@@ -71,10 +63,7 @@ def run(app: App, *, host: str | None = None, port: int | None = None) -> bool:
     Closing the app stays the caller's, as it is for the other
     frontend. Returns whether the reader asked to be served again on
     fresh sources (Ctrl+R) — which is the caller's to do, over an app
-    it has closed.
-
-    `host` and `port` are a caller overriding where it listens for this
-    run — the command line's own, laid over the configured address."""
+    it has closed."""
     # The launch's own reports have nowhere to go in a browser that is
     # not open yet, so they go where the reader is: the terminal they
     # typed in, one blank line after the lot, as the terminal's launch
@@ -85,11 +74,10 @@ def run(app: App, *, host: str | None = None, port: int | None = None) -> bool:
     if notices:
         print()
     setup = Api(app).settings.web.get()
-    config = settings(setup.config, host=host, port=port)
     # Said before the socket is bound, because the address is the
     # configuration's and not the socket's answer: a reader can be
     # opening the page while the first request is still arriving.
-    print(banner.render_web(config))
+    print(banner.render_web(setup.config))
     # The last few requests, kept under the address and rewritten in
     # place: proof that the browser is reaching this server, in a
     # terminal that stays the height it started at. It owns the terminal
@@ -113,7 +101,7 @@ def run(app: App, *, host: str | None = None, port: int | None = None) -> bool:
 
         restart = _serve(
             app,
-            config,
+            setup.config,
             setup.custom_dir,
             setup.cert_dir,
             show=tail.show,
@@ -132,8 +120,7 @@ def run_beside(app: App) -> Server:
     the terminal as `otaku serve` rings it. Raises ServeError where the
     address cannot be served."""
     setup = Api(app).settings.web.get()
-    config = settings(setup.config)
-    server = _bind_server(app, config, setup.custom_dir, setup.cert_dir, None)
+    server = _bind_server(app, setup.config, setup.custom_dir, setup.cert_dir, None)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server
 
@@ -152,8 +139,8 @@ def _serve(
 ) -> bool:
     """Serve the app until interrupted — the composition root
     under `run`, the background worker started here for the same reason
-    `chat.run` starts it. `config` is the configured address (`settings`
-    below); `custom_web_dir` is the state dir's own web directory, where
+    `chat.run` starts it. `config` is the address in force
+    (`api.settings.web`); `custom_web_dir` is the state dir's own web directory, where
     the reader's `custom.css` lives and nothing else is ever read from;
     `cert_dir` is where the TLS pair lives, read only when the address
     says https. Closing the app stays the caller's, like every other
@@ -164,7 +151,8 @@ def _serve(
     for the door — where either APPEARS is the caller's, because this
     package draws nothing in a terminal.
 
-    Ctrl+C is only wired when this runs on the main thread, because that
+    Ctrl+C — and SIGTERM, a `docker stop` or a `kill`, taken as the first
+    Ctrl+C — is only wired when this runs on the main thread, because that
     is the only thread a signal handler can be installed from — and the
     keys at the terminal (Ctrl+D as Ctrl+C, Ctrl+R as a stop that asks to
     be served again) are watched only there too. Returns whether Ctrl+R
@@ -185,6 +173,8 @@ def _serve(
         if on_main
         else None
     )
+    halt = _stopping(server.stopping, stopping, "Shutting down…")
+    was_term = signal.signal(signal.SIGTERM, lambda *_: halt()) if on_main else None
     # The keys the terminal answers while it serves: Ctrl+D is Ctrl+C,
     # and — for `otaku serve`, whose process is its own to replace —
     # Ctrl+R is a stop that asks to be served again on fresh sources.
@@ -211,6 +201,8 @@ def _serve(
     finally:
         if was is not None:
             signal.signal(signal.SIGINT, was)
+        if was_term is not None:
+            signal.signal(signal.SIGTERM, was_term)
         server.stop()
     return asked.is_set()
 
@@ -314,34 +306,3 @@ def _get_tls_context(
     except CertError as e:
         where = app.record_crash("web certificate", e)
         raise ServeError(f"{e}" + (f" (recorded in {where})" if where else "")) from e
-
-
-# ---------- where it listens ----------
-
-
-def settings(
-    config: WebSettings, *, host: str | None = None, port: int | None = None
-) -> WebSettings:
-    """Where this frontend listens: the app's own `[web]` slice, with
-    what outranks it laid over. The slice arrives from the app as the
-    terminal's looks do — a frontend reads one slice and only its own,
-    and neither reads the file for itself.
-
-    Three answers, in the order they win. The FILE is the standing one, a
-    decision made once and kept. `OTAKU_WEB_PORT` moves a development
-    server off it so a real otaku can keep the port — unadvertised, and
-    applied here rather than in `cli` because which port this frontend
-    listens on is its own business wherever the answer comes from. An
-    explicit `host` or `port` beats both: it was typed for this run, by
-    somebody who is watching it."""
-    wanted = os.environ.get(_PORT_VAR, "").strip()
-    if wanted:
-        if wanted.isdigit() and 1 <= int(wanted) <= 65535:
-            config = replace(config, port=int(wanted))
-        else:
-            print(f"otaku: ignoring {_PORT_VAR}={wanted!r} — not a port number", file=sys.stderr)
-    if host is not None:
-        config = replace(config, host=host)
-    if port is not None:
-        config = replace(config, port=port)
-    return config

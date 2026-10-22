@@ -14,7 +14,7 @@ frontend's whole life over it — as `terminal.run.run` is the terminal's;
 `web.run_beside` serves an app the terminal holds, beside its chat
 (`/set serve`). What this package reads
 of the state dir is its own medium and nothing else: where to listen
-(the `[web]` slice of config.toml, `web.settings`) and the reader's own
+(the `[web]` slice in force, `api.settings.web`) and the reader's own
 `web/` directory.
 
 Four parts, one job each: `run` is the life (the banner, the tail,
@@ -23,6 +23,6 @@ what the page may ask, as tables; `cert` is the TLS pair it serves
 under. The thread that owns the app is the backend's (`App.run`).
 """
 
-from otaku.web.run import ServeError, Server, run, run_beside, settings
+from otaku.web.run import ServeError, Server, run, run_beside
 
-__all__ = ["ServeError", "Server", "run", "run_beside", "settings"]
+__all__ = ["ServeError", "Server", "run", "run_beside"]
