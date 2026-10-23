@@ -31,6 +31,10 @@ from scenarios.support.harness import App, launch, set_config_provider
 from scenarios.support.screens import ENTER, ESC, run_screen
 from scenarios.support.server import ModelServer
 
+# A picker's watchdog outlasts the five seconds its rows may take to land
+# before its keys are read (`settled_pick`): a slow runner needs them.
+_SETTLING = 10.0
+
 
 class TestThink:
     def test_a_level_is_set_and_remembered(self, app: App, capsys) -> None:
@@ -753,7 +757,7 @@ class TestManagedPicker:
         app, server = self.launch_managed(tmp_path)
         try:
             with contextlib.suppress(EOFError):
-                run_screen("ly" + ESC, lambda: self.settled_pick(app))
+                run_screen("ly" + ESC, lambda: self.settled_pick(app), patience=_SETTLING)
             assert server.loaded == {"alpha"}
             # The load request carried the provider's keep_alive.
             load = next(r for r in server.requests if r.get("prompt") == "")
@@ -766,10 +770,10 @@ class TestManagedPicker:
         app, server = self.launch_managed(tmp_path)
         try:
             with contextlib.suppress(EOFError):
-                run_screen(_DOWN + "x" + ESC, lambda: self.settled_pick(app))
+                run_screen(_DOWN + "x" + ESC, lambda: self.settled_pick(app), patience=_SETTLING)
             assert _extraction(app) == "ollama/beta"
             with contextlib.suppress(EOFError):
-                run_screen(_DOWN + "x" + ESC, lambda: self.settled_pick(app))
+                run_screen(_DOWN + "x" + ESC, lambda: self.settled_pick(app), patience=_SETTLING)
             assert _pinned(app) == ""
             assert _model(app) == "alpha"  # the story's model never moved
         finally:
@@ -828,7 +832,7 @@ class TestManagedPicker:
         server.loaded = {"alpha"}
         try:
             with contextlib.suppress(EOFError):
-                run_screen("uy" + ESC, lambda: self.settled_pick(app))
+                run_screen("uy" + ESC, lambda: self.settled_pick(app), patience=_SETTLING)
             assert server.loaded == set()
             unload = next(r for r in server.requests if r.get("keep_alive") == 0)
             assert unload["model"] == "alpha"
@@ -868,7 +872,7 @@ class TestManagedPicker:
             return picker.run()
 
         try:
-            notice = run_screen(ENTER, settled)
+            notice = run_screen(ENTER, settled, patience=_SETTLING)
             assert notice is not None and "ollama/beta" in notice
         finally:
             app.close()
@@ -877,7 +881,7 @@ class TestManagedPicker:
     def test_enter_on_a_not_loaded_model_loads_it_first(self, tmp_path) -> None:
         app, server = self.launch_managed(tmp_path)
         try:
-            notice = run_screen(ENTER, lambda: self.settled_pick(app))
+            notice = run_screen(ENTER, lambda: self.settled_pick(app), patience=_SETTLING)
             # The pick EXECUTES the switch and answers with its notice —
             # here a no-op notice, since the launch already stood on it.
             assert notice is not None and "ollama/alpha" in notice

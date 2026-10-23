@@ -124,7 +124,7 @@ class TestServe:
         set_config_provider(state, server)
         port = _free_port()
         terminal = Terminal(str(state), args=("web",), env={"OTAKU_WEB_PORT": str(port)})
-        _waited(lambda: _listening(port))
+        _waited(terminal, lambda: _listening(port))
         _pressed_until(terminal, CTRL_D, "Shutting down", timeout=20.0)
         assert terminal.wait() == 0
 
@@ -138,11 +138,11 @@ class TestServe:
         terminal = launch_remembered(server, tmp_path / "state", env={"OTAKU_WEB_PORT": str(port)})
         terminal.send("/set serve on")
         terminal.send(ENTER, 1.0)
-        _waited(lambda: _listening(port))
+        _waited(terminal, lambda: _listening(port))
         play(terminal, "I enter the hall.", "stirred")
         terminal.send("/set serve off")
         terminal.send(ENTER, 1.0)
-        _waited(lambda: not _listening(port))
+        _waited(terminal, lambda: not _listening(port))
         play(terminal, "I look around.", "stirred")
         assert terminal.quit() == 0
 
@@ -153,7 +153,7 @@ class TestServe:
         set_config(state, web_terminal_serve=True)
         port = _free_port()
         terminal = launch_remembered(server, state, env={"OTAKU_WEB_PORT": str(port)})
-        _waited(lambda: _listening(port))
+        _waited(terminal, lambda: _listening(port))
         assert terminal.quit() == 0
         assert not _listening(port)
 
@@ -195,7 +195,7 @@ class TestSigterm:
         set_config_provider(state, server)
         port = _free_port()
         terminal = Terminal(str(state), args=("serve",), env={"OTAKU_WEB_PORT": str(port)})
-        _waited(lambda: _listening(port))
+        _waited(terminal, lambda: _listening(port))
         terminal.send_signal(signal.SIGTERM)
         assert terminal.wait() == 0
         assert not _listening(port)
@@ -418,14 +418,16 @@ def _pressed_until(terminal: Terminal, key: bytes, marker: str, *, timeout: floa
     assert marker in terminal.transcript, terminal.transcript[-2000:]
 
 
-def _waited(holds: Callable[[], bool], timeout: float = 20.0) -> None:
-    """Wait until `holds` does — a port answering, or let go."""
+def _waited(terminal: Terminal, holds: Callable[[], bool], timeout: float = 20.0) -> None:
+    """Wait until `holds` does — a port answering, or let go — reading the
+    terminal meanwhile, so the app never blocks on a full pty, and showing
+    its tail if it never comes."""
     import time
 
     deadline = time.time() + timeout
     while not holds():
-        assert time.time() < deadline, "never came"
-        time.sleep(0.1)
+        assert time.time() < deadline, f"never came; the terminal:\n{terminal.transcript[-1500:]}"
+        terminal.settle(0.1)
 
 
 def _listening(port: int) -> bool:

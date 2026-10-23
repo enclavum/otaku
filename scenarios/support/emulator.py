@@ -237,24 +237,27 @@ def fresh_root() -> Path:
     return Path(tempfile.mkdtemp()) / "state"
 
 
-def echo(root: Path, *, rows: int = ROWS, cols: int = COLS) -> tuple[list[str], tuple[int, int]]:
+def echo(
+    root: Path, *, rows: int = ROWS, cols: int = COLS, still: float = 1.5
+) -> tuple[list[str], tuple[int, int]]:
     """What a fresh launch shows of the story, on a screen of the size
-    given: its rows and its cursor."""
+    given, once it has drawn nothing for `still` seconds: its rows and
+    its cursor."""
     other = Emulated(root, rows=rows, cols=cols)
     try:
-        other.quiet(still=1.5)
+        other.quiet(still=still)
         return other.lines(), other.cursor
     finally:
         other.quit()
 
 
-def mismatch(live: Emulated, *, story_mode: bool) -> list[str]:
+def mismatch(live: Emulated, *, story_mode: bool, still: float = 1.5) -> list[str]:
     """Where the live screen and a fresh launch's echo of the same story
     disagree, read back from the cursor through the echoed turns: row by
     row in chat mode, the rows the store never holds left out of the live
     screen; word by word in story mode, whose one text wraps wherever its
-    echo began."""
-    rows, (ey, ex) = echo(live.root, rows=live.rows, cols=live.cols)
+    echo began. `still` is the echo's wait for silence (`echo`)."""
+    rows, (ey, ex) = echo(live.root, rows=live.rows, cols=live.cols, still=still)
     start = next((i for i, row in enumerate(rows) if "Resumed at message" in row), -1) + 2
     lines, (ly, lx) = live.lines(), live.cursor
     if story_mode:

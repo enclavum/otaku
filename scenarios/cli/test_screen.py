@@ -411,7 +411,16 @@ def run(term: Emulated, steps: list[Step], *, story_mode: bool = False) -> list[
         with term.recording() as frames:
             act(term)
             term.quiet()
-        found = ([] if erasing else jumps(frames)) + mismatch(term, story_mode=story_mode)
+        differs = mismatch(term, story_mode=story_mode)
+        if differs:
+            # Both captures wait for a moment's silence, not for the turn's
+            # end: a second look after a longer one tells a slow end of
+            # turn from a screen that is wrong.
+            term.quiet(still=3.0)
+            later = mismatch(term, story_mode=story_mode, still=4.0)
+            verdict = "still there after a longer quiet" if later else "gone after a longer quiet"
+            differs = [f"{problem} [{verdict}]" for problem in differs]
+        found = ([] if erasing else jumps(frames)) + differs
         problems += [f"{name}: {problem}" for problem in found[:6]]
     return problems
 
