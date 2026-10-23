@@ -324,12 +324,12 @@ def _serving(
         app.start_worker()
         server = run_beside(app)
         try:
-            url = server.address + "/"
-            if host in ("0.0.0.0", "::"):
-                # The address READS as the host for a wildcard bind; the
-                # test reaches it on loopback, and the Host header is what
-                # the stories vary.
-                url = f"{'https' if https else 'http'}://127.0.0.1:{port}/"
+            # Dialled at the IPv4 loopback the server listens on, never at
+            # the `localhost` its address reads as: Windows tries ::1 first
+            # and gives up on it after two seconds, every request. A
+            # wildcard bind is reached there too; the Host header is what
+            # those stories vary.
+            url = f"{'https' if https else 'http'}://127.0.0.1:{port}/"
             _reachable(url, context)
             store = read_store(root)
             try:

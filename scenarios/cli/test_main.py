@@ -16,6 +16,7 @@ from otaku.backend.api import Api
 from otaku.backend.app.paths import Paths
 from otaku.backend.launch import open_app
 from otaku.settings import state as state_mod
+from otaku.terminal.prompt.session import CHAT_PLACEHOLDER
 from otaku.terminal.tty import PROMPT_CONTINUATION
 from scenarios.support import server as scripted
 from scenarios.support.harness import SPEC, run_otaku, set_config, set_config_provider
@@ -27,6 +28,7 @@ pytestmark = pytest.mark.cli
 # The continuation prompt as the transcript shows it: its trailing space is
 # not printed, the caret moved past it, with no placeholder drawn after it.
 _CONTINUED = PROMPT_CONTINUATION.rstrip()
+_PLACEHOLDER = "".join(text for _, text in CHAT_PLACEHOLDER)
 
 
 class TestFirstRun:
@@ -452,7 +454,16 @@ def launch_remembered(
 
 
 def play(terminal: Terminal, line: str, marker: str) -> None:
-    """Send one prompt line and wait until `marker` shows on screen."""
+    """Send one prompt line and wait until `marker` shows on screen and
+    the prompt is back: what is typed while a reply still streams is
+    thrown away at its end, and its words show a moment before that."""
+    import time
+
+    prompts = terminal.transcript.count(_PLACEHOLDER)
     terminal.send(line)
     terminal.send(ENTER, 1.0)
     terminal.expect(marker)
+    deadline = time.time() + 10.0
+    while terminal.transcript.count(_PLACEHOLDER) <= prompts:
+        assert time.time() < deadline, "the prompt never came back"
+        terminal.settle(0.2)

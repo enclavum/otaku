@@ -681,7 +681,10 @@ def with_prompt(root, server) -> App:
     """The app over a prompts.toml whose questions prompt is `HOW_TO_ASK`."""
     paths = Paths.resolve(root)
     paths.ensure_tree()
-    paths.prompts_file.write_text(f'tool_questions_prompt = "{HOW_TO_ASK}"\n', encoding="utf-8")
+    # LF, as otaku writes it: a CRLF file is healed with a backup of its own.
+    paths.prompts_file.write_text(
+        f'tool_questions_prompt = "{HOW_TO_ASK}"\n', encoding="utf-8", newline="\n"
+    )
     return launch(root, server)
 
 
