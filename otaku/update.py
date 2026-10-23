@@ -4,12 +4,18 @@
 tools dir, pipx's venvs, a git checkout — and hands back that
 installer's own upgrade invocation (None for a checkout: git updates
 it, not otaku); `run` executes it. The cli's `otaku update` narrates
-around these.
+around these. `fetch_latest_version` reads the version announced as
+current, which the cli hands the app for its update check
+(`App.check_for_update`).
 """
 
+import os
+import re
 import subprocess
 import sys
 from pathlib import Path
+
+import httpx
 
 import otaku
 
@@ -27,6 +33,34 @@ MANUAL_COMMANDS = (
     "uv tool upgrade otaku",
     "pip install --upgrade otaku",
 )
+
+# The version announced as current: otaku's own __init__.py at the tag the
+# maintainer moves to a release to announce it. Every installed otaku reads
+# this path, so the file keeps its place and its `__version__` line its
+# shape (`_VERSION_LINE`).
+_UPDATE_CHECK_TAG = "stable"
+_UPDATE_CHECK_URL = (
+    f"https://raw.githubusercontent.com/enclavum/otaku/{_UPDATE_CHECK_TAG}/otaku/__init__.py"
+)
+# For otaku's own tests, which run the real binary — unadvertised.
+_UPDATE_CHECK_URL_VAR = "OTAKU_UPDATE_URL"
+_ASK_SECONDS = 5.0
+_VERSION_LINE = re.compile(r'^__version__\s*=\s*"(\d+\.\d+\.\d+)"', re.MULTILINE)
+
+
+def fetch_latest_version() -> str | None:
+    """The version announced as current — the `X.Y.Z` that otaku/__init__.py
+    names at the update check's tag — or None where it cannot be had: no
+    network, no tag yet, a file not in shape."""
+    url = os.environ.get(_UPDATE_CHECK_URL_VAR, "").strip() or _UPDATE_CHECK_URL
+    try:
+        reply = httpx.get(url, timeout=_ASK_SECONDS)
+    except (httpx.HTTPError, httpx.InvalidURL):
+        return None
+    if reply.status_code != 200:
+        return None
+    found = _VERSION_LINE.search(reply.text)
+    return found.group(1) if found else None
 
 
 def upgrade_command() -> list[str] | None:

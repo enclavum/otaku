@@ -228,7 +228,7 @@ class TestVariables:
         web = relaunched.api.settings.web.get().config
         assert (web.port, web.https) == (9600, False)
         assert relaunched.api.settings.terminal.get().terminal_serve is False
-        notices = " ".join(relaunched.api.app.get().launch.notices)
+        notices = " ".join(relaunched.api.app.get().launch_facts.notices)
         for name in ("OTAKU_WEB_PORT", "OTAKU_WEB_HTTPS", "OTAKU_TERMINAL_SERVE"):
             assert name in notices, name
         relaunched.close()

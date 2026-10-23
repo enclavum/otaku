@@ -40,6 +40,11 @@ ESC = b"\x1b"
 TAB = b"\t"
 
 
+# Where the real binary's update check asks in a test: a port nothing
+# listens on, refused at once (`otaku.update.fetch_latest_version`).
+_NO_UPDATES = "http://127.0.0.1:9/"
+
+
 class Terminal:
     """One app run in a pty. `send` types, `expect` waits for markers in
     the transcript so far, `quit` ends the session."""
@@ -64,6 +69,8 @@ class Terminal:
                 # Neutralized so the background is whatever a story ARMS
                 # (OSC 11), never the developer terminal's own answer.
                 "COLORFGBG": "",
+                # The update check asks a port nothing listens on, never GitHub.
+                "OTAKU_UPDATE_URL": _NO_UPDATES,
             }
             | (env or {})
         )

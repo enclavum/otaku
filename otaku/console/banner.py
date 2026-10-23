@@ -10,7 +10,6 @@ import ipaddress
 import os
 import sys
 from dataclasses import dataclass
-from typing import Protocol
 
 from otaku import __version__
 from otaku.console import BOLD, DIM, RESET
@@ -41,22 +40,20 @@ class AppFacts:
     model: str  # "(no model)" when none
     provider: str  # the provider serving it; "" when none
     context_window: int | None  # what a request gets on the model, when a LOCAL provider answers
+    newer_version: str = ""  # the version the last update check found announced; "" for none
 
 
-class WebFacts(Protocol):
-    """Where a served app listens and what it asks of whoever
-    reaches it — the `[web]` settings slice, as its caller hands it
-    over. A protocol rather than the type: `console` imports nothing
-    above it, so it names the fields it reads and no more."""
+@dataclass(frozen=True)
+class WebFacts:
+    """What a served app's banner states, as its caller reads them off
+    the app it serves: where the page listens, whether a password guards
+    it, and the newer version the last update check found."""
 
-    @property
-    def host(self) -> str: ...
-    @property
-    def port(self) -> int: ...
-    @property
-    def https(self) -> bool: ...
-    @property
-    def password(self) -> str: ...  # a hash; "" is no password at all
+    host: str
+    port: int
+    is_https: bool
+    password_set: bool
+    newer_version: str = ""  # "" for none
 
 
 @dataclass(frozen=True)
@@ -91,7 +88,7 @@ def render_terminal(facts: AppFacts) -> str:
         model += f" · {format_context(facts.context_window)} context"
     last = " · ".join(part for part in (facts.provider, "/help for commands") if part)
     said = [
-        _name(style),
+        _name(style, facts.newer_version),
         f"{style.dim}{model}{style.reset}",
         f"{style.dim}{last}{style.reset}",
     ]
@@ -104,7 +101,7 @@ def render_terminal(facts: AppFacts) -> str:
     return "\n".join([*rows, ""])
 
 
-def render_web(where: WebFacts) -> str:
+def render_web(facts: WebFacts) -> str:
     """What a served app opens with, said the way a server says it:
     the name, where the page is and how to quit — no mark, and the model
     and the story are on the page itself. After the address, that a
@@ -114,16 +111,16 @@ def render_web(where: WebFacts) -> str:
     both on is the configuration the file recommends, and warrants no
     warning."""
     style = _style()
-    note = f"{style.dim} (password set){style.reset}" if where.password else ""
-    shown = address(where)
+    note = f"{style.dim} (password set){style.reset}" if facts.password_set else ""
+    shown = address(facts)
     if style is _COLOUR:  # a link where escapes are written at all
-        opening, closing = link_ends(link_target(where))
+        opening, closing = link_ends(link_target(facts))
         shown = f"{opening}{shown}{closing}"
-    rows = [_name(style), f"{style.dim}Running on{style.reset} {shown}{note}"]
-    if _is_public(where.host):
+    rows = [_name(style, facts.newer_version), f"{style.dim}Running on{style.reset} {shown}{note}"]
+    if _is_public(facts.host):
         missing = [
             name
-            for name, on in (("no TLS", where.https), ("no password", where.password))
+            for name, on in (("no TLS", facts.is_https), ("no password", facts.password_set))
             if not on
         ]
         if missing:
@@ -155,20 +152,20 @@ def _is_public(host: str) -> bool:
         return True
 
 
-def address(where: WebFacts) -> str:
+def address(facts: WebFacts) -> str:
     """The URL the banner prints and a reader pastes: the host as
     configured, `127.0.0.1` read as `localhost`, the scheme's own port
     left unsaid."""
-    return _url(where.host, where)
+    return _url(facts.host, facts)
 
 
-def link_target(where: WebFacts) -> str:
+def link_target(facts: WebFacts) -> str:
     """The URL a link to the page opens: `address`, but for a wildcard
     host — every interface, no machine a browser can open — `localhost`,
     where the page answers too. Shown, the address stays the wildcard: it
     says the page is public."""
-    host = "localhost" if where.host.strip("[]") in _WILDCARD else where.host
-    return _url(host, where)
+    host = "localhost" if facts.host.strip("[]") in _WILDCARD else facts.host
+    return _url(host, facts)
 
 
 def link_ends(url: str) -> tuple[str, str]:
@@ -178,17 +175,19 @@ def link_ends(url: str) -> tuple[str, str]:
     return f"\x1b]8;;{url}\x1b\\", "\x1b]8;;\x1b\\"
 
 
-def _url(host: str, where: WebFacts) -> str:
-    scheme = "https" if where.https else "http"
+def _url(host: str, facts: WebFacts) -> str:
+    scheme = "https" if facts.is_https else "http"
     reachable = "localhost" if host == "127.0.0.1" else host
-    if where.port == (443 if where.https else 80):
+    if facts.port == (443 if facts.is_https else 80):
         return f"{scheme}://{reachable}"
-    return f"{scheme}://{reachable}:{where.port}"
+    return f"{scheme}://{reachable}:{facts.port}"
 
 
-def _name(style: _Style) -> str:
-    """What every banner opens with: the name and the version."""
-    return f"{style.bold}otaku{style.reset} {style.dim}v{__version__}{style.reset}"
+def _name(style: _Style, newer_version: str = "") -> str:
+    """What every banner opens with: the name and the version — and the
+    newer one, where the last update check found one announced."""
+    newer = f"{style.dim} · v{newer_version} available{style.reset}" if newer_version else ""
+    return f"{style.bold}otaku{style.reset} {style.dim}v{__version__}{style.reset}{newer}"
 
 
 def _style() -> _Style:

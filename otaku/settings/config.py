@@ -70,6 +70,7 @@ class Config:
     encryption: Encryption = field(default_factory=Encryption)
     # [settings]
     show_banner: bool = True
+    check_updates: bool = True
     smooth_streaming: bool = True
     notification_sound: str = "default"  # "default" = the platform's own; else a path
     # [terminal]
@@ -106,6 +107,7 @@ class Config:
         lines = [
             "[settings]",
             row(f"show_banner = {toml_scalar(self.show_banner)}", "the session header shown when a chat opens"),
+            row(f"check_updates = {toml_scalar(self.check_updates)}", "once a day, check GitHub for a new release"),
             row(f"smooth_streaming = {toml_scalar(self.smooth_streaming)}", "re-time bursty model output into an even stream"),
             row(f"notification_sound = {toml_scalar(self.notification_sound)}", 'what /set notification plays: "default" is the platform\'s own, else a path'),
             "",
@@ -209,6 +211,7 @@ def load(path: Path) -> Config:
         return Config(
             encryption=encryption,
             show_banner=bool(settings.get("show_banner", True)),
+            check_updates=bool(settings.get("check_updates", True)),
             smooth_streaming=bool(settings.get("smooth_streaming", True)),
             notification_sound=str(settings.get("notification_sound", "default")),
             dialogue_color=str(terminal.get("dialogue_color", "auto")),

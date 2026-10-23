@@ -35,7 +35,7 @@ from otaku.console import banner, keys, sound, ticker
 from otaku.web.api import Api, App
 from otaku.web.api.app.settings import WebSettings
 from otaku.web.cert import CertError, get_context
-from otaku.web.server import Hooks, Server, bind
+from otaku.web.server import Hooks, Server, bind, web_facts
 
 __all__ = ["ServeError", "Server", "run", "run_beside"]
 
@@ -68,7 +68,8 @@ def run(app: App) -> bool:
     # not open yet, so they go where the reader is: the terminal they
     # typed in, one blank line after the lot, as the terminal's launch
     # does.
-    notices = Api(app).app.get().launch.notices
+    launch_facts = Api(app).app.get().launch_facts
+    notices = launch_facts.notices
     for report in notices:
         print(report)
     if notices:
@@ -77,7 +78,7 @@ def run(app: App) -> bool:
     # Said before the socket is bound, because the address is the
     # configuration's and not the socket's answer: a reader can be
     # opening the page while the first request is still arriving.
-    print(banner.render_web(setup.config))
+    print(banner.render_web(web_facts(setup.config, launch_facts.newer_version)))
     # The last few requests, kept under the address and rewritten in
     # place: proof that the browser is reaching this server, in a
     # terminal that stays the height it started at. It owns the terminal

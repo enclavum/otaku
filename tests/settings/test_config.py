@@ -26,3 +26,4 @@ class TestToToml:
         assert parsed["terminal"]["dialogue_color"] == "auto"
         assert parsed["terminal"]["dialogue_bold"] is False
         assert parsed["web"]["terminal_serve"] is False  # the chat serves nothing unasked
+        assert parsed["settings"]["check_updates"] is True  # on until turned off

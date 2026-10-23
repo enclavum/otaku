@@ -379,7 +379,7 @@
  ],
  "app": {
   "version": "0.8.0",
-  "launch": {
+  "launch_facts": {
    "notices": [],
    "hint": "Sample stories were imported so you can look around — type to play on, /stories switches between them, or see every command with /help · /model chooses a model · /new starts your own play."
   },

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from otaku import __version__
 from otaku.backend.app.core import services as domain_core
-from otaku.backend.app.core.schemas import AppInfo, ExtractionModel, Launch, ModelInUse
+from otaku.backend.app.core.schemas import AppInfo, ExtractionModel, LaunchFacts, ModelInUse
 from otaku.backend.app.core.services import App
 from otaku.backend.app.machine.resources import MachineResource
 from otaku.backend.app.models import services as domain_models
@@ -35,24 +35,28 @@ class AppResource(Resource):
         """otaku as it stands — read off what is cached, nothing asked of
         an engine — and what the launch that opened it had to say."""
         app = self._app
-        facts = domain_models.model_facts(app)
-        launch = domain_core.launch_facts(app)
+        model_facts = domain_models.model_facts(app)
+        launch_facts = domain_core.launch_facts(app)
         extracting = domain_models.extraction_model(app)
-        row = facts.row
+        row = model_facts.row
         return AppInfo(
             version=__version__,
-            launch=Launch(notices=launch.notices, hint=launch.hint),
+            launch_facts=LaunchFacts(
+                notices=launch_facts.notices,
+                hint=launch_facts.hint,
+                newer_version=launch_facts.newer_version,
+            ),
             model=(
                 ModelInUse(
-                    provider=facts.model.provider,
-                    name=facts.model.name,
-                    listed_name=domain_models.listed_name(app, facts.model),
+                    provider=model_facts.model.provider,
+                    name=model_facts.model.name,
+                    listed_name=domain_models.listed_name(app, model_facts.model),
                     context_window=row.context_window if row is not None else None,
                     capabilities=row.capabilities if row is not None else None,
-                    can_complete_text=facts.can_complete_text,
-                    can_attach=facts.can_attach(StorySettingLayout.default_layout),
+                    can_complete_text=model_facts.can_complete_text,
+                    can_attach=model_facts.can_attach(StorySettingLayout.default_layout),
                 )
-                if facts.model is not None
+                if model_facts.model is not None
                 else None
             ),
             extraction_model=(
@@ -65,7 +69,7 @@ class AppResource(Resource):
                 if extracting is not None
                 else None
             ),
-            on_cloud=facts.on_cloud,
+            on_cloud=model_facts.on_cloud,
         )
 
     def update(

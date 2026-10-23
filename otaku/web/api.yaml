@@ -98,7 +98,7 @@ openapi: 3.1.0
 
 info:
   title: otaku web API
-  version: 0.8.0
+  version: 0.9.0
   contact:
     name: otaku
     url: https://otaku.sh
@@ -2210,7 +2210,7 @@ components:
       type: object
       properties:
         version: { type: string }
-        launch: { $ref: "#/components/schemas/Launch" }
+        launch_facts: { $ref: "#/components/schemas/LaunchFacts" }
         model:
           description: The model in use; null with none.
           oneOf: [{ $ref: "#/components/schemas/ModelInUse" }, { type: "null" }]
@@ -2501,7 +2501,7 @@ components:
         model: { type: [string, "null"] }
         updated_at: { type: string }
 
-    Launch:
+    LaunchFacts:
       type: object
       description: What the launch that opened the app had to say.
       properties:
@@ -2509,6 +2509,9 @@ components:
           type: array
           items: { type: string }
         hint: { type: string }
+        newer_version:
+          type: string
+          description: The version the last update check found announced, where later than this otaku; empty for none.
 
     ListedProvider:
       type: object

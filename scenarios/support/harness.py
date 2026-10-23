@@ -165,7 +165,12 @@ def run_otaku(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
         timeout=30,
-        env={**os.environ, "OTAKU_CONFIG_DIR": str(root), "COLUMNS": "200"},
+        env={
+            **os.environ,
+            "OTAKU_CONFIG_DIR": str(root),
+            "COLUMNS": "200",
+            "OTAKU_UPDATE_URL": "http://127.0.0.1:9/",  # never GitHub
+        },
         check=False,
     )
 

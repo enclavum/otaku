@@ -185,7 +185,8 @@ class TestBackups:
         relaunched = launch(root, server)
         try:
             assert any(
-                "backup failed" in notice for notice in relaunched.api.app.get().launch.notices
+                "backup failed" in notice
+                for notice in relaunched.api.app.get().launch_facts.notices
             )
         finally:
             relaunched.close()
@@ -337,7 +338,7 @@ class TestSchemaMigration:
         _v1_database(root)
         app = launch(root, server)
         try:
-            assert any("migrated" in notice for notice in app.api.app.get().launch.notices)
+            assert any("migrated" in notice for notice in app.api.app.get().launch_facts.notices)
         finally:
             app.close()
 
@@ -1326,7 +1327,9 @@ class TestResume:
         opened = backend_launch.open_app(app.paths.root)
         try:
             assert Api(opened).app.get().model is None
-            assert any("ghost/model" in notice for notice in Api(opened).app.get().launch.notices)
+            assert any(
+                "ghost/model" in notice for notice in Api(opened).app.get().launch_facts.notices
+            )
         finally:
             opened.close()
 
@@ -1348,7 +1351,7 @@ class TestResume:
             assert facts.model is not None and facts.extraction_model is not None
             followed = (facts.extraction_model.provider, facts.extraction_model.name)
             assert followed == (facts.model.provider, facts.model.name)
-            notices = Api(opened).app.get().launch.notices
+            notices = Api(opened).app.get().launch_facts.notices
             assert any("ghost/extract-model" in notice for notice in notices)
         finally:
             opened.close()

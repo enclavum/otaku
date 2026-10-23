@@ -7,7 +7,7 @@ shared by the store and the request log), providers (sealed keys opened,
 values injected into the registry), store, worker, the samples seeded
 (`backend.samples`) — and
 it never prints: what a frontend should say rides on the app, its
-`LaunchFacts`, read as `api.app.get().launch`.
+`LaunchFacts`, read as `api.app.get().launch_facts`.
 The module also carries the launch pieces cli needs alone (`otaku logs
 requests` unlocks the way the app does).
 """
@@ -17,7 +17,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TypeVar
 
-from otaku import encryption
+from otaku import __version__, encryption
 from otaku.agents import Worker
 from otaku.backend import samples
 from otaku.backend.api import Api
@@ -165,7 +165,9 @@ def open_app(root: str | Path | None = None, *, ask_secret: AskSecret | None = N
     if fresh and config.seed_sample:
         notices += samples.seed(app)
         hint = samples.HINT if Api(app).settings.get().last_story is not None else ""
-    app._launch_facts = LaunchFacts(tuple(notices), hint)
+    app._launch_facts = LaunchFacts(
+        tuple(notices), hint, _newer_version(state.update_latest_version)
+    )
     # Everything above ran on the caller's thread; from here every call
     # runs on the app's own (`backend.app.thread`).
     app._thread.start()
@@ -193,6 +195,19 @@ def error_log(root: str | Path | None = None) -> ErrorLog:
 
 
 # ---------- launch internals ----------
+
+
+def _newer_version(latest_version: str) -> str:
+    """`latest_version` where it is a later version than this otaku's,
+    compared number by number — 0.10.0 is later than 0.9.0; "" otherwise,
+    and where either is not plain numbers."""
+    theirs, ours = _version_numbers(latest_version), _version_numbers(__version__)
+    return latest_version if theirs and ours and theirs > ours else ""
+
+
+def _version_numbers(version: str) -> tuple[int, ...]:
+    parts = version.split(".")
+    return tuple(int(part) for part in parts) if all(part.isdigit() for part in parts) else ()
 
 
 def _load_config(

@@ -65,6 +65,7 @@ def main(ctx: click.Context) -> None:
         click.echo(str(e), err=True)
         ctx.exit(1)
     try:
+        app.check_for_update(updater.fetch_latest_version)
         terminal_frontend.run(app)
     except Exception as e:
         _crashed(root, e)
@@ -89,6 +90,7 @@ def serve() -> None:
         ctx.exit(1)
     restart = False
     try:
+        app.check_for_update(updater.fetch_latest_version)
         restart = web_frontend.run(app)
     except web_frontend.ServeError as e:
         # An address that cannot be listened on: another otaku already

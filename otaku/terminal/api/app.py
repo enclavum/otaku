@@ -6,7 +6,7 @@ use as the terminal spells them, "provider/name" — read off the app
 from otaku.backend.api import Api, Changed, Invalid, ModelRef
 from otaku.backend.app.core.schemas import AppInfo as AppInfo
 from otaku.backend.app.core.schemas import ExtractionModel as ExtractionModel
-from otaku.backend.app.core.schemas import Launch as Launch
+from otaku.backend.app.core.schemas import LaunchFacts as LaunchFacts
 from otaku.backend.app.core.schemas import ModelInUse as ModelInUse
 
 

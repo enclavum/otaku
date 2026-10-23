@@ -185,6 +185,16 @@ _CONFIG_MIGRATIONS: list[Migration] = [
         ),
         after="password",
     ),
+    # 0.9.0 — the update check, on until turned off.
+    ensure_key(
+        "settings",
+        "check_updates",
+        row(
+            "check_updates = true",
+            "once a day, check GitHub for a new release",
+        ),
+        after="show_banner",
+    ),
 ]
 
 

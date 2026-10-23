@@ -77,7 +77,7 @@ const state = {
   model: MODELS[0].name,
   pinned: null, // the model lore extraction is pinned to; null follows the one above
   loaded: new Set([MODELS[0].name]),
-  launch: { notices: [], hint: "" },
+  launch_facts: { notices: [], hint: "", newer_version: "" },
   version: "",
   settings: null, // `Settings`, minus what the demo keeps elsewhere
   language: null,
@@ -101,7 +101,7 @@ const state = {
 export function seed(fixtures) {
   const { app, river, tour, codex } = fixtures;
   state.version = app.app.version;
-  state.launch = { notices: [], hint: app.app.launch.hint };
+  state.launch_facts = { notices: [], hint: app.app.launch_facts.hint, newer_version: "" };
   state.settings = structuredClone(app.settings);
   state.language = app.language;
   state.defaults = app.story_defaults;
@@ -288,7 +288,7 @@ export function app() {
   const extracting = state.pinned ?? state.model;
   return {
     version: state.version,
-    launch: structuredClone(state.launch),
+    launch_facts: structuredClone(state.launch_facts),
     model: {
       provider: PROVIDER,
       name: model.name,

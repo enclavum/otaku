@@ -272,7 +272,7 @@ class TestGenericProvider:
         try:
             listed = app.api.providers.list(probe=False).providers
             assert "mybox" not in {row.id for row in listed if row.configured}
-            assert any("[mybox]" in notice for notice in app.api.app.get().launch.notices)
+            assert any("[mybox]" in notice for notice in app.api.app.get().launch_facts.notices)
             assert tomllib.loads(app.paths.providers_file.read_text())["mybox"]
         finally:
             app.close()

@@ -21,6 +21,7 @@ only the run's own event.
 """
 
 import contextlib
+import datetime
 import threading
 from collections.abc import Callable, Collection, Iterator, Mapping
 from dataclasses import dataclass, replace
@@ -34,7 +35,7 @@ from otaku.backend.app.models.services import SavedModelSettings
 from otaku.backend.app.paths import Paths
 from otaku.backend.app.runs import WorkerRun
 from otaku.backend.app.thread import AppThread
-from otaku.backend.errors import Refused, Unavailable
+from otaku.backend.errors import Refused, StoppingError, Unavailable
 from otaku.formatting import pretty_path
 from otaku.integrations import Integrations
 from otaku.logging import ErrorLog
@@ -53,6 +54,9 @@ from otaku.settings.config import Config, ConfigError
 from otaku.settings.prompts import Prompts
 from otaku.settings.state import ModelRef, StateConfig
 from otaku.store import Store
+
+# How long the update check leaves between two asks.
+_UPDATE_CHECK_INTERVAL = datetime.timedelta(hours=24)
 
 T = TypeVar("T")
 E = TypeVar("E")
@@ -159,6 +163,41 @@ class App:
             return pretty_path(ErrorLog(self._paths.logs_dir).record(context, exc))
         except Exception:
             return ""
+
+    def check_for_update(self, fetch_latest_version: Callable[[], str | None]) -> None:
+        """Ask for the version announced as current — `fetch_latest_version`,
+        the cli's, as the backend reaches no network of its own — on a thread
+        of its own, once more than 24 hours have passed since the last ask,
+        unless config.toml turns it off. The time is written before asking,
+        so a failed ask waits its 24 hours too; the answer is kept for the
+        next launch's banner (`LaunchFacts.newer_version`). Any thread."""
+        now = datetime.datetime.now(datetime.UTC)
+
+        def claim_check() -> bool:
+            if not self._config().check_updates:
+                return False
+            try:
+                last = datetime.datetime.fromisoformat(self._state_config().update_checked_at)
+                if now - last < _UPDATE_CHECK_INTERVAL:
+                    return False
+            except (ValueError, TypeError):  # never checked, or a time otaku did not write
+                pass
+            self._update_state_config(
+                best_effort=True, update_checked_at=now.isoformat(timespec="seconds")
+            )
+            return True
+
+        def query() -> None:
+            if latest := fetch_latest_version():
+                with contextlib.suppress(StoppingError):  # the app closed meanwhile
+                    self.run(
+                        lambda: self._update_state_config(
+                            best_effort=True, update_latest_version=latest
+                        )
+                    )
+
+        if self.run(claim_check):
+            threading.Thread(target=query, daemon=True).start()
 
     def run(self, work: Callable[[], T], *, reading: bool = False) -> T:
         """`work` as ONE unit on the app's thread, nothing else running
@@ -384,10 +423,13 @@ class LaunchFacts:
     else could: `notices`, its REPORTS — created files, stale settings,
     keys that would not open — shown before the banner; and `hint`, the
     one BOLD line shown after the resumed scene (the sample-story hint),
-    where a hint belongs and a warning does not; "" for none."""
+    where a hint belongs and a warning does not; "" for none; and
+    `newer_version`, the version the last update check found announced,
+    where it is later than this otaku — for the banner; "" for none."""
 
     notices: tuple[str, ...] = ()
     hint: str = ""
+    newer_version: str = ""
 
 
 # ---------- the app's own facts, for the interface ----------

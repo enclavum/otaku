@@ -69,7 +69,7 @@ from otaku.web.server.base import LOOPBACK, RETRY_AFTER, Hooks, Server
 from otaku.web.server.guards import LOGIN, Guards
 from otaku.web.server.streams import WATCH, Streams
 
-__all__ = ["LOOPBACK", "Hooks", "Server", "bind"]
+__all__ = ["LOOPBACK", "Hooks", "Server", "bind", "web_facts"]
 
 # The lane is the METHOD. A GET only READS the app and is answered on
 # the read queue — during a reply as well as between them, which is what
@@ -167,11 +167,24 @@ def bind(
         (config.host, config.port),
         Handler,
         app=app,
-        address=banner.link_target(config),
+        address=banner.link_target(web_facts(config)),
         custom_web_dir=custom_web_dir,
         hooks=hooks,
         tls_context=tls_context,
         password_hash=password_hash,
+    )
+
+
+def web_facts(config: WebSettings, newer_version: str = "") -> banner.WebFacts:
+    """What a banner states of the address `config` gives: where the page
+    listens, whether a password guards it — and `newer_version`, the
+    newer version the last update check found."""
+    return banner.WebFacts(
+        host=config.host,
+        port=config.port,
+        is_https=config.https,
+        password_set=bool(config.password),
+        newer_version=newer_version,
     )
 
 

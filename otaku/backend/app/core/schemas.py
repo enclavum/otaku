@@ -14,18 +14,20 @@ class AppInfo(Schema):
     hosted catalog."""
 
     version: str
-    launch: Launch
+    launch_facts: LaunchFacts
     model: ModelInUse | None
     extraction_model: ExtractionModel | None
     on_cloud: bool
 
 
-class Launch(Schema):
-    """What the launch that opened the app had to say: its notices, and
-    the hint over the resumed scene."""
+class LaunchFacts(Schema):
+    """What the launch that opened the app had to say: its notices, the
+    hint over the resumed scene, and the newer version the last update
+    check found announced ("" for none)."""
 
     notices: tuple[str, ...]
     hint: str
+    newer_version: str
 
 
 class ModelInUse(Schema):

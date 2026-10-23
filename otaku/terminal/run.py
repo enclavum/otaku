@@ -90,7 +90,7 @@ def _run(app: App, terminated: threading.Event) -> None:
     the theme (before anything draws — the background ask reads stdin,
     which belongs to prompt_toolkit from the first prompt on), serve the
     page beside the chat where the reader asked for it (`/set serve`),
-    print what its launch had to say (`AppInfo.launch`: the notices, the
+    print what its launch had to say (`AppInfo.launch_facts`: the notices, the
     bold hint over the resumed scene), then the banner, open the model picker
     when the app arrived model-less (nothing remembered — the launch-time
     pick is THIS loop's, not the backend's), echo the resumed scene into
@@ -98,7 +98,7 @@ def _run(app: App, terminated: threading.Event) -> None:
     submit; the serving stops with the chat. `app.close()` stays the
     caller's (cli's)."""
     api = Api(app)
-    launch_facts = api.app.get().launch
+    launch_facts = api.app.get().launch_facts
     looks = api.settings.terminal.get()
     theme.use(looks)
     # Some terminals (Ghostty) need the explicit blink opt-in on top of
@@ -138,6 +138,7 @@ def _run(app: App, terminated: threading.Event) -> None:
                     model=model.name if model is not None else "(no model)",
                     provider=model.provider if model is not None else "",
                     context_window=model.context_window if model is not None else None,
+                    newer_version=launch_facts.newer_version,
                 )
             )
         )

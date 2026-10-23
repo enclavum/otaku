@@ -11,9 +11,7 @@ license = "AGPL-3.0-only"
 license-files = ["LICENSE"]
 authors = [{ name = "enclavum", email = "support@otaku.sh" }]
 requires-python = ">=3.11"
-# The GitHub repository topics, kept in step with them — one discovery
-# vocabulary, whichever index a reader arrives from. `omlx`, `story` and `lore`
-# are the three additions: otaku's own words for things, which no topic carries.
+# The GitHub repository topics.
 keywords = [
     "llm", "local-llm", "cli", "terminal", "tui", "web-ui",
     "ollama", "mlx", "omlx", "koboldcpp", "llamacpp", "lmstudio", "openrouter", "nanogpt",
@@ -47,9 +45,6 @@ dependencies = [
     "cryptography>=49,<51; sys_platform != 'darwin' or platform_machine == 'arm64'",
     "cryptography>=48,<49; sys_platform == 'darwin' and platform_machine == 'x86_64'",
     "httpx>=0.28,<1.0",
-    # Pictures on a turn: Pillow decodes, orients, downsizes and re-encodes
-    # them; pillow-heif adds HEIC, what an iPhone shoots, with libheif in
-    # its wheels.
     "pillow>=12.3,<13.0",
     "pillow-heif>=1.7,<2.0",
     "prompt_toolkit>=3.0.53,<4.0",
@@ -94,15 +89,10 @@ target-version = "py311"
 select = ["B", "E", "F", "I", "N", "RUF", "SIM", "UP", "W"]
 
 [tool.ruff.lint.per-file-ignores]
-# SQL statements are kept on two rows with their parameters on one, whatever
-# the width (see the store modules' `# fmt: off` blocks).
 "otaku/store/*" = ["E501"]
-# The terminal's command table: one help row per source line, whatever
-# the width (see the `# fmt: off` block).
 "otaku/terminal/commands.py" = ["E501"]
-# The rendered config: one setting per source line, whatever the width
-# (see the `# fmt: off` block in to_toml).
 "otaku/settings/config.py" = ["E501"]
+"otaku/settings/state.py" = ["E501"]
 # The dispatcher's `do_GET`, `do_POST`, …: http.server dispatches on the
 # method's name, spelled as the verb is.
 "otaku/web/server/__init__.py" = ["N802"]
