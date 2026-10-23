@@ -1,5 +1,6 @@
 # otaku — an LLM frontend for roleplay and creative writing
 
+[![CI](https://github.com/enclavum/otaku/actions/workflows/ci.yml/badge.svg)](https://github.com/enclavum/otaku/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/otaku.svg)](https://pypi.org/project/otaku/)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](https://github.com/enclavum/otaku/blob/main/LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://github.com/enclavum/otaku/blob/main/pyproject.toml)
