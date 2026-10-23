@@ -22,3 +22,6 @@ demo/terminal/package-lock.json
 
 # The assistant's private working rules, never public
 CLAUDE.local.md
+
+# Dependencies are pinned by range in pyproject.toml; no lock is kept.
+uv.lock

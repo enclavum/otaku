@@ -199,6 +199,48 @@ class TestSigterm:
         assert not _listening(port)
 
 
+class TestUninstall:
+    """`otaku uninstall` asks before it deletes anything, and never where no
+    one can answer; from a checkout, which the reader removes, it offers
+    the purge alone."""
+
+    def test_piped_it_refuses_and_touches_nothing(
+        self, server: ModelServer, tmp_path: Path
+    ) -> None:
+        state = tmp_path / "state"
+        set_config_provider(state, server)
+        result = run_otaku(state, "uninstall")
+        assert result.returncode == 1
+        assert (state / "configs").is_dir()
+
+    def test_from_a_checkout_the_purge_alone_is_offered_and_kept_by_default(
+        self, server: ModelServer, tmp_path: Path
+    ) -> None:
+        # The suite runs otaku from its own checkout, which the reader removes.
+        state = tmp_path / "state"
+        set_config_provider(state, server)
+        terminal = Terminal(str(state), args=("uninstall",))
+        terminal.expect("Purge all data?")
+        terminal.send(ENTER)
+        assert terminal.wait() == 0
+        assert (state / "configs").is_dir()
+
+    def test_a_purge_confirmed_deletes_the_state_dir(
+        self, server: ModelServer, tmp_path: Path
+    ) -> None:
+        state = tmp_path / "state"
+        set_config_provider(state, server)
+        terminal = Terminal(str(state), args=("uninstall",))
+        terminal.expect("Purge all data?")
+        terminal.send("y")
+        terminal.send(ENTER)
+        terminal.expect("Are you sure")
+        terminal.send("y")
+        terminal.send(ENTER)
+        assert terminal.wait() == 0
+        assert not state.exists()
+
+
 class TestHelpVersion:
     def test_version_prints_and_exits(self, tmp_path: Path) -> None:
         result = run_otaku(tmp_path / "state", "--version")
@@ -221,7 +263,7 @@ class TestHelpVersion:
         listing = run_otaku(tmp_path / "state", "logs", "--help").stdout
         commands_block = listing.split("Commands:", 1)[1]
         assert "..." not in commands_block
-        assert "Show every contained crash's traceback" in commands_block
+        assert "Show crash tracebacks" in commands_block
         order = [commands_block.index(name) for name in ("requests", "system", "error")]
         assert order == sorted(order)
 

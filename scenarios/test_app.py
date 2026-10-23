@@ -1,5 +1,6 @@
 """The launch itself (`otaku.app`): the key ceremony and what it seals,
-the daily backup snapshot, and resuming over a story that is gone.
+the daily backup snapshot, resuming over a story that is gone, and the
+purge that `otaku uninstall` asks for.
 
 Encryption runs the real path end to end — the "command" KEK provider
 with a scripted retrieve_command — so these stories prove the core
@@ -1302,6 +1303,29 @@ class TestFirstLaunch:
         # The scenario default: a fresh database, seed_sample = false.
         assert app.story_id is None
         assert app.store.stories.list() == []
+
+
+class TestPurge:
+    """The state dir deleted — otaku's own folders, and the dir itself
+    where they were all it held — with its keys in the OS keychain."""
+
+    def test_a_used_state_dir_is_gone(self, app: App) -> None:
+        app.play("I enter the hall.")
+        root = app.paths.root
+        app.close()
+        assert backend_launch.purge(root) == root
+        assert not root.exists()
+
+    def test_what_else_the_dir_holds_stays_and_the_dir_with_it(self, app: App) -> None:
+        root = app.paths.root
+        (root / "notes.txt").write_text("mine")
+        app.close()
+        backend_launch.purge(root)
+        assert sorted(entry.name for entry in root.iterdir()) == ["notes.txt"]
+
+    def test_a_dir_never_made_is_purged_without_a_fault(self, tmp_path: Path) -> None:
+        # nothing there, nothing under its keychain service: nothing fails
+        backend_launch.purge(tmp_path / "state")
 
 
 class TestResume:

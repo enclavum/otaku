@@ -12,6 +12,11 @@ Renames and replacements:
   alongside the terminal instead of blocking it.
 - The `/bye` command is renamed to `/quit`, with the former command staying as an alias.
 
+Installing and updating:
+
+- Daily check for updates on GitHub (can be turned off in `~/.otaku/configs/config.toml`).
+- Uninstall command `otaku uninstall` that can also purge data.
+
 ## [0.8.0] - 2026-10-17
 
 Characters library (in the web interface only for now; the terminal will follow in the next

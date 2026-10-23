@@ -140,6 +140,12 @@ How to update:
 otaku update
 ```
 
+How to uninstall:
+
+```bash
+otaku uninstall  # also purges data on request
+```
+
 ## Launch
 
 In the terminal, type one of the two commands:

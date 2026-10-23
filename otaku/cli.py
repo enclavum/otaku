@@ -76,8 +76,8 @@ def main(ctx: click.Context) -> None:
 
 @main.command(short_help="Serve the web interface")
 def serve() -> None:
-    """Serve otaku's web interface until interrupted, address and port
-    are configured in ~/.otaku/configs/config.toml."""
+    """Serve otaku's web interface; address and port are configured in
+    ~/.otaku/configs/config.toml."""
     ctx = click.get_current_context()
     root = resolve_root()
     try:
@@ -133,12 +133,12 @@ def _crashed(root: Path | None, e: Exception) -> None:
 
 @main.group(
     cls=_DeclaredOrderGroup,
-    short_help="Day-rotated logs: requests, system and error",
+    short_help="Rotated logs: requests, system and error",
 )
 def logs() -> None:
-    """Day-rotated logs: `requests` (what the models were sent), `system`
-    (the background worker's own account), and `error` (every contained
-    crash's traceback)."""
+    """Rotated logs: `requests` (what the models were sent), `system`
+    (the background worker's own account), and `error` (crash
+    tracebacks)."""
 
 
 @logs.command("requests", short_help="Show the model-request log")
@@ -160,7 +160,7 @@ def logs_requests(day: str | None, list_days: bool) -> None:
     _page(request_log, day, list_days, "request", logging.render_requests)
 
 
-@logs.command("system", short_help="Show the background lore work")
+@logs.command("system", short_help="Show the background work")
 @click.argument("day", required=False)
 @click.option("--list", "list_days", is_flag=True, help="List the available log days.")
 def logs_system(day: str | None, list_days: bool) -> None:
@@ -169,12 +169,12 @@ def logs_system(day: str | None, list_days: bool) -> None:
     _page(backend_launch.system_log(resolve_root()), day, list_days, "system", logging.render_plain)
 
 
-@logs.command("error", short_help="Show every contained crash's traceback")
+@logs.command("error", short_help="Show crash tracebacks")
 @click.argument("day", required=False)
 @click.option("--list", "list_days", is_flag=True, help="List the available log days.")
 def logs_error(day: str | None, list_days: bool) -> None:
-    """Print one day's error log — every contained crash's traceback
-    (DAY as YYYY-MM-DD, default today)."""
+    """Print one day's error log — its crash tracebacks (DAY as
+    YYYY-MM-DD, default today)."""
     _page(backend_launch.error_log(resolve_root()), day, list_days, "error", logging.render_plain)
 
 
@@ -214,9 +214,8 @@ def _page(
 
 @main.command(short_help="Update otaku to the latest release")
 def update() -> None:
-    """Update otaku in place, whatever installed it: a Homebrew or uv
-    install runs its own upgrade, a source checkout is left to git, and
-    anything else gets pip. The new version runs at the next launch."""
+    """Update otaku in place, using the tool that it was installed with.
+    The new version runs at the next launch."""
     command = updater.upgrade_command()
     if command is None:
         click.echo("This otaku runs from a source checkout — update it with git:")
@@ -234,3 +233,41 @@ def update() -> None:
     for manual in updater.MANUAL_COMMANDS:
         click.echo(f"  {manual}", err=True)
     click.get_current_context().exit(1)
+
+
+@main.command(short_help="Uninstall otaku and, optionally, all its data")
+def uninstall() -> None:
+    """Uninstall otaku, using the tool that it was installed with, and,
+    optionally, all its data."""
+    ctx = click.get_current_context()
+    if not sys.stdin.isatty():
+        click.echo(
+            "otaku uninstall asks before it deletes anything: run it in a terminal.", err=True
+        )
+        ctx.exit(1)
+    command = updater.uninstall_command()
+    if command is None:
+        # A checkout's data is a state dir like any other's: the purge stands.
+        click.echo("otaku runs from a git checkout — remove the checked-out repo manually.")
+    elif not click.confirm("Uninstall otaku?", default=True, prompt_suffix=" "):
+        return
+    purging = False
+    if click.confirm("Purge all data?", default=False, prompt_suffix=" "):
+        click.echo(
+            "WARNING: purging will delete all your stories, characters library, uploaded "
+            "pictures, backups and otaku's keys in your keychain (if any)."
+        )
+        purging = click.confirm("Are you sure you want to purge?", default=False, prompt_suffix=" ")
+    if purging:
+        purged = pretty_path(backend_launch.purge(resolve_root()))
+        click.echo(f"Purged {purged} and otaku's keys in your keychain (if any).")
+    if command is None:
+        return
+    if sys.platform == "win32":
+        # A running otaku.exe cannot remove itself.
+        click.echo("Run this once otaku has exited: " + " ".join(command))
+        return
+    if updater.run(command) != 0:
+        click.echo("The uninstall did not finish — run it yourself: " + " ".join(command), err=True)
+        ctx.exit(1)
+    click.echo("Uninstalled otaku.")

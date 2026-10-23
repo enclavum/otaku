@@ -9,9 +9,11 @@ values injected into the registry), store, worker, the samples seeded
 it never prints: what a frontend should say rides on the app, its
 `LaunchFacts`, read as `api.app.get().launch_facts`.
 The module also carries the launch pieces cli needs alone (`otaku logs
-requests` unlocks the way the app does).
+requests` unlocks the way the app does; `otaku uninstall` purges).
 """
 
+import contextlib
+import shutil
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
@@ -195,6 +197,27 @@ def error_log(root: str | Path | None = None) -> ErrorLog:
 
 
 # ---------- launch internals ----------
+
+
+def purge(root: str | Path | None = None) -> Path:
+    """Delete the state dir — every story, picture, backup, setting and log
+    in it — and its keys in the OS keychain; the dir purged. Only otaku's
+    own folders go, and the dir itself only where they were all it held:
+    one OTAKU_CONFIG_DIR points at keeps whatever else is in it."""
+    paths = Paths.resolve(root)
+    encryption.purge_keychain_items(paths.keychain_service)
+    for folder in (
+        paths.configs_dir,
+        paths.database_dir,
+        paths.logs_dir,
+        paths.custom_web_dir,
+        paths.cert_dir,
+    ):
+        if folder.exists():
+            shutil.rmtree(folder)
+    with contextlib.suppress(OSError):  # something else is in it
+        paths.root.rmdir()
+    return paths.root
 
 
 def _newer_version(latest_version: str) -> str:
