@@ -347,12 +347,12 @@ def type_password(root: Path, password: str) -> None:
     config.toml in plain, whatever the line held before — for the launch
     to replace with its hash."""
     config = Paths.resolve(root).config_file
-    lines = config.read_text().splitlines()
+    lines = config.read_text(encoding="utf-8").splitlines()
     typed = [
         f"password = {json.dumps(password)}" if line.startswith("password =") else line
         for line in lines
     ]
-    config.write_text("\n".join(typed) + "\n")
+    config.write_text("\n".join(typed) + "\n", encoding="utf-8")
 
 
 def _free_port() -> int:

@@ -68,7 +68,7 @@ class TestMaxContext:
 
     def test_the_set_value_lands_in_config_toml_and_is_remembered(self, app: App) -> None:
         app.play("/set max_context 32000")
-        migrated = app.paths.config_file.read_text()
+        migrated = app.paths.config_file.read_text(encoding="utf-8")
         assert "max_context = 32000" in migrated
         assert migrated.count("max_context") == 1  # edited in place, not appended
         assert "0 = the model's own max context" in migrated  # the comment rides it
@@ -105,14 +105,14 @@ class TestMaxContext:
         capsys.readouterr()
         app.play("/set max_context")
         assert "32,000 tokens" in capsys.readouterr().out
-        assert "max_context = 32000" in app.paths.config_file.read_text()
+        assert "max_context = 32000" in app.paths.config_file.read_text(encoding="utf-8")
 
     def test_the_prompt_may_use_the_whole_window_until_a_cap_is_set(self, app: App) -> None:
         # 0 is what a fresh config carries: the window a model advertises
         # is the one it can use, and a reader who wants the prompt kept
         # smaller than that says so.
         assert _settings(app).context_limit == 0
-        assert "max_context = 0" in app.paths.config_file.read_text()
+        assert "max_context = 0" in app.paths.config_file.read_text(encoding="utf-8")
 
     def test_a_story_over_the_cap_declines_with_the_sentence(self, app: App, capsys) -> None:
         for i in range(8):
@@ -141,9 +141,9 @@ class TestServe:
     def test_the_switch_lands_in_config_toml(self, app: App, monkeypatch) -> None:
         _free_port(monkeypatch)
         app.play("/set serve on")
-        assert "terminal_serve = true" in app.paths.config_file.read_text()
+        assert "terminal_serve = true" in app.paths.config_file.read_text(encoding="utf-8")
         app.play("/set serve off")
-        assert "terminal_serve = false" in app.paths.config_file.read_text()
+        assert "terminal_serve = false" in app.paths.config_file.read_text(encoding="utf-8")
 
     def test_the_page_is_served_again_right_after_off(self, app: App, monkeypatch) -> None:
         # the closed connections still linger on the port when it is asked
@@ -171,11 +171,14 @@ class TestServe:
         config = app.paths.config_file
         config.write_text(
             "".join(
-                row for row in config.read_text().splitlines(True) if "terminal_serve" not in row
-            )
+                row
+                for row in config.read_text(encoding="utf-8").splitlines(True)
+                if "terminal_serve" not in row
+            ),
+            encoding="utf-8",
         )
         relaunched = launch(app.paths.root, app.server)
-        assert "terminal_serve = false" in config.read_text()
+        assert "terminal_serve = false" in config.read_text(encoding="utf-8")
         assert relaunched.api.settings.terminal.get().terminal_serve is False
         relaunched.close()
 
@@ -194,7 +197,7 @@ class TestVariables:
         after = app.api.settings.web.get().config
         assert (after.host, after.port, after.https) == ("0.0.0.0", 9601, True)
         config = app.paths.root / "configs" / "config.toml"
-        assert 'host = "localhost"' in config.read_text()
+        assert 'host = "localhost"' in config.read_text(encoding="utf-8")
 
     def test_off_turns_off_what_the_file_turns_on(self, app: App, monkeypatch) -> None:
         set_config(app.paths.root, web_https=True, web_terminal_serve=True)
@@ -216,7 +219,7 @@ class TestVariables:
         with pytest.raises(Invalid):
             app.api.settings.check_password("over the hills")
         config = app.paths.root / "configs" / "config.toml"
-        assert "under the stairs" not in config.read_text()
+        assert "under the stairs" not in config.read_text(encoding="utf-8")
 
     def test_a_value_a_variable_cannot_hold_is_passed_over_and_said(
         self, app: App, monkeypatch

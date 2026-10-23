@@ -67,11 +67,14 @@ class TestThink:
         app.play("/set think unset")
         app.play("/model generic/test-model")
         assert _think(app) == "high"
-        saved = tomllib.loads(app.paths.models_file.read_text())
+        saved = tomllib.loads(app.paths.models_file.read_text(encoding="utf-8"))
         assert saved["test-model"]["think"] == "high"
         assert saved["other-model"]["think"] == "unset"
         app.play("/set think none")
-        assert tomllib.loads(app.paths.models_file.read_text())["test-model"]["think"] == "none"
+        assert (
+            tomllib.loads(app.paths.models_file.read_text(encoding="utf-8"))["test-model"]["think"]
+            == "none"
+        )
 
     def test_the_level_an_older_state_held_moves_to_its_model(self, server, tmp_path) -> None:
         # Before 0.5.0 the level was one for every model and lived in
@@ -83,13 +86,15 @@ class TestThink:
         root = tmp_path / "state"
         set_config_provider(root, server)
         paths = Paths.resolve(root)
-        paths.state_file.write_text('model = "generic/test-model"\nstory = 0\nthink = "none"\n')
+        paths.state_file.write_text(
+            'model = "generic/test-model"\nstory = 0\nthink = "none"\n', encoding="utf-8"
+        )
         app = launch(root, server)
         try:
             assert _think(app) == "none"
-            saved = tomllib.loads(paths.models_file.read_text())
+            saved = tomllib.loads(paths.models_file.read_text(encoding="utf-8"))
             assert saved["test-model"]["think"] == "none"
-            assert "think" not in tomllib.loads(paths.state_file.read_text())
+            assert "think" not in tomllib.loads(paths.state_file.read_text(encoding="utf-8"))
         finally:
             app.close()
 
@@ -100,13 +105,17 @@ class TestThink:
         root = tmp_path / "state"
         set_config_provider(root, server)
         paths = Paths.resolve(root)
-        paths.state_file.write_text('model = "generic/test-model"\nthink = "default"\n')
+        paths.state_file.write_text(
+            'model = "generic/test-model"\nthink = "default"\n', encoding="utf-8"
+        )
         app = launch(root, server)
         try:
             assert _think(app) == "unset"
-            assert "think" not in tomllib.loads(paths.state_file.read_text())
+            assert "think" not in tomllib.loads(paths.state_file.read_text(encoding="utf-8"))
             saved = (
-                tomllib.loads(paths.models_file.read_text()) if paths.models_file.exists() else {}
+                tomllib.loads(paths.models_file.read_text(encoding="utf-8"))
+                if paths.models_file.exists()
+                else {}
             )
             assert "think" not in saved.get("test-model", {})
         finally:
@@ -121,19 +130,23 @@ class TestThink:
         root = tmp_path / "state"
         set_config_provider(root, server)
         paths = Paths.resolve(root)
-        paths.models_file.write_text('[test-model]\nthink = "low"\n')
-        paths.state_file.write_text('model = "generic/test-model"\nthink = "high"\n')
+        paths.models_file.write_text('[test-model]\nthink = "low"\n', encoding="utf-8")
+        paths.state_file.write_text(
+            'model = "generic/test-model"\nthink = "high"\n', encoding="utf-8"
+        )
         app = launch(root, server)
         try:
             assert _think(app) == "low"
-            assert "think" not in tomllib.loads(paths.state_file.read_text())
+            assert "think" not in tomllib.loads(paths.state_file.read_text(encoding="utf-8"))
         finally:
             app.close()
-        paths.state_file.write_text('model = ""\nthink = "high"\n')
+        paths.state_file.write_text('model = ""\nthink = "high"\n', encoding="utf-8")
         app = launch(root, server)
         try:
-            assert "think" not in tomllib.loads(paths.state_file.read_text())
-            assert tomllib.loads(paths.models_file.read_text()) == {"test-model": {"think": "low"}}
+            assert "think" not in tomllib.loads(paths.state_file.read_text(encoding="utf-8"))
+            assert tomllib.loads(paths.models_file.read_text(encoding="utf-8")) == {
+                "test-model": {"think": "low"}
+            }
         finally:
             app.close()
 
@@ -200,7 +213,10 @@ class TestThink:
             try:
                 assert _think(app) == "off"
                 assert (
-                    tomllib.loads(app.paths.models_file.read_text())["test-model"]["think"] == "off"
+                    tomllib.loads(app.paths.models_file.read_text(encoding="utf-8"))["test-model"][
+                        "think"
+                    ]
+                    == "off"
                 )
                 app.play("Hello.")
                 assert app.server.requests[-1]["reasoning_effort"] == "none"
@@ -208,12 +224,12 @@ class TestThink:
                 assert _think(app) == "unset"
                 app.play("Again.")
                 assert "reasoning_effort" not in app.server.requests[-1]
-                saved = tomllib.loads(app.paths.models_file.read_text())
+                saved = tomllib.loads(app.paths.models_file.read_text(encoding="utf-8"))
                 assert saved["test-model"]["think"] == "unset"
                 app.play("/model ollama/plain-model")
                 assert _think(app) == "unset"
                 app.play("/set parameter temperature 0.5")
-                saved = tomllib.loads(app.paths.models_file.read_text())
+                saved = tomllib.loads(app.paths.models_file.read_text(encoding="utf-8"))
                 assert "think" not in saved["plain-model"]
                 app.play("Hello.")
                 assert "reasoning_effort" not in app.server.requests[-1]
@@ -316,7 +332,7 @@ class TestThink:
                 assert "thinking_budget" not in body
                 app.play("/set think 0")
                 assert _think(app) == "0"
-                saved = tomllib.loads(app.paths.models_file.read_text())
+                saved = tomllib.loads(app.paths.models_file.read_text(encoding="utf-8"))
                 assert saved["test-model"]["think"] == "0"
             finally:
                 app.close()
@@ -625,7 +641,7 @@ class TestParameters:
         assert _params(app)["stop"] == ["\nUser:", "The End"]
         app.play("I enter the hall.")
         assert app.server.requests[-1]["stop"] == ["\nUser:", "The End"]
-        saved = tomllib.loads(app.paths.models_file.read_text())
+        saved = tomllib.loads(app.paths.models_file.read_text(encoding="utf-8"))
         assert saved["test-model"]["stop"] == ["\nUser:", "The End"]
         relaunched = launch(app.paths.root, app.server)
         try:

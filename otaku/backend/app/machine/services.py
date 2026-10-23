@@ -35,6 +35,7 @@ RAM does not move that fast.
 import os
 import re
 import subprocess
+import sys
 import time
 
 _MEMINFO = "/proc/meminfo"  # its presence is also how Linux is recognized
@@ -79,8 +80,8 @@ def virtual_memory() -> tuple[int, int] | None:
 
 
 def _read() -> tuple[int, int] | None:
-    # os.sysconf itself is absent on Windows — the AttributeError is the
-    # platform answering, and `virtual_memory` turns it into None.
+    if sys.platform == "win32":  # no os.sysconf
+        return None
     total = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
     if total <= 0:
         return None

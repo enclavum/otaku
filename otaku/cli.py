@@ -9,6 +9,7 @@ entry-point business) and passed down as a plain path.
 """
 
 import getpass
+import io
 import os
 import sys
 from collections.abc import Callable, Iterable
@@ -53,6 +54,12 @@ def resolve_root() -> Path | None:
 @click.pass_context
 def main(ctx: click.Context) -> None:
     """A roleplay client."""
+    if sys.platform == "win32":
+        # A pipe or a file there takes the ANSI codepage, which has no `→`
+        # or `…`; a console is UTF-8 already. Python 3.15 does this itself.
+        for stream in (sys.stdout, sys.stderr):
+            if isinstance(stream, io.TextIOWrapper):
+                stream.reconfigure(encoding="utf-8")
     if ctx.invoked_subcommand is not None:
         return
     root = resolve_root()

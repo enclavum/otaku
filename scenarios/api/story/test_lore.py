@@ -232,7 +232,9 @@ class TestExtract:
             "Messages:\n{chunk}\n"
             'Reply as {"scene": {"title": "...", "summary": "..."}} — {this} stays literal.'
         )
-        paths.prompts_file.write_text(f"extract_prompt = {json.dumps(template)}\n")
+        paths.prompts_file.write_text(
+            f"extract_prompt = {json.dumps(template)}\n", encoding="utf-8"
+        )
         app = launch(root, server)
         try:
             for i in range(3):
@@ -339,11 +341,16 @@ class TestIdleScheduling:
         try:
             for i in range(3):
                 app.play(f"Turn number {i}.")
+            # A slow machine may run a pass between turns too, closing a
+            # scene over the fewer messages it saw: wait for the one that
+            # saw all six.
             deadline = time.time() + 10
             ends: list[int] = []
-            while time.time() < deadline and not ends:
+            while time.time() < deadline:
                 ids = app.store.stories.get_messages_ids(app.story_id)
                 ends = app.store.scenes.get_current_ends(app.story_id, ids)
+                if ends and ids.index(ends[-1]) >= 3:
+                    break
                 time.sleep(0.1)
             assert ends, "the idle pass never closed a scene"
             assert ids.index(ends[-1]) == 3  # the newest two messages stayed open
@@ -591,7 +598,11 @@ class TestFailedPass:
         assert "failed" in out
         assert "ancelled" not in out
         logs = app.paths.root / "logs"
-        assert any("the reply was empty" in f.read_text() for f in logs.rglob("*") if f.is_file())
+        assert any(
+            "the reply was empty" in f.read_text(encoding="utf-8")
+            for f in logs.rglob("*")
+            if f.is_file()
+        )
 
     def test_a_scene_without_a_summary_is_refused(self, app: App, capsys) -> None:
         # A committed scene whose summary is empty would swallow its span:
@@ -629,11 +640,11 @@ class TestFailedPass:
         app.play("/extract")
         assert "failed" in capsys.readouterr().out
         logs = list((app.paths.root / "logs").rglob("*"))
-        assert any("RuntimeError" in f.read_text() for f in logs if f.is_file())
+        assert any("RuntimeError" in f.read_text(encoding="utf-8") for f in logs if f.is_file())
         # The error log holds the WHOLE traceback, not just the shape.
         errors = [f for f in logs if f.name.startswith("error-")]
-        assert errors and "Traceback" in errors[0].read_text()
-        assert "boom" in errors[0].read_text()
+        assert errors and "Traceback" in errors[0].read_text(encoding="utf-8")
+        assert "boom" in errors[0].read_text(encoding="utf-8")
 
 
 class TestHealing:
@@ -643,7 +654,7 @@ class TestHealing:
         # The chapel export, with one character's history blanked: the
         # next pass rebuilds exactly the missing rollup — from the one
         # entry, verbatim — and touches nothing that is already there.
-        export = imports.parse_story(CHAPEL.read_text())
+        export = imports.parse_story(CHAPEL.read_text(encoding="utf-8"))
         scene = export.scenes[-1]
         journals = tuple(
             replace(j, history="") if j.character == "Кассиан" else j for j in scene.journals
@@ -653,7 +664,8 @@ class TestHealing:
         path.write_text(
             exports.render_story(
                 holed, otaku_version="0", model="test/test-model", exported="2026-07-30 12:00"
-            )
+            ),
+            encoding="utf-8",
         )
 
         app.play(f"/import {path}")

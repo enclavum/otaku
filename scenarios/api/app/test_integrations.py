@@ -39,14 +39,14 @@ SEARCH = "/search"
 class TestWebSearchKey:
     def test_nothing_stands_until_a_key_is_saved(self, app: App) -> None:
         assert app.api.integrations.web_search.get() == WebSearch(False)
-        file = tomllib.loads(app.paths.integrations_file.read_text())
+        file = tomllib.loads(app.paths.integrations_file.read_text(encoding="utf-8"))
         assert file == {"web_search": {"api_key": ""}}
 
     def test_a_key_is_sealed_into_the_one_section_whichever_engines(self, app: App) -> None:
         for key in ("tvly-dev-123", "0f3a-2b"):
             app.api.integrations.web_search.update(api_key=f" {key} ")
             assert app.api.integrations.web_search.get() == WebSearch(True)
-            raw = app.paths.integrations_file.read_text()
+            raw = app.paths.integrations_file.read_text(encoding="utf-8")
             assert key not in raw  # never plain in the file
             file = tomllib.loads(raw)
             # one section, no engine named in it
@@ -69,16 +69,16 @@ class TestWebSearchKey:
         app.api.integrations.web_search.update(api_key="tvly-x")
         app.api.integrations.web_search.update(api_key="")
         assert app.api.integrations.web_search.get() == WebSearch(False)
-        file = tomllib.loads(app.paths.integrations_file.read_text())
+        file = tomllib.loads(app.paths.integrations_file.read_text(encoding="utf-8"))
         assert file["web_search"]["api_key"] == ""
         # forgetting none is a no-op, and says so
         app.api.integrations.web_search.update(api_key="  ")
         assert app.api.integrations.web_search.get() == WebSearch(False)
 
     def test_a_section_a_hand_edit_dropped_is_founded_by_the_save(self, app: App) -> None:
-        app.paths.integrations_file.write_text("# emptied by hand\n")
+        app.paths.integrations_file.write_text("# emptied by hand\n", encoding="utf-8")
         app.api.integrations.web_search.update(api_key="tvly-x")
-        file = tomllib.loads(app.paths.integrations_file.read_text())
+        file = tomllib.loads(app.paths.integrations_file.read_text(encoding="utf-8"))
         assert _unsealed(app, file["web_search"]["api_key"]) == "tvly-x"
 
 

@@ -157,7 +157,8 @@ class TestTurns:
         paths.prompts_file.write_text(
             'me_framing = "<<{name} speaks>>\\n{body}"\n'
             'you_framing = "<<now play {name}>>"\n'
-            'ooc_framing = "<<aside: {body}>>"\n'
+            'ooc_framing = "<<aside: {body}>>"\n',
+            encoding="utf-8",
         )
         app = launch(root, server)
         try:
@@ -177,13 +178,17 @@ class TestTurns:
         root = tmp_path / "state"
         paths = Paths.resolve(root)
         paths.ensure_tree()
-        paths.prompts_file.write_text('me_framing = "<<first {name}>>\\n{body}"\n')
+        paths.prompts_file.write_text(
+            'me_framing = "<<first {name}>>\\n{body}"\n', encoding="utf-8"
+        )
         app = launch(root, server)
         try:
             app.play("/me Elara: one.")
         finally:
             app.close()
-        paths.prompts_file.write_text('me_framing = "<<second {name}>>\\n{body}"\n')
+        paths.prompts_file.write_text(
+            'me_framing = "<<second {name}>>\\n{body}"\n', encoding="utf-8"
+        )
         app = launch(root, server)
         try:
             app.play("/me Elara: two.")
@@ -523,7 +528,9 @@ class TestRoll:
         root = tmp_path / "state"
         paths = Paths.resolve(root)
         paths.ensure_tree()
-        paths.prompts_file.write_text('roll_framing = "<<rolled {dice}>> {body}"\n')
+        paths.prompts_file.write_text(
+            'roll_framing = "<<rolled {dice}>> {body}"\n', encoding="utf-8"
+        )
         app = launch(root, server)
         try:
             app.play("/roll 1d4 I duck.")
@@ -1097,7 +1104,9 @@ class TestTheCanvasOverTheChatWire:
         root = tmp_path / "state"
         paths = Paths.resolve(root)
         paths.ensure_tree()
-        paths.prompts_file.write_text('emulate_text_completion_prompt = "CONTINUE HOW"\n')
+        paths.prompts_file.write_text(
+            'emulate_text_completion_prompt = "CONTINUE HOW"\n', encoding="utf-8"
+        )
         app = launch(root, server)
         try:
             app.play("/system Be terse.")
@@ -1245,7 +1254,7 @@ class TestToolsOtakuRuns:
         root = tmp_path / "state"
         paths = Paths.resolve(root)
         paths.ensure_tree()
-        paths.prompts_file.write_text('tool_framing = "<<{tool}: {body}>>"\n')
+        paths.prompts_file.write_text('tool_framing = "<<{tool}: {body}>>"\n', encoding="utf-8")
         app = launch(root, server)
         try:
             app.api.stories.settings.update(app.ensure_story(), "allow_system_info", enabled=True)
@@ -1348,7 +1357,7 @@ class TestLegacyTurns:
             "The hall answers.\n"
         )
         path = tmp_path / "old.md"
-        path.write_text(document)
+        path.write_text(document, encoding="utf-8")
         app.play(f"/import {path}")
         app.play("She waits.")
         wire = app.server.requests[-1]["messages"]
@@ -1378,7 +1387,7 @@ def _continuing_omlx(
         set_config_provider(root, server, name="omlx")
         paths = Paths.resolve(root)
         if framing is not None:
-            paths.prompts_file.write_text(f'story_framing = "{framing}"\n')
+            paths.prompts_file.write_text(f'story_framing = "{framing}"\n', encoding="utf-8")
         if template_line is not None:
             entry = {models_file.TEMPLATE_KEY: template_line}
             models_file.save(paths.models_file, "test-model", entry)

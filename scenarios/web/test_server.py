@@ -75,7 +75,7 @@ class TestServing:
         assert page.headers("/web-fonts/Mine.woff2")["content-type"] == "font/woff2"
         # Absent, wrong kind, and a name that is not a name at all.
         assert page.status("/web-fonts/Absent.woff2") == 404
-        (theirs / "notes.txt").write_text("not a typeface")
+        (theirs / "notes.txt").write_text("not a typeface", encoding="utf-8")
         assert page.status("/web-fonts/notes.txt") == 404
         assert page.status("/web-fonts/../../configs/providers.toml") == 404
 
@@ -319,12 +319,12 @@ class TestReading:
         # out again.
         page.patch("/api/providers/openrouter", {"api_key": "k-test"})
         providers = page.root / "configs/providers.toml"
-        assert tomllib.loads(providers.read_text())["openrouter"]["api_key"]
+        assert tomllib.loads(providers.read_text(encoding="utf-8"))["openrouter"]["api_key"]
         answer = page.patch("/api/providers/openrouter", {"api_key": ""})
         assert answer["value"]["key_source"] is None
-        assert tomllib.loads(providers.read_text())["openrouter"]["api_key"] == ""
+        assert tomllib.loads(providers.read_text(encoding="utf-8"))["openrouter"]["api_key"] == ""
         page.patch("/api/providers/generic", {"url": ""})
-        assert tomllib.loads(providers.read_text())["generic"]["url"] == ""
+        assert tomllib.loads(providers.read_text(encoding="utf-8"))["generic"]["url"] == ""
 
     def test_a_provider_says_where_its_key_comes_from(self, page: Page, monkeypatch) -> None:
         # The field's caption, never the value: the section's key while
@@ -872,7 +872,7 @@ class TestStorySettings:
         answer = page.patch(path, {"text": "ASK ANEW"})
         assert answer["notice"] and answer["value"]["text"] == "ASK ANEW"
         assert page.get(path)["text"] == "ASK ANEW"
-        assert "ASK ANEW" in Paths.resolve(page.root).prompts_file.read_text()
+        assert "ASK ANEW" in Paths.resolve(page.root).prompts_file.read_text(encoding="utf-8")
         page.patch(path, {"text": ""})
         assert page.get(path)["text"] == shipped
         # a name no tool answers to
@@ -1504,7 +1504,7 @@ class TestWebSearchKeyOverTheWire:
         answer = page.patch(path, {"api_key": "tvly-abc"})
         assert answer["notice"] and answer["value"] == {"has_key": True}
         assert page.get(path) == {"has_key": True}
-        raw = Paths.resolve(page.root).integrations_file.read_text()
+        raw = Paths.resolve(page.root).integrations_file.read_text(encoding="utf-8")
         assert "tvly-abc" not in raw and "tavily" not in raw
         page.patch(path, {"api_key": "any-other"})
         assert page.get(path) == {"has_key": True}

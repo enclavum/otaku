@@ -329,13 +329,13 @@ class TestToolsTab:
         # the key is typed over where it stands and saved with Ctrl+S
         self.tools(app, DOWN + ENTER + DOWN + ENTER + "tvly-abc" + CTRL_S + ESC + ESC)
         assert app.api.integrations.web_search.get() == WebSearch(True)
-        raw = app.paths.integrations_file.read_text()
+        raw = app.paths.integrations_file.read_text(encoding="utf-8")
         assert "tvly-abc" not in raw  # never plain in the file
         assert tomllib.loads(raw)["web_search"]["api_key"].startswith("sealed:")
         # Delete on the field forgets it, file and app both
         self.tools(app, DOWN + ENTER + DOWN + DELETE + ESC + ESC)
         assert app.api.integrations.web_search.get() == WebSearch(False)
-        file = tomllib.loads(app.paths.integrations_file.read_text())
+        file = tomllib.loads(app.paths.integrations_file.read_text(encoding="utf-8"))
         assert file["web_search"]["api_key"] == ""
 
     def test_the_emulation_is_the_last_row_its_instructions_then_its_depth(self, app: App) -> None:
@@ -369,7 +369,7 @@ class TestToolsTab:
     def test_the_prompts_file_holds_what_was_saved(self, app: App) -> None:
         app.play("I push the door.")
         self.tools(app, ENTER + ENTER + "Be brief. " + CTRL_S + ESC + ESC)
-        text = app.paths.prompts_file.read_text()
+        text = app.paths.prompts_file.read_text(encoding="utf-8")
         assert "Be brief. " in text
 
     def tools(self, app: App, keys: str) -> None:

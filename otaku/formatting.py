@@ -104,7 +104,7 @@ def pretty_path(path: Path) -> str:
         relative = path.relative_to(Path.home())
     except ValueError:
         return str(path)
-    return "~" if relative == Path() else f"~/{relative}"
+    return "~" if relative == Path() else str(Path("~", relative))
 
 
 def decode_text(raw: bytes) -> str:

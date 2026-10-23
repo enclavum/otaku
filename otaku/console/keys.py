@@ -70,7 +70,7 @@ def _watch(fd: int, keys: Mapping[bytes, Callable[[], None]], done: threading.Ev
 def _pressed(fd: int) -> bytes:
     """The key pressed within one look, or b"" — the look is what lets
     the watch notice it has been asked to end."""
-    if termios is None:
+    if sys.platform == "win32":
         import msvcrt  # Windows only, and only here
 
         if msvcrt.kbhit():
@@ -88,7 +88,7 @@ def _unlined(fd: int) -> Iterator[None]:
     cbreak changes are put back — not a snapshot — so this composes
     with whoever else restores the terminal meanwhile (the ticker's
     quiet), in whichever order the two let go."""
-    if termios is None:
+    if sys.platform == "win32" or termios is None:
         yield
         return
     before = termios.tcgetattr(fd)

@@ -59,8 +59,8 @@ class TestFirstRun:
         terminal.send(ENTER, 1.0)
         terminal.expect("No model selected")
         assert terminal.quit() == 0
-        assert "[providers." not in (state / "configs" / "config.toml").read_text()
-        providers = (state / "configs" / "providers.toml").read_text()
+        assert "[providers." not in (state / "configs" / "config.toml").read_text(encoding="utf-8")
+        providers = (state / "configs" / "providers.toml").read_text(encoding="utf-8")
         for section in ("[llamacpp]", "[koboldcpp]", "[ollama]", "[omlx]", "[lmstudio]"):
             assert section in providers
         assert (state / "configs" / "prompts.toml").exists()

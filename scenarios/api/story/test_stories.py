@@ -12,6 +12,7 @@ fork, truncate — and about the story commands' effects on the store, the
 story the chat plays, and the remembered state.
 """
 
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -393,6 +394,9 @@ class TestSystem:
         app.play("/system /nowhere/gone.md")
         assert app.premise == "/nowhere/gone.md"
 
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="a mode of 0o000 does not stop a read on Windows"
+    )
     def test_an_unreadable_file_changes_nothing(self, app: App, capsys, tmp_path) -> None:
         sealed = tmp_path / "sealed.md"
         sealed.write_text("You are the narrator.", encoding="utf-8")
@@ -677,7 +681,7 @@ def with_prompt(root, server) -> App:
     """The app over a prompts.toml whose questions prompt is `HOW_TO_ASK`."""
     paths = Paths.resolve(root)
     paths.ensure_tree()
-    paths.prompts_file.write_text(f'tool_questions_prompt = "{HOW_TO_ASK}"\n')
+    paths.prompts_file.write_text(f'tool_questions_prompt = "{HOW_TO_ASK}"\n', encoding="utf-8")
     return launch(root, server)
 
 

@@ -18,7 +18,7 @@ class TestCrashContainment:
         assert "Command failed (RuntimeError)" in out
         assert "error-" in out  # the notice names the log
         errors = [f for f in (app.paths.root / "logs").rglob("error-*") if f.is_file()]
-        assert errors and "Traceback" in errors[0].read_text()
+        assert errors and "Traceback" in errors[0].read_text(encoding="utf-8")
         # The session lives on: the next line plays normally.
         app.play("I enter the hall.")
         assert app.messages[-1].body

@@ -59,7 +59,7 @@ class TestModel:
         # A hand-edited models.toml is the only way in. The launch says
         # such a thing before the banner; a switch has to say it where it
         # happens, or the session drops a parameter in silence.
-        app.paths.models_file.write_text("[other-model]\nbogus = 1\n")
+        app.paths.models_file.write_text("[other-model]\nbogus = 1\n", encoding="utf-8")
         capsys.readouterr()
         app.play("/model generic/other-model")
         assert "bogus" in capsys.readouterr().out
@@ -96,7 +96,9 @@ class TestModel:
         try:
             root = tmp_path / "state"
             set_config_provider(root, server, name="ollama")
-            Paths.resolve(root).state_file.write_text('model = "ollama/test-model"\n')
+            Paths.resolve(root).state_file.write_text(
+                'model = "ollama/test-model"\n', encoding="utf-8"
+            )
             app = launch(root, server, spec=None)
             try:
                 assert _spec(app) == "ollama/test-model"
@@ -259,11 +261,14 @@ class TestUpdateCheck:
         config = app.paths.config_file
         config.write_text(
             "".join(
-                row for row in config.read_text().splitlines(True) if "check_updates" not in row
-            )
+                row
+                for row in config.read_text(encoding="utf-8").splitlines(True)
+                if "check_updates" not in row
+            ),
+            encoding="utf-8",
         )
         relaunched = launch(app.paths.root, app.server)
-        assert "check_updates = true" in config.read_text()
+        assert "check_updates = true" in config.read_text(encoding="utf-8")
         relaunched.close()
 
     def test_this_version_announced_names_nothing(self, app: App) -> None:

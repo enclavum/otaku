@@ -147,7 +147,7 @@ def quiet_ctrl_c() -> "Iterator[Callable[[], None]]":
     Windows)."""
     fd = None
     saved = None
-    if termios is not None:
+    if sys.platform != "win32" and termios is not None:
         with contextlib.suppress(ValueError, OSError, termios.error):
             fd = sys.stdin.fileno()
             if os.isatty(fd):

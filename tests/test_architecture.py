@@ -275,11 +275,13 @@ class TestMirror:
             roots += [folder / "__init__.py" for folder in _resource_folders(twin)]
             roots.append(_WEB_DOOR[0] / twin / "__init__.py")
         for root in roots:
-            body = ast.parse(root.read_text()).body
+            body = ast.parse(root.read_text(encoding="utf-8")).body
             assert all(_is_docstring(node) for node in body), root.relative_to(_ROOT)
         # the client's package has no section of its own name
         for package in _TWINS:
-            assert package not in _SECTION.findall((_CLIENT / f"{package}.js").read_text())
+            assert package not in _SECTION.findall(
+                (_CLIENT / f"{package}.js").read_text(encoding="utf-8")
+            )
 
     def test_dispatch_is_flat_its_one_table_in_its_root(self) -> None:
         # a module of handlers is named after the resource its commands
@@ -427,12 +429,12 @@ class TestDoors:
             assert not any(found.target.startswith(forbidden) for found in _imports(path)), path
             modules = {
                 alias.name.split(".")[0]
-                for node in ast.walk(ast.parse(path.read_text()))
+                for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
                 if isinstance(node, ast.Import)
                 for alias in node.names
             } | {
                 (node.module or "").split(".")[0]
-                for node in ast.walk(ast.parse(path.read_text()))
+                for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
                 if isinstance(node, ast.ImportFrom)
             }
             assert not modules & {"http", "socket", "socketserver", "threading"}, path
@@ -482,7 +484,7 @@ class TestInterface:
     def test_a_resource_holds_the_app_and_its_sub_resources_alone(self) -> None:
         wrong = []
         for path in _interface_files(kinds=("resources.py",), with_facade=False):
-            for node in ast.parse(path.read_text()).body:
+            for node in ast.parse(path.read_text(encoding="utf-8")).body:
                 if isinstance(node, ast.ClassDef):
                     wrong += [f"{node.name}: {problem}" for problem in _holds_more(node)]
         assert not wrong, "\n".join(wrong)
@@ -564,7 +566,9 @@ class TestAppPrivacy:
                     _SRC / "backend" / "samples" / "__init__.py",
                 ):
                     continue
-                for number, line in enumerate(path.read_text().splitlines(), start=1):
+                for number, line in enumerate(
+                    path.read_text(encoding="utf-8").splitlines(), start=1
+                ):
                     if needle.search(line):
                         uses.append(f"{path.relative_to(_ROOT)}:{number}: {line.strip()}")
         assert not uses, "app._ outside the domain:\n" + "\n".join(uses)
@@ -731,13 +735,13 @@ class TestPageModules:
     def test_the_clients_modules_import_nothing_beside_it(self) -> None:
         client = _STATIC / "js" / "api"
         for path in client.rglob("*.js"):
-            for spec in re.findall(r'from "([^"]+)"', path.read_text()):
+            for spec in re.findall(r'from "([^"]+)"', path.read_text(encoding="utf-8")):
                 assert (path.parent / spec).resolve().is_relative_to(client), (path.name, spec)
 
     def test_the_screens_reach_the_server_through_the_client_alone(self) -> None:
         # the watch excepted: the server's own channel, as the sign-in is
         for path in _page_files():
-            source = path.read_text()
+            source = path.read_text(encoding="utf-8")
             if path.name == "shell.js":
                 source = source.replace('"/api/watch"', "")
             assert "fetch(" not in source, path.name
@@ -886,7 +890,9 @@ class TestWebTheme:
     def test_every_token_is_documented_and_nothing_more(self) -> None:
         declared = set(re.findall(r"(--otk-[a-z-]+):", _light_block()))
         documented = set(
-            re.findall(r"--otk-[a-z-]+", (_ROOT / "docs" / "web_tokens.md").read_text())
+            re.findall(
+                r"--otk-[a-z-]+", (_ROOT / "docs" / "web_tokens.md").read_text(encoding="utf-8")
+            )
         )
         assert declared == documented, (
             f"undocumented: {sorted(declared - documented)}; "
@@ -909,7 +915,7 @@ class TestDemo:
     ships with a demo that silently cannot answer it."""
 
     def test_the_demo_routes_every_path_the_spec_lists(self) -> None:
-        router = (_ROOT / "demo" / "web" / "demo.js").read_text()
+        router = (_ROOT / "demo" / "web" / "demo.js").read_text(encoding="utf-8")
         missing = sorted({path for _, path in _spec_operations() if path not in router})
         assert not missing, f"paths the demo does not route: {missing}"
 
@@ -967,7 +973,7 @@ def _imports(path: Path) -> list[_Import]:
         _module_of(path) if path.name == "__init__.py" else _module_of(path).rpartition(".")[0]
     )
     found = []
-    for node in ast.walk(ast.parse(path.read_text())):
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
         if isinstance(node, ast.Import):
             found += [
                 _Import(alias.name, True, alias.asname, node.lineno)
@@ -1095,7 +1101,7 @@ def _flat_names() -> set[str]:
 def _assigned(path: Path) -> set[str]:
     """The names a module assigns at its top level."""
     out = set()
-    for node in ast.parse(path.read_text()).body:
+    for node in ast.parse(path.read_text(encoding="utf-8")).body:
         targets = node.targets if isinstance(node, ast.Assign) else [getattr(node, "target", None)]
         out |= {target.id for target in targets if isinstance(target, ast.Name)}
     return out
@@ -1115,7 +1121,7 @@ def _verbs() -> list[tuple[str, ast.FunctionDef, set[str]]]:
     the names it is decorated with)."""
     found = []
     for path in _interface_files(kinds=("resources.py",), with_facade=False):
-        for node in ast.parse(path.read_text()).body:
+        for node in ast.parse(path.read_text(encoding="utf-8")).body:
             if not isinstance(node, ast.ClassDef):
                 continue
             for verb in node.body:
@@ -1178,7 +1184,7 @@ def _client_twins() -> set[tuple[str, str]]:
     return {
         (twin, name)
         for twin in _TWINS
-        for name in _SECTION.findall((_CLIENT / f"{twin}.js").read_text())
+        for name in _SECTION.findall((_CLIENT / f"{twin}.js").read_text(encoding="utf-8"))
     }
 
 
@@ -1246,7 +1252,7 @@ def _attributes() -> dict[str, dict[str, str]]:
     its `__init__`."""
     out: dict[str, dict[str, str]] = {}
     for path in _interface_files():
-        for node in ast.parse(path.read_text()).body:
+        for node in ast.parse(path.read_text(encoding="utf-8")).body:
             if not isinstance(node, ast.ClassDef):
                 continue
             held = out.setdefault(node.name, {})
@@ -1387,7 +1393,7 @@ def _routes() -> set[tuple[str, str]]:
 
 
 def _spec_text() -> str:
-    return (_SRC / "web" / "api.yaml").read_text()
+    return (_SRC / "web" / "api.yaml").read_text(encoding="utf-8")
 
 
 def _spec_operations() -> set[tuple[str, str]]:
@@ -1464,7 +1470,7 @@ def _page_specs(path: Path) -> list[str]:
     page's root, the suffix dropped — `../kit/dom.js` read as `js/kit/dom`."""
     return [
         (path.parent / spec).resolve().relative_to(_STATIC.resolve()).as_posix()
-        for spec in re.findall(r'from "(\.[^"]+)\.js"', path.read_text())
+        for spec in re.findall(r'from "(\.[^"]+)\.js"', path.read_text(encoding="utf-8"))
     ]
 
 
@@ -1491,7 +1497,7 @@ def _group(module: str) -> str:
 
 def _page_source(name: str) -> str:
     """A page module's source, found in whichever group holds it."""
-    return next(path for path in (_STATIC / "js").rglob(name)).read_text()
+    return next(path for path in (_STATIC / "js").rglob(name)).read_text(encoding="utf-8")
 
 
 def _js_keys(name: str, constant: str) -> set[str]:
@@ -1502,7 +1508,7 @@ def _js_keys(name: str, constant: str) -> set[str]:
 
 
 def _app_css() -> str:
-    return (_STATIC / "app.css").read_text()
+    return (_STATIC / "app.css").read_text(encoding="utf-8")
 
 
 def _light_block() -> str:

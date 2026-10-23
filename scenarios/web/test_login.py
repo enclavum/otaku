@@ -149,7 +149,7 @@ class TestSigningIn:
 
 class TestThePasswordOnDisk:
     def test_a_typed_password_is_kept_as_a_hash(self, guarded: Page) -> None:
-        config = Paths.resolve(guarded.root).config_file.read_text()
+        config = Paths.resolve(guarded.root).config_file.read_text(encoding="utf-8")
         stored = tomllib.loads(config)["web"]["password"]
         assert stored.startswith("$scrypt$")
         assert PASSWORD not in config
@@ -158,7 +158,7 @@ class TestThePasswordOnDisk:
         backups = sorted(Paths.resolve(guarded.root).config_backups_dir.glob("config-*.toml"))
         assert backups, "hashing the password is an edit, and an edit leaves a backup"
         for backup in backups:
-            assert PASSWORD not in backup.read_text(), backup.name
+            assert PASSWORD not in backup.read_text(encoding="utf-8"), backup.name
 
     def test_changing_the_password_signs_everybody_out(
         self, server: ModelServer, tmp_path: Path

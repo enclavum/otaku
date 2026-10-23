@@ -163,7 +163,7 @@ def run_otaku(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, "-c", "from otaku.cli import main; main()", *args],
         capture_output=True,
-        text=True,
+        encoding="utf-8",
         timeout=30,
         env={
             **os.environ,

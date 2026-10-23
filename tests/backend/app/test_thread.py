@@ -6,6 +6,7 @@ handed across, closed to cancel it; and a closed thread answers every
 call StoppingError."""
 
 import signal
+import sys
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -68,6 +69,10 @@ class TestLanes:
 
 
 class TestGivingUp:
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="no pthread_kill on Windows to aim the SIGINT at the waiting thread",
+    )
     def test_a_call_given_up_on_while_queued_never_runs(self, thread: AppThread) -> None:
         holding, release, ran = threading.Event(), threading.Event(), []
         holder = _beside(lambda: thread.run(lambda: (holding.set(), release.wait(5))))

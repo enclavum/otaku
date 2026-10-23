@@ -5,6 +5,7 @@ and read them off it, which the guards, the streams and the dispatcher
 all share. Nothing here decides what a path MEANS."""
 
 import json
+import socketserver
 import ssl
 import sys
 import threading
@@ -94,7 +95,10 @@ class Server(ThreadingHTTPServer):
     interrupt that stopped the server."""
 
     daemon_threads = True
-    allow_reuse_address = True
+    # A restart rebinds at once past TIME_WAIT. Windows binds past it
+    # without the option, and with it binds over a port another process
+    # is listening on.
+    allow_reuse_address = sys.platform != "win32"
 
     def __init__(
         self,
@@ -146,6 +150,13 @@ class Server(ThreadingHTTPServer):
         # would do nothing and the only way out of a wedged engine would
         # be `kill`.
         self.stopping = threading.Event()
+
+    def server_bind(self) -> None:
+        """The socket bound, without the stdlib's reverse lookup of the
+        host's name between the bind and the listen: a slow DNS holds the
+        port shut for as long as it takes, and nothing reads the name."""
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = str(self.server_address[0]), self.server_address[1]
 
     def serve_forever(self, poll_interval: float = _SHUTDOWN_POLL_INTERVAL) -> None:
         """Serve until stopped, looking for the stop every `poll_interval`

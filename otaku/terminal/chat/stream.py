@@ -432,7 +432,7 @@ class _StreamWatcher:
         self._fd: int = -1
 
     def __enter__(self) -> Self:
-        if termios is None or tty is None:
+        if sys.platform == "win32" or termios is None or tty is None:
             return self
         try:
             fd = sys.stdin.fileno()
@@ -454,6 +454,8 @@ class _StreamWatcher:
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=0.5)
+        if sys.platform == "win32":
+            return
         if self._fd >= 0:
             with contextlib.suppress(termios.error, OSError):
                 termios.tcflush(self._fd, termios.TCIFLUSH)
