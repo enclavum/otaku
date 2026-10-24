@@ -1,9 +1,9 @@
 # Publish to PyPI when a version tag (vX.Y.Z) is pushed, then open the
 # tag's GitHub release as a draft holding the same sdist, attested; run by
-# hand, publish a rehearsal to TestPyPI under a development version
-# (0.9.0.dev1, …), since neither index takes the same version twice. Both
-# indexes trust this workflow (Trusted Publishing), so no token is kept
-# anywhere.
+# hand, rehearse it all under a development version (0.9.0.dev1, …) — to
+# TestPyPI, and a draft named after it — since neither index takes the
+# same version twice. Both indexes trust this workflow (Trusted
+# Publishing), so no token is kept anywhere.
 name: Publish
 
 on:
@@ -65,10 +65,10 @@ jobs:
 
   # The files PyPI took, attested as this workflow's build, and the sdist
   # the release's one asset — the file the Homebrew formula fetches. A
-  # draft: its body is written by hand before it is published.
+  # draft: its body is written by hand before it is published; a
+  # rehearsal's draft is deleted once checked.
   release:
     needs: publish
-    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -87,11 +87,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          # a rehearsal's draft is named after its version; a draft makes no tag
+          TAG: ${{ github.event_name == 'push' && github.ref_name || format('v{0}', inputs.version) }}
         run: |
           sdist=$(ls dist/*.tar.gz)
-          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" "$sdist"
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" "$sdist"
+          elif [ "$GITHUB_EVENT_NAME" = push ]; then
+            gh release create "$TAG" "$sdist" --verify-tag --draft --title "$TAG" --notes ""
           else
-            gh release create "$GITHUB_REF_NAME" "$sdist" --verify-tag --draft \
-              --title "$GITHUB_REF_NAME" --notes ""
+            gh release create "$TAG" "$sdist" --target "$GITHUB_SHA" --draft --title "$TAG" \
+              --notes "Rehearsal: delete me."
           fi
