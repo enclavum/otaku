@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Self
 
-SCHEMA_VERSION = "13"
+SCHEMA_VERSION = "14"
 
 SCHEMA_DDL = """
 -- ---------- the codex: what every story may draw on ----------
@@ -62,7 +62,7 @@ CREATE TABLE messages (
     story_id    INTEGER NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
     parent_id   INTEGER,
     role        TEXT NOT NULL CHECK (role IN ('user','assistant','tool')),
-    kind        TEXT NOT NULL DEFAULT 'dialogue' CHECK (kind IN ('dialogue','narration','ooc','card','tool')),
+    kind        TEXT NOT NULL DEFAULT 'dialogue' CHECK (kind IN ('dialogue','narration','ooc','card','tool','chapter')),
     speaker_id  INTEGER REFERENCES characters(id) ON DELETE SET NULL,  -- extracted automatically
     speaker     BLOB,                    -- extracted automatically; name-at-the-time snapshot
     body        BLOB NOT NULL,           -- exactly what was typed/generated
@@ -73,6 +73,8 @@ CREATE TABLE messages (
     updated_at  TEXT NOT NULL,
     attachments TEXT,                    -- the turn's pictures as a JSON list, see Attachment; NULL when none
     mode        TEXT NOT NULL DEFAULT 'chat' CHECK (mode IN ('story','chat')),  -- the mode it was written in
+    pinned      BOOLEAN NOT NULL DEFAULT 0 CHECK (pinned IN (0,1)),  -- sent whole even where its scene is summarized
+    word_count  INTEGER,                 -- NULL where it could not be counted
     UNIQUE (story_id, id),               -- composite-FK target: same-story references only
     FOREIGN KEY (story_id, parent_id) REFERENCES messages(story_id, id),
     CHECK (parent_id IS NULL OR parent_id < id)
@@ -208,8 +210,10 @@ class Story:
 class Message:
     """One turn of a story. `id` is 0 on a turn not yet stored; `append`
     assigns the real one. `kind` is 'dialogue' | 'narration' | 'ooc' |
-    'card' | 'tool' — every kind is a STORED kind; what only exists on
-    the wire is `context.assembler.WireTurn`, a different type. A TOOL
+    'card' | 'tool' | 'chapter' — every kind is a STORED kind; what only
+    exists on the wire is `context.assembler.WireTurn`, a different type.
+    A CHAPTER row is the reader's, opening a chapter: its body the
+    title. A TOOL
     turn (role and kind 'tool') is a tool's result, a tool otaku ran —
     nobody's line, and no reply: it goes on the wire as the reader's
     turn, framed out of character, and counts as neither; `provider`

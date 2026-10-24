@@ -189,6 +189,7 @@ so a list of mixed scripts does not ripple. Raise both together.
 | `--otk-col-lamp` | the resident / answering lamp gutter |
 | `--otk-col-size` | a model's size column |
 | `--otk-col-count` | a count column |
+| `--otk-col-messages` | a story's message count, "1234 msg" |
 | `--otk-col-ago` | a "2h" column |
 | `--otk-reader-w` | the right pane, identical in every lens |
 | `--otk-measure` | a reading line, wherever prose is set |

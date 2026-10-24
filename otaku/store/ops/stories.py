@@ -33,6 +33,17 @@ from otaku.store.schema import Attachment, Message, Story, StoryMode, StorySetti
 # ("The River - 3 - 3 - 2"). The group captures the last repetition, which
 # is the number the title actually reads as.
 _NUMBER_SUFFIX = re.compile(r"(?: - (\d+))+$")
+# A message's word count, the rule schema step 14 counted the rows of its
+# day by (`migrations.v14`, a frozen copy), so the two read alike.
+# Chinese and Japanese leave no spaces between words, so each character
+# there counts as one, as word processors count them: kana and the CJK
+# ideographs. Korean spaces its words and is counted as they stand. A
+# word is a run between spaces holding a letter or a digit, so a lone
+# dash or asterisk counts as none.
+_CHARACTER_WORDS = re.compile(
+    r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff66-\uff9f]"
+)
+_WORD_CHARACTER = re.compile(r"[^\W_]")
 
 
 @dataclass(frozen=True)
@@ -45,7 +56,8 @@ class StoryListing:
     first_user: str  # the first user message of the current chain
     model: str  # "provider/model" behind the newest reply
     updated_at: datetime
-    num_messages: int  # length of the current chain, not the tree
+    message_count: int  # length of the current chain, not the tree
+    word_count: int  # the current chain's words, as far as they are counted
 
     @property
     def label(self) -> str:
@@ -233,8 +245,8 @@ class StoryOps:
             parent = after
             # fmt: off
             cur = conn.execute(
-                "INSERT INTO messages (story_id, parent_id, role, kind, speaker_id, speaker, body, template, provider, model, created_at, updated_at, attachments, mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (story_id, parent, message.role, message.kind, message.speaker_id, self._db.seal_opt(message.speaker), self._db.seal(message.body), self._db.seal_opt(message.template), message.provider, message.model, now, now, Attachment.to_json(message.attachments), message.mode.value),
+                "INSERT INTO messages (story_id, parent_id, role, kind, speaker_id, speaker, body, template, provider, model, created_at, updated_at, attachments, mode, word_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (story_id, parent, message.role, message.kind, message.speaker_id, self._db.seal_opt(message.speaker), self._db.seal(message.body), self._db.seal_opt(message.template), message.provider, message.model, now, now, Attachment.to_json(message.attachments), message.mode.value, 0 if message.role == "tool" else _count_words(message.body)),
             )
             message_id = int(cur.lastrowid or 0)
             moved = conn.execute(
@@ -368,14 +380,14 @@ class StoryOps:
             message_map: dict[int, int] = {}
             for mid in chain:
                 row = conn.execute(
-                    "SELECT parent_id, role, kind, speaker_id, speaker, body, template, provider, model, created_at, attachments, mode FROM messages WHERE id = ?",
+                    "SELECT parent_id, role, kind, speaker_id, speaker, body, template, provider, model, created_at, attachments, mode, word_count FROM messages WHERE id = ?",
                     (mid,),
                 ).fetchone()
                 parent, role, kind, speaker_id, speaker = row[:5]
-                body, template, provider, model, created, attachments, mode = row[5:]
+                body, template, provider, model, created, attachments, mode, word_count = row[5:]
                 cur = conn.execute(
-                    "INSERT INTO messages (story_id, parent_id, role, kind, speaker_id, speaker, body, template, provider, model, created_at, updated_at, attachments, mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (new_story, message_map.get(parent), role, kind, character_map.get(speaker_id), speaker, body, template, provider, model, created, now, attachments, mode),
+                    "INSERT INTO messages (story_id, parent_id, role, kind, speaker_id, speaker, body, template, provider, model, created_at, updated_at, attachments, mode, word_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (new_story, message_map.get(parent), role, kind, character_map.get(speaker_id), speaker, body, template, provider, model, created, now, attachments, mode, word_count),
                 )
                 message_map[int(mid)] = int(cur.lastrowid or 0)
 
@@ -457,15 +469,18 @@ class StoryOps:
         tree = self._get_tree_rows([int(r[0]) for r in rows if r[3] is not None])
         chains: dict[int, set[int]] = {}
         lengths: dict[int, int] = {}
+        words: dict[int, int] = {}
         first_user_ids: dict[int, int] = {}
         models: dict[int, str] = {}
         for story_row in rows:
             story_id = int(story_row[0])
             chain = chains[story_id] = set()
+            words[story_id] = 0
             node = story_row[3]
             while node is not None and node in tree:  # head → root; finite via the parent CHECK
                 chain.add(node)
-                parent, role, provider, model = tree[node]
+                parent, role, provider, model, word_count = tree[node]
+                words[story_id] += word_count or 0  # uncounted: an encrypted row from before v14
                 if role == "user":
                     first_user_ids[story_id] = node  # last user seen = root-most
                 if role == "assistant" and model and story_id not in models:
@@ -483,7 +498,8 @@ class StoryOps:
                 first_user=first_users.get(int(story_id), ""),
                 model=models.get(int(story_id), ""),
                 updated_at=datetime.fromisoformat(updated_at),
-                num_messages=lengths[int(story_id)],
+                message_count=lengths[int(story_id)],
+                word_count=words[int(story_id)],
             )
             for story_id, title, updated_at, _head in rows
         ]
@@ -506,21 +522,22 @@ class StoryOps:
 
     def _get_tree_rows(
         self, story_ids: builtins.list[int]
-    ) -> dict[int, tuple[int | None, str, str | None, str | None]]:
-        """id → (parent_id, role, provider, model) for every message of these
-        stories — the flat, nothing-decrypted read behind the chain walks."""
+    ) -> dict[int, tuple[int | None, str, str | None, str | None, int | None]]:
+        """id → (parent_id, role, provider, model, word_count) for every
+        message of these stories — the flat, nothing-decrypted read behind
+        the chain walks."""
         if not story_ids:
             return {}
         placeholders = ",".join("?" * len(story_ids))
         # fmt: off
         rows = self._db.conn.execute(
-            f"SELECT id, parent_id, role, provider, model FROM messages WHERE story_id IN ({placeholders})",
+            f"SELECT id, parent_id, role, provider, model, word_count FROM messages WHERE story_id IN ({placeholders})",
             tuple(story_ids),
         ).fetchall()
         # fmt: on
         return {
-            int(mid): (parent, str(role), provider, model)
-            for mid, parent, role, provider, model in rows
+            int(mid): (parent, str(role), provider, model, word_count)
+            for mid, parent, role, provider, model, word_count in rows
         }
 
     def _get_bodies(self, wanted: dict[int, int]) -> dict[int, str]:
@@ -588,13 +605,13 @@ class MessagesOps:
 
     def update(self, message_id: int, body: str) -> None:
         """The author's correction of one message's text — the one deliberate
-        rewrite of source prose. Derivatives built from the old text stay;
-        they are corrected in the lore browser."""
+        rewrite of source prose, recounted. Derivatives built from the old
+        text stay; they are corrected in the lore browser."""
         with self._db.conn as conn:
             # fmt: off
             conn.execute(
-                "UPDATE messages SET body = ?, updated_at = ? WHERE id = ?",
-                (self._db.seal(body), self._db.now(), message_id),
+                "UPDATE messages SET body = ?, updated_at = ?, word_count = CASE role WHEN 'tool' THEN 0 ELSE ? END WHERE id = ?",
+                (self._db.seal(body), self._db.now(), _count_words(body), message_id),
             )
             # fmt: on
 
@@ -709,3 +726,11 @@ def unique_title(base: str, taken: Container[str]) -> str | None:
     while f"{stem} - {n}" in taken:
         n += 1
     return f"{stem} - {n}"
+
+
+def _count_words(text: str) -> int:
+    """The words of a body as stored: each Chinese or Japanese character,
+    then every run between spaces that holds a letter or a digit."""
+    characters = len(_CHARACTER_WORDS.findall(text))
+    rest = _CHARACTER_WORDS.sub(" ", text)
+    return characters + sum(1 for run in rest.split() if _WORD_CHARACTER.search(run))

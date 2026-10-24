@@ -209,7 +209,8 @@ def _summary(row: StoryListing) -> StorySummary:
         first_message=row.first_user,
         model=row.model,
         updated_at=row.updated_at,
-        message_count=row.num_messages,
+        message_count=row.message_count,
+        word_count=row.word_count,
     )
 
 
@@ -225,7 +226,8 @@ def _story(app: App, record: StoryRecord) -> Story:
         label=flatten(record.listing.label),
         premise=record.story.system,
         head=record.story.head_id,
-        message_count=record.listing.num_messages,
+        message_count=record.listing.message_count,
+        word_count=record.listing.word_count,
         updated_at=record.listing.updated_at,
         layout=layout,
         mode=layout.mode,

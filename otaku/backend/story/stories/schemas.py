@@ -20,7 +20,8 @@ class StorySummary(Schema):
     reader finds it by (the title, else the newest story-so-far rollup,
     else the first line played; "" when nothing names it), that rollup
     and that line, the model it was last played on, when it was last
-    written (for display alone), and how many messages its chain holds."""
+    written (for display alone), and how many messages and words its
+    chain holds."""
 
     id: int
     title: str
@@ -30,20 +31,21 @@ class StorySummary(Schema):
     model: str
     updated_at: datetime
     message_count: int
+    word_count: int
 
 
 class Story(Schema):
     """One story's facts: its title and the label a reader finds it by
     (flattened to one line and uncut), its premise, the message its chain
-    ends at (None while nothing is played), how many messages that chain
-    holds, when it was last written (for display alone), the layout it
-    is read in and the look that draws it (`mode`), how a line typed now
-    would join its newest row ("inline" or "paragraph"; None while
-    nothing is played — the story to be begun), on the model in use the
-    wire its next request goes over and whether a picture may ride it,
-    the question the story stands on (None for none: the next line
-    played answers it), the tools whose calls a reader is shown, and
-    those a frontend that can fold draws by their label alone."""
+    ends at (None while nothing is played), how many messages and words
+    that chain holds, when it was last written (for display alone), the
+    layout it is read in and the look that draws it (`mode`), how a line
+    typed now would join its newest row ("inline" or "paragraph"; None
+    while nothing is played — the story to be begun), on the model in
+    use the wire its next request goes over and whether a picture may
+    ride it, the question the story stands on (None for none: the next
+    line played answers it), the tools whose calls a reader is shown,
+    and those a frontend that can fold draws by their label alone."""
 
     id: int
     title: str
@@ -51,6 +53,7 @@ class Story(Schema):
     premise: str
     head: int | None
     message_count: int
+    word_count: int
     updated_at: datetime
     layout: Layout
     mode: StoryMode

@@ -4,6 +4,10 @@ See also the tentative roadmap: [ROADMAP.md](https://github.com/enclavum/otaku/b
 
 ## [0.9.0] - ...
 
+New features:
+
+- Word counts in the stories list and the info window.
+
 Renames and replacements:
 
 - The `otaku web` command is renamed to `otaku serve`, with the former command staying as an
@@ -14,6 +18,7 @@ Renames and replacements:
 
 Installing and updating:
 
+- Otaku can now also run in Docker.
 - Daily check for updates on GitHub (can be turned off in `~/.otaku/configs/config.toml`).
 - Uninstall command `otaku uninstall` that can also purge data.
 

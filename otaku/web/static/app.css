@@ -131,6 +131,7 @@
   --otk-col-lamp:     10px;    /* the resident/connected lamp gutter      */
   --otk-col-size:     66px;    /* a model's size column                   */
   --otk-col-count:    46px;    /* a count column                          */
+  --otk-col-messages: 66px;    /* a story's "1234 msg" column             */
   --otk-col-ago:      30px;    /* a "2h ago" column                       */
   --otk-reader-w:     400px;   /* the right pane, identical in all lenses  */
   --otk-measure:      860px;   /* a reading line, wherever prose is set    */
@@ -1216,6 +1217,10 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
    take no room, so the note starts where they would. */
 .otk-row__title--noted { display: flex; align-items: center; gap: 10px; }
 .otk-row__title--noted > .otk-tag { margin-bottom: calc(var(--otk-size-row) * 0.2); }
+/* a tag after the title, among the figures (the open story): centred on
+   the title's capitals the same way, rather than set on the row's
+   baseline — prose rows alone, a mono row's capitals sit otherwise */
+.otk-row:not(.otk-row--mono) > .otk-tag { align-self: center; margin-bottom: calc(var(--otk-size-row) * 0.2); }
 .otk-row__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .otk-row__text:empty { display: none; }
 .otk-row__id { width: 26px; flex: none; text-align: right; font-family: var(--otk-font-mono); font-size: var(--otk-size-mono-sm); line-height: var(--otk-leading-row); color: var(--otk-faint); font-variant-numeric: tabular-nums; }
@@ -1238,6 +1243,7 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
 .otk-stack > .otk-choice__name { line-height: var(--otk-leading-row); }
 .otk-row__num--size  { width: var(--otk-col-size); }
 .otk-row__num--count { width: var(--otk-col-count); }
+.otk-row__num--messages { width: var(--otk-col-messages); }
 .otk-row__num--ago   { width: var(--otk-col-ago); }
 /* a phone's row: the indent and the gaps close up, and a hosted model's
    empty size column gives its width to the name — the rows of one group

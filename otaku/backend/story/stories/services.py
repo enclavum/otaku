@@ -212,7 +212,7 @@ def fork_story(
     lead = f"Forked to: {label}." if label else "Forked."
     if from_message_id is None:
         return forked, lead
-    return forked, f"{lead} Continued from message {copy.num_messages}."
+    return forked, f"{lead} Continued from message {copy.message_count}."
 
 
 def set_head(app: App, story_id: int, message_id: int, *, expected_head: int | None) -> None:

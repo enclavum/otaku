@@ -332,17 +332,21 @@ export async function openInfo() {
   const closing = [];
   const facts = element("div", "otk-v otk-v--sm");
   let title = null;
+  let measure = null;
   for (const section of report.sections) {
     if (section.note) blocks.push(element("p", "otk-note", section.note));
     for (const [label, value] of section.rows) {
       const name = label.toLowerCase();
-      // the subject takes the title, the open story closes the slip
+      // the subject takes the title, the open story closes the slip, its
+      // words after its messages
       if (name === "model" && !title) title = value;
       else if (name === "story") closing.push(element("span", "otk-docket__story", value));
-      else if (name === "messages") closing.push(span("otk-index__sub", `${value} messages`));
+      else if (name === "messages") measure = span("otk-index__sub", `${value} messages`);
+      else if (name === "words" && measure) measure.textContent += ` · ${value} words`;
       else facts.append(leader(name, value));
     }
   }
+  if (measure) closing.push(measure);
   // The rule goes under the SUBJECT — what the slip is about — not
   // between two blocks of the same kind of fact.
   if (facts.childElementCount) blocks.push(element("div", "otk-hr"), facts);

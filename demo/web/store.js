@@ -195,6 +195,7 @@ function storyOf(story) {
     premise: story.premise,
     head: newest?.id ?? null,
     message_count: story.messages.length,
+    word_count: wordsOf(story),
     updated_at: story.updatedAt,
     layout,
     mode: modeOf(layout),
@@ -221,8 +222,23 @@ function summaryOf(story) {
     model: "",
     updated_at: story.updatedAt,
     message_count: story.messages.length,
+    word_count: wordsOf(story),
   };
 }
+
+// The story's words, counted as the store counts each message
+// (`store.ops.stories._count_words`): a tool's result none, a Chinese or
+// Japanese character one, then every run between spaces holding a letter
+// or a digit.
+const CHARACTER_WORDS = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff66-\uff9f]/gu;
+const wordsOf = (story) =>
+  story.messages
+    .filter((message) => message.role !== "tool")
+    .reduce((sum, { body }) => {
+      const characters = body.match(CHARACTER_WORDS)?.length ?? 0;
+      const runs = body.replace(CHARACTER_WORDS, " ").split(/\s+/).filter((run) => /[\p{L}\p{N}]/u.test(run));
+      return sum + characters + runs.length;
+    }, 0);
 
 const layoutOf = (story) => story.settings.find((row) => row.name === "layout")?.layout ?? "manuscript";
 // `Layout.mode`: the canvas and the novel are read as one text

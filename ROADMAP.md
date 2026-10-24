@@ -20,8 +20,8 @@ Future releases:
 
 | Version | Features |
 |---|---|
-| 0.8.1 | card import from online resources |
-| 0.9 | audio input, starred messages, structured context preview |
-| 0.10 | lorebooks in addition to automatic lore extraction |
-| 0.10.1 | import of SillyTavern and some other tools' lorebooks |
-| 0.11 | a helper model called before and after each turn; per-character context |
+| 0.9 | card import from online resources |
+| 0.10 | audio input, starred messages, structured context preview |
+| 0.11 | lorebooks in addition to automatic lore extraction |
+| 0.12 | import of SillyTavern and some other tools' lorebooks |
+| 0.13 | a helper model called before and after each turn; per-character context |

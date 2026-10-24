@@ -209,7 +209,8 @@ def _app_rows(app: App, story_id: int | None) -> tuple[tuple[str, str], ...]:
     label = flatten(listing.label) if listing is not None else ""
     if label:
         out.append(("Story", truncate_label(label, LABEL_WIDTH)))
-    out.append(("Messages", str(listing.num_messages if listing is not None else 0)))
+    out.append(("Messages", str(listing.message_count if listing is not None else 0)))
+    out.append(("Words", f"{listing.word_count if listing is not None else 0:,}"))
     # Where lore extraction reads the story: the model saved for it, or
     # the one the model block above names.
     model, pin = app._model(), app._extraction_pin()

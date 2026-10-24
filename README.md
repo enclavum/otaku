@@ -126,9 +126,9 @@ docker compose up -d
 docker compose -f https://github.com/enclavum/otaku.git up -d
 ```
 
-Note: when running otaku in docker, you can also attach to its terminal interface with the command
-below, but it doesn't work as intended there, because the docker TTY is not a proper terminal. To
-use the terminal interface, install otaku without docker.
+When running otaku in Docker, you can also attach to its terminal interface with the command
+below, but the interface doesn't fully work as intended there, because the Docker TTY is not a
+proper terminal. To use the terminal interface, install otaku without Docker.
 
 ```bash
 # Ctrl+D leaves the terminal interface; otaku keeps running

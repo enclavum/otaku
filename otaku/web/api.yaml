@@ -2909,6 +2909,7 @@ components:
         premise: { type: string, description: "The system prompt." }
         head: { type: [integer, "null"], description: "Its newest message's id — the ETag's — null while nothing is played." }
         message_count: { type: integer, description: "The messages on its current chain." }
+        word_count: { type: integer, description: "The words on its current chain; an encrypted story's from before 0.9.0 are not counted." }
         updated_at: { type: string, format: date-time }
         layout: { type: string, enum: [novel, canvas, manuscript, chat] }
         mode: { type: string, enum: [story, chat], description: "The look its layout draws." }
@@ -2990,6 +2991,7 @@ components:
         model: { type: string, description: "The model it was last played with." }
         updated_at: { type: string, format: date-time }
         message_count: { type: integer }
+        word_count: { type: integer }
 
     Language:
       type: object
