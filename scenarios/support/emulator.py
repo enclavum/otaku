@@ -261,8 +261,8 @@ def mismatch(live: Emulated, *, story_mode: bool, still: float = 1.5) -> list[st
     start = next((i for i, row in enumerate(rows) if "Resumed at message" in row), -1) + 2
     lines, (ly, lx) = live.lines(), live.cursor
     if story_mode:
-        theirs = _words([*rows[start:ey], rows[ey][:ex]], live.cols)
-        ours = _words([*lines[:ly], lines[ly][:lx]], live.cols)
+        theirs = _words(_to_cursor(rows[start:], ey - start, ex, live.cols), live.cols)
+        ours = _words(_to_cursor(lines, ly, lx, live.cols), live.cols)
         # their common tail: either screen may be cut at its top, the first
         # word of the shorter one maybe a word's end
         common = min(len(theirs), len(ours)) - 1
@@ -311,14 +311,27 @@ def _stored_rows(lines: list[str], cursor_row: int) -> tuple[list[str], int]:
     return kept, cursor_row - cut
 
 
+def _to_cursor(lines: list[str], y: int, x: int, cols: int) -> list[str]:
+    """The rows up to the cursor, its own cut at it. A row one column short
+    of full right above a cursor at a row's start was filled by the seam
+    the prompt stands after, a space the screen's rows are read without:
+    given back, so the row reads as wrapped, not as a paragraph's end."""
+    rows = [*lines[:y], lines[y][:x]]
+    if x == 0 and y > 0 and len(rows[-2]) == cols - 1:
+        rows[-2] += " "
+    return rows
+
+
 def _words(lines: list[str], cols: int) -> list[str]:
-    """The text the rows hold: a full row read as wrapped onto the next —
-    what follows it is the same line, even a row holding nothing yet but
-    the seam the prompt stands after — and a blank row as a paragraph mark."""
+    """The text the rows hold, the last the cursor's: a full row read as
+    wrapped onto the next — what follows it is the same line, even a
+    cursor's row holding nothing yet but the seam the prompt stands after
+    — and a blank row as a paragraph mark, after a full row too: a newline
+    there moves straight down, a row left blank only by an empty line."""
     text = ""
     wrapped = False
-    for line in lines:
-        if not line.strip() and not wrapped:
+    for at, line in enumerate(lines):
+        if not line.strip() and not (wrapped and at == len(lines) - 1):
             text += " ¶ "
         else:
             text += line + ("" if len(line) >= cols else " ")

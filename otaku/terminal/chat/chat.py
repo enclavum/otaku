@@ -103,6 +103,7 @@ class Chat:
             fill=lambda: self.context_fill,
             served_at=lambda: self.server.address if self.server is not None else "",
             last_note=lambda: self.status_note,
+            waiting_to_wrap=lambda: self.ledger.waiting_to_wrap,
         )
         # An erase the ledger makes mid-stream takes the pinned row with it.
         self.ledger = ScreenLedger(repaint=self.status_line.refresh)

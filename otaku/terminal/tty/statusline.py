@@ -95,11 +95,14 @@ class StatusLine:
         fill: Callable[[], str],
         served_at: Callable[[], str],
         last_note: Callable[[], str],
+        waiting_to_wrap: Callable[[], bool],
     ) -> None:
         self._worker = worker
         self._fill = fill
         self._served_at = served_at
         self._last_note = last_note
+        self._waiting_to_wrap = waiting_to_wrap
+        self._held = False  # a repaint asked for while the cursor waited to wrap
         self._note = ""  # what the reply streaming is doing, while it streams
         self._noted_at = 0.0  # when the note standing was shown
         self._clearing: threading.Timer | None = None  # a clear waiting out the minimum
@@ -223,6 +226,13 @@ class StatusLine:
         with self._lock:
             if not self._open:
                 return
+            if self._waiting_to_wrap():
+                # Past a full row's last letter: some terminals forget the
+                # wrap waiting there when the cursor is restored, and the
+                # next letter lands on it. Painted once the text moves on.
+                self._held = True
+                return
+            self._held = False
             size = shutil.get_terminal_size()
             if size.lines != self._rows and size.lines >= 3:
                 # Resized under us: re-reserve against the new height.
@@ -240,6 +250,12 @@ class StatusLine:
                 f"{SAVE_CURSOR}{GOTO_ROW.format(self._rows)}{ERASE_LINE}{DIM}{line}{RESET}{RESTORE_CURSOR}"
             )
             _terminal().flush()
+
+    def paint_held(self) -> None:
+        """The repaint held while the cursor waited to wrap, now it may
+        stand elsewhere (`refresh`)."""
+        if self._held:
+            self.refresh()
 
     def _line(self, width: int, note: str) -> str:
         return _render(self._worker(), self._right_part(), width, note)

@@ -240,7 +240,9 @@ class _Stream(Generic[E]):
     """A reply as its caller reads it: the events its job hands across,
     in order. `close` is the cancel — the same door a closed generator is,
     a reply ended with what arrived kept — and returns once the job is
-    over, so the kept reply is recorded before the caller draws."""
+    over, so the kept reply is recorded before the caller draws. `cancel`
+    asks the same without waiting: the stream is read on to its end, so a
+    caller that draws every event has drawn all the reply kept."""
 
     def __init__(self, thread: AppThread, start: Callable[[], Iterator[E]]) -> None:
         self._app_thread = thread
@@ -269,6 +271,10 @@ class _Stream(Generic[E]):
         if isinstance(item, _Raised):
             self._closed = True
             raise item.error
+
+    def cancel(self) -> None:
+        if not self._closed:
+            self.job.cancel()
 
     def close(self) -> None:
         if self._closed:

@@ -15,6 +15,7 @@ the module is `slow` besides `cli`, and runs only when asked for with
 import contextlib
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -31,6 +32,7 @@ from scenarios.support.emulator import (
     ENTER,
     RIGHT,
     ROWS,
+    TM,
     Emulated,
     jumps,
     mismatch,
@@ -177,6 +179,38 @@ class TestStoryMode:
             prose = " ".join(row.body.split("```")[0].split())
             if row.role == "assistant" and prose:
                 assert prose[:40] in shown, prose[:60]
+
+    def test_a_sentence_ending_on_the_last_column_keeps_its_last_letter(
+        self, played: "Played"
+    ) -> None:
+        """A call's note repaints the status row the moment the sentence
+        before it fills its row to the last column, where the cursor waits
+        to wrap: the repaint waits for the text to move on, so the words
+        after the call never land on that last letter — some terminals
+        forget the wait across the repaint's cursor restore."""
+        term = played(Layout.CANVAS)
+        said = "Go on."
+        # the reply begins after the reader's line and the join's space,
+        # the terminal wrapping letter by letter
+        start = (term.cursor[1] + len(said) + 1) % term.cols
+        sentence = _filling(term.cols - start if term.cols - start >= 20 else 2 * term.cols - start)
+        call = "```otk-system-info\n```"
+
+        def script(body: dict[str, Any]) -> str | tuple[str, str]:
+            messages = body.get("messages") or []
+            if len(messages) >= 2 and sentence in TM.content_text(messages[-2]):
+                # the round after the call, a paragraph after it: the prompt
+                # draws the text's last line again, which would mend that row
+                return "The rest of it came slowly.\n\nThen the bells stopped."
+            if messages and said in TM.content_text(messages[-1]):
+                return f"{sentence}\n\n{call}"
+            return TM.reply(body)  # the lore pass, and anything else
+
+        played.server.script = script
+        problems = run(term, [line(said)], story_mode=True)
+        assert not problems, "\n".join(problems)
+        # the premise: the sentence did fill its row to the last column
+        assert any(len(row) == term.cols and row.endswith(sentence[-8:]) for row in term.lines())
 
     def test_a_line_opening_with_a_dash_runs_on(self, played: "Played") -> None:
         term = played(Layout.CANVAS)
@@ -389,6 +423,12 @@ def key(name: str, data: bytes, *, erases: bool = False) -> Step:
         term.send(data, 0.2)
 
     return name, act, erases
+
+
+def _filling(length: int) -> str:
+    """A sentence exactly `length` letters long, its full stop the last."""
+    words = ("The bells rang over the water once more " * 4)[: length - 1].rstrip()
+    return words.ljust(length - 1, "s") + "."
 
 
 def midway(text: str, data: bytes) -> Step:

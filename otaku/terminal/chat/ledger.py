@@ -395,6 +395,12 @@ class ScreenLedger:
         as the terminal lays it out, wrapping included."""
         return _column(self._tail, terminal_width())
 
+    @property
+    def waiting_to_wrap(self) -> bool:
+        """Whether the cursor stands past a full row's last letter, the
+        terminal waiting to wrap at the next one (`resume_tail`)."""
+        return self.tail_column >= terminal_width()
+
     def note_printed(self, text: str) -> None:
         """Keep where the text ends as `text` prints: the last line's
         text, and the newlines after it. Newlines alone end the line

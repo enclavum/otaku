@@ -86,30 +86,9 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-    # Screens that fail now and then, a different one each run: the live
-    # screen and a fresh launch's echo are each captured after a moment's
-    # silence, not at the turn's end. They run apart and only warn until
-    # the captures wait for the turn.
-    env:
-      FLAKY: >-
-        scenarios/cli/test_screen.py::TestChatMode::test_every_block_echoes_as_it_played
-        scenarios/cli/test_screen.py::TestStoryMode::test_every_block_flows_as_it_played
-        scenarios/cli/test_screen.py::TestStoryMode::test_a_reply_cut_or_regenerated_mid_stream
-        scenarios/cli/test_screen.py::TestStoryMode::test_a_failed_regenerate_keeps_the_text_open
-        scenarios/cli/test_screen.py::TestStoryMode::test_an_answered_reply_keeps_every_round
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.2.0
         with:
           python-version: "3.14"
-      - name: screens
-        run: uv run pytest scenarios/ --slow -m "slow and not live" $(printf -- '--deselect %s ' $FLAKY)
-      - name: flaky screens
-        id: flaky
-        if: ${{ !cancelled() }}
-        continue-on-error: true
-        shell: bash  # -o pipefail: the tee keeps pytest's exit status
-        run: uv run pytest --slow -m "slow and not live" -rf $FLAKY | tee flaky.log
-      - name: flaky screens, as warnings on the run
-        if: ${{ !cancelled() && steps.flaky.outcome == 'failure' }}
-        run: grep '^FAILED' flaky.log | sed 's/^/::warning title=Flaky screen test::/'
+      - run: uv run pytest scenarios/ --slow -m "slow and not live"

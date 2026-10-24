@@ -144,6 +144,25 @@ class TestStreams:
         events.close()  # type: ignore[attr-defined]
         assert len(closed_on) == 1 and closed_on[0] is not threading.current_thread()
 
+    def test_a_cancelled_reply_is_read_to_the_last_event_it_kept(self, thread: AppThread) -> None:
+        # what the reply yielded is what it keeps: a reader going on after
+        # the cancel gets every one of those, the ones handed across while
+        # it lagged behind included, and then the end
+        kept: list[int] = []
+
+        def reply() -> Iterator[int]:
+            for i in range(100):
+                kept.append(i)
+                yield i
+                time.sleep(0.01)
+
+        events = thread.stream(reply)
+        assert next(events) == 0
+        time.sleep(0.05)  # the app's thread runs ahead of its reader
+        events.cancel()  # type: ignore[attr-defined]
+        read = [0, *events]
+        assert read == kept and len(read) < 100
+
 
 class TestClose:
     def test_a_call_after_the_close_is_answered_stopping(self) -> None:

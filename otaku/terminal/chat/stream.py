@@ -81,9 +81,10 @@ def waiting() -> Iterator[None]:
 def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
     """Drive one stream onto the screen. True when Ctrl+R asked for a
     fresh take — the caller regenerates and calls back in; the erase (or
-    the regenerating marker) is handled here. Ctrl+C closes the stream
-    (the backend records the partial) and returns to the prompt. Marks
-    the submission as one that streamed a reply (`Chat.replied`).
+    the regenerating marker) is handled here. Ctrl+C asks the reply to
+    stop, what the backend kept is drawn to its last piece, and the
+    prompt comes back. Marks the submission as one that streamed a reply
+    (`Chat.replied`).
 
     Everything shown inline — the echoed block, thinking, prose, error
     and stats lines — prints through the ledger, so the exchange's row
@@ -150,9 +151,30 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
     # after every last write of the stream's own — a style reset among
     # them — has landed.
     end_row = False
+    # Ctrl+C asks the reply to stop instead of tearing through the drawing:
+    # the stream then ends with what the backend kept, every event of it
+    # drawn, so the screen holds what the story does. The first hands
+    # SIGINT back, so a second is the ordinary interrupt.
+    stop_asked = False
+    finished = False  # the reply's end came: a Ctrl+C after it cut nothing
+    is_main = threading.current_thread() is threading.main_thread()
+    previous_handler = signal.getsignal(signal.SIGINT) or signal.default_int_handler
+
+    def ask_to_stop(*_: object) -> None:
+        nonlocal stop_asked
+        signal.signal(signal.SIGINT, previous_handler)
+        cancel = getattr(events, "cancel", None)
+        if not callable(cancel):
+            raise KeyboardInterrupt  # a plain iterator: nothing to ask
+        stop_asked = True
+        cancel()
+
     with chat.status_line.pinned(), watcher:
+        if is_main:
+            signal.signal(signal.SIGINT, ask_to_stop)
         try:
             for event in events:
+                chat.status_line.paint_held()  # the last event drawn may have moved off the edge
                 # No thinking in the canvas: the one text has no place for
                 # it, and it is never stored — the spinner turns on through it.
                 if is_story_mode and isinstance(event, AssistantReasoning):
@@ -348,6 +370,7 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                     else:
                         out.write(lead + error_line(f"[ error: {event.reason} ]") + "\n")
                 elif isinstance(event, Done):
+                    finished = True
                     close_block()  # a reply cut inside its call still shows it
                     streamer.flush()
                     if streamed:
@@ -361,6 +384,8 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
         except KeyboardInterrupt:
             interrupted = True
         finally:
+            if is_main and signal.getsignal(signal.SIGINT) is ask_to_stop:
+                signal.signal(signal.SIGINT, previous_handler)
             spinner.stop()
             close_block()  # a ^C inside a block: its end drawn before the prompt
             streamer.flush()
@@ -373,6 +398,7 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
     if end_row:
         _end_row(chat, out, story_mode=is_story_mode and in_text)
 
+    interrupted = interrupted or (stop_asked and not finished)
     if interrupted:
         # The cut line is ended — the prose, a block or the thinking
         # stopped mid-line. A wait cut before anything showed has no line
