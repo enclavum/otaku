@@ -1,0 +1,101 @@
+# Publish to PyPI when a version tag (vX.Y.Z) is pushed, then open the
+# tag's GitHub release as a draft holding the same sdist, attested; run by
+# hand, rehearse it all under a development version (0.9.0.dev1, …) — to
+# TestPyPI, and a draft named after it — since neither index takes the
+# same version twice. Both indexes trust this workflow (Trusted
+# Publishing), so no token is kept anywhere.
+name: Publish
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Rehearsal version for TestPyPI, e.g. 0.9.0.dev1"
+        required: true
+
+jobs:
+  build:
+    if: github.repository == 'enclavum/otaku'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+      - name: The tag names the version in otaku/__init__.py
+        if: github.event_name == 'push'
+        run: |
+          version=$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' otaku/__init__.py)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "The tag is $GITHUB_REF_NAME, but otaku/__init__.py says $version."
+            exit 1
+          fi
+      - name: The rehearsal's development version
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.dev[0-9]+$'; then
+            echo "A rehearsal needs a development version, like 0.9.0.dev1."
+            exit 1
+          fi
+          sed -i "s/^__version__ = \".*\"$/__version__ = \"$VERSION\"/" otaku/__init__.py
+      - run: uv build
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: ${{ github.event_name == 'push' && 'pypi' || 'testpypi' }}
+    permissions:
+      id-token: write  # what Trusted Publishing signs in with
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: ${{ github.event_name == 'push' && 'https://upload.pypi.org/legacy/' || 'https://test.pypi.org/legacy/' }}
+
+  # The files PyPI took, attested as this workflow's build, and the sdist
+  # the release's one asset — the file the Homebrew formula fetches. A
+  # draft: its body is written by hand before it is published; a
+  # rehearsal's draft is deleted once checked.
+  release:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write  # the release and its asset
+      id-token: write  # what the attestation is signed with
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist/*
+      - name: The draft release, the sdist its one asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          # a rehearsal's draft is named after its version; a draft makes no tag
+          TAG: ${{ github.event_name == 'push' && github.ref_name || format('v{0}', inputs.version) }}
+        run: |
+          sdist=$(ls dist/*.tar.gz)
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" "$sdist"
+          elif [ "$GITHUB_EVENT_NAME" = push ]; then
+            gh release create "$TAG" "$sdist" --verify-tag --draft --title "$TAG" --notes ""
+          else
+            gh release create "$TAG" "$sdist" --target "$GITHUB_SHA" --draft --title "$TAG" \
+              --notes "Rehearsal: delete me."
+          fi
