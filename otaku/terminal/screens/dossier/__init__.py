@@ -196,7 +196,7 @@ class Dossier(PremiseTab, MessagesTab, ScenesTab, CastTab, ToolsTab):
             return [
                 (
                     "class:help",
-                    " ↑/↓ navigate · / filter · e edit · enter resume from this turn"
+                    " ↑/↓ navigate · / filter · e edit · space pin · enter resume from this turn"
                     f" · ←/→ tabs · esc {back}",
                 )
             ]
@@ -296,6 +296,8 @@ class Dossier(PremiseTab, MessagesTab, ScenesTab, CastTab, ToolsTab):
             self._pivot()
         elif data == " " and self.dossier_on and self.tab == "tools":
             self._toggle_checkbox()
+        elif data == " " and self.dossier_on and self.tab == "messages":
+            self._toggle_pin()
 
     def _open_detail(self) -> None:
         assert self.view is not None

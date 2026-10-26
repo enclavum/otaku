@@ -4,10 +4,12 @@ the join rule), how a line typed now would join the newest row
 (`next_join`, the same rule, a line with no break of its own in the
 layout's mode), a stored body split for a frontend that parses nothing
 (`segments`) — a reply into prose and its calls, a user's line into its
-story and its words with the model, a chapter into its heading — what a tool's message is called
+story and its words with the model, a chapter into its heading — which
+rows may be pinned (`can_pin`), what a tool's message is called
 (`tool_label`), and the question the story stands on (`posed_question`)."""
 
 from otaku.backend.story.messages.services import (
+    can_pin,
     join_type,
     next_join,
     posed_question,
@@ -145,6 +147,17 @@ class TestSegments:
         assert segments(line("/chapter The Flood")) == [
             {"kind": "prose", "text": "/chapter The Flood"}
         ]
+
+
+class TestCanPin:
+    def test_any_row_but_a_cards_and_a_tools_may_be_pinned(self) -> None:
+        assert can_pin(line("I wave."))
+        assert can_pin(reply("The weir groans."))
+        assert can_pin(Message(role="user", body="/chapter The Flood", kind="chapter"))
+        assert not can_pin(Message(role="user", body="/card keeper.json", kind="card"))
+        assert not can_pin(
+            Message(role="tool", kind="tool", body="Time: now", provider="system-info")
+        )
 
 
 class TestToolLabel:

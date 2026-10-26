@@ -6,7 +6,9 @@ See also the tentative roadmap: [ROADMAP.md](https://github.com/enclavum/otaku/b
 
 New features:
 
-- Manual splitting of stories into chapters with the `/chapter TITLE` command in the prompt line.
+- Split stories into chapters manually with the `/chapter TITLE` command in the prompt line.
+- Pin important messages in the messages list to have them always sent as is, even after their scene
+  is summarized.
 - Word counts in the stories list and the info window.
 
 Renames and replacements:

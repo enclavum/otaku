@@ -2,8 +2,8 @@
 
 Cases 1-2: a story below the verbatim threshold, or one without covering
 summaries, goes out whole. Case 3: HEAD verbatim, the covered scenes as
-summaries, the TAIL verbatim and scene-aligned; a card is never
-summarized away. Case 4: over the limit — the context in force, the
+summaries, the TAIL verbatim and scene-aligned; a card or a pinned
+message is never summarized away. Case 4: over the limit — the context in force, the
 window under the context limit — the oldest summaries are replaced by the story-so-far
 through the last replaced scene. Case 5: still over, the tail target
 steps down to its floor; past the floor the assembly refuses. Across all
@@ -237,6 +237,54 @@ class TestCharacterCards:
         assert assemble("", [user("I wave.")], 8192).cards == ()
 
 
+class TestPinnedMessages:
+    """Case 3's other special case: a pinned message in a summarized scene
+    rides whole in front of its scene's summary, in story order with the
+    scene's cards, in its own role and with its pictures; in the head or
+    the tail, where it rides verbatim anyway, a pin changes nothing."""
+
+    def test_a_pinned_message_rides_in_front_of_its_scenes_summary(self) -> None:
+        rows = turns(220)
+        rows[46] = pinned(user("I mark the weir.", message_id=47))  # inside scene 3's span
+        scenes = (scene(42, "sum two"), scene(64, "sum three"))
+        prompt = assemble("", rows, 65536, scenes=scenes, min_tail_messages=150)
+        sent = "\n".join(m.body for m in prompt.messages)
+        assert sent.index("sum two") < sent.index("I mark the weir.") < sent.index("sum three")
+        assert "turn 46." not in sent  # its neighbours are summarized as ever
+
+    def test_pins_and_cards_keep_their_story_order(self) -> None:
+        rows = turns(220)
+        rows[44] = card(45, "((OOC: Elara joins.))")
+        rows[46] = pinned(user("I mark the weir.", message_id=47))
+        rows[50] = card(51, "((OOC: Wren joins.))")
+        prompt = assemble("", rows, 65536, scenes=(scene(64, "sum"),), min_tail_messages=150)
+        sent = "\n".join(m.body for m in prompt.messages)
+        riding = ("((OOC: Elara joins.))", "I mark the weir.", "((OOC: Wren joins.))", "sum")
+        places = [sent.index(text) for text in riding]
+        assert places == sorted(places)
+
+    def test_a_pinned_reply_rides_in_its_own_role_unmarked(self) -> None:
+        rows = turns(220)
+        rows[46] = pinned(replace(assistant("The weir groans."), id=47))
+        prompt = assemble("", rows, 65536, scenes=(scene(64, "sum"),), min_tail_messages=150)
+        (turn,) = [m for m in prompt.messages if "The weir groans." in m.body]
+        assert (turn.role, turn.body) == ("assistant", "The weir groans.")
+
+    def test_a_pinned_messages_pictures_ride_with_it(self) -> None:
+        rows = turns(220)
+        rows[46] = pinned(replace(user("Look.", message_id=47), attachments=(CAT,)))
+        prompt = assemble("", rows, 65536, scenes=(scene(64, "sum"),), files=CAT_FOLDER)
+        assert prompt.pictures_sent == 1
+        assert [m.images for m in prompt.messages if m.images] == [(CAT_PICTURE,)]
+
+    def test_a_pin_in_the_tail_changes_nothing(self) -> None:
+        rows = turns(220)
+        plain = assemble("", rows, 65536, scenes=(scene(64, "sum"),), min_tail_messages=150)
+        rows[200] = pinned(rows[200])
+        tail_pinned = assemble("", rows, 65536, scenes=(scene(64, "sum"),), min_tail_messages=150)
+        assert tail_pinned.messages == plain.messages
+
+
 class TestRecapDegrades:
     """Case 4: over the limit, the oldest summaries are replaced by the
     story-so-far through the last replaced scene — never a kept scene's
@@ -292,6 +340,16 @@ class TestRecapDegrades:
         )
         sent = "\n".join(m.body for m in prompt.messages)
         assert sent.index("((OOC: Elara joins.))") < sent.index("Arc through two.")
+
+    def test_a_replaced_scenes_pinned_message_floats_in_front_of_the_history(self) -> None:
+        rows = turns(40)
+        rows[7] = pinned(user("I mark the weir.", message_id=8))  # inside scene 1's span
+        prompt = assemble(
+            "", rows, 2524, scenes=self._scenes(), head_messages=5, min_tail_messages=10
+        )
+        sent = "\n".join(m.body for m in prompt.messages)
+        assert prompt.history
+        assert sent.index("I mark the weir.") < sent.index("Arc through two.")
 
     def test_the_context_limit_caps_a_larger_window(self) -> None:
         # The window would hold everything; the setting caps it, the
@@ -752,6 +810,10 @@ def story(row: Message) -> Message:
 
 def card(message_id: int, body: str) -> Message:
     return Message(id=message_id, role="user", body=body, kind="card")
+
+
+def pinned(row: Message) -> Message:
+    return replace(row, pinned=True)
 
 
 def tool(body: str, name: str = "search") -> Message:

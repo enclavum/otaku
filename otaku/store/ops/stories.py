@@ -245,8 +245,8 @@ class StoryOps:
             parent = after
             # fmt: off
             cur = conn.execute(
-                "INSERT INTO messages (story_id, parent_id, role, kind, speaker_id, speaker, body, template, provider, model, created_at, updated_at, attachments, mode, word_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (story_id, parent, message.role, message.kind, message.speaker_id, self._db.seal_opt(message.speaker), self._db.seal(message.body), self._db.seal_opt(message.template), message.provider, message.model, now, now, Attachment.to_json(message.attachments), message.mode.value, 0 if message.role == "tool" else _count_words(message.body)),
+                "INSERT INTO messages (story_id, parent_id, role, kind, speaker_id, speaker, body, template, provider, model, created_at, updated_at, attachments, mode, pinned, word_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (story_id, parent, message.role, message.kind, message.speaker_id, self._db.seal_opt(message.speaker), self._db.seal(message.body), self._db.seal_opt(message.template), message.provider, message.model, now, now, Attachment.to_json(message.attachments), message.mode.value, int(message.pinned), 0 if message.role == "tool" else _count_words(message.body)),
             )
             message_id = int(cur.lastrowid or 0)
             moved = conn.execute(
@@ -270,7 +270,7 @@ class StoryOps:
             "    SELECT id, parent_id, 0 FROM messages WHERE id = ?"
             "    UNION ALL"
             "    SELECT m.id, m.parent_id, chain.depth + 1 FROM messages m JOIN chain ON m.id = chain.parent_id) "
-            "SELECT m.id, m.role, m.kind, m.speaker_id, m.speaker, m.body, m.template, m.provider, m.model, m.attachments, m.mode "
+            "SELECT m.id, m.role, m.kind, m.speaker_id, m.speaker, m.body, m.template, m.provider, m.model, m.attachments, m.mode, m.pinned "
             "FROM chain JOIN messages m ON m.id = chain.id ORDER BY chain.depth DESC",
             (head,),
         ).fetchall()
@@ -289,6 +289,7 @@ class StoryOps:
             model,
             attachments,
             mode,
+            pinned,
         ) in rows:
             if kind == "chapter":
                 chapter += 1
@@ -305,6 +306,7 @@ class StoryOps:
                     model=model,
                     attachments=Attachment.from_json(attachments),
                     mode=StoryMode.from_value(mode),
+                    pinned=bool(pinned),
                     chapter=chapter,
                 )
             )
@@ -387,14 +389,14 @@ class StoryOps:
             message_map: dict[int, int] = {}
             for mid in chain:
                 row = conn.execute(
-                    "SELECT parent_id, role, kind, speaker_id, speaker, body, template, provider, model, created_at, attachments, mode, word_count FROM messages WHERE id = ?",
+                    "SELECT parent_id, role, kind, speaker_id, speaker, body, template, provider, model, created_at, attachments, mode, pinned, word_count FROM messages WHERE id = ?",
                     (mid,),
                 ).fetchone()
                 parent, role, kind, speaker_id, speaker = row[:5]
-                body, template, provider, model, created, attachments, mode, word_count = row[5:]
+                body, template, provider, model, created, attachments, mode, pinned, word_count = row[5:]
                 cur = conn.execute(
-                    "INSERT INTO messages (story_id, parent_id, role, kind, speaker_id, speaker, body, template, provider, model, created_at, updated_at, attachments, mode, word_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (new_story, message_map.get(parent), role, kind, character_map.get(speaker_id), speaker, body, template, provider, model, created, now, attachments, mode, word_count),
+                    "INSERT INTO messages (story_id, parent_id, role, kind, speaker_id, speaker, body, template, provider, model, created_at, updated_at, attachments, mode, pinned, word_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (new_story, message_map.get(parent), role, kind, character_map.get(speaker_id), speaker, body, template, provider, model, created, now, attachments, mode, pinned, word_count),
                 )
                 message_map[int(mid)] = int(cur.lastrowid or 0)
 
@@ -588,7 +590,7 @@ class MessagesOps:
         """One message, decrypted — None for an id the tree does not hold."""
         # fmt: off
         row = self._db.conn.execute(
-            "SELECT id, role, kind, speaker_id, speaker, body, template, provider, model, attachments, mode FROM messages WHERE id = ?",
+            "SELECT id, role, kind, speaker_id, speaker, body, template, provider, model, attachments, mode, pinned FROM messages WHERE id = ?",
             (message_id,),
         ).fetchone()
         # fmt: on
@@ -602,7 +604,7 @@ class MessagesOps:
         placeholders = ",".join("?" * len(message_ids))
         # fmt: off
         rows = self._db.conn.execute(
-            f"SELECT id, role, kind, speaker_id, speaker, body, template, provider, model, attachments, mode FROM messages WHERE id IN ({placeholders})",
+            f"SELECT id, role, kind, speaker_id, speaker, body, template, provider, model, attachments, mode, pinned FROM messages WHERE id IN ({placeholders})",
             tuple(message_ids),
         ).fetchall()
         # fmt: on
@@ -618,6 +620,17 @@ class MessagesOps:
             conn.execute(
                 "UPDATE messages SET body = ?, updated_at = ?, word_count = CASE role WHEN 'tool' THEN 0 ELSE ? END WHERE id = ?",
                 (self._db.seal(body), self._db.now(), _count_words(body), message_id),
+            )
+            # fmt: on
+
+    def set_pinned(self, message_id: int, pinned: bool) -> None:
+        """Pin a message, or unpin it: a pinned one is sent whole even
+        where its scene is summarized."""
+        with self._db.conn as conn:
+            # fmt: off
+            conn.execute(
+                "UPDATE messages SET pinned = ?, updated_at = ? WHERE id = ?",
+                (int(pinned), self._db.now(), message_id),
             )
             # fmt: on
 
@@ -705,9 +718,8 @@ class MessagesOps:
 
     def _message(self, row: Sequence[Any]) -> Message:
         """One row as `get` and `list` select it, decrypted."""
-        mid, role, kind, speaker_id, speaker, body, template, provider, model, attachments, mode = (
-            row
-        )
+        mid, role, kind, speaker_id, speaker, body = row[:6]
+        template, provider, model, attachments, mode, pinned = row[6:]
         return Message(
             id=int(mid),
             role=str(role),
@@ -720,6 +732,7 @@ class MessagesOps:
             model=model,
             attachments=Attachment.from_json(attachments),
             mode=StoryMode.from_value(mode),
+            pinned=bool(pinned),
         )
 
 

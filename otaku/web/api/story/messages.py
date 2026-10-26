@@ -1,5 +1,5 @@
-"""A story's messages, as the page asks for them: the chain, one message
-and its correction — and a line played, a write whose answer is the
+"""A story's messages, as the page asks for them: the chain, one message,
+its correction and its pin — and a line played, a write whose answer is the
 reply's event stream (`STREAMS`), each event named on the wire by
 `event`, as a regenerated reply's is (`stories`)."""
 
@@ -8,7 +8,7 @@ from collections.abc import Iterator, Mapping
 from dataclasses import asdict
 from typing import Any
 
-from otaku.backend.api import Api
+from otaku.backend.api import UNCHANGED, Api
 from otaku.backend.story.messages.schemas import (
     AssistantMessage,
     AssistantReasoning,
@@ -144,7 +144,12 @@ ROUTES: dict[tuple[str, str], Route] = {
     ),
     ("PATCH", "/api/stories/{story}/messages/{message}"): tagged(
         lambda api, ask: changed(
-            api.stories.messages.update(ask.id("story"), ask.id("message"), body=ask.need("body"))
+            api.stories.messages.update(
+                ask.id("story"),
+                ask.id("message"),
+                body=ask.need("body") if "body" in ask.body else UNCHANGED,
+                pinned=ask.flag("pinned") if "pinned" in ask.body else UNCHANGED,
+            )
         )
     ),
 }

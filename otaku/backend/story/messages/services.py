@@ -63,6 +63,26 @@ def update_message(app: App, story_id: int, message_id: int, *, body: str) -> st
     return "Message edited."
 
 
+def set_pinned(app: App, story_id: int, message_id: int, pinned: bool) -> str:
+    """Pin one message of a story, or unpin it, and the sentence: a
+    pinned message is sent whole even where its scene is summarized, in
+    front of the scene's summary. The message must be on that story's
+    current chain, as an edit's must. Any message may be unpinned. Raises
+    Invalid for a pin on a row that is never pinned (`can_pin`), NotFound
+    for a message that is not on the story's chain."""
+    stored = get_message(app, story_id, message_id)
+    if pinned and not can_pin(stored):
+        raise Invalid("A card or a tool result can't be pinned.")
+    app._store.messages.set_pinned(message_id, pinned)
+    return "Message pinned." if pinned else "Message unpinned."
+
+
+def can_pin(row: Message) -> bool:
+    """Whether a row may be pinned: any but a card's, which is always
+    sent whole, and a tool's result, which is the model's alone."""
+    return row.kind != "card" and row.role != "tool"
+
+
 def tool_label(row: Message) -> str | None:
     """What a tool's message is called where a frontend names it, for the
     result it holds (`Tool.label_of`); None for every other row."""

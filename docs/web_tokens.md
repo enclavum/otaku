@@ -272,6 +272,7 @@ in classes, so a stylesheet can name it the same way the scripts do.
 | `data-refused` | the composer's box | on the canvas, where the box stands disabled, it holds the refusal of the line typed in the story, in place of its placeholder |
 | `data-on="false"` | `.otk-feature`, `.otk-ruler__row` | the setting is off: its row on the Tools tab, and the depth ruler belonging to it |
 | `data-dragging` | `.otk-ruler__row` | the depth mark is being dragged |
+| `data-pinned="true"` / `"false"` | `.otk-row__id` in the messages list, `.otk-detail__pin` in its reader | the message is pinned: its number shows as a filled pin, as does the reader's pin; absent on a row that may not be pinned |
 | `.is-offline` | `.otk-app` | the server stopped answering |
 | `.is-loaded` / `.is-dim` | `.otk-row` | a model resident in memory, or not |
 | `.is-dragover` / `.is-filled` | `.otk-dropzone` | a file over the drop zone, and one dropped |

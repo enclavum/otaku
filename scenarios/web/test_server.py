@@ -580,11 +580,24 @@ class TestWrites:
         assert answer["notice"] and answer["value"]["body"] == "I listen."
         assert page.store.stories.get_messages(page.story)[0].body == "I listen."
 
-    def test_a_malformed_body_is_the_page_s_fault_not_a_crash(self, page: Page) -> None:
-        # A field the page did not send is a bad request, not a 500.
+    def test_a_message_pinned_lands_in_the_store(self, page: Page) -> None:
         page.play("I listen at the culvert mouth.")
         first = page.store.stories.get_messages(page.story)[0]
-        assert page.status(f"/api/stories/{page.story}/messages/{first.id}", method="PATCH") == 400
+        path = f"/api/stories/{page.story}/messages/{first.id}"
+        answer = page.patch(path, {"pinned": True})
+        assert answer["notice"] and answer["value"]["pinned"] is True
+        assert page.store.messages.get(first.id).pinned
+        # a pin is a boolean, never a word that reads as one
+        assert page.status(path, method="PATCH", data=b'{"pinned": "yes"}') == 400
+
+    def test_a_malformed_body_is_the_page_s_fault_not_a_crash(self, page: Page) -> None:
+        # A text sent as null is a bad request, not a 500; a body naming
+        # nothing to change is the backend's refusal, with its sentence.
+        page.play("I listen at the culvert mouth.")
+        first = page.store.stories.get_messages(page.story)[0]
+        path = f"/api/stories/{page.story}/messages/{first.id}"
+        assert page.status(path, method="PATCH", data=b'{"body": null}') == 400
+        page.refused("PATCH", path, {})
 
     def test_a_journal_state_has_no_write(self, page: Page) -> None:
         # The entry is a journal's one writable field; a state is the

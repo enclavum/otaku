@@ -22,9 +22,10 @@ The limit is the context in force — the model's window, under the
 context limit where one is set (`context_in_force`) — minus a reserve for the model's
 reply — sized
 from the story's own recent replies, so a terse story reserves little
-and a florid one enough. Card rows are never summarized and never
-dropped: a card in a replaced scene floats to the front of the recap,
-in front of the history.
+and a florid one enough. Card rows and pinned rows are never
+summarized and never dropped: one in a replaced scene rides whole in
+front of its scene's summary, in story order, and in front of the
+history once its scene is rolled into it.
 
 The shape is deliberately story-like, because injected structure breaks
 a roleplay model's prose: the system message is the user's own text,
@@ -365,10 +366,11 @@ def assemble_story(
 class _CoveredScene:
     """One scene covering part of the middle, as the recap tells it:
     its summary, the story-so-far rollup THROUGH it (its rung of the
-    ladder), and the card rows its span held — paired so case 4 can
-    replace a summary without losing what must float."""
+    ladder), and the rows its span held that ride whole — its cards and
+    pinned rows, in story order — paired so case 4 can replace a summary
+    without losing what must float."""
 
-    cards: list[Message]
+    whole: list[Message]
     summary: str
     history: str
 
@@ -432,13 +434,13 @@ class _Assembly:
         budget = max(0, limit - system_tokens)
         head, covered, tail = self._split(tail_target)
         verbatim = head + tail
-        # A card row in a covered scene rides the recap whole, at every
-        # level, and its picture with it: a card's portrait outlives the
-        # summary of the scene it came in.
-        cards = [m for scene in covered for m in scene.cards]
-        pictures_of, pictures_held = self._pictures(head + cards + tail)
-        # The recap's estimate holds a card's text; its picture is added here.
-        card_pictures_tokens = IMAGE_TOKENS * sum(len(pictures_of.get(m, ())) for m in cards)
+        # A card's or a pinned row in a covered scene rides the recap
+        # whole, at every level, and its pictures with it: a card's
+        # portrait outlives the summary of the scene it came in.
+        whole = [m for scene in covered for m in scene.whole]
+        pictures_of, pictures_held = self._pictures(head + whole + tail)
+        # The recap's estimate holds their text; their pictures are added here.
+        whole_pictures_tokens = IMAGE_TOKENS * sum(len(pictures_of.get(m, ())) for m in whole)
         head_tokens = sum(self._wire_tokens(m, pictures_of.get(m, ())) for m in head)
         tail_tokens = sum(
             self._wire_tokens(m, pictures_of.get(m, ()), is_last=i == len(tail) - 1)
@@ -460,7 +462,7 @@ class _Assembly:
         # once every size is actually measured. Level 0 is always yielded.
         for recap in self._degrade(covered):
             if (
-                head_tokens + recap.tokens + card_pictures_tokens + tail_tokens + injected_tokens
+                head_tokens + recap.tokens + whole_pictures_tokens + tail_tokens + injected_tokens
                 <= budget
             ):
                 break  # the first fit wins; the deepest level rides otherwise
@@ -473,10 +475,10 @@ class _Assembly:
         rows = inject_into_tail(head + recap.rows + tail, self.injections, wall)
         wire.extend(self._wire_turns(rows, pictures_of))
         # A picture is counted only where its row is sent whole — verbatim,
-        # or a card's row in the recap: a summarized row's is neither sent
+        # or riding the recap whole: a summarized row's is neither sent
         # nor missed, the summary is what remains of the turn. Omitted is
         # what would not load — no vision, a file gone.
-        pictures_attached = sum(len(m.attachments) for m in head + cards + tail)
+        pictures_attached = sum(len(m.attachments) for m in head + whole + tail)
         pictures_sent = sum(len(pictures) for pictures in pictures_of.values())
         return AssembledPrompt(
             messages=wire,
@@ -486,7 +488,7 @@ class _Assembly:
             system_tokens=system_tokens,
             transcript_tokens=head_tokens
             + recap.tokens
-            + card_pictures_tokens
+            + whole_pictures_tokens
             + tail_tokens
             + injected_tokens,
             head=len(head),
@@ -507,7 +509,7 @@ class _Assembly:
             ),
             cards=tuple(
                 CardSent(m.speaker or "", self._wire_tokens(m, pictures_of.get(m, ())))
-                for m in [*head, *cards, *tail]
+                for m in [*head, *whole, *tail]
                 if m.kind == "card"
             ),
         )
@@ -521,12 +523,12 @@ class _Assembly:
         the tail grows past the minimum. Scenes ending inside the head or
         the tail stay verbatim there and are not summarized.
 
-        A card row in the replaced region is never replaced with it: it joins
-        the first covered scene ending at or after it — the summary it will
-        stand in front of. A card's position deliberately
-        does not matter, its retention does. Cases 1-2 (short by count, or
-        no covering scene) come out of here as no covered scenes —
-        everything verbatim, the head split off all the same."""
+        A card's row or a pinned row in the replaced region is never
+        replaced with it: it joins the first covered scene ending at or
+        after it — the summary it will stand in front of, in story order.
+        Cases 1-2 (short by count, or no covering scene) come out of here
+        as no covered scenes — everything verbatim, the head split off all
+        the same."""
         messages, head_messages = self.messages, self.shape.head_messages
         if len(messages) <= head_messages + tail_target:
             return messages[:head_messages], [], messages[head_messages:]
@@ -543,16 +545,16 @@ class _Assembly:
         if not covering:
             return messages[:head_messages], [], messages[head_messages:]
         boundary = position[covering[-1].end_message_id]
-        covered = [_CoveredScene(cards=[], summary=s.summary, history=s.history) for s in covering]
+        covered = [_CoveredScene(whole=[], summary=s.summary, history=s.history) for s in covering]
         ends = [position[s.end_message_id] for s in covering]
         for m in messages[head_messages : boundary + 1]:
-            if m.kind == "card":
-                covered[bisect_left(ends, position[m.id])].cards.append(m)
+            if m.kind == "card" or m.pinned:
+                covered[bisect_left(ends, position[m.id])].whole.append(m)
         return messages[:head_messages], covered, messages[boundary + 1 :]
 
     def _pictures(self, rows: list[Message]) -> tuple[dict[Message, tuple[WirePicture, ...]], int]:
         """Which pictures ride which row sent whole — the verbatim rows and
-        the card rows the recap carries, in story order — read from the
+        the rows the recap carries whole, in story order — read from the
         folder here and only here: every row's — or, where the engine gathers
         every picture onto the latest prompt, the newest pictured row's
         alone, so a follow-up without a picture still reaches the model
@@ -577,12 +579,13 @@ class _Assembly:
 
     def _degrade(self, covered: list[_CoveredScene]) -> Iterator[_RecapLevel]:
         """Case 4, one level at a time: level 0 is case 3's recap — every
-        covered scene's cards in front of its summary, oldest first. Level k
-        replaces the summaries of the first k+1 scenes with the story-so-far
-        THROUGH the last of them (its own history rung); their cards float
-        to the front, in front of the history. A replaced scene without a
-        rung falls back to the nearest older one — the scenes past that rung
-        go uncovered rather than retold.
+        covered scene's cards and pinned rows in front of its summary,
+        oldest first. Level k replaces the summaries of the first k+1
+        scenes with the story-so-far THROUGH the last of them (its own
+        history rung); their rows float to the front, in front of the
+        history. A replaced scene without a rung falls back to the nearest
+        older one — the scenes past that rung go uncovered rather than
+        retold.
 
         Level 0 always, then each deeper level up to the history alone. No
         covered scenes yields the one empty level (cases 1-2)."""
@@ -602,11 +605,11 @@ class _Assembly:
             if self.recap_header:
                 rows.append(self._recap_row(self.recap_header))
             for scene in replaced:
-                rows.extend(scene.cards)
+                rows.extend(scene.whole)
             if history:
                 rows.append(self._recap_row(history))
             for scene in kept:
-                rows.extend(scene.cards)
+                rows.extend(scene.whole)
                 rows.append(self._recap_row(scene.summary))
             recap = "\n\n".join(self._wire_text(m) for m in rows)
             yield _RecapLevel(

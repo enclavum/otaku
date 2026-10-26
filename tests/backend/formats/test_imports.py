@@ -3,7 +3,7 @@
 Its contract is the round-trip: `parse_story(render_story(x))` returns
 `x` exactly — titles, system, story-so-far, cast with aliases and
 descriptions, scenes with spans, summaries and journals, and messages
-with their kind, speaker, and verbatim template and bodies. A file without
+with their kind, pin, speaker, and verbatim template and bodies. A file without
 the export marker parses as None; a declared format above the reader's
 raises, while any older or absent one is read.
 """
@@ -55,13 +55,13 @@ FULL = ExportedStory(
     ),
     messages=(
         ExportedMessage(role="user", body="Я вхожу в часовню.", speaker="Кассиан"),
-        ExportedMessage(role="assistant", body="Дверь скрипит.\n\nВнутри темно."),
+        ExportedMessage(role="assistant", body="Дверь скрипит.\n\nВнутри темно.", pinned=True),
         ExportedMessage(
             role="user",
             body="Кто здесь?",
             template="((OOC: The user writes as Кассиан.))\n{body}",
         ),
-        ExportedMessage(role="assistant", body="Хороший план.", kind="ooc"),
+        ExportedMessage(role="assistant", body="Хороший план.", kind="ooc", pinned=True),
         ExportedMessage(role="user", body="Тишина висела в воздухе.", kind="narration"),
         ExportedMessage(
             role="user",
@@ -221,6 +221,31 @@ class TestMessageHeaders:
     def test_a_chapters_row(self) -> None:
         message = self.parse_one('1 · user (chapter) · "((OOC: Chapter \\"{body}\\"))"')
         assert (message.kind, message.template) == ("chapter", '((OOC: Chapter "{body}"))')
+
+    def test_a_pin_stands_after_the_kind_or_alone(self) -> None:
+        for kind in ("ooc", "narration", "card", "chapter"):
+            message = self.parse_one(f"1 · user ({kind}, pinned)")
+            assert (message.kind, message.pinned) == (kind, True), kind
+            assert not self.parse_one(f"1 · user ({kind})").pinned, kind
+        message = self.parse_one("1 · assistant (pinned)")
+        assert (message.role, message.kind, message.pinned) == ("assistant", "dialogue", True)
+        assert not self.parse_one("1 · assistant").pinned
+
+    def test_a_pin_keeps_the_speaker_and_the_template(self) -> None:
+        message = self.parse_one('1 · user (ooc, pinned) · Рин · "((OOC: y))"')
+        assert (message.pinned, message.speaker, message.template) == (True, "Рин", "((OOC: y))")
+        message = self.parse_one("1 · user (pinned) · Рин")
+        assert (message.pinned, message.speaker, message.template) == (True, "Рин", None)
+        message = self.parse_one('1 · user (pinned) · "((OOC: z))"')
+        assert (message.pinned, message.speaker, message.template) == (True, None, "((OOC: z))")
+
+    def test_a_mark_the_export_never_writes_is_no_header(self) -> None:
+        # The pin follows the kind, as the export writes it; any other
+        # spelling leaves the message out rather than guessing at it.
+        for header in ("1 · user (pinned, ooc)", "1 · user (ooc pinned)", "1 · user (starred)"):
+            doc = f"<!-- otaku export\n-->\n\n## Messages\n\n### {header}\nBody.\n"
+            parsed = parse_story(doc)
+            assert parsed is not None and len(parsed.messages) == 0, header
 
     def test_an_unterminated_framing_degrades_to_absent(self) -> None:
         message = self.parse_one('1 · user · Рин · "unterminated')

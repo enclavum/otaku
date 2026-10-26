@@ -35,7 +35,8 @@ from dataclasses import dataclass
 #  3: each scene carries its own **History:** (the arc through it) — a
 #     v2 reader would fold the field line into the summary, so the
 #     version fences it out.
-#  4: `chapter` message kind, the row a /chapter line opens one with
+#  4: `chapter` message kind, the row a /chapter line opens one with;
+#     `pinned` beside a pinned message's kind
 EXPORT_FORMAT_VERSION = 4
 
 # What recognizes the document — the first line of its metadata block.
@@ -70,6 +71,7 @@ class ExportedMessage:
     kind: str = "dialogue"
     speaker: str | None = None
     template: str | None = None
+    pinned: bool = False
 
 
 @dataclass(frozen=True)

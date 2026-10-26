@@ -59,6 +59,15 @@ import { buildTools } from "./tools.js";
    in, and nothing else. A file picker offers anything, and a `.png` read
    as text is a screenful of noise where the premise was. */
 const _PREMISE_FILES = ".txt,.md,.markdown,text/plain,text/markdown";
+// What a pin does to the message it is on, said under it while pinned —
+// the terminal's preview says it too (`terminal/screens/dossier/messages.py`
+// `_PIN_NOTE`): change one, change both.
+const _PIN_NOTE =
+  "Pinned: this message is sent as is and in its place, even after its scene is summarized.";
+// The pin a message is pinned by, drawn on a 16-unit square: symmetric
+// about its diagonal, its stroke kept inside the square.
+const _PIN_PATH =
+  "M8.7 1.1 14.9 7.3 12.3 6.8 9.7 9.4 10.1 12.7 8.7 14.1 5.7 11.1 1.9 14.9 1.1 14.1 4.9 10.3 1.9 7.3 3.3 5.9 6.6 6.3 9.2 3.7Z";
 
 
 /** Open the dossier — on the open story by default, or on `story` (a
@@ -97,6 +106,7 @@ export async function openStory({ story = null, tab = "messages", allStories } =
     select: {},
     footnotes: {},
   };
+  showCount(view);
 
   for (const button of $$(".otk-tab", popup)) {
     button.onclick = () => show(view, button.dataset.tab);
@@ -294,7 +304,7 @@ function buildMessages(view, pane) {
       const pictures = message.attachments?.length ?? 0;
       if (pictures) title.append(span("otk-tag", `${pictures} picture${pictures === 1 ? "" : "s"}`));
       const drawn = row(
-        span("otk-row__id", String(message.position)),
+        rowNumber(view, message),
         span(who === "you" ? "otk-row__who otk-row__who--you" : "otk-row__who", who),
         title,
       );
@@ -380,6 +390,7 @@ function drawReader(view, pane, message, edit) {
   const head = element("div", "otk-detail__head");
   head.append(span("otk-label otk-label--ink", `Message ${message.position}`));
   if (message.kind) head.append(span("otk-tag", message.kind));
+  if (message.can_pin || message.pinned) head.append(readerPin(view, message));
 
   // A reader's line reads as the transcript draws it, a chapter's heading
   // numbered; a text not saved yet, as typed.
@@ -394,6 +405,10 @@ function drawReader(view, pane, message, edit) {
   // keeps (`stories.update_message`), as the transcript's field does.
   const body = element("div", "otk-detail__section");
   body.append(edited(reader(message.body.trim(), (text) => saveMessage(view, message, text), line), ""));
+  const pinNote = element("p", "otk-note", _PIN_NOTE);
+  pinNote.dataset.pinNote = String(message.id);
+  pinNote.hidden = !message.pinned;
+  body.append(pinNote);
 
   const out = [head, body];
 
@@ -462,6 +477,93 @@ async function saveMessage(view, message, text) {
     await landed("", { corrected: view.inside ? [message.position, text] : null });
   }
   return answer;
+}
+
+/** The story's messages counted at the end of the tab row, and how many
+    are pinned where any is — the same on every tab. */
+function showCount(view) {
+  const total = view.messages.length;
+  const pinned = view.messages.filter((message) => message.pinned).length;
+  const count = `${total} ${total === 1 ? "message" : "messages"}`;
+  $("[data-tabs-aside]", view.popup).textContent = pinned ? `${count} · ${pinned} pinned` : count;
+}
+
+/** A message's number in its row, which is also its pin (`markPin`).
+    Inside the row's own button, so a span whose clicks stop at it: a pin
+    is no pick, and two quick ones no resume. A row that may not be pinned
+    keeps its bare number — unless pinned already, as an unpin is never
+    refused. */
+function rowNumber(view, message) {
+  const number = span("otk-row__id");
+  if (!message.can_pin && !message.pinned) {
+    number.textContent = String(message.position);
+    return number;
+  }
+  number.append(span("otk-row__ordinal", String(message.position)), pinGlyph(17));
+  markPin(number, message);
+  const toggle = guard(() => togglePin(view, message));
+  number.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggle();
+  });
+  number.addEventListener("dblclick", (event) => event.stopPropagation());
+  return number;
+}
+
+/** The open message's pin, at the end of the reader's header. */
+function readerPin(view, message) {
+  const pin = element("button", "otk-detail__pin");
+  pin.type = "button";
+  pin.append(pinGlyph(17));
+  markPin(pin, message);
+  pin.onclick = guard(() => togglePin(view, message));
+  return pin;
+}
+
+/** A pin as its message stands: `data-pinned`, and what pressing it does
+    — the reader's a button of its own, the list's inside its row's. */
+function markPin(pin, message) {
+  const does = `${message.pinned ? "unpin" : "pin"} message ${message.position}`;
+  pin.dataset.pin = String(message.id);
+  pin.dataset.pinned = String(message.pinned);
+  pin.title = does;
+  if (pin.matches("button")) {
+    pin.setAttribute("aria-pressed", String(message.pinned));
+    pin.setAttribute("aria-label", does);
+  }
+}
+
+function pinGlyph(size) {
+  const glyph = svgElement("svg", {
+    class: "otk-pin",
+    width: size,
+    height: size,
+    viewBox: "0 0 16 16",
+    "aria-hidden": "true",
+  });
+  glyph.append(svgElement("path", { d: _PIN_PATH }));
+  return glyph;
+}
+
+async function togglePin(view, message) {
+  /* Pinned or unpinned from the list or the reader, both kept in step,
+     and the count; what the next request costs changes with it. */
+  const answer = await api.stories.messages.update(view.subject.id, message.id, {
+    pinned: !message.pinned,
+  });
+  if (!answer.refused) {
+    message.pinned = answer.value.pinned;
+    // the story's own copy of the message, which the count reads
+    const kept = view.messages.find((m) => m.id === message.id);
+    if (kept) kept.pinned = message.pinned;
+    for (const pin of $$(`[data-pin="${message.id}"]`, view.popup)) markPin(pin, message);
+    for (const note of $$(`[data-pin-note="${message.id}"]`, view.popup)) {
+      note.hidden = !message.pinned;
+    }
+    showCount(view);
+    await showContextUse();
+  }
+  footnote(view.popup, answer.notice, answer.refused);
 }
 
 function resumeAt(view, message) {
@@ -947,6 +1049,7 @@ async function reread(view, selectId) {
   view.memory = opened.memory;
   view.refused = opened.refused;
   for (const tab of ["messages", "scenes", "cast"]) view.built.delete(tab);
+  showCount(view);
   show(view, "cast", selectId);
 }
 

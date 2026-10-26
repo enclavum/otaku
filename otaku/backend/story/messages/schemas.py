@@ -76,6 +76,8 @@ def _as_message(row: schema.Message, previous: schema.Message | None, unit: int)
         model=row.model,
         attachments=row.attachments,
         mode=row.mode,
+        pinned=row.pinned,
+        can_pin=domain_messages.can_pin(row),
         segments=tuple(domain_messages.segments(row)),
         join_type=domain_messages.join_type(previous, row),
         tool_label=domain_messages.tool_label(row),
@@ -88,8 +90,10 @@ class Message(Schema):
     stored (fences and all), the kind the language stored it as, the
     speaker (None until extraction names one), who made it (`provider`
     and `model` — a card's file, a tool's name), the template it was
-    played with, its pictures, the mode it was written in — and what a
-    client would otherwise parse or decide: the body split (`segments`:
+    played with, its pictures, the mode it was written in, whether it is
+    pinned (sent whole even where its scene is summarized) — and what a
+    client would otherwise parse or decide: whether it may be pinned
+    (`can_pin`), the body split (`segments`:
     prose, and each tool call as its tool's facts; a user's line its
     story and its words with the model; a chapter its heading, numbered
     along the chain), how it joins the message before it (`join_type`),
@@ -107,6 +111,8 @@ class Message(Schema):
     model: str | None
     attachments: tuple[Attachment, ...]
     mode: StoryMode
+    pinned: bool
+    can_pin: bool
     segments: tuple[dict[str, object], ...]
     join_type: JoinType
     tool_label: str | None

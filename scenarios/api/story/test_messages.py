@@ -614,6 +614,64 @@ class TestChapter:
         assert [m.body for m in chain] == ["I enter the hall.", scripted.CHAT_REPLY]
 
 
+class TestPin:
+    """A message pinned or unpinned on the story's chain: the store keeps
+    the mark, the message says it and whether it may be pinned, a fork and
+    an export keep it. A card's or a tool's row is never pinned, and any
+    row may be unpinned."""
+
+    def test_a_pin_is_kept_and_taken_back(self, app: App) -> None:
+        app.play("I enter the hall.")
+        story = app.story_id
+        line = app.api.stories.messages.list(story)[0]
+        assert (line.pinned, line.can_pin) == (False, True)
+        changed = app.api.stories.messages.update(story, line.id, pinned=True)
+        assert changed.notice and changed.value.pinned
+        assert [m.pinned for m in app.api.stories.messages.list(story)] == [True, False]
+        app.api.stories.messages.update(story, line.id, pinned=False)
+        assert not app.store.messages.get(line.id).pinned
+
+    def test_a_card_is_never_pinned_but_always_unpinned(self, app: App) -> None:
+        app.play("I enter the hall.")
+        story = app.story_id
+        card = Message(role="user", kind="card", body="/card keeper.json", provider="card")
+        card_id = app.store.stories.append(story, card, after=app.store.stories.get_head(story))
+        (shown,) = [m for m in app.api.stories.messages.list(story) if m.id == card_id]
+        assert not shown.can_pin
+        with pytest.raises(Invalid):
+            app.api.stories.messages.update(story, card_id, pinned=True)
+        assert not app.store.messages.get(card_id).pinned
+        app.store.messages.set_pinned(card_id, True)  # by hand, or by an older document
+        app.api.stories.messages.update(story, card_id, pinned=False)
+        assert not app.store.messages.get(card_id).pinned
+
+    def test_an_update_names_something_to_change(self, app: App) -> None:
+        app.play("I enter the hall.")
+        with pytest.raises(Invalid):
+            app.api.stories.messages.update(app.story_id, app.messages[0].id)
+
+    def test_a_correction_and_a_pin_in_one_update(self, app: App) -> None:
+        app.play("I enter the hall.")
+        changed = app.api.stories.messages.update(
+            app.story_id, app.messages[0].id, body="I leave the hall.", pinned=True
+        )
+        assert (changed.value.body, changed.value.pinned) == ("I leave the hall.", True)
+
+    def test_a_fork_keeps_the_pins(self, app: App) -> None:
+        app.play("I enter the hall.")
+        app.api.stories.messages.update(app.story_id, app.messages[1].id, pinned=True)
+        app.play("/fork")
+        assert [m.pinned for m in app.messages] == [False, True]
+
+    def test_an_export_and_its_import_keep_the_pins(self, app: App) -> None:
+        app.play("I enter the hall.")
+        story = app.story_id
+        app.api.stories.messages.update(story, app.messages[1].id, pinned=True)
+        text = app.api.stories.export.get(story).text
+        imported = app.api.imports.create(text=text, file_name="hall.md").value.story_id
+        assert [m.pinned for m in app.api.stories.messages.list(imported)] == [False, True]
+
+
 class TestInliners:
     def test_prose_keeps_its_slashes_and_plays(self, app: App) -> None:
         line = "She looks up and/or down on 24/08/2026 at https://x.co/cue"

@@ -915,16 +915,29 @@ export function message(id, messageId) {
   return structuredClone(found);
 }
 
-export function updateMessage(id, messageId, body) {
+/** A message corrected, or pinned or unpinned, as the product's
+    `stories.messages.update` does: either field or both, the sentences
+    joined; a pin refused where `can_pin` says so, an unpin never. */
+export function updateMessage(id, messageId, { body, pinned }) {
   const story = held(id);
   const found = story.messages.find((row) => row.id === messageId);
   if (!found) throw notFound(OFF_CHAIN);
-  if (!body.trim()) throw invalid("A message cannot be emptied — undo the exchange instead.");
-  found.body = body;
-  found.segments = found.kind === "chapter" ? headingOf(story, found) : [{ kind: "prose", text: body }];
+  if (body === undefined && pinned === undefined) throw invalid("Nothing to change.");
+  const said = [];
+  if (body !== undefined) {
+    if (!body.trim()) throw invalid("A message cannot be emptied — undo the exchange instead.");
+    found.body = body;
+    found.segments = found.kind === "chapter" ? headingOf(story, found) : [{ kind: "prose", text: body }];
+    said.push("Message edited.");
+  }
+  if (pinned !== undefined) {
+    if (pinned && !found.can_pin) throw invalid("A card or a tool result can't be pinned.");
+    found.pinned = pinned;
+    said.push(pinned ? "Message pinned." : "Message unpinned.");
+  }
   touch(story);
   moved(story);
-  return { value: structuredClone(found), notice: "Message edited." };
+  return { value: structuredClone(found), notice: said.join(" ") };
 }
 
 // ---------- chapters ----------
@@ -973,12 +986,16 @@ export function record(id, role, body, extra = {}) {
     model: role === "assistant" ? state.model : null,
     attachments: [],
     mode: modeOf(layoutOf(story)),
+    pinned: false,
+    can_pin: true,
     segments: [{ kind: "prose", text: body }],
     join_type: "paragraph",
     tool_label: null,
     unit: 0,
     ...extra,
   };
+  // every row but a card's and a tool's (`messages.services.can_pin`)
+  row.can_pin = row.kind !== "card" && row.role !== "tool";
   row.join_type = joinOf(previous, row);
   row.unit = row.id;
   story.messages.push(row);

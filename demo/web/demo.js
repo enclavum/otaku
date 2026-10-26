@@ -125,8 +125,12 @@ const ROUTES = {
   "GET /api/stories/{story}/messages": (p, q) =>
     items(store.messages(num(p.story), q.get("last") == null ? null : Number(q.get("last")))),
   "GET /api/stories/{story}/messages/{message}": (p) => store.message(num(p.story), num(p.message)),
-  "PATCH /api/stories/{story}/messages/{message}": (p, q, b) =>
-    changed(store.updateMessage(num(p.story), num(p.message), need(b, "body"))),
+  "PATCH /api/stories/{story}/messages/{message}": (p, q, b) => {
+    const fields = {};
+    if ("body" in b) fields.body = need(b, "body");
+    if ("pinned" in b) fields.pinned = flag(b, "pinned");
+    return changed(store.updateMessage(num(p.story), num(p.message), fields));
+  },
   "GET /api/stories/{story}/settings": (p) => items(store.storySettings(num(p.story))),
   "GET /api/stories/{story}/settings/{setting}": (p) => store.storySetting(num(p.story), p.setting),
   "PATCH /api/stories/{story}/settings/{setting}": (p, q, b) =>

@@ -1207,6 +1207,10 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
 .otk-tab { font-family: var(--otk-font-display); font-size: 16px; font-weight: 600; letter-spacing: -0.01em; padding-bottom: 14px; color: var(--otk-muted); border-bottom: var(--otk-mark) solid transparent; }
 .otk-tab[aria-selected="true"] { color: var(--otk-ink); border-bottom-color: var(--otk-accent); }
 .otk-tabs__aside { margin-left: auto; padding-bottom: 14px; font-family: var(--otk-font-mono); font-size: var(--otk-size-small); color: var(--otk-faint); }
+/* the dossier's count, midway between the head's buttons and the rule
+   under the tabs: the row centres it, and the padding under it matches
+   the 10px the head leaves under its buttons */
+.otk-tabs__aside--centered { padding-bottom: 10px; }
 /* five tabs and the aside outrun a phone's width: the strip swipes sideways
    instead of clipping, the gaps drawn in */
 @media (max-width: 600px) {
@@ -1262,6 +1266,16 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
 /* the number and the speaker, digits and capitals smaller than the
    words: centred in the row, since small type set on its baseline sits low */
 .otk-row__id, .otk-row__who { align-self: center; }
+/* A message's number is also its pin: pinned, a filled accent pin stands
+   in its place; a pointer over the number of a row that may be pinned
+   turns it into an outline pin to press. */
+.otk-row__id[data-pinned] { display: flex; align-items: center; justify-content: flex-end; height: 1.35em; cursor: pointer; }
+.otk-row__id .otk-pin { display: none; fill: none; stroke: currentColor; stroke-width: 1.2; stroke-linejoin: round; }
+.otk-row__id[data-pinned="true"] .otk-row__ordinal,
+.otk-row__id[data-pinned]:hover .otk-row__ordinal { display: none; }
+.otk-row__id[data-pinned="true"] .otk-pin,
+.otk-row__id[data-pinned]:hover .otk-pin { display: block; }
+.otk-row__id[data-pinned="true"] .otk-pin { fill: var(--otk-accent); stroke: var(--otk-accent); }
 .otk-row__num { flex: none; text-align: right; font-family: var(--otk-font-mono); font-size: var(--otk-size-mono-sm); line-height: var(--otk-leading-row); color: var(--otk-muted); font-variant-numeric: tabular-nums; }
 .otk-row--mono .otk-row__title { font-family: var(--otk-font-mono); font-size: var(--otk-size-mono); }
 .otk-row[aria-selected="true"] .otk-row__title { color: var(--otk-ink); }
@@ -1517,6 +1531,12 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 .otk-detail--reader { flex: 0 1 var(--otk-reader-w); min-width: 300px; }
 .otk-detail__scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
 .otk-detail__head { display: flex; align-items: baseline; gap: 10px; }
+/* the open message's pin, at the end of the reader's header, in step
+   with the number-pin in the list */
+.otk-detail__pin { margin-left: auto; display: flex; padding: 2px; line-height: 0; color: var(--otk-faint); cursor: pointer; transform: translateY(3px); }
+.otk-detail__pin .otk-pin { display: block; fill: none; stroke: currentColor; stroke-width: 1.2; stroke-linejoin: round; }
+.otk-detail__pin[data-pinned="true"] .otk-pin { fill: var(--otk-accent); stroke: var(--otk-accent); }
+.otk-detail__pin:hover { color: var(--otk-ink); }
 .otk-detail__title { margin: 12px 0 10px; font-family: var(--otk-font-display); font-size: var(--otk-size-title); font-weight: 800; letter-spacing: -0.02em; color: var(--otk-ink); overflow-wrap: anywhere; }
 .otk-detail__section { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: var(--otk-hair) solid var(--otk-line-soft); }
 .otk-fact { display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr); gap: 12px; padding: 7px 0; border-bottom: var(--otk-hair) solid var(--otk-line-soft); font-family: var(--otk-font-mono); font-size: var(--otk-size-mono-sm); margin: 0; }

@@ -40,6 +40,8 @@
    "model": null,
    "attachments": [],
    "mode": "chat",
+   "pinned": false,
+   "can_pin": true,
    "segments": [
     {
      "kind": "chapter_number",
@@ -69,6 +71,8 @@
    "model": null,
    "attachments": [],
    "mode": "chat",
+   "pinned": false,
+   "can_pin": true,
    "segments": [
     {
      "kind": "prose",
@@ -90,6 +94,8 @@
    "model": null,
    "attachments": [],
    "mode": "chat",
+   "pinned": false,
+   "can_pin": true,
    "segments": [
     {
      "kind": "prose",
@@ -111,6 +117,8 @@
    "model": null,
    "attachments": [],
    "mode": "chat",
+   "pinned": false,
+   "can_pin": true,
    "segments": [
     {
      "kind": "prose",
@@ -132,6 +140,8 @@
    "model": null,
    "attachments": [],
    "mode": "chat",
+   "pinned": false,
+   "can_pin": true,
    "segments": [
     {
      "kind": "prose",
@@ -153,6 +163,8 @@
    "model": null,
    "attachments": [],
    "mode": "chat",
+   "pinned": false,
+   "can_pin": true,
    "segments": [
     {
      "kind": "prose",
@@ -174,6 +186,8 @@
    "model": null,
    "attachments": [],
    "mode": "chat",
+   "pinned": false,
+   "can_pin": true,
    "segments": [
     {
      "kind": "prose",
@@ -195,6 +209,8 @@
    "model": null,
    "attachments": [],
    "mode": "chat",
+   "pinned": false,
+   "can_pin": true,
    "segments": [
     {
      "kind": "prose",
@@ -216,6 +232,8 @@
    "model": null,
    "attachments": [],
    "mode": "chat",
+   "pinned": false,
+   "can_pin": true,
    "segments": [
     {
      "kind": "prose",
@@ -237,6 +255,8 @@
    "model": null,
    "attachments": [],
    "mode": "chat",
+   "pinned": false,
+   "can_pin": true,
    "segments": [
     {
      "kind": "prose",
@@ -258,6 +278,8 @@
    "model": null,
    "attachments": [],
    "mode": "chat",
+   "pinned": false,
+   "can_pin": true,
    "segments": [
     {
      "kind": "prose",
@@ -279,6 +301,8 @@
    "model": null,
    "attachments": [],
    "mode": "chat",
+   "pinned": false,
+   "can_pin": true,
    "segments": [
     {
      "kind": "chapter_number",
@@ -308,6 +332,8 @@
    "model": null,
    "attachments": [],
    "mode": "chat",
+   "pinned": false,
+   "can_pin": true,
    "segments": [
     {
      "kind": "prose",
@@ -329,6 +355,8 @@
    "model": null,
    "attachments": [],
    "mode": "chat",
+   "pinned": false,
+   "can_pin": true,
    "segments": [
     {
      "kind": "prose",
@@ -350,6 +378,8 @@
    "model": null,
    "attachments": [],
    "mode": "chat",
+   "pinned": false,
+   "can_pin": true,
    "segments": [
     {
      "kind": "prose",
@@ -371,6 +401,8 @@
    "model": null,
    "attachments": [],
    "mode": "chat",
+   "pinned": false,
+   "can_pin": true,
    "segments": [
     {
      "kind": "prose",
@@ -405,6 +437,8 @@
     }
    ],
    "mode": "chat",
+   "pinned": false,
+   "can_pin": true,
    "segments": [
     {
      "kind": "prose",
@@ -426,6 +460,8 @@
    "model": null,
    "attachments": [],
    "mode": "chat",
+   "pinned": false,
+   "can_pin": true,
    "segments": [
     {
      "kind": "prose",

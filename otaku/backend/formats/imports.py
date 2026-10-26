@@ -23,10 +23,14 @@ from otaku.backend.formats import (
 from otaku.store import Store
 from otaku.store.schema import Message
 
-# A message header: `### 3 · user (ooc) · Speaker · "template"` — the
-# speaker and the JSON-quoted template optional, in that order.
+# A message header: `### 3 · user (ooc, pinned) · Speaker · "template"` —
+# the kind, the pin, the speaker and the JSON-quoted template optional, in
+# that order. The pin is captured by one branch's group or the other's —
+# after a kind (4) or alone (5) — as `re` cannot give two branches one.
 _MSG_HEADER = re.compile(
-    r"^(\d+)\s*·\s*(user|assistant)(?:\s*\((ooc|narration|card|chapter)\))?(?:\s*·\s*(.+))?$"
+    r"^(\d+)\s*·\s*(user|assistant)"
+    r"(?:\s*\((?:(ooc|narration|card|chapter)(?:,\s*(pinned))?|(pinned))\))?"
+    r"(?:\s*·\s*(.+))?$"
 )
 # `### 2 · The Crossing` / `### 2` — a scene header in `## Scenes`.
 _SCENE_HEADER = re.compile(r"^(\d+)(?:\s*·\s*(.+))?$")
@@ -146,7 +150,7 @@ def parse_story(text: str) -> ExportedStory | None:
         m = _MSG_HEADER.match(header)
         if m is None:
             continue
-        speaker, template = _speaker_and_template(m.group(4) or "")
+        speaker, template = _speaker_and_template(m.group(6) or "")
         messages.append(
             ExportedMessage(
                 role=m.group(2),
@@ -154,6 +158,7 @@ def parse_story(text: str) -> ExportedStory | None:
                 kind=m.group(3) or "dialogue",
                 speaker=speaker,
                 template=template,
+                pinned=bool(m.group(4) or m.group(5)),
             )
         )
 
@@ -214,6 +219,7 @@ def write_story(store: Store, export: ExportedStory) -> int:
                 body=message.body,
                 kind=message.kind,
                 template=message.template,
+                pinned=message.pinned,
             ),
             after=ids[-1] if ids else None,
         )

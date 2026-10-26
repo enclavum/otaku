@@ -226,6 +226,7 @@ class Message:
     # the layout's mode it was recorded in, read by the join rule; a
     # factory, as StoryMode is defined below
     mode: "StoryMode" = field(default_factory=lambda: StoryMode.CHAT)
+    pinned: bool = False  # the reader's mark: sent whole even where its scene is summarized
 
     # ---- derived: counted when the row is read, never stored ----
 

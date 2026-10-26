@@ -22,7 +22,8 @@ from __future__ import annotations
 from collections.abc import Iterator, Sequence
 
 from otaku.backend.app.pictures.services import RawFile
-from otaku.backend.base import Changed, Resource, streams
+from otaku.backend.base import UNCHANGED, Changed, Resource, Unchanged, streams
+from otaku.backend.errors import Invalid
 from otaku.backend.story.messages import services as domain_messages
 from otaku.backend.story.messages.schemas import Message, PlayEvent, _as_message, as_events
 from otaku.store import schema
@@ -46,14 +47,29 @@ class MessagesResource(Resource):
         domain_messages.get_message(self._app, story_id, message_id)  # on the chain, or NotFound
         return next(found for found in self.list(story_id) if found.id == message_id)
 
-    def update(self, story_id: int, message_id: int, *, body: str) -> Changed[Message]:
+    def update(
+        self,
+        story_id: int,
+        message_id: int,
+        *,
+        body: str | Unchanged = UNCHANGED,
+        pinned: bool | Unchanged = UNCHANGED,
+    ) -> Changed[Message]:
         """The author's correction of one message of a story, on its current
-        chain; the whitespace at its edges stays the stored one — a
-        correction changes the words, never the join. Raises Invalid on
-        an empty body, NotFound for a message that is not on the story's
-        chain."""
-        said = domain_messages.update_message(self._app, story_id, message_id, body=body)
-        return Changed(self.get(story_id, message_id), said)
+        chain — the whitespace at its edges stays the stored one: a
+        correction changes the words, never the join — and its pin: a
+        pinned message is sent whole even where its scene is summarized.
+        Raises Invalid for nothing to change, an empty body and a pin on a
+        row that is never pinned, NotFound for a message that is not on
+        the story's chain."""
+        said = []
+        if not isinstance(body, Unchanged):
+            said.append(domain_messages.update_message(self._app, story_id, message_id, body=body))
+        if not isinstance(pinned, Unchanged):
+            said.append(domain_messages.set_pinned(self._app, story_id, message_id, pinned))
+        if not said:
+            raise Invalid("Nothing to change.")
+        return Changed(self.get(story_id, message_id), " ".join(said))
 
     @streams
     def create(

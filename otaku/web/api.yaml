@@ -574,17 +574,18 @@ paths:
     patch:
       operationId: updateMessage
       tags: [Messages]
-      summary: Correct a message
-      description: The author's correction, on the story's current chain. The whitespace at its edges stays the stored one — a correction changes the words, never the join. An empty body is refused.
+      summary: Correct a message, or pin it
+      description: The author's correction, on the story's current chain, and its pin. The whitespace at its edges stays the stored one — a correction changes the words, never the join. A pinned message is sent whole even where its scene is summarized, in front of the scene's summary. Nothing to change, an empty body and a pin on a card's or a tool's message are refused.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [body]
+              minProperties: 1
               properties:
                 body: { type: string }
+                pinned: { type: boolean, description: "Pin the message, or unpin it: a pin is refused where `can_pin` is false, an unpin never." }
       responses:
         default: { $ref: "#/components/responses/Failed" }
         "200":
@@ -2577,6 +2578,8 @@ components:
           type: array
           items: { $ref: "#/components/schemas/Attachment" }
         mode: { type: string, enum: [story, chat], description: "The mode it was written in." }
+        pinned: { type: boolean, description: "Sent whole even where its scene is summarized, in front of the scene's summary." }
+        can_pin: { type: boolean, description: "Whether it may be pinned: every message but a card's and a tool's." }
         segments:
           type: array
           description: The body split in order — prose, and each tool call as its tool's facts; a user's line, its story and its words with the model; a chapter, its number and its title with the join between (joined, "Chapter 2. The Flood") — so a page draws a message without parsing it. The body stays whole above, for the editor.

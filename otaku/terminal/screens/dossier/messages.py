@@ -1,6 +1,6 @@
 """The messages tab: the story browser's message view — the messages
 listed, one read whole beside them, `e` correcting it where it is read,
-and the story resumed from one: on the last at once, on an earlier one
+space pinning it, and the story resumed from one: on the last at once, on an earlier one
 after asking what resuming there means (fork — the default — truncate,
 or cancel)."""
 
@@ -16,7 +16,21 @@ from otaku.terminal.screens.base import (
     wrap_text,
 )
 from otaku.terminal.screens.dossier.base import DossierBase, made_by
+from otaku.terminal.tty import BOLD
 from otaku.terminal.tty.render import pictures_note
+
+# A pinned message's mark, where the list draws the dots around its role
+# — the heavy asterisk, heavy in every font without a bold of its own —
+# and the role between them bold.
+_PIN_MARK = "✱"
+# Normal intensity back, after a bold run.
+_NORMAL = "\x1b[22m"
+# What a pin does to the message it is on, dim under it in the preview —
+# the page's sentence, copied (`web/static/js/screens/dossier.js`
+# `_PIN_NOTE`): change one, change both.
+_PIN_NOTE = (
+    "Pinned: this message is sent as is and in its place, even after its scene is summarized."
+)
 
 # What picking a story or one of its turns settles to: open it as it is,
 # continue in a copy from the turn, or rewind it to the turn (the later
@@ -79,7 +93,11 @@ class MessagesTab(DossierBase):
                 )
             # The original message number, so a filtered row still reads
             # as its true position in the story.
-            row = f"{orig + 1:>4} · {m.role:<{role_w}} · {head}"
+            mark, role = "·", m.role
+            if m.pinned:
+                mark, role = _PIN_MARK, f"{BOLD}{m.role}{_NORMAL}"
+            pad = " " * (role_w - len(m.role))
+            row = f"{orig + 1:>4} {mark} {role}{pad} {mark} {head}"
             self._emit_row(out, row_i == self.cursor, row)
         return out
 
@@ -109,6 +127,10 @@ class MessagesTab(DossierBase):
             if not body.endswith("\n"):
                 body += "\n"
             out.extend(ansi_fragments(body, "class:preview.body"))
+        if m.pinned:
+            out.append(("class:preview.body", "\n"))
+            for line in wrap_text(_PIN_NOTE, width):
+                out.append(("class:preview.muted", line + "\n"))
         # The template snapshot shown DIM after a blank line — the
         # template layer (its `{body}` placeholder and all) that the turn
         # was played with, which the body alone does not show. It is not
@@ -123,6 +145,22 @@ class MessagesTab(DossierBase):
         if m.role == "assistant":
             out += made_by(m.provider, m.model, width)
         return out
+
+    def _toggle_pin(self) -> None:
+        """Space: the message under the cursor pinned, or unpinned — sent
+        whole even where its scene is summarized — the backend's sentence
+        the notice, a refusal's included."""
+        if not self.turn_filtered:
+            return
+        orig = self.turn_filtered[self.cursor]
+        m = self.msgs[orig]
+        try:
+            changed = self.api.stories.messages.update(self.story_id, m.id, pinned=not m.pinned)
+        except Refused as e:
+            self.notice = str(e)
+            return
+        self.msgs[orig] = changed.value
+        self.notice = changed.notice
 
     def _resume_text(self) -> StyleAndTextTuples:
         picked = self.turn_filtered[self.cursor] + 1 if self.turn_filtered else 0

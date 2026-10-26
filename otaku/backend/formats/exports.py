@@ -66,6 +66,7 @@ def read_story(store: Store, story_id: int) -> ExportedStory:
                 kind=m.kind,
                 speaker=m.speaker,
                 template=m.template,
+                pinned=m.pinned,
             )
             for m in messages
         ),
@@ -136,7 +137,11 @@ def render_story(export: ExportedStory, *, otaku_version: str, model: str, expor
 
     out += ["## Messages", ""]
     for n, message in enumerate(export.messages, 1):
-        kind = f" ({message.kind})" if message.kind != "dialogue" else ""
+        # the kind beside the role where it is not dialogue, and a pin
+        marks = [message.kind] if message.kind != "dialogue" else []
+        if message.pinned:
+            marks.append("pinned")
+        kind = f" ({', '.join(marks)})" if marks else ""
         header = f"### {n} · {message.role}{kind}"
         if message.speaker:
             header += f" · {message.speaker}"
