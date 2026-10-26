@@ -18,6 +18,7 @@ import {
   isPlaying,
   joinNext,
   keepingPlace,
+  recapChapters,
   showCorrected,
   showPlayed,
   showTail,
@@ -498,6 +499,7 @@ function apply(value) {
   keepingPlace(() => {
     transcript.dataset.transcript = LAYOUT_OF[value] ?? DEFAULT;
     showTail(); // the canvas is typed in, every other layout in the box
+    recapChapters(); // which turn takes a chapter's initial is the layout's
   });
   for (const button of $$("[data-transcript-mode]")) {
     button.setAttribute("aria-pressed", String(button.dataset.transcriptMode === value));

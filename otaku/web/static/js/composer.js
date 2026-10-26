@@ -74,6 +74,8 @@ const _MENU = {
   // the caption matches the terminal's group label for /roll
   // (`terminal.commands.GROUP_LABELS["special"]`), so the two menus file it alike
   "/roll": ["Special", "roll real dice; the model narrates"],
+  // the terminal's group label for /chapter (`terminal.commands.GROUP_LABELS["stories"]`)
+  "/chapter": ["Stories", "a new chapter at the story's end"],
 };
 
 /** The word itself, without the `… ` the table marks an inliner with: the

@@ -56,6 +56,12 @@ INLINERS: tuple[str, ...] = ("/ooc", "/cue")
 # and `https://x.co/cue` all carry a slash that follows a non-space.
 _INLINERS_REGEX = re.compile(r"(?<=\s)(" + "|".join(INLINERS) + r")(?=\s|$)")
 
+# What a /chapter line is shown as: its number and its title, two runs a
+# client may set apart, the join between them so that joined they read
+# as one line.
+_CHAPTER_NUMBER = "Chapter {number}"
+_CHAPTER_JOIN = ". "
+
 
 class Line:
     """One typed line, read. The base class is prose — playing the story,
@@ -71,6 +77,9 @@ class Line:
     # The side the named character speaks: "request" (/me — the line IS
     # their words), "reply" (/you — it asks them to answer), "" for none.
     speaks: ClassVar[str] = ""
+    # Whether the model answers the line once it is played: /chapter
+    # alone is recorded and left for what follows.
+    needs_answer: ClassVar[bool] = True
     needs_name: ClassVar[bool] = False
     needs_text: ClassVar[bool] = False
     template_field: ClassVar[str] = ""  # the prompts.toml key; "" = none
@@ -142,6 +151,16 @@ class Line:
         "" except where recording itself computed something (the dice a
         /roll rolled)."""
         return ""
+
+    def shown(self, chapter: int | None) -> list[tuple[str, str]]:
+        """The stored line as both frontends show it, as runs of text and
+        their kind: the line as typed — its story `prose`, its words with
+        the model `ooc` (`spans`) — but where a direction shows something
+        in its place: a /chapter line its `chapter_number` and its
+        `chapter_title`. Joined, the runs read as one line. `chapter` is
+        the one the line stands in, counted along its chain, None where
+        unknown."""
+        return [(text, "ooc" if ooc else "prose") for text, ooc in spans(self.line)]
 
 
 class _Me(Line):
@@ -257,15 +276,42 @@ class _Roll(Line):
         return f"dice: {self._rolled}" if self._rolled else ""
 
 
+class _Chapter(Line):
+    """`/chapter TITLE` — a chapter opens at the story's end: a row of its
+    own kind, which the model reads through its framing and both
+    frontends draw under its heading. The one direction played without
+    an answer: what follows is the writer's, or the model's on a
+    continue or a regenerate."""
+
+    token = "/chapter"
+    args = "TITLE"
+    request_kind = "chapter"
+    needs_answer = False
+    needs_text = True
+    template_field = "chapter_framing"
+
+    def shown(self, chapter: int | None) -> list[tuple[str, str]]:
+        # its chapter's heading, once the number is known
+        if chapter is None:
+            return super().shown(chapter)
+        number = _CHAPTER_NUMBER.replace("{number}", str(chapter))
+        return [(number, "chapter_number"), (_CHAPTER_JOIN, "prose"), (self.text, "chapter_title")]
+
+
 # Every direction, keyed by the token that opens it — the one registry;
 # iterating it yields exactly the tokens the menus may offer.
-DIRECTIONS: dict[str, type[Line]] = {cls.token: cls for cls in (_Me, _You, _Ooc, _Roll)}
+DIRECTIONS: dict[str, type[Line]] = {cls.token: cls for cls in (_Me, _You, _Ooc, _Chapter, _Roll)}
 
 
 def read(line: str) -> Line:
     """The line, read as whatever direction opened it — prose when none
     did, so every caller gets an answer instead of a None to test."""
     return DIRECTIONS.get(line.split(" ", 1)[0], Line)(line)
+
+
+def shown(line: str, *, chapter: int | None = None) -> list[tuple[str, str]]:
+    """A stored line as both frontends show it (`Line.shown`)."""
+    return read(line).shown(chapter)
 
 
 def spans(line: str) -> list[tuple[str, bool]]:

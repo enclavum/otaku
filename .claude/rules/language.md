@@ -25,12 +25,15 @@ A played line reads in both frontends, in every layout and in the
 prompt as typed, as its two kinds of text: the story, and its WORDS WITH
 THE MODEL drawn faint. Which is which is the language's (`syntax.spans`;
 a stored row's `ooc` runs in `Message.segments`), never a frontend's.
-The dossier shows a message as stored.
+The dossier's list shows a message as stored; its reader, as the
+transcript draws it (a chapter as its heading).
 
 The directions (`/you`, `/me`, `/ooc`, `/cue`, `/roll`) are sugar for
 the player, never an obligation: a design works with none of them
 typed, the plain-text path exists and is the primary one, and a
 direction may only short-circuit a question it happens to answer.
+`/chapter` is the one direction that is not sugar: it is the only way
+to open a chapter, and it asks for no answer.
 
 ## The commands
 

@@ -69,19 +69,21 @@ def tool_label(row: Message) -> str | None:
     return get_tool_label(row.provider, row.body) if row.role == "tool" else None
 
 
-def segments(body: str, role: str = "assistant") -> list[dict[str, object]]:
-    """A stored body split: prose (`{"kind": "prose", "text"}`) and each
-    tool call as its tool's facts (`{"kind": "tool_call", …}` — a name no
-    tool owns is a call all the same, with its tool and text alone), in
-    order. A user's line splits instead into its story and its words
-    with the model (`syntax.spans`): `{"kind": "prose"}` and
-    `{"kind": "ooc"}` runs."""
-    if role == "user":
+def segments(row: Message) -> list[dict[str, object]]:
+    """A stored row's body split: prose (`{"kind": "prose", "text"}`) and
+    each tool call as its tool's facts (`{"kind": "tool_call", …}` — a
+    name no tool owns is a call all the same, with its tool and text
+    alone), in order. A user's line splits instead into the runs the
+    language shows it as (`syntax.shown`): `{"kind": "prose"}` and
+    `{"kind": "ooc"}` — a chapter's, `{"kind": "chapter_number"}` and
+    `{"kind": "chapter_title"}` with the join between."""
+    if row.role == "user":
         return [
-            {"kind": "ooc" if ooc else "prose", "text": text} for text, ooc in syntax.spans(body)
+            {"kind": kind, "text": text}
+            for text, kind in syntax.shown(row.body, chapter=row.chapter)
         ]
     out: list[dict[str, object]] = []
-    for part in tool_calls.parse_reply(body):
+    for part in tool_calls.parse_reply(row.body):
         if isinstance(part, Prose):
             out.append({"kind": "prose", "text": part.text})
         elif part.name in TOOLS:

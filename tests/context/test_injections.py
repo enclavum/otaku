@@ -100,7 +100,9 @@ class TestIntoTheTail:
 
 
 def rows(n: int) -> list[Message]:
-    return [Message("user" if i % 2 else "assistant", f"r{i}", id=i) for i in range(1, n + 1)]
+    return [
+        Message(role="user" if i % 2 else "assistant", body=f"r{i}", id=i) for i in range(1, n + 1)
+    ]
 
 
 def bodies(placed: list[Message]) -> list[str]:

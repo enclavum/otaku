@@ -2568,7 +2568,7 @@ components:
         id: { type: integer }
         role: { type: string, enum: [user, assistant, tool], description: "A tool message is a tool's result: nobody's line, no reply." }
         body: { type: string }
-        kind: { type: string, enum: [dialogue, narration, ooc, card, tool] }
+        kind: { type: string, enum: [dialogue, narration, ooc, card, tool, chapter], description: "A chapter is the row a `/chapter TITLE` line opens one with." }
         template: { type: [string, "null"] }
         speaker: { type: [string, "null"], description: "The extractor's name for who spoke; null until its pass reads the message." }
         provider: { type: [string, "null"], description: "Who made the message: an engine, 'card' on a card greeting, a tool's name on a tool message." }
@@ -2579,7 +2579,7 @@ components:
         mode: { type: string, enum: [story, chat], description: "The mode it was written in." }
         segments:
           type: array
-          description: The body split in order — prose, and each tool call as its tool's facts; a user's line, its story and its words with the model — so a page draws a message without parsing it. The body stays whole above, for the editor.
+          description: The body split in order — prose, and each tool call as its tool's facts; a user's line, its story and its words with the model; a chapter, its number and its title with the join between (joined, "Chapter 2. The Flood") — so a page draws a message without parsing it. The body stays whole above, for the editor.
           items:
             oneOf:
               - type: object
@@ -2590,6 +2590,16 @@ components:
                 description: "A user's line's words with the model: all of a /you or /ooc line after its token, whatever follows a /ooc or /cue inliner."
                 properties:
                   kind: { const: ooc }
+                  text: { type: string }
+              - type: object
+                description: 'A chapter''s number, as its heading names it ("Chapter 2").'
+                properties:
+                  kind: { const: chapter_number }
+                  text: { type: string }
+              - type: object
+                description: "A chapter's title."
+                properties:
+                  kind: { const: chapter_title }
                   text: { type: string }
               - type: object
                 description: A tool call — a known tool's carries what it read; one of a name no tool owns, its tool and text alone.

@@ -3,9 +3,11 @@
 An `Extractor` binds one story to one model plus the channels a pass
 reports through; `run` owns the whole pass in order: gate, scene closes,
 rollups. The unextracted tail of the story — everything after the last
-current scene, minus the newest `settle` messages — must hold both
-`min_chars` of body text and `min_messages` messages; a long backlog is
-packed into spans each meeting both minimums. Per span, one completion
+current scene — is planned into scenes (`plan_scenes`): no scene crosses
+a chapter, each meeting both `min_chars` of body text and `min_messages`
+messages, cut as evenly as the sizes let, none closing over the newest
+`settle` messages; the chapter in play keeps its newest scene open, so
+the end of a chapter never leaves a stub. Per span, one completion
 (the extract template) closes a scene: a narrative summary, new
 characters joining the cast, one journal row per character present, and
 speaker labels filled onto unattributed in-character rows. The journal
@@ -22,8 +24,8 @@ whether or not a scene closes.
 
 Cancellation is an Event checked at every step: once set, the in-flight
 completion stops mid-stream, nothing more is written, and a
-half-extracted scene never commits. The gates run on id-only queries —
-the story is decrypted only when a scene actually closes. `progress` (a
+half-extracted scene never commits. A pass decrypts its unextracted
+tail alone, to weigh and close it — never the whole story. `progress` (a
 status line) may carry names; `log` (the system log) stays
 content-free: ids and counts, never prose.
 
@@ -52,6 +54,7 @@ import enum
 import json
 import threading
 import time
+from bisect import bisect_left
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Self
@@ -135,6 +138,16 @@ class Report:
     attributed: int = 0  # messages given a speaker by the extraction
     skipped: int = 0  # malformed extraction items dropped
     last_scene_title: str = ""  # the newest closed scene's title, for the report
+
+
+@dataclass(frozen=True)
+class _Plan:
+    """The scenes one pass would close, as runs of the tail's rows, and
+    the measure of what is settled — for the log, when it closes none."""
+
+    spans: list[list[Message]]
+    chars: int
+    messages: int
 
 
 class _Cast:
@@ -242,36 +255,23 @@ class Extractor:
         """One pass over the story's unextracted tail: scene closes, then
         the rollups — which run whatever the gate said, so an invalidated
         or missing history heals on the next idle. The gates come from
-        the extraction settings; `force` (the manual close) drops the
-        gate and the settle margin — the spans still pack to the
-        configured minimums."""
-        settings = self._settings
+        the extraction settings; `force` (the manual close) closes all
+        of the tail, the settle margin and the scene held open dropped —
+        the spans still pack to the configured minimums."""
         report = Report()
         if not self._store.stories.exists(self._story_id):
             return PassResult.NO_STORY, report
-
-        ids = self._store.stories.get_messages_ids(self._story_id)
-        # Card rows never enter a pass: not the char gate (one import would
-        # clear `min_chars` alone), not the spans, not the numbered chat —
-        # a scene about a character sheet is not a scene. Their retention
-        # is the assembler's business.
-        cards = set(self._store.stories.get_card_message_ids(self._story_id))
-        ids = [i for i in ids if i not in cards]
-        ends = self._store.scenes.get_current_ends(self._story_id, ids)
-        last_end = max(ends, default=None)
-        tail_ids = ids if last_end is None else [i for i in ids if i > last_end]
-        if not force and settings.settle > 0:
-            tail_ids = tail_ids[: max(0, len(tail_ids) - settings.settle)]
-        chars = self._store.messages.count_body_chars(tail_ids, tool_calls.strip)
-        too_short = chars < settings.min_chars or len(tail_ids) < settings.min_messages
-        if not tail_ids or (not force and too_short):
+        plan = self._plan(force)
+        if not plan.spans:
+            settings = self._settings
             self._log(
-                f"extraction declined (story {self._story_id}): {chars} settled chars in "
-                f"{len(tail_ids)} messages, need {settings.min_chars} in {settings.min_messages}"
+                f"extraction idle (story {self._story_id}): {plan.chars} settled chars in "
+                f"{plan.messages} messages close no scene yet (one takes {settings.min_chars} "
+                f"in {settings.min_messages}, and the newest stays open)"
             )
             result = PassResult.TOO_SHORT
         else:
-            result = self._close_scenes(tail_ids, report)
+            result = self._close_scenes(plan.spans, report)
             if result in (PassResult.CANCELLED, PassResult.FAILED):
                 return result, report
 
@@ -332,38 +332,54 @@ class Extractor:
 
     # ---------- the pass internals ----------
 
-    def _close_scenes(self, tail_ids: list[int], report: Report) -> PassResult:
-        """Close the tail as one scene — or several, when it has run long.
-        Only now is the story decrypted; the spans' journals feed each next
-        extraction, so the story stays continuous across them."""
+    def _plan(self, force: bool) -> _Plan:
+        """The scenes this pass would close over the unextracted tail —
+        everything after the last current scene but the card rows: a scene
+        about a character sheet is not a scene, and one import would clear
+        `min_chars` alone; their retention is the assembler's business.
+        The settle margin counts the newest of the rest, a tool's turn
+        among them; the scenes are planned over all but the tools' turns,
+        which are not the scene (`plan_scenes`)."""
         settings = self._settings
-        chain = self._store.stories.get_messages(self._story_id)
-        by_id = {m.id: m for m in chain}
-        if any(i not in by_id for i in tail_ids):
-            # The story moved between the gate's snapshot and this read (an
-            # undo on the frontend thread) — this pass is stale; the next
-            # one sees the new chain.
-            self._log(f"extraction declined (story {self._story_id}): the story changed mid-pass")
-            return PassResult.CANCELLED
-        # A tool's turn is not the scene: left out, as the calls are.
-        tail = [by_id[i] for i in tail_ids if by_id[i].role != "tool"]
-        sizes = [len(tool_calls.strip(m.body)) for m in tail]
-        spans = [
-            tail[a:b]
-            for a, b in pack(
-                sizes, min_chars=settings.min_chars, min_messages=settings.min_messages
-            )
-        ]
+        ids = self._store.stories.get_messages_ids(self._story_id)
+        last_end = max(self._store.scenes.get_current_ends(self._story_id, ids), default=None)
+        tail_ids = ids if last_end is None else [i for i in ids if i > last_end]
+        tail = [m for m in self._store.messages.list(tail_ids) if m.kind != "card"]
+        settling = 0 if force else settings.settle
+        settled_ids = {m.id for m in tail[: max(0, len(tail) - settling)]}
+        rows = [m for m in tail if m.role != "tool"]
+        sizes = [len(tool_calls.strip(m.body)) for m in rows]
+        settled = sum(1 for m in rows if m.id in settled_ids)
+        spans = plan_scenes(
+            sizes,
+            [i for i, m in enumerate(rows) if m.is_scene_start],
+            settled=settled,
+            min_chars=settings.min_chars,
+            min_messages=settings.min_messages,
+            force=force,
+        )
+        return _Plan([rows[a:b] for a, b in spans], chars=sum(sizes[:settled]), messages=settled)
+
+    def _close_scenes(self, spans: list[list[Message]], report: Report) -> PassResult:
+        """Close the planned spans, a scene each, in order (`_plan`); the
+        spans' journals feed each next extraction, so the story stays
+        continuous across them."""
         # Message NUMBER = 1-based position on the chain (what the resume
-        # line counts), so the progress line can name the span's range —
-        # off the SAME read the staleness check guarded: a second read
-        # could see an undo that landed after it.
-        number = {m.id: i for i, m in enumerate(chain, 1)}
+        # line counts), so the progress line can name the span's range; the
+        # same read tells a story that moved since the plan was made (an
+        # undo on the frontend thread): this pass is stale, and the next
+        # one sees the new chain.
+        number = {
+            mid: i for i, mid in enumerate(self._store.stories.get_messages_ids(self._story_id), 1)
+        }
+        if any(m.id not in number for span in spans for m in span):
+            self._log(f"extraction skipped (story {self._story_id}): the story changed mid-pass")
+            return PassResult.CANCELLED
         cast = _Cast.load(self._store, self._story_id, self._client.id, self._model)
         pass_started = time.monotonic()
         self._log(
             f"extraction started (story {self._story_id}): "
-            f"{len(tail_ids)} messages in {len(spans)} span(s)"
+            f"{sum(len(span) for span in spans)} messages in {len(spans)} span(s)"
         )
         for k, span in enumerate(spans, 1):
             if self._cancel.is_set():
@@ -738,26 +754,93 @@ class Extractor:
         return "".join(buf)
 
 
-def pack(sizes: list[int], *, min_chars: int, min_messages: int) -> list[tuple[int, int]]:
+def plan_scenes(
+    sizes: Sequence[int],
+    scene_starts: Sequence[int],
+    *,
+    settled: int,
+    min_chars: int,
+    min_messages: int,
+    force: bool = False,
+) -> list[tuple[int, int]]:
+    """The scenes one pass closes over the unextracted tail, as [start,
+    end) spans in order — `sizes` its rows' (each at least 0),
+    `scene_starts` the rows a scene must begin at (a chapter's heading;
+    one outside the tail is ignored), the first `settled` rows past the
+    settle margin (0 to all of them); the minimums are at least 1. No
+    scene crosses a start: the tail is cut before each, and each part
+    packs on its own (`pack`); a start at 0 needs no cut, but marks row 0
+    as a heading. A part that has ended closes whole once its last row
+    is settled — a short one as one short scene; the part in play closes
+    its settled rows but the newest span, held open, so a chapter ending
+    never leaves a stub behind. `force` (the manual close) closes
+    everything but a heading alone — a part that is nothing but its
+    heading — which never closes a scene."""
+    starts = set(scene_starts)
+    bounds = [0, *sorted(i for i in starts if 0 < i < len(sizes)), len(sizes)]
+    out: list[tuple[int, int]] = []
+    for index in range(len(bounds) - 1):
+        start, end = bounds[index], bounds[index + 1]
+        in_play = index == len(bounds) - 2
+        ready_end = end if force else min(end, settled)  # what may close now ends here
+        if not in_play and ready_end < end:
+            break  # an ended part waits to be settled whole
+        empty = ready_end <= start
+        heading_alone = start in starts and ready_end - start == 1
+        if empty or heading_alone:
+            continue
+        spans = pack(sizes[start:ready_end], min_chars=min_chars, min_messages=min_messages)
+        if in_play and not force:
+            spans = spans[:-1]
+        out += [(start + a, start + b) for a, b in spans]
+    return out
+
+
+def pack(sizes: Sequence[int], *, min_chars: int, min_messages: int) -> list[tuple[int, int]]:
     """Cut item sizes into contiguous [start, end) spans, each meeting BOTH
-    minimums: a span grows until it holds `min_chars` of content AND
-    `min_messages` items, then cuts. A leftover under the minimums merges
-    into the span before it — every scene meets the minimums, so long
-    messages can never produce a handful-of-messages scene."""
-    spans: list[tuple[int, int]] = []
+    minimums — `min_chars` of content and `min_messages` items — as many
+    as the minimums allow, cut as evenly by size as they let: 59 like
+    items at 20 a span are 29 and 30, never 20 and 39. Items under the
+    minimums are one span all the same."""
+    items = len(sizes)
+    if not items:
+        return []
+    totals = [0]
+    for size in sizes:
+        totals.append(totals[-1] + size)
+
+    def meets(start: int, end: int) -> bool:
+        return end - start >= min_messages and totals[end] - totals[start] >= min_chars
+
+    # The spans fitted from the end, each starting as late as it may:
+    # `latest[j]` is where the (j+1)-th span from the end starts, so what
+    # follows a cut at or before it still holds j+1 spans.
+    latest: list[int] = []
+    end = items
+    for start in range(items - 1, -1, -1):
+        if meets(start, end):
+            latest.append(start)
+            end = start
+    parts = len(latest)
+    if parts <= 1:
+        return [(0, items)]
+    out = []
     start = 0
-    size = 0
-    for i, n in enumerate(sizes):
-        size += n
-        if size >= min_chars and i - start + 1 >= min_messages:
-            spans.append((start, i + 1))
-            start, size = i + 1, 0
-    if start < len(sizes):
-        if spans:
-            spans[-1] = (spans[-1][0], len(sizes))
-        else:
-            spans.append((0, len(sizes)))
-    return spans
+    for i in range(1, parts):
+        # this span meets both minimums, and what follows still holds the rest
+        low = max(start + min_messages, bisect_left(totals, totals[start] + min_chars))
+        high = latest[parts - i - 1]
+        # the cut nearest an even share of the size, between those bounds,
+        # the earliest of equally near ones (empty items make ties)
+        target = totals[items] * i / parts
+        at = bisect_left(totals, target, low, high + 1)
+        if at > high or (at > low and target - totals[at - 1] <= totals[at] - target):
+            at -= 1
+        at = bisect_left(totals, totals[at], low, at + 1)
+        out.append((start, at))
+        start = at
+    out.append((start, items))
+    return out
 
 
 def numbered_chat(span: Sequence[Message]) -> str:

@@ -26,7 +26,7 @@ from otaku.store.schema import Message
 # A message header: `### 3 · user (ooc) · Speaker · "template"` — the
 # speaker and the JSON-quoted template optional, in that order.
 _MSG_HEADER = re.compile(
-    r"^(\d+)\s*·\s*(user|assistant)(?:\s*\((ooc|narration|card)\))?(?:\s*·\s*(.+))?$"
+    r"^(\d+)\s*·\s*(user|assistant)(?:\s*\((ooc|narration|card|chapter)\))?(?:\s*·\s*(.+))?$"
 )
 # `### 2 · The Crossing` / `### 2` — a scene header in `## Scenes`.
 _SCENE_HEADER = re.compile(r"^(\d+)(?:\s*·\s*(.+))?$")

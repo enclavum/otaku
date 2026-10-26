@@ -43,6 +43,7 @@ from otaku.terminal.tty.render import (
     BlockStream,
     QuestionStream,
     flow,
+    line_text,
     message,
     spaced,
     typeset_line,
@@ -200,14 +201,14 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                             inline=event.message.join_type is JoinType.INLINE
                         )
                         # the breaks at its edges are the joins' to draw, not
-                        # drawn twice
-                        body = event.message.body.strip("\n")
+                        # drawn twice; a chapter's words are its heading
+                        body = line_text(event.message).strip("\n")
                         if inline:
                             streamer.feed(" ")
                         typeset_line(streamer, body)
                         streamer.flush()
                         chat.ledger.reply_begins()
-                        fed += event.message.body
+                        fed += line_text(event.message)
                         streamed = True
                     else:
                         # The played turn echoes as the grey block; the reply
@@ -217,7 +218,10 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                         # the card import's report line is the family.
                         chat.ledger.echo_block(
                             message(
-                                event.message.body, "user", pictures=len(event.message.attachments)
+                                event.message.body,
+                                "user",
+                                segments=event.message.segments,
+                                pictures=len(event.message.attachments),
                             )
                         )
                     # not in story mode's one text, which the reply goes on in

@@ -782,7 +782,8 @@ _PAGE = {
     "help": {"api", "browser", "dom", "language"},
     # The dossier under the browser: the browser reaches into it (Open
     # story), never the other way — its route back is a command.
-    # `characters` for the Cast tab's card: linked, picked, invited.
+    # `characters` for the Cast tab's card: linked, picked, invited;
+    # `transcript` for a reader's line, read in Messages as it is played.
     "dossier": {
         "api",
         "browser",
@@ -794,6 +795,7 @@ _PAGE = {
         "prose",
         "shell",
         "tools",
+        "transcript",
     },
     # All characters, and the card picker every "which card" goes through;
     # `transfer` for the card dialog an invite and an import open.

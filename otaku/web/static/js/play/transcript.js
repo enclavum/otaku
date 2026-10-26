@@ -105,13 +105,17 @@ export function showTurns(turns, { keepPlace = false, posed = false } = {}) {
     drawTurn(turn, i + 1, { posed: posed && i === turns.length - 1 }),
   );
   if (keepPlace) {
-    holdSpace(() => transcript.replaceChildren(...drawn));
+    holdSpace(() => {
+      transcript.replaceChildren(...drawn);
+      capChapters();
+    });
     showTurnBar();
     showTail();
     return;
   }
   release();
   transcript.replaceChildren(...drawn);
+  capChapters();
   showTurnBar();
   showTail();
   toBottom();
@@ -130,7 +134,10 @@ export function takeBack(turns, question = null) {
   const call = question;
   const drawn = storedTurns();
   const same = turns.every(
-    (turn, i) => drawn[i] && (turn.role === "user") === drawn[i].classList.contains("otk-turn"),
+    (turn, i) =>
+      drawn[i] &&
+      (turn.role === "user") ===
+        (drawn[i].classList.contains("otk-turn") || drawn[i].classList.contains("otk-chapter")),
   );
   if (!same) {
     showTurns(turns, { keepPlace: true, posed: Boolean(call) });
@@ -743,7 +750,9 @@ async function redrawTurn(position) {
   if (!stored || !drawn) return;
   const newest = position === messages.length;
   const call = newest && !facts.refused ? facts.question : null;
-  drawn.replaceWith(drawTurn(stored, position, { posed: Boolean(call) }));
+  const fresh = drawTurn(stored, position, { posed: Boolean(call) });
+  drawn.replaceWith(fresh);
+  dropCap(fresh);
   if (newest) {
     if (call) showAsk(call);
     else clearAsk();
@@ -755,7 +764,9 @@ async function redrawTurn(position) {
 function storedTurns() {
   // a tool's turn is a stored row like any other: counted, or every turn
   // after one would be addressed one place off the store's
-  return $$(".otk-turn, .otk-reply, .otk-tool", transcript).filter((a) => !a.dataset.unstored);
+  return $$(".otk-turn, .otk-chapter, .otk-reply, .otk-tool", transcript).filter(
+    (a) => !a.dataset.unstored,
+  );
 }
 
 /** Send while the box is the reader's, Stop while the model has it. */
@@ -870,7 +881,11 @@ export function keepingPlace(change) {
     below it. */
 function topmost() {
   const top = transcript.getBoundingClientRect().top;
-  return $$(".otk-turn, .otk-reply", transcript).find((turn) => turn.getBoundingClientRect().bottom > top) ?? null;
+  return (
+    $$(".otk-turn, .otk-chapter, .otk-reply", transcript).find(
+      (turn) => turn.getBoundingClientRect().bottom > top,
+    ) ?? null
+  );
 }
 
 /* ---------- following a reply down ----------
@@ -926,6 +941,14 @@ function follow() {
     (`shell.showFacts`): where a reply arriving now joins the text. */
 const canvas = () => $(".otk-app")?.dataset.layout === "canvas";
 
+/** Whether the flow is drawn as one text — the canvas's look, which the
+    novel wears too (`data-transcript`). */
+const isOneText = () => transcript.dataset.transcript === "canvas";
+
+/** Whether the reader's turns are drawn as the replies are — in one text
+    and in the chat; the manuscript sets them apart. */
+const drawnAlike = () => isOneText() || transcript.dataset.transcript === "chat";
+
 function drawTurn(turn, position, { posed = false } = {}) {
   // How the turn joins the one before it — the backend's join rule
   // (`join_type`), drawn by the canvas: inline after one space, or a
@@ -934,6 +957,10 @@ function drawTurn(turn, position, { posed = false } = {}) {
     article.dataset.join = turn.join_type ?? "paragraph";
     return article;
   };
+  if (turn.kind === "chapter") {
+    const heading = chapterHeading(turn);
+    if (heading) return heading;
+  }
   if (turn.role === "user") {
     const article = joined(element("article", "otk-turn"));
     const rubric = element("span", "otk-turn__rubric", `${position} · you`);
@@ -981,6 +1008,81 @@ function drawTurn(turn, position, { posed = false } = {}) {
     the layout's (`app.css`, the chat). */
 function replyRubric(position) {
   return element("span", "otk-turn__rubric otk-reply__rubric", _replyRubric(position));
+}
+
+/** A chapter's heading — its number and its title as the backend split
+    the row (`segments`), the same in every layout, with no rubric and no
+    join of its own; null for a row whose number is not known, which is
+    drawn as typed. */
+function chapterHeading(turn) {
+  const text = (kind) => turn.segments?.find((segment) => segment.kind === kind)?.text;
+  const number = text("chapter_number");
+  const title = text("chapter_title");
+  if (number === undefined || title === undefined) return null;
+  const article = element("article", "otk-chapter");
+  article.setAttribute("aria-label", `${number}: ${title}`);
+  article.append(span("otk-chapter__num", number), element("h2", "otk-chapter__title", title));
+  return article;
+}
+
+/** Every turn that opens its chapter, its initial set (`dropCap`). */
+function capChapters() {
+  for (const turn of $$(".otk-turn, .otk-reply", transcript)) dropCap(turn);
+}
+
+/** The initials set again for the look now in force: a switched layout
+    may move one between the reader's line and the reply (`opensChapter`). */
+export function recapChapters() {
+  for (const cap of $$(".otk-dropcap", transcript)) {
+    const prose = cap.parentElement;
+    cap.replaceWith(...cap.childNodes);
+    prose.normalize();
+  }
+  capChapters();
+}
+
+/** The big initial on a turn that opens its chapter (`opensChapter`); not
+    where the turn runs on inside a paragraph of one text. */
+function dropCap(article) {
+  if (!article.matches(".otk-turn, .otk-reply") || $(".otk-dropcap", article)) return;
+  if (isOneText() && article.dataset.join === "inline") return;
+  if (!opensChapter(article)) return;
+  // the text as read: a stored turn's box holds its editor's field too
+  const prose = $(".otk-typeset", article);
+  if (prose) capFirstLetter(prose);
+}
+
+/** The first letter of the prose, with an opening quote right before it,
+    in the initial's span (`.otk-dropcap`). */
+function capFirstLetter(prose) {
+  const walker = document.createTreeWalker(prose, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const letter = /[\p{L}\p{N}]/u.exec(node.data);
+    if (!letter) continue;
+    const lead = node.data.search(/\S/);
+    const from = /\s/.test(node.data.slice(lead, letter.index)) ? letter.index : lead;
+    const cap = node.splitText(from);
+    cap.splitText(letter.index - from + letter[0].length);
+    const box = span("otk-dropcap", "");
+    cap.replaceWith(box);
+    box.append(cap);
+    return;
+  }
+}
+
+/** Whether a turn opens its chapter: where every turn is drawn alike
+    (`drawnAlike`), the one right after the chapter's heading, whoever
+    wrote it; in the manuscript the first reply after it, whatever the
+    reader wrote between. */
+function opensChapter(article) {
+  const alike = drawnAlike();
+  if (!alike && !article.classList.contains("otk-reply")) return false;
+  for (let at = article.previousElementSibling; at; at = at.previousElementSibling) {
+    if (at.classList.contains("otk-chapter")) return true;
+    if (at.dataset.unstored) continue;
+    if (at.matches(alike ? ".otk-turn, .otk-reply" : ".otk-reply")) return false;
+  }
+  return false;
 }
 
 function replyReader(turn, { posed = false } = {}) {
@@ -1310,11 +1412,12 @@ function joinSpace() {
   return span("otk-seam", " ");
 }
 
-function lineNodes(segments) {
+export function lineNodes(segments) {
   /* The reader's line from the store's split (`segments`): its commands
      picked out, its words with the model faint — all of a /you or /ooc
      line after the token, whatever follows a /ooc or /cue to its end —
-     in every layout; the edges trimmed, as the line is (`drawTurn`). */
+     in every layout and in the dossier; the edges trimmed, as the line
+     is (`drawTurn`). */
   const last = segments.length - 1;
   return segments.flatMap((segment, i) => {
     let text = segment.text;
@@ -1349,7 +1452,7 @@ function showTurnBar() {
      in the terminal. They live under the PROMPT rather than the turn:
      they are what you do next, and next is where the cursor is. Drawn
      once in the markup, so this only decides what there is to act on. */
-  const turns = $$(".otk-turn, .otk-reply", transcript).length;
+  const turns = $$(".otk-turn, .otk-chapter, .otk-reply", transcript).length;
   /* Regenerate answers mid-reply too — it means "not this one" and takes
      the door Stop does; undo cannot, the turn having not landed yet. */
   const undo = $("[data-turn='undo']");
@@ -1624,6 +1727,7 @@ function streamed(turn) {
     nodes.splice(lastProse + 1, 0, caret());
   }
   turn.block.replaceChildren(...nodes);
+  dropCap(turn.article);
 }
 
 function draw(turn, happened) {
@@ -1656,6 +1760,7 @@ const DRAW = {
       $(".otk-generating__status", above)?.remove();
     }
     transcript.insertBefore(drawn, turn.article);
+    dropCap(drawn);
   },
   assistant_reasoning(turn, happened) {
     if (!turn.reasoning) {
@@ -1725,6 +1830,7 @@ const DRAW = {
     ordinal += 1;
     const landed = drawTurn(turn.reply, ordinal);
     turn.article.replaceWith(landed);
+    dropCap(landed);
     ordinal += 1;
     const result = drawTurn(happened.message, ordinal);
     landed.after(result);
@@ -1841,8 +1947,10 @@ function endTurn(turn) {
             join_type: turn.article.dataset.join,
           }
         : null);
-    if (landed) turn.block.replaceWith(replyReader(landed, { posed: Boolean(turn.call) }));
-    else turn.block.remove();
+    if (landed) {
+      turn.block.replaceWith(replyReader(landed, { posed: Boolean(turn.call) }));
+      dropCap(turn.article);
+    } else turn.block.remove();
     // a reply that never arrived leaves no empty block behind
     if (!landed && !$(".otk-error, .otk-verbose, .otk-reasoning", turn.article)) {
       turn.article.remove();
@@ -1872,7 +1980,7 @@ function endTurn(turn) {
 /* the standing reply comes off, so the fresh take streams in its place
    rather than under it */
 function dropLastReply() {
-  const last = [...$$(".otk-turn, .otk-reply", transcript)].pop();
+  const last = [...$$(".otk-turn, .otk-chapter, .otk-reply", transcript)].pop();
   if (last && last.classList.contains("otk-reply")) {
     last.remove();
     // an article kept only to say a take failed was never counted, so

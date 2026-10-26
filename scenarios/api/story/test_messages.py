@@ -5,6 +5,7 @@ message corrected.
 """
 
 import contextlib
+import re
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -545,6 +546,72 @@ class TestRoll:
         app.play("/roll banana I flail.")
         assert app.story_id is None
         assert app.server.requests == []
+
+
+class TestChapter:
+    """`/chapter TITLE`: a row of its own kind at the story's end, played
+    without an answer, numbered along the chain when it is shown."""
+
+    def test_a_chapter_lands_without_asking_the_model(self, app: App) -> None:
+        app.play("I enter the hall.")
+        asked = len(app.server.requests)
+        app.play("/chapter The Flood")
+        assert len(app.server.requests) == asked
+        last = app.store.stories.get_messages(app.story_id)[-1]
+        assert (last.role, last.kind, last.body) == ("user", "chapter", "/chapter The Flood")
+
+    def test_the_chapters_are_numbered_along_the_chain(self, app: App) -> None:
+        app.play("/chapter The Gate")
+        app.play("I enter the hall.")
+        app.play("/chapter The Flood")
+        shown = app.api.stories.messages.list(app.story_id)
+        assert [_heading(m.segments) for m in shown if m.kind == "chapter"] == [
+            (1, "The Gate"),
+            (2, "The Flood"),
+        ]
+
+    def test_a_landed_chapter_is_told_numbered(self, app: App) -> None:
+        app.play("/chapter The Gate")
+        story = app.story_id
+        events = list(
+            app.api.stories.messages.create(
+                story, line="/chapter The Flood", expected_head=app.api.stories.get(story).head
+            )
+        )
+        (told,) = [e for e in events if isinstance(e, UserMessage)]
+        assert _heading(told.message.segments) == (2, "The Flood")
+        assert not [e for e in events if isinstance(e, AssistantMessage)]
+
+    def test_the_framing_comes_from_the_prompts_file(self, server, tmp_path) -> None:
+        # Like every direction: the file IS the injection (see TestTurns),
+        # read by the model with the reply that follows.
+        root = tmp_path / "state"
+        paths = Paths.resolve(root)
+        paths.ensure_tree()
+        paths.prompts_file.write_text('chapter_framing = "<<chapter {body}>>"\n', encoding="utf-8")
+        app = launch(root, server)
+        try:
+            app.play("/chapter The Flood")
+            app.play("I wade in.")
+            wire = "\n".join(scripted.content_text(m) for m in app.server.requests[-1]["messages"])
+            assert "<<chapter The Flood>>" in wire
+            assert "/chapter" not in wire
+        finally:
+            app.close()
+
+    def test_a_regenerate_answers_a_chapter_like_any_line(self, app: App) -> None:
+        app.play("I enter the hall.")
+        app.play("/chapter The Flood")
+        app.play("/regen")
+        chain = app.store.stories.get_messages(app.story_id)
+        assert (chain[-2].kind, chain[-1].role) == ("chapter", "assistant")
+
+    def test_undo_takes_a_chapter_back_like_a_line(self, app: App) -> None:
+        app.play("I enter the hall.")
+        app.play("/chapter The Flood")
+        app.play("/undo")
+        chain = app.store.stories.get_messages(app.story_id)
+        assert [m.body for m in chain] == ["I enter the hall.", scripted.CHAT_REPLY]
 
 
 class TestInliners:
@@ -1456,6 +1523,12 @@ def _after_the_tool(then: str, *, first: str, marker: str = "Time: ") -> Callabl
         return then if marker in newest else first
 
     return script
+
+
+def _heading(segments: tuple[dict[str, object], ...]) -> tuple[int, str]:
+    """A chapter's number and title, off the segments a frontend draws."""
+    parts = {part["kind"]: str(part["text"]) for part in segments}
+    return int(re.sub(r"\D", "", parts["chapter_number"])), parts["chapter_title"]
 
 
 def _landed(events: list) -> Message:

@@ -28,8 +28,8 @@ HINT = (
 # folder beside the documents.
 _IMAGES_FOLDER = "images"
 # A sample's pictures ship in `_IMAGES_FOLDER`, named for the message they
-# belong to: `river.15.1.jpg` is the first picture of river.md's
-# 15th message. The document itself carries no picture — the export
+# belong to: `river.17.1.jpg` is the first picture of river.md's
+# 17th message. The document itself carries no picture — the export
 # format never does — so the first launch puts them on the message
 # through the app's own intake, as a reader's attachment would land.
 _SAMPLE_PICTURE = re.compile(r"^(?P<stem>.+)\.(?P<message>\d+)\.(?P<order>\d+)\.[A-Za-z0-9]+$")

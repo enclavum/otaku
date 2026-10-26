@@ -47,6 +47,7 @@ from otaku.store.migrations import v10 as store_v10
 from otaku.store.migrations import v11 as store_v11
 from otaku.store.migrations import v12 as store_v12
 from otaku.store.migrations import v13 as store_v13
+from otaku.store.migrations import v14 as store_v14
 from otaku.store.schema import (
     SCHEMA_DDL,
     SCHEMA_VERSION,
@@ -569,6 +570,51 @@ class TestSchemaMigration:
         try:
             assert store.cards.get(card).profile == "description = 'A keeper.'"
             assert [c.profile for c in store.characters.list(story)] == [copy]
+        finally:
+            store.close()
+
+    def test_step_14_counts_a_plain_librarys_words_and_admits_a_chapter(self, tmp_path) -> None:
+        # A version-13 row has no count: on a plain database the step counts
+        # every row — a tool's result as none, a Chinese or Japanese
+        # character as a word — and a chapter's row may be stored after it.
+        paths = _state(tmp_path)
+        store = _open(paths)
+        try:
+            story = store.stories.add("A")
+            _say(store, story, "The keeper waits at the gate.")
+            _say(store, story, "雨が降る")
+            result = Message(
+                role="tool", kind="tool", body="three more words", provider="web-search"
+            )
+            store.stories.append(story, result, after=store.stories.get_head(story))
+        finally:
+            store.close()
+        _taken_back(paths, 13)
+        store = _open(paths)
+        try:
+            (listing,) = store.stories.list()
+            assert listing.word_count == 6 + 4
+            chapter = Message(role="user", kind="chapter", body="/chapter The Flood")
+            store.stories.append(story, chapter, after=store.stories.get_head(story))
+        finally:
+            store.close()
+
+    def test_step_14_leaves_an_encrypted_librarys_words_uncounted(self, tmp_path) -> None:
+        # A step never holds the cipher: the rows it found stay uncounted,
+        # and a row written since is counted as it lands.
+        paths = _state(tmp_path)
+        store = _sealed(paths)
+        try:
+            story = store.stories.add("A")
+            _say(store, story, "The keeper waits at the gate.")
+        finally:
+            store.close()
+        _taken_back(paths, 13)
+        store = _sealed(paths)
+        try:
+            assert store.stories.list()[0].word_count == 0
+            _say(store, story, "She opens it.")
+            assert store.stories.list()[0].word_count == 3
         finally:
             store.close()
 
@@ -1177,17 +1223,18 @@ class TestFirstLaunch:
             assert story_id is not None
             story = app.store.stories.get(story_id)
             assert story.title == "The River That Forgot Its Name"
-            assert len(app.messages) == 16
+            assert len(app.messages) == 18
+            assert app.messages[0].kind == "chapter"  # told in chapters from its first row
             # The sample's pictures, shipped in the samples' images, landed
             # on the message they are named for, through the app's own
             # intake: the files and their thumbnails are in the folder.
-            pictured = app.messages[14]
+            pictured = app.messages[16]
             assert pictured.role == "user" and len(pictured.attachments) == 2
             for picture in pictured.attachments:
                 assert app.store.files.get(picture.file) is not None
                 assert app.store.files.get_thumb(picture.file) is not None
                 assert picture.width <= 1568 and picture.height <= 1568
-            assert all(not m.attachments for i, m in enumerate(app.messages) if i != 14)
+            assert all(not m.attachments for i, m in enumerate(app.messages) if i != 16)
             ids = app.store.stories.get_messages_ids(story_id)
             assert len(app.store.scenes.get_current(story_id, ids)) == 2
             assert [c.name for c in app.store.characters.list(story_id)] == ["Maren", "Tallis"]
@@ -1204,7 +1251,8 @@ class TestFirstLaunch:
             tour = app.store.stories.get(others[0].id)
             assert not [s.name for s in tour.settings if s.enabled]
             tour_ids = app.store.stories.get_messages_ids(others[0].id)
-            assert len(tour_ids) == 318
+            assert len(tour_ids) == 323
+            assert app.store.messages.get(tour_ids[0]).kind == "chapter"
             tour_scenes = app.store.scenes.get_current(others[0].id, tour_ids)
             assert len(tour_scenes) == 15
             assert all(s.history for s in tour_scenes)
@@ -1280,7 +1328,7 @@ class TestFirstLaunch:
             app.play("Hello? Is someone there?")
             assert "No model selected" in capsys.readouterr().out
             assert app.server.requests == []
-            assert len(app.messages) == 17  # the turn is story, kept
+            assert len(app.messages) == 19  # the turn is story, kept
         finally:
             app.close()
 
@@ -1491,6 +1539,11 @@ def _open(paths: Paths) -> Store:
     return Store.open(paths.database_file, PlainCipher(), backups_dir=paths.backups_dir, keep=0)
 
 
+def _sealed(paths: Paths) -> Store:
+    """The store over an encrypted database."""
+    return Store.open(paths.database_file, Cipher(FILES_KEY), backups_dir=paths.backups_dir, keep=0)
+
+
 def _state(tmp_path) -> Paths:
     paths = Paths.resolve(tmp_path / "state")
     paths.ensure_tree()
@@ -1565,8 +1618,10 @@ def _taken_back(paths: Paths, version: int) -> None:
     """A database this build wrote, put back to what `version` shipped:
     each later step's tables as the step found them — the record format is
     positional, so the rows read as that version's — the fork points step
-    12 works out emptied, and the stamp set: what the ladder takes up."""
+    12 works out and the columns step 14 adds emptied, and the stamp set:
+    what the ladder takes up."""
     undo = {
+        14: (("messages", store_v14._V13_MESSAGES),),
         13: (("cards", store_v13._V12_CARDS), ("characters", store_v13._V12_CHARACTERS)),
         12: (("stories", store_v12._V11_STORIES),),
         11: (("cards", store_v11._V10_CARDS),),
@@ -1574,6 +1629,8 @@ def _taken_back(paths: Paths, version: int) -> None:
     conn = sqlite3.connect(paths.database_file)
     if version < 12:
         conn.execute("UPDATE stories SET forked_from_message_id = NULL")
+    if version < 14:
+        conn.execute("UPDATE messages SET pinned = 0, word_count = NULL")
     conn.execute("PRAGMA writable_schema = ON")
     for step in range(int(SCHEMA_VERSION), version, -1):
         for table, ddl in undo[step]:

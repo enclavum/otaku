@@ -13,7 +13,7 @@ from otaku.terminal.prompt import paths
 from otaku.terminal.screens import stories as screen_stories
 from otaku.terminal.tty import DIM, RESET, error_line
 from otaku.terminal.tty.cursor import terminal_width
-from otaku.terminal.tty.render import last_turns, message, prose, question_block
+from otaku.terminal.tty.render import last_turns, line_text, message, prose, question_block
 
 
 def stories(chat: Chat, raw: str) -> None:
@@ -118,11 +118,16 @@ def regen(chat: Chat, raw: str) -> None:
             # fresh take goes on from it (`ledger.echo_flow`)
             chat.ledger.echo_flow(inline=False, above=marker)
             if prompt is not None:
-                chat.ledger.reply.write(prose(prompt.body))
+                chat.ledger.reply.write(prose(line_text(prompt)))
             chat.ledger.reply_begins()
         else:
             chat.ledger.echo_block(
-                message(prompt.body.strip(), "user", pictures=len(prompt.attachments))
+                message(
+                    prompt.body.strip(),
+                    "user",
+                    segments=prompt.segments,
+                    pictures=len(prompt.attachments),
+                )
                 if prompt
                 else "",
                 above=marker,

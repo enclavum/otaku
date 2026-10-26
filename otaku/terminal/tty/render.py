@@ -236,11 +236,13 @@ def message(
     `shown` holds its tool (`shown_tools`), else left out — blocks behind the bar,
     wrapped at `width`, the terminal's unless the caller draws into a
     narrower place. In story mode's one text (`story`) a call of a tool
-    this build does not know is left out too. A reply is drawn from its
-    `segments`, its body as the backend split it (`Message.segments`); None
-    draws `text` as prose alone — a cut of a body, which no split
-    matches. Takes no settings besides that — the user's colors reached
-    the theme at launch, so a caller only has to say WHAT it is drawing.
+    this build does not know is left out too. A stored turn is drawn
+    from its `segments`, its body as the backend split it
+    (`Message.segments`) — a chapter's, its heading; None draws `text`:
+    a reply's as prose alone (a cut of a body, which no split matches),
+    a line not stored yet as the language reads it. Takes no settings
+    besides that — the user's colors reached the theme at launch, so a
+    caller only has to say WHAT it is drawing.
     The one renderer for showing AND measuring, so the ledger can never
     disagree with an echo."""
     if role == "user":
@@ -250,7 +252,7 @@ def message(
             f"{DIM}{highlight_commands(run, tokens)}{_NORMAL}"
             if ooc
             else highlight_commands(run, tokens)
-            for run, ooc in api_language.spans(text)
+            for run, ooc in _line_runs(text, segments)
         )
         if pictures:
             marker = f"{DIM}{pictures_note(pictures)}{_NORMAL}"
@@ -372,7 +374,9 @@ def turn(item: Message, *, shown: frozenset[str] = frozenset(), story: bool = Fa
     canvas, and a block stands alone: nothing of them is drawn."""
     body = item.body.strip()
     if item.role == "user":
-        return user_block(message(body, "user", pictures=len(item.attachments)))
+        return user_block(
+            message(body, "user", segments=item.segments, pictures=len(item.attachments))
+        )
     drawn = message(
         body,
         item.role,
@@ -469,7 +473,11 @@ def flow_offsets(
         # there as the reader's line; the one the story stands on is drawn
         newest = posed and index == len(items) - 1
         seen = shown & {"question"} if newest else frozenset()
-        piece = prose(body.body) if item.role == "user" else turn(body, shown=seen, story=True)
+        piece = (
+            prose(line_text(item).strip(" \t"))
+            if item.role == "user"
+            else turn(body, shown=seen, story=True)
+        )
         if not out:
             starts.append(0)
             out = piece
@@ -492,6 +500,27 @@ def prose(text: str) -> str:
     typeset_line(streamer, text)
     streamer.flush()
     return out.getvalue()
+
+
+def line_text(item: Message) -> str:
+    """A stored reader's line as it reads: its segments joined — its body
+    as typed, or a chapter's heading."""
+    return "".join(str(segment["text"]) for segment in item.segments)
+
+
+def _line_runs(
+    text: str, segments: Sequence[Mapping[str, object]] | None
+) -> list[tuple[str, bool]]:
+    """A reader's line as its runs of story and of words with the model:
+    a stored one's as the backend split it, its edges trimmed as `text`
+    is; a line not stored yet's as the language reads it."""
+    if segments is None:
+        return api_language.spans(text)
+    runs = [(str(segment["text"]), segment["kind"] == "ooc") for segment in segments]
+    if runs:
+        runs[0] = (runs[0][0].lstrip(), runs[0][1])
+        runs[-1] = (runs[-1][0].rstrip(), runs[-1][1])
+    return [run for run in runs if run[0]]
 
 
 def typeset_line(streamer: Streamer, text: str) -> None:

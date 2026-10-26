@@ -51,6 +51,7 @@ import * as held from "../play/held.js";
 import { thumbs } from "../kit/pictures.js";
 import { typeset } from "../kit/prose.js";
 import { facts, landed, resume, showContextUse } from "../play/shell.js";
+import { lineNodes } from "../play/transcript.js";
 import { cardFieldEditors, inviteCard, openCardWindow, pick } from "./characters.js";
 import { buildTools } from "./tools.js";
 
@@ -287,7 +288,9 @@ function buildMessages(view, pane) {
          count reads with the line, and stays in view when the line is
          cut. */
       const title = element("span", "otk-row__title otk-row__title--noted");
-      title.append(span("otk-row__text", excerpt(message.body, 300)));
+      const words = span("otk-row__text");
+      words.append(...rowWords(message));
+      title.append(words);
       const pictures = message.attachments?.length ?? 0;
       if (pictures) title.append(span("otk-tag", `${pictures} picture${pictures === 1 ? "" : "s"}`));
       const drawn = row(
@@ -331,17 +334,34 @@ function sceneStart(view, scene) {
   return Number.isNaN(first) ? null : (view.messages[first - 1]?.id ?? null);
 }
 
-function reader(text, save) {
+/** A message's words in its row of the list. A reader's line reads as
+    typed, as the terminal's list reads it — its commands picked out, its
+    words with the model faint — whole, the row's own ellipsis cutting it;
+    every other message cut plain. */
+function rowWords(message) {
+  if (message.role !== "user") return [excerpt(message.body, 300)];
+  const parts = message.segments ?? [];
+  // the backend's split while it spells the line as typed; the whole line
+  // as story where the language shows it otherwise (a chapter's heading)
+  const spelled = parts.map((part) => part.text).join("") === message.body;
+  return lineNodes(spelled ? parts : [{ kind: "prose", text: message.body }]);
+}
+
+function reader(text, save, line = null) {
   /* A played turn READS as it played — dialogue and `*emphasis*` set as
-     the transcript sets them — and is still the field that corrects it.
-     So the two are one box, sharing the editable's face and box, the
-     rendering keeping its newlines, so opening one moves nothing. Which
-     is shown is the stylesheet's, off `data-editing`, so nothing here
-     keeps state about it. */
+     the transcript sets them, a reader's line drawn by `line` — and is
+     still the field that corrects it. So the two are one box, sharing
+     the editable's face and box, the rendering keeping its newlines, so
+     opening one moves nothing. Which is shown is the stylesheet's, off
+     `data-editing`, so nothing here keeps state about it. */
   const box = element("div", "otk-editable otk-prose otk-prose--read otk-typeset");
   const field = editable("otk-prose otk-prose--read", { text, save });
 
   const paint = () => {
+    if (line) {
+      box.replaceChildren(...line(field.value));
+      return;
+    }
     const { spoken, nodes } = typeset(field.value);
     box.classList.toggle("otk-prose--dialogue", spoken);
     box.replaceChildren(...nodes);
@@ -361,11 +381,19 @@ function drawReader(view, pane, message, edit) {
   head.append(span("otk-label otk-label--ink", `Message ${message.position}`));
   if (message.kind) head.append(span("otk-tag", message.kind));
 
+  // A reader's line reads as the transcript draws it, a chapter's heading
+  // numbered; a text not saved yet, as typed.
+  const line =
+    message.role === "user"
+      ? (text) =>
+          lineNodes(text === message.body.trim() ? (message.segments ?? []) : [{ kind: "prose", text }])
+      : null;
+
   // The message is corrected where it is read: the reader IS the field —
   // without the whitespace at its edges, the row's join, which the save
   // keeps (`stories.update_message`), as the transcript's field does.
   const body = element("div", "otk-detail__section");
-  body.append(edited(reader(message.body.trim(), (text) => saveMessage(view, message, text)), ""));
+  body.append(edited(reader(message.body.trim(), (text) => saveMessage(view, message, text), line), ""));
 
   const out = [head, body];
 
@@ -419,11 +447,13 @@ async function saveMessage(view, message, text) {
   const answer = await saveField(
     view,
     () => api.stories.messages.update(view.subject.id, message.id, { body: text }),
-    () => {
-      message.body = text;
-      message.haystack = `${text} ${message.speaker ?? ""}`.toLowerCase();
+    (saved) => {
+      // as stored, its edges kept, with the split a reader's line is drawn from
+      message.body = saved.body;
+      message.segments = saved.segments;
+      message.haystack = `${saved.body} ${message.speaker ?? ""}`.toLowerCase();
       const line = $(`[data-pane="messages"] .otk-row[data-id="${message.id}"] .otk-row__text`, view.popup);
-      if (line) line.textContent = excerpt(text, 300);
+      line?.replaceChildren(...rowWords(message));
     },
   );
   /* The story's name falls back to its first line, so the runhead asks
@@ -1005,12 +1035,13 @@ function sceneCount(character) {
 
 async function saveField(view, write, shown) {
   /* Nothing is rebuilt: the field shows what it saved, `shown` carries
-     the text to the other places this dossier draws it, and a click away
-     that saved is not undone. A refusal travels back to `browser.editable`,
-     which keeps the field open with the words. */
+     what the write answered (`value`) to the other places this dossier
+     draws it, and a click away that saved is not undone. A refusal
+     travels back to `browser.editable`, which keeps the field open with
+     the words. */
   const answer = await write();
   if (!answer.refused) {
-    shown();
+    shown(answer.value);
     footnote(view.popup, answer.notice);
   }
   return answer;

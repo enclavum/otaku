@@ -174,6 +174,11 @@ class TestInfo:
         rows = _rows(app.api.info.get(story_id=app.story_id))
         assert (rows["Reasoning"], rows["Capabilities"]) == ("unknown", "unknown")
 
+    def test_the_story_is_counted_in_messages_and_words(self, app: App) -> None:
+        app.play("I open the door.")  # and the scripted reply's ten words
+        rows = _rows(app.api.info.get(story_id=app.story_id))
+        assert (rows["Messages"], rows["Words"]) == ("2", "14")
+
     def test_without_a_model_the_session_half_still_reports(self, server, tmp_path, capsys) -> None:
         # A model is one of the things /info reports, not its
         # precondition: the story and the parameters are the session's

@@ -171,9 +171,10 @@ def submit_line(
     file that is no picture), stored only when the turn records, so a
     refusal leaves the story and the folder untouched. Then: the typed
     name settles to the cast's
-    spelling, the turn records and is told (`Landed`), and the reply
-    streams as its pieces and lands, `Failed` on a stream error,
-    `Finished` at the end. With no model selected the turn is still
+    spelling, the turn records and is told (`Landed`), and the reply —
+    none to a /chapter, whose stream ends there — streams as its pieces
+    and lands, `Failed` on a stream error, `Finished` at the end. With no
+    model selected the turn is still
     recorded — it is story — and Declined(NO_MODEL_HINT) ends the stream
     after it.
     Closing the generator mid-stream records the partial reply and its
@@ -316,6 +317,10 @@ def _submit_events(
     )
     chain.append(row)
     yield _landed(chain, note=frame.note)
+    if not frame.needs_answer:
+        # A chapter: recorded, and the stream ends with it — what follows
+        # is the writer's, or the model's on a continue or a regenerate.
+        return
     reply_speaker = known if frame.speaks == "reply" else None
     yield from _reply_events(
         app, story_id, chain, reply_kind=frame.reply_kind, reply_speaker=reply_speaker

@@ -18,7 +18,7 @@ The three pillars of otaku:
 
 Web interface:
 
-![otaku web](https://raw.githubusercontent.com/enclavum/otaku/main/images/capture-web.png?v=0.8.0)
+![otaku web](https://raw.githubusercontent.com/enclavum/otaku/main/images/capture-web.png?v=0.9.0)
 
 Terminal interface:
 
@@ -203,6 +203,10 @@ A few example prompts:
 For D&D roleplay, there is the `/roll` command: `/roll 1d20+5 I search the alcove` rolls the
 dice, shows you what fell, and sends the result together with your action; `/regen` re-tells the
 same roll rather than re-rolling it. Dice examples: `2d6+3`, `d20`, `2d20kh1`/`2d20kl1`.
+
+To start a new chapter, type `/chapter` with its title, e.g. `/chapter The Flood`. The chapter is
+numbered for you and gets a heading in the transcript; the model doesn't reply to it, but it's told
+that a new chapter starts there.
 
 During play, you can `/undo` (Ctrl+U) the last exchange and `/regen` (Ctrl+R) the last reply.
 

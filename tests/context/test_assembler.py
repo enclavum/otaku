@@ -805,7 +805,10 @@ class TestPictures:
     and counts the omission on the verbatim rows alone."""
 
     def test_a_picture_rides_its_verbatim_row(self) -> None:
-        messages = [Message("user", "look", attachments=(CAT,)), Message("assistant", "a cat")]
+        messages = [
+            Message(role="user", body="look", attachments=(CAT,)),
+            Message(role="assistant", body="a cat"),
+        ]
         prompt = assemble("", messages, None, files=CAT_FOLDER)
         assert prompt.messages[0].images == (CAT_PICTURE,)
         assert prompt.messages[1].images == ()
@@ -813,23 +816,23 @@ class TestPictures:
 
     def test_a_picture_costs_its_estimate(self) -> None:
         with_it = assemble(
-            "", [Message("user", "look", attachments=(CAT,))], None, files=CAT_FOLDER
+            "", [Message(role="user", body="look", attachments=(CAT,))], None, files=CAT_FOLDER
         )
-        without = assemble("", [Message("user", "look")], None)
+        without = assemble("", [Message(role="user", body="look")], None)
         assert with_it.transcript_tokens - without.transcript_tokens == IMAGE_TOKENS
 
     def test_without_a_loader_nothing_rides_and_the_omission_is_counted(self) -> None:
-        prompt = assemble("", [Message("user", "look", attachments=(CAT,))], None)
+        prompt = assemble("", [Message(role="user", body="look", attachments=(CAT,))], None)
         assert prompt.messages[0].images == ()
         assert (prompt.pictures_sent, prompt.pictures_omitted) == (0, 1)
         assert (
             prompt.transcript_tokens
-            == assemble("", [Message("user", "look")], None).transcript_tokens
+            == assemble("", [Message(role="user", body="look")], None).transcript_tokens
         )
 
     def test_a_file_the_folder_cannot_answer_for_is_an_omission(self) -> None:
         gone = Attachment(file="pic-0001-20260918-7b02d4ee.png", width=1, height=1, size=1)
-        messages = [Message("user", "look", attachments=(CAT, gone))]
+        messages = [Message(role="user", body="look", attachments=(CAT, gone))]
         prompt = assemble("", messages, None, files=CAT_FOLDER)
         assert prompt.messages[0].images == (CAT_PICTURE,)
         assert (prompt.pictures_sent, prompt.pictures_omitted) == (1, 1)
@@ -871,9 +874,9 @@ class TestPictures:
         # gets the newest row's alone; the earlier row's is held, not
         # omitted, and costs nothing.
         messages = [
-            Message("user", "one", attachments=(CAT,)),
-            Message("assistant", "a cat"),
-            Message("user", "two", attachments=(CAT,)),
+            Message(role="user", body="one", attachments=(CAT,)),
+            Message(role="assistant", body="a cat"),
+            Message(role="user", body="two", attachments=(CAT,)),
         ]
         prompt = assemble("", messages, None, files=CAT_FOLDER, newest_pictures_only=True)
         assert [turn.images for turn in prompt.messages] == [(), (), (CAT_PICTURE,)]
@@ -886,9 +889,9 @@ class TestPictures:
         # picture it is about: the newest row that carries any rides,
         # however many rows after it carry none.
         messages = [
-            Message("user", "one", attachments=(CAT,)),
-            Message("assistant", "a cat"),
-            Message("user", "and the left corner?"),
+            Message(role="user", body="one", attachments=(CAT,)),
+            Message(role="assistant", body="a cat"),
+            Message(role="user", body="and the left corner?"),
         ]
         prompt = assemble("", messages, None, files=CAT_FOLDER, newest_pictures_only=True)
         assert [turn.images for turn in prompt.messages] == [(CAT_PICTURE,), (), ()]
@@ -896,8 +899,8 @@ class TestPictures:
 
     def test_same_role_rows_rejoin_with_their_pictures(self) -> None:
         messages = [
-            Message("user", "one", attachments=(CAT,)),
-            Message("user", "two", attachments=(CAT,)),
+            Message(role="user", body="one", attachments=(CAT,)),
+            Message(role="user", body="two", attachments=(CAT,)),
         ]
         prompt = assemble("", messages, None, files=CAT_FOLDER)
         (turn,) = prompt.messages

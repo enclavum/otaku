@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import builtins
 import re
-from collections.abc import Callable, Container, Sequence
+from collections.abc import Container, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -53,7 +53,7 @@ class StoryListing:
     id: int
     title: str
     story_so_far: str  # the newest history rollup among current scenes
-    first_user: str  # the first user message of the current chain
+    first_user: str  # the first line played on the current chain: no card's or chapter's row
     model: str  # "provider/model" behind the newest reply
     updated_at: datetime
     message_count: int  # length of the current chain, not the tree
@@ -62,8 +62,8 @@ class StoryListing:
     @property
     def label(self) -> str:
         """The row's display name — THE fallback rule, in its one home:
-        title, else the newest story-so-far rollup, else the first user
-        message; "" when nothing exists to name. `api.stories.get_story`
+        title, else the newest story-so-far rollup, else the first line
+        played; "" when nothing exists to name. `api.stories.get_story`
         reads it off `get_listing` for one story."""
         return self.title or self.story_so_far or self.first_user
 
@@ -275,38 +275,45 @@ class StoryOps:
             (head,),
         ).fetchall()
         # fmt: on
-        return [
-            Message(
-                id=int(mid),
-                role=str(role),
-                kind=str(kind),
-                speaker_id=speaker_id,
-                speaker=self._db.unseal_opt(speaker),
-                body=self._db.unseal(body),
-                template=self._db.unseal_opt(template),
-                provider=provider,
-                model=model,
-                attachments=Attachment.from_json(attachments),
-                mode=StoryMode.from_value(mode),
+        messages = []
+        chapter = 0
+        for (
+            mid,
+            role,
+            kind,
+            speaker_id,
+            speaker,
+            body,
+            template,
+            provider,
+            model,
+            attachments,
+            mode,
+        ) in rows:
+            if kind == "chapter":
+                chapter += 1
+            messages.append(
+                Message(
+                    id=int(mid),
+                    role=str(role),
+                    kind=str(kind),
+                    speaker_id=speaker_id,
+                    speaker=self._db.unseal_opt(speaker),
+                    body=self._db.unseal(body),
+                    template=self._db.unseal_opt(template),
+                    provider=provider,
+                    model=model,
+                    attachments=Attachment.from_json(attachments),
+                    mode=StoryMode.from_value(mode),
+                    chapter=chapter,
+                )
             )
-            for mid, role, kind, speaker_id, speaker, body, template, provider, model, attachments, mode in rows
-        ]
+        return messages
 
     def get_messages_ids(self, story_id: int) -> builtins.list[int]:
         """Ids of the story's messages, root → head. Id-only — nothing is
         decrypted, so callers that need boundaries pay nothing."""
         return self._get_chain_ids(self.get_head(story_id))
-
-    def get_card_message_ids(self, story_id: int) -> builtins.list[int]:
-        """Ids of the story's card rows (any branch; callers intersect with
-        the chain). Id-only — extraction subtracts these without decrypting
-        anything, exactly like the boundary queries above."""
-        # fmt: off
-        rows = self._db.conn.execute(
-            "SELECT id FROM messages WHERE story_id = ? AND kind = 'card' ORDER BY id", (story_id,)
-        ).fetchall()
-        # fmt: on
-        return [int(row[0]) for row in rows]
 
     def get_texts(self) -> dict[int, str]:
         """Each story's full current-chain text, lowercased — the browser's
@@ -479,9 +486,10 @@ class StoryOps:
             node = story_row[3]
             while node is not None and node in tree:  # head → root; finite via the parent CHECK
                 chain.add(node)
-                parent, role, provider, model, word_count = tree[node]
+                parent, role, kind, provider, model, word_count = tree[node]
                 words[story_id] += word_count or 0  # uncounted: an encrypted row from before v14
-                if role == "user":
+                # a card's line and a chapter's heading are no line played
+                if role == "user" and kind not in ("card", "chapter"):
                     first_user_ids[story_id] = node  # last user seen = root-most
                 if role == "assistant" and model and story_id not in models:
                     models[story_id] = f"{provider}/{model}" if provider else model
@@ -522,8 +530,8 @@ class StoryOps:
 
     def _get_tree_rows(
         self, story_ids: builtins.list[int]
-    ) -> dict[int, tuple[int | None, str, str | None, str | None, int | None]]:
-        """id → (parent_id, role, provider, model, word_count) for every
+    ) -> dict[int, tuple[int | None, str, str, str | None, str | None, int | None]]:
+        """id → (parent_id, role, kind, provider, model, word_count) for every
         message of these stories — the flat, nothing-decrypted read behind
         the chain walks."""
         if not story_ids:
@@ -531,13 +539,13 @@ class StoryOps:
         placeholders = ",".join("?" * len(story_ids))
         # fmt: off
         rows = self._db.conn.execute(
-            f"SELECT id, parent_id, role, provider, model, word_count FROM messages WHERE story_id IN ({placeholders})",
+            f"SELECT id, parent_id, role, kind, provider, model, word_count FROM messages WHERE story_id IN ({placeholders})",
             tuple(story_ids),
         ).fetchall()
         # fmt: on
         return {
-            int(mid): (parent, str(role), provider, model, word_count)
-            for mid, parent, role, provider, model, word_count in rows
+            int(mid): (parent, str(role), str(kind), provider, model, word_count)
+            for mid, parent, role, kind, provider, model, word_count in rows
         }
 
     def _get_bodies(self, wanted: dict[int, int]) -> dict[int, str]:
@@ -584,24 +592,22 @@ class MessagesOps:
             (message_id,),
         ).fetchone()
         # fmt: on
-        if row is None:
-            return None
-        mid, role, kind, speaker_id, speaker, body, template, provider, model, attachments, mode = (
-            row
-        )
-        return Message(
-            id=int(mid),
-            role=str(role),
-            kind=str(kind),
-            speaker_id=speaker_id,
-            speaker=self._db.unseal_opt(speaker),
-            body=self._db.unseal(body),
-            template=self._db.unseal_opt(template),
-            provider=provider,
-            model=model,
-            attachments=Attachment.from_json(attachments),
-            mode=StoryMode.from_value(mode),
-        )
+        return None if row is None else self._message(row)
+
+    def list(self, message_ids: Sequence[int]) -> builtins.list[Message]:
+        """These messages, decrypted, in the order given — those the tree
+        holds."""
+        if not message_ids:
+            return []
+        placeholders = ",".join("?" * len(message_ids))
+        # fmt: off
+        rows = self._db.conn.execute(
+            f"SELECT id, role, kind, speaker_id, speaker, body, template, provider, model, attachments, mode FROM messages WHERE id IN ({placeholders})",
+            tuple(message_ids),
+        ).fetchall()
+        # fmt: on
+        found = {int(row[0]): self._message(row) for row in rows}
+        return [found[mid] for mid in message_ids if mid in found]
 
     def update(self, message_id: int, body: str) -> None:
         """The author's correction of one message's text — the one deliberate
@@ -671,6 +677,22 @@ class MessagesOps:
             )
             # fmt: on
 
+    def get_chapter(self, message_id: int) -> int | None:
+        """The chapter a message stands in, counted along its chain — 0
+        before the first — or None for an id the tree does not hold:
+        the walk to the root, nothing decrypted."""
+        # fmt: off
+        row = self._db.conn.execute(
+            "WITH RECURSIVE chain(id, parent_id, kind) AS ("
+            "    SELECT id, parent_id, kind FROM messages WHERE id = ?"
+            "    UNION ALL"
+            "    SELECT m.id, m.parent_id, m.kind FROM messages m JOIN chain ON m.id = chain.parent_id) "
+            "SELECT COUNT(*), SUM(kind = 'chapter') FROM chain",
+            (message_id,),
+        ).fetchone()
+        # fmt: on
+        return int(row[1]) if row[0] else None
+
     def get_parent(self, message_id: int) -> int | None:
         """One message's parent in the tree. No feature reads this — it is
         the door the SUITE observes the sibling promise through ("nothing
@@ -681,25 +703,24 @@ class MessagesOps:
         ).fetchone()
         return row[0] if row else None
 
-    def count_body_chars(
-        self, message_ids: list[int], strip: Callable[[str], str] | None = None
-    ) -> int:
-        """Total characters of these messages' bodies — what the scene gate
-        measures. Each body goes through `strip` first when one is given:
-        the caller says what counts, and the text never leaves here.
-        Decrypts only the rows asked for; it has to decrypt, since a sealed
-        blob's byte length is a bad proxy for character count."""
-        if not message_ids:
-            return 0
-        placeholders = ",".join("?" * len(message_ids))
-        # fmt: off
-        rows = self._db.conn.execute(
-            f"SELECT body FROM messages WHERE id IN ({placeholders})",
-            tuple(message_ids),
-        ).fetchall()
-        # fmt: on
-        bodies = (self._db.unseal(row[0]) for row in rows)
-        return sum(len(strip(body) if strip else body) for body in bodies)
+    def _message(self, row: Sequence[Any]) -> Message:
+        """One row as `get` and `list` select it, decrypted."""
+        mid, role, kind, speaker_id, speaker, body, template, provider, model, attachments, mode = (
+            row
+        )
+        return Message(
+            id=int(mid),
+            role=str(role),
+            kind=str(kind),
+            speaker_id=speaker_id,
+            speaker=self._db.unseal_opt(speaker),
+            body=self._db.unseal(body),
+            template=self._db.unseal_opt(template),
+            provider=provider,
+            model=model,
+            attachments=Attachment.from_json(attachments),
+            mode=StoryMode.from_value(mode),
+        )
 
 
 def unique_title(base: str, taken: Container[str]) -> str | None:

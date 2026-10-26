@@ -103,6 +103,7 @@ COMMANDS: tuple[CommandSpec, ...] = (
     _syntax("… /cue", "Steer just the next reply — not kept in context afterwards", "inline"),
     # Stories
     CommandSpec("/stories", "", "Browse stories, resume an old one", "stories", CommandType.INTERACTIVE),
+    _syntax("/chapter", "Start a new chapter at the end of the story", "stories"),
     CommandSpec("/fork", "[TITLE]", "Continue in a copy of this story; the original stays", "stories", CommandType.OPERATION),
     CommandSpec("/system", "<text | FILE>", "Set the system prompt for this story — from text or a file; - clears it", "stories", CommandType.INTERACTIVE),
     CommandSpec("/title", "NEW", "Set the story title", "stories", CommandType.OPERATION),
@@ -151,6 +152,7 @@ SHORTCUTS: dict[str, Shortcut] = {
     "/stories": Shortcut("c-t", "Ctrl+T"),
     "/lore": Shortcut("c-l", "Ctrl+L"),
     "/model": Shortcut("c-o", "Ctrl+O"),  # Ctrl+M is unusable — the terminal sends it as Enter
+    "/context": Shortcut("c-q", "Ctrl+Q"),
     "/quit": Shortcut("c-d", "Ctrl+D"),
 }
 

@@ -51,7 +51,7 @@ stylesheet that reaches past the contract accepts the breakage itself.
 | Token | Used by |
 |---|---|
 | `--otk-accent` | title rules, selection marks, the caret |
-| `--otk-accent-ink` | accent used as text: links, rubrics, tokens |
+| `--otk-accent-ink` | accent used as text: links, rubrics, tokens, a chapter's number and its big initial |
 | `--otk-accent-tint` | the ground of a selected row |
 | `--otk-ok` | answering, resident, loaded |
 | `--otk-danger` | delete, stop, refusals and failures — nothing else |
@@ -164,7 +164,7 @@ only that script.
 | `--otk-size-mono` | fields, filters, model names |
 | `--otk-size-mono-sm` | facts, urls, ids |
 | `--otk-size-small` | counts |
-| `--otk-size-label` | a section eyebrow |
+| `--otk-size-label` | a section eyebrow, a chapter's number |
 | `--otk-size-foot` | panel footers |
 | `--otk-size-tag` | kind tags, the turn rubric |
 

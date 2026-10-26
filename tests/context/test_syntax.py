@@ -9,7 +9,10 @@ asks for the scene in character. `spans` reads a line as its story and
 its words with the model: runs that join back into the line exactly,
 out of character all of a /you or /ooc line after its token and
 whatever follows an inliner, the tokens themselves story, the breaks at
-the line's edges read past.
+the line's edges read past. `shown` is a stored line as both frontends
+show it: those runs, but a /chapter line its chapter's heading once its
+number is known. A /chapter line is the one direction played without an
+answer.
 
 `to_wire` composes what a stored turn sends. Two shapes reach it: a
 turn stored before the syntax existed, whose prose was already stripped
@@ -21,7 +24,7 @@ turn is the newest.
 
 import random
 
-from otaku.context.syntax import DIRECTIONS, read, roll_dice, spans, to_wire
+from otaku.context.syntax import DIRECTIONS, read, roll_dice, shown, spans, to_wire
 from otaku.store.schema import Message
 
 # What a v2 turn stores: the template, placeholders intact.
@@ -81,6 +84,10 @@ class TestCheck:
     def test_a_command_and_an_inliner_can_share_a_line(self) -> None:
         assert read("/me Elara: I step in /cue keep it tense").check() is None
 
+    def test_a_chapter_needs_a_title(self) -> None:
+        assert read("/chapter").check() is not None
+        assert read("/chapter The Flood").check() is None
+
 
 class TestTemplateField:
     # The template METHOD is gone: the caller resolves `template_field`
@@ -94,6 +101,7 @@ class TestTemplateField:
         assert read("/you Elara").template_field == "you_framing"
         assert read("/ooc What genre?").template_field == "ooc_framing"
         assert read("/roll 1d6").template_field == "roll_framing"
+        assert read("/chapter The Flood").template_field == "chapter_framing"
 
 
 class TestSpans:
@@ -145,8 +153,14 @@ class TestSpans:
 
 
 class TestDirections:
-    def test_the_registry_holds_exactly_the_four(self) -> None:
-        assert set(DIRECTIONS) == {"/me", "/you", "/ooc", "/roll"}
+    def test_the_registry_holds_exactly_the_five(self) -> None:
+        assert set(DIRECTIONS) == {"/me", "/you", "/ooc", "/chapter", "/roll"}
+
+    def test_a_chapter_alone_is_played_without_an_answer(self) -> None:
+        assert [token for token, line in DIRECTIONS.items() if not line.needs_answer] == [
+            "/chapter"
+        ]
+        assert read("She looks up.").needs_answer
 
 
 class TestKinds:
@@ -172,6 +186,27 @@ class TestKinds:
     def test_an_inliner_changes_neither(self) -> None:
         assert _kinds("She looks up /ooc nervous") == ("dialogue", "dialogue")
 
+    def test_a_chapter_is_a_kind_of_its_own(self) -> None:
+        assert read("/chapter The Flood").request_kind == "chapter"
+
+
+class TestShown:
+    def test_a_line_shows_as_its_runs_of_story_and_words_with_the_model(self) -> None:
+        assert shown("I wait /cue make it rain") == [
+            ("I wait /cue", "prose"),
+            (" make it rain", "ooc"),
+        ]
+        assert shown("She looks up.", chapter=2) == [("She looks up.", "prose")]
+
+    def test_a_chapter_shows_its_numbered_heading(self) -> None:
+        runs = shown("/chapter The Flood", chapter=3)
+        assert [kind for _, kind in runs] == ["chapter_number", "prose", "chapter_title"]
+        assert "3" in runs[0][0]
+        assert runs[-1][0] == "The Flood"
+
+    def test_a_chapter_whose_number_is_unknown_shows_as_typed(self) -> None:
+        assert shown("/chapter The Flood") == [("/chapter The Flood", "prose")]
+
 
 class TestPromptToWire:
     def test_prose_goes_out_as_it_is(self) -> None:
@@ -192,6 +227,10 @@ class TestPromptToWire:
     def test_ooc_slots_its_prose_into_the_template(self) -> None:
         got = wire("/ooc What genre?", OOC, is_last=True)
         assert got == "<<aside: What genre?>>"
+
+    def test_a_chapter_slots_its_title_into_the_template(self) -> None:
+        got = wire("/chapter The Flood", '<<chapter "{body}">>', is_last=True)
+        assert got == '<<chapter "The Flood">>'
 
     def test_the_name_comes_from_the_line_not_the_cast(self) -> None:
         # No lookup anywhere: the spelling typed is the spelling sent, so a

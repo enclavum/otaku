@@ -255,7 +255,7 @@ function labelOf(story) {
    greeting — and no line break stands between them; PARAGRAPH otherwise. */
 function joinOf(previous, next) {
   if (previous === null) return "paragraph";
-  const alone = (row) => row.kind === "card" || row.provider === "card";
+  const alone = (row) => row.kind === "card" || row.kind === "chapter" || row.provider === "card";
   const inline =
     previous.mode === "story" &&
     next.mode === "story" &&
@@ -921,11 +921,40 @@ export function updateMessage(id, messageId, body) {
   if (!found) throw notFound(OFF_CHAIN);
   if (!body.trim()) throw invalid("A message cannot be emptied — undo the exchange instead.");
   found.body = body;
-  found.segments = [{ kind: "prose", text: body }];
+  found.segments = found.kind === "chapter" ? headingOf(story, found) : [{ kind: "prose", text: body }];
   touch(story);
   moved(story);
   return { value: structuredClone(found), notice: "Message edited." };
 }
+
+// ---------- chapters ----------
+
+/* A chapter opened at the story's end by a `/chapter TITLE` line: the
+   reader's row of kind 'chapter', the line as typed its body, shown as its
+   number and title — numbered along the chain, split as the product's
+   `Line.shown` splits it (`context.syntax`); the framing is the built-in
+   `chapter_framing`. */
+export function openChapter(id, line) {
+  const story = held(id);
+  record(id, "user", line, {
+    kind: "chapter",
+    template: '((OOC: Chapter "{body}" starts here.))',
+  });
+  const opened = story.messages.at(-1);
+  opened.segments = headingOf(story, opened);
+  return structuredClone(opened);
+}
+
+const chapterOf = (story, row) =>
+  story.messages.slice(0, story.messages.findIndex((each) => each.id === row.id) + 1)
+    .filter((each) => each.kind === "chapter").length;
+// the title: the line after its token, as `syntax.read` gives it
+const titleOf = (body) => body.trim().replace(/^\/chapter(\s+|$)/, "");
+const headingOf = (story, row) => [
+  { kind: "chapter_number", text: `Chapter ${chapterOf(story, row)}` },
+  { kind: "prose", text: ". " },
+  { kind: "chapter_title", text: titleOf(row.body) },
+];
 
 /** One row recorded at the story's head, in the shape the product's rows
     take — the demo's model writes prose and no tool call, so a row is

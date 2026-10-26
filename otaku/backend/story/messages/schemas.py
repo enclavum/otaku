@@ -76,7 +76,7 @@ def _as_message(row: schema.Message, previous: schema.Message | None, unit: int)
         model=row.model,
         attachments=row.attachments,
         mode=row.mode,
-        segments=tuple(domain_messages.segments(row.body, row.role)),
+        segments=tuple(domain_messages.segments(row)),
         join_type=domain_messages.join_type(previous, row),
         tool_label=domain_messages.tool_label(row),
         unit=unit,
@@ -91,10 +91,11 @@ class Message(Schema):
     played with, its pictures, the mode it was written in — and what a
     client would otherwise parse or decide: the body split (`segments`:
     prose, and each tool call as its tool's facts; a user's line its
-    story and its words with the model), how it joins the message before
-    it (`join_type`), a tool message's label (None on every other), and
-    the first message of the reply unit it stands in (`unit`: what an
-    undo or a regenerate takes with it)."""
+    story and its words with the model; a chapter its heading, numbered
+    along the chain), how it joins the message before it (`join_type`),
+    a tool message's label (None on every other), and the first message
+    of the reply unit it stands in (`unit`: what an undo or a regenerate
+    takes with it)."""
 
     id: int
     role: str

@@ -575,6 +575,38 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
   margin-top: calc(var(--otk-block-gap) - var(--otk-turn-gap));
 }
 .otk-turn__rubric { font-family: var(--otk-font-mono); font-size: var(--otk-size-tag); letter-spacing: 0.26em; text-transform: uppercase; color: var(--otk-accent); }
+/* A chapter: a heading between turns, where a new chapter begins — 44px
+   above it, its top margin set against the flow's own gap between turns,
+   and that gap below it. */
+.otk-chapter {
+  display: flex; flex-direction: column; align-items: center; gap: 9px;
+  margin: calc(44px - var(--otk-turn-gap)) 0 0;
+  text-align: center;
+}
+.otk-chapter__num {
+  display: flex; align-items: center; gap: 14px; width: 100%; max-width: 420px;
+  font-family: var(--otk-font-mono); font-size: var(--otk-size-label);
+  letter-spacing: var(--otk-track-label); text-transform: uppercase; color: var(--otk-accent-ink);
+}
+.otk-chapter__num::before, .otk-chapter__num::after { content: ""; flex: 1; height: var(--otk-hair); background: var(--otk-line); }
+.otk-chapter__title {
+  margin: 0; max-width: 560px;
+  font-family: var(--otk-font-prose); font-size: 26px; font-weight: 500; font-style: normal;
+  line-height: 1.25; letter-spacing: -0.005em; color: var(--otk-ink); text-wrap: balance;
+}
+/* The turn that opens a chapter starts on a raised initial: a large accent
+   letter standing on the first line's baseline, rising into the space
+   above, a real span (`.otk-dropcap`) around its first letter. It has no
+   line height of its own, so the lines stay even, and the box holding
+   it lets it rise past the box's top, which the editor's shared class
+   clips (`.otk-editable`). The letter may sit inside a run of speech,
+   hence any depth. */
+.otk-dropcap { font-size: 46px; line-height: 0; font-weight: 500; color: var(--otk-accent-ink); }
+.otk-typeset:has(.otk-dropcap) { overflow: visible; }
+/* the chat layout alone shows a turn's label just above its text: the
+   paragraph moves down by the letter's rise, so it clears the label as
+   the text does */
+.otk-transcript[data-transcript="chat"] .otk-typeset:has(.otk-dropcap) { margin-top: 0.75em; }
 /* the manuscript's mark before a played line's rubric, decoration alone;
    the chat's rubrics go without it */
 .otk-transcript[data-transcript="manuscript"] .otk-turn__rubric::before { content: "◆ "; content: "◆ " / ""; }
@@ -656,6 +688,10 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
    a line of text or after the field a paragraph became, where two breaks
    would make two blank lines. The first turn opens the text. */
 .otk-transcript[data-transcript="canvas"] > [data-join="paragraph"]:not(:first-child)::before { content: ""; display: block; height: var(--otk-block-gap); }
+/* the canvas has no gap between turns: a chapter's margins stand whole,
+   and the paragraph after it opens without its own gap line */
+.otk-transcript[data-transcript="canvas"] > .otk-chapter { margin: 44px 0 25px; }
+.otk-transcript[data-transcript="canvas"] > .otk-chapter + [data-join="paragraph"]::before { display: none; }
 /* The canvas is typed in where the story is: its end editable — the TAIL
    (`transcript.showTail`) — in the text's own face, the composer's box
    standing disabled below with its verbs. */
@@ -1100,8 +1136,10 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 .otk-prefixes { position: absolute; left: 14px; bottom: 100%; margin-bottom: 8px; width: 428px; max-width: calc(100% - 28px); display: flex; flex-direction: column; padding: 4px 0 6px; background: var(--otk-paper); border: var(--otk-hair) solid var(--otk-line); box-shadow: var(--otk-shadow-slip); }
 .otk-prefixes__group { display: flex; align-items: baseline; gap: 9px; padding: 7px 16px 3px; }
 .otk-prefixes__group::after { content: ""; flex: 1; height: var(--otk-hair); background: var(--otk-line-soft); }
-.otk-prefix { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 10px; align-items: baseline; width: 100%; padding: 3px 16px; }
-.otk-prefix__token { font-family: var(--otk-font-mono); font-size: var(--otk-size-mono-sm); color: var(--otk-accent-ink); }
+/* neither column wraps: the token's is as wide as the longest token and
+   kept on one line, as a browser may break one after a slash */
+.otk-prefix { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px; align-items: baseline; width: 100%; padding: 3px 16px; }
+.otk-prefix__token { white-space: nowrap; font-family: var(--otk-font-mono); font-size: var(--otk-size-mono-sm); color: var(--otk-accent-ink); }
 .otk-prefix__desc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--otk-font-prose); font-size: var(--otk-size-note); line-height: var(--otk-leading-row); color: var(--otk-body); }
 .otk-prefixes--cast { width: 320px; max-height: 200px; overflow-y: auto; }
 .otk-prefix--name { grid-template-columns: minmax(0, 1fr); }
@@ -1209,23 +1247,21 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
 .otk-row[aria-selected="true"] { border-left-color: var(--otk-accent); background: var(--otk-accent-tint); }
 .otk-row__title { flex: 1 1 0%; min-width: 132px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--otk-font-prose); font-size: var(--otk-size-row); line-height: var(--otk-leading-row); color: var(--otk-body); }
 /* a title with a note right after its words: the words give way, the note
-   never does. The note is centred on the words' CAPITALS — the band from
-   the cap line to the baseline — not on their line: the line's descender
-   room lies below, so a box centred on it (or set on the baseline) hangs
-   under the words. The band's centre sits a tenth of the prose size above
-   the line's, hence the bottom margin of twice that. Words that are none
-   take no room, so the note starts where they would. */
+   never does, centred on their line — the row's centre in the one list
+   that has one (`.otk-col--messages`); words that are none take no room */
 .otk-row__title--noted { display: flex; align-items: center; gap: 10px; }
-.otk-row__title--noted > .otk-tag { margin-bottom: calc(var(--otk-size-row) * 0.2); }
 /* a tag after the title, among the figures (the open story): centred on
-   the title's capitals the same way, rather than set on the row's
-   baseline — prose rows alone, a mono row's capitals sit otherwise */
+   the row, whose default padding sets its centre a tenth of the prose
+   size above the line's — hence the lift of twice that; prose rows alone */
 .otk-row:not(.otk-row--mono) > .otk-tag { align-self: center; margin-bottom: calc(var(--otk-size-row) * 0.2); }
 .otk-row__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .otk-row__text:empty { display: none; }
 .otk-row__id { width: 26px; flex: none; text-align: right; font-family: var(--otk-font-mono); font-size: var(--otk-size-mono-sm); line-height: var(--otk-leading-row); color: var(--otk-faint); font-variant-numeric: tabular-nums; }
 .otk-row__who { width: 58px; flex: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--otk-font-mono); font-size: var(--otk-size-label); line-height: var(--otk-leading-row); letter-spacing: 0.14em; text-transform: uppercase; color: var(--otk-faint); }
 .otk-row__who--you { color: var(--otk-accent-ink); }
+/* the number and the speaker, digits and capitals smaller than the
+   words: centred in the row, since small type set on its baseline sits low */
+.otk-row__id, .otk-row__who { align-self: center; }
 .otk-row__num { flex: none; text-align: right; font-family: var(--otk-font-mono); font-size: var(--otk-size-mono-sm); line-height: var(--otk-leading-row); color: var(--otk-muted); font-variant-numeric: tabular-nums; }
 .otk-row--mono .otk-row__title { font-family: var(--otk-font-mono); font-size: var(--otk-size-mono); }
 .otk-row[aria-selected="true"] .otk-row__title { color: var(--otk-ink); }
@@ -1686,9 +1722,6 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 .otk-keys__plus { padding-left: 6px; font-family: var(--otk-font-mono); font-size: var(--otk-size-label); color: var(--otk-faint); }
 .otk-keys-grid { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 11px 30px; align-items: baseline; }
 .otk-keys__meaning { font-family: var(--otk-font-prose); font-size: var(--otk-size-read); color: var(--otk-muted); }
-/* A key box sits on its row's baseline and hangs below it, so the help
-   sheet's last row needs room of its own above the docket's foot. */
-[data-help-body] > :last-child { margin-bottom: 16px; }
 
 /* inside a docket */
 .otk-leader__aside { align-self: flex-end; font-family: var(--otk-font-mono); font-size: var(--otk-size-small); color: var(--otk-faint); }
@@ -1716,7 +1749,9 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 }
 
 .otk-col--messages { flex: 1 1 0%; min-width: 300px; padding: 12px 22px; }
-.otk-col--messages .otk-row { padding-left: 14px; padding-right: 14px; }
+/* a message is a sentence, its body its lowercase: even padding sets that
+   body on the row's centre, where the default's centres a name's capitals */
+.otk-col--messages .otk-row { padding: 3px 14px; }
 .otk-col--messages .otk-col__pinned { padding: 11px 0 0; margin-left: 14px; border-top: 0; }
 
 /* =============================================================================

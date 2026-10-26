@@ -49,6 +49,11 @@ ROLL_FRAMING_DEFAULT = (
     "roll on your own.))\n{body}"
 )
 
+# A chapter's start, as the model reads the row that opens one: out of
+# character, so it is read as the story's structure and never as a line
+# to answer; its title (`{body}`), unnumbered.
+CHAPTER_FRAMING_DEFAULT = '((OOC: Chapter "{body}" starts here.))'
+
 # A card's block, a line per field — a line whose fields are all empty is
 # left out (`context.cards.card_to_wire`), so the block's close stands on
 # a line of its own.
@@ -279,6 +284,7 @@ _DEFAULTS = {
     "you_framing": YOU_FRAMING_DEFAULT,
     "ooc_framing": OOC_FRAMING_DEFAULT,
     "roll_framing": ROLL_FRAMING_DEFAULT,
+    "chapter_framing": CHAPTER_FRAMING_DEFAULT,
     "card_framing": CARD_FRAMING_DEFAULT,
     "story_framing": STORY_FRAMING_DEFAULT,
     "extract_prompt": EXTRACT_DEFAULT,
@@ -304,6 +310,9 @@ _REQUIRED = {
     # {dice} is the roll itself — without it the numbers never reach the
     # model and the command is a no-op wearing a frame.
     "roll_framing": ("dice", "body"),
+    # {body} is the chapter's title — without it the model reads a heading
+    # naming nothing.
+    "chapter_framing": ("body",),
     # Only {name}: a card template line whose OTHER placeholders are absent
     # is a choice — omitting {examples} is how a user keeps examples off
     # the wire — and compose drops the lines of fields a card lacks.
@@ -333,6 +342,7 @@ class Prompts:
     you_framing: str = _DEFAULTS["you_framing"]
     ooc_framing: str = _DEFAULTS["ooc_framing"]
     roll_framing: str = _DEFAULTS["roll_framing"]
+    chapter_framing: str = _DEFAULTS["chapter_framing"]
     card_framing: str = _DEFAULTS["card_framing"]
     extract_prompt: str = _DEFAULTS["extract_prompt"]
     scene_history_prompt: str = _DEFAULTS["scene_history_prompt"]

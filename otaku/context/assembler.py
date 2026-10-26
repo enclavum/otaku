@@ -261,21 +261,21 @@ def get_join_type(previous: Message | None, next: Message) -> JoinType:
     """How `next` joins `previous`, the row before it — the wire's and
     the canvas's one rule, read off the two rows and the newlines at the
     boundary: INLINE where both were written in story mode, neither
-    stands alone (a card's line or greeting), and no newline stands at
-    the end of the one or the start of the other; PARAGRAPH otherwise —
-    the first row, a chat row or a row standing alone on either side, a
-    break the reader typed or the model wrote at the edge. Spaces at the
-    edges decide nothing. A tool's result runs on in story mode like any
-    row written there: story mode does not draw it, so the reply after
-    it goes on in the paragraph the call interrupted."""
+    stands alone (a card's line or greeting, a chapter), and no newline
+    stands at the end of the one or the start of the other; PARAGRAPH
+    otherwise — the first row, a chat row or a row standing alone on
+    either side, a break the reader typed or the model wrote at the
+    edge. Spaces at the edges decide nothing. A tool's result runs on in
+    story mode like any row written there: story mode does not draw it,
+    so the reply after it goes on in the paragraph the call interrupted."""
     if previous is None:
         return JoinType.PARAGRAPH
     rows = (previous, next)
     if any(row.mode is not StoryMode.STORY for row in rows):
         return JoinType.PARAGRAPH
     # A card's line and greeting stand alone in any mode: nobody wrote
-    # them into the text.
-    if any(row.kind == "card" or row.provider == CARD_PROVIDER for row in rows):
+    # them into the text. So does a chapter, a heading over the text.
+    if any(row.kind in ("card", "chapter") or row.provider == CARD_PROVIDER for row in rows):
         return JoinType.PARAGRAPH
     if previous.body.rstrip(" \t").endswith("\n") or next.body.lstrip(" \t").startswith("\n"):
         return JoinType.PARAGRAPH

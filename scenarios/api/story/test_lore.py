@@ -168,6 +168,20 @@ class TestExtract:
         assert memory.history == "I saw the guest."
         assert len(lore_calls(app)) == 1  # the extraction; no rollup calls
 
+    def test_no_scene_crosses_a_chapter(self, app: App) -> None:
+        # A chapter's row opens a scene: the close cuts the story before
+        # it, whatever the sizes would have packed together.
+        for i in range(2):
+            app.play(f"Turn number {i}.")
+        app.play("/chapter The Flood")
+        for i in range(2, 4):
+            app.play(f"Turn number {i}.")
+        app.play("/extract")
+        story_id = app.story_id
+        ids = app.store.stories.get_messages_ids(story_id)
+        ends = app.store.scenes.get_current_ends(story_id, ids)
+        assert [ids.index(end) for end in ends] == [3, 8]  # the chapter's row is the 5th
+
     def test_a_pass_records_its_model_on_every_row_it_makes(self, app: App) -> None:
         # Who made the memory: the pass's engine and model, on the scene,
         # the journal and the character it named.
@@ -328,8 +342,10 @@ class TestIdleScheduling:
     def test_the_settle_margin_holds_the_newest_messages_out(self, server, tmp_path) -> None:
         # The live rule for the AUTOMATIC pass: no scene ends where the
         # story is still moving. With a settle margin of 2, the idle pass
-        # over six messages may close a scene only up to the fourth —
-        # /extract is the one thing that drops this margin.
+        # over six messages may close scenes only over the first four, and
+        # the story in play holds the newest of those open too: it closes
+        # the first exchange alone. /extract is the one thing that drops
+        # this margin.
         set_config(
             tmp_path / "state",
             settle_messages=2,
@@ -341,31 +357,31 @@ class TestIdleScheduling:
         try:
             for i in range(3):
                 app.play(f"Turn number {i}.")
-            # A slow machine may run a pass between turns too, closing a
-            # scene over the fewer messages it saw: wait for the one that
-            # saw all six.
+            # A slow machine may run a pass between turns too, but one over
+            # fewer messages holds its one span open: the first scene to
+            # close is the one the pass over all six closed.
             deadline = time.time() + 10
             ends: list[int] = []
-            while time.time() < deadline:
+            while time.time() < deadline and not ends:
                 ids = app.store.stories.get_messages_ids(app.story_id)
                 ends = app.store.scenes.get_current_ends(app.story_id, ids)
-                if ends and ids.index(ends[-1]) >= 3:
-                    break
                 time.sleep(0.1)
             assert ends, "the idle pass never closed a scene"
-            assert ids.index(ends[-1]) == 3  # the newest two messages stayed open
+            assert ids.index(ends[-1]) == 1  # the newest four stayed open
         finally:
             app.close()
 
     def test_tool_calls_do_not_count_toward_the_scene_gate(self, server, tmp_path) -> None:
         # The gate measures story text. Three exchanges whose replies are
-        # padded with a block far past scene_min_chars still hold too
-        # little play (19 characters an exchange), so the pass declines;
-        # three more carry the story itself over the line, and it closes.
+        # padded with a block far past scene_min_chars hold play for one
+        # scene alone (19 characters an exchange), held open while the
+        # story is in play, so nothing closes — counted with their blocks,
+        # they would close two; three more carry the story itself over the
+        # line, and a scene closes.
         set_config(
             tmp_path / "state",
             settle_messages=0,
-            scene_min_chars=100,
+            scene_min_chars=30,
             scene_min_messages=2,
             idle_seconds=0.1,
         )

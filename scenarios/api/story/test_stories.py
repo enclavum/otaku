@@ -21,6 +21,7 @@ import pytest
 from otaku.backend.api import Api, Layout, Refused
 from otaku.backend.app.paths import Paths
 from otaku.backend.codex.cards.schemas import RawFile
+from otaku.store.schema import Message
 from otaku.terminal.api.prompts import read_prompt
 from otaku.terminal.screens import stories as screen_stories
 from scenarios.support import server as scripted
@@ -119,7 +120,7 @@ class TestResumeDialog:
         assert app.story_id == first
         assert [m.body for m in app.messages] == ["The first story begins."]
         # The abandoned reply still exists in the tree — nothing was deleted.
-        assert app.store.messages.count_body_chars([reply_id]) > 0
+        assert app.store.messages.get(reply_id) is not None
 
 
 class TestStoryBrowser:
@@ -317,6 +318,62 @@ class TestFork:
     def test_the_family_of_a_story_not_there_is_refused(self, app: App) -> None:
         with pytest.raises(Refused):
             app.api.stories.forks.list(999)
+
+
+class TestWordCount:
+    """A story's words, counted as each turn lands and summed along its
+    current chain: a word is a run between spaces holding a letter or a
+    digit, a Chinese or Japanese character a word of its own, and a
+    tool's result none. The scripted reply is ten words."""
+
+    def test_the_turns_are_counted_as_they_land(self, app: App) -> None:
+        app.play("I open — the door.")  # a lone dash is no word
+        story = app.story_id
+        assert app.api.stories.get(story).word_count == 4 + 10
+        assert [s.word_count for s in app.api.stories.list() if s.id == story] == [14]
+
+    def test_an_edit_counts_the_message_again(self, app: App) -> None:
+        app.play("I open the door.")
+        story = app.story_id
+        app.api.stories.messages.update(story, app.messages[0].id, body="I knock twice, then wait.")
+        assert app.api.stories.get(story).word_count == 5 + 10
+
+    def test_an_undone_exchange_leaves_the_count(self, app: App) -> None:
+        app.play("I open the door.")
+        app.play("I step inside.")
+        app.play("/undo")
+        assert app.api.stories.get(app.story_id).word_count == 4 + 10
+
+    def test_a_fork_carries_the_count(self, app: App) -> None:
+        app.play("I open the door.")
+        app.play("/fork")
+        assert app.api.stories.get(app.story_id).word_count == 4 + 10
+
+    def test_a_chinese_or_japanese_character_is_a_word(self, app: App) -> None:
+        app.play("雨が降る")
+        assert app.api.stories.get(app.story_id).word_count == 4 + 10
+
+    def test_a_tools_result_counts_none(self, app: App) -> None:
+        app.play("I open the door.")
+        story = app.story_id
+        result = Message(
+            role="tool", kind="tool", body="the internet's many words", provider="web-search"
+        )
+        app.store.stories.append(story, result, after=app.store.stories.get_head(story))
+        assert app.api.stories.get(story).word_count == 4 + 10
+
+
+class TestTheFirstLinePlayed:
+    def test_a_chapters_heading_and_a_cards_line_are_passed_over(self, app: App) -> None:
+        # What names an untitled story with no memory yet, and what the
+        # browsers show as its first prompt: the reader's first line.
+        app.play("/chapter The Gate")
+        story = app.story_id
+        card = Message(role="user", kind="card", body="/card keeper.json", provider="card")
+        app.store.stories.append(story, card, after=app.store.stories.get_head(story))
+        app.play("I knock.")
+        (listed,) = [s for s in app.api.stories.list() if s.id == story]
+        assert listed.first_message == "I knock."
 
 
 class TestSystem:

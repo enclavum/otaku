@@ -4,7 +4,7 @@ the join rule), how a line typed now would join the newest row
 (`next_join`, the same rule, a line with no break of its own in the
 layout's mode), a stored body split for a frontend that parses nothing
 (`segments`) — a reply into prose and its calls, a user's line into its
-story and its words with the model — what a tool's message is called
+story and its words with the model, a chapter into its heading — what a tool's message is called
 (`tool_label`), and the question the story stands on (`posed_question`)."""
 
 from otaku.backend.story.messages.services import (
@@ -82,11 +82,18 @@ class TestNextJoin:
         greeting = Message(role="assistant", body="Welcome.", provider="card", mode=STORY)
         assert next_join(greeting, Layout.CANVAS) is JoinType.PARAGRAPH
 
+    def test_a_chapter_stands_alone(self) -> None:
+        heading = Message(role="user", body="/chapter The Flood", kind="chapter", mode=STORY)
+        prose = Message(role="assistant", body="and the water rose.", mode=STORY)
+        assert join_type(heading, prose) is JoinType.PARAGRAPH
+        assert join_type(prose, heading) is JoinType.PARAGRAPH
+        assert next_join(heading, Layout.CANVAS) is JoinType.PARAGRAPH
+
 
 class TestSegments:
     def test_prose_and_each_call_as_its_tools_facts(self) -> None:
         body = "Creak.\n```otk-question\nGo in?\n1. Yes\n```"
-        assert segments(body) == [
+        assert segments(reply(body)) == [
             {"kind": "prose", "text": "Creak."},
             {
                 "kind": "tool_call",
@@ -100,12 +107,12 @@ class TestSegments:
         ]
 
     def test_a_call_of_a_tool_this_build_does_not_have_is_a_call_all_the_same(self) -> None:
-        assert segments("```otk-plan\nlater\n```") == [
+        assert segments(reply("```otk-plan\nlater\n```")) == [
             {"kind": "tool_call", "tool": "plan", "text": "later"}
         ]
 
     def test_a_call_otaku_runs_carries_who_acts_on_it(self) -> None:
-        (call,) = segments("```otk-web-search\ntides\n```")
+        (call,) = segments(reply("```otk-web-search\ntides\n```"))
         assert (call["tool"], call["label"], call["actor"]) == (
             "web-search",
             "Web search",
@@ -113,21 +120,30 @@ class TestSegments:
         )
 
     def test_plain_prose_is_one_segment_and_an_empty_body_none(self) -> None:
-        assert segments("The hall glows.") == [{"kind": "prose", "text": "The hall glows."}]
-        assert segments("") == []
+        assert segments(reply("The hall glows.")) == [{"kind": "prose", "text": "The hall glows."}]
+        assert segments(reply("")) == []
 
     def test_a_users_line_splits_into_its_story_and_its_words_with_the_model(self) -> None:
-        assert segments("I wait /cue make it rain", "user") == [
+        assert segments(line("I wait /cue make it rain")) == [
             {"kind": "prose", "text": "I wait /cue"},
             {"kind": "ooc", "text": " make it rain"},
         ]
-        assert segments("/you Mara", "user") == [
+        assert segments(line("/you Mara")) == [
             {"kind": "prose", "text": "/you"},
             {"kind": "ooc", "text": " Mara"},
         ]
         # a fence in a line is no call: a line is not a reply
-        assert segments("```otk-note\nx\n```", "user") == [
+        assert segments(line("```otk-note\nx\n```")) == [
             {"kind": "prose", "text": "```otk-note\nx\n```"}
+        ]
+
+    def test_a_chapter_splits_into_its_numbered_heading(self) -> None:
+        parts = segments(line("/chapter The Flood", chapter=3))
+        assert [part["kind"] for part in parts] == ["chapter_number", "prose", "chapter_title"]
+        assert "3" in str(parts[0]["text"]) and parts[-1]["text"] == "The Flood"
+        # a number not counted yet: the line as typed
+        assert segments(line("/chapter The Flood")) == [
+            {"kind": "prose", "text": "/chapter The Flood"}
         ]
 
 
@@ -171,3 +187,7 @@ class TestPosedQuestion:
 
 def reply(body: str) -> Message:
     return Message(role="assistant", body=body)
+
+
+def line(body: str, *, chapter: int | None = None) -> Message:
+    return Message(role="user", body=body, chapter=chapter)

@@ -16,14 +16,14 @@ from otaku.store.schema import Message
 def append_message(app: App, story_id: int, message: Message, *, after: int | None) -> Message:
     """Append one turn to a story after `after` — the head the caller
     read, None for an empty story — and hand it back with its assigned
-    id. Raises HeadMoved where the head stands elsewhere: nothing is
-    written."""
+    id and the chapter it stands in. Raises HeadMoved where the head
+    stands elsewhere: nothing is written."""
     try:
         message_id = app._store.stories.append(story_id, message, after=after)
     except StaleHeadError as e:
         raise HeadMoved(e.head) from e
     app._search_index = None
-    return replace(message, id=message_id)
+    return replace(message, id=message_id, chapter=app._store.messages.get_chapter(message_id))
 
 
 def pop_exchange(app: App, story_id: int, *, expected_head: int | None) -> list[Message]:

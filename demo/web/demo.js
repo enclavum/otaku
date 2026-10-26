@@ -677,6 +677,23 @@ async function card(story, query, body, ask) {
    product's order: the line as recorded (`user_message`), the reply's
    pieces (`assistant_text`, the first saying how it joins), the reply as
    recorded (`assistant_message`), and `done`. */
+/** A chapter's stream: the row that opens it, and nothing after — the
+    answer `play` gives, as the product's stream answers. */
+function chapterStream(opened) {
+  const encoder = new TextEncoder();
+  const event = { type: "user_message", message: opened, note: "" };
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+      controller.close();
+    },
+  });
+  return new Response(stream, {
+    status: 200,
+    headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-store" },
+  });
+}
+
 function play(story, body, ask, regenerate, signal) {
   store.story(story);
   const expected = expectedHead(story, ask);
@@ -688,6 +705,12 @@ function play(story, body, ask, regenerate, signal) {
       throw new store.Refused(409, "This model cannot see pictures.");
     }
     if (!line.trim() && facts.mode !== "story") throw new store.Refused(422, "Nothing to send: type a line.");
+  }
+  // `/chapter TITLE` opens a chapter: its row recorded and the stream
+  // over, no reply (`context.syntax`'s one unanswered direction)
+  if (!regenerate && /^\s*\/chapter(\s|$)/.test(line)) {
+    if (!line.trim().slice("/chapter".length).trim()) throw new store.Refused(422, "Usage: /chapter TITLE");
+    return chapterStream(store.openChapter(story, line.trim()));
   }
   const events = [];
   if (regenerate) store.dropReply(story);

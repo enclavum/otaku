@@ -17,7 +17,7 @@ from dataclasses import replace
 from prompt_toolkit.utils import get_cwidth
 
 from otaku.backend.story.messages.resources import _as_messages
-from otaku.backend.story.messages.services import segments as split
+from otaku.backend.story.messages.services import segments
 from otaku.backend.story.tools import ToolQuestion
 from otaku.store.schema import Message, StoryMode
 from otaku.terminal.api import Message as Drawn
@@ -417,6 +417,11 @@ def asked_block(text: str, *, width: int) -> str:
     stream.feed(text)
     stream.close()
     return out.getvalue()
+
+
+def split(body: str) -> list[dict[str, object]]:
+    """A reply's body split as the backend hands it over (`segments`)."""
+    return segments(Message(role="assistant", body=body))
 
 
 def handed(rows: Sequence[Message]) -> list[Drawn]:

@@ -378,10 +378,11 @@
   }
  ],
  "app": {
-  "version": "0.8.0",
+  "version": "0.9.0",
   "launch_facts": {
    "notices": [],
-   "hint": "Sample stories were imported so you can look around — type to play on, /stories switches between them, or see every command with /help · /model chooses a model · /new starts your own play."
+   "hint": "Sample stories were imported so you can look around — type to play on, /stories switches between them, or see every command with /help · /model chooses a model · /new starts your own play.",
+   "newer_version": ""
   },
   "model": {
    "provider": "ollama",
@@ -432,6 +433,10 @@
    {
     "token": "/ooc",
     "args": "PROMPT"
+   },
+   {
+    "token": "/chapter",
+    "args": "TITLE"
    },
    {
     "token": "/roll",
@@ -832,6 +837,10 @@
       "0"
      ],
      [
+      "Words",
+      "0"
+     ],
+     [
       "Extraction",
       "the story model"
      ]
@@ -866,10 +875,11 @@
    "title": "The Vermilion Tour",
    "label": "The Vermilion Tour",
    "story_so_far": "Bell Harrow becomes stage manager of the Vermilion Players at the Corona, inheriting a mysterious prompt book, a leaking corner, and an unopened iron trunk tied to Vessendal's debts and a proscribed, unfinished two-hundred-year-old play from Katterau. Alongside Emeran Falk, Odalric Vane, Mirelle Sorel, and clerk Casimir Prewick, she uncovers cryptic pages, forged bills, and buried debts—Vane's hidden loan from Hessel Brandt, Anna Sorel's sealed legacy, Mirelle's true parentage and hidden son Rupert/Anton, and copyist Anselm Krug's long guilt. Investigations lead through Achterhalt, the capital's Office of Public Morals (Lenz), and reclusive heir Marius Skarke, who secretly funds the play's revival. Harrow imposes strict rules—certified copies only, no wagers, no volunteering for the unfilled \"eleventh line\"—and orchestrates the play's full, certified performance at the Theatre Royal, breaking its centuries-old curse by finally answering its silent bell. Aftermath: debts settled, Grelle's long guilt resolved, Fenner Bacher rescued and adopted into the company, Mirelle reunited with her son, and the once-cursed script formally retired. The Players gain solvency, a new wagon, and stability. Seasons pass in performances, reconciliations, and quiet institutional rituals—chalk lists, certified books, Toby's promotion—cementing Harrow's harbor-like role holding the company together.",
-   "first_message": "/card vane.json",
+   "first_message": "I come in out of the rain through the stage door of the Corona, boots loud on the boards, and hold the coaching-inn notice up so whoever is nearest can read it: WANTED — A STAGE MANAGER, THE VERMILION PLAYERS, APPLY WITHIN. \"Your door was open,\" I say to the half-dark. \"It shouldn't be.\"",
    "model": "",
    "updated_at": "2026-01-01T00:00:00+00:00",
-   "message_count": 318
+   "message_count": 323,
+   "word_count": 68690
   },
   {
    "id": 1,
@@ -879,7 +889,8 @@
    "first_message": "I follow the post road down into the Meade valley, checking the hills against my survey as I go.",
    "model": "",
    "updated_at": "2026-01-01T00:00:00+00:00",
-   "message_count": 16
+   "message_count": 18,
+   "word_count": 1026
   }
  ],
  "tool_prompts": {

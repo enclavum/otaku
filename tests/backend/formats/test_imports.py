@@ -63,6 +63,12 @@ FULL = ExportedStory(
         ),
         ExportedMessage(role="assistant", body="Хороший план.", kind="ooc"),
         ExportedMessage(role="user", body="Тишина висела в воздухе.", kind="narration"),
+        ExportedMessage(
+            role="user",
+            body="/chapter The Night",
+            kind="chapter",
+            template='((OOC: Chapter "{body}" starts here.))',
+        ),
     ),
 )
 
@@ -211,6 +217,10 @@ class TestMessageHeaders:
         assert message.kind == "ooc"
         assert message.speaker == "Рин"
         assert message.template == "((OOC: y))"
+
+    def test_a_chapters_row(self) -> None:
+        message = self.parse_one('1 · user (chapter) · "((OOC: Chapter \\"{body}\\"))"')
+        assert (message.kind, message.template) == ("chapter", '((OOC: Chapter "{body}"))')
 
     def test_an_unterminated_framing_degrades_to_absent(self) -> None:
         message = self.parse_one('1 · user · Рин · "unterminated')
