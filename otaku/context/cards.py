@@ -34,6 +34,9 @@ _ORIGINAL_MACRO = re.compile(r"\{\{\s*original\s*\}\}", re.IGNORECASE)
 _RETIRED_REMINDER = "depth_note"
 # The card template's `{field}` holes (`card_to_wire`).
 _PLACEHOLDER = re.compile(r"\{(\w+)\}")
+# A character past U+FFFF as 0.7.0 and 0.8.0 wrote it in a basic string: a
+# JSON surrogate pair, which TOML refuses — re-paired as it is read.
+_SURROGATE_PAIR = re.compile(r"(?<!\\)\\u(d[89ab][0-9a-f]{2})\\u(d[c-f][0-9a-f]{2})", re.I)
 
 # Who made what a card brings into a story — its character, its row,
 # its greeting — as `provider` records it (`schema`): the card, no model.
@@ -73,11 +76,12 @@ class CharacterProfile:
         """The profile a TOML text holds — a codex card's or a story
         character's copy alike — under `name`, its row's: every key of the
         profile's vocabulary but the name read back, a list as a tuple,
-        `depth_note` as the reminder 0.7.0 and before wrote; anything else
-        (the `name` line a copy before 0.8.0 carries, a key a later feature
-        added) left out. Raises `tomllib.TOMLDecodeError` for a text that
-        is no TOML."""
-        data = tomllib.loads(toml_text) if toml_text else {}
+        `depth_note` as the reminder 0.7.0 and before wrote, a character
+        past U+FFFF those versions escaped as a surrogate pair read as the
+        character (`read_toml`); anything else (the `name` line a copy before
+        0.8.0 carries, a key a later feature added) left out. Raises
+        `tomllib.TOMLDecodeError` for a text that is no TOML."""
+        data = read_toml(toml_text) if toml_text else {}
         values: dict[str, Any] = {}
         for field in fields(cls):
             value = data.get(field.name)
@@ -128,10 +132,10 @@ def card_injections(toml_text: str, *, char: str) -> tuple[Injection, Injection]
     """What a card asks of the request besides its own row, read from a
     story character's profile: its system prompt, joined to the story's
     system message, and its reminder, sent before the reader's
-    `reminder_depth`-th message from the end — each bound to `char`, the
-    character's name, and the profile's `user`, empty (so not sent) where
-    the card has none. Raises `tomllib.TOMLDecodeError` for a text that
-    is no TOML."""
+    `reminder_depth`-th message from the end, a depth below 1 read as 1 —
+    each bound to `char`, the character's name, and the profile's `user`,
+    and trimmed; empty (so not sent) where the card has none. Raises
+    `tomllib.TOMLDecodeError` for a text that is no TOML."""
     card = CharacterProfile.from_toml(toml_text, name=char)
     user = card.user
     return (
@@ -157,15 +161,17 @@ def card_to_wire(toml_text: str, template: str, *, char: str) -> str:
     card text are never re-read as placeholders; a template line whose
     placeholders ALL came up empty is dropped — a card without a
     scenario ships no dangling `Scenario:` label."""
-    data = tomllib.loads(toml_text)
+    data = read_toml(toml_text)
     user = str(data.get("user", ""))
     # Every card field answers, empty when the profile omitted it — an
     # absent scenario must drop its template line, not survive as a
     # literal `{scenario}`. Only names outside the card's vocabulary are
-    # left as written.
+    # left as written, a key of the text's own among them.
     values: dict[str, str] = {field.name: "" for field in fields(CharacterProfile)}
     values["user"] = user
     for key, value in data.items():
+        if key not in values:
+            continue
         if isinstance(value, str):
             values[key] = bind(value, char=char, user=user)
         elif isinstance(value, list):
@@ -185,6 +191,20 @@ def card_to_wire(toml_text: str, template: str, *, char: str) -> str:
     return "\n".join(out)
 
 
+def read_toml(toml_text: str) -> dict[str, Any]:
+    """A profile's TOML as `tomllib` reads it, but a character past U+FFFF
+    that 0.7.0 and 0.8.0 escaped as a surrogate pair — which TOML refuses —
+    read as the character, so the profiles those versions wrote read
+    again. Raises `tomllib.TOMLDecodeError` for a text that is no TOML."""
+    return tomllib.loads(_SURROGATE_PAIR.sub(_paired, toml_text))
+
+
+def _paired(found: re.Match[str]) -> str:
+    """The character a surrogate pair's two halves stand for."""
+    high, low = int(found.group(1), 16), int(found.group(2), 16)
+    return chr(0x10000 + (high - 0xD800) * 0x400 + (low - 0xDC00))
+
+
 def _field_pairs(profile: CharacterProfile) -> list[str]:
     """Every non-empty field but the two names as a TOML row, in the
     profile's order, macros intact — a number where it is not its
@@ -197,7 +217,7 @@ def _field_pairs(profile: CharacterProfile) -> list[str]:
         if isinstance(value, str) and value:
             lines.append(_toml_pair(field.name, value))
         elif isinstance(value, tuple) and value:
-            items = ", ".join(json.dumps(item) for item in value)
+            items = ", ".join(_toml_basic(item) for item in value)
             lines.append(f"{field.name} = [{items}]")
         elif isinstance(value, int) and value != field.default:
             lines.append(f"{field.name} = {value}")
@@ -207,14 +227,24 @@ def _field_pairs(profile: CharacterProfile) -> list[str]:
 def _toml_pair(key: str, value: str) -> str:
     """One `key = value` row, round-trip exact: a clean single line as a
     literal string, multi-line as a triple-single literal (the leading
-    newline trims), anything a literal cannot hold escaped the JSON way —
-    which is a valid TOML basic string."""
+    newline trims), anything a literal cannot hold as a basic string
+    (`_toml_basic`)."""
     if "\n" not in value and "'" not in value and not _has_control(value):
         return f"{key} = '{value}'"
     if "'''" not in value and not _has_control(value.replace("\n", "")):
         return f"{key} = '''\n{value}'''"
-    return f"{key} = {json.dumps(value)}"
+    return f"{key} = {_toml_basic(value)}"
+
+
+def _toml_basic(text: str) -> str:
+    """`text` as a TOML basic string, escaped the JSON way — a valid one —
+    but every character written as it is, never as the surrogate pair
+    TOML refuses, and DEL escaped: a control character to TOML, not to
+    JSON."""
+    return json.dumps(text, ensure_ascii=False).replace("\x7f", "\\u007f")
 
 
 def _has_control(text: str) -> bool:
-    return any(ord(ch) < 32 and ch not in "\n\t" for ch in text)
+    """Whether `text` holds a control character a TOML literal cannot: one
+    below space but a newline or a tab, or DEL."""
+    return any((ord(ch) < 32 and ch not in "\n\t") or ch == "\x7f" for ch in text)

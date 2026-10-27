@@ -15,6 +15,7 @@ from otaku.backend.app.runs import WorkerRun
 from otaku.backend.codex.cards import services as codex_cards
 from otaku.backend.errors import NO_MODEL_HINT, NO_SUCH_STORY, Conflict, Invalid, NotFound
 from otaku.backend.story import request
+from otaku.context.cards import read_toml
 from otaku.store.schema import Attachment, Card, Character, Journal, Scene
 
 # A row of a story's memory, as `_theirs` finds it.
@@ -282,7 +283,7 @@ def update_character(
         raise Invalid("Nothing to change.")
     if profile is not None:
         try:
-            tomllib.loads(profile)
+            read_toml(profile)
         except tomllib.TOMLDecodeError as e:
             # The profile is data other features parse — a broken edit is
             # refused the way an emptied summary is.

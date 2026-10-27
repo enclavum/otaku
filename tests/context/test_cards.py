@@ -1,13 +1,23 @@
 """Cards as context material: a character's profile written as TOML and
-read back (`CharacterProfile.to_toml`, `from_toml`), the wire block
-composed from a story character's profile (`card_to_wire`), bound at wire
-time, and what a card injects beside it (`card_injections`)."""
+read back (`CharacterProfile.to_toml`, `from_toml`) — any card text,
+field for field — the wire block composed from a story character's
+profile (`card_to_wire`), bound at wire time (`bind`, the vocabulary
+`binds` answers for), and what a card injects beside it
+(`card_injections`) — each reading a profile an older version wrote
+(`read_toml`)."""
 
 import tomllib
 
 import pytest
 
-from otaku.context.cards import CharacterProfile, bind, card_injections, card_to_wire
+from otaku.context.cards import (
+    CharacterProfile,
+    bind,
+    binds,
+    card_injections,
+    card_to_wire,
+    read_toml,
+)
 from otaku.store.schema import InjectionPosition
 
 
@@ -68,6 +78,19 @@ class TestCardToWire:
         got = card_to_wire(CharacterProfile(name="E").to_toml(), "hello {nonsense}", char="E")
         assert got == "hello {nonsense}"
 
+    def test_a_key_outside_the_vocabulary_fills_nothing(self) -> None:
+        # what the profile does not read (`from_toml`), the wire does not send
+        assert card_to_wire("model = 'x'", "M: {model}", char="E") == "M: {model}"
+
+    def test_the_user_fills_from_the_profile(self) -> None:
+        assert card_to_wire("user = 'Alex'", "P: {user}", char="E") == "P: Alex"
+        text = CharacterProfile(name="E", description="d").to_toml()
+        assert card_to_wire(text, "P: {user}\nD: {description}", char="E") == "D: d"
+
+    def test_a_line_with_one_placeholder_filled_stays(self) -> None:
+        text = CharacterProfile(name="E", description="warden").to_toml()
+        assert card_to_wire(text, "{description} / {scenario}", char="E") == "warden / "
+
 
 class TestBind:
     def test_both_names_in_any_case(self) -> None:
@@ -76,6 +99,7 @@ class TestBind:
 
     def test_the_tavern_era_spellings(self) -> None:
         assert bind("<BOT> waves to <USER>", char="Elara", user="Alex") == "Elara waves to Alex"
+        assert bind("<bot> waves to <User>", char="Elara", user="Alex") == "Elara waves to Alex"
 
     def test_unknown_macros_stay_written(self) -> None:
         assert bind("roll {{roll:d20}}", char="E", user="U") == "roll {{roll:d20}}"
@@ -87,6 +111,26 @@ class TestBind:
 
     def test_a_backslash_in_a_name_survives(self) -> None:
         assert bind("{{char}}!", char=r"El\ara", user="U") == r"El\ara!"
+        assert bind("{{user}}!", char="E", user=r"Al\1ex") == r"Al\1ex!"
+
+
+class TestBinds:
+    """Whether `bind` resolves an exact token: the vocabulary question."""
+
+    KNOWN = ("{{char}}", "{{ USER }}", "<BOT>", "<user>", "{{original}}")
+    UNKNOWN = ("{{roll:d20}}", "{{random}}")
+
+    def test_the_vocabulary_binds(self) -> None:
+        for macro in self.KNOWN:
+            assert binds(macro), macro
+
+    def test_anything_else_or_inexact_does_not(self) -> None:
+        for macro in (*self.UNKNOWN, "{{char}} x", "{{char}}{{user}}"):
+            assert not binds(macro), macro
+
+    def test_it_answers_what_bind_does_to_the_token(self) -> None:
+        for macro in (*self.KNOWN, *self.UNKNOWN):
+            assert binds(macro) == (bind(macro, char="C", user="U") != macro), macro
 
 
 class TestProfileToml:
@@ -114,6 +158,48 @@ class TestProfileToml:
     def test_a_storys_copy_records_the_user_it_binds(self) -> None:
         profile = CharacterProfile(name="Elara", user="Alex", description="warden")
         assert tomllib.loads(profile.to_toml()) == {"user": "Alex", "description": "warden"}
+
+    def test_the_user_comes_first(self) -> None:
+        profile = CharacterProfile(name="Elara", user="Alex", description="warden")
+        assert next(iter(tomllib.loads(profile.to_toml()))) == "user"
+
+    def test_fields_are_one_blank_line_apart(self) -> None:
+        text = CharacterProfile(name="E", description="d", personality="p").to_toml()
+        assert len(text.split("\n\n")) == 2
+
+    def test_the_text_is_edge_clean(self) -> None:
+        # exactly what a document round-trip, which trims body edges, gives back
+        for profile in (
+            CharacterProfile(name="E", description="first\nline"),
+            CharacterProfile(name="E", description="d", creator_notes="last\n"),
+            CharacterProfile(name="E", greeting="\nopens on a break"),
+        ):
+            text = profile.to_toml()
+            assert text == text.strip(), profile
+
+    def test_a_default_depth_is_not_written(self) -> None:
+        assert tomllib.loads(CharacterProfile(name="E", reminder="r").to_toml()) == {
+            "reminder": "r"
+        }
+
+    @pytest.mark.parametrize(
+        "profile",
+        [
+            CharacterProfile(name="E", description="a\r\nb"),  # an imported card's line ends
+            CharacterProfile(name="E", personality="bell\x07"),
+            CharacterProfile(name="E", personality="delete\x7f"),
+            CharacterProfile(name="E", scenario="tab\there"),
+            CharacterProfile(name="E", greeting="a\n'''b"),
+            CharacterProfile(name="E", description="\nstarts on a new line"),
+            CharacterProfile(name="E", creator_notes="ends with a quote'\nx'"),
+            CharacterProfile(name="E", greeting="Hi 🎭"),
+            CharacterProfile(name="E", greeting="Hi 🎭\n'''"),
+            CharacterProfile(name="E", examples=("Hi 🎭", "multi\nline", 'q "x"')),
+            CharacterProfile(name="E", alternate_greetings=("✨",)),
+        ],
+    )
+    def test_any_card_text_round_trips(self, profile: CharacterProfile) -> None:
+        assert CharacterProfile.from_toml(profile.to_toml(), name="E") == profile
 
     def test_empty_fields_are_omitted(self) -> None:
         text = CharacterProfile(name="E").to_toml()
@@ -158,6 +244,19 @@ class TestProfileToml:
     def test_a_text_that_is_no_toml_is_refused(self) -> None:
         with pytest.raises(tomllib.TOMLDecodeError):
             CharacterProfile.from_toml("description = = 'x'", name="E")
+
+    def test_a_profile_an_older_version_escaped_reads_again(self) -> None:
+        # 0.7.0 and 0.8.0 wrote a character past U+FFFF as a JSON surrogate
+        # pair, which TOML refuses
+        old = 'examples = ["Hi \\ud83c\\udfad"]\n\nsystem_prompt = "Be \\ud83c\\udfad."'
+        assert CharacterProfile.from_toml(old, name="E").examples == ("Hi 🎭",)
+        assert card_to_wire(old, "X: {examples}", char="E") == "X: Hi 🎭"
+        system, _ = card_injections(old, char="E")
+        assert system.text == "Be 🎭."
+
+    def test_an_escaped_backslash_is_no_older_versions_escape(self) -> None:
+        text = 'description = "\\\\ud83c\\\\udfad"'
+        assert read_toml(text) == {"description": "\\ud83c\\udfad"}
 
 
 class TestCardInjections:
