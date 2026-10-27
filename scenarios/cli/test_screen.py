@@ -9,10 +9,14 @@ stats) are left out of the comparison.
 
 Minutes, not seconds: every check launches a second app for its echo. So
 the module is `slow` besides `cli`, and runs only when asked for with
-`--slow` (`make regression`).
+`--slow` (`make regression`). A check that fails says what tracing it
+takes: the seed of the fake model's picks (`OTAKU_SCREEN_SEED` replays
+it), the live screen and a fresh launch's, and the last bytes written.
 """
 
 import contextlib
+import os
+import random
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
@@ -34,6 +38,7 @@ from scenarios.support.emulator import (
     ROWS,
     TM,
     Emulated,
+    echo,
     jumps,
     mismatch,
     model_server,
@@ -43,6 +48,9 @@ from scenarios.support.emulator import (
 from scenarios.support.harness import read_store
 
 pytestmark = [pytest.mark.cli, pytest.mark.slow]
+
+# The seed of the test running now, for its failure to name (`Played`).
+_SEED = [0]
 
 # A step: what a failure calls it, what it does to the terminal, and
 # whether it erases what stood drawn by design — an undo, a regenerate, an
@@ -361,6 +369,9 @@ class Played:
     one state dir each; ends every terminal and the server with the test."""
 
     def __init__(self, tmp_path: Path) -> None:
+        # the fake model's picks from a seed a failure names, to replay them
+        _SEED[0] = int(os.environ.get("OTAKU_SCREEN_SEED") or random.randrange(1_000_000))
+        random.seed(_SEED[0])
         self.server = model_server()
         self._tmp_path = tmp_path
         self._terms: list[Emulated] = []
@@ -462,7 +473,27 @@ def run(term: Emulated, steps: list[Step], *, story_mode: bool = False) -> list[
             differs = [f"{problem} [{verdict}]" for problem in differs]
         found = ([] if erasing else jumps(frames)) + differs
         problems += [f"{name}: {problem}" for problem in found[:6]]
+    if problems:
+        problems.append(_evidence(term))
     return problems
+
+
+def _evidence(term: Emulated) -> str:
+    """What a failed check takes to trace: the seed the fake model's picks
+    came from, the live screen and a fresh launch's, row by row, and the
+    last bytes the app wrote."""
+    rows, _ = echo(term.root, rows=term.rows, cols=term.cols)
+    return "\n".join(
+        [
+            f"seed {_SEED[0]} (OTAKU_SCREEN_SEED={_SEED[0]} replays its picks)",
+            "--- the live screen ---",
+            *(f"{n:2}|{row}" for n, row in enumerate(term.lines())),
+            "--- a fresh launch's ---",
+            *(f"{n:2}|{row}" for n, row in enumerate(rows)),
+            "--- the last bytes the app wrote ---",
+            repr(term.raw[-2000:]),
+        ]
+    )
 
 
 def painted(raw: bytes) -> bool:
