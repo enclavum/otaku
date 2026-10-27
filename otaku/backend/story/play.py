@@ -459,16 +459,17 @@ def _reply_events(
             if attempt.content or attempt.error is not None:
                 break
         content, final = attempt.content, attempt.final
+        if final is None and attempt.error is None:
+            # A stream ended before its last chunk — where nobody reads any
+            # more, or at a call that ends the reply — files its own account
+            # so far: the wait it spent, what the wire stated by then.
+            final = stream.stats
         tool_call: Tool | None = None
         if attempt.parser.cut is not None:
             # Kept through the fence that ended the call, the recorder's own
-            # where the model opened another block instead; the usage is
-            # the stream's own account where the cut came before the final
-            # chunk.
+            # where the model opened another block instead.
             body = "".join(content)[: attempt.parser.cut.at]
             content = [body if attempt.parser.cut.fenced else body + "\n" + FENCE]
-            if final is None:
-                final = stream.stats
             tool_call = _last_tool_call(content[0])
         reply = _land_reply(
             app, story_id, model, chain, content, final, reply_kind, reply_speaker, mode
