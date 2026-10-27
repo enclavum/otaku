@@ -575,7 +575,7 @@ paths:
       operationId: updateMessage
       tags: [Messages]
       summary: Correct a message, or pin it
-      description: The author's correction, on the story's current chain, and its pin. The whitespace at its edges stays the stored one — a correction changes the words, never the join. A pinned message is sent whole even where its scene is summarized, in front of the scene's summary. Nothing to change, an empty body and a pin on a card's or a tool's message are refused.
+      description: The author's correction, on the story's current chain, and its pin. The whitespace at its edges stays the stored one — a correction changes the words, never the join. A pinned message is sent whole even where its scene is summarized, quoted after the scene's summary. Nothing to change, an empty body and a pin on a card's or a tool's message are refused.
       requestBody:
         required: true
         content:
@@ -2409,13 +2409,31 @@ components:
               tokens: { type: integer }
         parts:
           type: array
-          description: One part per message, exactly as the wire will carry it — or, over the text wire, ONE part, role "prompt", the text as sent.
+          description: The request's text in parts, in order, each with where it comes from, a separator between two that stand apart — a run reads as one — of messages, of the summary's history and scene summaries, of pinned messages — and a header, the summary's or the pinned messages', with what follows it; every other part stands apart. Over the text wire, the pieces of the one text it sends, the template's markers and framing among the system's.
           items:
-            type: object
-            properties:
-              role: { type: string }
-              body: { type: string }
-              pictures: { type: integer }
+            oneOf:
+              - type: object
+                properties:
+                  kind: { const: separator }
+              - type: object
+                properties:
+                  kind: { const: part }
+                  role: { type: string, description: 'The role it goes in: "system" in the system message, else a message''s own.' }
+                  body: { type: string }
+                  pictures: { type: integer }
+                  provenance:
+                    type: string
+                    enum: [system, message, card, pinned_message, pinned_header, header, history, scene, injection]
+                    description: "Where it comes from: the system message's own text; a stored message, sent as it is; a card's message, imported rather than played; a pinned message quoted in the summary, out of its place, or the header over the pinned messages quoted there; the summary standing in for the middle — the header over it, the story so far, or one scene's summary; or an injection."
+                  scene_num: { type: [integer, "null"], description: "A scene summary's scene, numbered as the dossier numbers it; null on every other part." }
+                  scene_title: { type: string, description: 'A scene summary''s scene title; "" on every other part.' }
+                  injection_label: { type: string, description: 'An injection''s name, as its setting names what it injects; "" on every other part.' }
+                  injection_position:
+                    description: An injection's place, as the request carries it; null on every other part.
+                    oneOf: [{ type: string, enum: [system] }, { type: integer, minimum: 1 }, { type: "null" }]
+                  injection_position_text: { type: string, description: 'An injection''s place as the depth ruler names it — "system", "2nd last" …; "" on every other part.' }
+                  card_name: { type: string, description: 'The character a card came in under; "" on every other part.' }
+                  caption: { type: string, description: 'What both frontends head the part with: where it comes from, and which — "pinned · header", "summary · scene 3 · The Weir", "injection · story reminder · 3rd last" …' }
 
     ContextFill:
       type: object
@@ -2578,7 +2596,7 @@ components:
           type: array
           items: { $ref: "#/components/schemas/Attachment" }
         mode: { type: string, enum: [story, chat], description: "The mode it was written in." }
-        pinned: { type: boolean, description: "Sent whole even where its scene is summarized, in front of the scene's summary." }
+        pinned: { type: boolean, description: "Sent whole even where its scene is summarized, quoted after the scene's summary." }
         can_pin: { type: boolean, description: "Whether it may be pinned: every message but a card's and a tool's." }
         segments:
           type: array

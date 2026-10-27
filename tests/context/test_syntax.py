@@ -1,5 +1,10 @@
 """The story's typed language.
 
+`read(line)` binds a line to whatever opened it — a direction's token,
+whole, at the line's start, or prose — and splits it the direction's
+way: the name and the text, the first inliner (a whole `/ooc` or `/cue`
+whose slash follows whitespace) and what follows it. `update_name`
+replaces the name alone; `join_name` is `split_name` backwards.
 `check` returns the usage line for a malformed line and None for a good
 one — an unknown `/word` is prose, not an error. `read(line)` answers
 with the direction the line opened with, prose included, so nothing has
@@ -24,7 +29,7 @@ turn is the newest.
 
 import random
 
-from otaku.context.syntax import DIRECTIONS, read, roll_dice, shown, spans, to_wire
+from otaku.context.syntax import DIRECTIONS, INLINERS, read, roll_dice, shown, spans, to_wire
 from otaku.store.schema import Message
 
 # What a v2 turn stores: the template, placeholders intact.
@@ -38,6 +43,60 @@ def wire(body: str, template: str | None, *, is_last: bool) -> str:
     return to_wire(Message(role="user", body=body, template=template), is_last=is_last)
 
 
+class TestRead:
+    def test_a_line_binds_its_name_text_inliner_and_tail(self) -> None:
+        frame = read("/me Elara: I step in /cue tense")
+        assert (frame.token, frame.name, frame.text, frame.inliner, frame.tail) == (
+            "/me",
+            "Elara",
+            "I step in",
+            "/cue",
+            "tense",
+        )
+
+    def test_prose_binds_no_name_and_no_inliner(self) -> None:
+        frame = read("She waits.")
+        assert (frame.token, frame.name, frame.text, frame.inliner, frame.tail) == (
+            "",
+            "",
+            "She waits.",
+            None,
+            "",
+        )
+
+    def test_a_word_that_only_begins_with_a_token_is_prose(self) -> None:
+        assert read("/youth is wasted").token == ""
+        assert read("/meow").token == ""
+
+    def test_an_empty_line_is_prose(self) -> None:
+        assert read("").token == ""
+        assert read("").check() is None
+
+    def test_an_inliner_at_the_start_of_a_line_is_prose(self) -> None:
+        # the start of the line is where a direction lives
+        assert read("/cue whisper").inliner is None
+        assert spans("/cue whisper") == [("/cue whisper", False)]
+        assert wire("/cue whisper", None, is_last=True) == "/cue whisper"
+
+    def test_an_inliner_is_a_whole_token(self) -> None:
+        for line in ("I go /cues now", "I go /oocish"):
+            assert read(line).inliner is None, line
+            assert spans(line) == [(line, False)], line
+            assert wire(line, None, is_last=True) == line, line
+
+    def test_a_roll_carries_its_dice_in_the_name_slot(self) -> None:
+        frame = read("/roll 1d20+5 I search")
+        assert (frame.name, frame.text) == ("1d20+5", "I search")
+        assert read("/roll 1d6").text == ""
+
+    def test_the_named_character_speaks_on_the_side_its_direction_says(self) -> None:
+        # /me: the line IS their words; /you: it asks them to answer
+        assert read("/me Elara: hi").speaks == "request"
+        assert read("/you Elara").speaks == "reply"
+        for line in ("She waits.", "/ooc x", "/roll 1d6", "/chapter The Flood"):
+            assert read(line).speaks == "", line
+
+
 class TestCheck:
     def test_prose_is_always_valid(self) -> None:
         assert read("She looks up.").check() is None
@@ -49,23 +108,23 @@ class TestCheck:
         assert read("/me Elara: I step in.").check() is None
 
     def test_me_needs_a_colon(self) -> None:
-        assert read("/me Elara I step in").check() == "Usage: /me NAME: PROMPT"
+        assert read("/me Elara I step in").check() == read("/me").usage
 
     def test_me_needs_prose_after_the_colon(self) -> None:
-        assert read("/me Elara:").check() == "Usage: /me NAME: PROMPT"
+        assert read("/me Elara:").check() == read("/me").usage
 
     def test_me_needs_a_name(self) -> None:
-        assert read("/me : I step in.").check() == "Usage: /me NAME: PROMPT"
+        assert read("/me : I step in.").check() == read("/me").usage
 
     def test_you_needs_a_name(self) -> None:
-        assert read("/you").check() == "Usage: /you NAME[: HINT]"
+        assert read("/you").check() == read("/you").usage
 
     def test_you_takes_an_optional_hint_after_a_colon(self) -> None:
         assert read("/you Elara: be cold").check() is None
         assert read("/you Elara:").check() is None  # an empty hint is the bare form
 
     def test_ooc_needs_prose(self) -> None:
-        assert read("/ooc").check() == "Usage: /ooc PROMPT"
+        assert read("/ooc").check() == read("/ooc").usage
 
     def test_a_well_formed_roll_passes_with_or_without_an_action(self) -> None:
         assert read("/roll 1d20+5 I search the alcove").check() is None
@@ -76,7 +135,7 @@ class TestCheck:
 
     def test_a_roll_spec_that_is_not_dice_is_refused(self) -> None:
         error = read("/roll banana I flail").check()
-        assert error is not None and error.startswith("Usage: /roll DICE [PROMPT]")
+        assert error is not None and error.startswith(read("/roll").usage)
 
     def test_an_inliner_needs_text_after_it(self) -> None:
         assert read("She looks up /cue").check() is not None
@@ -87,6 +146,48 @@ class TestCheck:
     def test_a_chapter_needs_a_title(self) -> None:
         assert read("/chapter").check() is not None
         assert read("/chapter The Flood").check() is None
+
+    def test_the_inliner_is_checked_before_the_direction(self) -> None:
+        # it belongs to no direction
+        error = read("/ooc /cue").check()
+        assert error is not None and error != read("/ooc").usage
+
+    def test_the_usage_is_the_tokens_and_its_arguments_shape(self) -> None:
+        for token, direction in DIRECTIONS.items():
+            usage = direction(token).usage
+            assert token in usage and direction.args in usage, token
+
+
+class TestUpdateName:
+    """The line with its name replaced by the cast's own spelling, the
+    rest kept — the closing inliner and its text included."""
+
+    def test_the_name_alone_is_replaced(self) -> None:
+        assert read("/me elara: I bow.").update_name("Elara") == "/me Elara: I bow."
+        assert read("/you elara").update_name("Elara") == "/you Elara"
+        assert read("/you elara: be cold").update_name("Elara") == "/you Elara: be cold"
+
+    def test_the_inliner_and_its_text_stay(self) -> None:
+        line = "/me elara: I bow /cue whisper"
+        assert read(line).update_name("Elara") == "/me Elara: I bow /cue whisper"
+
+    def test_a_line_without_a_name_comes_back_as_typed(self) -> None:
+        for line in ("She waits.", "/ooc x", "/ooc x /cue y"):
+            assert read(line).update_name("Elara") == line, line
+
+
+class TestSplitName:
+    def test_join_name_is_split_name_backwards(self) -> None:
+        for token, rest in (
+            ("/me", "Elara: hi"),
+            ("/you", "Elara: be cold"),
+            ("/you", "Elara"),
+            ("/roll", "1d20 I search"),
+            ("/roll", "1d20"),
+            ("", "anything at all"),
+        ):
+            frame = read(f"{token} {rest}".strip())
+            assert frame.join_name(*frame.split_name(rest)) == rest, (token, rest)
 
 
 class TestTemplateField:
@@ -145,6 +246,12 @@ class TestSpans:
     def test_a_slash_inside_a_word_is_prose(self) -> None:
         assert spans("and/or https://x.co/cue now") == [("and/or https://x.co/cue now", False)]
 
+    def test_a_chapter_line_is_story(self) -> None:
+        assert spans("/chapter The Flood") == [("/chapter The Flood", False)]
+
+    def test_an_ooc_line_with_an_inliner_is_one_aside_after_its_token(self) -> None:
+        assert spans("/ooc x /cue y") == [("/ooc", False), (" x /cue y", True)]
+
     def test_the_breaks_at_a_lines_edges_are_read_past(self) -> None:
         assert spans("\n\n/ooc after a break") == [
             ("\n\n/ooc", False),
@@ -155,6 +262,9 @@ class TestSpans:
 class TestDirections:
     def test_the_registry_holds_exactly_the_five(self) -> None:
         assert set(DIRECTIONS) == {"/me", "/you", "/ooc", "/chapter", "/roll"}
+
+    def test_the_inliners_are_exactly_the_two(self) -> None:
+        assert set(INLINERS) == {"/ooc", "/cue"}
 
     def test_a_chapter_alone_is_played_without_an_answer(self) -> None:
         assert [token for token, line in DIRECTIONS.items() if not line.needs_answer] == [
@@ -204,6 +314,10 @@ class TestShown:
         assert "3" in runs[0][0]
         assert runs[-1][0] == "The Flood"
 
+    def test_a_chapters_heading_reads_as_one_line(self) -> None:
+        joined = "".join(text for text, _ in shown("/chapter The Flood", chapter=3))
+        assert "\n" not in joined and joined.endswith("The Flood")
+
     def test_a_chapter_whose_number_is_unknown_shows_as_typed(self) -> None:
         assert shown("/chapter The Flood") == [("/chapter The Flood", "prose")]
 
@@ -213,13 +327,43 @@ class TestPromptToWire:
         assert wire("She looks up.", None, is_last=True) == "She looks up."
 
     def test_a_lines_leading_whitespace_is_its_seam_and_rides_the_wire(self) -> None:
-        # typed so to go on with the text before it (`assembler.join_of`)
+        # typed so to go on with the text before it (`assembler.get_join_type`)
         assert wire(" and the door", None, is_last=True) == " and the door"
         assert wire("\n\nAnd the door", None, is_last=True) == "\n\nAnd the door"
+
+    def test_a_lines_trailing_break_rides_the_wire(self) -> None:
+        # left for the model's continuation; a cue between the edges
+        # comes and goes inside them
+        assert wire("She waits.\n\n", None, is_last=True) == "She waits.\n\n"
+        line = "\n\nShe waits /cue x\n\n"
+        assert wire(line, None, is_last=True) == "\n\nShe waits ((OOC: x))\n\n"
+        assert wire(line, None, is_last=False) == "\n\nShe waits\n\n"
+
+    def test_a_card_row_sends_its_card_block(self) -> None:
+        row = Message(role="user", kind="card", body="Elara", template="T")
+        assert to_wire(row, is_last=True, card_block="BLOCK") == "BLOCK"
+
+    def test_a_card_row_without_a_profile_sends_its_body_unread(self) -> None:
+        row = Message(role="user", kind="card", body="/ooc x")
+        assert to_wire(row, is_last=True) == "/ooc x"
+
+    def test_a_card_block_is_no_other_rows_business(self) -> None:
+        row = Message(role="user", body="She waits.")
+        assert to_wire(row, is_last=True, card_block="X") == "She waits."
 
     def test_a_command_prefix_never_reaches_the_model(self) -> None:
         got = wire("/me Elara: I step in.", ME, is_last=True)
         assert got == "<<Elara speaks>>\nI step in."
+
+    def test_a_framing_without_a_body_slot_leads_by_a_blank_line(self) -> None:
+        got = wire("/me Elara: I bow.", "<<{name} speaks>>", is_last=True)
+        assert got == "<<Elara speaks>>\n\nI bow."
+
+    def test_a_direction_without_a_framing_sends_its_text_alone(self) -> None:
+        assert wire("/ooc What genre?", None, is_last=True) == "What genre?"
+
+    def test_the_framings_other_braces_stay_literal(self) -> None:
+        assert wire("/ooc hi", "<<{mood}: {body}>>", is_last=True) == "<<{mood}: hi>>"
 
     def test_a_bodyless_command_sends_its_framing_alone(self) -> None:
         assert wire("/you Elara", YOU, is_last=True) == "<<now play Elara>>"
@@ -307,6 +451,11 @@ class TestPromptToWire:
         # sent before the slot existed.
         got = wire("/you Elara", "<<play {name}. {body}>>", is_last=False)
         assert got == "<<play Elara.>>"
+        assert wire("/you Elara", "<<play {name}:{body}>>", is_last=False) == "<<play Elara:>>"
+
+    def test_a_you_hint_without_a_framing_is_still_an_aside(self) -> None:
+        # direction is never story
+        assert wire("/you Elara: be cold", None, is_last=True) == "((OOC: be cold))"
 
     def test_a_you_hint_without_a_slot_becomes_its_own_aside(self) -> None:
         # A template from before the slot existed still carries the hint —
@@ -387,6 +536,20 @@ class TestDice:
     def test_keep_lowest_is_disadvantage(self) -> None:
         assert roll_dice("2d20kl1", _dice(18, 11)) == (11, "[18, 11 → 11]")
 
+    def test_a_modifier_may_lead(self) -> None:
+        assert roll_dice("5+1d20", _dice(14)) == (19, "5 + 14")
+
+    def test_dice_may_subtract_dice(self) -> None:
+        assert roll_dice("1d20-1d4", _dice(10, 3)) == (7, "10 - 3")
+
+    def test_keeping_several_adds_up_the_kept(self) -> None:
+        rolled = roll_dice("4d6kh3", _dice(3, 5, 1, 6))
+        assert rolled is not None and rolled[0] == 14
+
+    def test_the_largest_dice_the_caps_allow_roll(self) -> None:
+        for spec in ("100d6", "1d1000", "1d2"):
+            assert roll_dice(spec) is not None, spec
+
     def test_a_modifier_subtracts_too(self) -> None:
         assert roll_dice("1d20-2", _dice(10)) == (8, "10 - 2")
 
@@ -425,6 +588,8 @@ class TestDice:
             "1d1001",
             "2d20kh2",  # keeping everything rolled keeps nothing at all
             "2d20kh0",
+            "1d20kh1",  # keeps all it rolls
+            "2+3",  # flat numbers alone
             "1d20++5",
             "+1d20",
             "1d20+",
@@ -454,7 +619,7 @@ class TestDice:
         total = int(rolled.split(" = ", 1)[1].split(" ", 1)[0])
         assert rolled.startswith("2d6+1 = ")
         assert 3 <= total <= 13
-        assert frame.note == f"dice: {rolled}"
+        assert rolled in frame.note
 
     def test_every_other_line_freezes_verbatim_and_notes_nothing(self) -> None:
         frame = read("/me Elara: I step in.")

@@ -25,8 +25,8 @@ from otaku.backend.codex.cards import services as codex_cards
 from otaku.backend.errors import NO_SUCH_STORY, Conflict, HeadMoved, Invalid, NotFound
 from otaku.backend.story import chain
 from otaku.backend.story.settings.services import settings_of
-from otaku.context.assembler import estimate_tokens
 from otaku.context.cards import CARD_PROVIDER, CharacterProfile, bind, card_to_wire
+from otaku.context.prompt import estimate_tokens
 from otaku.store.schema import Card, Message, StoryMode
 
 # A card block above roughly this many tokens gets a warning: it rides

@@ -316,7 +316,7 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                     # all, until its look is decided: the opening fence
                     # ahead of its first piece, the closing fence after the
                     # piece that closed it — the language's canonical form
-                    # (`context.tool_calls`), which the terminal may not
+                    # (`context.tools`), which the terminal may not
                     # import, so spelled here as `render.message` spells it.
                     opening = "" if call_open else f"```otk-{event.name}\n"
                     closing = "\n```" if event.closed else ""

@@ -22,9 +22,10 @@ from otaku.backend.story.play import ReasoningPiece as ReasoningPiece
 from otaku.backend.story.play import submit_line as submit_line
 from otaku.backend.story.tools import TOOLS, ToolQuestion, get_tool_label, read_call
 from otaku.backend.story.tools import Actor as Actor
-from otaku.context import syntax, tool_calls
-from otaku.context.assembler import JoinType, get_join_type
-from otaku.context.tool_calls import Prose
+from otaku.context import syntax, tools
+from otaku.context.assembler import get_join_type
+from otaku.context.prompt import JoinType
+from otaku.context.tools import Prose
 from otaku.store.schema import Layout, Message
 
 
@@ -65,8 +66,8 @@ def update_message(app: App, story_id: int, message_id: int, *, body: str) -> st
 
 def set_pinned(app: App, story_id: int, message_id: int, pinned: bool) -> str:
     """Pin one message of a story, or unpin it, and the sentence: a
-    pinned message is sent whole even where its scene is summarized, in
-    front of the scene's summary. The message must be on that story's
+    pinned message is sent whole even where its scene is summarized,
+    quoted after the scene's summary. The message must be on that story's
     current chain, as an edit's must. Any message may be unpinned. Raises
     Invalid for a pin on a row that is never pinned (`can_pin`), NotFound
     for a message that is not on the story's chain."""
@@ -103,7 +104,7 @@ def segments(row: Message) -> list[dict[str, object]]:
             for text, kind in syntax.shown(row.body, chapter=row.chapter)
         ]
     out: list[dict[str, object]] = []
-    for part in tool_calls.parse_reply(row.body):
+    for part in tools.parse_reply(row.body):
         if isinstance(part, Prose):
             out.append({"kind": "prose", "text": part.text})
         elif part.name in TOOLS:
@@ -137,7 +138,7 @@ def posed_question(newest: Message | None, shown: frozenset[str]) -> ToolQuestio
     past it; a line played since means it was answered."""
     if newest is None or newest.role != "assistant" or "question" not in shown:
         return None
-    for part in reversed(tool_calls.parse_reply(newest.body)):
+    for part in reversed(tools.parse_reply(newest.body)):
         if isinstance(part, Prose):
             if part.text.strip():
                 return None

@@ -212,7 +212,7 @@ class Message:
     `/chapter` line; a tool's row is the result of a tool otaku ran —
     nobody's line, sent as the reader's turn, framed out of character."""
 
-    id: int = 0  # until stored; the assembler's wire-only rows never are
+    id: int = 0  # until stored
     role: str  # 'user' | 'assistant' | 'tool'
     kind: str = "dialogue"  # 'dialogue' | 'narration' | 'ooc' | 'card' | 'tool' | 'chapter'
     speaker_id: int | None = None

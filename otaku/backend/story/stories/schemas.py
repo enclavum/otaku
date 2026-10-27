@@ -10,7 +10,7 @@ from otaku.backend.base import Schema
 # to ask.
 from otaku.backend.story.stories.services import NOTHING_TO_REGENERATE as NOTHING_TO_REGENERATE
 from otaku.backend.story.stories.services import NOTHING_TO_UNDO as NOTHING_TO_UNDO
-from otaku.context.assembler import JoinType
+from otaku.context.prompt import JoinType
 from otaku.formatting import LABEL_WIDTH, truncate_label
 from otaku.store.schema import CompletionType, Layout, StoryMode
 

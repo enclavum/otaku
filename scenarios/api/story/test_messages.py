@@ -1191,21 +1191,25 @@ class TestTheNovel:
             app.play("/system Be brief.")
             app.play("I was waiting for")
             report = app.api.stories.context.get(app.story_id)
-            # one part, the text as sent, its tokens the text's estimate
-            assert [part.role for part in report.parts] == ["prompt"]
+            # the parts joined are the text as sent, its tokens the text's estimate
+            wire = "".join(getattr(part, "body", "") for part in report.parts)
             assert report.template == "plain"
-            assert report.total_tokens == estimate_tokens(report.wire)
+            assert report.figures.total_tokens == estimate_tokens(wire)
             # the next request IS the preview, the typed line after it
             app.play("Then?")
-            assert app.server.requests[-1]["prompt"] == report.wire + " Then?"
-            # and the terminal prints the text as sent, under the one
-            # marker that stands for the field
+            assert app.server.requests[-1]["prompt"] == wire + " Then?"
+            # and the terminal prints the text as sent, part by part
             report = app.api.stories.context.get(app.story_id)
             capsys.readouterr()
             app.play("/context")
             printed = capsys.readouterr().out
-            assert "[prompt]" in printed and printed.endswith(report.wire + "\n")
-            assert " Then?" in report.wire
+            lines = [
+                line
+                for part in report.parts
+                for line in getattr(part, "body", "").splitlines()
+                if line.strip()
+            ]
+            assert lines and all(line in printed for line in lines)
 
     def test_a_reply_outside_story_mode_is_recorded_in_chat_mode(self, app: App) -> None:
         app.play("I open the door.")

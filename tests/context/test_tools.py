@@ -4,19 +4,20 @@ the model using a tool and are not story.
 The `otk-` namespace is the whole test of what a call is: no list of
 tools is consulted, so a call stays one in a build that never heard of
 its tool. `parse_reply`'s contract: the body as `Prose` and `ToolCall`
-segments in order; a call's `name` is the NAME, lowercase, its inside
-the lines between its fences kept as written, no trailing blank line,
-running to the end when never closed; a fence is a fence only at the
-start of its line, and its line goes with the call, newline included,
-as do the blank lines before it; calls never nest — an opening fence
-inside a call ends it and opens its own, a bare fence line ends the
-open call and is prose when none is, any other line is prose outside a
-call and the call's own inside one; plain fences are never tracked.
-`strip`'s: the body without its calls, fences and all, a newline where
-a call stood between two runs of prose, nothing else changed.
-`to_wire`'s: the body under a `ToolSet` — a call of a tool that is on
-as its canonical self, any other — switched off, or unknown — gone with
-the blank line beside it. `ReplyParser`'s: the same
+segments in order; a call's `name` is the NAME — words of letters
+joined by single hyphens, 32 at most — lowercase, its inside the lines
+between its fences kept as written, no trailing blank line, running to
+the end when never closed; a fence is a fence only at the start of its
+line, and its line goes with the call, newline included, as do the
+blank lines before it; calls never nest — an opening fence inside a
+call ends it and opens its own, a bare fence line ends the open call
+and is prose when none is, any other line is prose outside a call and
+the call's own inside one; plain fences are never tracked. `strip`'s:
+the body without its calls, fences and all, a newline where a call
+stood between two runs of prose, nothing else changed. `to_wire`'s: the
+body under a `ToolSet` — a call of a tool that is on as its canonical
+self, any other — switched off, or unknown — gone with the blank line
+beside it; what it gives goes again unchanged. `ReplyParser`'s: the same
 parse over a stream — whatever the chunking, the pieces joined are
 `parse_reply`'s segments; a line's start that may yet become a fence is
 held back until its newline decides it, and so is a line's end until
@@ -24,11 +25,9 @@ the next line says whose it is; a call of a tool in `ending` ends the
 text, and `cut` says where.
 """
 
-from typing import ClassVar
-
 import pytest
 
-from otaku.context.tool_calls import (
+from otaku.context.tools import (
     FENCE,
     Cut,
     Prose,
@@ -41,6 +40,36 @@ from otaku.context.tool_calls import (
 )
 
 QUESTION = "```otk-question\nGo in?\n1. Yes\n2. No\n```"
+
+
+# Bodies every reading must agree on: the stream's with the whole one's,
+# the wire's with itself.
+BODIES = [
+    "She nods. The door opens.",
+    "```otk-note\nplan\n```\nShe nods.\n```otk-question\nStay?\n1. Stay\n2. Go\n```",
+    "a < b, ```python\nx\n```, ``` \n and ```otk-\n astray\n```",
+    "```OTK-NOTE\nx\n```\n```otk-note\ny\n```",
+    "```otk-question\n```",
+    "```otk-note\na\n```otk-question\nb\n```",
+    "```otk-note\n```otk-question\nb\n```",
+    "```otk-note\n\na\n\n```py\nb\n\n```\n\nc",
+    "She nods.\n```otk-note\nthe letter is",
+    "```otk-note\nx\n\n",
+    "  ```` otk-note  \nx\n   `````  \n",
+    "One.\n\n\n```otk-note\na\n```\nTwo.\n\n```otk-question\nb\n```\n\nThree.",
+    "ends on a maybe\n```otk-qu",
+    "ends on a maybe\n``",
+    "ends on a maybe\n   ",
+    "```otk-note",
+    "```otk-note\n",
+    "\n\n```otk-note\nx\n```\n\n",
+    "x ```\ny\n```otk-note\nz ```\n```",
+    "```otk-web-search\nq\n```",
+    "```otk-web--search\nq\n```",
+    "```otk-note\nx\n    ```\n```",
+    "```otk-note\r\nx\r\n```",
+    "```otk-" + "a" * 16 + "-" + "a" * 16 + "\nx\n```",
+]
 
 
 class TestParseReply:
@@ -86,6 +115,13 @@ class TestParseReply:
             ToolCall("note", "x", closed=True),
         ]
 
+    def test_a_whitespace_line_before_an_opening_fence_is_the_proses(self) -> None:
+        # content, not a blank line, outside a call as inside one
+        assert parse_reply("A\n  \n```otk-note\nx\n```") == [
+            Prose("A\n  "),
+            ToolCall("note", "x", closed=True),
+        ]
+
     def test_the_proses_own_blank_lines_stay(self) -> None:
         assert parse_reply("She nods.\n\nThe door opens.\n") == [
             Prose("She nods.\n\nThe door opens.")
@@ -119,11 +155,26 @@ class TestParseReply:
         assert parse_reply("```OTK-Note\nx\n```") == [ToolCall("note", "x", closed=True)]
         assert parse_reply("```Otk-QUESTION\nx\n```") == [ToolCall("question", "x", closed=True)]
 
+    def test_a_name_may_join_words_with_single_hyphens(self) -> None:
+        assert parse_reply("```otk-web-search\nq\n```") == [ToolCall("web-search", "q", True)]
+        assert parse_reply("```OTK-Web-Search\nq\n```") == [ToolCall("web-search", "q", True)]
+
+    def test_a_hyphen_that_joins_no_two_words_is_prose(self) -> None:
+        for info in ("otk-web--search", "otk--web", "otk-web-", "otk-web_search"):
+            body = f"```{info}\nq\n```"
+            assert parse_reply(body) == [Prose(body)], info
+
     def test_a_name_may_be_thirty_two_letters_and_no_more(self) -> None:
         assert parse_reply("```otk-" + "a" * 32 + "\nx\n```") == [
             ToolCall("a" * 32, "x", closed=True)
         ]
         body = "```otk-" + "a" * 33 + "\nx\n```"
+        assert parse_reply(body) == [Prose(body)]
+
+    def test_the_cap_counts_the_hyphens(self) -> None:
+        name = "a" * 15 + "-" + "a" * 16
+        assert parse_reply(f"```otk-{name}\nx\n```") == [ToolCall(name, "x", closed=True)]
+        body = "```otk-" + "a" * 16 + "-" + "a" * 16 + "\nx\n```"
         assert parse_reply(body) == [Prose(body)]
 
     def test_a_fence_may_be_longer_than_three_backticks(self) -> None:
@@ -132,6 +183,14 @@ class TestParseReply:
     def test_a_fence_may_be_indented_three_spaces_at_most(self) -> None:
         assert parse_reply("   ```otk-note\nx\n   ```") == [ToolCall("note", "x", closed=True)]
         body = "    ```otk-note\nx\n```"  # four: an indented code block to markdown, prose here
+        assert parse_reply(body) == [Prose(body)]
+        # a closing fence indented four is the inside's, and the call runs on
+        assert parse_reply("```otk-note\nx\n    ```") == [
+            ToolCall("note", "x\n    ```", closed=False)
+        ]
+
+    def test_a_tab_is_no_indent_a_fence_may_have(self) -> None:
+        body = "\t```otk-note\nx\n```"
         assert parse_reply(body) == [Prose(body)]
 
     def test_spaces_and_tabs_may_stand_around_the_name(self) -> None:
@@ -267,6 +326,9 @@ class TestStrip:
         assert strip("```otk-note\nx\n```\nShe nods.") == "She nods."
         assert strip("She nods.\n" + QUESTION) == "She nods."
 
+    def test_the_blank_lines_before_a_call_leave_with_it(self) -> None:
+        assert strip("A\n\n```otk-note\nx\n```\nB") == "A\nB"
+
     def test_every_call_leaves(self) -> None:
         body = "One.\n```otk-note\nfirst\nsecond\n```\nTwo.\n```otk-question\nStay?\n1. Stay\n```"
         assert strip(body) == "One.\nTwo."
@@ -324,6 +386,20 @@ class TestToWire:
         # A white list: a decommissioned tool's calls never ride.
         assert to_wire("A\n```otk-plan\nx\n```\nB", self.ON) == "A\nB"
 
+    def test_with_no_tool_on_no_call_rides(self) -> None:
+        assert to_wire("A\n```otk-note\nx\n```\nB", ToolSet()) == "A\nB"
+
+    def test_a_hyphenated_tool_that_is_on_goes_canonical(self) -> None:
+        on = ToolSet(on=frozenset({"web-search"}))
+        assert to_wire("```OTK-Web-Search\nq", on) == "```otk-web-search\nq\n```"
+
+    @pytest.mark.parametrize("body", [*BODIES, "A\n\n```otk-plan\nx\n```\n\nB"])
+    def test_what_goes_on_the_wire_goes_again_unchanged(self, body: str) -> None:
+        # its canonical self: a stored reply sent twice reads the same
+        for tools in (self.ON, ToolSet(on=frozenset({"note", "question"}))):
+            once = to_wire(body, tools)
+            assert to_wire(once, tools) == once
+
     def test_a_call_that_leaves_takes_the_blank_lines_after_it(self) -> None:
         assert to_wire("```otk-plan\nx\n```\n\nShe nods.", self.ON) == "She nods."
         assert to_wire("A\n\n```otk-plan\nx\n```\n\nB", self.ON) == "A\n\nB"
@@ -351,28 +427,6 @@ class TestToWire:
 class TestReplyParser:
     """The same grammar over a stream."""
 
-    BODIES: ClassVar[list[str]] = [
-        "She nods. The door opens.",
-        "```otk-note\nplan\n```\nShe nods.\n```otk-question\nStay?\n1. Stay\n2. Go\n```",
-        "a < b, ```python\nx\n```, ``` \n and ```otk-\n astray\n```",
-        "```OTK-NOTE\nx\n```\n```otk-note\ny\n```",
-        "```otk-question\n```",
-        "```otk-note\na\n```otk-question\nb\n```",
-        "```otk-note\n```otk-question\nb\n```",
-        "```otk-note\n\na\n\n```py\nb\n\n```\n\nc",
-        "She nods.\n```otk-note\nthe letter is",
-        "```otk-note\nx\n\n",
-        "  ```` otk-note  \nx\n   `````  \n",
-        "One.\n\n\n```otk-note\na\n```\nTwo.\n\n```otk-question\nb\n```\n\nThree.",
-        "ends on a maybe\n```otk-qu",
-        "ends on a maybe\n``",
-        "ends on a maybe\n   ",
-        "```otk-note",
-        "```otk-note\n",
-        "\n\n```otk-note\nx\n```\n\n",
-        "x ```\ny\n```otk-note\nz ```\n```",
-    ]
-
     @pytest.mark.parametrize("body", BODIES)
     def test_any_chunking_gives_the_segments_parse_reply_gives(self, body: str) -> None:
         cuts = [(i, j) for i in range(len(body) + 1) for j in range(i, len(body) + 1)]
@@ -397,6 +451,8 @@ class TestReplyParser:
             "```otk",
             "```otk-",
             "```otk-qu",
+            "```otk-web-",
+            "```otk-web-se",
             " ",
             "   ",
             "   ``",
@@ -416,6 +472,10 @@ class TestReplyParser:
         # No tool's name is this long: the text is prose, and is let go.
         pieces = ReplyParser().feed("```otk-" + "a" * 200)
         assert pieces == [Prose("```otk-" + "a" * 200)]
+
+    def test_a_name_is_held_up_to_the_cap_and_let_go_past_it(self) -> None:
+        assert ReplyParser().feed("```otk-" + "a" * 32) == []
+        assert ReplyParser().feed("```otk-" + "a" * 33) == [Prose("```otk-" + "a" * 33)]
 
     def test_a_held_line_start_opens_its_call_at_its_newline(self) -> None:
         parser = ReplyParser()
@@ -487,6 +547,16 @@ class TestCut:
         ]
         assert parser.cut is None
 
+    def test_an_ending_call_cuts_whatever_its_case(self) -> None:
+        parser = ReplyParser(ending=frozenset({"question"}))
+        parser.feed("```OTK-Question\nGo?\n```\nmore")
+        assert parser.cut == Cut(at=len("```OTK-Question\nGo?\n```"), fenced=True)
+
+    def test_a_hyphenated_tool_may_end_the_text(self) -> None:
+        parser = ReplyParser(ending=frozenset({"web-search"}))
+        parser.feed("```otk-web-search\nq\n```\nmore")
+        assert parser.cut == Cut(at=len("```otk-web-search\nq\n```"), fenced=True)
+
     def test_the_cut_runs_through_the_closing_fence(self) -> None:
         parser = ReplyParser(ending=frozenset({"question"}))
         pieces = parser.feed("Creak.\n\n" + self.ASK + "\n\nShe goes in anyway.")
@@ -536,6 +606,13 @@ class TestCut:
         assert parser.cut is None
         assert parser.flush() == [ToolCall("question", "", closed=True)]
         assert parser.cut == Cut(at=len(self.ASK), fenced=True)
+
+    def test_the_cut_at_an_opening_fence_may_come_at_flush(self) -> None:
+        parser = ReplyParser(ending=frozenset({"question"}))
+        parser.feed("```otk-question\nGo?\n```otk-note")
+        assert parser.cut is None  # the line may yet be something else
+        parser.flush()
+        assert parser.cut == Cut(at=len("```otk-question\nGo?"), fenced=False)
 
     def test_a_closing_fences_trailing_spaces_are_within_the_cut(self) -> None:
         parser = ReplyParser(ending=frozenset({"question"}))

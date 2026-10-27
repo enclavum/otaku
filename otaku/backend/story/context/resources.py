@@ -11,12 +11,7 @@ from otaku.backend.app.core.services import App
 from otaku.backend.base import Resource
 from otaku.backend.errors import NotFound
 from otaku.backend.story.context import services as domain_context
-from otaku.backend.story.context.schemas import (
-    ContextFill,
-    ContextInjection,
-    ContextPart,
-    ContextReport,
-)
+from otaku.backend.story.context.schemas import ContextFill, ContextReport, as_context_report
 
 
 class ContextResource(Resource):
@@ -28,25 +23,14 @@ class ContextResource(Resource):
 
     def get(self, story_id: int) -> ContextReport:
         """Preview a story's next request: what it is made of, said in
-        words, and one part per message it will carry. No model: the
+        words, and its text in parts, each with where it comes from, a
+        separator between two that stand apart. No model: the
         preview still stands, over the assembler's default window — what
         WOULD be sent is a question that needs no server. A model not
         loaded is not loaded for a preview, so its window is the
         substitute too, and the report says so. Raises NotFound for a
         story that is not there, Conflict for one that cannot fit."""
-        found = domain_context.get_context(self._app, story_id)
-        return ContextReport(
-            prompt=found.prompt,
-            tail_setting=found.tail_setting,
-            parts=tuple(ContextPart(part.role, part.body, part.pictures) for part in found.parts),
-            injections=tuple(
-                ContextInjection(each.label, each.position, each.position.text, each.tokens)
-                for each in found.injections
-            ),
-            note=found.note,
-            wire=found.wire,
-            template=found.template,
-        )
+        return as_context_report(domain_context.get_context(self._app, story_id))
 
 
 class ContextFillResource(Resource):

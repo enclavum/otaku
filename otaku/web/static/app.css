@@ -73,6 +73,21 @@
   --otk-chat-story:  var(--otk-ok);           /* the story's rule, chat layout */
   --otk-chat-you:    var(--otk-accent);       /* the reader's rule, chat layout */
 
+  /* -- the request's bands, in the context panel -------------------------- */
+  --otk-inject-bg:    oklch(0.975 0.022 85);   /* a text injected besides the story */
+  --otk-inject-line:  oklch(0.80 0.07 85);
+  --otk-inject-ink:   oklch(0.50 0.09 75);
+  --otk-system-bg:    oklch(0.972 0.016 282);  /* the system message               */
+  --otk-system-line:  oklch(0.78 0.06 282);
+  --otk-system-ink:   oklch(0.47 0.10 282);
+  --otk-card-bg:      oklch(0.974 0.018 350);  /* a character card                 */
+  --otk-card-line:    oklch(0.80 0.06 350);
+  --otk-card-ink:     oklch(0.49 0.10 350);
+  --otk-pinned-bg:    oklch(0.973 0.018 205);  /* the pinned messages, word for word */
+  --otk-pinned-line:  oklch(0.79 0.055 205);
+  --otk-pinned-ink:   oklch(0.47 0.08 215);
+  --otk-summary-bg:   oklch(0.982 0.004 175);  /* the summary: paper's lightness, greyed */
+
   /* -- three voices, one job each ----------------------------------------- */
   --otk-font-prose:   'Newsreader', 'Literata', Georgia, serif;
   --otk-font-display: 'Archivo', 'IBM Plex Sans', system-ui, sans-serif;
@@ -170,6 +185,19 @@
   --otk-accent:      oklch(0.68 0.13 55);
   --otk-accent-ink:  oklch(0.74 0.12 55);
   --otk-accent-tint: oklch(0.68 0.13 55 / 0.14);
+  --otk-inject-bg:    oklch(0.31 0.03 85);
+  --otk-inject-line:  oklch(0.52 0.07 85);
+  --otk-inject-ink:   oklch(0.82 0.09 80);
+  --otk-system-bg:    oklch(0.30 0.03 282);
+  --otk-system-line:  oklch(0.48 0.07 282);
+  --otk-system-ink:   oklch(0.80 0.08 282);
+  --otk-card-bg:      oklch(0.30 0.03 350);
+  --otk-card-line:    oklch(0.50 0.07 350);
+  --otk-card-ink:     oklch(0.80 0.08 350);
+  --otk-pinned-bg:    oklch(0.30 0.028 205);
+  --otk-pinned-line:  oklch(0.50 0.06 205);
+  --otk-pinned-ink:   oklch(0.80 0.07 205);
+  --otk-summary-bg:   oklch(0.265 0.006 200);
   --otk-dialogue:    oklch(0.76 0.12 244);
   --otk-scrollbar-thumb: oklch(0.50 0.01 165);
   --otk-scrollbar-track: oklch(0.30 0.008 90);
@@ -196,6 +224,19 @@
     --otk-accent:      oklch(0.68 0.13 55);
     --otk-accent-ink:  oklch(0.74 0.12 55);
     --otk-accent-tint: oklch(0.68 0.13 55 / 0.14);
+    --otk-inject-bg:    oklch(0.31 0.03 85);
+    --otk-inject-line:  oklch(0.52 0.07 85);
+    --otk-inject-ink:   oklch(0.82 0.09 80);
+    --otk-system-bg:    oklch(0.30 0.03 282);
+    --otk-system-line:  oklch(0.48 0.07 282);
+    --otk-system-ink:   oklch(0.80 0.08 282);
+    --otk-card-bg:      oklch(0.30 0.03 350);
+    --otk-card-line:    oklch(0.50 0.07 350);
+    --otk-card-ink:     oklch(0.80 0.08 350);
+    --otk-pinned-bg:    oklch(0.30 0.028 205);
+    --otk-pinned-line:  oklch(0.50 0.06 205);
+    --otk-pinned-ink:   oklch(0.80 0.07 205);
+    --otk-summary-bg:   oklch(0.265 0.006 200);
     --otk-dialogue:    oklch(0.76 0.12 244);
     --otk-scrollbar-thumb: oklch(0.50 0.01 165);
     --otk-scrollbar-track: oklch(0.30 0.008 90);
@@ -1581,7 +1622,7 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 .otk-context__stages { display: flex; border: var(--otk-hair) solid var(--otk-ink); background: var(--otk-band); }
 /* the injections, bracketed between the stages and an ink rule: a section
    head with the total, then fixed depth and token columns so every row lines up */
-.otk-context__injected { display: flex; flex-direction: column; gap: 6px; padding-bottom: 14px; border-bottom: var(--otk-hair) solid var(--otk-ink); margin-bottom: 6px; }
+.otk-context__injected { display: flex; flex-direction: column; gap: 6px; padding-bottom: 14px; border-bottom: var(--otk-hair) solid var(--otk-line); margin-bottom: 0; }
 .otk-context__injrow { display: grid; grid-template-columns: auto minmax(24px, 1fr) 84px 118px; column-gap: 8px; align-items: baseline; padding: 3px 0; }
 /* the head is a section head without its rule: the rows follow it at the
    head's 8px margin plus the column's 6px gap, and stand 14px of padding over
@@ -1592,6 +1633,10 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 .otk-context__injat, .otk-context__injtok { font-family: var(--otk-font-mono); font-size: var(--otk-size-mono); font-weight: 400; letter-spacing: 0; color: var(--otk-muted); font-variant-numeric: tabular-nums; }
 .otk-context__injtok { text-align: right; }
 .otk-context__injhead .otk-context__injtok { color: var(--otk-body); }
+/* the heading over the request's text stands 21px off the rule above it
+   and off the text below: the head's 14px gap plus 7px over it, its 16px
+   plus the wire's 5px under it */
+.otk-context__wirehead { margin: 7px 0 16px; }
 .otk-context__cell { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 5px; padding: 18px 14px; background: var(--otk-paper); }
 .otk-context__cell + .otk-context__cell { border-left: var(--otk-hair) solid var(--otk-line); }
 .otk-context__cell--idle { background: none; }
@@ -1611,7 +1656,56 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
   .otk-context__injname { font-size: var(--otk-size-ui); white-space: nowrap; }
   .otk-context__injat, .otk-context__injtok { white-space: nowrap; font-size: 13px; }
 }
-.otk-context__wire { display: flex; flex-direction: column; gap: 20px; padding-top: 6px; }
+.otk-context__wire { display: flex; flex-direction: column; gap: 5px; padding-top: 0; }
+/* 5px from the head's last rule down to the first block: the wire follows
+   the stages and the costed lists, and .otk-context's gap is 22px */
+.otk-context > .otk-v + .otk-context__wire { margin-top: -17px; }
+/* The request in bands: the system message, a card, an injection and the
+   pinned messages each in a band of its own hue, the summary in a grey
+   fold; each reaches the panel's edges and labels itself in the left
+   gutter, reading bottom-to-top. Plain messages sit on the panel's own
+   left edge; only the bands step in. */
+.otk-fold {
+  position: relative; margin: 0 -30px; padding: 16px 30px 16px 64px;
+  border-top: var(--otk-hair) dotted var(--otk-line);
+  border-bottom: var(--otk-hair) dotted var(--otk-line);
+  background: var(--otk-summary-bg);
+  display: flex; flex-direction: column; gap: 24px;
+}
+.otk-fold__label {
+  position: absolute; left: 4px; width: 56px;
+  display: flex; flex-direction: column; align-items: center; gap: 15px;
+  font-family: var(--otk-font-mono); font-size: var(--otk-size-tag);
+  letter-spacing: var(--otk-track-tag); text-transform: uppercase;
+  color: var(--otk-faint);
+}
+.otk-fold__label--top { top: 24px; }
+.otk-fold__label--bottom { bottom: 24px; }
+.otk-fold__word { writing-mode: vertical-rl; transform: rotate(180deg); }
+.otk-fold__arrow { display: flex; align-items: center; justify-content: center; width: 1em; height: 1em; font-size: 12px; line-height: 1; letter-spacing: 0; }
+.otk-inject {
+  position: relative; margin: 0 -30px; padding: 16px 30px 16px 64px;
+  --band-bg: var(--otk-inject-bg); --band-line: var(--otk-inject-line); --band-ink: var(--otk-inject-ink);
+  border-top: var(--otk-hair) dotted var(--band-line);
+  border-bottom: var(--otk-hair) dotted var(--band-line);
+  background: var(--band-bg);
+  display: flex; flex-direction: column; gap: 12px;
+}
+.otk-inject__label {
+  position: absolute; left: 4px; width: 56px; top: 50%; transform: translateY(-50%);
+  display: flex; justify-content: center;
+  font-family: var(--otk-font-mono); font-size: var(--otk-size-tag);
+  letter-spacing: var(--otk-track-tag); text-transform: uppercase;
+  color: var(--band-ink);
+}
+.otk-inject .otk-passage__rubric { color: var(--band-ink); }
+.otk-inject--system { --band-bg: var(--otk-system-bg); --band-line: var(--otk-system-line); --band-ink: var(--otk-system-ink); }
+.otk-inject--card   { --band-bg: var(--otk-card-bg);   --band-line: var(--otk-card-line);   --band-ink: var(--otk-card-ink); }
+.otk-inject--pinned { --band-bg: var(--otk-pinned-bg); --band-line: var(--otk-pinned-line); --band-ink: var(--otk-pinned-ink); }
+/* a run of plain messages starts as far below a band's rule as a band's own
+   text sits inside it: 5px gap + 11px = the bands' 16px */
+.otk-context__wire > :is(.otk-inject, .otk-fold) + .otk-passage { padding-top: 11px; }
+.otk-context__wire > .otk-passage:has(+ :is(.otk-inject, .otk-fold)) { padding-bottom: 11px; }
 
 /* =============================================================================
    DOCKET — a slip for every small report

@@ -55,7 +55,7 @@ from otaku.backend.story.prompts.resources import (
 )
 from otaku.backend.story.stories.resources import StoriesResource
 from otaku.backend.story.transfer.resources import ImportsResource
-from otaku.context.assembler import JoinType
+from otaku.context.prompt import JoinType
 from otaku.providers import KeySource, Locality, ModelState
 from otaku.settings.state import ModelRef
 from otaku.store.schema import (

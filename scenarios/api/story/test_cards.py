@@ -416,7 +416,7 @@ class TestWhatACardInjects:
         assert {i.text for i in job} == {"Never lie.", "Riddles."}
         report = app.api.stories.context.get(story)
         assert len(report.injections) == 2
-        (sent,) = report.prompt.cards
+        (sent,) = report.cards
         assert sent.name == "Wren" and sent.tokens > 0
 
 

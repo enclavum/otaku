@@ -2,7 +2,8 @@
 `api.settings` — pinned to the file vocabulary they order, because the
 two live in different layers and only this keeps them one thing — and
 its pure edges, how stop strings are typed and read back and how a value
-is shown."""
+is shown. And the model in use's one choice of wire (`ModelFacts`): the
+template a story's request is rendered in, over the text wire alone."""
 
 import pytest
 
@@ -10,12 +11,15 @@ from otaku.backend.app.models.services import (
     EFFORT_LEVELS,
     PARAMETERS,
     THINK_MENU,
+    ModelFacts,
     parameter_text,
     parse_stops,
 )
 from otaku.providers.openai.completion import PROTOCOL_PARAMS
+from otaku.providers.openai.templates import PLAIN, TEXT_TEMPLATES, TextTemplate
 from otaku.providers.registry import ALL_CLIENTS
 from otaku.settings.models import THINK_UNSET
+from otaku.store.schema import Layout
 
 
 class TestThinkVocabulary:
@@ -83,3 +87,34 @@ class TestParameterText:
 
     def test_stops_are_json_strings_apart(self) -> None:
         assert parameter_text(["\nUser:", "END"]) == '"\\nUser:" "END"'
+
+
+class TestWireTemplate:
+    """The template the turn and its preview render a story's request in:
+    the model's own, where the layout goes over the text wire; none where
+    it goes as the chat."""
+
+    def test_the_novel_on_a_model_that_completes_text_is_rendered_in_its_template(self) -> None:
+        assert facts(PLAIN).wire_template(Layout.NOVEL) is PLAIN
+
+    def test_every_other_layout_goes_as_the_chat(self) -> None:
+        for layout in (Layout.CANVAS, Layout.MANUSCRIPT, Layout.CHAT):
+            assert facts(PLAIN).wire_template(layout) is None, layout
+
+    def test_the_novel_on_a_model_that_cannot_complete_text_goes_as_the_chat(self) -> None:
+        assert facts(TEXT_TEMPLATES["gemma4"]).wire_template(Layout.NOVEL) is None
+        assert facts(PLAIN, text_completion=False).wire_template(Layout.NOVEL) is None
+
+
+def facts(template: TextTemplate | None, *, text_completion: bool = True) -> ModelFacts:
+    """The model in use as far as the wire is concerned: whether its engine
+    serves the text wire, and the template it renders in."""
+    return ModelFacts(
+        model=None,
+        client=None,
+        row=None,
+        vision=False,
+        text_completion=text_completion,
+        text_template=template,
+        on_cloud=False,
+    )

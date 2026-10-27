@@ -1,6 +1,6 @@
 ---
 paths:
-  - "otaku/context/tool_calls.py"
+  - "otaku/context/tools.py"
   - "otaku/context/injections.py"
   - "otaku/context/assembler.py"
   - "otaku/backend/story/tools.py"
@@ -13,6 +13,7 @@ paths:
   - "otaku/terminal/chat/stream.py"
   - "otaku/web/static/js/play/transcript.js"
   - "tests/context/test_assembler.py"
+  - "tests/context/test_tools.py"
   - "docs/tools_design.md"
 ---
 
@@ -21,9 +22,9 @@ paths:
 ## Tool calls
 
 A model uses a tool by writing a TOOL CALL in its reply, an `otk-NAME`
-fenced block (`context.tool_calls`). otaku owns the convention, never the
+fenced block (`context.tools`). otaku owns the convention, never the
 API's `tools` field, so it works on every engine (`docs/tools_design.md`
-is the decision and the engine facts behind it). `tool_calls` lives in
+is the decision and the engine facts behind it). The grammar lives in
 `context` because the worker and the assembler read it below the
 backend.
 

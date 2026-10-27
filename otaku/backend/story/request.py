@@ -12,9 +12,10 @@ from otaku.agents.extraction import ExtractionSettings
 from otaku.backend.app.core.services import App
 from otaku.backend.story.settings.services import StorySettings, settings_of
 from otaku.context import assembler
-from otaku.context.assembler import AssembledPrompt, ContextShape
+from otaku.context.assembler import ContextShape
 from otaku.context.cards import card_injections
 from otaku.context.injections import Injection
+from otaku.context.prompt import AssembledPrompt
 from otaku.providers import PicturesRide
 from otaku.store.schema import CompletionType, Message
 

@@ -9,6 +9,8 @@ New features:
 - Split stories into chapters manually with the `/chapter TITLE` command in the prompt line.
 - Pin important messages in the messages list to have them always sent as is, even after their scene
   is summarized.
+- The context preview displays the structure of what is sent to the model and where each piece comes
+  from: a message, a summary, a card and so on.
 - Word counts in the stories list and the info window.
 
 Renames and replacements:

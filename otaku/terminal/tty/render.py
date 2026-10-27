@@ -308,7 +308,7 @@ def message(
             continue
         else:
             # the calls with no look yet print as they streamed, in the
-            # language's canonical form (`context.tool_calls`), which the
+            # language's canonical form (`context.tools`), which the
             # terminal may not import — `chat.stream` spells it the same
             piece = f"```otk-{segment['tool']}\n{piece}\n```"
             streamer.feed(piece)

@@ -1875,10 +1875,54 @@ export function context(id) {
       }),
     // the recompute assembles no injection, so it reports none, honestly
     injections: [],
-    parts: [
-      ...(story.premise ? [{ role: "system", body: story.premise, pictures: 0 }] : []),
-      ...story.messages.map((row) => ({ role: row.role === "tool" ? "user" : row.role, body: row.body, pictures: 0 })),
-    ],
+    parts: laid([
+      ...(story.premise ? [part("system", story.premise, "system", "system")] : []),
+      ...story.messages.map((row) =>
+        row.kind === "card"
+          ? { ...part(row.role, row.body, "card", row.speaker ? `card · ${row.speaker}` : "card"), card_name: row.speaker ?? "" }
+          : part(row.role, row.body, "message", row.role),
+      ),
+    ]),
+  };
+}
+
+/* A separator between two parts that stand apart — the product's rule
+   (`story.context.services.separate`), copied: a run reads as one — of
+   messages, of the summary's history and scene summaries, of pinned
+   messages; a header — the summary's, the pinned messages' — opens what
+   follows it; every other part stands apart. */
+function laid(parts) {
+  const runs = ["message message", "history scene", "scene scene", "pinned_message pinned_message"];
+  const headers = ["header", "pinned_header"];
+  return parts.flatMap((each, at) => {
+    const previous = parts[at - 1];
+    const apart =
+      previous !== undefined &&
+      !headers.includes(previous.provenance) &&
+      !runs.includes(`${previous.provenance} ${each.provenance}`);
+    return apart ? [{ kind: "separator" }, each] : [each];
+  });
+}
+
+/** One part of the recomputed preview, in the product's shape: the role
+    it goes in, its text, where it comes from, and its caption — the
+    product's words for those three (`story.context.schemas._caption`),
+    copied — no injection, scene or summary in a recompute, so their
+    fields stand empty. */
+function part(role, body, provenance, caption) {
+  return {
+    kind: "part",
+    role,
+    body,
+    pictures: 0,
+    provenance,
+    scene_num: null,
+    scene_title: "",
+    injection_label: "",
+    injection_position: null,
+    injection_position_text: "",
+    card_name: "",
+    caption,
   };
 }
 

@@ -526,6 +526,13 @@ class ModelFacts:
         (`Layout.completion_type`)."""
         return layout.completion_type(self.can_complete_text)
 
+    def wire_template(self, layout: Layout) -> templates.TextTemplate | None:
+        """The template a story read in `layout` is rendered in on the
+        model — over the text wire, its one text; None over the chat
+        wire. The one choice, so the turn and its preview send alike."""
+        is_text = self.completion_type(layout) is CompletionType.TEXT
+        return self.text_template if is_text else None
+
     def can_attach(self, layout: Layout) -> bool:
         """Whether a picture may ride the next request of a story read in
         `layout` (`can_attach`)."""

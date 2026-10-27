@@ -65,6 +65,20 @@ markup, so `index.html` carries the square as a hard-coded copy of the
 accent (and a grey one for a stopped otaku). Retheming the accent leaves
 it as it is, and the tab keeps its mark.
 
+## The request's bands
+
+The context panel draws the request in bands, each part where it comes
+from: a hue for each kind of text sent besides the story's own lines, and
+the summary in a grey fold.
+
+| Token | Used by |
+|---|---|
+| `--otk-system-bg` / `--otk-system-line` / `--otk-system-ink` | the system message's band: its ground, its dotted edges, its gutter word and rubrics |
+| `--otk-card-bg` / `--otk-card-line` / `--otk-card-ink` | a character card's band |
+| `--otk-inject-bg` / `--otk-inject-line` / `--otk-inject-ink` | an injection's band: a text sent besides the story |
+| `--otk-pinned-bg` / `--otk-pinned-line` / `--otk-pinned-ink` | the band of the pinned messages one header heads |
+| `--otk-summary-bg` | the ground of the summary's fold |
+
 ## Typefaces of your own
 
 Put a `.woff2` (or `.woff`, `.ttf`, `.otf`) in `web/fonts/` beside your

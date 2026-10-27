@@ -9,7 +9,7 @@ from otaku.backend.app.pictures.services import RawFile as RawFile
 from otaku.backend.base import Report, Schema
 from otaku.backend.story.messages import services as domain_messages
 from otaku.backend.story.messages.services import Actor
-from otaku.context.assembler import JoinType
+from otaku.context.prompt import JoinType
 from otaku.formatting import format_context
 from otaku.providers import Stats
 from otaku.store import schema

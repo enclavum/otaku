@@ -26,6 +26,18 @@ const _SCOPES = [
   { key: "all", label: "all stories" },
 ];
 
+/* The kind of band a section of the request is drawn in, by where its
+   last part comes from — a header leads the group it heads: its word in
+   the gutter, its modifier, what it says to a screen reader. Messages
+   are drawn bare; the summary's pieces in its fold (`_SUMMARY`). */
+const _BANDS = {
+  system: { word: "system", modifier: "system", label: "The system message" },
+  card: { word: "card", modifier: "card", label: "A character card" },
+  injection: { word: "injection", modifier: "", label: "Injected by a tool" },
+  pinned_message: { word: "pinned", modifier: "pinned", label: "A pinned message, kept verbatim" },
+};
+const _SUMMARY = new Set(["header", "history", "scene"]);
+
 // ---------- context: the request as a document ----------
 
 // A row's name is the backend's lowercase name of the text placed, capitalised for a row.
@@ -86,29 +98,73 @@ export async function openContext() {
     }));
     head.append(costed("Injected", rows));
   }
+  // the request itself, headed as the lists above it are
+  head.append(element("div", "otk-section otk-context__injhead otk-context__wirehead", "Request text"));
 
   const wire = element("div", "otk-context__wire");
-  for (const part of preview.parts) {
-    const passage = element("div", "otk-passage");
-    // The pictures riding the part, beside the role — the report's own
-    // count, drawn where the terminal draws it.
-    const riding = part.pictures
-      ? ` · ${part.pictures} picture${part.pictures === 1 ? "" : "s"} attached`
-      : "";
-    passage.append(
-      span("otk-passage__rubric", part.role + riding),
-      element(
-        "p",
-        part.role === "user" ? "otk-prose otk-prose--said" : "otk-prose otk-prose--wire",
-        part.body,
-      ),
-    );
-    wire.append(passage);
+  for (const section of sections(preview.parts)) wire.append(...drawn(section));
+  if (!wire.childElementCount) {
+    // a request with no text yet — no premise, no message: said as an absent value
+    const nothing = element("div", "otk-passage");
+    nothing.append(element("p", "otk-prose otk-absent", "Empty"));
+    wire.append(nothing);
   }
 
   body.replaceChildren(head, wire);
   footnote(popup, `~${count(shape.total_tokens)} of ${count(shape.limit)} tokens projected`);
   body.focus();
+}
+
+/* The parts between two separators, a section each: the backend decides
+   what stands apart (`story.context.services.separate`), the page how it
+   looks. */
+function sections(parts) {
+  const out = [[]];
+  for (const part of parts) {
+    if (part.kind === "separator") out.push([]);
+    else out[out.length - 1].push(part);
+  }
+  return out.filter((section) => section.length);
+}
+
+/* A section as the design draws it: the summary in a grey fold labelled
+   at both ends, the system message, a card, an injection or a group of
+   pinned messages in a band of its own hue, messages as they are. */
+function drawn(section) {
+  const passages = section.map(passage);
+  const kind = section[section.length - 1].provenance;
+  if (_SUMMARY.has(kind)) {
+    const fold = element("div", "otk-fold");
+    fold.setAttribute("aria-label", "Sent as a summary, not verbatim");
+    const top = span("otk-fold__label otk-fold__label--top");
+    top.append(span("otk-fold__word", "summary"), span("otk-fold__arrow", "\u2193"));
+    const bottom = span("otk-fold__label otk-fold__label--bottom");
+    bottom.append(span("otk-fold__arrow", "\u2191"), span("otk-fold__word", "summary"));
+    fold.append(top, ...passages, bottom);
+    return [fold];
+  }
+  const band = _BANDS[kind];
+  if (!band) return passages;
+  const modifier = band.modifier ? ` otk-inject--${band.modifier}` : "";
+  const drawnBand = element("div", `otk-inject${modifier}`);
+  drawnBand.setAttribute("aria-label", band.label);
+  const gutter = span("otk-inject__label");
+  gutter.append(span("otk-fold__word", band.word));
+  drawnBand.append(gutter, ...passages);
+  return [drawnBand];
+}
+
+/* One part: its caption — the backend's, the words the terminal heads it
+   with too — over its text, the reader's own lines in the voice they are
+   drawn in on the page. */
+function passage(part) {
+  const said = part.provenance === "message" && part.role === "user";
+  const drawnPassage = element("div", "otk-passage");
+  drawnPassage.append(
+    span("otk-passage__rubric", part.caption),
+    element("p", said ? "otk-prose otk-prose--said" : "otk-prose otk-prose--wire", part.body),
+  );
+  return drawnPassage;
 }
 
 function costed(title, rows) {

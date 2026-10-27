@@ -38,7 +38,7 @@ template, while a reply has no template at all — and the extract
 template reads "out of character" off that shape, so unmarked it would
 be read as something that happened in the scene. Out-of-character rows
 are mined for decisions but never speaker-attributed and never part of
-the scene's story. A tool call in a body (`context.tool_calls`: any
+the scene's story. A tool call in a body (`context.tools`: any
 fenced block marked `otk-NAME`) is the model's own aside, not the
 scene: it is left out, fences and all, before
 a row is measured by the gate, packed into a span, or numbered for the
@@ -59,8 +59,8 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Self
 
-from otaku.context import tool_calls
-from otaku.context.assembler import WirePicture, WireTurn
+from otaku.context import tools
+from otaku.context.prompt import WirePicture, WireTurn
 from otaku.context.syntax import OOC_FRAME, to_wire
 from otaku.formatting import format_duration, render
 from otaku.providers import (
@@ -348,7 +348,7 @@ class Extractor:
         settling = 0 if force else settings.settle
         settled_ids = {m.id for m in tail[: max(0, len(tail) - settling)]}
         rows = [m for m in tail if m.role != "tool"]
-        sizes = [len(tool_calls.strip(m.body)) for m in rows]
+        sizes = [len(tools.strip(m.body)) for m in rows]
         settled = sum(1 for m in rows if m.id in settled_ids)
         spans = plan_scenes(
             sizes,
@@ -862,7 +862,7 @@ def numbered_chat(span: Sequence[Message]) -> str:
     for n, item in enumerate(span, 1):
         # is_last=False always: a cue steers one reply, it is not something
         # that happened in the scene.
-        body = tool_calls.strip(item.body)
+        body = tools.strip(item.body)
         text = to_wire(replace(item, body=body), is_last=False)
         if item.attachments:
             marks = " ".join(

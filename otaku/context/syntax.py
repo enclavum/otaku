@@ -2,10 +2,10 @@
 
 Two questions, one vocabulary. Reading: `read(line)` binds a typed line
 to whatever opened it — a direction (/me, /you, /ooc) or prose when
-nothing did. Writing: `to_wire` is the ONE dispatch turning a stored turn into wire
-text, whatever its kind — prose parses for its syntax, a direction's
-stored template fills, a card row takes the block composed from its
-character's profile, a recap row IS its text.
+nothing did. Writing: `to_wire` is the ONE dispatch turning a stored
+turn into wire text, whatever its kind — prose parses for its syntax, a
+direction's stored template fills, a card row takes the block composed
+from its character's profile.
 
 A line is stored exactly as typed and read again whenever the turn is
 used. Templates are data on the turn (`Message.template`); at RECORD
@@ -164,8 +164,8 @@ class Line:
 
 
 class _Me(Line):
-    """`/me NAME: PROMPT` — the writer speaks as NAME. The only direction
-    carrying both a name and prose, so the only one that splits."""
+    """`/me NAME: PROMPT` — the writer speaks as NAME, the PROMPT their
+    words."""
 
     token = "/me"
     args = "NAME: PROMPT"
@@ -231,10 +231,11 @@ class _Roll(Line):
     """`/roll DICE [PROMPT]` — the writer rolls REAL dice and plays the
     result: otaku rolls at record time (never the model — asked to roll,
     a model picks dramatic numbers and bends them mid-narration), the
-    numbers freeze into the stored template, and the optional PROMPT is
-    the action the roll decides. DICE is `1d20+5`-shaped — `NdS` terms
-    and flat modifiers chained with + and -, `kh`/`kl` keeping the
-    highest or lowest (advantage and disadvantage).
+    numbers freeze into the stored template (its `{dice}`), and the
+    optional PROMPT is the action the roll decides. DICE is
+    `1d20+5`-shaped — `NdS` terms and flat modifiers chained with + and
+    -, `kh`/`kl` keeping the highest or lowest (advantage and
+    disadvantage).
 
     The spec rides the NAME slot — the first token, what the command is
     about — so the base machinery does its usual work: `needs_name`

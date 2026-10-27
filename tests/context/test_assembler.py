@@ -3,9 +3,11 @@
 Cases 1-2: a story below the verbatim threshold, or one without covering
 summaries, goes out whole. Case 3: HEAD verbatim, the covered scenes as
 summaries, the TAIL verbatim and scene-aligned; a card or a pinned
-message is never summarized away. Case 4: over the limit — the context in force, the
-window under the context limit — the oldest summaries are replaced by the story-so-far
-through the last replaced scene. Case 5: still over, the tail target
+message is never summarized away — a card rides in front of its scene's
+summary, a pinned message is quoted after it. Case 4: over the limit —
+the context in force, the window under the context limit — the oldest
+summaries are replaced by the story-so-far through the last replaced
+scene. Case 5: still over, the tail target
 steps down to its floor; past the floor the assembly refuses. Across all
 of them the wire promise holds: the model sees the stored messages and
 nothing the code invented but the recap — and the injections it was
@@ -13,7 +15,9 @@ handed, each where it was told to go, a stored reply's tool calls as the
 story's tool set has them, a tool's turn as the reader's, framed. The
 join rule (`get_join_type`, its write side `join`) decides how a row
 joins the text before it — off the two rows' modes and the line breaks
-at their edges — on the wire and in the canvas alike.
+at their edges — on the wire and in the canvas alike. Every piece the
+request carries says where it comes from, for a preview to show it as
+what it is. How each wire sends the pieces is `test_prompt`'s.
 """
 
 from dataclasses import dataclass, replace
@@ -21,21 +25,31 @@ from dataclasses import dataclass, replace
 import pytest
 
 from otaku.context.assembler import (
-    IMAGE_TOKENS,
     ContextOverflowError,
     ContextShape,
-    JoinType,
-    WirePicture,
     assemble_story,
     context_in_force,
     get_join_type,
-    join,
 )
 from otaku.context.injections import Injection
-from otaku.context.tool_calls import ToolSet
+from otaku.context.prompt import (
+    IMAGE_TOKENS_ESTIMATE,
+    AssembledPrompt,
+    JoinType,
+    PromptPieceMetadata,
+    Provenance,
+    WirePicture,
+)
+from otaku.context.tools import ToolSet
 from otaku.providers import PicturesRide
-from otaku.providers.openai.templates import PLAIN, TEXT_TEMPLATES
-from otaku.store.schema import Attachment, InjectionPosition, Message, Scene, StoryMode
+from otaku.store.schema import (
+    Attachment,
+    Character,
+    InjectionPosition,
+    Message,
+    Scene,
+    StoryMode,
+)
 
 CAT = Attachment(file="pic-0001-20260918-a3f9c1e2.jpg", width=2, height=2, size=3)
 CAT_PICTURE = WirePicture(b"cat", "image/jpeg")
@@ -50,7 +64,10 @@ def assemble(
     context_window: int | None,
     *,
     scenes: tuple = (),
+    characters: tuple[Character, ...] = (),
     recap_header: str = "",
+    card_framing: str = "",
+    pinned_header: str = "[[pinned]]",
     head_messages: int = 20,
     min_tail_messages: int = 150,
     context_limit: int = 0,
@@ -61,8 +78,10 @@ def assemble(
 ):
     """The doc's vocabulary over the door's arguments, so every case
     below reads like its section, with a stand-in store answering the
-    reads the door makes. `files` is the folder the pictures are read
-    from; None, the default, is a model that cannot see."""
+    reads the door makes: the scenes, the cast (`characters`, a card's
+    profile read through its row's speaker) and `files`, the folder the
+    pictures are read from — None, the default, is a model that cannot
+    see."""
     shape = ContextShape(
         head_messages=head_messages,
         min_tail_messages=min_tail_messages,
@@ -73,13 +92,13 @@ def assemble(
     else:
         pictures_ride = PicturesRide.LATEST if newest_pictures_only else PicturesRide.EACH
     return assemble_story(
-        _Store(scenes, files),
+        _Store(scenes, characters, files),
         1,
         system=system,
         messages=messages,
         injections=injections,
         tool_set=tool_set,
-        prompts=_Prompts(recap_header),
+        prompts=_Prompts(recap_header, card_framing, pinned_header),
         shape=shape,
         pictures_ride=pictures_ride,
     )
@@ -90,10 +109,10 @@ class TestShortStory:
 
     def test_everything_is_sent_verbatim(self) -> None:
         prompt = assemble("", turns(40), 8192, head_messages=20, min_tail_messages=150)
-        sent = "\n".join(m.body for m in prompt.messages)
+        sent = "\n".join(m.body for m in prompt.as_chat())
         assert all(f"turn {i}." in sent for i in range(1, 41))
         assert prompt.scenes_summarized == 0
-        assert prompt.recap == ""
+        assert recap(prompt) == ""
 
     def test_even_with_summaries_extracted(self) -> None:
         # The threshold governs, not the summaries' existence.
@@ -106,7 +125,7 @@ class TestShortStory:
             min_tail_messages=150,
         )
         assert prompt.scenes_summarized == 0
-        assert "The heist unfolded." not in "\n".join(m.body for m in prompt.messages)
+        assert "The heist unfolded." not in "\n".join(m.body for m in prompt.as_chat())
 
 
 class TestNoSummaries:
@@ -117,6 +136,13 @@ class TestNoSummaries:
         prompt = assemble("", turns(40), 8192, head_messages=5, min_tail_messages=10)
         assert prompt.head + prompt.tail == 40
         assert prompt.scenes_summarized == 0
+
+    def test_a_scene_without_a_summary_covers_nothing(self) -> None:
+        prompt = assemble(
+            "", turns(40), 8192, scenes=(scene(20),), head_messages=5, min_tail_messages=10
+        )
+        assert prompt.scenes_summarized == 0
+        assert prompt.head + prompt.tail == 40
 
     def test_a_scene_ending_in_head_or_tail_does_not_count(self) -> None:
         prompt = assemble(
@@ -146,24 +172,24 @@ class TestScenesCoverTheMiddle:
             scene(95, "sum four"),
         )
         prompt = assemble("", turns(220), 65536, scenes=scenes, min_tail_messages=150)
-        sent = "\n".join(m.body for m in prompt.messages)
+        sent = "\n".join(m.body for m in prompt.as_chat())
         assert prompt.scenes_summarized == 3
         assert "sum three" in sent
         assert "sum four" not in sent  # its scene rides verbatim in the tail
         assert "turn 65." in sent  # the tail starts right after scene 3
         assert "turn 64." not in sent  # summarized away
         assert "turn 20." in sent and "turn 21." not in sent  # the head's edge
-        assert prompt.head == 20
+        assert (prompt.head, prompt.middle, prompt.tail) == (20, 44, 156)
 
     def test_option_b_fewer_scenes_move_the_boundary_earlier(self) -> None:
         scenes = (scene(25, "sum one"), scene(42, "sum two"))
         prompt = assemble("", turns(220), 65536, scenes=scenes, min_tail_messages=150)
-        sent = "\n".join(m.body for m in prompt.messages)
+        sent = "\n".join(m.body for m in prompt.as_chat())
         assert prompt.scenes_summarized == 2
         assert "turn 43." in sent
         assert "turn 42." not in sent
 
-    def test_the_recap_header_opens_the_recap(self) -> None:
+    def test_the_recap_header_heads_the_summaries(self) -> None:
         prompt = assemble(
             "",
             turns(220),
@@ -171,7 +197,7 @@ class TestScenesCoverTheMiddle:
             scenes=(scene(64, "sum"),),
             recap_header="[So far:]",
         )
-        sent = "\n".join(m.body for m in prompt.messages)
+        sent = "\n".join(m.body for m in prompt.as_chat())
         assert sent.index("[So far:]") < sent.index("sum")
 
     def test_a_scene_ending_at_the_tails_first_message_stays_verbatim(self) -> None:
@@ -183,7 +209,7 @@ class TestScenesCoverTheMiddle:
         assert at_boundary.scenes_summarized == 0
         assert at_boundary.head + at_boundary.tail == 220
         before_boundary = assemble("", turns(220), 65536, scenes=(scene(69, "sum"),))
-        sent = "\n".join(m.body for m in before_boundary.messages)
+        sent = "\n".join(m.body for m in before_boundary.as_chat())
         assert before_boundary.scenes_summarized == 1
         assert "turn 70." in sent  # the tail holds min_tail plus the boundary message
         assert "turn 69." not in sent
@@ -203,19 +229,56 @@ class TestCharacterCards:
         rows[46] = card(47, "((OOC: Elara joins.))")  # inside scene 3's span
         scenes = (scene(42, "sum two"), scene(64, "sum three"))
         prompt = assemble("", rows, 65536, scenes=scenes, min_tail_messages=150)
-        sent = "\n".join(m.body for m in prompt.messages)
+        sent = "\n".join(m.body for m in prompt.as_chat())
         assert sent.index("sum two") < sent.index("((OOC: Elara joins.))")
         assert sent.index("((OOC: Elara joins.))") < sent.index("sum three")
 
+    def test_a_card_row_sends_its_characters_profile_through_the_card_framing(self) -> None:
+        elara = Character(id=7, name="Elara", profile='description = "A smuggler."')
+        row = replace(card(1, "Elara joins."), speaker_id=7)
+        prompt = assemble(
+            "",
+            [row, user("I wave.")],
+            8192,
+            characters=(elara,),
+            card_framing="<<{name}: {description}>>",
+        )
+        assert prompt.pieces[0].text == "<<Elara: A smuggler.>>"
+
+    def test_a_card_row_whose_character_is_gone_sends_its_body(self) -> None:
+        elara = Character(id=7, name="Elara", profile='description = "A smuggler."')
+        row = replace(card(1, "Elara joins."), speaker_id=99)
+        prompt = assemble(
+            "",
+            [row, user("I wave.")],
+            8192,
+            characters=(elara,),
+            card_framing="<<{name}: {description}>>",
+        )
+        assert prompt.pieces[0].text == "Elara joins."
+
+    def test_a_card_ahead_of_the_first_summary_stands_outside_its_header(self) -> None:
+        rows = turns(220)
+        rows[46] = card(47, "((OOC: Elara joins.))")  # inside the covered scene's span
+        prompt = assemble(
+            "",
+            rows,
+            65536,
+            scenes=(scene(64, "sum"),),
+            recap_header="[So far:]",
+            min_tail_messages=150,
+        )
+        assert "((OOC: Elara joins.))\n\n[So far:]\n\nsum" in prompt.as_chat()[0].body
+
     def test_a_card_body_is_never_read_as_syntax(self) -> None:
         prompt = assemble("", [card(1, "Speech example: hi /cue whisper"), user("I wave.")], 8192)
-        assert prompt.messages[0].body.startswith("Speech example: hi /cue whisper")
+        assert prompt.as_chat()[0].body.startswith("Speech example: hi /cue whisper")
 
     def test_a_card_in_the_recap_is_never_read_as_syntax(self) -> None:
         rows = turns(220)
         rows[46] = card(47, "Example: breathe /cue whisper softly")
         prompt = assemble("", rows, 65536, scenes=(scene(64, "sum"),))
-        assert "breathe /cue whisper softly" in "\n".join(m.body for m in prompt.messages)
+        assert "breathe /cue whisper softly" in "\n".join(m.body for m in prompt.as_chat())
 
     def test_every_card_the_request_carries_is_listed_with_its_cost(self) -> None:
         rows = turns(220)
@@ -231,7 +294,7 @@ class TestCharacterCards:
         pictured = [replace(plain[0], attachments=(CAT,)), plain[1]]
         without = assemble("", plain, 8192, files=CAT_FOLDER)
         with_it = assemble("", pictured, 8192, files=CAT_FOLDER)
-        assert with_it.cards[0].tokens - without.cards[0].tokens == IMAGE_TOKENS
+        assert with_it.cards[0].tokens - without.cards[0].tokens == IMAGE_TOKENS_ESTIMATE
 
     def test_a_request_without_cards_lists_none(self) -> None:
         assert assemble("", [user("I wave.")], 8192).cards == ()
@@ -239,50 +302,83 @@ class TestCharacterCards:
 
 class TestPinnedMessages:
     """Case 3's other special case: a pinned message in a summarized scene
-    rides whole in front of its scene's summary, in story order with the
-    scene's cards, in its own role and with its pictures; in the head or
-    the tail, where it rides verbatim anyway, a pin changes nothing."""
+    is quoted after its scene's summary — its wire text, in story order
+    with the scene's other pins under one header, prompts.toml's
+    `pinned_header`, in the recap's own message whatever its role, its
+    pictures with it; in the head or the tail, where it rides verbatim
+    anyway, a pin changes nothing."""
 
-    def test_a_pinned_message_rides_in_front_of_its_scenes_summary(self) -> None:
+    def test_a_pinned_message_is_quoted_after_its_scenes_summary(self) -> None:
         rows = turns(220)
         rows[46] = pinned(user("I mark the weir.", message_id=47))  # inside scene 3's span
         scenes = (scene(42, "sum two"), scene(64, "sum three"))
-        prompt = assemble("", rows, 65536, scenes=scenes, min_tail_messages=150)
-        sent = "\n".join(m.body for m in prompt.messages)
-        assert sent.index("sum two") < sent.index("I mark the weir.") < sent.index("sum three")
+        sent = recapped(rows, scenes)
+        assert "sum three\n\n[[pinned]]\n\nI mark the weir.\n\nturn 65." in sent
         assert "turn 46." not in sent  # its neighbours are summarized as ever
 
-    def test_pins_and_cards_keep_their_story_order(self) -> None:
+    def test_one_header_opens_a_scenes_pins_its_cards_before_the_summary(self) -> None:
         rows = turns(220)
         rows[44] = card(45, "((OOC: Elara joins.))")
         rows[46] = pinned(user("I mark the weir.", message_id=47))
+        rows[48] = pinned(user("I cross it.", message_id=49))
         rows[50] = card(51, "((OOC: Wren joins.))")
-        prompt = assemble("", rows, 65536, scenes=(scene(64, "sum"),), min_tail_messages=150)
-        sent = "\n".join(m.body for m in prompt.messages)
-        riding = ("((OOC: Elara joins.))", "I mark the weir.", "((OOC: Wren joins.))", "sum")
-        places = [sent.index(text) for text in riding]
-        assert places == sorted(places)
+        sent = recapped(rows, (scene(64, "sum"),))
+        assert (
+            "((OOC: Elara joins.))\n\n((OOC: Wren joins.))\n\nsum\n\n"
+            "[[pinned]]\n\nI mark the weir.\n\nI cross it.\n\nturn 65."
+        ) in sent
 
-    def test_a_pinned_reply_rides_in_its_own_role_unmarked(self) -> None:
+    def test_each_kept_scene_heads_its_own_pins(self) -> None:
+        rows = turns(220)
+        rows[30] = pinned(user("I mark the weir.", message_id=31))  # inside scene 2's span
+        rows[46] = pinned(user("I cross it.", message_id=47))  # inside scene 3's span
+        sent = recapped(rows, (scene(42, "sum two"), scene(64, "sum three")))
+        assert (
+            "sum two\n\n[[pinned]]\n\nI mark the weir.\n\nsum three\n\n[[pinned]]\n\nI cross it."
+        ) in sent
+
+    def test_a_pinned_reply_is_quoted_in_the_recaps_own_message(self) -> None:
+        # a quotation, never a turn of the model's to answer or imitate
         rows = turns(220)
         rows[46] = pinned(replace(assistant("The weir groans."), id=47))
         prompt = assemble("", rows, 65536, scenes=(scene(64, "sum"),), min_tail_messages=150)
-        (turn,) = [m for m in prompt.messages if "The weir groans." in m.body]
-        assert (turn.role, turn.body) == ("assistant", "The weir groans.")
+        assert [m.role for m in prompt.as_chat()] == ["user"]
+        assert "sum\n\n[[pinned]]\n\nThe weir groans." in prompt.as_chat()[0].body
+
+    def test_a_pinned_line_is_quoted_as_the_wire_has_it(self) -> None:
+        # its directions composed and a cue spent, the breaks at its edges trimmed
+        rows = turns(220)
+        rows[46] = pinned(story(user("\n\nI mark the weir /cue slowly\n\n", message_id=47)))
+        sent = recapped(rows, (scene(64, "sum"),))
+        assert "[[pinned]]\n\nI mark the weir\n\nturn 65." in sent
+
+    def test_a_pin_with_nothing_to_send_is_neither_quoted_nor_headed(self) -> None:
+        rows = turns(220)
+        rows[46] = pinned(replace(assistant(QUESTION), id=47))  # its tool is off
+        sent = recapped(rows, (scene(64, "sum"),))
+        assert "sum\n\nturn 65." in sent
+
+    def test_without_a_header_the_pins_follow_the_summary_alone(self) -> None:
+        rows = turns(220)
+        rows[46] = pinned(user("I mark the weir.", message_id=47))
+        prompt = assemble(
+            "", rows, 65536, scenes=(scene(64, "sum"),), min_tail_messages=150, pinned_header=""
+        )
+        assert "sum\n\nI mark the weir.\n\nturn 65." in prompt.as_chat()[0].body
 
     def test_a_pinned_messages_pictures_ride_with_it(self) -> None:
         rows = turns(220)
         rows[46] = pinned(replace(user("Look.", message_id=47), attachments=(CAT,)))
         prompt = assemble("", rows, 65536, scenes=(scene(64, "sum"),), files=CAT_FOLDER)
         assert prompt.pictures_sent == 1
-        assert [m.images for m in prompt.messages if m.images] == [(CAT_PICTURE,)]
+        assert [m.images for m in prompt.as_chat() if m.images] == [(CAT_PICTURE,)]
 
     def test_a_pin_in_the_tail_changes_nothing(self) -> None:
         rows = turns(220)
         plain = assemble("", rows, 65536, scenes=(scene(64, "sum"),), min_tail_messages=150)
         rows[200] = pinned(rows[200])
         tail_pinned = assemble("", rows, 65536, scenes=(scene(64, "sum"),), min_tail_messages=150)
-        assert tail_pinned.messages == plain.messages
+        assert tail_pinned.as_chat() == plain.as_chat()
 
 
 class TestRecapDegrades:
@@ -310,7 +406,7 @@ class TestRecapDegrades:
             head_messages=5,
             min_tail_messages=10,
         )
-        sent = "\n".join(m.body for m in prompt.messages)
+        sent = "\n".join(m.body for m in prompt.as_chat())
         assert prompt.history and "Arc through two." in sent
         assert prompt.scenes_rolled_up == 2
         assert prompt.scenes_summarized == 1
@@ -322,7 +418,7 @@ class TestRecapDegrades:
         one, two, three = self._scenes()
         scenes = (one, replace_history(two, ""), three)
         prompt = assemble("", turns(40), 2524, scenes=scenes, head_messages=5, min_tail_messages=10)
-        assert prompt.history and "Arc through one." in prompt.recap
+        assert prompt.history and "Arc through one." in recap(prompt)
         assert prompt.scenes_rolled_up == 1
 
     def test_without_any_rung_the_dropped_scenes_go_uncovered(self) -> None:
@@ -332,24 +428,43 @@ class TestRecapDegrades:
         assert prompt.scenes_rolled_up == 0
         assert prompt.scenes_summarized == 1
 
+    def test_with_no_summary_left_there_is_no_header(self) -> None:
+        # every scene dropped, none with a rung: nothing for the header to head
+        scenes = tuple(replace_history(s, "") for s in self._scenes())
+        prompt = assemble(
+            "",
+            turns(40),
+            1600,
+            scenes=scenes,
+            recap_header="[So far:]",
+            head_messages=5,
+            min_tail_messages=10,
+        )
+        assert prompt.scenes_summarized == 0
+        assert "[So far:]" not in prompt.as_chat()[0].body
+
     def test_a_replaced_scenes_card_floats_in_front_of_the_history(self) -> None:
         rows = turns(40)
         rows[7] = card(8, "((OOC: Elara joins.))")  # inside scene 1's span
         prompt = assemble(
             "", rows, 2524, scenes=self._scenes(), head_messages=5, min_tail_messages=10
         )
-        sent = "\n".join(m.body for m in prompt.messages)
+        sent = "\n".join(m.body for m in prompt.as_chat())
         assert sent.index("((OOC: Elara joins.))") < sent.index("Arc through two.")
 
-    def test_a_replaced_scenes_pinned_message_floats_in_front_of_the_history(self) -> None:
+    def test_the_replaced_scenes_pins_are_quoted_after_the_history_under_one_header(
+        self,
+    ) -> None:
         rows = turns(40)
         rows[7] = pinned(user("I mark the weir.", message_id=8))  # inside scene 1's span
+        rows[14] = pinned(user("I cross it.", message_id=15))  # inside scene 2's span
         prompt = assemble(
             "", rows, 2524, scenes=self._scenes(), head_messages=5, min_tail_messages=10
         )
-        sent = "\n".join(m.body for m in prompt.messages)
-        assert prompt.history
-        assert sent.index("I mark the weir.") < sent.index("Arc through two.")
+        assert prompt.scenes_rolled_up == 2
+        assert (
+            "Arc through two.\n\n[[pinned]]\n\nI mark the weir.\n\nI cross it.\n\ndelta delta"
+        ) in prompt.as_chat()[0].body
 
     def test_the_context_limit_caps_a_larger_window(self) -> None:
         # The window would hold everything; the setting caps it, the
@@ -363,7 +478,7 @@ class TestRecapDegrades:
             min_tail_messages=10,
             context_limit=2524,
         )
-        assert prompt.history and "Arc through two." in prompt.recap
+        assert prompt.history and "Arc through two." in recap(prompt)
         assert prompt.limit == 1500  # the cap minus the reserve
 
     def test_a_context_limit_of_zero_means_the_whole_window(self) -> None:
@@ -436,33 +551,193 @@ class TestRejected:
         assert refusal.tokens > refusal.limit
 
 
+class TestContextInForce:
+    """The context a prompt is cut to: the model's window — a default
+    where nobody states one — or the context limit where it is lower, 0
+    for no limit."""
+
+    def test_the_window_without_a_limit(self) -> None:
+        assert context_in_force(65536, 0) == 65536
+
+    def test_the_limit_where_it_is_lower(self) -> None:
+        assert context_in_force(65536, 2048) == 2048
+
+    def test_the_window_where_the_limit_is_higher(self) -> None:
+        assert context_in_force(2048, 65536) == 2048
+
+    def test_a_window_nobody_states_is_a_default_the_limit_still_caps(self) -> None:
+        assert context_in_force(None, 0) > 0
+        assert context_in_force(None, 1024) == 1024
+
+
+class TestTheReplyReserve:
+    """The limit is the context in force less a reserve for the reply,
+    sized from the story's own recent replies: a terse story reserves
+    little, a florid one enough."""
+
+    def test_a_florid_story_reserves_more_than_a_terse_one(self) -> None:
+        terse = assemble("", [user("Go."), assistant("x" * 400), user("On.")], 65536)
+        florid = assemble("", [user("Go."), assistant("x" * 40_000), user("On.")], 65536)
+        assert florid.limit < terse.limit
+
+    def test_only_the_recent_replies_size_it(self) -> None:
+        later = [row for _ in range(10) for row in (user("On."), assistant("x" * 400))]
+        long_ago = assemble("", [user("Go."), assistant("x" * 40_000), *later], 65536)
+        never = assemble("", [user("Go."), assistant("x" * 400), *later], 65536)
+        assert long_ago.limit == never.limit
+
+
 class TestWirePromise:
     """Cross-case: the model sees the stored messages and nothing the
     code invented but the recap."""
 
     def test_sends_a_single_turn_verbatim(self) -> None:
         prompt = assemble("", [user("I open the door.")], 8192)
-        assert [(m.role, m.body) for m in prompt.messages] == [("user", "I open the door.")]
+        assert [(m.role, m.body) for m in prompt.as_chat()] == [("user", "I open the door.")]
 
     def test_puts_the_system_prompt_first(self) -> None:
         prompt = assemble("Be terse.", [user("Hi.")], 8192)
-        assert prompt.messages[0].role == "system"
-        assert prompt.messages[0].body == "Be terse."
+        assert prompt.as_chat()[0].role == "system"
+        assert prompt.as_chat()[0].body == "Be terse."
 
     def test_omits_an_empty_system_prompt(self) -> None:
         prompt = assemble("", [user("Hi.")], 8192)
-        assert prompt.messages[0].role == "user"
+        assert prompt.as_chat()[0].role == "user"
 
     def test_consecutive_same_role_rows_merge_into_one_turn(self) -> None:
         rows = [user("One."), user("Two."), assistant("Three.")]
         prompt = assemble("", rows, 8192)
-        assert [m.role for m in prompt.messages] == ["user", "assistant"]
-        assert prompt.messages[0].body == "One.\n\nTwo."
+        assert [m.role for m in prompt.as_chat()] == ["user", "assistant"]
+        assert prompt.as_chat()[0].body == "One.\n\nTwo."
 
     def test_roles_stay_as_stored(self) -> None:
         rows = [assistant("It begins."), user("I nod.")]
         prompt = assemble("", rows, 8192)
-        assert [m.role for m in prompt.messages] == ["assistant", "user"]
+        assert [m.role for m in prompt.as_chat()] == ["assistant", "user"]
+
+
+class TestWhereEachPieceComesFrom:
+    """Every piece says where it comes from: the premise and each system
+    injection open the request as the system message's; a stored row is
+    a message in its own role — a card a card under the name it came in
+    under; the recap's own are its header, the history and each scene's
+    summary, a scene numbered and titled as the dossier has it, and each
+    pinned row it quotes under their header, all user rows; an injection
+    at a depth is a user row of its own. A row with nothing to send is no
+    piece."""
+
+    def test_the_premise_and_each_system_injection_open_the_request(self) -> None:
+        prompt = assemble("Be terse.", exchange(), 8192, injections=(system("Ask rarely."),))
+        at_system = PromptPieceMetadata(
+            Provenance.INJECTION, injection_owner="ask", injection_position=InjectionPosition()
+        )
+        assert [(p.role, p.text, p.metadata) for p in prompt.pieces[:2]] == [
+            ("system", "Be terse.", PromptPieceMetadata(Provenance.SYSTEM)),
+            ("system", "Ask rarely.", at_system),
+        ]
+
+    def test_without_a_premise_the_system_message_has_no_piece(self) -> None:
+        prompt = assemble("", exchange(), 8192)
+        assert all(p.role != "system" for p in prompt.pieces)
+
+    def test_a_stored_row_is_a_message_in_its_own_role(self) -> None:
+        rows = [user("One."), assistant("Two."), chapter("The Weir"), tool("Tides.")]
+        prompt = assemble("", rows, 8192)
+        assert [(p.role, p.metadata) for p in prompt.pieces] == [
+            ("user", PromptPieceMetadata(Provenance.MESSAGE)),
+            ("assistant", PromptPieceMetadata(Provenance.MESSAGE)),
+            ("user", PromptPieceMetadata(Provenance.MESSAGE)),
+            ("tool", PromptPieceMetadata(Provenance.MESSAGE)),
+        ]
+
+    def test_a_card_is_a_card_under_its_name_wherever_it_rides(self) -> None:
+        rows = turns(220)
+        rows[2] = replace(card(3, "Elara joins."), speaker="Elara")  # in the head
+        rows[46] = replace(card(47, "Wren joins."), speaker="Wren")  # in the recap
+        rows[210] = replace(card(211, "Mara joins."), speaker="Mara")  # in the tail
+        scenes = (scene(42, "sum two"), scene(64, "sum three"))
+        prompt = assemble("", rows, 65536, scenes=scenes, min_tail_messages=150)
+        assert [(p.text, p.metadata) for p in prompt.pieces if p.text.endswith("joins.")] == [
+            ("Elara joins.", PromptPieceMetadata(Provenance.CARD, card_name="Elara")),
+            ("Wren joins.", PromptPieceMetadata(Provenance.CARD, card_name="Wren")),
+            ("Mara joins.", PromptPieceMetadata(Provenance.CARD, card_name="Mara")),
+        ]
+
+    def test_a_pinned_row_is_pinned_only_riding_the_recap(self) -> None:
+        rows = turns(220)
+        rows[2] = pinned(rows[2])  # in the head
+        rows[46] = pinned(user("I mark the weir.", message_id=47))  # in the recap
+        rows[200] = pinned(rows[200])  # in the tail
+        prompt = assemble("", rows, 65536, scenes=(scene(64, "sum"),), min_tail_messages=150)
+        where = {p.text: (p.role, p.metadata.provenance) for p in prompt.pieces}
+        assert where["[[pinned]]"] == ("user", Provenance.PINNED_HEADER)
+        assert where["I mark the weir."] == ("user", Provenance.PINNED_MESSAGE)
+        assert where["turn 3."] == ("user", Provenance.MESSAGE)
+        assert where["turn 201."] == ("user", Provenance.MESSAGE)
+
+    def test_the_recap_is_its_header_the_history_and_the_kept_scenes(self) -> None:
+        scenes = (
+            scene(10, "alpha " * 700, history="Arc through one.", title="The Dock"),
+            scene(20, "bravo " * 700, history="Arc through two.", title="The Chase"),
+            scene(25, "delta " * 700, history="Arc through three.", title="The Weir"),
+        )
+        prompt = assemble(
+            "",
+            turns(40),
+            2524,
+            scenes=scenes,
+            recap_header="[So far:]",
+            head_messages=5,
+            min_tail_messages=10,
+        )
+        own = (Provenance.HEADER, Provenance.HISTORY, Provenance.SCENE)
+        assert [
+            (p.role, p.text, p.metadata) for p in prompt.pieces if p.metadata.provenance in own
+        ] == [
+            ("user", "[So far:]", PromptPieceMetadata(Provenance.HEADER)),
+            ("user", "Arc through two.", PromptPieceMetadata(Provenance.HISTORY)),
+            (
+                "user",
+                "delta " * 700,
+                PromptPieceMetadata(Provenance.SCENE, scene_num=3, scene_title="The Weir"),
+            ),
+        ]
+
+    def test_a_scene_is_numbered_among_the_current_scenes(self) -> None:
+        # the first scene ends in the head and rides verbatim, yet it counts
+        scenes = (
+            scene(3, "opening", title="Dawn"),
+            scene(25, "sum one", title="The Dock"),
+            scene(42, "sum two", title="The Weir"),
+        )
+        prompt = assemble("", turns(220), 65536, scenes=scenes, min_tail_messages=150)
+        assert [
+            (p.metadata.scene_num, p.metadata.scene_title)
+            for p in prompt.pieces
+            if p.metadata.provenance is Provenance.SCENE
+        ] == [(2, "The Dock"), (3, "The Weir")]
+
+    def test_an_injection_at_a_depth_is_a_user_row_of_its_own(self) -> None:
+        prompt = assemble("", exchange(), 8192, injections=(end("Remember."),))
+        at_depth = PromptPieceMetadata(
+            Provenance.INJECTION,
+            injection_owner="reminder",
+            injection_position=InjectionPosition(1),
+        )
+        assert [(p.role, p.text, p.metadata) for p in prompt.pieces][2] == (
+            "user",
+            "Remember.",
+            at_depth,
+        )
+
+    def test_a_row_with_nothing_to_send_is_no_piece(self) -> None:
+        rows = [user("One."), assistant(QUESTION), user("Two.")]
+        prompt = assemble("", rows, 8192, tool_set=NO_TOOLS)
+        assert [p.text for p in prompt.pieces] == ["One.", "Two."]
+
+    def test_a_picture_alone_is_something_to_send(self) -> None:
+        prompt = assemble("", [replace(user(""), attachments=(CAT,))], None, files=CAT_FOLDER)
+        assert [(p.text, p.images) for p in prompt.pieces] == [("", (CAT_PICTURE,))]
 
 
 class TestInjections:
@@ -477,7 +752,7 @@ class TestInjections:
 
     def test_one_rides_before_the_newest_message(self) -> None:
         prompt = assemble("", exchange(), 8192, injections=(end("Remember."),))
-        assert [(m.role, m.body) for m in prompt.messages] == [
+        assert [(m.role, m.body) for m in prompt.as_chat()] == [
             ("user", "One."),
             ("assistant", "Two."),
             ("user", "Remember.\n\nThree."),
@@ -487,7 +762,7 @@ class TestInjections:
         # A reply is never counted: 2 is the reader's previous message.
         rows = [user("One."), assistant("Two."), user("Three."), assistant("Four."), user("Five.")]
         previous = assemble("", rows, 8192, injections=(end("Remember.", 2),))
-        assert [m.body for m in previous.messages] == [
+        assert [m.body for m in previous.as_chat()] == [
             "One.",
             "Two.",
             "Remember.\n\nThree.",
@@ -495,17 +770,17 @@ class TestInjections:
             "Five.",
         ]
         third = assemble("", rows, 8192, injections=(end("Remember.", 3),))
-        assert third.messages[0].body == "Remember.\n\nOne."
+        assert third.as_chat()[0].body == "Remember.\n\nOne."
 
     def test_the_newest_message_always_keeps_the_last_word(self) -> None:
         # The nearest place is before the newest message: no position
         # names one after it.
         prompt = assemble("", exchange(), 8192, injections=(end("Remember.", 1),))
-        assert prompt.messages[-1].body == "Remember.\n\nThree."
+        assert prompt.as_chat()[-1].body == "Remember.\n\nThree."
 
     def test_a_position_past_the_top_stops_at_the_top(self) -> None:
         prompt = assemble("", exchange(), 8192, injections=(end("Remember.", 99),))
-        assert prompt.messages[0].body == "Remember.\n\nOne."
+        assert prompt.as_chat()[0].body == "Remember.\n\nOne."
 
     def test_the_recap_is_a_wall(self) -> None:
         # The recap stands where the middle was; an injection stays in the
@@ -519,7 +794,7 @@ class TestInjections:
             min_tail_messages=10,
             injections=(end("Remember.", 99),),
         )
-        sent = "\n\n".join(m.body for m in prompt.messages)
+        sent = "\n\n".join(m.body for m in prompt.as_chat())
         recap, injected, tail = (
             sent.index("The heist unfolded."),
             sent.index("Remember."),
@@ -530,24 +805,24 @@ class TestInjections:
     def test_the_same_place_keeps_the_order_given(self) -> None:
         both = (end("First."), end("Second."))
         prompt = assemble("", exchange(), 8192, injections=both)
-        assert prompt.messages[-1].body == "First.\n\nSecond.\n\nThree."
+        assert prompt.as_chat()[-1].body == "First.\n\nSecond.\n\nThree."
 
     def test_a_system_injection_follows_the_premise(self) -> None:
         prompt = assemble("Be terse.", exchange(), 8192, injections=(system("Ask rarely."),))
-        assert (prompt.messages[0].role, prompt.messages[0].body) == (
+        assert (prompt.as_chat()[0].role, prompt.as_chat()[0].body) == (
             "system",
             "Be terse.\n\nAsk rarely.",
         )
-        assert [m.body for m in prompt.messages[1:]] == ["One.", "Two.", "Three."]
+        assert [m.body for m in prompt.as_chat()[1:]] == ["One.", "Two.", "Three."]
 
     def test_without_a_premise_the_system_message_is_the_injection(self) -> None:
         prompt = assemble("", exchange(), 8192, injections=(system("Ask rarely."),))
-        assert (prompt.messages[0].role, prompt.messages[0].body) == ("system", "Ask rarely.")
+        assert (prompt.as_chat()[0].role, prompt.as_chat()[0].body) == ("system", "Ask rarely.")
 
     def test_an_empty_injection_is_not_sent(self) -> None:
         plain = assemble("", exchange(), 8192)
         prompt = assemble("", exchange(), 8192, injections=(end(""), system("")))
-        assert prompt.messages == plain.messages
+        assert prompt.as_chat() == plain.as_chat()
 
     def test_an_injection_costs_its_tokens(self) -> None:
         text = "x" * 400
@@ -565,22 +840,22 @@ class TestInjections:
     def test_the_newest_cue_stays_live_under_an_injection(self) -> None:
         rows = [user("One."), assistant("Two."), user("I go. /cue hurry")]
         prompt = assemble("", rows, 8192, injections=(end("Remember."),))
-        assert prompt.messages[-1].body == "Remember.\n\nI go. ((OOC: hurry))"
+        assert prompt.as_chat()[-1].body == "Remember.\n\nI go. ((OOC: hurry))"
 
     def test_a_picture_still_rides_its_own_message(self) -> None:
         rows = [user("One."), assistant("Two."), replace(user("Look."), attachments=(CAT,))]
         prompt = assemble("", rows, 8192, files=_CatFolder(), injections=(end("Remember.", 2),))
-        assert [m.images for m in prompt.messages] == [(), (), (CAT_PICTURE,)]
+        assert [m.images for m in prompt.as_chat()] == [(), (), (CAT_PICTURE,)]
 
     def test_the_turn_it_lands_in_and_every_turn_after_are_volatile(self) -> None:
         newest = assemble("Be terse.", exchange(), 8192, injections=(end("Remember."),))
-        assert [m.volatile for m in newest.messages] == [False, False, False, True]
+        assert [m.volatile for m in newest.as_chat()] == [False, False, False, True]
         deeper = assemble("Be terse.", exchange(), 8192, injections=(end("Remember.", 2),))
-        assert [m.volatile for m in deeper.messages] == [False, True, True, True]
+        assert [m.volatile for m in deeper.as_chat()] == [False, True, True, True]
 
     def test_a_system_injection_makes_nothing_volatile(self) -> None:
         prompt = assemble("", exchange(), 8192, injections=(system("Ask rarely."),))
-        assert not any(m.volatile for m in prompt.messages)
+        assert not any(m.volatile for m in prompt.as_chat())
 
 
 class TestTheJoin:
@@ -625,6 +900,12 @@ class TestTheJoin:
         assert get_join_type(story(user("One")), greeting) is JoinType.PARAGRAPH
         assert get_join_type(greeting, story(user("I nod."))) is JoinType.PARAGRAPH
 
+    def test_a_chapter_stands_alone_in_any_mode(self) -> None:
+        # a heading over the text, nobody's words run into it
+        heading = story(chapter("The Weir"))
+        assert get_join_type(story(user("One")), heading) is JoinType.PARAGRAPH
+        assert get_join_type(heading, story(assistant("Rain."))) is JoinType.PARAGRAPH
+
     def test_a_tool_turn_runs_on_in_story_mode_as_any_row(self) -> None:
         # story mode draws no tool's turn, so the reply after it goes on in
         # the paragraph the call interrupted
@@ -646,7 +927,7 @@ class TestTheJoin:
             ],
             None,
         )
-        assert [(t.role, t.body, t.join_type) for t in prompt.messages] == [
+        assert [(t.role, t.body, t.join_type) for t in prompt.as_chat()] == [
             ("user", "I was waiting", JoinType.PARAGRAPH),
             ("assistant", "for the bus.\n\nIt rained.", JoinType.INLINE),
             ("user", "and the door", JoinType.INLINE),
@@ -654,32 +935,51 @@ class TestTheJoin:
             ("user", "Then?", JoinType.PARAGRAPH),
         ]
 
+    def test_the_recap_and_an_injection_stand_apart_in_any_mode(self) -> None:
+        # written in no mode of the story's: a paragraph from them
+        rows = [story(user("I was waiting")), story(assistant("for the bus.")), story(user("and"))]
+        prompt = assemble("", rows, None, injections=(end("Remember."),))
+        assert [(p.text, p.join_type) for p in prompt.pieces] == [
+            ("I was waiting", JoinType.PARAGRAPH),
+            ("for the bus.", JoinType.INLINE),
+            ("Remember.", JoinType.PARAGRAPH),
+            ("and", JoinType.PARAGRAPH),
+        ]
+
+    def test_a_spent_cue_that_opened_a_paragraph_leaves_the_paragraph_and_no_turn(self) -> None:
+        # nothing of the line is left to send, but the canvas still draws
+        # the paragraph it opened
+        rows = [
+            story(assistant("It rained.")),
+            story(user("\n\n/cue whisper")),
+            story(assistant("She smiled.")),
+        ]
+        prompt = assemble("", rows, None)
+        assert [(t.role, t.body) for t in prompt.as_chat()] == [
+            ("assistant", "It rained.\n\nShe smiled.")
+        ]
+        assert prompt.as_story_text() == "It rained.\n\nShe smiled."
+
+    def test_the_same_line_newest_sends_its_cue(self) -> None:
+        rows = [story(assistant("It rained.")), story(user("\n\n/cue whisper"))]
+        assert assemble("", rows, None).as_chat()[-1].body == "((OOC: whisper))"
+
     def test_a_paragraphs_rows_join_after_a_blank_line(self) -> None:
         rows = [user("One."), assistant("Two."), assistant("\n\n\nThree."), user("Four.")]
         prompt = assemble("", rows, None)
-        assert [(t.body, t.join_type) for t in prompt.messages] == [
+        assert [(t.body, t.join_type) for t in prompt.as_chat()] == [
             ("One.", JoinType.PARAGRAPH),
             ("Two.\n\nThree.", JoinType.PARAGRAPH),
             ("Four.", JoinType.PARAGRAPH),
         ]
 
 
-class TestJoin:
-    """`join`, the join rule's write side: one space inline, a blank line
-    for a paragraph, the whitespace at the two edges given up for it."""
+class TestTheTextWire:
+    """The text wire sends the same assembly as one text: the rows by
+    their seams, a tool's turn framed as the model reads it, the system
+    message inside prompts.toml's `story_framing`."""
 
-    def test_inline_is_one_space(self) -> None:
-        assert join("She waited  ", JoinType.INLINE, "\tfor the bus.") == (
-            "She waited for the bus."
-        )
-
-    def test_a_paragraph_is_one_blank_line(self) -> None:
-        assert join("One.\n", JoinType.PARAGRAPH, "\n\n\nTwo.") == "One.\n\nTwo."
-        assert join("One.", JoinType.PARAGRAPH, "Two.") == "One.\n\nTwo."
-
-
-class TestTheStoryAsOneText:
-    def test_the_turns_read_as_one_text_with_their_seams(self) -> None:
+    def test_the_rows_read_as_one_text_by_their_seams(self) -> None:
         prompt = assemble(
             "Be brief.",
             [
@@ -696,10 +996,6 @@ class TestTheStoryAsOneText:
             "I was waiting for the bus.\n\nThen?\n\nNothing came.\n\nsaid no one and left."
         )
 
-    def test_a_paragraphs_blank_line_lead_is_not_drawn_twice(self) -> None:
-        rows = [story(user("One.")), story(assistant("\n\nTwo.")), story(assistant("\n\n\nThree."))]
-        assert assemble("", rows, None).as_story_text() == "One.\n\nTwo.\n\nThree."
-
     def test_a_tool_turn_is_a_paragraph_of_its_own_framed_as_the_model_reads_it(self) -> None:
         rows = [
             user("Look it up."),
@@ -713,34 +1009,9 @@ class TestTheStoryAsOneText:
             "<<search: Tides: high at six.>>\n\nIt is six."
         )
 
-    def test_the_system_text_is_the_premise_and_what_was_injected_after_it(self) -> None:
+    def test_the_system_message_goes_inside_the_story_framing(self) -> None:
         prompt = assemble("Be brief.", exchange(), None, injections=(system("ASK HOW"),))
-        assert prompt.system == "Be brief.\n\nASK HOW"
-        assert prompt.system == next(t.body for t in prompt.messages if t.role == "system")
-        assert "Be brief." not in prompt.as_story_text()
-
-    def test_without_a_premise_there_is_no_system_turn_and_the_text_is_empty(self) -> None:
-        prompt = assemble("", exchange(), None)
-        assert prompt.system == ""
-        assert all(t.role != "system" for t in prompt.messages)
-
-    def test_the_text_wires_system_is_the_framing_around_the_premise(self) -> None:
-        # the standing instruction stands even where the premise is empty:
-        # a model turn needs a turn before it
-        brief = assemble("Be brief.", exchange(), None)
-        assert brief.text_completion_system == "<<frame Be brief.>>"
-        assert assemble("", exchange(), None).text_completion_system == "<<frame >>"
-        injected = assemble("Be brief.", exchange(), None, injections=(system("ASK HOW"),))
-        assert injected.text_completion_system == "<<frame Be brief.\n\nASK HOW>>"
-
-    def test_as_text_renders_the_framed_premise_and_the_story_in_the_template(self) -> None:
-        rows = [story(user("I was waiting")), story(assistant("for the bus."))]
-        prompt = assemble("Be brief.", rows, None)
-        assert prompt.as_text(PLAIN) == "<<frame Be brief.>>\n\nI was waiting for the bus."
-        assert prompt.as_text(TEXT_TEMPLATES["gemma4"], "\n\n") == (
-            "<bos><|turn>system\n<<frame Be brief.>><turn|>\n"
-            "<|turn>model\nI was waiting for the bus.\n\n"
-        )
+        assert prompt.text_completion_system == "<<frame Be brief.\n\nASK HOW>>"
 
 
 class TestToolCalls:
@@ -751,23 +1022,23 @@ class TestToolCalls:
 
     def test_a_call_of_a_tool_that_is_on_goes_as_written(self) -> None:
         prompt = assemble("", noted(), 8192, tool_set=ToolSet(on=frozenset({"note"})))
-        assert prompt.messages[1].body == "Two.\n\n```otk-note\nthe seal\n```"
+        assert prompt.as_chat()[1].body == "Two.\n\n```otk-note\nthe seal\n```"
 
     def test_a_call_of_any_other_tool_leaves_the_wire(self) -> None:
         prompt = assemble("", noted(), 8192, tool_set=NO_TOOLS)
-        assert [m.body for m in prompt.messages] == ["One.", "Two.", "Three."]
+        assert [m.body for m in prompt.as_chat()] == ["One.", "Two.", "Three."]
 
     def test_a_reply_that_was_a_call_alone_leaves_no_turn_once_its_tool_is_off(self) -> None:
         # an empty turn teaches a model to answer with nothing: the
         # reader's lines either side rejoin, as around a reply never made
         rows = [user("One."), assistant(QUESTION), user("Two.")]
         prompt = assemble("", rows, 8192, tool_set=NO_TOOLS)
-        assert [(m.role, m.body) for m in prompt.messages] == [("user", "One.\n\nTwo.")]
+        assert [(m.role, m.body) for m in prompt.as_chat()] == [("user", "One.\n\nTwo.")]
 
     def test_the_same_reply_goes_while_its_tool_is_on(self) -> None:
         rows = [user("One."), assistant(QUESTION), user("Two.")]
         prompt = assemble("", rows, 8192, tool_set=ToolSet(on=frozenset({"question"})))
-        assert [(m.role, m.body) for m in prompt.messages] == [
+        assert [(m.role, m.body) for m in prompt.as_chat()] == [
             ("user", "One."),
             ("assistant", QUESTION),
             ("user", "Two."),
@@ -784,7 +1055,7 @@ class TestToolCalls:
             assistant("It is six."),
         ]
         prompt = assemble("", rows, 8192, tool_set=ToolSet(on=frozenset({"search"})))
-        assert [(m.role, m.body) for m in prompt.messages] == [
+        assert [(m.role, m.body) for m in prompt.as_chat()] == [
             ("user", "Look it up."),
             ("assistant", "```otk-search\ntides\n```"),
             ("user", "<<search: Tides: high at six.>>"),
@@ -792,7 +1063,132 @@ class TestToolCalls:
         ]
 
 
+class TestPictures:
+    """A picture rides the verbatim row it was attached to, and costs
+    the estimate there; a summarized row's is neither sent nor missed;
+    a loader that answers nothing — no vision, a file gone — sends none
+    and counts the omission on the verbatim rows alone."""
+
+    def test_a_picture_rides_its_verbatim_row(self) -> None:
+        messages = [
+            Message(role="user", body="look", attachments=(CAT,)),
+            Message(role="assistant", body="a cat"),
+        ]
+        prompt = assemble("", messages, None, files=CAT_FOLDER)
+        assert prompt.as_chat()[0].images == (CAT_PICTURE,)
+        assert prompt.as_chat()[1].images == ()
+        assert (prompt.pictures_sent, prompt.pictures_omitted) == (1, 0)
+
+    def test_a_picture_costs_its_estimate(self) -> None:
+        with_it = assemble(
+            "", [Message(role="user", body="look", attachments=(CAT,))], None, files=CAT_FOLDER
+        )
+        without = assemble("", [Message(role="user", body="look")], None)
+        assert with_it.transcript_tokens - without.transcript_tokens == IMAGE_TOKENS_ESTIMATE
+
+    def test_without_a_loader_nothing_rides_and_the_omission_is_counted(self) -> None:
+        prompt = assemble("", [Message(role="user", body="look", attachments=(CAT,))], None)
+        assert prompt.as_chat()[0].images == ()
+        assert (prompt.pictures_sent, prompt.pictures_omitted) == (0, 1)
+        assert (
+            prompt.transcript_tokens
+            == assemble("", [Message(role="user", body="look")], None).transcript_tokens
+        )
+
+    def test_a_file_the_folder_cannot_answer_for_is_an_omission(self) -> None:
+        gone = Attachment(file="pic-0001-20260918-7b02d4ee.png", width=1, height=1, size=1)
+        messages = [Message(role="user", body="look", attachments=(CAT, gone))]
+        prompt = assemble("", messages, None, files=CAT_FOLDER)
+        assert prompt.as_chat()[0].images == (CAT_PICTURE,)
+        assert (prompt.pictures_sent, prompt.pictures_omitted) == (1, 1)
+
+    def test_a_summarized_row_loses_its_picture_and_a_tail_row_keeps_it(self) -> None:
+        # Option A's story: 220 turns, scenes 1-3 summarized, the tail
+        # from turn 65. A picture on turn 30 rides the summary away —
+        # neither sent nor counted as missed; one on turn 200 rides.
+        story = turns(220)
+        story[29] = replace(story[29], attachments=(CAT,))
+        story[199] = replace(story[199], attachments=(CAT,))
+        scenes = (scene(25, "sum one"), scene(42, "sum two"), scene(64, "sum three"))
+        prompt = assemble("", story, 65536, scenes=scenes, min_tail_messages=150, files=CAT_FOLDER)
+        assert prompt.scenes_summarized == 3
+        (with_it,) = [turn for turn in prompt.as_chat() if turn.images]
+        assert "turn 200." in with_it.body and "turn 30." not in with_it.body
+        assert (prompt.pictures_sent, prompt.pictures_omitted) == (1, 0)
+
+    def test_a_card_rows_picture_rides_the_recap_with_it(self) -> None:
+        # A card row in a summarized scene rides the recap whole — and its
+        # portrait with it, costed in the fit like a verbatim row's; the
+        # summarized prose row beside it loses its picture as before.
+        story = turns(220)
+        story[29] = replace(story[29], attachments=(CAT,))
+        story[30] = replace(card(31, "Elara joins."), attachments=(CAT,))
+        scenes = (scene(25, "sum one"), scene(42, "sum two"), scene(64, "sum three"))
+        prompt = assemble("", story, 65536, scenes=scenes, min_tail_messages=150, files=CAT_FOLDER)
+        assert prompt.scenes_summarized == 3
+        (with_it,) = [turn for turn in prompt.as_chat() if turn.images]
+        assert "Elara joins." in with_it.body and "turn 30." not in with_it.body
+        assert with_it.images == (CAT_PICTURE,)
+        assert (prompt.pictures_sent, prompt.pictures_omitted) == (1, 0)
+        plain = [replace(m, attachments=()) for m in story]
+        without = assemble("", plain, 65536, scenes=scenes, min_tail_messages=150, files=CAT_FOLDER)
+        assert prompt.transcript_tokens - without.transcript_tokens == IMAGE_TOKENS_ESTIMATE
+
+    def test_with_newest_pictures_only_earlier_rows_pictures_are_held_back(self) -> None:
+        # An engine that gathers every picture onto the latest prompt
+        # gets the newest row's alone; the earlier row's is held, not
+        # omitted, and costs nothing.
+        messages = [
+            Message(role="user", body="one", attachments=(CAT,)),
+            Message(role="assistant", body="a cat"),
+            Message(role="user", body="two", attachments=(CAT,)),
+        ]
+        prompt = assemble("", messages, None, files=CAT_FOLDER, newest_pictures_only=True)
+        assert [turn.images for turn in prompt.as_chat()] == [(), (), (CAT_PICTURE,)]
+        assert (prompt.pictures_sent, prompt.pictures_held, prompt.pictures_omitted) == (1, 1, 0)
+        plain = assemble("", [replace(m, attachments=()) for m in messages], None)
+        assert prompt.transcript_tokens - plain.transcript_tokens == IMAGE_TOKENS_ESTIMATE
+
+    def test_with_newest_pictures_only_the_newest_pictured_row_rides(self) -> None:
+        # A follow-up without a picture still reaches the model with the
+        # picture it is about: the newest row that carries any rides,
+        # however many rows after it carry none.
+        messages = [
+            Message(role="user", body="one", attachments=(CAT,)),
+            Message(role="assistant", body="a cat"),
+            Message(role="user", body="and the left corner?"),
+        ]
+        prompt = assemble("", messages, None, files=CAT_FOLDER, newest_pictures_only=True)
+        assert [turn.images for turn in prompt.as_chat()] == [(CAT_PICTURE,), (), ()]
+        assert (prompt.pictures_sent, prompt.pictures_held) == (1, 0)
+
+    def test_same_role_rows_rejoin_with_their_pictures(self) -> None:
+        messages = [
+            Message(role="user", body="one", attachments=(CAT,)),
+            Message(role="user", body="two", attachments=(CAT,)),
+        ]
+        prompt = assemble("", messages, None, files=CAT_FOLDER)
+        (turn,) = prompt.as_chat()
+        assert turn.images == (CAT_PICTURE, CAT_PICTURE)
+        assert prompt.pictures_sent == 2
+
+
 # ---------- fixtures ----------
+
+
+def recapped(rows: list[Message], scenes: tuple[Scene, ...]) -> str:
+    """What a story of user turns sends with `scenes` covering its middle:
+    one user turn, the head, the recap and the tail run together."""
+    prompt = assemble("", rows, 65536, scenes=scenes, min_tail_messages=150)
+    (turn,) = prompt.as_chat()
+    return turn.body
+
+
+def recap(prompt: AssembledPrompt) -> str:
+    """The recap's own text — its header, the history, the scene
+    summaries — a blank line apart; "" when there is none."""
+    own = (Provenance.HEADER, Provenance.HISTORY, Provenance.SCENE)
+    return "\n\n".join(p.text for p in prompt.pieces if p.metadata.provenance in own)
 
 
 def user(body: str, message_id: int = 0) -> Message:
@@ -814,6 +1210,11 @@ def card(message_id: int, body: str) -> Message:
 
 def pinned(row: Message) -> Message:
     return replace(row, pinned=True)
+
+
+def chapter(title: str) -> Message:
+    """A chapter's row: its body the `/chapter` line."""
+    return Message(role="user", kind="chapter", body=f"/chapter {title}")
 
 
 def tool(body: str, name: str = "search") -> Message:
@@ -844,130 +1245,19 @@ def turns(n: int) -> list[Message]:
     return [user(f"turn {i}.", message_id=i) for i in range(1, n + 1)]
 
 
-def scene(end_id: int, summary: str = "", history: str = "") -> Scene:
+def scene(end_id: int, summary: str = "", history: str = "", title: str = "") -> Scene:
     return Scene(
-        id=end_id, start_message_id=1, end_message_id=end_id, summary=summary, history=history
-    )
-
-
-def replace_history(s: Scene, history: str) -> Scene:
-    return Scene(
-        id=s.id,
-        start_message_id=s.start_message_id,
-        end_message_id=s.end_message_id,
-        summary=s.summary,
+        id=end_id,
+        start_message_id=1,
+        end_message_id=end_id,
+        title=title,
+        summary=summary,
         history=history,
     )
 
 
-class TestPictures:
-    """A picture rides the verbatim row it was attached to, and costs
-    the estimate there; a summarized row's is neither sent nor missed;
-    a loader that answers nothing — no vision, a file gone — sends none
-    and counts the omission on the verbatim rows alone."""
-
-    def test_a_picture_rides_its_verbatim_row(self) -> None:
-        messages = [
-            Message(role="user", body="look", attachments=(CAT,)),
-            Message(role="assistant", body="a cat"),
-        ]
-        prompt = assemble("", messages, None, files=CAT_FOLDER)
-        assert prompt.messages[0].images == (CAT_PICTURE,)
-        assert prompt.messages[1].images == ()
-        assert (prompt.pictures_sent, prompt.pictures_omitted) == (1, 0)
-
-    def test_a_picture_costs_its_estimate(self) -> None:
-        with_it = assemble(
-            "", [Message(role="user", body="look", attachments=(CAT,))], None, files=CAT_FOLDER
-        )
-        without = assemble("", [Message(role="user", body="look")], None)
-        assert with_it.transcript_tokens - without.transcript_tokens == IMAGE_TOKENS
-
-    def test_without_a_loader_nothing_rides_and_the_omission_is_counted(self) -> None:
-        prompt = assemble("", [Message(role="user", body="look", attachments=(CAT,))], None)
-        assert prompt.messages[0].images == ()
-        assert (prompt.pictures_sent, prompt.pictures_omitted) == (0, 1)
-        assert (
-            prompt.transcript_tokens
-            == assemble("", [Message(role="user", body="look")], None).transcript_tokens
-        )
-
-    def test_a_file_the_folder_cannot_answer_for_is_an_omission(self) -> None:
-        gone = Attachment(file="pic-0001-20260918-7b02d4ee.png", width=1, height=1, size=1)
-        messages = [Message(role="user", body="look", attachments=(CAT, gone))]
-        prompt = assemble("", messages, None, files=CAT_FOLDER)
-        assert prompt.messages[0].images == (CAT_PICTURE,)
-        assert (prompt.pictures_sent, prompt.pictures_omitted) == (1, 1)
-
-    def test_a_summarized_row_loses_its_picture_and_a_tail_row_keeps_it(self) -> None:
-        # Option A's story: 220 turns, scenes 1-3 summarized, the tail
-        # from turn 65. A picture on turn 30 rides the summary away —
-        # neither sent nor counted as missed; one on turn 200 rides.
-        story = turns(220)
-        story[29] = replace(story[29], attachments=(CAT,))
-        story[199] = replace(story[199], attachments=(CAT,))
-        scenes = (scene(25, "sum one"), scene(42, "sum two"), scene(64, "sum three"))
-        prompt = assemble("", story, 65536, scenes=scenes, min_tail_messages=150, files=CAT_FOLDER)
-        assert prompt.scenes_summarized == 3
-        (with_it,) = [turn for turn in prompt.messages if turn.images]
-        assert "turn 200." in with_it.body and "turn 30." not in with_it.body
-        assert (prompt.pictures_sent, prompt.pictures_omitted) == (1, 0)
-
-    def test_a_card_rows_picture_rides_the_recap_with_it(self) -> None:
-        # A card row in a summarized scene rides the recap whole — and its
-        # portrait with it, costed in the fit like a verbatim row's; the
-        # summarized prose row beside it loses its picture as before.
-        story = turns(220)
-        story[29] = replace(story[29], attachments=(CAT,))
-        story[30] = replace(card(31, "Elara joins."), attachments=(CAT,))
-        scenes = (scene(25, "sum one"), scene(42, "sum two"), scene(64, "sum three"))
-        prompt = assemble("", story, 65536, scenes=scenes, min_tail_messages=150, files=CAT_FOLDER)
-        assert prompt.scenes_summarized == 3
-        (with_it,) = [turn for turn in prompt.messages if turn.images]
-        assert "Elara joins." in with_it.body and "turn 30." not in with_it.body
-        assert with_it.images == (CAT_PICTURE,)
-        assert (prompt.pictures_sent, prompt.pictures_omitted) == (1, 0)
-        plain = [replace(m, attachments=()) for m in story]
-        without = assemble("", plain, 65536, scenes=scenes, min_tail_messages=150, files=CAT_FOLDER)
-        assert prompt.transcript_tokens - without.transcript_tokens == IMAGE_TOKENS
-
-    def test_with_newest_pictures_only_earlier_rows_pictures_are_held_back(self) -> None:
-        # An engine that gathers every picture onto the latest prompt
-        # gets the newest row's alone; the earlier row's is held, not
-        # omitted, and costs nothing.
-        messages = [
-            Message(role="user", body="one", attachments=(CAT,)),
-            Message(role="assistant", body="a cat"),
-            Message(role="user", body="two", attachments=(CAT,)),
-        ]
-        prompt = assemble("", messages, None, files=CAT_FOLDER, newest_pictures_only=True)
-        assert [turn.images for turn in prompt.messages] == [(), (), (CAT_PICTURE,)]
-        assert (prompt.pictures_sent, prompt.pictures_held, prompt.pictures_omitted) == (1, 1, 0)
-        plain = assemble("", [replace(m, attachments=()) for m in messages], None)
-        assert prompt.transcript_tokens - plain.transcript_tokens == IMAGE_TOKENS
-
-    def test_with_newest_pictures_only_the_newest_pictured_row_rides(self) -> None:
-        # A follow-up without a picture still reaches the model with the
-        # picture it is about: the newest row that carries any rides,
-        # however many rows after it carry none.
-        messages = [
-            Message(role="user", body="one", attachments=(CAT,)),
-            Message(role="assistant", body="a cat"),
-            Message(role="user", body="and the left corner?"),
-        ]
-        prompt = assemble("", messages, None, files=CAT_FOLDER, newest_pictures_only=True)
-        assert [turn.images for turn in prompt.messages] == [(CAT_PICTURE,), (), ()]
-        assert (prompt.pictures_sent, prompt.pictures_held) == (1, 0)
-
-    def test_same_role_rows_rejoin_with_their_pictures(self) -> None:
-        messages = [
-            Message(role="user", body="one", attachments=(CAT,)),
-            Message(role="user", body="two", attachments=(CAT,)),
-        ]
-        prompt = assemble("", messages, None, files=CAT_FOLDER)
-        (turn,) = prompt.messages
-        assert turn.images == (CAT_PICTURE, CAT_PICTURE)
-        assert prompt.pictures_sent == 2
+def replace_history(s: Scene, history: str) -> Scene:
+    return replace(s, history=history)
 
 
 class _CatFolder:
@@ -983,12 +1273,13 @@ CAT_FOLDER = _CatFolder()
 
 class _Store:
     """The store as the door reads it — the story's current scenes, its
-    cast's archives (none: a card row sends its body as it stands) and
-    the files folder — answered in memory, nothing on disk."""
+    cast (a card row whose character is not among it sends its body as
+    it stands) and the files folder — answered in memory, nothing on
+    disk."""
 
-    def __init__(self, scenes: tuple, files: object) -> None:
+    def __init__(self, scenes: tuple, characters: tuple[Character, ...], files: object) -> None:
         self.scenes = _Scenes(scenes)
-        self.characters = _Characters()
+        self.characters = _Characters(characters)
         self.files = files if files is not None else _CatFolder()
 
 
@@ -1001,16 +1292,21 @@ class _Scenes:
 
 
 class _Characters:
-    def list(self, story_id: int) -> list:
-        return []
+    def __init__(self, characters: tuple[Character, ...]) -> None:
+        self._characters = list(characters)
+
+    def list(self, story_id: int) -> list[Character]:
+        return self._characters
 
 
 @dataclass(frozen=True)
 class _Prompts:
-    """What the door reads of the prompts: the recap header and the card
-    template (empty: no archive to compose from anyway)."""
+    """What the door reads of the prompts: the recap header, the card
+    template, the header over the pinned rows the recap quotes, and the
+    two wires' framings."""
 
     recap_header: str
     card_framing: str = ""
+    pinned_header: str = "[[pinned]]"
     story_framing: str = "<<frame {premise}>>"
     tool_framing: str = "<<{tool}: {body}>>"

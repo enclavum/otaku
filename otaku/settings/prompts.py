@@ -6,8 +6,9 @@ into a turn's `template` verbatim — nothing is filled at write time, so
 the turn keeps the wording this file had when it played; `{name}` and
 `{body}` mark where the turn's own name and text slot in at wire time.
 The lore templates build the memory; `recap_header` carries the finished
-scene summaries back into the request; a tool's prompt is sent while
-the tool is switched on, never stored — and is the one text edited from
+scene summaries back into the request, and `pinned_header` opens the
+pinned messages quoted among them; a tool's prompt is sent while the
+tool is switched on, never stored — and is the one text edited from
 inside the app (`set_prompt`).
 
 The stub is written on first use with every template active; once the
@@ -188,6 +189,13 @@ Rules:
 {entries}
 """
 
+# The line over the recap's summaries — the story so far, the scene
+# summaries — that stand in for the middle of the story (`context.assembler`).
+RECAP_HEADER_DEFAULT = "[The story so far — the scenes between these moments:]"
+
+# The line over the pinned messages the recap quotes after a summary.
+PINNED_HEADER_DEFAULT = "[Key messages from earlier, word for word:]"
+
 # The tools' prompts: what tells the model how a tool is used
 # (`backend.story.tools`). Sent as an injection while the tool is switched on
 # for the story — bare in the system message, inside the OOC enclosure
@@ -290,7 +298,8 @@ _DEFAULTS = {
     "extract_prompt": EXTRACT_DEFAULT,
     "scene_history_prompt": SCENE_HISTORY_DEFAULT,
     "journal_history_prompt": JOURNAL_HISTORY_DEFAULT,
-    "recap_header": "[The story so far — the scenes between these moments:]",
+    "recap_header": RECAP_HEADER_DEFAULT,
+    "pinned_header": PINNED_HEADER_DEFAULT,
     "tool_questions_prompt": TOOL_QUESTIONS_DEFAULT,
     "tool_assistant_notes_prompt": TOOL_ASSISTANT_NOTES_DEFAULT,
     "tool_system_info_prompt": TOOL_SYSTEM_INFO_DEFAULT,
@@ -348,6 +357,7 @@ class Prompts:
     scene_history_prompt: str = _DEFAULTS["scene_history_prompt"]
     journal_history_prompt: str = _DEFAULTS["journal_history_prompt"]
     recap_header: str = _DEFAULTS["recap_header"]
+    pinned_header: str = _DEFAULTS["pinned_header"]
     tool_questions_prompt: str = _DEFAULTS["tool_questions_prompt"]
     tool_assistant_notes_prompt: str = _DEFAULTS["tool_assistant_notes_prompt"]
     tool_system_info_prompt: str = _DEFAULTS["tool_system_info_prompt"]

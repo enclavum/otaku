@@ -5,6 +5,7 @@ carries, and how full it is — the figure the status row shows.
 import pytest
 
 from otaku.backend.api import InjectionPosition, Layout, NotFound, Refused
+from otaku.backend.app.paths import Paths
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch, set_config, set_config_provider
 
@@ -79,6 +80,42 @@ class TestContext:
         finally:
             app.close()
 
+    def test_a_pinned_message_is_quoted_after_its_scenes_summary(self, server, tmp_path) -> None:
+        # Under prompts.toml's header — the file's, so the load path is
+        # what is asserted — which the preview reads as one with the pin.
+        root = tmp_path / "state"
+        set_config(root, head_messages=1, min_tail_messages=1)
+        Paths.resolve(root).prompts_file.write_text(
+            'pinned_header = "<<kept>>"\n', encoding="utf-8"
+        )
+        app = launch(root, server)
+        try:
+            for i in range(6):
+                app.play(f"Turn number {i}.")
+            line = next(m for m in app.messages if m.body == "Turn number 2.")
+            app.api.stories.messages.update(app.story_id, line.id, pinned=True)
+            app.play("/extract")
+            app.play("We continue.")  # past the scene, for the recap to stand in
+            parts = app.api.stories.context.get(app.story_id).parts
+            laid = [
+                part.provenance.value if hasattr(part, "provenance") else "separator"
+                for part in parts
+            ]
+            at = laid.index("pinned_header")
+            assert laid[at - 2 : at + 3] == [
+                "scene",
+                "separator",
+                "pinned_header",
+                "pinned_message",
+                "separator",
+            ]
+            assert (parts[at].body, parts[at + 1].body) == ("<<kept>>", "Turn number 2.")
+            app.play("And on.")
+            sent = app.server.requests[-1]["messages"][0]["content"]
+            assert "met the Keeper.\n\n<<kept>>\n\nTurn number 2." in sent
+        finally:
+            app.close()
+
 
 class TestContextInjections:
     """What the request carries besides the story is reported as facts —
@@ -105,7 +142,7 @@ class TestContextInjections:
         ]
         assert all(i.tokens > 0 for i in report.injections)
         # a system injection's tokens are the system message's
-        assert report.prompt.system_tokens >= report.injections[0].tokens
+        assert report.figures.system_tokens >= report.injections[0].tokens
 
     def test_the_emulation_is_listed_on_the_canvas_over_the_chat_wire(self, app: App) -> None:
         # switched on, and gated: nothing in the manuscript, the system
@@ -142,8 +179,20 @@ class TestContextUse:
             for i in range(3):
                 app.play(f"Turn number {i}. " + "x" * 400)
             use = app.api.stories.context.fill.get(app.story_id)
-            assert use.percent == app.api.stories.context.get(app.story_id).used > 0
+            assert use.percent == app.api.stories.context.get(app.story_id).figures.used > 0
             assert use.context_in_force == 32768
+        finally:
+            app.close()
+            server.close()
+
+    def test_a_story_that_is_not_there_is_refused(self, tmp_path) -> None:
+        # the window known, so the refusal is the story's own
+        app, server = _loaded_ollama(tmp_path)
+        try:
+            app.play("I knock at the gate.")
+            assert app.api.stories.context.fill.get(app.story_id).context_in_force == 32768
+            with pytest.raises(NotFound):
+                app.api.stories.context.fill.get(app.story_id + 999)
         finally:
             app.close()
             server.close()

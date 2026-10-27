@@ -858,6 +858,13 @@ class TestStorySettings:
         ]
         assert all(i["tokens"] > 0 for i in injections)
 
+    def test_each_part_of_the_context_preview_carries_its_caption(self, page: Page) -> None:
+        # the words the terminal heads the part with, for the page to head it with too
+        page.play("I listen at the culvert mouth.")
+        parts = page.get(f"/api/stories/{page.story}/context")["parts"]
+        drawn = [part for part in parts if part["kind"] == "part"]
+        assert drawn and all(part["caption"] for part in drawn)
+
     def test_the_context_preview_carries_the_cards_and_what_they_inject(self, page: Page) -> None:
         page.play("I listen at the culvert mouth.")
         story = page.story
@@ -1484,9 +1491,9 @@ class TestTheNovelOverTheWire:
             # the preview is the one text the wire sends: the story in it,
             # and none of an instruct template's turn markers
             preview = page.get(f"/api/stories/{page.story}/context")
-            assert [part["role"] for part in preview["parts"]] == ["prompt"]
-            assert "\n\nI was waiting for" in preview["parts"][0]["body"]
-            assert "<|turn>" not in preview["parts"][0]["body"]
+            text = "".join(part.get("body", "") for part in preview["parts"])
+            assert "\n\nI was waiting for" in text
+            assert "<|turn>" not in text
             assert preview["shape"]["total_tokens"] > 0
             # a line played in the novel, then an empty line, the continue:
             # no message of the reader's for it; the line opens a paragraph

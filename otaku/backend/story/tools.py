@@ -4,7 +4,7 @@ reply — one class each, and the one registry.
 A class declares a tool: its name, and who acts on its call. An
 instance is one call of it, read at construction — what the play stream
 makes of a reply. WHAT a call is — a fenced block marked `otk-NAME`,
-whatever the name — is `context.tool_calls`' business, which knows no
+whatever the name — is `context.tools`' business, which knows no
 tool: a body keeps its fences for good, and a call must stay one in a
 build that never heard of its tool. Whether a story lets the model use
 a tool, the prompt that tells the model how, and where it rides, are

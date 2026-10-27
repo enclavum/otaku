@@ -27,18 +27,13 @@ from otaku.backend.story.request import assemble, build_job
 from otaku.backend.story.settings.services import StorySettings, ToolSetting, settings_of
 from otaku.backend.story.tools import TOOLS, Actor, Tool, read_call
 from otaku.context import syntax
-from otaku.context.assembler import (
-    AssembledPrompt,
-    ContextOverflowError,
-    JoinType,
-    context_in_force,
-    get_join_type,
-)
-from otaku.context.tool_calls import FENCE, Prose, ReplyParser, ToolCall, parse_reply
+from otaku.context.assembler import ContextOverflowError, context_in_force, get_join_type
+from otaku.context.prompt import AssembledPrompt, JoinType
+from otaku.context.tools import FENCE, Prose, ReplyParser, ToolCall, parse_reply
 from otaku.providers import OpenAIClient, ProviderError, Reasoning, Reply, Stats, Text, templates
 from otaku.settings.state import ModelRef
 from otaku.store.files import Owner
-from otaku.store.schema import Character, CompletionType, Layout, Message, StoryMode
+from otaku.store.schema import Character, Layout, Message, StoryMode
 
 # How many pictures one turn may carry, and the refusals that are not
 # about one file: a model that cannot see, too many on one turn.
@@ -398,14 +393,12 @@ def _reply_events(
         yield Declined(str(e))
         return
     # The wire is the layout's on the model in use (`ModelFacts.
-    # completion_type`, `_request`). A reply is recorded in the layout's
+    # wire_template`, `_request`). A reply is recorded in the layout's
     # mode over either wire, in story mode a break it opens with kept:
     # the paragraph it starts (`get_join_type`).
     settings = settings_of(app, story_id)
     layout = settings.layout
-    facts = app._model_facts()
-    text_wire = facts.completion_type(layout) is CompletionType.TEXT
-    resolved = facts.text_template if text_wire else None
+    resolved = app._model_facts().wire_template(layout)
     mode = layout.mode
     # A text completion that comes back EMPTY, its stream ending clean —
     # an instruct model at the end of a closed paragraph ends its turn at
@@ -504,7 +497,7 @@ def _request(
     resolved: templates.TextTemplate | None,
     opener: str,
 ) -> Reply:
-    """The request the wire sends (`ModelFacts.completion_type`), the same stream
+    """The request the wire sends (`ModelFacts.wire_template`), the same stream
     coming back either way. In the text wire (`resolved`, the model's text
     template) it is ONE TEXT the model continues over the engine's text
     wire — the assembly's own rendering (`AssembledPrompt.as_text`, the
@@ -518,7 +511,7 @@ def _request(
     if resolved is None:
         return client.completion.chat(
             model.name,
-            assembled.messages,
+            assembled.as_chat(),
             params,
             level=saved.level,
             purpose="chat",
