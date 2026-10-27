@@ -13,6 +13,7 @@ line-kill there). `settle` before sending a control key rides that window
 out.
 """
 
+import contextlib
 import fcntl
 import os
 import pty
@@ -138,11 +139,21 @@ class Terminal:
 
     def quit(self, *, timeout: float = 10.0) -> int:
         """End the session (Ctrl+D past any open UI) and return the exit
-        code."""
+        code. The keys are pressed again every two seconds while the app
+        runs on, as a person would: one that lands while the app asks the
+        terminal something is read with the answer and dropped
+        (`otaku.terminal.tty.ask`). The screen is read meanwhile, so an app
+        still drawing never blocks on a full pty."""
         try:
-            self.send(ESC, 0.3)
-            self.send(CTRL_D, 0.3)
-            return self._proc.wait(timeout=timeout)
+            deadline = time.time() + timeout
+            while self._proc.poll() is None and time.time() < deadline:
+                with contextlib.suppress(OSError):  # it ended between the check and the key
+                    self.send(ESC, 0.3)
+                    self.send(CTRL_D, 0.3)
+                again = time.time() + 2.0
+                while self._proc.poll() is None and time.time() < min(again, deadline):
+                    self._drain(0.1)
+            return self._proc.wait(timeout=1)
         finally:
             self._proc.kill()
             os.close(self._master)

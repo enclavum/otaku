@@ -103,7 +103,7 @@ class Emulated(Terminal):
         self.screen = XtermScreen(cols, rows)
         self._stream = pyte.ByteStream(self.screen)
         self._frames: list[Frame] | None = None
-        self._last_byte = time.time()
+        self._last_byte: float | None = None  # nothing drawn yet
 
     def _drain(self, seconds: float) -> None:
         end = time.time() + seconds
@@ -137,12 +137,15 @@ class Emulated(Terminal):
                 self._frames.append((rows, cursor.y, time.monotonic(), shown))
 
     def quiet(self, still: float = 1.2, timeout: float = 60.0) -> None:
-        """Wait until nothing has been drawn for `still` seconds."""
+        """Wait until the app has drawn, and then drawn nothing for `still`
+        seconds. The silence before its first byte is a launch still
+        starting — the interpreter, the imports, slow on a busy machine —
+        never a screen done drawing."""
         start = time.time()
         self._drain(0.3)
         while time.time() - start < timeout:
             self._drain(0.2)
-            if time.time() - self._last_byte > still:
+            if self._last_byte is not None and time.time() - self._last_byte > still:
                 return
 
     @contextmanager
