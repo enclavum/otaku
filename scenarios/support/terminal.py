@@ -50,6 +50,11 @@ class Terminal:
     """One app run in a pty. `send` types, `expect` waits for markers in
     the transcript so far, `quit` ends the session."""
 
+    # Every cursor-position query answered, as a real terminal does. This
+    # one answers only those a test arms (`arm_cpr`), so prompt_toolkit is
+    # told it gets none: left to find out, it prints a warning 2 s on.
+    _can_answer_cursor = False
+
     def __init__(
         self,
         state_dir: str,
@@ -73,6 +78,7 @@ class Terminal:
                 # The update check asks a port nothing listens on, never GitHub.
                 "OTAKU_UPDATE_URL": _NO_UPDATES,
             }
+            | ({} if self._can_answer_cursor else {"PROMPT_TOOLKIT_NO_CPR": "1"})
             | (env or {})
         )
         self._proc = subprocess.Popen(

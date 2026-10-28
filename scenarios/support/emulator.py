@@ -97,6 +97,8 @@ class Emulated(Terminal):
     answers the app's cursor-position queries from where its cursor is.
     `recording` keeps every distinct frame the screen passed through."""
 
+    _can_answer_cursor = True
+
     def __init__(self, root: Path, *, rows: int = ROWS, cols: int = COLS) -> None:
         super().__init__(str(root), rows=rows, cols=cols)
         self.root = root
