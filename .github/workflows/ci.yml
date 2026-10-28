@@ -1,5 +1,7 @@
 # Lint, typecheck and the offline suite on every push to main or a release
 # branch and on every pull request; the slow screen tests on Linux and macOS.
+# The pseudo-terminal scenarios, the screen tests among them, may fail in a
+# job that still passes (continue-on-error): read the run for failed tests.
 # Live tests need real engines and keys, so they stay on the maintainer's
 # machine.
 name: CI
@@ -37,8 +39,6 @@ jobs:
     name: tests (${{ matrix.os }}, Python ${{ matrix.python }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
-    # 3.15 is the newest Python: a failure there is a finding, not a red build.
-    continue-on-error: ${{ matrix.python == '3.15' }}
     strategy:
       fail-fast: false
       matrix:
@@ -49,13 +49,13 @@ jobs:
       - uses: astral-sh/setup-uv@v10.2.0
         with:
           python-version: ${{ matrix.python }}
-      - name: offline suite
-        if: runner.os != 'Windows'
-        run: uv run pytest tests/ scenarios/ -m "not live"
-      # The pseudo-terminal scenarios need pty, which Windows does not have.
+      # Windows has no pty, so it cannot even import the pseudo-terminal scenarios.
       - name: offline suite, without the pseudo-terminal scenarios
-        if: runner.os == 'Windows'
-        run: uv run pytest tests/ scenarios/ -m "not live and not cli" --ignore=scenarios/cli
+        run: uv run pytest tests/ scenarios/ -m "not live and not cli and not slow" --ignore=scenarios/cli
+      - name: pseudo-terminal scenarios, failures tolerated
+        if: runner.os != 'Windows' && !cancelled()
+        continue-on-error: true
+        run: uv run pytest scenarios/ -m "not live and cli and not slow"
 
   docker:
     name: docker image
@@ -91,4 +91,6 @@ jobs:
       - uses: astral-sh/setup-uv@v10.2.0
         with:
           python-version: "3.14"
-      - run: uv run pytest scenarios/ --slow -m "slow and not live"
+      - name: slow screen tests, failures tolerated
+        continue-on-error: true
+        run: uv run pytest scenarios/ -m "not live and slow"

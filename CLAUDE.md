@@ -28,9 +28,20 @@ Python 3.11 in the `otaku` conda environment:
     make format RUN=...                  # ruff format
     make typecheck RUN=...               # mypy (strict)
     make test RUN=...                    # pytest over tests/, the unit suite
-    make scenarios RUN=...               # pytest over scenarios/ — .claude/rules/tests.md
+    make scenarios RUN=...               # pytest over scenarios/, but the slow ones — .claude/rules/tests.md
     make regression RUN=...              # the slow screen scenarios alone
     make test-model                      # a fake llama.cpp on :8080 — scripts/test_model.py
+
+A pytest run outside these targets selects for itself: nothing but `-m`
+leaves the `slow` screen scenarios out, so add `and not slow` to the
+expression, or pass `-m "not slow"` when there is none — else a
+`pytest scenarios/` takes minutes.
+
+CI lets the pseudo-terminal scenarios (`cli`, the screen tests among
+them) fail without failing the run (`continue-on-error`), so a green run
+is not a passed one. After every run, look for failed tests in its
+output — `gh run view <id> --log | grep -E ' (FAILED|ERROR) '` — and
+trace each one, rerunning it locally, before building on the run.
 
 The app must NOT be launched through a bare `conda run`: it pipes stdin
 and stdout, and a terminal that cannot be reached answers nothing — no

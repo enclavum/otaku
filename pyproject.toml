@@ -110,6 +110,6 @@ testpaths = ["tests"]
 markers = [
     "live: talks to a real provider (each smoke skips itself when its server or api key is absent)",
     "cli: drives the real binary in a subprocess or a pty — the slow end of the suite",
-    "slow: minutes, not seconds — deselected unless `--slow` is given (`make regression`)",
+    "slow: minutes, not seconds — a run that should skip them says `-m \"not slow\"` (`make regression` runs them alone)",
 ]
 addopts = "-q"

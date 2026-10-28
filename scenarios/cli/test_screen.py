@@ -8,10 +8,11 @@ the rows the store never holds (the thinking, an error, the verbose
 stats) are left out of the comparison.
 
 Minutes, not seconds: every check launches a second app for its echo. So
-the module is `slow` besides `cli`, and runs only when asked for with
-`--slow` (`make regression`). A check that fails says what tracing it
-takes: the seed of the fake model's picks (`OTAKU_SCREEN_SEED` replays
-it), the live screen and a fresh launch's, and the last bytes written.
+the module is `slow` besides `cli`: `make regression` runs it, and any
+other run leaves it out with `-m "not slow"`. A check that fails says
+what tracing it takes: the seed of the fake model's picks
+(`OTAKU_SCREEN_SEED` replays it), the live screen and a fresh launch's,
+and the last bytes written.
 """
 
 import contextlib

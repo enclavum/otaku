@@ -16,13 +16,14 @@ typecheck:
 test:
 	$(RUN) pytest
 
+# Every scenario but the `slow` ones, which only this selector leaves out.
 scenarios:
-	$(RUN) pytest scenarios/
+	$(RUN) pytest scenarios/ -m "not slow"
 
 # The terminal's screen played turn by turn against its own echo
 # (scenarios/cli/test_screen.py): minutes, so left out of `scenarios`.
 regression:
-	$(RUN) pytest scenarios/ --slow -m slow
+	$(RUN) pytest scenarios/ -m slow
 
 # A fake llama.cpp on llama.cpp's own port, for looking at the transcript
 # by hand: its lines' leading digits choose the blocks (scripts/test_model.py).

@@ -10,24 +10,6 @@ from scenarios.support.harness import App, launch
 from scenarios.support.server import ModelServer
 
 
-def pytest_addoption(parser: pytest.Parser) -> None:
-    parser.addoption(
-        "--slow", action="store_true", help="also run the `slow` scenarios (minutes, not seconds)"
-    )
-
-
-def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
-    """The `slow` scenarios run only when asked for: left out of every
-    run without `--slow`, whatever `-m` selects, so no suite of seconds
-    turns into one of minutes."""
-    if config.getoption("--slow"):
-        return
-    slow = [item for item in items if item.get_closest_marker("slow")]
-    if slow:
-        config.hook.pytest_deselected(items=slow)
-        items[:] = [item for item in items if not item.get_closest_marker("slow")]
-
-
 @pytest.fixture(autouse=True)
 def _no_shell_keys(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
     """The developer's own shell keys stay out of every offline scenario:

@@ -12,7 +12,8 @@ The layout follows the app's own seams:
   it carries the `cli` marker, because driving the real binary costs
   seconds where the in-process kind costs milliseconds. `test_screen.py`
   is the terminal's screen itself, emulated and held against its own
-  echo turn by turn: minutes, so `slow` too, run only with `--slow`.
+  echo turn by turn: minutes, so `slow` too, which only `-m "not slow"`
+  leaves out.
 - `web/` — the page over a real app. Its `page` fixture serves the app
   beside the test (`web.run_beside`) and speaks HTTP, holding the story
   it plays as the page does; the test asserts through its own store
