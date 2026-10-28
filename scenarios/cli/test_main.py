@@ -309,7 +309,8 @@ class TestErasing:
         terminal.send(ENTER, 1.0)
         terminal.expect("It came up six.")
         erase = terminal.raw.index(b"\x1b[6n\x1b[3A\r\x1b[J")
-        assert not terminal.raw[:erase].endswith(b"\r\n")
+        # the bytes leading up to the erase, for a failure to show
+        assert not terminal.raw[:erase].endswith(b"\r\n"), terminal.raw[max(0, erase - 600) : erase]
 
 
 class TestBlocks:
