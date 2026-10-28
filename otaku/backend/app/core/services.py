@@ -80,6 +80,9 @@ class App:
     _launch_facts: "LaunchFacts"
     # The forced extraction passes asked for, the newest per story.
     _extraction_runs: dict[int, WorkerRun]
+    # Each story's discards since it last grew, newest last: what a revert
+    # puts back (`backend.story.chain`). Memory only — a launch forgets them.
+    _discards: dict[int, list["Discard"]]
     # Caches: each settings file as last read, by its stat (`_read_file`);
     # the stories content index behind `api.stories.list_stories` — built
     # on the first search, reset by every chain write (`backend.story.chain`).
@@ -115,6 +118,7 @@ class App:
         app._thread = AppThread()
         app._launch_facts = LaunchFacts()
         app._extraction_runs = {}
+        app._discards = {}
         app._file_cache = {paths.config_file: (_file_key(paths.config_file), config)}
         app._search_index = None
         app._on_idle = app._thread.idle
@@ -430,6 +434,17 @@ class LaunchFacts:
     notices: tuple[str, ...] = ()
     hint: str = ""
     newer_version: str = ""
+
+
+@dataclass(frozen=True)
+class Discard:
+    """One discard on a story's history, made by an undo or a regenerate:
+    the head before it, which a revert puts back, and the head after it —
+    the history is current only while the story stands there. Held by the
+    app (`App._discards`), operated by `backend.story.chain`."""
+
+    head_before: int | None
+    head_after: int | None
 
 
 # ---------- the app's own facts, for the interface ----------

@@ -9,9 +9,16 @@ New features:
 - Split stories into chapters manually with the `/chapter TITLE` command in the prompt line.
 - Pin important messages in the messages list to have them always sent as is, even after their scene
   is summarized.
+- Word counts in the stories list and the info window.
+
+Improvements:
+
 - The context preview displays the structure of what is sent to the model and where each piece comes
   from: a message, a summary, a card and so on.
-- Word counts in the stories list and the info window.
+- Revert accidental undos and regenerations, one after another back to the last new message, with
+  a button in the web interface or Ctrl+Y in the terminal.
+- See undone and regenerated messages in the messages list (`h` in the terminal, a switch in the web
+  interface) and resume or fork from any of them.
 
 Renames and replacements:
 

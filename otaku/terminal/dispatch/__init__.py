@@ -53,7 +53,7 @@ Handler = Callable[[Chat, str], str | None]
 # lands below the last exchange and invalidates on its first say — the
 # dispatch window watches for the write rather than assuming one, so a
 # picker left without a choice costs the exchanges above it nothing.
-_PLAYING = {"/undo", "/regen", "/card"}
+_PLAYING = {"/undo", "/regen", "/revert", "/card"}
 
 
 def dispatch(chat: Chat, line: str) -> bool:
@@ -189,6 +189,7 @@ HANDLERS: dict[str, Handler] = {
     "/system": stories.system,
     "/regen": stories.regen,
     "/undo": stories.undo,
+    "/revert": stories.revert,
     # a story's settings (`backend.story.settings`)
     "/set mode": settings.set_mode,
     # its messages (`backend.story.messages`)

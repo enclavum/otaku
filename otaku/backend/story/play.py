@@ -22,7 +22,14 @@ from dataclasses import dataclass, field, replace
 from otaku.backend.app.core.services import App
 from otaku.backend.app.pictures.services import Picture, RawFile, read_picture, save
 from otaku.backend.errors import NO_MODEL_HINT, NO_SUCH_STORY, Conflict, Invalid, NotFound
-from otaku.backend.story.chain import append_message, check_head, pop_reply, unit_start
+from otaku.backend.story.chain import (
+    append_message,
+    check_head,
+    forget_discards,
+    pop_reply,
+    record_discard,
+    unit_start,
+)
 from otaku.backend.story.request import assemble, build_job
 from otaku.backend.story.settings.services import StorySettings, ToolSetting, settings_of
 from otaku.backend.story.tools import TOOLS, Actor, Tool, read_call
@@ -258,8 +265,10 @@ def _submit_events(
     pictures: Sequence[Picture],
 ) -> Generator[Event, None, None]:
     """`submit`'s stream over the story's chain as it was read, which it
-    keeps current as its rows land."""
+    keeps current as its rows land. Not an undo or a regenerate, so no
+    revert is left to take."""
     app.note_submission()
+    forget_discards(app, story_id)
     if not line.strip() and not pictures:
         # A continue: the reply follows the story as it stands — another
         # of the model's rows, joined to the last by the join rule
@@ -326,7 +335,9 @@ def _regenerate_events(
     app: App, story_id: int, *, expected_head: int | None
 ) -> Generator[Event, None, None]:
     """`regenerate`'s stream: the standing reply set aside, from the head
-    `regenerate` read, and the fresh take over what stands before it."""
+    `regenerate` read, and the fresh take over what stands before it —
+    the reply set aside going on the story's discards once the take
+    stands, a take stopped included."""
     app.note_submission()
     popped, chain = pop_reply(app, story_id, expected_head=expected_head)
     # The prompt the take re-runs — absent when the story is a promptless
@@ -349,7 +360,12 @@ def _regenerate_events(
             speaker = app._store.characters.find(story_id, frame.name)
     else:
         kind = popped.kind if popped is not None else "dialogue"
-    yield from _reply_events(app, story_id, chain, reply_kind=kind, reply_speaker=speaker)
+    try:
+        yield from _reply_events(app, story_id, chain, reply_kind=kind, reply_speaker=speaker)
+    finally:
+        if popped is not None:
+            head_after = app._store.stories.get_head(story_id)
+            record_discard(app, story_id, head_before=expected_head, head_after=head_after)
 
 
 def _reply_events(

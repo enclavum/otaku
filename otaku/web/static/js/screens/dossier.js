@@ -94,6 +94,7 @@ export async function openStory({ story = null, tab = "messages", allStories } =
     inside,
     facts: read,
     messages: opened?.messages ?? [],
+    tree: opened?.tree ?? [],
     premise: opened?.premise ?? "",
     memory: opened?.memory ?? null,
     refused: opened?.refused ?? "",
@@ -160,17 +161,20 @@ export async function land(storyId, messageId, action) {
 
 /** One story as the dossier draws it: its facts, its messages and its
     memory, asked at once — three reads, each whole, so a tab never draws
-    half of one — and the sentence a refusal answered with. */
+    half of one — and the sentence a refusal answered with. The messages
+    come with the discarded among them (`tree`, as the list reads them);
+    `messages` is the chain alone, what every count and place reads. */
 async function opening(storyId) {
-  const [story, messages, lore] = await Promise.all([
+  const [story, tree, lore] = await Promise.all([
     api.stories.get(storyId),
-    api.stories.messages.list(storyId),
+    api.stories.messages.list(storyId, { withDiscarded: true }),
     api.stories.lore.get(storyId),
   ]);
   const refused = story.refused ? story.notice : lore.refused ? lore.notice : "";
   return {
     premise: story.refused ? "" : story.premise,
-    messages,
+    messages: tree.filter((message) => !message.discarded),
+    tree,
     memory: refused ? null : memoryOf(lore),
     refused,
   };
@@ -270,20 +274,30 @@ function buildMessages(view, pane) {
       view.select.messages(first);
     },
   });
-  const rows = view.messages.map((message, i) => ({
+  /* The chain's messages numbered, the discarded among them unnumbered
+     (`position` null) and drawn only while the switch shows them. */
+  let played = 0;
+  const rows = view.tree.map((message) => ({
     ...message,
-    position: i + 1,
-    last: i === view.messages.length - 1,
+    position: message.discarded ? null : ++played,
+    last: !message.discarded && message.id === view.messages.at(-1)?.id,
     haystack: `${message.body} ${message.speaker ?? ""}`.toLowerCase(),
   }));
-  tabNote(view, "messages", `${rows.length} ${rows.length === 1 ? "message" : "messages"}`);
+  const column = $(".otk-col--messages", pane);
+  const toggle = $("[data-discarded-switch]", pane);
+  // every opening starts with them hidden: the pane outlives the story
+  let discardedShown = false;
+  toggle?.setAttribute("aria-checked", "false");
+  if (column) column.dataset.discarded = "hidden";
+  const visible = () => rows.filter((message) => discardedShown || !message.discarded);
+  tabNote(view, "messages", `${played} ${played === 1 ? "message" : "messages"}`);
   padScrollbar($("[data-detail]", pane));
-  if (!rows.length) $("[data-actions]", pane).replaceChildren();
+  if (!played) $("[data-actions]", pane).replaceChildren();
   // `e` is the keyboard's way to the same verb the pointer takes.
   const edit = () => $("[data-detail] .otk-edit__verb--edit", pane)?.click();
   const list = browser(view.popup, {
     root: pane,
-    rows,
+    rows: visible(),
     drawRow: (message) => {
       // who the row is: a tool's result and a card's line by what they
       // are, the reader's own line, or the speaker the pass named
@@ -310,6 +324,7 @@ function buildMessages(view, pane) {
       );
       // what a save finds its row by: the cursor may be elsewhere by then
       drawn.dataset.id = String(message.id);
+      drawn.classList.toggle("otk-row--discarded", message.discarded);
       return drawn;
     },
     drawPreview: (message) => drawReader(view, pane, message, edit),
@@ -321,6 +336,20 @@ function buildMessages(view, pane) {
         : { line: "Nothing played yet.", hint: "continue this story to play into it" },
   });
   view.select.messages = (id) => list.select((message) => message.id === id);
+  /* The switch beside the filter: the discarded shown among the chain's
+     messages, or hidden — the cursor kept on its message, or on the
+     nearest one shown above it, as the terminal's `h` keeps it. */
+  if (toggle) {
+    toggle.onclick = guard(async () => {
+      const at = list.current();
+      discardedShown = !discardedShown;
+      toggle.setAttribute("aria-checked", String(discardedShown));
+      if (column) column.dataset.discarded = discardedShown ? "shown" : "hidden";
+      const next = visible();
+      const keep = at ? next.findLast((message) => rows.indexOf(message) <= rows.indexOf(at)) : null;
+      await list.replace(next, (message) => message === keep);
+    });
+  }
 }
 
 function padScrollbar(scroll) {
@@ -388,7 +417,9 @@ function reader(text, save, line = null) {
 
 function drawReader(view, pane, message, edit) {
   const head = element("div", "otk-detail__head");
-  head.append(span("otk-label otk-label--ink", `Message ${message.position}`));
+  // a discarded message has no number along the chain
+  const name = message.discarded ? "Message" : `Message ${message.position}`;
+  head.append(span("otk-label otk-label--ink", name));
   if (message.kind) head.append(span("otk-tag", message.kind));
   if (message.can_pin || message.pinned) head.append(readerPin(view, message));
 
@@ -472,9 +503,11 @@ async function saveMessage(view, message, text) {
     },
   );
   /* The story's name falls back to its first line, so the runhead asks
-     again; and the open story's transcript reads the same turn. */
+     again; and the open story's transcript reads the same turn — not a
+     discarded one's, which no transcript draws. */
   if (!answer.refused) {
-    await landed("", { corrected: view.inside ? [message.position, text] : null });
+    const shown = view.inside && !message.discarded;
+    await landed("", { corrected: shown ? [message.position, text] : null });
   }
   return answer;
 }
@@ -495,6 +528,12 @@ function showCount(view) {
     refused. */
 function rowNumber(view, message) {
   const number = span("otk-row__id");
+  // a discarded message has no number — "undone" stands in its place —
+  // and is pinned from its reader
+  if (message.discarded) {
+    number.append(span("otk-row__why", "undone"));
+    return number;
+  }
   if (!message.can_pin && !message.pinned) {
     number.textContent = String(message.position);
     return number;
@@ -523,7 +562,8 @@ function readerPin(view, message) {
 /** A pin as its message stands: `data-pinned`, and what pressing it does
     — the reader's a button of its own, the list's inside its row's. */
 function markPin(pin, message) {
-  const does = `${message.pinned ? "unpin" : "pin"} message ${message.position}`;
+  const which = message.discarded ? "message" : `message ${message.position}`;
+  const does = `${message.pinned ? "unpin" : "pin"} ${which}`;
   pin.dataset.pin = String(message.id);
   pin.dataset.pinned = String(message.pinned);
   pin.title = does;
@@ -568,23 +608,34 @@ async function togglePin(view, message) {
 
 function resumeAt(view, message) {
   // The last turn resumes as it stands; an earlier one has to say what
-  // to do with everything after it.
+  // to do with everything after it, and a discarded one how to go on.
   if (message.last) return land(view.subject.id, message.id, "resume");
   return askLanding(view, message);
 }
 
 async function askLanding(view, message) {
   /* Picking an earlier turn has to say what becomes of everything after
-     it. The radios choose; the button applies — a click on "Set aside"
-     must not set anything aside. */
+     it; picking a discarded one, whether the story goes on from it or a
+     copy does. The radios choose; the button applies — a click on "Set
+     aside" must not set anything aside. */
   let chosen = "fork";
   const follow = view.messages.length - message.position;
   const choice = await ask("landing", (dialog) => {
-    $("[data-title]", dialog).textContent = `Resume from message ${message.position}?`;
-    $(".otk-dialog__body", dialog).textContent =
-      `${follow === 1 ? "One turn follows" : `${follow} turns follow`} this one. ` +
-      "Choose what happens to them.";
-    const options = $$("[data-select]", dialog);
+    const body = $(".otk-dialog__body", dialog);
+    if (message.discarded) {
+      $("[data-title]", dialog).textContent = "Resume from a discarded message?";
+      body.textContent = "";
+    } else {
+      $("[data-title]", dialog).textContent = `Resume from message ${message.position}?`;
+      body.textContent =
+        `${follow === 1 ? "One turn follows" : `${follow} turns follow`} this one. ` +
+        "Choose what happens to them.";
+    }
+    body.hidden = !body.textContent;
+    // on a discarded message Resume stands in for Set aside
+    $('[data-select="move"]', dialog).hidden = !message.discarded;
+    $('[data-select="truncate"]', dialog).hidden = message.discarded;
+    const options = $$("[data-select]", dialog).filter((option) => !option.hidden);
     const confirm = $('[data-choice="confirm"]', dialog);
     const select = (picked) => {
       chosen = picked.dataset.select;
@@ -595,9 +646,11 @@ async function askLanding(view, message) {
       if (confirm) confirm.textContent = $(".otk-choice__name", picked)?.textContent ?? chosen;
     };
     for (const option of options) option.onclick = () => select(option);
-    // fork is the default: the one choice that loses nothing
-    const fork = options.find((option) => option.dataset.select === "fork");
-    if (fork) select(fork);
+    // fork is the default on the chain: the one choice that loses nothing;
+    // on a discarded message, resuming loses nothing either, and comes first
+    const preferred = message.discarded ? "move" : "fork";
+    const first = options.find((option) => option.dataset.select === preferred);
+    if (first) select(first);
   });
   // Returned, so the guard on the door that opened this dialog catches
   // a landing that fails — fired bare, it would reject with nobody
@@ -1046,6 +1099,7 @@ async function reread(view, selectId) {
      cast shown on `selectId`. */
   const opened = await opening(view.subject.id);
   view.messages = opened.messages;
+  view.tree = opened.tree;
   view.memory = opened.memory;
   view.refused = opened.refused;
   for (const tab of ["messages", "scenes", "cast"]) view.built.delete(tab);

@@ -9,7 +9,9 @@ premise tab is the one full-width view — a premise is one text, so
 there is no list beside it; Enter edits it in place. The messages tab
 is the story browser's message view: Enter on the last message resumes,
 an earlier one asks what resuming there means (fork — the default —
-truncate, or cancel), and `e` corrects a message where it is read.
+truncate, or cancel), a discarded one, shown by `h`, likewise (resume —
+the default — fork, or cancel), and `e` corrects a message where it is
+read.
 Scenes and cast are the two lenses over the memory: Enter opens an item
 as a FIELD LIST — one row per text (`scene_fields` / `char_fields`,
 this screen's own reading of the story's `Lore`) — and Enter on a
@@ -75,7 +77,7 @@ from otaku.terminal.api import prompts as api_prompts
 from otaku.terminal.screens.base import base_style, bordered_box, page_step, text_line
 from otaku.terminal.screens.dossier.base import Field, Tab
 from otaku.terminal.screens.dossier.cast import CastTab, char_fields
-from otaku.terminal.screens.dossier.messages import RESUME_OPTIONS, MessagesTab
+from otaku.terminal.screens.dossier.messages import MessagesTab
 from otaku.terminal.screens.dossier.premise import PremiseTab
 from otaku.terminal.screens.dossier.scenes import ScenesTab, scene_fields
 from otaku.terminal.screens.dossier.tools import SHARED_REMINDER, TEXT_KINDS, ToolsTab
@@ -126,7 +128,9 @@ class Dossier(PremiseTab, MessagesTab, ScenesTab, CastTab, ToolsTab):
             if not self.turn_filtered:
                 return [("", "")]
             orig = self.turn_filtered[self.cursor]
-            return [("class:preview.title", f"{orig + 1}. {self.msgs[orig].role}\n")]
+            number = self.numbers[orig]
+            role = self.msgs[orig].role
+            return [("class:preview.title", f"{number}. {role}\n" if number else f"{role}\n")]
         if self.tab == "tools":
             # The setting's name is the panel's header, so the text under
             # it can become the edit buffer with the header standing; the
@@ -196,8 +200,8 @@ class Dossier(PremiseTab, MessagesTab, ScenesTab, CastTab, ToolsTab):
             return [
                 (
                     "class:help",
-                    " ↑/↓ navigate · / filter · e edit · space pin · enter resume from this turn"
-                    f" · ←/→ tabs · esc {back}",
+                    " ↑/↓ navigate · / filter · e edit · space pin · h discarded"
+                    f" · enter resume from this turn · ←/→ tabs · esc {back}",
                 )
             ]
         if self.tab == "cast":
@@ -237,10 +241,7 @@ class Dossier(PremiseTab, MessagesTab, ScenesTab, CastTab, ToolsTab):
         assert self.view is not None
         q = self.query.strip().casefold()
         if self.tab == "messages":
-            if not q:
-                self.turn_filtered = list(range(len(self.msgs)))
-            else:
-                self.turn_filtered = [i for i, m in enumerate(self.msgs) if q in m.body.casefold()]
+            self.turn_filtered = self._turns(q)
         elif self.tab == "scenes":
             if not q:
                 self.scenes_f = list(range(len(self.view.scenes)))
@@ -292,6 +293,8 @@ class Dossier(PremiseTab, MessagesTab, ScenesTab, CastTab, ToolsTab):
         key = latin_key(data)
         if key == "e" and self.dossier_on and self.tab == "messages":
             self._start_edit()
+        elif key == "h" and self.dossier_on and self.tab == "messages":
+            self._toggle_discarded()
         elif key == "o" and self.dossier_on and self.detail is not None:
             self._pivot()
         elif data == " " and self.dossier_on and self.tab == "tools":
@@ -321,12 +324,13 @@ class Dossier(PremiseTab, MessagesTab, ScenesTab, CastTab, ToolsTab):
         if self.tab == "messages":
             if not self.turn_filtered:
                 return
-            orig = self.turn_filtered[self.cursor]
-            if orig + 1 == len(self.msgs):
+            m = self.msgs[self.turn_filtered[self.cursor]]
+            if not m.discarded and m.id == self._head():
                 self._land("resume")
             else:
-                # An earlier turn: what resuming there means is the resume
-                # dialog's question, fork being the default.
+                # An earlier turn or a discarded one: what resuming there
+                # means is the resume dialog's question, its first row the
+                # default.
                 self.confirming_resume = True
                 self.resume_choice = 0
             return
@@ -560,11 +564,11 @@ class Dossier(PremiseTab, MessagesTab, ScenesTab, CastTab, ToolsTab):
 
         @kb.add("up", filter=resuming)
         def _resume_up(event: Any) -> None:
-            self.resume_choice = (self.resume_choice - 1) % len(RESUME_OPTIONS)
+            self.resume_choice = (self.resume_choice - 1) % len(self._resume_options())
 
         @kb.add("down", filter=resuming)
         def _resume_down(event: Any) -> None:
-            self.resume_choice = (self.resume_choice + 1) % len(RESUME_OPTIONS)
+            self.resume_choice = (self.resume_choice + 1) % len(self._resume_options())
 
         @kb.add("enter", filter=resuming)
         def _resume_enter(event: Any) -> None:

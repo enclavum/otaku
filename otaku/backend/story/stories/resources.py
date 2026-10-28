@@ -1,7 +1,8 @@
 """The stories as a frontend reaches them — the collection and each
 story (`StoriesResource`), and the actions on one: a copy continued
 (`ForksResource`), a fresh take on its last reply (`RegensResource`),
-its trailing exchange taken back (`UndosResource`) — with every resource
+its trailing exchange taken back (`UndosResource`), what its newest
+discard took put back (`RevertsResource`) — with every resource
 inside a story attached under it: its settings, its messages and the
 play, its memory, its cards, its export, its next request. Every call
 names the story it acts on. The work is the domain's
@@ -49,6 +50,7 @@ class StoriesResource(Resource):
         self.messages = MessagesResource(app)
         self.regens = RegensResource(app)
         self.undos = UndosResource(app)
+        self.reverts = RevertsResource(app)
         self.lore = LoreResource(app)
         self.scenes = ScenesResource(app)
         self.characters = CharactersResource(app)
@@ -110,14 +112,15 @@ class StoriesResource(Resource):
     ) -> Changed[Story]:
         """A story's title and its premise — the system prompt — and its
         head, whichever are given. A title is never emptied; the premise
-        is taken verbatim, and "" CLEARS it. The head moves back to one of
-        the story's messages — from `expected_head`, the head the caller
-        read, which a head move names — and the messages after it stay in
-        the tree as siblings: nothing
-        is deleted; the landing line says where it stands. Raises
-        NotFound for a story that is not there or a head off its chain,
-        HeadMoved where the head stands elsewhere than expected, Invalid
-        for an emptied title or nothing to change."""
+        is taken verbatim, and "" CLEARS it. The head moves to one of the
+        story's messages — back along its chain, or onto a discarded one —
+        from `expected_head`, the head the caller read, which a head move
+        names; the messages it leaves stay in the tree as siblings:
+        nothing is deleted, and no revert takes the move back. The landing
+        line says where it stands. Raises NotFound for a story that is not
+        there or a head that is none of its messages, HeadMoved where the
+        head stands elsewhere than expected, Invalid for an emptied title
+        or nothing to change."""
         app = self._app
         said: list[str] = []
         if not isinstance(title, Unchanged) or not isinstance(premise, Unchanged):
@@ -132,8 +135,8 @@ class StoriesResource(Resource):
         if not isinstance(head, Unchanged):
             if isinstance(expected_head, Unchanged):
                 raise Invalid("A head move names the head it moves from.")
-            domain_stories.set_head(app, story_id, head, expected_head=expected_head)
-            said.append(self.get(story_id).landed_line("Truncated"))
+            verb = domain_stories.set_head(app, story_id, head, expected_head=expected_head)
+            said.append(self.get(story_id).landed_line(verb))
         if not said:
             raise Invalid("Nothing to change.")
         return Changed(self.get(story_id), " ".join(said))
@@ -200,6 +203,23 @@ class UndosResource(Resource):
         return Changed(_story(self._app, domain_stories.get_story(self._app, story_id)), said)
 
 
+class RevertsResource(Resource):
+    """/stories/{story}/reverts — what the newest discard took, put back."""
+
+    def create(self, story_id: int, *, expected_head: int | None) -> Changed[Story]:
+        """Put back what a story's newest discard took — an undo's
+        exchange or a regenerate's earlier take — moving the head back
+        from `expected_head`, the head the caller read: what the discard
+        landed on stays in the tree as siblings. The discards are the
+        undos and regenerates since anything else moved the story's head,
+        held while the app runs (`Story.can_revert`). Answered
+        as the story now stands. Raises NotFound for a story that is not
+        there, HeadMoved where its head stands elsewhere, Conflict with
+        nothing to revert."""
+        said = domain_stories.revert_discard(self._app, story_id, expected_head=expected_head)
+        return Changed(_story(self._app, domain_stories.get_story(self._app, story_id)), said)
+
+
 def _summary(row: StoryListing) -> StorySummary:
     return StorySummary(
         id=row.id,
@@ -237,4 +257,5 @@ def _story(app: App, record: StoryRecord) -> Story:
         question=Question(asked.text, asked.question, asked.options) if asked else None,
         shown_tools=record.shown_tools,
         folded_tools=record.folded_tools,
+        can_revert=record.can_revert,
     )

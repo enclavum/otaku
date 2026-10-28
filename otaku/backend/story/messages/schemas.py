@@ -61,10 +61,13 @@ def as_events(found: Generator[domain_messages.Event, None, None]) -> Iterator[P
         found.close()
 
 
-def _as_message(row: schema.Message, previous: schema.Message | None, unit: int) -> Message:
+def _as_message(
+    row: schema.Message, previous: schema.Message | None, unit: int, *, discarded: bool = False
+) -> Message:
     """A stored row as the message a client draws: its body split, how
-    it joins `previous` (the row before it), a tool message's label, and the
-    first row of the reply unit it stands in."""
+    it joins `previous` (the row before it), a tool message's label, the
+    first row of the reply unit it stands in, and whether it is off the
+    current chain."""
     return Message(
         id=row.id,
         role=row.role,
@@ -82,6 +85,7 @@ def _as_message(row: schema.Message, previous: schema.Message | None, unit: int)
         join_type=domain_messages.join_type(previous, row),
         tool_label=domain_messages.tool_label(row),
         unit=unit,
+        discarded=discarded,
     )
 
 
@@ -97,9 +101,11 @@ class Message(Schema):
     prose, and each tool call as its tool's facts; a user's line its
     story and its words with the model; a chapter its heading, numbered
     along the chain), how it joins the message before it (`join_type`),
-    a tool message's label (None on every other), and the first message
+    a tool message's label (None on every other), the first message
     of the reply unit it stands in (`unit`: what an undo or a regenerate
-    takes with it)."""
+    takes with it), and whether it is off the story's current chain
+    (`discarded`: left by an undo, a regenerate or a head move — its join
+    and its unit read along its own branch)."""
 
     id: int
     role: str
@@ -117,6 +123,7 @@ class Message(Schema):
     join_type: JoinType
     tool_label: str | None
     unit: int
+    discarded: bool
 
 
 class UserMessage(Schema):

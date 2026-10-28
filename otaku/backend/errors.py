@@ -9,9 +9,9 @@ and `StoppingError`, the answer of a call the closing app will not run."""
 NO_MODEL_HINT = "No model selected — pick one with /model."
 NO_STORY_HINT = "No story yet — send a message first."
 # What every door says for a story id the store does not hold, and for a
-# message id that is not on the story's current chain.
+# message id that is none of the story's, on its chain or discarded.
 NO_SUCH_STORY = "No such story."
-OFF_CHAIN = "That message is not on the story's current chain."
+NO_SUCH_MESSAGE = "No such message in this story."
 
 
 class Refused(Exception):  # noqa: N818 — a refusal is an expected answer, not an error

@@ -1,16 +1,18 @@
-"""A story's messages: its chain read (`list_messages`, `get_message`)
-and a message corrected (`update_message`); a line played on it
-(`submit_line`, the play engine's, `play`, with the events it tells);
-and a stored message's rules, as a client is answered them — its body
-split for a client that parses nothing (`segments`), how it joins the
-message before it on the canvas (`join_type`), where the reply unit it
-stands in starts (`unit_start`), what a tool's message is called
-(`tool_label`), where a line typed now would stand (`next_join`), and
-the question a story stands on (`posed_question`)."""
+"""A story's messages: its chain listed (`list_messages`), or every
+message it holds in the order its list reads them (`list_messages_full`),
+one read (`get_message`) and corrected (`update_message`); a line played
+on it (`submit_line`, the play engine's, `play`, with the events it
+tells); and a stored message's rules, as a client is answered them — its
+body split for a client that parses nothing (`segments`), how it joins
+the message before it on the canvas (`join_type`), what a tool's message
+is called (`tool_label`), where a line typed now would stand
+(`next_join`), and the question a story stands on (`posed_question`)."""
+
+from dataclasses import dataclass, replace
 
 from otaku.backend.app.core.services import App
-from otaku.backend.errors import NO_SUCH_STORY, OFF_CHAIN, Invalid, NotFound
-from otaku.backend.story.chain import unit_start as unit_start
+from otaku.backend.errors import NO_SUCH_MESSAGE, NO_SUCH_STORY, Invalid, NotFound
+from otaku.backend.story.chain import unit_start
 from otaku.backend.story.play import CallPiece as CallPiece
 from otaku.backend.story.play import Declined as Declined
 from otaku.backend.story.play import Event as Event
@@ -29,33 +31,104 @@ from otaku.context.tools import Prose
 from otaku.store.schema import Layout, Message
 
 
-def list_messages(app: App, story_id: int) -> list[Message]:
+@dataclass(frozen=True)
+class ListedMessage:
+    """A message of a story where a list reads it, with what its own
+    branch says of it: the row before it there (None for a first), the
+    first row of the reply unit it stands in, and whether it is off the
+    current chain."""
+
+    row: Message
+    previous: Message | None
+    unit: int
+    discarded: bool
+
+
+def list_messages(app: App, story_id: int) -> list[ListedMessage]:
     """A story's current chain, root → head. Raises NotFound for a story
     that is not there."""
+    return _listed(_chain(app, story_id))
+
+
+def list_messages_full(app: App, story_id: int) -> list[ListedMessage]:
+    """Every message a story holds, as its list reads them: the current
+    chain, root → head, and under each of its messages the discarded
+    branches that leave from it — those leaving from none on top — oldest
+    first, each read through in order before the next. Raises NotFound
+    for a story that is not there."""
+    chain = _chain(app, story_id)
+    children: dict[int | None, list[Message]] = {}
+    for parent, row in app._store.stories.get_discarded(story_id):
+        children.setdefault(parent, []).append(row)
+    out = _branches(children, None, [])
+    for index, listed in enumerate(_listed(chain)):
+        out.append(listed)
+        if listed.row.id in children:
+            out += _branches(children, listed.row.id, chain[: index + 1])
+    return out
+
+
+def _chain(app: App, story_id: int) -> list[Message]:
+    """A story's current chain as stored, root → head. Raises NotFound
+    for a story that is not there."""
     if not app._store.stories.exists(story_id):
         raise NotFound(NO_SUCH_STORY)
     return app._store.stories.get_messages(story_id)
 
 
+def _listed(chain: list[Message]) -> list[ListedMessage]:
+    """A chain's rows, each with the row before it and its reply unit."""
+    return [
+        ListedMessage(
+            row, chain[index - 1] if index else None, chain[unit_start(chain, index + 1)].id, False
+        )
+        for index, row in enumerate(chain)
+    ]
+
+
+def _branches(
+    children: dict[int | None, list[Message]], parent: int | None, path: list[Message]
+) -> list[ListedMessage]:
+    """The discarded branches leaving from `parent`, depth first — `path`
+    the rows from the root to it — each row's chapter counted along its
+    own branch. A loop, never recursion: a branch may be as long as the
+    story."""
+    out: list[ListedMessage] = []
+    path = list(path)
+    stack = [(row, len(path)) for row in reversed(children.get(parent, []))]
+    while stack:
+        row, depth = stack.pop()
+        del path[depth:]
+        before = (path[-1].chapter or 0) if path else 0
+        row = replace(row, chapter=before + (row.kind == "chapter"))
+        path.append(row)
+        unit = path[unit_start(path, len(path))].id
+        out.append(ListedMessage(row, path[-2] if depth else None, unit, True))
+        stack += [(child, depth + 1) for child in reversed(children.get(row.id, []))]
+    return out
+
+
 def get_message(app: App, story_id: int, message_id: int) -> Message:
-    """One message of a story's current chain. Raises NotFound for a
-    story that is not there, and a message that is not on its chain."""
-    found = next((row for row in list_messages(app, story_id) if row.id == message_id), None)
-    if found is None:
-        raise NotFound(OFF_CHAIN)
+    """One message of a story, on its chain or discarded. Raises NotFound
+    for a story that is not there, and a message that is none of its."""
+    if not app._store.stories.exists(story_id):
+        raise NotFound(NO_SUCH_STORY)
+    found = app._store.messages.get(message_id)
+    if found is None or app._store.messages.get_story_id(message_id) != story_id:
+        raise NotFound(NO_SUCH_MESSAGE)
     return found
 
 
 def update_message(app: App, story_id: int, message_id: int, *, body: str) -> str:
     """The author's correction of one message of a story, and the
-    sentence. The message must be on that story's current chain — a
-    correction landing on another story's would rewrite a story nobody
-    was looking at. The whitespace at the message's edges stays the
+    sentence. The message must be that story's, on its chain or discarded
+    — a correction landing on another story's would rewrite a story
+    nobody was looking at. The whitespace at the message's edges stays the
     stored one, whatever the edit's: a break there is how the row joins
     its neighbours (`assembler.get_join_type`), which an editor does not
     show — a correction changes the words, never the join. Raises Invalid
-    on an empty body, NotFound for a message that is not on the story's
-    chain."""
+    on an empty body, NotFound for a message that is none of the
+    story's."""
     if not body.strip():
         raise Invalid("A message cannot be emptied — undo the exchange instead.")
     stored = get_message(app, story_id, message_id)
@@ -67,10 +140,11 @@ def update_message(app: App, story_id: int, message_id: int, *, body: str) -> st
 def set_pinned(app: App, story_id: int, message_id: int, pinned: bool) -> str:
     """Pin one message of a story, or unpin it, and the sentence: a
     pinned message is sent whole even where its scene is summarized,
-    quoted after the scene's summary. The message must be on that story's
-    current chain, as an edit's must. Any message may be unpinned. Raises
-    Invalid for a pin on a row that is never pinned (`can_pin`), NotFound
-    for a message that is not on the story's chain."""
+    quoted after the scene's summary — once on the chain, for a discarded
+    one. The message must be that story's, as an edit's must. Any message
+    may be unpinned. Raises Invalid for a pin on a row that is never
+    pinned (`can_pin`), NotFound for a message that is none of the
+    story's."""
     stored = get_message(app, story_id, message_id)
     if pinned and not can_pin(stored):
         raise Invalid("A card or a tool result can't be pinned.")

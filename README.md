@@ -208,7 +208,8 @@ To start a new chapter, type `/chapter` with its title, e.g. `/chapter The Flood
 numbered for you and gets a heading in the transcript; the model doesn't reply to it, but it's told
 that a new chapter starts there.
 
-During play, you can `/undo` (Ctrl+U) the last exchange and `/regen` (Ctrl+R) the last reply.
+During play, you can `/undo` (Ctrl+U) the last exchange, `/regen` (Ctrl+R) the last reply, and
+`/revert` (Ctrl+Y) either.
 
 ### Story mode
 

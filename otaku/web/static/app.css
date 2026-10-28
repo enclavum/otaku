@@ -137,6 +137,10 @@
   --otk-rail-w:      250px;
   --otk-page-max:    820px;
 
+  /* -- motion ------------------------------------------------------------- */
+  --otk-revert-hold: 10s;      /* how long Revert waits before it fades    */
+  --otk-revert-fade: 0.8s;
+
   /* -- scrollbars --------------------------------------------------------- */
   --otk-scrollbar-w:  10px;    /* the app styles its own scrollbars        */
   --otk-scrollbar-thumb: oklch(0.60 0.011 165);  /* ink-family: it reads as drawn */
@@ -1107,6 +1111,16 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 .otk-attach-btn:not([hidden]) { flex: none; align-self: stretch; display: inline-flex; align-items: center; justify-content: center; width: 36px; padding: 0; color: var(--otk-ink); cursor: pointer; }
 .otk-attach-btn:hover, .otk-attach-btn:focus-visible { color: var(--otk-accent); }
 .otk-composer__verbs { flex: 0 1 auto; margin-left: auto; display: flex; align-items: center; gap: 7px; }
+/* Revert: a square glyph button just left of Send, shown after a Regen or an
+   Undo while there is something to take back. It waits, then fades, and the
+   app sets [hidden] on animationend; hovering or focusing it holds it, so a
+   slow reach still lands, and showing it again restarts the wait. */
+.otk-revert { width: 28px; height: 28px; padding: 0; justify-content: center; align-self: center; color: var(--otk-muted); border-color: var(--otk-line-soft); }
+.otk-revert:hover { color: var(--otk-ink); }
+@keyframes otk-revert-fade { to { opacity: 0; } }
+.otk-revert:not([hidden]) { animation: otk-revert-fade var(--otk-revert-fade) ease-in var(--otk-revert-hold) forwards; }
+.otk-revert:hover, .otk-revert:focus-visible { animation-play-state: paused; }
+.otk-revert__icon { display: block; transform: scaleX(-1); fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .otk-hints { margin: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 16px; font-family: var(--otk-font-mono); font-size: var(--otk-size-tag); letter-spacing: var(--otk-track-foot); text-transform: uppercase; color: var(--otk-faint); }
 .otk-hints > * { white-space: nowrap; }
 /* A touch screen has no keys to hint at, and on a phone the row costs lines
@@ -1317,6 +1331,20 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
 .otk-row__id[data-pinned="true"] .otk-pin,
 .otk-row__id[data-pinned]:hover .otk-pin { display: block; }
 .otk-row__id[data-pinned="true"] .otk-pin { fill: var(--otk-accent); stroke: var(--otk-accent); }
+/* The messages list can show the discarded turns — undone, or replaced by a
+   regen — faint and unnumbered, after the turn they leave from; the switch
+   beside the filter says whether it does. */
+.otk-discarded { flex: none; display: inline-flex; align-items: center; gap: 8px; margin-left: 14px; cursor: pointer; }
+.otk-discarded__word { font-family: var(--otk-font-prose); font-size: var(--otk-size-note); color: var(--otk-faint); }
+.otk-col--messages[data-discarded="shown"] .otk-discarded__word { color: var(--otk-ink); }
+.otk-row--discarded { display: none; }
+.otk-col--messages[data-discarded="shown"] .otk-row--discarded { display: flex; }
+.otk-row--discarded .otk-row__who,
+.otk-row--discarded .otk-row__title { color: var(--otk-faint); }
+/* a discarded turn has no number: its id column says "undone" in small
+   caps, right-aligned so it runs out into the row's left padding */
+.otk-row--discarded .otk-row__id { display: flex; justify-content: flex-end; overflow: visible; white-space: nowrap; }
+.otk-row__why { font-size: var(--otk-size-tag); letter-spacing: var(--otk-track-foot); text-transform: uppercase; color: var(--otk-faint); }
 .otk-row__num { flex: none; text-align: right; font-family: var(--otk-font-mono); font-size: var(--otk-size-mono-sm); line-height: var(--otk-leading-row); color: var(--otk-muted); font-variant-numeric: tabular-nums; }
 .otk-row--mono .otk-row__title { font-family: var(--otk-font-mono); font-size: var(--otk-size-mono); }
 .otk-row[aria-selected="true"] .otk-row__title { color: var(--otk-ink); }

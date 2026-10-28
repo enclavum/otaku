@@ -90,13 +90,17 @@ def _capture(url: str) -> dict[str, Any]:
     tour = by_title["The Vermilion Tour"]
     tools = [row for row in read(f"/api/stories/{river}/settings")["items"] if row["tool"]]
     prompted = [
-        row for row in read(f"/api/stories/{river}/settings")["items"]
+        row
+        for row in read(f"/api/stories/{river}/settings")["items"]
         if row["prompt_name"] and not row["tool"]
     ]
     # What a story made now starts with — its settings, every switch off —
     # read off one made for it and deleted again, after the reads above.
     request = urllib.request.Request(
-        url + "/api/stories", data=b"{}", headers={"Content-Type": "application/json"}, method="POST"
+        url + "/api/stories",
+        data=b"{}",
+        headers={"Content-Type": "application/json"},
+        method="POST",
     )
     with urllib.request.urlopen(request, timeout=30) as reply:
         fresh = json.loads(reply.read())["value"]["id"]
@@ -121,8 +125,14 @@ def _capture(url: str) -> dict[str, Any]:
             "balance": read("/api/balance?probe=false"),
             "stories": stories,
             # Every tool's prompt and every prompt no tool owns, as shipped.
-            "tool_prompts": {row["tool"]: read(f"/api/tools/{row['tool']}/prompt") for row in tools if row["prompt_name"]},
-            "prompts": {row["prompt_name"]: read(f"/api/prompts/{row['prompt_name']}") for row in prompted},
+            "tool_prompts": {
+                row["tool"]: read(f"/api/tools/{row['tool']}/prompt")
+                for row in tools
+                if row["prompt_name"]
+            },
+            "prompts": {
+                row["prompt_name"]: read(f"/api/prompts/{row['prompt_name']}") for row in prompted
+            },
         },
         "river": _story(url, river),
         "tour": _story(url, tour),
@@ -201,12 +211,16 @@ def _copy_pictures(fixtures: dict[str, Any], root: Path) -> None:
     shutil.rmtree(files, ignore_errors=True)
     files.mkdir()
     held = root / "database" / "files"
-    pictures = [p for message in fixtures["river"]["messages"] for p in message.get("attachments") or []]
+    pictures = [
+        p for message in fixtures["river"]["messages"] for p in message.get("attachments") or []
+    ]
     pictures += [p for card in fixtures["codex"]["card"].values() for p in card["pictures"]]
     for picture in pictures:
         stem = Path(picture["file"]).stem
         for stored in (picture["file"], f"{stem}-thumb.jpg"):
-            shutil.copyfile(held / stored, files / _PICTURE_NAME.sub(rf"\g<1>{_PINNED_DAY}\g<2>", stored))
+            shutil.copyfile(
+                held / stored, files / _PICTURE_NAME.sub(rf"\g<1>{_PINNED_DAY}\g<2>", stored)
+            )
     print(f"wrote {files} ({len(list(files.iterdir()))} files)")
 
 

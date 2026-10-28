@@ -618,6 +618,7 @@ class TestHttpSpec:
 _ON_THE_PAGE = {
     "/undo": "screen:/undo",
     "/regen": "screen:/regen",
+    "/revert": "screen:/revert",
     "/last": "screen:/last",
     "/clear": "screen:/clear",
     "/stories": "screen:/stories",

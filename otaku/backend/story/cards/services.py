@@ -168,6 +168,8 @@ def import_card(
         mode=mode,
         after=expected_head,
     )
+    # not an undo or a regenerate: no revert is left to take
+    chain.forget_discards(app, story_id)
     greeting = _greet(
         app, story_id, brought.character_id, profile, persona, mode, after=brought.line.id
     )

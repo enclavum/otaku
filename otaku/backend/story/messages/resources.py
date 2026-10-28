@@ -26,26 +26,36 @@ from otaku.backend.base import UNCHANGED, Changed, Resource, Unchanged, streams
 from otaku.backend.errors import Invalid
 from otaku.backend.story.messages import services as domain_messages
 from otaku.backend.story.messages.schemas import Message, PlayEvent, _as_message, as_events
-from otaku.store import schema
 
 
 class MessagesResource(Resource):
-    """/stories/{story}/messages — a story's current chain, message by
-    message; a line sent plays the story."""
+    """/stories/{story}/messages — a story's messages, its current chain
+    or all of them; a line sent plays the story."""
 
-    def list(self, story_id: int, *, last: int | None = None) -> list[Message]:
+    def list(
+        self, story_id: int, *, last: int | None = None, with_discarded: bool = False
+    ) -> list[Message]:
         """A story's current chain, root → head, as messages — its `last`
         messages alone where a count is given, each joined to the one before
-        it all the same. Raises NotFound for a story that is not
-        there."""
-        drawn = _as_messages(domain_messages.list_messages(self._app, story_id))
+        it all the same. `with_discarded` lists every message the story
+        holds, as its list reads them: under each message of the chain the
+        discarded branches leaving from it, oldest first. Raises NotFound
+        for a story that is not there."""
+        listing = (
+            domain_messages.list_messages_full if with_discarded else domain_messages.list_messages
+        )
+        drawn = [
+            _as_message(listed.row, listed.previous, listed.unit, discarded=listed.discarded)
+            for listed in listing(self._app, story_id)
+        ]
         return drawn[-last:] if last else drawn
 
     def get(self, story_id: int, message_id: int) -> Message:
-        """One message of a story's current chain. Raises NotFound for one
-        that is not on it."""
-        domain_messages.get_message(self._app, story_id, message_id)  # on the chain, or NotFound
-        return next(found for found in self.list(story_id) if found.id == message_id)
+        """One message of a story, on its chain or discarded. Raises
+        NotFound for one that is none of its."""
+        domain_messages.get_message(self._app, story_id, message_id)  # the story's, or NotFound
+        listed = self.list(story_id, with_discarded=True)
+        return next(found for found in listed if found.id == message_id)
 
     def update(
         self,
@@ -55,13 +65,13 @@ class MessagesResource(Resource):
         body: str | Unchanged = UNCHANGED,
         pinned: bool | Unchanged = UNCHANGED,
     ) -> Changed[Message]:
-        """The author's correction of one message of a story, on its current
-        chain — the whitespace at its edges stays the stored one: a
+        """The author's correction of one message of a story, on its chain
+        or discarded — the whitespace at its edges stays the stored one: a
         correction changes the words, never the join — and its pin: a
         pinned message is sent whole even where its scene is summarized.
         Raises Invalid for nothing to change, an empty body and a pin on a
-        row that is never pinned, NotFound for a message that is not on
-        the story's chain."""
+        row that is never pinned, NotFound for a message that is none of
+        the story's."""
         said = []
         if not isinstance(body, Unchanged):
             said.append(domain_messages.update_message(self._app, story_id, message_id, body=body))
@@ -99,16 +109,3 @@ class MessagesResource(Resource):
                 self._app, story_id, line, files, expected_head=expected_head
             )
         )
-
-
-def _as_messages(rows: Sequence[schema.Message]) -> list[Message]:
-    """A chain's rows as messages, root → head, each joined to the one
-    before it."""
-    return [
-        _as_message(
-            row,
-            rows[index - 1] if index else None,
-            rows[domain_messages.unit_start(rows, index + 1)].id,
-        )
-        for index, row in enumerate(rows)
-    ]

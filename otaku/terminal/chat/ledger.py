@@ -362,6 +362,13 @@ class ScreenLedger:
         sys.stdout.flush()
 
     @property
+    def is_live(self) -> bool:
+        """Whether an exchange the stack holds still ends the screen —
+        nothing printed past it since — so a turn echoed now reads on from
+        it, in place."""
+        return bool(self._stack)
+
+    @property
     def reply_turns(self) -> int | None:
         """How many of the story's last rows the top exchange's reply
         shows, where a launch echo cut the reply's unit; None where it

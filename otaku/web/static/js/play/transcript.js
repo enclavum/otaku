@@ -773,9 +773,10 @@ function storedTurns() {
 function turnOver(streaming) {
   /* Send gives way to Stop, and the root says a reply is arriving —
      what the stylesheet holds still meanwhile (the layout glyphs) reads
-     it there. */
+     it there. Revert is never offered while a reply is written. */
   if (send) send.hidden = streaming;
   if (stop) stop.hidden = !streaming;
+  if (streaming) for (const revert of $$("[data-revert]")) revert.hidden = true;
   $(".otk-app")?.toggleAttribute("data-playing", streaming);
 }
 

@@ -1,14 +1,15 @@
 """The stories as the terminal reaches them — the twin of
 `backend.story.stories`: everything it answers, re-exported — the
-two refusals the terminal says itself where it has no story to ask among
-them — and what `/title`, `/fork`, `/new` and a bare `/system` mean,
-with the sentence each is answered with."""
+three refusals the terminal says itself where it has no story to ask
+among them — and what `/title`, `/fork`, `/new` and a bare `/system`
+mean, with the sentence each is answered with."""
 
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 
 from otaku.backend.api import Api, Changed, Conflict
 from otaku.backend.story.stories.schemas import NOTHING_TO_REGENERATE as NOTHING_TO_REGENERATE
+from otaku.backend.story.stories.schemas import NOTHING_TO_REVERT as NOTHING_TO_REVERT
 from otaku.backend.story.stories.schemas import NOTHING_TO_UNDO as NOTHING_TO_UNDO
 from otaku.backend.story.stories.schemas import Question as Question
 from otaku.backend.story.stories.schemas import Story as Story

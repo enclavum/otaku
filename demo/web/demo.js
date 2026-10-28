@@ -116,6 +116,10 @@ const ROUTES = {
     const story = num(p.story);
     return changed(store.undo(story, expectedHead(story, ask)));
   },
+  "POST /api/stories/{story}/reverts": (p, q, b, ask) => {
+    const story = num(p.story);
+    return changed(store.revert(story, expectedHead(story, ask)));
+  },
   "GET /api/stories/{story}/export": (p) => store.exportDocument(num(p.story)),
   "POST /api/imports": (p, q, b) => {
     const landed = store.importDocument(need(b, "text"), need(b, "file_name"));

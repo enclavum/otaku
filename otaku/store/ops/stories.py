@@ -277,40 +277,28 @@ class StoryOps:
         # fmt: on
         messages = []
         chapter = 0
-        for (
-            mid,
-            role,
-            kind,
-            speaker_id,
-            speaker,
-            body,
-            template,
-            provider,
-            model,
-            attachments,
-            mode,
-            pinned,
-        ) in rows:
-            if kind == "chapter":
-                chapter += 1
-            messages.append(
-                Message(
-                    id=int(mid),
-                    role=str(role),
-                    kind=str(kind),
-                    speaker_id=speaker_id,
-                    speaker=self._db.unseal_opt(speaker),
-                    body=self._db.unseal(body),
-                    template=self._db.unseal_opt(template),
-                    provider=provider,
-                    model=model,
-                    attachments=Attachment.from_json(attachments),
-                    mode=StoryMode.from_value(mode),
-                    pinned=bool(pinned),
-                    chapter=chapter,
-                )
-            )
+        for row in rows:
+            chapter += row[2] == "chapter"
+            messages.append(_read_message(self._db, row, chapter=chapter))
         return messages
+
+    def get_discarded(self, story_id: int) -> builtins.list[tuple[int | None, Message]]:
+        """Every message of the story off its current chain — what an undo,
+        a regenerate or a head move left — each with its parent, decrypted,
+        oldest first: by `created_at`, the order they are listed in alone,
+        then by id."""
+        # fmt: off
+        rows = self._db.conn.execute(
+            "WITH RECURSIVE chain(id, parent_id) AS ("
+            "    SELECT id, parent_id FROM messages WHERE id = (SELECT head_id FROM stories WHERE id = ?)"
+            "    UNION ALL"
+            "    SELECT m.id, m.parent_id FROM messages m JOIN chain ON m.id = chain.parent_id) "
+            "SELECT id, role, kind, speaker_id, speaker, body, template, provider, model, attachments, mode, pinned, parent_id FROM messages "
+            "WHERE story_id = ? AND id NOT IN (SELECT id FROM chain) ORDER BY created_at, id",
+            (story_id, story_id),
+        ).fetchall()
+        # fmt: on
+        return [(row[12], _read_message(self._db, row[:12])) for row in rows]
 
     def get_messages_ids(self, story_id: int) -> builtins.list[int]:
         """Ids of the story's messages, root → head. Id-only — nothing is
@@ -594,7 +582,7 @@ class MessagesOps:
             (message_id,),
         ).fetchone()
         # fmt: on
-        return None if row is None else self._message(row)
+        return None if row is None else _read_message(self._db, row)
 
     def list(self, message_ids: Sequence[int]) -> builtins.list[Message]:
         """These messages, decrypted, in the order given — those the tree
@@ -608,7 +596,7 @@ class MessagesOps:
             tuple(message_ids),
         ).fetchall()
         # fmt: on
-        found = {int(row[0]): self._message(row) for row in rows}
+        found = {int(row[0]): _read_message(self._db, row) for row in rows}
         return [found[mid] for mid in message_ids if mid in found]
 
     def update(self, message_id: int, body: str) -> None:
@@ -706,6 +694,14 @@ class MessagesOps:
         # fmt: on
         return int(row[1]) if row[0] else None
 
+    def get_story_id(self, message_id: int) -> int | None:
+        """The story a message is one of — None for an id the tree does not
+        hold."""
+        row = self._db.conn.execute(
+            "SELECT story_id FROM messages WHERE id = ?", (message_id,)
+        ).fetchone()
+        return int(row[0]) if row else None
+
     def get_parent(self, message_id: int) -> int | None:
         """One message's parent in the tree. No feature reads this — it is
         the door the SUITE observes the sibling promise through ("nothing
@@ -715,25 +711,6 @@ class MessagesOps:
             "SELECT parent_id FROM messages WHERE id = ?", (message_id,)
         ).fetchone()
         return row[0] if row else None
-
-    def _message(self, row: Sequence[Any]) -> Message:
-        """One row as `get` and `list` select it, decrypted."""
-        mid, role, kind, speaker_id, speaker, body = row[:6]
-        template, provider, model, attachments, mode, pinned = row[6:]
-        return Message(
-            id=int(mid),
-            role=str(role),
-            kind=str(kind),
-            speaker_id=speaker_id,
-            speaker=self._db.unseal_opt(speaker),
-            body=self._db.unseal(body),
-            template=self._db.unseal_opt(template),
-            provider=provider,
-            model=model,
-            attachments=Attachment.from_json(attachments),
-            mode=StoryMode.from_value(mode),
-            pinned=bool(pinned),
-        )
 
 
 def unique_title(base: str, taken: Container[str]) -> str | None:
@@ -768,3 +745,27 @@ def _count_words(text: str) -> int:
     characters = len(_CHARACTER_WORDS.findall(text))
     rest = _CHARACTER_WORDS.sub(" ", text)
     return characters + sum(1 for run in rest.split() if _WORD_CHARACTER.search(run))
+
+
+def _read_message(db: Database, row: Sequence[Any], *, chapter: int | None = None) -> Message:
+    """One message row as the message reads select it — id, role, kind,
+    speaker_id, speaker, body, template, provider, model, attachments,
+    mode, pinned — decrypted, with the chapter it stands in where the read
+    counted one along its chain."""
+    mid, role, kind, speaker_id, speaker, body = row[:6]
+    template, provider, model, attachments, mode, pinned = row[6:]
+    return Message(
+        id=int(mid),
+        role=str(role),
+        kind=str(kind),
+        speaker_id=speaker_id,
+        speaker=db.unseal_opt(speaker),
+        body=db.unseal(body),
+        template=db.unseal_opt(template),
+        provider=provider,
+        model=model,
+        attachments=Attachment.from_json(attachments),
+        mode=StoryMode.from_value(mode),
+        pinned=bool(pinned),
+        chapter=chapter,
+    )

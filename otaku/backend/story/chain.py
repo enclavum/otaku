@@ -2,15 +2,19 @@
 appended, the trailing exchange or reply popped — a card's unplayed
 character with it — the head moved — each from the head the caller saw,
 by the store's compare-and-set (HeadMoved where it stands elsewhere:
-nothing written), the stories' search index reset with every move."""
+nothing written), the stories' search index reset with every move. And
+the discards a revert puts back: each head an undo or a regenerate
+left, held in memory until anything else moves the story's head."""
 
 from collections.abc import Sequence
 from dataclasses import replace
 
-from otaku.backend.app.core.services import App
+from otaku.backend.app.core.services import App, Discard
 from otaku.backend.errors import HeadMoved
 from otaku.store.ops.stories import StaleHeadError
 from otaku.store.schema import Message
+
+# ---------- the chain ----------
 
 
 def append_message(app: App, story_id: int, message: Message, *, after: int | None) -> Message:
@@ -117,13 +121,14 @@ def move_head(
     app._search_index = None
 
 
-def drop_unplayed_card(app: App, story_id: int, popped: list[Message]) -> None:
+def drop_unplayed_card(app: App, story_id: int, popped: list[Message]) -> bool:
     """Undoing a card import takes the character with it — while they are
     UNPLAYED: the import wrote the row, the undo unwrites it, and the
     duplicate refusal stops blocking a retry (the reason imports get
     undone at all). A journal marks them played — extraction wove them
     into the story — and then the cast row stays: a character with
-    history is story, not import residue."""
+    history is story, not import residue. Whether one was dropped."""
+    dropped = False
     for row in popped:
         if row.kind != "card" or row.speaker_id is None:
             continue
@@ -132,3 +137,23 @@ def drop_unplayed_card(app: App, story_id: int, popped: list[Message]) -> None:
         )
         if not journaled:
             app._store.characters.delete(row.speaker_id)
+            dropped = True
+    return dropped
+
+
+# ---------- the discards ----------
+
+
+def record_discard(
+    app: App, story_id: int, *, head_before: int | None, head_after: int | None
+) -> None:
+    """Note a discard on the story's history, newest last."""
+    app._discards.setdefault(story_id, []).append(Discard(head_before, head_after))
+
+
+def forget_discards(app: App, story_id: int) -> None:
+    """Something other than an undo or a regenerate moved the story's
+    head — or an undo took a card's character with it, which no revert
+    brings back — or the story is gone: nothing it discarded before is a
+    revert away any more."""
+    app._discards.pop(story_id, None)

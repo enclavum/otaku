@@ -1,6 +1,6 @@
 """Managing stories: browsing and resuming, forking, /title, /system, /new —
 and the actions on one: /undo takes the trailing exchange back, /regen
-sets the reply aside for a fresh take.
+sets the reply aside for a fresh take, /revert puts back what they took.
 
 The browser itself is a full-screen surface driven headless below; for
 the routing stories it is a stubbed `screens.stories.pick` — patched at
@@ -44,6 +44,7 @@ HOW_TO_ASK = "ASK LIKE THIS"
 
 
 CAT = Path(__file__).parents[2] / "fixtures" / "cat.jpg"
+SERAPHINA = Path(__file__).parents[2] / "fixtures" / "seraphina.png"
 
 
 class TestBrowsing:
@@ -206,6 +207,32 @@ class TestStoryBrowser:
         first, _second = two_stories(app)
         self.pick(app, BACKSPACE + "y" + ESC)
         assert [row.id for row in app.store.stories.list()] == [first]
+
+    def test_h_shows_the_discarded_and_enter_resumes_on_one(self, app: App) -> None:
+        # The undone exchange is listed under the message it left from
+        # once `h` shows it; Resume, the dialog's first choice, moves the
+        # head onto it — and leaves nothing to revert.
+        app.play("One.")
+        app.play("Two.")
+        app.play("/undo")
+        story = app.story_id
+        reply = app.store.stories.get_discarded(story)[-1][1].id
+        self.pick(app, ENTER + DOWN + ENTER)  # hidden: the tail resumes as it stands
+        assert app.store.stories.get_head(story) != reply
+        self.pick(app, ENTER + "h" + DOWN + DOWN + ENTER + ENTER)
+        assert app.store.stories.get_head(story) == reply
+        assert [m.body for m in app.messages][-2:] == ["Two.", scripted.CHAT_REPLY]
+        assert not app.api.stories.get(story).can_revert
+
+    def test_a_discarded_message_forks_from_the_dialog(self, app: App) -> None:
+        app.play("One.")
+        app.play("Two.")
+        app.play("/undo")
+        story = app.story_id
+        self.pick(app, ENTER + "h" + DOWN + ENTER + DOWN + ENTER)
+        assert app.story_id != story
+        assert [m.body for m in app.messages] == ["One.", scripted.CHAT_REPLY, "Two."]
+        assert app.store.stories.get_head(story) == app.store.stories.get_messages(story)[-1].id
 
     def test_backspace_inside_the_filter_never_deletes(self, app: App) -> None:
         # While a filter is open backspace edits it, so the `y` lands in
@@ -595,6 +622,85 @@ class TestRegenerate:
             app.close()
 
 
+class TestRevert:
+    """/revert puts back what the newest /undo or /regen took — again,
+    back through a run of them — until anything else moves the head."""
+
+    def test_revert_puts_back_what_an_undo_took(self, app: App) -> None:
+        app.play("The first turn.")
+        app.play("The second turn.")
+        played = [m.id for m in app.messages]
+        app.play("/undo")
+        app.play("/revert")
+        assert [m.id for m in app.messages] == played
+
+    def test_reverts_walk_back_a_run_of_undos(self, app: App) -> None:
+        for line in ("One.", "Two.", "Three."):
+            app.play(line)
+        played = [m.id for m in app.messages]
+        app.play("/undo")
+        app.play("/undo")
+        assert can_revert(app)
+        app.play("/revert")
+        assert [m.id for m in app.messages] == played[:4]
+        app.play("/revert")
+        assert [m.id for m in app.messages] == played
+        assert not can_revert(app)
+        app.play("/revert")  # nothing left: refused, nothing moves
+        assert [m.id for m in app.messages] == played
+
+    def test_revert_puts_back_the_take_a_regen_replaced(self, app: App) -> None:
+        app.play("I roll the dice.")
+        first_take = app.messages[-1].id
+        app.server.script = lambda body: "It came up six."
+        app.play("/regen")
+        fresh = app.messages[-1].id
+        app.play("/revert")
+        assert app.messages[-1].id == first_take
+        assert app.store.messages.get(fresh) is not None  # set aside, never deleted
+
+    def test_a_line_or_a_rewind_leaves_nothing_to_revert(self, app: App) -> None:
+        app.play("One.")
+        app.play("Two.")
+        app.play("/undo")
+        app.play("Three.")
+        assert not can_revert(app)
+        app.play("/undo")
+        assert can_revert(app)
+        story, first = app.story_id, app.messages[0].id
+        app.api.stories.update(story, head=first, expected_head=app.api.stories.get(story).head)
+        assert not can_revert(app)
+
+    def test_an_edit_and_a_pin_keep_what_there_is_to_revert(self, app: App) -> None:
+        app.play("One.")
+        app.play("Two.")
+        played = [m.id for m in app.messages]
+        app.play("/undo")
+        story, first = app.story_id, app.messages[0].id
+        app.api.stories.messages.update(story, first, body="One, corrected.")
+        app.api.stories.messages.update(story, first, pinned=True)
+        app.play("/revert")
+        assert [m.id for m in app.messages] == played
+
+    def test_an_undo_that_took_a_cards_character_leaves_nothing_to_revert(self, app: App) -> None:
+        # The character went with the undone import and nothing brings
+        # it back, so the import's rows never come back without it.
+        app.play(f"/card {SERAPHINA}")
+        app.play("/undo")
+        assert not can_revert(app)
+        app.play("/revert")
+        assert app.store.stories.get_messages(app.story_id) == []
+
+    def test_a_revert_from_a_stale_head_is_refused(self, app: App) -> None:
+        app.play("One.")
+        app.play("Two.")
+        app.play("/undo")
+        story, stale = app.story_id, app.messages[0].id
+        with pytest.raises(Refused):
+            app.api.stories.reverts.create(story, expected_head=stale)
+        assert can_revert(app)
+
+
 class TestStartWithCards:
     """A story started with codex cards: a card row and a linked character
     each, in pick order, then the first card's greeting — one voice opens
@@ -721,6 +827,11 @@ def picks(story_id: int, upto: int | None = None, action: str = "resume") -> Pic
         return cut.value.id, cut.notice
 
     return pick
+
+
+def can_revert(app: App) -> bool:
+    """Whether a revert would put something back in the story played."""
+    return app.api.stories.get(app.story_id).can_revert
 
 
 def two_stories(app: App) -> tuple[int, int]:

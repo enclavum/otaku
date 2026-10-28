@@ -9,6 +9,7 @@ from otaku.backend.base import Schema
 # Re-exported: the refusals a frontend says itself where it has no story
 # to ask.
 from otaku.backend.story.stories.services import NOTHING_TO_REGENERATE as NOTHING_TO_REGENERATE
+from otaku.backend.story.stories.services import NOTHING_TO_REVERT as NOTHING_TO_REVERT
 from otaku.backend.story.stories.services import NOTHING_TO_UNDO as NOTHING_TO_UNDO
 from otaku.context.prompt import JoinType
 from otaku.formatting import LABEL_WIDTH, truncate_label
@@ -45,7 +46,9 @@ class Story(Schema):
     use the wire its next request goes over and whether a picture may
     ride it, the question the story stands on (None for none: the next
     line played answers it), the tools whose calls a reader is shown,
-    and those a frontend that can fold draws by their label alone."""
+    those a frontend that can fold draws by their label alone, and
+    whether a revert would put something back now (`can_revert`: an
+    undo or a regenerate since anything else moved its head)."""
 
     id: int
     title: str
@@ -63,6 +66,7 @@ class Story(Schema):
     question: Question | None
     shown_tools: frozenset[str]
     folded_tools: frozenset[str]
+    can_revert: bool
 
     def landed_line(self, verb: str = "Resumed") -> str:
         """The line a frontend prints when it lands in the story ("Story:

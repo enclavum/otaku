@@ -10,9 +10,10 @@ import { get, items, patch, post, query, remove, segment, stream } from "./_http
 /* The stories: the collection, one story, and the actions on one — a copy
    (`forks`, which lists the stories forks join it to as well), a fresh
    take on its last reply (`regens`, a stream), its
-   trailing exchange taken back (`undos`). A write that moves the head — a
-   head given, an undo, a fresh take — names the one this page last read
-   (`If-Match`). */
+   trailing exchange taken back (`undos`), what the newest undo or fresh
+   take set aside put back (`reverts`). A write that moves the head — a
+   head given, an undo, a fresh take, a revert — names the one this page
+   last read (`If-Match`). */
 export const stories = {
   list: ({ query: needle = "" } = {}) => get(`/api/stories${query({ query: needle })}`).then(items),
   get: (story) => get(`/api/stories/${story}`),
@@ -28,6 +29,7 @@ export const stories = {
     create: (story, { signal } = {}) => stream(`/api/stories/${story}/regens`, {}, { story, signal }),
   },
   undos: { create: (story) => post(`/api/stories/${story}/undos`, {}, { moves: story }) },
+  reverts: { create: (story) => post(`/api/stories/${story}/reverts`, {}, { moves: story }) },
 };
 
 // ---------- settings ----------
@@ -45,12 +47,12 @@ export const settings = {
 // ---------- messages ----------
 
 /* A story's messages: the chain — its `last` messages alone where a count
-   is given — one message and its correction, and a line played
-   (`{line, files}`, the pictures as `encodeFile` makes them): a stream,
-   from the head this page last read. */
+   is given, every message it holds with `withDiscarded` — one message and
+   its correction, and a line played (`{line, files}`, the pictures as
+   `encodeFile` makes them): a stream, from the head this page last read. */
 export const messages = {
-  list: (story, { last = null } = {}) =>
-    get(`/api/stories/${story}/messages${query({ last })}`).then(items),
+  list: (story, { last = null, withDiscarded = false } = {}) =>
+    get(`/api/stories/${story}/messages${query({ last, with_discarded: withDiscarded })}`).then(items),
   get: (story, message) => get(`/api/stories/${story}/messages/${message}`),
   update: (story, message, fields) => patch(`/api/stories/${story}/messages/${message}`, fields),
   create: (story, fields, { signal } = {}) =>

@@ -223,6 +223,13 @@ so a list of mixed scripts does not ripple. Raise both together.
 | `--otk-docket-w` | a slip's width; `.otk-docket--narrow` and `--wide` re-set it |
 | `--otk-docket-h` | the height of the one slip that is torn to a set length |
 
+## Motion
+
+| Token | Used by |
+|---|---|
+| `--otk-revert-hold` | how long Revert, beside Send, waits before it fades (10s) |
+| `--otk-revert-fade` | how long it takes to fade (0.8s) |
+
 ## Scrollbars
 
 The app styles its own, so a list edge stays a hairline instead of picking up
@@ -269,6 +276,8 @@ in classes, so a stylesheet can name it the same way the scripts do.
 | `aria-disabled="true"` | `.otk-btn`, `.otk-mode`, `.otk-lightbox__arrow` | out of reach for now |
 | `aria-current="true"` | `.otk-spine__dot`, `.otk-pics__thumb` | the lit one of the spine's dots; the picture of a card shown large |
 | `hidden` | any pane or menu | not mounted |
+| `hidden` | `.otk-revert` | Revert is not offered: shown after an Undo or a Regen while there is something to take back, never while a reply is arriving; once shown it waits `--otk-revert-hold`, fades over `--otk-revert-fade`, and the app sets `hidden` on `animationend` — hover or focus holds it |
+| `data-discarded="shown"` / `"hidden"` | `.otk-col--messages` | the list also shows the discarded turns — undone, or replaced by a regen — as `.otk-row--discarded` rows, faint and unnumbered, after the turn they leave from |
 | `data-popup="/model"` | a `<dialog>` | which command opens it |
 | `data-theme="dark"` / `"light"` | `<html>` | the token set pinned; absent, the OS decides |
 | `data-booting` | `<html>` | the shell unseen until the page knows whether a sign-in comes first |

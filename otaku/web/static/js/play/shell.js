@@ -80,6 +80,8 @@ function factsOf(app, story) {
     can_attach: story?.can_attach ?? model?.can_attach ?? false,
     can_complete_text: model?.can_complete_text ?? false,
     next_join: story?.next_join ?? null,
+    // whether the newest undo or fresh take can still be taken back
+    can_revert: story?.can_revert ?? false,
   };
 }
 
@@ -124,6 +126,12 @@ export function showFacts(facts) {
   // (`facts.can_attach`: the model sees, and the mode's wire carries one),
   // gone otherwise. The backend refuses a picture regardless.
   for (const button of $$("[data-attach]")) button.hidden = !facts.can_attach;
+  // Revert is offered by an Undo or a Regen alone (`commands.offerRevert`)
+  // and withdrawn here once anything else left nothing to take back, or
+  // another story is drawn: it was offered for this one.
+  if (!facts.can_revert || facts.story_id !== drawn) {
+    for (const button of $$("[data-revert]")) button.hidden = true;
+  }
   // The wire and the look on the app root, for the stylesheet and the
   // composer: over the text wire no picture rides the request, so the flow
   // shows none (docs/web_tokens.md); on the canvas an empty line continues.

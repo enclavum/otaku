@@ -96,6 +96,7 @@ COMMANDS: tuple[CommandSpec, ...] = (
     # The mid-stream take is the terminal's POSIX-only watcher — the
     # Windows consoles have no termios, so there the row must not say more.
     CommandSpec("/regen", "", "Re-run the last prompt" + ("" if sys.platform == "win32" else " (mid-stream: cancel + regen)"), "playing", CommandType.INTERACTIVE),
+    CommandSpec("/revert", "", "Revert the last /undo or /regen", "playing", CommandType.INTERACTIVE),
     CommandSpec("/last", "[N]", "Show the last N turns (default 5)", "playing", CommandType.INTERACTIVE),
     CommandSpec("/clear", "", "Clear the screen", "playing", CommandType.INTERACTIVE),
     # Inside a prompt
@@ -149,6 +150,7 @@ ALIASES: dict[str, str] = {"/bye": "/quit", "/exit": "/quit"}
 SHORTCUTS: dict[str, Shortcut] = {
     "/regen": Shortcut("c-r", "Ctrl+R"),
     "/undo": Shortcut("c-u", "Ctrl+U"),
+    "/revert": Shortcut("c-y", "Ctrl+Y"),  # takes prompt_toolkit's yank, as /undo took its Ctrl+U
     "/stories": Shortcut("c-t", "Ctrl+T"),
     "/lore": Shortcut("c-l", "Ctrl+L"),
     "/model": Shortcut("c-o", "Ctrl+O"),  # Ctrl+M is unusable — the terminal sends it as Enter

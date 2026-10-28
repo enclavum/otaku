@@ -11,7 +11,6 @@ from dataclasses import replace
 from typing import get_args
 
 from otaku.backend.api import Actor, JoinType
-from otaku.backend.story.messages.resources import _as_messages
 from otaku.backend.story.messages.schemas import (
     AssistantMessage,
     AssistantReasoning,
@@ -24,8 +23,10 @@ from otaku.backend.story.messages.schemas import (
     ReplyReport,
     ToolMessage,
     UserMessage,
+    _as_message,
 )
 from otaku.backend.story.messages.schemas import Message as Handed
+from otaku.backend.story.messages.services import _listed
 from otaku.providers import Stats
 from otaku.store.schema import Message
 from otaku.web.api.story.messages import event
@@ -155,7 +156,8 @@ class TestEvent:
 def handed(*rows: Message) -> list[Handed]:
     """Store rows as the messages an event carries — built as the backend
     builds them, each numbered by its position."""
-    return _as_messages([replace(row, id=index + 1) for index, row in enumerate(rows)])
+    chain = [replace(row, id=index + 1) for index, row in enumerate(rows)]
+    return [_as_message(listed.row, listed.previous, listed.unit) for listed in _listed(chain)]
 
 
 def _call() -> AssistantToolCall:

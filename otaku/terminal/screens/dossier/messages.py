@@ -1,8 +1,10 @@
 """The messages tab: the story browser's message view — the messages
-listed, one read whole beside them, `e` correcting it where it is read,
-space pinning it, and the story resumed from one: on the last at once, on an earlier one
-after asking what resuming there means (fork — the default — truncate,
-or cancel)."""
+listed, the discarded among them faint, an asterisk for their number,
+while `h` shows them, one read whole beside them, `e` correcting it where it is read,
+space pinning it, and the story resumed from one: on the last at once,
+on an earlier one after asking what resuming there means (fork — the
+default — truncate, or cancel), on a discarded one likewise (resume —
+the default — fork, or cancel)."""
 
 from typing import Literal
 
@@ -33,16 +35,23 @@ _PIN_NOTE = (
 )
 
 # What picking a story or one of its turns settles to: open it as it is,
-# continue in a copy from the turn, or rewind it to the turn (the later
-# turns stay as siblings).
-_Landing = Literal["resume", "fork", "truncate"]
+# continue in a copy from the turn, or move its head to the turn — a
+# rewind on the chain, a resume on a discarded one (the turns it leaves
+# stay as siblings).
+_Landing = Literal["resume", "fork", "move"]
 
 
-# The resume dialog's rows, in order: (action, label). The action is what
-# the picker returns; "cancel" closes the dialog and stays in the browser.
-RESUME_OPTIONS: tuple[tuple[Literal["cancel"] | _Landing, str], ...] = (
+# The resume dialog's rows, in order: (action, label) — on an earlier
+# message of the chain, and on a discarded one. The action is what the
+# picker returns; "cancel" closes the dialog and stays in the browser.
+_RESUME_OPTIONS: tuple[tuple[Literal["cancel"] | _Landing, str], ...] = (
     ("fork", "Fork — continue in a new story from here"),
-    ("truncate", "Truncate — discard the messages after this one"),
+    ("move", "Truncate — discard the messages after this one"),
+    ("cancel", "Cancel"),
+)
+_DISCARDED_OPTIONS: tuple[tuple[Literal["cancel"] | _Landing, str], ...] = (
+    ("move", "Resume — continue the story from this message"),
+    ("fork", "Fork — continue in a new story from here"),
     ("cancel", "Cancel"),
 )
 
@@ -52,11 +61,10 @@ class MessagesTab(DossierBase):
 
     def _turn_rows(self) -> StyleAndTextTuples:
         out: StyleAndTextTuples = []
-        if not self.msgs:
-            out.append(("class:muted", "  (no messages yet)"))
-            return out
         if not self.turn_filtered:
-            out.append(("class:muted", "  (no matches)"))
+            # nothing played, or nothing but discarded messages kept hidden
+            caption = "  (no matches)" if self.query.strip() else "  (no messages yet)"
+            out.append(("class:muted", caption))
             return out
         role_w = len("assistant")  # widest role name
         # prefix(4) + idx(4) + " · "(3) + role(role_w) + " · "(3) = fixed
@@ -91,14 +99,15 @@ class MessagesTab(DossierBase):
                 head = flatten(
                     self._render(head, m.role, pictures=pictures, shown=self.shown_tools)
                 )
-            # The original message number, so a filtered row still reads
-            # as its true position in the story.
+            # The message's number along the chain, so a filtered row still
+            # reads as its true position in the story; a discarded one has an
+            # asterisk in its place.
             mark, role = "·", m.role
             if m.pinned:
                 mark, role = _PIN_MARK, f"{BOLD}{m.role}{_NORMAL}"
             pad = " " * (role_w - len(m.role))
-            row = f"{orig + 1:>4} {mark} {role}{pad} {mark} {head}"
-            self._emit_row(out, row_i == self.cursor, row)
+            row = f"{self.numbers[orig] or '*':>4} {mark} {role}{pad} {mark} {head}"
+            self._emit_row(out, row_i == self.cursor, row, dim=m.discarded)
         return out
 
     def _turn_preview(self, width: int) -> StyleAndTextTuples:
@@ -162,13 +171,33 @@ class MessagesTab(DossierBase):
         self.msgs[orig] = changed.value
         self.notice = changed.notice
 
+    def _toggle_discarded(self) -> None:
+        """h: the discarded messages shown among the chain's, or hidden —
+        the cursor kept on its message, or on the nearest shown above it."""
+        at = self.turn_filtered[self.cursor] if self.turn_filtered else 0
+        self.discarded_shown = not self.discarded_shown
+        self._refilter()
+        self.cursor = max((i for i, orig in enumerate(self.turn_filtered) if orig <= at), default=0)
+
+    def _resume_options(self) -> tuple[tuple[Literal["cancel"] | _Landing, str], ...]:
+        """The resume dialog's rows for the message under the cursor."""
+        if self.turn_filtered and self.msgs[self.turn_filtered[self.cursor]].discarded:
+            return _DISCARDED_OPTIONS
+        return _RESUME_OPTIONS
+
     def _resume_text(self) -> StyleAndTextTuples:
-        picked = self.turn_filtered[self.cursor] + 1 if self.turn_filtered else 0
+        number = self.numbers[self.turn_filtered[self.cursor]] if self.turn_filtered else 0
+        played = sum(n is not None for n in self.numbers)
+        title = (
+            f"Resume at message {number} of {played}"
+            if number is not None
+            else "Resume at a discarded message"
+        )
         out: StyleAndTextTuples = [
-            ("class:dialog.title", f"Resume at message {picked} of {len(self.msgs)}\n"),
+            ("class:dialog.title", f"{title}\n"),
             ("class:dialog.body", "\n"),
         ]
-        for i, (_, label) in enumerate(RESUME_OPTIONS):
+        for i, (_, label) in enumerate(self._resume_options()):
             selected = i == self.resume_choice
             style = "class:row.selected" if selected else "class:dialog.body"
             out.append((style, f"{' > ' if selected else '   '}{label}\n"))
@@ -177,7 +206,7 @@ class MessagesTab(DossierBase):
         return out
 
     def _do_resume(self) -> None:
-        action = RESUME_OPTIONS[self.resume_choice][0]
+        action = self._resume_options()[self.resume_choice][0]
         self.confirming_resume = False
         if action == "cancel" or not self.turn_filtered:
             return
@@ -194,18 +223,20 @@ class MessagesTab(DossierBase):
         there is nothing to pick — the list level resumes a story with
         nothing played without opening it. What the landing settled is
         kept for the caller to play: the story, a copy, or the story
-        rewound, and the line that says so."""
+        rewound or resumed on a discarded turn, and the line that says
+        so."""
         try:
             if action == "resume":
                 landed = self.api.stories.get(story_id)
                 self.result = landed.id, landed.landed_line()
             else:
-                assert upto_id is not None  # a copy and a rewind cut AT a turn
+                assert upto_id is not None  # a copy and a head move cut AT a turn
                 if action == "fork":
                     cut = self.api.stories.forks.create(story_id, at=upto_id)
                 else:
-                    drawn = self.msgs[-1].id if self.msgs else None
-                    cut = self.api.stories.update(story_id, head=upto_id, expected_head=drawn)
+                    cut = self.api.stories.update(
+                        story_id, head=upto_id, expected_head=self._head()
+                    )
                 self.result = cut.value.id, cut.notice
         except Refused as e:
             self.notice = str(e)

@@ -1,19 +1,32 @@
 """The stories, operated: found (the one filter rule both browsers
 promise), read off the store, made — empty, or started with codex
 cards — renamed, given a premise, deleted,
-forked, rewound — and the actions on a story's trailing exchange: a
-fresh take on its reply (the play engine's, `play`), the exchange taken
-back. Every write naming the story it acts on, every chain-changing one
-dropping the search index.
+forked, rewound or resumed on a discarded message — and the actions on
+a story's trailing exchange: a fresh take on its reply (the play
+engine's, `play`), the exchange taken back, and what the newest discard
+took put back. Every write naming the story it acts on, every
+chain-changing one dropping the search index.
 """
 
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from otaku.backend.app.core.services import App
-from otaku.backend.errors import NO_SUCH_STORY, OFF_CHAIN, Conflict, HeadMoved, Invalid, NotFound
+from otaku.backend.app.core.services import App, Discard
+from otaku.backend.errors import (
+    NO_SUCH_MESSAGE,
+    NO_SUCH_STORY,
+    Conflict,
+    HeadMoved,
+    Invalid,
+    NotFound,
+)
 from otaku.backend.story.cards import services as cards
-from otaku.backend.story.chain import drop_unplayed_card, pop_exchange
+from otaku.backend.story.chain import (
+    drop_unplayed_card,
+    forget_discards,
+    pop_exchange,
+    record_discard,
+)
 from otaku.backend.story.messages.services import posed_question
 
 # Re-exported: a fresh take on the last reply is an action on the story,
@@ -29,6 +42,10 @@ from otaku.store.schema import Layout, Message, Story
 
 # An undo with no exchange to take back — no story at all included.
 NOTHING_TO_UNDO = "Nothing to undo."
+# A revert with no discard to put back: no undo or regenerate since
+# anything else moved the story's head, none where it stands now, or no
+# story at all.
+NOTHING_TO_REVERT = "Nothing to revert."
 
 
 @dataclass(frozen=True)
@@ -37,7 +54,8 @@ class StoryRecord:
     reader finds it by, the turns its chain holds, when it was last
     written), the layout it is read in, its newest row (None while
     nothing is played), the tools whose calls a reader is shown and those
-    drawn folded, and the question the story stands on (None for none)."""
+    drawn folded, the question the story stands on (None for none), and
+    whether a revert would put something back now."""
 
     story: Story
     listing: StoryListing
@@ -46,6 +64,7 @@ class StoryRecord:
     shown_tools: frozenset[str]
     folded_tools: frozenset[str]
     question: ToolQuestion | None
+    can_revert: bool
 
 
 # ---------- the stories ----------
@@ -114,6 +133,7 @@ def get_story(app: App, story_id: int) -> StoryRecord:
         shown,
         held.folded_tools,
         posed_question(newest, shown),
+        _newest_discard(app, story_id, story.head_id) is not None,
     )
 
 
@@ -184,6 +204,7 @@ def delete_story(app: App, story_id: int) -> str:
     app._store.stories.delete(story_id)
     app._store.sweep_files()
     app._search_index = None
+    forget_discards(app, story_id)
     return "Story deleted."
 
 
@@ -191,18 +212,20 @@ def fork_story(
     app: App, story_id: int, *, from_message_id: int | None = None, title: str = ""
 ) -> tuple[int, str]:
     """Continue in a copy of a story — from its head, or from one of its
-    messages on; the original stays — and the sentence. `title` names the
-    copy: "" inherits a numbered one ("<title> - N", or none when the
-    story has none). Raises NotFound for a story that is not there or a
-    message that is not on its chain, Conflict for a story with nothing
-    played."""
+    messages on, discarded or not; the original stays — and the sentence.
+    `title` names the copy: "" inherits a numbered one ("<title> - N", or
+    none when the story has none). Raises NotFound for a story that is
+    not there or a message that is not in it, Conflict for a fork from
+    the head of a story with nothing played."""
     if not exists(app, story_id):
         raise NotFound(NO_SUCH_STORY)
-    ids = app._store.stories.get_messages_ids(story_id)
-    if not ids:
+    if from_message_id is None and not app._store.stories.get_messages_ids(story_id):
         raise Conflict("Nothing to fork yet — send a message first.")
-    if from_message_id is not None and from_message_id not in ids:
-        raise NotFound(OFF_CHAIN)
+    if (
+        from_message_id is not None
+        and app._store.messages.get_story_id(from_message_id) != story_id
+    ):
+        raise NotFound(NO_SUCH_MESSAGE)
     forked = app._store.stories.fork(
         story_id, from_message_id=from_message_id, title=title.strip() or None
     )
@@ -215,22 +238,26 @@ def fork_story(
     return forked, f"{lead} Continued from message {copy.message_count}."
 
 
-def set_head(app: App, story_id: int, message_id: int, *, expected_head: int | None) -> None:
-    """Rewind a story to one of its messages: the head moves there — from
-    `expected_head`, the head the caller read — and the turns after it
-    stay in the tree as siblings: nothing is deleted. Raises NotFound for
-    a story that is not there or a message that is not on its chain,
-    HeadMoved where the head stands elsewhere than expected."""
+def set_head(app: App, story_id: int, message_id: int, *, expected_head: int | None) -> str:
+    """Move a story's head to one of its messages — a rewind to one on its
+    chain, a resume on a discarded one — from `expected_head`, the head
+    the caller read: the turns it leaves stay in the tree as siblings,
+    nothing deleted. Not an undo or a regenerate, so no revert is left to
+    take. Returns the landing's verb, "Truncated" or "Resumed". Raises
+    NotFound for a story that is not there or a message that is not in
+    it, HeadMoved where the head stands elsewhere than expected."""
     if not exists(app, story_id):
         raise NotFound(NO_SUCH_STORY)
-    ids = app._store.stories.get_messages_ids(story_id)
-    if message_id not in ids:
-        raise NotFound(OFF_CHAIN)
+    if app._store.messages.get_story_id(message_id) != story_id:
+        raise NotFound(NO_SUCH_MESSAGE)
+    is_on_chain = message_id in app._store.stories.get_messages_ids(story_id)
     try:
         app._store.stories.set_head(story_id, message_id, expected_head=expected_head)
     except StaleHeadError as e:
         raise HeadMoved(e.head) from e
     app._search_index = None
+    forget_discards(app, story_id)
+    return "Truncated" if is_on_chain else "Resumed"
 
 
 # ---------- the actions on a story's exchange ----------
@@ -239,19 +266,65 @@ def set_head(app: App, story_id: int, message_id: int, *, expected_head: int | N
 def undo_exchange(app: App, story_id: int, *, expected_head: int | None) -> str:
     """Take back a story's trailing exchange — and the sentence. Nothing
     is deleted — the head moves back, from `expected_head`, the head the
-    caller read. An unplayed imported character is dropped with
-    their card exchange, so a retried import is never refused as a
-    duplicate. Raises NotFound for a story that is not there, HeadMoved
-    where its head stands elsewhere, Conflict with nothing to take
-    back."""
+    caller read — and goes on the story's discards for a revert. An
+    unplayed imported character is dropped with their card exchange, so
+    a retried import is never refused as a duplicate; nothing brings
+    them back, so the discards are emptied instead. Raises NotFound for a
+    story that is not there, HeadMoved where its head stands elsewhere,
+    Conflict with nothing to take back."""
     if not app._store.stories.exists(story_id):
         raise NotFound(NO_SUCH_STORY)
     app.note_submission()
     popped = pop_exchange(app, story_id, expected_head=expected_head)
     if not popped:
         raise Conflict(NOTHING_TO_UNDO)
-    drop_unplayed_card(app, story_id, popped)
+    if drop_unplayed_card(app, story_id, popped):
+        forget_discards(app, story_id)
+    else:
+        head_after = app._store.stories.get_head(story_id)
+        record_discard(app, story_id, head_before=popped[0].id, head_after=head_after)
     return f"Took back the last exchange ({len(popped)} messages)."
+
+
+def revert_discard(app: App, story_id: int, *, expected_head: int | None) -> str:
+    """Put back what a story's newest discard took — an undo's exchange or
+    a regenerate's earlier take — and the sentence: the head returns to
+    where that discard left it, from `expected_head`, the head the caller
+    read, and what it had landed on stays in the tree as siblings. Raises
+    NotFound for a story that is not there, HeadMoved where its head
+    stands elsewhere, Conflict with nothing to revert — no undo or
+    regenerate since anything else moved its head, or none where it
+    stands now."""
+    if not app._store.stories.exists(story_id):
+        raise NotFound(NO_SUCH_STORY)
+    head = app._store.stories.get_head(story_id)
+    if head != expected_head:
+        raise HeadMoved(head)
+    newest = _newest_discard(app, story_id, head)
+    if newest is None:
+        raise Conflict(NOTHING_TO_REVERT)
+    app.note_submission()
+    before = app._store.stories.get_messages_ids(story_id)
+    try:
+        app._store.stories.set_head(story_id, newest.head_before, expected_head=head)
+    except StaleHeadError as e:
+        raise HeadMoved(e.head) from e
+    app._search_index = None
+    app._discards[story_id].pop()
+    after = app._store.stories.get_messages_ids(story_id)
+    shared = next(
+        (at for at, (was, now) in enumerate(zip(before, after, strict=False)) if was != now),
+        min(len(before), len(after)),
+    )
+    back = len(after) - shared
+    return f"Brought back {back} {'message' if back == 1 else 'messages'}."
+
+
+def _newest_discard(app: App, story_id: int, head: int | None) -> Discard | None:
+    """A story's newest discard while it is current — the story standing
+    where it landed — None otherwise."""
+    discards = app._discards.get(story_id)
+    return discards[-1] if discards and discards[-1].head_after == head else None
 
 
 # ---------- wording ----------

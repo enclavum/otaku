@@ -16,8 +16,8 @@ from dataclasses import replace
 
 from prompt_toolkit.utils import get_cwidth
 
-from otaku.backend.story.messages.resources import _as_messages
-from otaku.backend.story.messages.services import segments
+from otaku.backend.story.messages.schemas import _as_message
+from otaku.backend.story.messages.services import _listed, segments
 from otaku.backend.story.tools import ToolQuestion
 from otaku.store.schema import Message, StoryMode
 from otaku.terminal.api import Message as Drawn
@@ -428,7 +428,8 @@ def handed(rows: Sequence[Message]) -> list[Drawn]:
     """Store rows as the messages the terminal is handed — split, joined
     and placed in their reply units as the backend builds them — each
     numbered by its position."""
-    return _as_messages([replace(row, id=index + 1) for index, row in enumerate(rows)])
+    chain = [replace(row, id=index + 1) for index, row in enumerate(rows)]
+    return [_as_message(listed.row, listed.previous, listed.unit) for listed in _listed(chain)]
 
 
 def tool_turn(body: str) -> Message:

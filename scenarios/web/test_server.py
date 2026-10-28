@@ -173,6 +173,7 @@ class TestTheSurface:
         path = f"/api/stories/{story}"
         assert page.status(path, method="PATCH", data=json.dumps({"head": first}).encode()) == 428
         assert page.status(f"{path}/undos", method="POST") == 428
+        assert page.status(f"{path}/reverts", method="POST") == 428
         # a title moves no head and names none
         assert page.status(path, method="PATCH", data=b'{"title": "The Weir"}') == 200
 
@@ -428,6 +429,17 @@ class TestReading:
         assert [m["id"] for m in last] == [page.messages()[-1]["id"]]
         assert page.status(f"/api/stories/{page.story}/messages?last=0") == 400
 
+    def test_the_discarded_come_with_the_chain_where_they_are_asked_for(self, page: Page) -> None:
+        page.play("I listen at the culvert mouth.")
+        page.post(f"/api/stories/{page.story}/undos", if_match="*")
+        path = f"/api/stories/{page.story}/messages"
+        assert page.get(path)["items"] == []
+        listed = page.get(f"{path}?with_discarded=true")["items"]
+        assert [(m["role"], m["discarded"]) for m in listed] == [
+            ("user", True),
+            ("assistant", True),
+        ]
+
     def test_a_path_whose_id_is_not_one_addresses_nothing(self, page: Page) -> None:
         # A row id is digits, so a path carrying anything else names no
         # resource and matches no route: 404, and no handler is ever
@@ -657,6 +669,17 @@ class TestWrites:
         story = page.made()
         null = b'{"head": null}'
         assert page.status(f"/api/stories/{story}", method="PATCH", data=null) == 400
+
+    def test_a_revert_puts_back_what_the_undo_took(self, page: Page) -> None:
+        page.play("I listen at the culvert mouth.")
+        story, head = page.story, page.messages()[-1]["id"]
+        undone = page.post(f"/api/stories/{story}/undos", if_match="*")
+        assert undone["value"]["can_revert"]
+        reverted = page.post(f"/api/stories/{story}/reverts", if_match="*")
+        assert reverted["notice"]
+        assert reverted["value"]["head"] == head and not reverted["value"]["can_revert"]
+        problem = page.refused("POST", f"/api/stories/{story}/reverts", if_match="*")
+        assert problem["status"] == 409
 
     def test_nothing_to_undo_is_an_answer_the_page_shows(self, page: Page) -> None:
         # An expected answer: the status that says why, and the sentence —

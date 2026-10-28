@@ -209,6 +209,8 @@ function storyOf(story) {
     question: questionOf(story),
     shown_tools: shownTools(story),
     folded_tools: foldedTools(story),
+    // the demo keeps no discards: an undo here deletes, so nothing reverts
+    can_revert: false,
   };
 }
 
@@ -895,6 +897,14 @@ export function undo(id, expected) {
   return { value: storyOf(story), notice: `Took back the last exchange (${popped.length} messages).` };
 }
 
+/** A revert: nothing to put back, ever — the demo's undo deletes what it
+    takes, and its story says so (`can_revert`). */
+export function revert(id, expected) {
+  held(id);
+  checkHead(id, expected);
+  throw conflict("Nothing to revert.");
+}
+
 function landedLine(story, verb) {
   const label = cut(labelOf(story), LABEL_WIDTH);
   const head = label ? `Story: ${label}. ` : "";
@@ -992,6 +1002,7 @@ export function record(id, role, body, extra = {}) {
     join_type: "paragraph",
     tool_label: null,
     unit: 0,
+    discarded: false,
     ...extra,
   };
   // every row but a card's and a tool's (`messages.services.can_pin`)

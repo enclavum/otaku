@@ -126,12 +126,16 @@ def event(happened: PlayEvent) -> dict[str, Any]:
 
 def _list(api: Api, ask: Ask) -> dict[str, Any]:
     """The story's chain, root to head — its `last` messages alone where the
-    query asks for a count."""
+    query asks for a count; every message it holds, the discarded among
+    them, with `?with_discarded=true`."""
     raw = ask.query.get("last")
     if raw is not None and not (raw.isdigit() and int(raw) > 0):
         raise ValueError("last is not a count from 1")
     last = int(raw) if raw is not None else None
-    return {"items": plain(api.stories.messages.list(ask.id("story"), last=last))}
+    listed = api.stories.messages.list(
+        ask.id("story"), last=last, with_discarded=ask.query_flag("with_discarded", False)
+    )
+    return {"items": plain(listed)}
 
 
 # ---------- the rows ----------

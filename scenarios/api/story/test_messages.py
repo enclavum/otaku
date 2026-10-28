@@ -1,7 +1,7 @@
 """Playing a story: turns, the wire promise, the roleplay commands /me,
 /you, /ooc, the inline pair typed inside a line, the tools a reply
 calls and the answers to a question, the novel and the canvas — and a
-message corrected.
+message corrected, and the discarded ones listed with the chain.
 """
 
 import contextlib
@@ -670,6 +670,99 @@ class TestPin:
         text = app.api.stories.export.get(story).text
         imported = app.api.imports.create(text=text, file_name="hall.md").value.story_id
         assert [m.pinned for m in app.api.stories.messages.list(imported)] == [False, True]
+
+
+class TestDiscarded:
+    """Every message a story holds, listed (`with_discarded`): under each
+    message of the chain the branches an undo or a regenerate left from
+    it, oldest first, each read along its own branch — normal messages,
+    edited, pinned, forked from and resumed on like any."""
+
+    def test_an_undone_exchange_stands_under_the_message_it_left(self, app: App) -> None:
+        app.play("One.")
+        app.play("Two.")
+        app.play("/undo")
+        app.play("Three.")
+        full = app.api.stories.messages.list(app.story_id, with_discarded=True)
+        assert [(m.body, m.discarded) for m in full] == [
+            ("One.", False),
+            (scripted.CHAT_REPLY, False),
+            ("Two.", True),
+            (scripted.CHAT_REPLY, True),
+            ("Three.", False),
+            (scripted.CHAT_REPLY, False),
+        ]
+        # the chain alone lists none of them
+        assert not any(m.discarded for m in app.api.stories.messages.list(app.story_id))
+
+    def test_the_takes_a_regen_replaced_come_oldest_first(self, app: App) -> None:
+        app.play("I roll the dice.")
+        for take in ("It came up two.", "It came up six."):
+            app.server.script = lambda body, take=take: take
+            app.play("/regen")
+        full = app.api.stories.messages.list(app.story_id, with_discarded=True)
+        assert [(m.body, m.discarded) for m in full] == [
+            ("I roll the dice.", False),
+            (scripted.CHAT_REPLY, True),
+            ("It came up two.", True),
+            ("It came up six.", False),
+        ]
+
+    def test_a_discarded_chapter_is_numbered_along_its_own_branch(self, app: App) -> None:
+        app.play("/chapter The Gate")
+        app.play("I enter the hall.")
+        app.play("/chapter The Flood")
+        app.play("/undo")  # the second chapter, discarded
+        full = app.api.stories.messages.list(app.story_id, with_discarded=True)
+        assert [(_heading(m.segments), m.discarded) for m in full if m.kind == "chapter"] == [
+            ((1, "The Gate"), False),
+            ((2, "The Flood"), True),
+        ]
+
+    def test_a_discarded_message_is_edited_pinned_and_forked_from(self, app: App) -> None:
+        app.play("One.")
+        app.play("Two.")
+        app.play("/undo")
+        story = app.story_id
+        full = app.api.stories.messages.list(story, with_discarded=True)
+        aside = next(m for m in full if m.discarded and m.role == "user")
+        app.api.stories.messages.update(story, aside.id, body="Two, corrected.")
+        app.api.stories.messages.update(story, aside.id, pinned=True)
+        stored = app.store.messages.get(aside.id)
+        assert (stored.body, stored.pinned) == ("Two, corrected.", True)
+        fork = app.api.stories.forks.create(story, at=aside.id).value.id
+        assert [m.body for m in app.store.stories.get_messages(fork)] == [
+            "One.",
+            scripted.CHAT_REPLY,
+            "Two, corrected.",
+        ]
+
+    def test_resuming_on_a_discarded_message_moves_the_head_onto_it(self, app: App) -> None:
+        app.play("One.")
+        app.play("Two.")
+        app.play("/undo")
+        app.play("Three.")
+        story = app.story_id
+        full = app.api.stories.messages.list(story, with_discarded=True)
+        aside = next(m for m in full if m.discarded and m.role == "assistant")
+        app.api.stories.update(story, head=aside.id, expected_head=app.api.stories.get(story).head)
+        assert app.store.stories.get_head(story) == aside.id
+        relisted = app.api.stories.messages.list(story, with_discarded=True)
+        # the ending it left is discarded in its turn: nothing is lost
+        assert [m.body for m in relisted if m.discarded] == ["Three.", scripted.CHAT_REPLY]
+
+    def test_a_message_of_another_story_is_refused(self, app: App) -> None:
+        app.play("One.")
+        other = app.messages[0].id
+        app.play("/new")
+        app.play("Two.")
+        story = app.story_id
+        with pytest.raises(Refused):
+            app.api.stories.messages.update(story, other, pinned=True)
+        with pytest.raises(Refused):
+            app.api.stories.update(story, head=other, expected_head=app.api.stories.get(story).head)
+        with pytest.raises(Refused):
+            app.api.stories.forks.create(story, at=other)
 
 
 class TestInliners:

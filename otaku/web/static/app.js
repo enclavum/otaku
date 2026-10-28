@@ -173,6 +173,15 @@ function start() {
       // typed: the caret comes back to the box.
       refocus();
     }
+    // Revert, beside Send: what the last Undo or Regen took, put back.
+    if (event.target.closest("[data-revert]")) {
+      runCommand("/revert");
+      refocus();
+    }
+  });
+  // Revert takes itself away once its fade has run out.
+  document.addEventListener("animationend", (event) => {
+    if (event.animationName === "otk-revert-fade") event.target.hidden = true;
   });
 
   for (const dialog of $$("dialog")) {
