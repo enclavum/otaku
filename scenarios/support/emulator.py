@@ -40,6 +40,7 @@ CTRL_D = b"\x04"
 CTRL_J = b"\n"
 CTRL_R = b"\x12"
 CTRL_U = b"\x15"
+CTRL_Y = b"\x19"
 DOWN = b"\x1b[B"
 RIGHT = b"\x1b[C"
 # Ctrl+Enter as a terminal honouring modifyOtherKeys reports it

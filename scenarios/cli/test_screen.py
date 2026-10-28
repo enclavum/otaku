@@ -33,6 +33,7 @@ from scenarios.support.emulator import (
     CTRL_J,
     CTRL_R,
     CTRL_U,
+    CTRL_Y,
     DOWN,
     ENTER,
     RIGHT,
@@ -105,6 +106,25 @@ class TestChatMode:
                 key("undo the failed line", CTRL_U, erases=True),
                 key("undo the turn before", CTRL_U, erases=True),
                 line("Short again."),
+            ],
+        )
+        assert not problems, "\n".join(problems)
+
+    def test_an_undo_and_a_regenerate_reverted(self, played: "Played") -> None:
+        """A revert draws back in place what the undo or the regenerate
+        took: the exchange under the ending it left, the earlier take where
+        the fresh one stood."""
+        term = played(Layout.MANUSCRIPT)
+        problems = run(
+            term,
+            [
+                line("Go on."),
+                line("And on."),
+                key("undo", CTRL_U, erases=True),
+                key("revert the undo", CTRL_Y, erases=True),
+                key("regenerate", CTRL_R, erases=True),
+                key("revert the regenerate", CTRL_Y, erases=True),
+                line("Short."),
             ],
         )
         assert not problems, "\n".join(problems)
@@ -237,6 +257,23 @@ class TestStoryMode:
                 line("And on."),
                 key("undo", CTRL_U, erases=True),
                 key("regenerate, failing again", CTRL_R, erases=True),
+            ],
+            story_mode=True,
+        )
+        assert not problems, "\n".join(problems)
+
+    def test_an_undo_and_a_regenerate_reverted(self, played: "Played") -> None:
+        term = played(Layout.CANVAS)
+        problems = run(
+            term,
+            [
+                line("Go on."),
+                line("And on."),
+                key("undo", CTRL_U, erases=True),
+                key("revert the undo", CTRL_Y, erases=True),
+                key("regenerate", CTRL_R, erases=True),
+                key("revert the regenerate", CTRL_Y, erases=True),
+                line("Further."),
             ],
             story_mode=True,
         )

@@ -5,7 +5,7 @@ the trailing exchange taken back (`/undo`) and what the newest discard
 took put back (`/revert`) — each drawn in place where the screen
 allows; `/title` is one call, its row the root's."""
 
-from otaku.terminal.api import Conflict, Message, Refused
+from otaku.terminal.api import Conflict, JoinType, Message, Refused
 from otaku.terminal.api import stories as api_stories
 from otaku.terminal.api.stories import NOTHING_TO_REGENERATE, NOTHING_TO_REVERT, NOTHING_TO_UNDO
 from otaku.terminal.chat import landing, stream
@@ -15,6 +15,8 @@ from otaku.terminal.screens import stories as screen_stories
 from otaku.terminal.tty import DIM, RESET, error_line
 from otaku.terminal.tty.cursor import terminal_width
 from otaku.terminal.tty.render import (
+    flow,
+    flow_offsets,
     last_turns,
     line_text,
     message,
@@ -180,9 +182,13 @@ def undo(chat: Chat, raw: str) -> None:
 def revert(chat: Chat, raw: str) -> None:
     """Put back what the newest discard took, in place where the screen
     allows — an undone exchange echoed back under the ending it left, an
-    earlier take drawn where the regenerated one stood — and the new
-    ending reported otherwise, as an undo's is."""
+    earlier take drawn where the regenerated one stood, in the canvas's
+    one text as in the blocks — and the new ending reported otherwise,
+    as an undo's is."""
     drawn = chat.messages()
+    # in the canvas, the question the story stands on, which the exchange
+    # coming back answered: read before the revert, as a line played reads it
+    asked = stream.question_to_drop(chat)
     try:
         if chat.story_id is None:
             raise Conflict(NOTHING_TO_REVERT)
@@ -192,7 +198,7 @@ def revert(chat: Chat, raw: str) -> None:
         chat.say(str(e))
         return
     chat.mark_drawn(reverted.value)
-    if not chat.is_story_mode and _draw_back(chat, drawn, chat.messages()):
+    if _draw_back(chat, drawn, chat.messages(), asked):
         _pose_again(chat, drawn=True)
         return
     chat.ledger.invalidate()
@@ -203,13 +209,16 @@ def revert(chat: Chat, raw: str) -> None:
     )
 
 
-def _draw_back(chat: Chat, drawn: list[Message], chain: list[Message]) -> bool:
+def _draw_back(
+    chat: Chat, drawn: list[Message], chain: list[Message], asked: list[Message] | None
+) -> bool:
     """Draw what a revert put back where the ledger proves the screen: an
-    exchange that comes back after the ending the screen shows, echoed as
-    a played one is, or a reply that comes back in place of the one
-    standing, drawn where that one began. False for anything else — more
-    than one exchange back, a reply the screen cannot erase — and nothing
-    is drawn."""
+    exchange that comes back after the ending the screen shows, played
+    back as a line and its reply are — in the canvas, on from the text's
+    end, the question it answered (`asked`) taken off first — or a reply
+    that comes back in place of the one standing, drawn where that one
+    began. False for anything else — more than one exchange back, a reply
+    the screen cannot erase — and nothing is drawn."""
     shared = next(
         (at for at, (was, now) in enumerate(zip(drawn, chain, strict=False)) if was.id != now.id),
         min(len(drawn), len(chain)),
@@ -219,9 +228,21 @@ def _draw_back(chat: Chat, drawn: list[Message], chain: list[Message]) -> bool:
     reply = back[1:] if prompt is not None else back
     if not back or not _is_unit(reply):
         return False
+    shown = chat.shown_tools
     if not gone:
         if prompt is None or not chat.ledger.is_live:
             return False
+        if chat.is_story_mode:
+            stream.drop_question(chat, asked)
+            inline = chat.ledger.echo_flow(inline=prompt.join_type is JoinType.INLINE)
+            text, starts = flow_offsets(back, shown=shown, posed=chat.posed)
+            cut = starts[1] if reply else len(text)
+            # the line's own breaks are its join's, drawn by the placing
+            chat.ledger.reply.write((" " if inline else "") + text[:cut].lstrip("\n"))
+            chat.ledger.reply_begins()
+            chat.ledger.reply.write(text[cut:])
+            _end_text(chat)
+            return True
         chat.ledger.echo_block(
             message(
                 prompt.body.strip(),
@@ -233,12 +254,30 @@ def _draw_back(chat: Chat, drawn: list[Message], chain: list[Message]) -> bool:
     elif prompt is None and reply and _is_unit(gone):
         if not chat.ledger.erase_reply():
             return False
+        if chat.is_story_mode:
+            # on where the replaced take began, joined as the take is
+            piece = flow(reply, shown=shown, posed=chat.posed)
+            if reply[0].join_type is JoinType.INLINE:
+                chat.ledger.reply.write(" " + piece)
+            else:
+                chat.ledger.reply.write("\n\n" + piece.lstrip("\n"))
+            _end_text(chat)
+            return True
     else:
         return False
     if reply:
-        shown = chat.shown_tools
         chat.ledger.reply.write("\n\n".join(turn(row, shown=shown) for row in reply) + "\n")
     return True
+
+
+def _end_text(chat: Chat) -> None:
+    """End the canvas's text as a reply streamed into it ends it: a row
+    left open mid-line for the next prompt to stand in (`hold_at_tail`),
+    a full one ended — `stream._end_row`'s rule, for a reply drawn whole."""
+    if chat.ledger.mid_row:
+        chat.ledger.hold_at_tail()
+    else:
+        chat.ledger.reply.write("\n")
 
 
 def _is_unit(rows: list[Message]) -> bool:
