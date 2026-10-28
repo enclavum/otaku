@@ -226,7 +226,7 @@ def _draw_back(
     gone, back = drawn[shared:], chain[shared:]
     prompt = back[0] if back and back[0].role == "user" else None
     reply = back[1:] if prompt is not None else back
-    if not back or not _is_unit(reply):
+    if not back or not _is_one_reply(reply):
         return False
     shown = chat.shown_tools
     if not gone:
@@ -251,7 +251,7 @@ def _draw_back(
                 pictures=len(prompt.attachments),
             )
         )
-    elif prompt is None and reply and _is_unit(gone):
+    elif prompt is None and reply and _is_one_reply(gone):
         if not chat.ledger.erase_reply():
             return False
         if chat.is_story_mode:
@@ -280,12 +280,12 @@ def _end_text(chat: Chat) -> None:
         chat.ledger.reply.write("\n")
 
 
-def _is_unit(rows: list[Message]) -> bool:
-    """Whether `rows` are one reply unit as /undo and /regen take it — a
-    reply with its tool chain — or nothing at all."""
+def _is_one_reply(rows: list[Message]) -> bool:
+    """Whether `rows` are one reply as /undo and /regen take it — with its
+    tool chain — or nothing at all."""
     if not rows:
         return True
-    return all(row.role != "user" for row in rows) and rows[-1].unit == rows[0].id
+    return all(row.role != "user" for row in rows) and rows[-1].reply_start_id == rows[0].id
 
 
 def _pose_again(chat: Chat, *, drawn: bool) -> None:

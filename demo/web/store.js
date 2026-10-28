@@ -981,7 +981,7 @@ const headingOf = (story, row) => [
 
 /** One row recorded at the story's head, in the shape the product's rows
     take — the demo's model writes prose and no tool call, so a row is
-    one prose segment, its own unit. */
+    one prose segment, its own reply's start. */
 export function record(id, role, body, extra = {}) {
   const story = held(id);
   const previous = story.messages.at(-1) ?? null;
@@ -1001,14 +1001,14 @@ export function record(id, role, body, extra = {}) {
     segments: [{ kind: "prose", text: body }],
     join_type: "paragraph",
     tool_label: null,
-    unit: 0,
+    reply_start_id: 0,
     discarded: false,
     ...extra,
   };
   // every row but a card's and a tool's (`messages.services.can_pin`)
   row.can_pin = row.kind !== "card" && row.role !== "tool";
   row.join_type = joinOf(previous, row);
-  row.unit = row.id;
+  row.reply_start_id = row.id;
   story.messages.push(row);
   touch(story);
   moved(story);

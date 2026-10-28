@@ -12,7 +12,7 @@ from dataclasses import dataclass, replace
 
 from otaku.backend.app.core.services import App
 from otaku.backend.errors import NO_SUCH_MESSAGE, NO_SUCH_STORY, Invalid, NotFound
-from otaku.backend.story.chain import unit_start
+from otaku.backend.story.chain import reply_start_index
 from otaku.backend.story.play import CallPiece as CallPiece
 from otaku.backend.story.play import Declined as Declined
 from otaku.backend.story.play import Event as Event
@@ -35,12 +35,12 @@ from otaku.store.schema import Layout, Message
 class ListedMessage:
     """A message of a story where a list reads it, with what its own
     branch says of it: the row before it there (None for a first), the
-    first row of the reply unit it stands in, and whether it is off the
-    current chain."""
+    id of the first row of the reply it stands in, and whether it is off
+    the current chain."""
 
     row: Message
     previous: Message | None
-    unit: int
+    reply_start_id: int
     discarded: bool
 
 
@@ -77,10 +77,14 @@ def _chain(app: App, story_id: int) -> list[Message]:
 
 
 def _listed(chain: list[Message]) -> list[ListedMessage]:
-    """A chain's rows, each with the row before it and its reply unit."""
+    """A chain's rows, each with the row before it and where its reply
+    starts."""
     return [
         ListedMessage(
-            row, chain[index - 1] if index else None, chain[unit_start(chain, index + 1)].id, False
+            row,
+            chain[index - 1] if index else None,
+            chain[reply_start_index(chain, index + 1)].id,
+            False,
         )
         for index, row in enumerate(chain)
     ]
@@ -102,8 +106,8 @@ def _branches(
         before = (path[-1].chapter or 0) if path else 0
         row = replace(row, chapter=before + (row.kind == "chapter"))
         path.append(row)
-        unit = path[unit_start(path, len(path))].id
-        out.append(ListedMessage(row, path[-2] if depth else None, unit, True))
+        reply_start_id = path[reply_start_index(path, len(path))].id
+        out.append(ListedMessage(row, path[-2] if depth else None, reply_start_id, True))
         stack += [(child, depth + 1) for child in reversed(children.get(row.id, []))]
     return out
 

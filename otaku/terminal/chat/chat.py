@@ -26,7 +26,7 @@ from otaku.terminal.api import (
 )
 from otaku.terminal.api.stories import Story
 from otaku.terminal.chat.ledger import ScreenLedger
-from otaku.terminal.tty.render import flow_offsets, turn, unit_start
+from otaku.terminal.tty.render import flow_offsets, reply_start_index, turn
 from otaku.terminal.tty.statusline import StatusLine
 
 # Turns echoed when a story (re)opens (the launch, a browser pick, an
@@ -285,7 +285,7 @@ class Chat:
     def restore_tail(self, count: int, above: str = "") -> None:
         """Hand the just-echoed tail (`render.last_turns(…, count)`) to
         the ledger, grouped the way /undo pops — a reply with its tool
-        chain (`Message.unit`) plus the one user row before it,
+        chain (`Message.reply_start_id`) plus the one user row before it,
         either alone when the other is missing — so
         the shown turns can be taken back off the screen without having
         been played. `above` names the report line printed (with its
@@ -298,8 +298,9 @@ class Chat:
         messages = self.messages()
         shown = messages[-count:]
         offset = len(messages) - len(shown)
-        # indexes into `shown`: the prompt, and the reply's unit — its first
-        # row and the row after its last — and whether the echo cut the unit
+        # indexes into `shown`: the prompt, and the reply with its tool
+        # chain — its first row and the row after its last — and whether the
+        # echo cut the reply
         groups: list[tuple[int | None, int | None, int, bool]] = []
         i = len(shown)
         while i > 0:
@@ -307,7 +308,7 @@ class Chat:
             if shown[i - 1].role == "assistant":
                 # the reply with its tool chain, as /undo pops it — the part
                 # the echo shows, where it cut the chain
-                begins = unit_start(messages, offset + i)
+                begins = reply_start_index(messages, offset + i)
                 cut = begins < offset
                 reply = i = max(begins, offset) - offset
             prompt = i - 1 if i > 0 and shown[i - 1].role == "user" else None

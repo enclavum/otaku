@@ -45,7 +45,9 @@ class MessagesResource(Resource):
             domain_messages.list_messages_full if with_discarded else domain_messages.list_messages
         )
         drawn = [
-            _as_message(listed.row, listed.previous, listed.unit, discarded=listed.discarded)
+            _as_message(
+                listed.row, listed.previous, listed.reply_start_id, discarded=listed.discarded
+            )
             for listed in listing(self._app, story_id)
         ]
         return drawn[-last:] if last else drawn

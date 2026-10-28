@@ -32,7 +32,7 @@ def append_message(app: App, story_id: int, message: Message, *, after: int | No
 
 def pop_exchange(app: App, story_id: int, *, expected_head: int | None) -> list[Message]:
     """Take back a story's trailing exchange: the reply (if any) with its
-    tool chain (`take_reply_unit`) plus the ONE user row that prompted
+    tool chain (`take_reply`) plus the ONE user row that prompted
     it — every submission is a single row (a /me or /you direction rides
     its row's template), and an imported backlog of consecutive user
     rows is story, not one submission; a continue's reply, standing
@@ -42,7 +42,7 @@ def pop_exchange(app: App, story_id: int, *, expected_head: int | None) -> list[
     head no longer stands at `expected_head`."""
     chain = app._store.stories.get_messages(story_id)
     check_head(chain, expected_head)
-    popped = take_reply_unit(chain)
+    popped = take_reply(chain)
     if chain and chain[-1].role == "user":
         popped.append(chain.pop())
     if popped:
@@ -54,7 +54,7 @@ def pop_reply(
     app: App, story_id: int, *, expected_head: int | None
 ) -> tuple[Message | None, list[Message]]:
     """Take back a story's trailing reply with its tool chain
-    (regenerate's first half, `take_reply_unit`), so the take re-runs
+    (regenerate's first half, `take_reply`), so the take re-runs
     from what stands before it — the reader's line, or the reply a
     continue went on from: the head moves back; the discarded messages stay
     in the tree as siblings. Returns the first of the replies dropped
@@ -63,7 +63,7 @@ def pop_reply(
     `expected_head`."""
     chain = app._store.stories.get_messages(story_id)
     check_head(chain, expected_head)
-    popped = take_reply_unit(chain)
+    popped = take_reply(chain)
     if not popped:
         return None, chain
     move_head(app, story_id, chain, expected_head=popped[0].id)
@@ -71,14 +71,14 @@ def pop_reply(
     return first, chain
 
 
-def take_reply_unit(chain: list[Message]) -> list[Message]:
-    """Take a chain's trailing reply off it as ONE unit: the reply, and
-    where a tool message stands right before it, that turn and the reply
-    holding its call, again and again. The unit ends at a reply with no
-    tool turn before it, so two replies side by side — a continue's
-    after the one it went on from — are two units. Reads roles and their
-    order alone, never the mode. Returns the rows taken, newest first;
-    [] where the chain does not end on a reply."""
+def take_reply(chain: list[Message]) -> list[Message]:
+    """Take a chain's trailing reply off it whole: the reply, and where a
+    tool message stands right before it, that turn and the reply holding
+    its call, again and again. It ends at a reply with no tool turn
+    before it, so two replies side by side — a continue's after the one
+    it went on from — are two replies. Reads roles and their order alone,
+    never the mode. Returns the rows taken, newest first; [] where the
+    chain does not end on a reply."""
     popped: list[Message] = []
     while chain and chain[-1].role in ("assistant", "tool"):
         row = chain.pop()
@@ -88,11 +88,11 @@ def take_reply_unit(chain: list[Message]) -> list[Message]:
     return popped
 
 
-def unit_start(rows: Sequence[Message], end: int) -> int:
-    """Where the reply ending at `rows[end - 1]` begins as ONE unit — the
-    unit `take_reply_unit` takes: the reply, and where a tool turn stands
-    right before it, that turn and the reply holding its call, again and
-    again. A row that is no reply begins its own."""
+def reply_start_index(rows: Sequence[Message], end: int) -> int:
+    """Where in `rows` the reply ending at `rows[end - 1]` begins, as
+    `take_reply` takes it: with, where a tool turn stands right before
+    it, that turn and the reply holding its call, again and again. A row
+    that is no reply begins its own."""
     at = end - 1
     while at > 0 and (rows[at].role == "tool" or rows[at - 1].role == "tool"):
         at -= 1

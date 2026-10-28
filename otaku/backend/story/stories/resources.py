@@ -192,10 +192,11 @@ class UndosResource(Resource):
 
     def create(self, story_id: int, *, expected_head: int | None) -> Changed[Story]:
         """Take back a story's trailing exchange — the reader's line and
-        the reply unit it got, or a continue's reply alone — moving the
-        head back from `expected_head`, the head the caller read. Nothing
-        is deleted: the messages stay in the tree, and an imported
-        character whose card exchange was never played goes with it.
+        the reply it got, its tool chain included, or a continue's reply
+        alone — moving the head back from `expected_head`, the head the
+        caller read. Nothing is deleted: the messages stay in the tree,
+        and an imported character whose card exchange was never played
+        goes with it.
         Answered as the story now stands. Raises NotFound for a story that
         is not there, HeadMoved where its head stands elsewhere, Conflict
         with nothing to take back."""

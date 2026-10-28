@@ -24,8 +24,10 @@ def as_events(found: Generator[domain_messages.Event, None, None]) -> Iterator[P
     try:
         for happened in found:
             match happened:
-                case domain_messages.Landed(row=row, previous=previous, unit=unit, note=note):
-                    message = _as_message(row, previous, unit)
+                case domain_messages.Landed(
+                    row=row, previous=previous, reply_start_id=reply_start_id, note=note
+                ):
+                    message = _as_message(row, previous, reply_start_id)
                     if row.role == "user":
                         yield UserMessage(message, note=note)
                     elif row.role == "tool":
@@ -62,12 +64,16 @@ def as_events(found: Generator[domain_messages.Event, None, None]) -> Iterator[P
 
 
 def _as_message(
-    row: schema.Message, previous: schema.Message | None, unit: int, *, discarded: bool = False
+    row: schema.Message,
+    previous: schema.Message | None,
+    reply_start_id: int,
+    *,
+    discarded: bool = False,
 ) -> Message:
     """A stored row as the message a client draws: its body split, how
     it joins `previous` (the row before it), a tool message's label, the
-    first row of the reply unit it stands in, and whether it is off the
-    current chain."""
+    id of the first row of the reply it stands in, and whether it is off
+    the current chain."""
     return Message(
         id=row.id,
         role=row.role,
@@ -84,7 +90,7 @@ def _as_message(
         segments=tuple(domain_messages.segments(row)),
         join_type=domain_messages.join_type(previous, row),
         tool_label=domain_messages.tool_label(row),
-        unit=unit,
+        reply_start_id=reply_start_id,
         discarded=discarded,
     )
 
@@ -102,10 +108,11 @@ class Message(Schema):
     story and its words with the model; a chapter its heading, numbered
     along the chain), how it joins the message before it (`join_type`),
     a tool message's label (None on every other), the first message
-    of the reply unit it stands in (`unit`: what an undo or a regenerate
-    takes with it), and whether it is off the story's current chain
+    of the reply it stands in (`reply_start_id`: an undo or a regenerate
+    takes the reply whole — a tool's call, its result and the reply
+    going on after it), and whether it is off the story's current chain
     (`discarded`: left by an undo, a regenerate or a head move — its join
-    and its unit read along its own branch)."""
+    and its reply's start read along its own branch)."""
 
     id: int
     role: str
@@ -122,7 +129,7 @@ class Message(Schema):
     segments: tuple[dict[str, object], ...]
     join_type: JoinType
     tool_label: str | None
-    unit: int
+    reply_start_id: int
     discarded: bool
 
 

@@ -119,7 +119,7 @@ class TestEvent:
         assert message["tool_label"] == "Web search call"
         assert message["provider"] == "web-search"
         # the reply holding the call and the result are one unit
-        assert message["unit"] == call.id
+        assert message["reply_start_id"] == call.id
 
     def test_done_without_a_report_says_nothing(self) -> None:
         assert event(Done(report=None, stats="")) == {
@@ -157,7 +157,9 @@ def handed(*rows: Message) -> list[Handed]:
     """Store rows as the messages an event carries — built as the backend
     builds them, each numbered by its position."""
     chain = [replace(row, id=index + 1) for index, row in enumerate(rows)]
-    return [_as_message(listed.row, listed.previous, listed.unit) for listed in _listed(chain)]
+    return [
+        _as_message(listed.row, listed.previous, listed.reply_start_id) for listed in _listed(chain)
+    ]
 
 
 def _call() -> AssistantToolCall:

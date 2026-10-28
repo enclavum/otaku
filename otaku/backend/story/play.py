@@ -28,7 +28,7 @@ from otaku.backend.story.chain import (
     forget_discards,
     pop_reply,
     record_discard,
-    unit_start,
+    reply_start_index,
 )
 from otaku.backend.story.request import assemble, build_job
 from otaku.backend.story.settings.services import StorySettings, ToolSetting, settings_of
@@ -60,14 +60,14 @@ NOTHING_TO_REGENERATE = "Nothing to regenerate."
 class Landed:
     """A row the stream recorded — the reader's line (autocorrect
     settled first), the model's reply, a tool's result — the row before
-    it on the chain, which it joins (None for the first), and the first
-    row of the reply unit it stands in (`chain.unit_start`). `note` is
-    the record's own line to show beside it: the dice a /roll rolled; ""
-    for every other row."""
+    it on the chain, which it joins (None for the first), and the id of
+    the first row of the reply it stands in (`chain.reply_start_index`).
+    `note` is the record's own line to show beside it: the dice a /roll
+    rolled; "" for every other row."""
 
     row: Message
     previous: Message | None
-    unit: int
+    reply_start_id: int
     note: str = ""
 
 
@@ -666,7 +666,7 @@ def _lead_breaks(text: str) -> str:
 
 def _landed(chain: Sequence[Message], *, note: str = "") -> Landed:
     """The row just recorded — the chain's last — as it is told."""
-    first = chain[unit_start(chain, len(chain))]
+    first = chain[reply_start_index(chain, len(chain))]
     assert first.id is not None  # a recorded row has its id
     return Landed(chain[-1], chain[-2] if len(chain) > 1 else None, first.id, note)
 

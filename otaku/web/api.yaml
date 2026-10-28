@@ -677,8 +677,8 @@ paths:
       tags: [Messages]
       summary: Regenerate the standing reply
       description: |
-        The standing reply set aside as a sibling — with its tool chain, one
-        unit — and a fresh take streamed in its place: the stream of
+        The standing reply set aside as a sibling — whole, with its tool
+        chain — and a fresh take streamed in its place: the stream of
         playing a line, with no user message. A POST because it is not
         idempotent: two calls leave two takes. Without a model, or with
         nothing to regenerate, it refuses before anything is dropped.
@@ -737,9 +737,10 @@ paths:
       summary: Take back the trailing exchange
       description: |
         What `/undo` does in the terminal: the reader's line and the reply
-        unit it got, or a continue's reply alone. Nothing is deleted — the
-        head moves back and the messages stay in the tree; an imported
-        character whose card exchange was never played goes with it.
+        it got, its tool chain included, or a continue's reply alone.
+        Nothing is deleted — the head moves back and the messages stay in
+        the tree; an imported character whose card exchange was never
+        played goes with it.
         Nothing to take back is refused (409). A POST because each call
         takes a different exchange — the one before, the next time — which
         `If-Match` makes safe to repeat.
@@ -2679,8 +2680,8 @@ components:
                     description: "A question's: the answers to pick from."
         join_type: { type: string, enum: [inline, paragraph], description: "How it joins the message before it — the wire's own rule: inline, one space; paragraph, a blank line." }
         tool_label: { type: [string, "null"], description: "A tool message's tool as a frontend names it for the result it holds; null on every other message." }
-        unit: { type: integer, description: "The first message of the reply unit it stands in — what undo and regenerate take as one." }
-        discarded: { type: boolean, description: "Off the story's current chain — left by an undo, a regenerate or a head move; its join and its unit read along its own branch. Only a list asked `with_discarded` holds one." }
+        reply_start_id: { type: integer, description: "The id of the first message of the reply it stands in — a tool's call, its result and the reply going on after it are one reply, which undo and regenerate take whole; a user's line is its own." }
+        discarded: { type: boolean, description: "Off the story's current chain — left by an undo, a regenerate or a head move; its join and its reply's start read along its own branch. Only a list asked `with_discarded` holds one." }
 
     Model:
       type: object

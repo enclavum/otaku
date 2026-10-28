@@ -32,8 +32,8 @@ from otaku.terminal.tty.render import (
     flow_offsets,
     last_turns,
     message,
+    reply_start_index,
     spaced,
-    unit_start,
     user_block,
 )
 
@@ -351,15 +351,15 @@ class TestFlow:
         assert flow(handed(rows), shown=NOTES) == "One.\n\nTwo."
 
 
-class TestUnitStart:
-    """`unit_start` — where the reply ending a list of rows begins as ONE
-    unit, as its `unit` names it: the reply, and where a tool turn stands
-    right before it, that turn and the reply holding its call, again and
-    again (the backend's rule, the chain's `take_reply_unit`)."""
+class TestReplyStartIndex:
+    """`reply_start_index` — where the reply ending a list of rows begins,
+    as its `reply_start_id` names it: the reply, and where a tool turn
+    stands right before it, that turn and the reply holding its call,
+    again and again (the backend's rule, the chain's `take_reply`)."""
 
-    def test_a_reply_alone_is_its_own_unit(self) -> None:
+    def test_a_reply_alone_starts_on_itself(self) -> None:
         rows = [chat("user", "Go."), chat("assistant", "Gone.")]
-        assert unit_start(handed(rows), 2) == 1
+        assert reply_start_index(handed(rows), 2) == 1
 
     def test_a_reply_takes_its_tool_chain(self) -> None:
         rows = [
@@ -370,16 +370,16 @@ class TestUnitStart:
             tool_turn("Six."),
             chat("assistant", "High at six."),
         ]
-        assert unit_start(handed(rows), 6) == 1
-        assert unit_start(handed(rows), 4) == 1
+        assert reply_start_index(handed(rows), 6) == 1
+        assert reply_start_index(handed(rows), 4) == 1
 
-    def test_two_replies_side_by_side_are_two_units(self) -> None:
+    def test_two_replies_side_by_side_are_two_replies(self) -> None:
         rows = [chat("user", "Go."), chat("assistant", "One."), chat("assistant", "Two.")]
-        assert unit_start(handed(rows), 3) == 2
+        assert reply_start_index(handed(rows), 3) == 2
 
     def test_a_chain_that_opens_the_rows_starts_at_the_first(self) -> None:
         rows = [tool_turn("Tides."), chat("assistant", "High.")]
-        assert unit_start(handed(rows), 2) == 0
+        assert reply_start_index(handed(rows), 2) == 0
 
 
 class TestLastTurns:
@@ -426,10 +426,12 @@ def split(body: str) -> list[dict[str, object]]:
 
 def handed(rows: Sequence[Message]) -> list[Drawn]:
     """Store rows as the messages the terminal is handed — split, joined
-    and placed in their reply units as the backend builds them — each
+    and placed in their replies as the backend builds them — each
     numbered by its position."""
     chain = [replace(row, id=index + 1) for index, row in enumerate(rows)]
-    return [_as_message(listed.row, listed.previous, listed.unit) for listed in _listed(chain)]
+    return [
+        _as_message(listed.row, listed.previous, listed.reply_start_id) for listed in _listed(chain)
+    ]
 
 
 def tool_turn(body: str) -> Message:

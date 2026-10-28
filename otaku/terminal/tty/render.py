@@ -430,12 +430,13 @@ def last_turns(
     return "\n".join(out).lstrip("\n")
 
 
-def unit_start(items: Sequence[Message], end: int) -> int:
-    """Where the reply ending at `items[end - 1]` begins as ONE unit —
-    what /undo and /regen take: the turn its `unit` names, found among
-    `items` (the turn itself where `items` starts after it)."""
-    unit = items[end - 1].unit
-    return next((at for at in range(end - 1, -1, -1) if items[at].id == unit), end - 1)
+def reply_start_index(items: Sequence[Message], end: int) -> int:
+    """Where in `items` the reply ending at `items[end - 1]` begins — the
+    whole of what /undo and /regen take: the turn its `reply_start_id`
+    names, found among `items` (the turn itself where `items` starts
+    after it)."""
+    first = items[end - 1].reply_start_id
+    return next((at for at in range(end - 1, -1, -1) if items[at].id == first), end - 1)
 
 
 def flow(

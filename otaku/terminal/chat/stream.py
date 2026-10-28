@@ -45,9 +45,9 @@ from otaku.terminal.tty.render import (
     flow,
     line_text,
     message,
+    reply_start_index,
     spaced,
     typeset_line,
-    unit_start,
 )
 from otaku.terminal.tty.spinner import Spinner
 from otaku.terminal.tty.typography import Streamer
@@ -569,8 +569,10 @@ def drop_question(chat: Chat, rows: list[Message] | None) -> None:
     # the reply with its tool chain — as much of it as the screen showed:
     # the erase took that
     items = list(rows)
-    first = unit_start(items, len(items)) if shown_turns is None else len(items) - shown_turns
-    # a cut unit opened the echo: nothing on screen before it to join
+    first = (
+        reply_start_index(items, len(items)) if shown_turns is None else len(items) - shown_turns
+    )
+    # a cut reply opened the echo: nothing on screen before it to join
     before = items[first - 1] if first and shown_turns is None else None
     piece = flow(items[first:])
     if before is None:

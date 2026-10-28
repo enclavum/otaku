@@ -1611,7 +1611,7 @@ class TestToolMessagesOverTheWire:
         ]
         assert rows[-1]["body"] == "It is late."
         # the reply holding the call and the result are one unit with the reply
-        assert rows[-1]["unit"] == rows[-3]["id"]
+        assert rows[-1]["reply_start_id"] == rows[-3]["id"]
 
 
 class TestSupportOverTheWire:

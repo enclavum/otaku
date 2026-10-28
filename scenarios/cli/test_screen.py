@@ -155,7 +155,7 @@ class TestChatMode:
         assert not problems, "\n".join(problems)
 
     def test_a_resumed_reply_goes_with_its_tool_rounds(self, played: "Played") -> None:
-        """A launch echoes a reply with tool rounds as one unit: a
+        """A launch echoes a reply with tool rounds whole: a
         regenerate redraws every round, and an undo takes every round off
         the screen, as the backend takes every row."""
         term = played(Layout.MANUSCRIPT, ("The ferry left.", "4 What time is it?"))
