@@ -119,20 +119,11 @@ uv tool install otaku
 brew trust enclavum/tap
 brew install enclavum/tap/otaku
 
-# run in docker with the repo checked out
-docker compose up -d
-
-# run in docker without checking out the repo
+# run in Docker (only the web interface accessible)
 docker compose -f https://github.com/enclavum/otaku.git up -d
-```
 
-When running otaku in Docker, you can also attach to its terminal interface with the command
-below, but the interface doesn't fully work as intended there, because the Docker TTY is not a
-proper terminal. To use the terminal interface, install otaku without Docker.
-
-```bash
-# Ctrl+D leaves the terminal interface; otaku keeps running
-docker compose attach --detach-keys=ctrl-d otaku
+# run in Docker if you've checked out the repo
+docker compose up -d
 ```
 
 How to update:

@@ -1,11 +1,8 @@
 # otaku in a container: the web on port 9600, the library in the
 # `otaku_data` volume.
 #
-# Note: you can also attach to otaku's terminal interface with the command
-# below, but it doesn't work as intended in docker, because the docker TTY
-# is not a proper terminal. To use the terminal interface, install otaku
-# without docker. Ctrl+D leaves the interface; otaku keeps running.
-#   docker compose attach --detach-keys=ctrl-d otaku
+# Note: with docker, you cannot access the terminal interface. To use it,
+# install otaku without docker.
 
 name: otaku
 
@@ -16,7 +13,6 @@ services:
     build: .
     pull_policy: build
     tty: true
-    stdin_open: true
     ports:
       - "9600:9600"
     volumes:

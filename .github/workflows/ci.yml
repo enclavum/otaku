@@ -64,11 +64,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - run: docker build -t otaku-ci .
-      # The container as compose runs it (-it): the terminal interface,
-      # serving the page beside it.
+      # The container as compose runs it (-t): the web interface.
       - name: The page answers from a running container
         run: |
-          docker run -dit --name otaku-ci -p 9600:9600 otaku-ci
+          docker run -dt --name otaku-ci -p 9600:9600 otaku-ci
           for attempt in $(seq 1 30); do
             if curl -fsS -o /dev/null http://127.0.0.1:9600/api/app/status; then
               exit 0
