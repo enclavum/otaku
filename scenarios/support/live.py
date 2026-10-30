@@ -25,12 +25,13 @@ def live_app(
 ) -> App:
     """The real app over `provider_config`, set to play `model`. The scripted
     `server` carries only the harness plumbing (its "generic" provider);
-    the story itself goes to the live endpoint."""
+    the story itself goes to the live endpoint — a story of its own, no
+    sample seeded for the launch to land in."""
     root = tmp_path / "state"
     paths = Paths.resolve(root)
     paths.ensure_tree()
     providers = {provider_config.name: provider_config}
-    write_atomic(paths.config_file, config_mod.Config().to_toml())
+    write_atomic(paths.config_file, config_mod.Config(seed_sample=False).to_toml())
     write_atomic(paths.providers_file, providers_mod.render(providers))
     return launch(root, server, spec=f"{provider_config.name}/{model}")
 
