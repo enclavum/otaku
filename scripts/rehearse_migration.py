@@ -63,6 +63,7 @@ VERSIONS = (
     "0.5.0",
     "0.6.0",
     "0.7.0",
+    "0.8.0",
 )
 PROVIDER, MODEL = "generic", "test-model"
 WORK = Path(os.environ.get("REHEARSAL_DIR", "/tmp/otaku-rehearsal"))
@@ -235,16 +236,19 @@ def seed_config(python: str, root: Path, server_url: str, *, version: str, encry
     """The old release writes its OWN default config (its shape, no network),
     then every provider url is dead-ended and the scripted one added. The
     snippet is the OLD release's api — never this build's: `otaku.app`
-    up to 0.3.0, the backend's launch module from 0.4.0 on."""
-    if tuple(int(n) for n in version.split(".")) < (0, 4, 0):
+    up to 0.3.0, the backend's launch module from 0.4.0 on, its paths in
+    the domain package from 0.8.0."""
+    released = tuple(int(n) for n in version.split("."))
+    if released < (0, 4, 0):
         code = (
             "from otaku.paths import Paths;"
             "from otaku.app import load_config;"
             f"load_config(Paths.resolve({str(root)!r}))"
         )
     else:
+        paths = "otaku.backend.domain.app._paths" if released >= (0, 8, 0) else "otaku.backend.paths"
         code = (
-            "from otaku.backend.paths import Paths;"
+            f"from {paths} import Paths;"
             "from otaku.backend.launch import _load_config;"
             f"_load_config(Paths.resolve({str(root)!r}))"
         )
