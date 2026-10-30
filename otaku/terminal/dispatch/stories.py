@@ -104,7 +104,7 @@ def regen(chat: Chat, raw: str) -> None:
             events = chat.api.stories.regens.create(story_id, expected_head=chat.head)
     except Refused as e:
         chat.ledger.invalidate()
-        chat.say(str(e))
+        chat.refuse(e)
         return
     # The prompt the take re-runs: the last user row once the trailing
     # reply goes — read while the fresh take may already have dropped it,
@@ -165,7 +165,7 @@ def undo(chat: Chat, raw: str) -> None:
         # Nothing taken: what the screen shows stands, and a story that
         # moved elsewhere is caught up before the next prompt.
         chat.ledger.invalidate()
-        chat.say(str(e))
+        chat.refuse(e)
         return
     chat.mark_drawn(undone.value)
     refreshing = chat.ledger.top_is_report()
@@ -195,7 +195,7 @@ def revert(chat: Chat, raw: str) -> None:
         reverted = chat.api.stories.reverts.create(chat.story_id, expected_head=chat.head)
     except Refused as e:
         chat.ledger.invalidate()
-        chat.say(str(e))
+        chat.refuse(e)
         return
     chat.mark_drawn(reverted.value)
     if _draw_back(chat, drawn, chat.messages(), asked):

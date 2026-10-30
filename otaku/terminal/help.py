@@ -32,6 +32,7 @@ _SPELLINGS: dict[str, tuple[str, str]] = {
     "/set verbose": ("", ""),
     "/set autocorrect": ("", ""),
     "/set notification": ("", ""),
+    "/set show_thinking": ("", ""),
     "/set max_context": ("", ""),
     "/set serve": ("", ""),
 }

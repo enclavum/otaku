@@ -79,7 +79,7 @@ def dispatch(chat: Chat, line: str) -> bool:
                 if said is not None:
                     chat.say(said)
         except Refused as e:
-            chat.say(str(e))
+            chat.refuse(e)
     return True
 
 
@@ -169,6 +169,7 @@ HANDLERS: dict[str, Handler] = {
     "/set verbose": lambda chat, raw: api_settings.set_verbose(chat.api, raw),
     "/set autocorrect": lambda chat, raw: api_settings.set_autocorrect(chat.api, raw),
     "/set notification": lambda chat, raw: api_settings.set_notification(chat.api, raw),
+    "/set show_thinking": lambda chat, raw: api_settings.set_show_thinking(chat.api, raw),
     "/set max_context": lambda chat, raw: api_settings.set_max_context(chat.api, raw),
     "/set serve": settings.set_serve,
     # the model in use's own settings (`backend.app.models`)

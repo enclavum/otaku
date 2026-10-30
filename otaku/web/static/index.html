@@ -157,13 +157,14 @@
             <!-- Send while the box is the reader's, Stop while the model has
                  it: one place, because they are one turn. Regen and Undo act
                  on the last exchange, which is why they live beside it. -->
+            <!-- revert: takes back the last Regen or Undo — shown after one,
+                 while there is something to take back, never while a reply
+                 is being written; it fades on its own. First of the verbs,
+                 so the ones it stands left of never move -->
+            <button type="button" class="otk-revert" data-revert title="Revert the last regen" aria-label="Revert the last regen" hidden><svg class="otk-revert__icon" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"/></svg></button>
             <!-- the pictures door, a clip at Send's left: shown only while the
                  model in use can see (the facts' `can_attach`) -->
             <button type="button" class="otk-attach-btn" data-attach aria-label="Attach pictures" title="Attach pictures" hidden><svg viewBox="0 0 16 16" width="22" height="22" aria-hidden="true"><path d="M13.6 7.2 8.1 12.7a3.4 3.4 0 0 1-4.8-4.8l6-6a2.2 2.2 0 0 1 3.1 3.1l-6 6a1 1 0 0 1-1.4-1.4l5.3-5.3" fill="none" stroke="currentColor" stroke-width="1.05" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
-            <!-- revert: takes back the last Regen or Undo — shown after one,
-                 while there is something to take back, never while a reply
-                 is being written; it fades on its own -->
-            <button type="button" class="otk-btn otk-revert" data-revert title="Revert the last regen" aria-label="Revert the last regen" hidden><svg class="otk-revert__icon" width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"/></svg></button>
             <button type="button" class="otk-btn otk-btn--primary" data-send>Send</button>
             <button type="button" class="otk-btn otk-btn--stop" data-stop hidden><span class="otk-btn__square"></span> Stop</button>
             <button type="button" class="otk-btn otk-btn--quiet" data-turn="regen">Regen</button>

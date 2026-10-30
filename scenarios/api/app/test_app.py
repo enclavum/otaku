@@ -287,8 +287,28 @@ class TestUpdateCheck:
             monkeypatch.setenv("OTAKU_UPDATE_URL", url)
             assert updater.fetch_latest_version() == __version__
 
+    def test_githubs_page_for_the_file_reads_by_either_copy_of_its_line(self, monkeypatch) -> None:
+        # The page carries the line among the file's lines as JSON, its
+        # quotes escaped, and in the drawn code, split by tags, its quotes
+        # entities: either alone is enough.
+        json_copy = (
+            '<script type="application/json">{"rawLines":["","__version__ = \\"1.2.3\\""]}</script>'
+        )
+        drawn_code = (
+            '<div data-line-number="9"><span class="pl-s1">__version__</span> '
+            '<span class="pl-c1">=</span> <span class="pl-s">&quot;1.2.3&quot;</span></div>'
+        )
+        for page in (json_copy + drawn_code, json_copy, drawn_code):
+            with _Serving(f"<html><body>{page}</body></html>") as url:
+                monkeypatch.setenv("OTAKU_UPDATE_URL", url)
+                assert updater.fetch_latest_version() == "1.2.3", page
+
     def test_no_answer_where_the_file_is_not_in_shape_or_out_of_reach(self, monkeypatch) -> None:
-        for body in ('__version__ = "0.9.0rc1"\n', "<html>Not Found</html>"):
+        for body in (
+            '__version__ = "0.9.0rc1"\n',
+            '{"rawLines":["__version__ = \\"0.9.0rc1\\""]}',
+            "<html>Not Found</html>",
+        ):
             with _Serving(body) as url:
                 monkeypatch.setenv("OTAKU_UPDATE_URL", url)
                 assert updater.fetch_latest_version() is None, body

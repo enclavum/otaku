@@ -58,6 +58,16 @@ export function count(n) {
   return n.toLocaleString("en-US");
 }
 
+/** Seconds as a span: "42s" under a minute, "3m 07s" above — the rule
+    `otaku.formatting.format_duration` holds, copied, because the two
+    languages cannot share a function. */
+export function duration(seconds) {
+  if (seconds >= 60) {
+    return `${Math.floor(seconds / 60)}m ${String(Math.floor(seconds % 60)).padStart(2, "0")}s`;
+  }
+  return `${halfEven(seconds)}s`;
+}
+
 /** A model's size on disk as the picker writes it, one decimal in GB;
     "" where it is not known — the rule `otaku.formatting.format_size`
     holds, copied, because the two languages cannot share a function. */

@@ -256,10 +256,9 @@ def _prompt_style() -> Style:
             "scrollbar.background": "bg:default",
             "scrollbar.button": "bg:ansibrightblack",
             # prompt_toolkit styles the bottom toolbar `reverse` by default — a
-            # full-width grey bar; noreverse leaves it plain, dim like the
-            # pinned row it hands off to.
+            # full-width grey bar; noreverse leaves it plain, its text painted
+            # as the pinned row's (`statusline._paints`).
             "bottom-toolbar": "noreverse",
-            "bottom-toolbar.text": "noreverse fg:ansibrightblack",
             # The answer rows above the prompt: the one under the cursor in
             # the accent, as the command menu picks its row out.
             "answer": "fg:default",

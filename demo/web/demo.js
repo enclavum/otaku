@@ -396,7 +396,7 @@ function expectedHead(story, ask) {
   const found = stated.length === 1 ? /^"(\d+)"$/.exec(stated[0]) : null;
   if (found) return Number(found[1]) || null;
   if (stated.includes(etag(head))) return head;
-  throw new store.Refused(412, "The story moved on since you last saw it — nothing was changed.", { head });
+  throw new store.Refused(412, "The story was continued on another device — nothing was changed.", { head });
 }
 
 const etag = (head) => `"${head ?? 0}"`;

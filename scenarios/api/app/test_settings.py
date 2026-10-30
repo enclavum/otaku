@@ -128,7 +128,7 @@ class TestMaxContext:
 class TestServe:
     """`/set serve`: the page served beside the chat, on the address
     config.toml's [web] names — a free port here, so no test ever reaches
-    a real otaku's — and the switch kept there (`terminal_serve`), off
+    a real otaku's — and the switch kept in its [terminal] (`serve`), off
     until asked."""
 
     def test_on_serves_the_page_and_off_stops_it(self, app: App, monkeypatch) -> None:
@@ -141,9 +141,9 @@ class TestServe:
     def test_the_switch_lands_in_config_toml(self, app: App, monkeypatch) -> None:
         _free_port(monkeypatch)
         app.play("/set serve on")
-        assert "terminal_serve = true" in app.paths.config_file.read_text(encoding="utf-8")
+        assert "\nserve = true" in app.paths.config_file.read_text(encoding="utf-8")
         app.play("/set serve off")
-        assert "terminal_serve = false" in app.paths.config_file.read_text(encoding="utf-8")
+        assert "\nserve = false" in app.paths.config_file.read_text(encoding="utf-8")
 
     def test_the_page_is_served_again_right_after_off(self, app: App, monkeypatch) -> None:
         # the closed connections still linger on the port when it is asked
@@ -165,7 +165,7 @@ class TestServe:
             holder.listen()
             app.play("/set serve on")
         assert not _listening(port)  # nothing of otaku's took it
-        assert app.api.settings.terminal.get().terminal_serve is True
+        assert app.api.settings.terminal.get().serve is True
 
     def test_a_config_from_before_the_switch_gets_it_at_the_launch(self, app: App) -> None:
         config = app.paths.config_file
@@ -173,13 +173,54 @@ class TestServe:
             "".join(
                 row
                 for row in config.read_text(encoding="utf-8").splitlines(True)
-                if "terminal_serve" not in row
+                if not row.startswith("serve ")
             ),
             encoding="utf-8",
         )
         relaunched = launch(app.paths.root, app.server)
-        assert "terminal_serve = false" in config.read_text(encoding="utf-8")
-        assert relaunched.api.settings.terminal.get().terminal_serve is False
+        assert "\nserve = false" in config.read_text(encoding="utf-8")
+        assert relaunched.api.settings.terminal.get().serve is False
+        relaunched.close()
+
+
+class TestShowThinking:
+    """`/set show_thinking`: the terminal prints a reply's thinking, or
+    only how long it took — the terminal's own setting, kept in
+    config.toml's [terminal], off until asked."""
+
+    def test_the_switch_lands_in_config_toml_and_reads_back(self, app: App) -> None:
+        assert app.api.settings.terminal.get().show_thinking is False
+        app.play("/set show_thinking on")
+        assert "\nshow_thinking = true" in app.paths.config_file.read_text(encoding="utf-8")
+        assert app.api.settings.terminal.get().show_thinking is True
+        app.play("/set show_thinking off")
+        assert "\nshow_thinking = false" in app.paths.config_file.read_text(encoding="utf-8")
+        assert app.api.settings.terminal.get().show_thinking is False
+
+    def test_bare_or_a_word_it_cannot_read_moves_nothing(self, app: App) -> None:
+        app.play("/set show_thinking on")
+        app.play("/set show_thinking")
+        app.play("/set show_thinking sometimes")
+        assert app.api.settings.terminal.get().show_thinking is True
+        assert "\nshow_thinking = true" in app.paths.config_file.read_text(encoding="utf-8")
+
+    def test_the_shared_settings_do_not_carry_it(self, app: App) -> None:
+        # the terminal's alone: the page draws its thinking as blocks to open
+        assert not hasattr(app.api.settings.get(), "show_thinking")
+
+    def test_a_config_from_before_the_switch_gets_it_at_the_launch(self, app: App) -> None:
+        config = app.paths.config_file
+        config.write_text(
+            "".join(
+                row
+                for row in config.read_text(encoding="utf-8").splitlines(True)
+                if not row.startswith("show_thinking ")
+            ),
+            encoding="utf-8",
+        )
+        relaunched = launch(app.paths.root, app.server)
+        assert "\nshow_thinking = false" in config.read_text(encoding="utf-8")
+        assert relaunched.api.settings.terminal.get().show_thinking is False
         relaunched.close()
 
 
@@ -200,15 +241,15 @@ class TestVariables:
         assert 'host = "localhost"' in config.read_text(encoding="utf-8")
 
     def test_off_turns_off_what_the_file_turns_on(self, app: App, monkeypatch) -> None:
-        set_config(app.paths.root, web_https=True, web_terminal_serve=True)
+        set_config(app.paths.root, web_https=True, serve=True)
         monkeypatch.setenv("OTAKU_WEB_HTTPS", "off")
         monkeypatch.setenv("OTAKU_TERMINAL_SERVE", "off")
         assert app.api.settings.web.get().config.https is False
-        assert app.api.settings.terminal.get().terminal_serve is False
+        assert app.api.settings.terminal.get().serve is False
 
     def test_the_terminal_serves_where_the_variable_says_so(self, app: App, monkeypatch) -> None:
         monkeypatch.setenv("OTAKU_TERMINAL_SERVE", "on")
-        assert app.api.settings.terminal.get().terminal_serve is True
+        assert app.api.settings.terminal.get().serve is True
 
     def test_the_variables_password_signs_in_and_stays_out_of_the_file(
         self, app: App, monkeypatch
@@ -230,7 +271,7 @@ class TestVariables:
         relaunched = launch(app.paths.root, app.server)
         web = relaunched.api.settings.web.get().config
         assert (web.port, web.https) == (9600, False)
-        assert relaunched.api.settings.terminal.get().terminal_serve is False
+        assert relaunched.api.settings.terminal.get().serve is False
         notices = " ".join(relaunched.api.app.get().launch_facts.notices)
         for name in ("OTAKU_WEB_PORT", "OTAKU_WEB_HTTPS", "OTAKU_TERMINAL_SERVE"):
             assert name in notices, name

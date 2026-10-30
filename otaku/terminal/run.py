@@ -116,7 +116,7 @@ def _run(app: App, terminated: threading.Event) -> None:
     # it (`/set serve`), one that cannot be served said among them, the
     # setting standing.
     reports = list(launch_facts.notices)
-    if looks.terminal_serve and (failure := chat.serve()) is not None:
+    if looks.serve and (failure := chat.serve()) is not None:
         reports.append(failure)
     for report in reports:
         print(report)
@@ -200,7 +200,10 @@ def _run(app: App, terminated: threading.Event) -> None:
     while not chat.quit and not terminated.is_set():
         # The story as it stands: played on, or deleted, elsewhere since
         # this terminal last drew it — the page served beside it above all.
-        landing.catch_up(chat)
+        # What it printed ends as a submission's output does, the blank
+        # before the prompt after it.
+        if landing.catch_up(chat):
+            answers.top_row = chat.ledger.gap(deferred=answers.posed)
         # How full the next request is, read again before every prompt —
         # so after a turn, a story switch, an undo, a switched model —
         # and drawn on the status row's right until the next one.
@@ -434,35 +437,38 @@ def submit(chat: Chat, line: str) -> None:
     try:
         if dispatch(chat, line):
             return
-        # The terminal's own affordance, resolved on its side: an `@path`
-        # naming a picture leaves the line and rides the turn as bytes.
-        # Whether the model can see is the backend's to refuse.
-        line, files = pictures.extract_pictures(line)
-        to_drop = stream.question_to_drop(chat)
-        try:
-            # A first line makes the story it lands in, and one refused
-            # leaves none behind (`Chat.writing`).
-            with stream.waiting(), chat.writing() as story_id:
-                events = chat.api.stories.messages.create(
-                    story_id, line=line, files=files, expected_head=chat.head
-                )
-        except Refused as e:
-            # Checked before it plays: invalid syntax leaves the story
-            # untouched rather than half-playing a line nobody can read.
-            chat.ledger.invalidate()
-            chat.say(str(e))
-            return
-        # in story mode the question this line answers leaves the text
-        # before the stream takes the terminal
-        stream.drop_question(chat, to_drop)
-        while stream.show(chat, events):
-            # the take stopped for a fresh one is recorded as its stream
-            # closes, unseen here: the fresh one goes from the head as it stands
-            story_id = chat.ensure_story()
-            standing = chat.api.stories.get(story_id).head
-            with stream.waiting():
-                events = chat.api.stories.regens.create(story_id, expected_head=standing)
-        chat.mark_drawn()
+        # The row pinned from the line's sending: the prompt's toolbar went
+        # with it, and the stream's own pin comes only once the reply runs.
+        with chat.status_line.pinned():
+            # The terminal's own affordance, resolved on its side: an `@path`
+            # naming a picture leaves the line and rides the turn as bytes.
+            # Whether the model can see is the backend's to refuse.
+            line, files = pictures.extract_pictures(line)
+            to_drop = stream.question_to_drop(chat)
+            try:
+                # A first line makes the story it lands in, and one refused
+                # leaves none behind (`Chat.writing`).
+                with stream.waiting(), chat.writing() as story_id:
+                    events = chat.api.stories.messages.create(
+                        story_id, line=line, files=files, expected_head=chat.head
+                    )
+            except Refused as e:
+                # Checked before it plays: invalid syntax leaves the story
+                # untouched rather than half-playing a line nobody can read.
+                chat.ledger.invalidate()
+                chat.refuse(e)
+                return
+            # in story mode the question this line answers leaves the text
+            # before the stream takes the terminal
+            stream.drop_question(chat, to_drop)
+            while stream.show(chat, events):
+                # the take stopped for a fresh one is recorded as its stream
+                # closes, unseen here: the fresh one goes from the head as it stands
+                story_id = chat.ensure_story()
+                standing = chat.api.stories.get(story_id).head
+                with stream.waiting():
+                    events = chat.api.stories.regens.create(story_id, expected_head=standing)
+            chat.mark_drawn()
     except KeyboardInterrupt:
         raise  # ^C is the user speaking, not a crash — the loop handles it
     except Exception as e:

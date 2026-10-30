@@ -174,16 +174,26 @@ _CONFIG_MIGRATIONS: list[Migration] = [
         ),
         after="https",
     ),
-    # 0.9.0 — the chat learns to serve the web interface beside it, off
-    # until asked (`/set serve`).
+    # 0.9.0 — the chat learns to print a reply's thinking, and to serve
+    # the web interface beside it, both off until asked (`/set
+    # show_thinking`, `/set serve`).
     ensure_key(
-        "web",
-        "terminal_serve",
+        "terminal",
+        "show_thinking",
         row(
-            "terminal_serve = false",
+            "show_thinking = false",
+            "print the model's thinking as it streams (/set show_thinking)",
+        ),
+        after="dialogue_bold",
+    ),
+    ensure_key(
+        "terminal",
+        "serve",
+        row(
+            "serve = false",
             "the terminal UI also serves the web interface while it runs (/set serve)",
         ),
-        after="password",
+        after="show_thinking",
     ),
     # 0.9.0 — the update check, on until turned off.
     ensure_key(

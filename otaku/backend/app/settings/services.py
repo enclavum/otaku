@@ -77,7 +77,7 @@ def get_terminal_settings(app: App) -> TerminalSettings:
     terminal = app._config().terminal
     env_serve = os.environ.get(_TERMINAL_SERVE_VAR, "").strip().lower()
     if env_serve in ("on", "off"):
-        terminal = replace(terminal, terminal_serve=env_serve == "on")
+        terminal = replace(terminal, serve=env_serve == "on")
     return terminal
 
 
@@ -193,18 +193,39 @@ def set_context_limit(app: App, tokens: int) -> str:
     return f"Max context: {context_limit_text(tokens)}."
 
 
-def set_terminal_serve(app: App, on: bool) -> str:
-    """Whether the chat serves the web interface beside it — written into
-    config.toml's [web], surgically, the pre-edit file backed up; the
-    serving itself is the frontend's. Raises Unavailable where the file
-    could not be written: nothing changed."""
+def set_show_thinking(app: App, on: bool) -> str:
+    """Whether the chat prints a reply's thinking as it streams, or only
+    how long it took — written into config.toml's [terminal] as
+    `set_serve` writes. Raises Unavailable where the file could
+    not be written: nothing changed."""
     # fmt: off
-    if on != app._config().web_terminal_serve and not surgery.update_config(
+    if on != app._config().show_thinking and not surgery.update_config(
         app._paths.config_file,
         app._paths.config_backups_dir,
         [
-            surgery.set_key("web", "terminal_serve", row(
-                f"terminal_serve = {toml_scalar(on)}",
+            surgery.set_key("terminal", "show_thinking", row(
+                f"show_thinking = {toml_scalar(on)}",
+                "print the model's thinking as it streams (/set show_thinking)",
+            ))
+        ],
+    ):
+        raise Unavailable("Not saved — config.toml could not be written.")
+    # fmt: on
+    return f"Show thinking: {_word(on)}."
+
+
+def set_serve(app: App, on: bool) -> str:
+    """Whether the chat serves the web interface beside it — written into
+    config.toml's [terminal] as `serve`, surgically, the pre-edit file
+    backed up; the serving itself is the frontend's. Raises Unavailable
+    where the file could not be written: nothing changed."""
+    # fmt: off
+    if on != app._config().serve and not surgery.update_config(
+        app._paths.config_file,
+        app._paths.config_backups_dir,
+        [
+            surgery.set_key("terminal", "serve", row(
+                f"serve = {toml_scalar(on)}",
                 "the terminal UI also serves the web interface while it runs (/set serve)",
             ))
         ],

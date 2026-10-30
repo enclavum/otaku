@@ -65,11 +65,14 @@ _LABEL = " background task: "
 # the terminal makes links.
 _SERVING_DOT = "●"
 _SERVING_LABEL = "web server on ↗"
+# The width the mark stands in, blank where no page is served.
+_SERVING_WIDTH = len(f"{_SERVING_DOT} {_SERVING_LABEL}")
 # The width the context size stands in ("999% of 128K"), so what stands
 # left of it does not move as it changes.
 _FILL_WIDTH = 12
-# The style the prompt's toolbar draws its text in (`session._prompt_style`).
-_TOOLBAR = "class:bottom-toolbar.text"
+# A piece's paint where it is the link's end around the label: no width,
+# no paint, written as it is.
+_LINK = "link"
 
 # How long a note stands at least once shown: a call that ends at once —
 # a tool otaku runs in no time — still reads.
@@ -112,24 +115,14 @@ class StatusLine:
 
     def fragments(self) -> StyleAndTextTuples:
         """The row as the prompt's toolbar draws it, the terminal's width
-        as the pinned row measures it: the dot in the theme's error color,
-        the label a link — its ends taking no width, prompt_toolkit having
-        no links of its own. The toolbar's row is held for the whole
-        prompt, so drawing it never reflows the screen."""
+        as the pinned row measures it, the link's ends taking no width —
+        prompt_toolkit has no links of its own. The toolbar's row is held
+        for the whole prompt, so drawing it never reflows the screen."""
         line = self._line(shutil.get_terminal_size().columns, self._last_note())
-        marked = self._marked(line)
-        if not marked:
-            return [(_TOOLBAR, line)]
-        before, between, after, url = marked
-        opening, closing = link_ends(url)
+        paints = _paints()
         return [
-            (_TOOLBAR, before),
-            (f"{_TOOLBAR} fg:{theme().error.style}", _SERVING_DOT),
-            (_TOOLBAR, between),
-            ("[ZeroWidthEscape]", opening),
-            (_TOOLBAR, _SERVING_LABEL),
-            ("[ZeroWidthEscape]", closing),
-            (_TOOLBAR, after),
+            ("[ZeroWidthEscape]", text) if paint == _LINK else (paints[paint][0], text)
+            for paint, text in self._pieces(line)
         ]
 
     @contextlib.contextmanager
@@ -199,9 +192,9 @@ class StatusLine:
         atexit.unregister(self.close)
 
     def set_note(self, note: str) -> None:
-        """Say what the reply streaming is doing — a tool being called —
-        ahead of the worker's words, "" for nothing; repainted when it
-        changes. A note stands `_NOTE_SECONDS` at least: cleared sooner,
+        """Say what the reply streaming is doing — thinking, a tool being
+        called — in the right's first cell, "" for nothing; repainted when
+        it changes. A note stands `_NOTE_SECONDS` at least: cleared sooner,
         it goes when they are out, on a timer, the stream never held; a
         new note takes over at once, and the row's release clears it."""
         with self._lock:
@@ -240,14 +233,13 @@ class StatusLine:
                 _terminal().write(
                     f"{SAVE_CURSOR}{SCROLL_ABOVE.format(self._rows - 1)}{RESTORE_CURSOR}"
                 )
-            line = self._line(size.columns, self._note)
-            if marked := self._marked(line):
-                before, between, after, url = marked
-                opening, closing = link_ends(url)
-                dot = f"{theme().error.fg}{_SERVING_DOT}{RESET}{DIM}"
-                line = f"{before}{dot}{between}{opening}{_SERVING_LABEL}{closing}{after}"
+            paints = _paints()
+            line = "".join(
+                text if paint == _LINK else f"{RESET}{paints[paint][1]}{text}"
+                for paint, text in self._pieces(self._line(size.columns, ""))
+            )
             _terminal().write(
-                f"{SAVE_CURSOR}{GOTO_ROW.format(self._rows)}{ERASE_LINE}{DIM}{line}{RESET}{RESTORE_CURSOR}"
+                f"{SAVE_CURSOR}{GOTO_ROW.format(self._rows)}{ERASE_LINE}{line}{RESET}{RESTORE_CURSOR}"
             )
             _terminal().flush()
 
@@ -258,33 +250,38 @@ class StatusLine:
             self.refresh()
 
     def _line(self, width: int, note: str) -> str:
-        return _render(self._worker(), self._right_part(), width, note)
+        return _render(self._worker(), self._right_part(width), width, note)
 
-    def _right_part(self) -> str:
-        """The row's right: the page served, where it is, then how full the
-        next request is at a fixed width, the two set apart by a vertical
-        line in the middle of the gap — the whole a fixed width, so the
-        mark stands still as the size changes."""
-        fill = self._fill()
-        if not self._served_at():
-            return f"{fill:>{_FILL_WIDTH}}" if fill else ""
-        mark = f"{_SERVING_DOT} {_SERVING_LABEL}"
-        if not fill:
-            return f"{mark}{'':{_FILL_WIDTH + 3}}"
-        gap = max(2, _FILL_WIDTH + 2 - len(fill))
-        left = gap // 2
-        return f"{mark}{' ' * left}|{' ' * (gap - left)}{fill}"
+    def _right_part(self, width: int) -> str:
+        """The row's right, three cells set apart by vertical lines, both
+        always drawn: what the reply streaming is doing, cut first where
+        the row is short; the page served, where it is; how full the next
+        request is. The last two keep fixed widths, blank while there is
+        nothing to show, so the lines stand still."""
+        mark = f"{_SERVING_DOT} {_SERVING_LABEL}" if self._served_at() else ""
+        cells = f" | {mark:<{_SERVING_WIDTH}} | {self._fill():>{_FILL_WIDTH}}"
+        return truncate(self._note, max(0, width - 2 - len(cells))) + cells
 
-    def _marked(self, line: str) -> tuple[str, str, str, str] | None:
-        """The line split around the served mark — what stands before the
-        dot, between it and the label, and after the label — with the
-        label's link; None where the line shows no mark."""
+    def _pieces(self, line: str) -> list[tuple[str, str]]:
+        """The line cut into its pieces, each with its paint (`_paints`):
+        the text, and where the line shows the served mark, its dot and
+        the label between its link's ends — the one cut both places the
+        row is drawn paint from."""
         url = self._served_at()
         before, dot, rest = line.partition(_SERVING_DOT)
         between, label, after = rest.partition(_SERVING_LABEL)
         if not (url and dot and label):
-            return None
-        return before, between, after, url
+            return [("text", line)]
+        opening, closing = link_ends(url)
+        return [
+            ("text", before),
+            ("dot", _SERVING_DOT),
+            ("text", between),
+            (_LINK, opening),
+            ("text", _SERVING_LABEL),
+            (_LINK, closing),
+            ("text", after),
+        ]
 
     def _drop_note(self) -> None:
         """End the reply's note with its window, at once."""
@@ -329,6 +326,15 @@ def _render(status: str, aside: str = "", width: int = 0, note: str = "") -> str
     if len(left) > space - 2:
         left = truncate(left, max(0, space - 2))
     return left + " " * (space - len(left)) + aside
+
+
+def _paints() -> dict[str, tuple[str, str]]:
+    """Each paint of the row in both forms it is drawn in — prompt_toolkit's
+    style for the toolbar, the escape for the pinned row — side by side,
+    so the two cannot differ: the text dimmed, never a guessed grey
+    (`theme`), and the served dot in the theme's error color, undimmed."""
+    error = theme().error
+    return {"text": ("dim", DIM), "dot": (f"fg:{error.style}", error.fg)}
 
 
 def _terminal() -> TextIO:

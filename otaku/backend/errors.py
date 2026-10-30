@@ -49,7 +49,7 @@ class HeadMoved(Conflict):
     story again from there."""
 
     def __init__(self, head: int | None) -> None:
-        super().__init__("The story moved on since you last saw it — nothing was changed.")
+        super().__init__("The story was continued on another device — nothing was changed.")
         self.head = head
 
 

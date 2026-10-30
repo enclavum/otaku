@@ -504,20 +504,6 @@ class StorySettings:
         return frozenset(shown)
 
     @property
-    def folded_tools(self) -> frozenset[str]:
-        """The tools whose calls a frontend that can fold draws by their
-        label alone, the text its hover hint: the notes while theirs is on
-        with its display switch off. One that cannot fold leaves them out,
-        as it does every call not shown."""
-        folded: set[str] = set()
-        for setting in self:
-            tool = setting.tool
-            folds = tool is not None and tool.name == "note" and not setting.display_notes
-            if folds and setting.enabled:
-                folded.add("note")
-        return frozenset(folded)
-
-    @property
     def injections(self) -> tuple[Injection, ...]:
         """What the switched-on settings send, in the order above."""
         return tuple(

@@ -128,6 +128,7 @@ COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("/set parameter", "<name> <val>", "Set an inference parameter for the model", "settings", CommandType.OPERATION),
     CommandSpec("/set mode", "chat|story", "Read the story as a chat, or as one text", "settings", CommandType.OPERATION),
     CommandSpec("/set think", "<level>", "Set the thinking effort for the model, or a thinking budget in tokens where supported", "settings", CommandType.OPERATION),
+    CommandSpec("/set show_thinking", "on|off", "Print the model's thinking as it streams", "settings", CommandType.OPERATION),
     CommandSpec("/set verbose", "on|off", "Show the stats line after each reply", "settings", CommandType.OPERATION),
     CommandSpec("/set autocorrect", "on|off", "Settle a character name you type in /you and /me commands to the cast's own spelling", "settings", CommandType.OPERATION),
     CommandSpec("/set notification", "on|off", "Play a sound when a reply lands (the sound is configs/config.toml's notification_sound)", "settings", CommandType.OPERATION),

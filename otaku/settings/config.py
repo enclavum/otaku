@@ -33,9 +33,12 @@ class TerminalSettings:
     # the platform's own sound — so a caller that has no opinion about
     # sound (the theme's, every time) needs none.
     notification_sound: str = "default"
+    # Whether the chat prints a reply's thinking as it streams, or only
+    # how long it took (`/set show_thinking`).
+    show_thinking: bool = False
     # Whether the chat serves the web interface beside it, at `[web]`'s
-    # address — a key of `[web]` in the file, the terminal's to act on.
-    terminal_serve: bool = False
+    # address (`/set serve`).
+    serve: bool = False
 
 
 @dataclass(frozen=True)
@@ -77,12 +80,13 @@ class Config:
     theme: str = "auto"  # "auto" asks the terminal; else "light" or "dark"
     dialogue_color: str = "auto"
     dialogue_bold: bool = False
+    show_thinking: bool = False
+    serve: bool = False
     # [web]
     web_host: str = "localhost"
     web_port: int = 9600
     web_https: bool = False
     web_password: str = ""
-    web_terminal_serve: bool = False
     # [context]
     head_messages: int = 20
     min_tail_messages: int = 150
@@ -115,13 +119,14 @@ class Config:
             row(f"theme = {toml_scalar(self.theme)}", '"auto" asks the terminal and takes dark when it will not say; or "light"/"dark"'),
             row(f"dialogue_color = {toml_scalar(self.dialogue_color)}", 'spoken lines: "auto" fits the background; a color name ("cyan") or #rrggbb'),
             row(f"dialogue_bold = {toml_scalar(self.dialogue_bold)}", "also bold the spoken lines"),
+            row(f"show_thinking = {toml_scalar(self.show_thinking)}", "print the model's thinking as it streams (/set show_thinking)"),
+            row(f"serve = {toml_scalar(self.serve)}", "the terminal UI also serves the web interface while it runs (/set serve)"),
             "",
             "[web]",
             row(f"host = {toml_scalar(self.web_host)}", '"localhost": reachable from this machine only; "0.0.0.0": from the whole network — set https and a password first'),
             row(f"port = {self.web_port}", "the port `otaku serve` listens on"),
             row(f"https = {toml_scalar(self.web_https)}", "RECOMMENDED to turn on when the host is not local; the certificate lives in cert/: drop in your own, or one is generated"),
             row(f"password = {toml_scalar(self.web_password)}", "RECOMMENDED to set when the host is not local; typed in plain text, it is replaced by its hash at the next launch"),
-            row(f"terminal_serve = {toml_scalar(self.web_terminal_serve)}", "the terminal UI also serves the web interface while it runs (/set serve)"),
             "",
             "[context]",
             row(f"head_messages = {self.head_messages}", "opening messages kept verbatim in the prompt"),
@@ -175,7 +180,8 @@ class Config:
             dialogue_bold=self.dialogue_bold,
             show_banner=self.show_banner,
             notification_sound=self.notification_sound,
-            terminal_serve=self.web_terminal_serve,
+            show_thinking=self.show_thinking,
+            serve=self.serve,
         )
 
 
@@ -216,6 +222,8 @@ def load(path: Path) -> Config:
             notification_sound=str(settings.get("notification_sound", "default")),
             dialogue_color=str(terminal.get("dialogue_color", "auto")),
             dialogue_bold=bool(terminal.get("dialogue_bold", False)),
+            show_thinking=bool(terminal.get("show_thinking", False)),
+            serve=bool(terminal.get("serve", False)),
             web_host=str(web.get("host", "localhost")),
             # Clamped to the range a socket accepts, 0 excluded: a port
             # of 0 asks the OS to pick one, and `otaku serve` says where
@@ -225,7 +233,6 @@ def load(path: Path) -> Config:
             web_port=min(65535, max(1, _int(web, "port", 9600))),
             web_https=bool(web.get("https", False)),
             web_password=str(web.get("password", "")),
-            web_terminal_serve=bool(web.get("terminal_serve", False)),
             head_messages=max(0, _int(context, "head_messages", 20)),
             min_tail_messages=max(1, _int(context, "min_tail_messages", 150)),
             context_limit=max(0, _int(context, "max_context", 0)),

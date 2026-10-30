@@ -388,6 +388,7 @@ class TestThink:
 
     def test_thinking_streams_but_is_never_saved(self, app: App, capsys) -> None:
         app.play("/set think high")
+        app.play("/set show_thinking on")
         app.server.script = lambda body: ("Let me consider the hall.", "The door creaks open.")
         app.play("I enter the hall.")
         # Streamed as a dim block behind the bar, apart from the reply.
@@ -401,6 +402,15 @@ class TestThink:
         # ...so the next turn's context carries no thinking either.
         app.play("I look around.")
         assert "consider" not in str(app.server.requests[-1]["messages"])
+
+    def test_thinking_off_prints_none_of_its_text(self, app: App, capsys) -> None:
+        # off (the default), the terminal stands a label in for it
+        app.play("/set think high")
+        app.server.script = lambda body: ("Let me consider the hall.", "The door creaks open.")
+        app.play("I enter the hall.")
+        shown = capsys.readouterr().out
+        assert "consider" not in shown
+        assert "The door creaks open." in shown
 
     def test_llamacpp_gets_both_knobs_and_none_turns_the_flag_off(self, server, tmp_path) -> None:
         # llama.cpp's server reads no reasoning_effort of its own and hands

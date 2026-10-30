@@ -63,7 +63,7 @@ const unavailable = (detail) => new Refused(502, detail);
 // The sentences more than one operation refuses with (`backend.errors`).
 const NO_SUCH_STORY = "No such story.";
 const OFF_CHAIN = "That message is not on the story's current chain.";
-const HEAD_MOVED = "The story moved on since you last saw it — nothing was changed.";
+const HEAD_MOVED = "The story was continued on another device — nothing was changed.";
 const NOT_IN_DEMO = (what) => `${what} is not in the demo — ${INSTALL}.`;
 
 // ---------- the state ----------
@@ -208,7 +208,6 @@ function storyOf(story) {
     can_attach: MODEL_CAPABILITIES.vision,
     question: questionOf(story),
     shown_tools: shownTools(story),
-    folded_tools: foldedTools(story),
     // the demo keeps no discards: an undo here deletes, so nothing reverts
     can_revert: false,
   };
@@ -274,11 +273,6 @@ function shownTools(story) {
   const notes = settingOf(story, "allow_assistant_notes");
   if (notes?.enabled && notes.display_notes) shown.push("note");
   return shown;
-}
-
-function foldedTools(story) {
-  const notes = settingOf(story, "allow_assistant_notes");
-  return notes?.enabled && !notes.display_notes ? ["note"] : [];
 }
 
 /* The question the story stands on (`messages.posed_question`), copied:

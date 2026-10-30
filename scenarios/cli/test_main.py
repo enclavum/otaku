@@ -150,7 +150,7 @@ class TestServe:
         self, server: ModelServer, tmp_path: Path
     ) -> None:
         state = tmp_path / "state"
-        set_config(state, web_terminal_serve=True)
+        set_config(state, serve=True)
         port = _free_port()
         terminal = launch_remembered(server, state, env={"OTAKU_WEB_PORT": str(port)})
         _waited(terminal, lambda: _listening(port))

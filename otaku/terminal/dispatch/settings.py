@@ -47,7 +47,7 @@ def set_serve(chat: Chat, raw: str) -> None:
     chat.say(api_settings.set_serve(chat.api, raw))
     if not raw.strip():
         return
-    if chat.api.settings.terminal.get().terminal_serve:
+    if chat.api.settings.terminal.get().serve:
         failure = chat.serve()
         if failure is not None:
             chat.say(error_line(failure))

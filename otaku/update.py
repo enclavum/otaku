@@ -48,13 +48,11 @@ MANUAL_COMMANDS = (
 # this path, so the file keeps its place and its `__version__` line its
 # shape (`_VERSION_LINE`).
 _UPDATE_CHECK_TAG = "stable"
-_UPDATE_CHECK_URL = (
-    f"https://raw.githubusercontent.com/enclavum/otaku/{_UPDATE_CHECK_TAG}/otaku/__init__.py"
-)
+_UPDATE_CHECK_URL = f"https://github.com/enclavum/otaku/blob/{_UPDATE_CHECK_TAG}/otaku/__init__.py"
 # For otaku's own tests, which run the real binary — unadvertised.
 _UPDATE_CHECK_URL_VAR = "OTAKU_UPDATE_URL"
 _ASK_SECONDS = 5.0
-_VERSION_LINE = re.compile(r'^__version__\s*=\s*"(\d+\.\d+\.\d+)"', re.MULTILINE)
+_VERSION_LINE = re.compile(r'__version__\s*=\s*\\?"(\d+\.\d+\.\d+)\\?"')
 
 
 def fetch_latest_version() -> str | None:
@@ -68,7 +66,8 @@ def fetch_latest_version() -> str | None:
         return None
     if reply.status_code != 200:
         return None
-    found = _VERSION_LINE.search(reply.text)
+    text = re.sub(r"<[^>]*>", "", reply.text).replace("&quot;", '"')
+    found = _VERSION_LINE.search(text)
     return found.group(1) if found else None
 
 

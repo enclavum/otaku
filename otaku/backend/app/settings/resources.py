@@ -87,14 +87,21 @@ class TerminalSettingsResource(Resource):
         """Its looks, and whether it serves the web interface beside it."""
         return domain_settings.get_terminal_settings(self._app)
 
-    def update(self, *, terminal_serve: bool | Unchanged = UNCHANGED) -> Changed[TerminalSettings]:
-        """Whether the chat serves the web interface beside it, written to
-        config.toml; the serving itself is the terminal's. Raises
-        Unavailable where the file could not be written: nothing
-        changed."""
+    def update(
+        self,
+        *,
+        show_thinking: bool | Unchanged = UNCHANGED,
+        serve: bool | Unchanged = UNCHANGED,
+    ) -> Changed[TerminalSettings]:
+        """Whether the chat prints a reply's thinking, and whether it
+        serves the web interface beside it, written to config.toml; the
+        serving itself is the terminal's. Raises Unavailable where the
+        file could not be written: nothing changed."""
         said = []
-        if not isinstance(terminal_serve, Unchanged):
-            said.append(domain_settings.set_terminal_serve(self._app, terminal_serve))
+        if not isinstance(show_thinking, Unchanged):
+            said.append(domain_settings.set_show_thinking(self._app, show_thinking))
+        if not isinstance(serve, Unchanged):
+            said.append(domain_settings.set_serve(self._app, serve))
         return Changed(self.get(), " ".join(said))
 
 

@@ -182,8 +182,9 @@ of its files reads that file first:
   events, how each frontend draws a call; injections.
 - `language.md` — the story's language, what a played line reads as in
   both frontends, the terminal's commands, the `@` sigil.
-- `web.md` — the one thread, what the server and the page must agree on,
-  `api.yaml`, the demos.
+- `web.md` — the one thread, the transcript's text that stays keeping
+  its place (VERY IMPORTANT), what the server and the page must agree
+  on, `api.yaml`, the demos.
 - `integrations.md` — the integrations and the web search key, a
   server's locality, pictures on the wire.
 - `config.md` — the configuration files and how otaku writes them, the

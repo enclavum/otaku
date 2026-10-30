@@ -645,6 +645,9 @@ _ON_THE_PAGE = {
     "/set verbose": "screen:/set",
     "/set autocorrect": "screen:/set",
     "/set notification": "screen:/set",
+    # the terminal prints a reply's thinking or folds it to how long it
+    # took; the page draws every thinking as a block the reader opens
+    "/set show_thinking": "none:the page's thinking blocks open and close where they stand",
     "/set max_context": "screen:/set",
     # the layout switch in the contents rail writes the setting the
     # terminal's two modes store
@@ -773,8 +776,19 @@ _PAGE = {
     # drawn by none.
     "held": {"api"},
     # `browser` for the kit's editor: a stored turn is corrected where it
-    # is read, as the dossier corrects one.
-    "transcript": {"api", "browser", "dom", "held", "language", "pictures", "prose", "status"},
+    # is read, as the dossier corrects one; `format` for how long a reply's
+    # thinking took.
+    "transcript": {
+        "api",
+        "browser",
+        "dom",
+        "format",
+        "held",
+        "language",
+        "pictures",
+        "prose",
+        "status",
+    },
     # The frame around the transcript — the layout switch, the facts, the
     # watch — `format` for the runhead's story name, `browser` for `guard`.
     "shell": {"api", "browser", "dom", "format", "held", "status", "transcript"},

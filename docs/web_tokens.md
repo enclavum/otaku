@@ -227,7 +227,7 @@ so a list of mixed scripts does not ripple. Raise both together.
 
 | Token | Used by |
 |---|---|
-| `--otk-revert-hold` | how long Revert, beside Send, waits before it fades (10s) |
+| `--otk-revert-hold` | how long Revert, the first of the composer's verbs, waits before it fades (10s) |
 | `--otk-revert-fade` | how long it takes to fade (0.8s) |
 
 ## Scrollbars
@@ -278,6 +278,7 @@ in classes, so a stylesheet can name it the same way the scripts do.
 | `hidden` | any pane or menu | not mounted |
 | `hidden` | `.otk-revert` | Revert is not offered: shown after an Undo or a Regen while there is something to take back, never while a reply is arriving; once shown it waits `--otk-revert-hold`, fades over `--otk-revert-fade`, and the app sets `hidden` on `animationend` — hover or focus holds it |
 | `data-discarded="shown"` / `"hidden"` | `.otk-col--messages` | the list also shows the discarded turns — undone, or replaced by a regen — as `.otk-row--discarded` rows, faint and unnumbered, after the turn they leave from |
+| `data-open="true"` | `.otk-call` | the notes, a tool turn or a reply's thinking shows its text under its label; its toggle (`.otk-call__toggle`) reads "hide" and carries `aria-expanded="true"` |
 | `data-popup="/model"` | a `<dialog>` | which command opens it |
 | `data-theme="dark"` / `"light"` | `<html>` | the token set pinned; absent, the OS decides |
 | `data-booting` | `<html>` | the shell unseen until the page knows whether a sign-in comes first |

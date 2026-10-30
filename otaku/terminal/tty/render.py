@@ -107,6 +107,7 @@ class BlockStream:
     def close(self) -> str:
         written = self._place_word() + (_NORMAL if self._dim else "")
         self._out.write(written)
+        self._out.flush()
         return written
 
     def _take(self, ch: str) -> str:

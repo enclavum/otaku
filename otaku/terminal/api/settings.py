@@ -35,13 +35,19 @@ def set_notification(api: Api, raw: str) -> str:
     return _switch(raw, "notification", current, lambda on: api.settings.update(notification=on))
 
 
+def set_show_thinking(api: Api, raw: str) -> str:
+    """`/set show_thinking [on|off]`; bare reports where it stands."""
+    current = api.settings.terminal.get().show_thinking
+    return _switch(
+        raw, "show_thinking", current, lambda on: api.settings.terminal.update(show_thinking=on)
+    )
+
+
 def set_serve(api: Api, raw: str) -> str:
     """`/set serve [on|off]`, the setting alone — the serving is the
     chat's; bare reports where it stands."""
-    current = api.settings.terminal.get().terminal_serve
-    return _switch(
-        raw, "serve", current, lambda on: api.settings.terminal.update(terminal_serve=on)
-    )
+    current = api.settings.terminal.get().serve
+    return _switch(raw, "serve", current, lambda on: api.settings.terminal.update(serve=on))
 
 
 def set_max_context(api: Api, raw: str) -> str:
@@ -64,7 +70,7 @@ def _switch(raw: str, name: str, current: bool, write: Callable[[bool], Changed[
     where it stands, anything else the usage line."""
     value = raw.strip().lower()
     if not value:
-        return f"{name.capitalize()}: {'on' if current else 'off'}."
+        return f"{name.replace('_', ' ').capitalize()}: {'on' if current else 'off'}."
     if value in _ON:
         return write(True).notice
     if value in _OFF:

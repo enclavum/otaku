@@ -65,7 +65,6 @@ class Story(Schema):
     can_attach: bool
     question: Question | None
     shown_tools: frozenset[str]
-    folded_tools: frozenset[str]
     can_revert: bool
 
     def landed_line(self, verb: str = "Resumed") -> str:

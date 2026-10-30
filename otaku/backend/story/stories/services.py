@@ -53,16 +53,15 @@ class StoryRecord:
     """One story as the store holds it: its row, its listing (the label a
     reader finds it by, the turns its chain holds, when it was last
     written), the layout it is read in, its newest row (None while
-    nothing is played), the tools whose calls a reader is shown and those
-    drawn folded, the question the story stands on (None for none), and
-    whether a revert would put something back now."""
+    nothing is played), the tools whose calls a reader is shown, the
+    question the story stands on (None for none), and whether a revert
+    would put something back now."""
 
     story: Story
     listing: StoryListing
     layout: Layout
     newest: Message | None
     shown_tools: frozenset[str]
-    folded_tools: frozenset[str]
     question: ToolQuestion | None
     can_revert: bool
 
@@ -131,7 +130,6 @@ def get_story(app: App, story_id: int) -> StoryRecord:
         held.layout,
         newest,
         shown,
-        held.folded_tools,
         posed_question(newest, shown),
         _newest_discard(app, story_id, story.head_id) is not None,
     )

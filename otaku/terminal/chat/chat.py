@@ -19,13 +19,16 @@ from otaku.terminal.api import (
     Api,
     App,
     Conflict,
+    HeadMoved,
     Layout,
     Message,
     NotFound,
+    Refused,
     StoryMode,
 )
 from otaku.terminal.api.stories import Story
 from otaku.terminal.chat.ledger import ScreenLedger
+from otaku.terminal.tty import error_line
 from otaku.terminal.tty.render import flow_offsets, reply_start_index, turn
 from otaku.terminal.tty.statusline import StatusLine
 
@@ -273,14 +276,28 @@ class Chat:
 
     # ---------- what it prints ----------
 
-    def say(self, text: str) -> None:
+    def say(self, text: str, *, spaced: bool = False) -> None:
         """Print command output below the typed line: the lead blank on
         the first write, ledger invalidation where due — every handler
         answers through here (or through the ledger's own channels).
-        Multi-line text is one answer: the bookkeeping runs once."""
-        sys.stdout.write(self.ledger.said() + text + "\n")
+        Multi-line text is one answer: the bookkeeping runs once.
+        `spaced`: a blank line above it, the lead blank or one of its own."""
+        lead = self.ledger.said()
+        if spaced and not lead:
+            text = "\n" + text
+        sys.stdout.write(lead + text + "\n")
         sys.stdout.flush()
         self.ledger.note_printed(text + "\n")
+
+    def refuse(self, refused: Refused) -> None:
+        """Say a refusal. A story moved on elsewhere (`HeadMoved`) is no
+        slip of the reader's but a write lost: in the error color, a blank
+        line above it. Any other is the app answering, said plainly
+        (`error_line`)."""
+        if isinstance(refused, HeadMoved):
+            self.say(error_line(str(refused)), spaced=True)
+        else:
+            self.say(str(refused))
 
     def restore_tail(self, count: int, above: str = "") -> None:
         """Hand the just-echoed tail (`render.last_turns(…, count)`) to

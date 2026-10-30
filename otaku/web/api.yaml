@@ -2998,10 +2998,6 @@ components:
           type: array
           items: { type: string }
           description: The tools whose calls a reader is shown — question while its tool is on, note while the notes are on and displayed.
-        folded_tools:
-          type: array
-          items: { type: string }
-          description: The tools whose calls a frontend that can fold draws by their label alone, the text its hover hint — note while the notes are on and not displayed.
         can_revert: { type: boolean, description: "Whether a revert would put something back now: an undo or a regenerate since anything else moved the story's head, held while otaku runs." }
 
     StoryCardCheck:

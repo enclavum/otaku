@@ -543,9 +543,16 @@ class ModelServer:
                         self._event({"error": {"message": outer.decline}})
                         self.wfile.write(b"data: [DONE]\n\n")
                         return
+                    # A few chunks, so the streaming path is exercised for real:
+                    # the thinking first — paced as the text is where a chunk
+                    # size is set (the test model's), whole otherwise.
                     if thinking and not as_text:
-                        self._event({"choices": [{"delta": {"reasoning_content": thinking}}]})
-                    # A few chunks, so the streaming path is exercised for real.
+                        step = outer.chunk_size or len(thinking)
+                        for i in range(0, len(thinking), step):
+                            if outer.chunk_delay:
+                                time.sleep(outer.chunk_delay)
+                            piece = thinking[i : i + step]
+                            self._event({"choices": [{"delta": {"reasoning_content": piece}}]})
                     third = outer.chunk_size or max(1, len(text) // 3)
                     for sent, i in enumerate(range(0, len(text), third)):
                         if outer.fail_after is not None and sent >= outer.fail_after:

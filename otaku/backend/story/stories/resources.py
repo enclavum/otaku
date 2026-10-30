@@ -257,6 +257,5 @@ def _story(app: App, record: StoryRecord) -> Story:
         can_attach=facts.can_attach(layout),
         question=Question(asked.text, asked.question, asked.options) if asked else None,
         shown_tools=record.shown_tools,
-        folded_tools=record.folded_tools,
         can_revert=record.can_revert,
     )

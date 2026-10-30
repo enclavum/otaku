@@ -10,6 +10,7 @@ close handling; Ctrl+R closes it and reports `regen` so the caller runs
 """
 
 import contextlib
+import io
 import os
 import select
 import signal
@@ -20,6 +21,7 @@ from collections.abc import Iterator
 from typing import Any, Self, TextIO
 
 from otaku.console.sound import ring
+from otaku.formatting import format_duration
 from otaku.terminal.api import (
     Actor,
     AssistantMessage,
@@ -37,7 +39,7 @@ from otaku.terminal.api import (
     UserMessage,
 )
 from otaku.terminal.chat.chat import Chat
-from otaku.terminal.tty import DIM, RESET, error_line
+from otaku.terminal.tty import DIM, ERASE_TO_END, RESET, error_line
 from otaku.terminal.tty.cursor import terminal_width
 from otaku.terminal.tty.render import (
     BlockStream,
@@ -63,6 +65,11 @@ except ImportError:
     tty = None  # type: ignore[assignment]
 
 _CTRL_R = b"\x12"
+# A folded thinking's label (`/set show_thinking off`) while it goes on,
+# and once it ended, with how long it took. The page's twin:
+# play/transcript.js.
+_THINKING = "Thinking…"
+_THOUGHT = "Thought for {}"
 
 
 @contextlib.contextmanager
@@ -109,6 +116,9 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
     block: BlockStream | None = None
     block_name = ""
     shown = chat.shown_tools  # a story's switches, read once: they cannot move mid-stream
+    show_thinking = chat.api.settings.terminal.get().show_thinking  # likewise
+    thought_at: float | None = None  # when a folded thinking's label went up, until settled
+    call_label = ""  # the label of a call otaku runs, standing until its turn lands
     start = time.monotonic()
 
     def close_block() -> None:
@@ -124,6 +134,46 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
         streamed = streamed or bool(written)
         block, block_name = None, ""
         after_call = True
+
+    def put_label(text: str) -> None:
+        """A block of a label alone — a folded thinking's, a call otaku
+        runs — dim behind the bar, a space after it so the cursor does not
+        touch it: the last thing drawn until `relabel` rewrites it."""
+        nonlocal fed, block, in_text, streamed
+        spinner.stop()
+        close_block()
+        block = BlockStream(out, terminal_width(), dim=True)
+        fed += block.open(streamer, fed)
+        in_text = False
+        written = block.feed(text)
+        fed += written
+        streamed = streamed or bool(written)
+        close_block()
+        out.write(" ")
+        out.flush()
+
+    def relabel(text: str) -> None:
+        """The label `put_label` drew, rewritten in place once what it
+        stands for is over — still the last thing drawn, the cursor on its
+        row — in one write, over the old one, so the row never stands
+        blank, and a space after it as `put_label` leaves. Off a terminal
+        it stays as drawn."""
+        if not sys.stdout.isatty():
+            return
+        drawn = io.StringIO()
+        label = BlockStream(drawn, terminal_width(), dim=True)
+        label.begin()
+        label.feed(text)
+        label.close()
+        out.write(f"\r{drawn.getvalue()} {ERASE_TO_END}")
+        out.flush()
+
+    def settle() -> None:
+        """A folded thinking's label, its thinking over: how long it took."""
+        nonlocal thought_at
+        if thought_at is not None:
+            relabel(_THOUGHT.format(format_duration(max(1.0, time.monotonic() - thought_at))))
+            thought_at = None
 
     # A continue: no line of the reader's to echo, so the reply goes on
     # where the text ended — placed NOW, before the wait, so the spinner
@@ -176,18 +226,44 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
         try:
             for event in events:
                 chat.status_line.paint_held()  # the last event drawn may have moved off the edge
+                # The status row says what the reply is doing while its
+                # pieces stream — thinking, a call of any tool, by its name —
+                # where the transcript draws nothing for it: story mode's one
+                # text, a call whose block is hidden. A call otaku runs keeps
+                # it while the tool works, after the reply holding the call
+                # landed; gone with whatever comes next.
+                if isinstance(event, AssistantReasoning):
+                    chat.status_line.set_note("thinking" if is_story_mode else "")
+                elif isinstance(event, AssistantToolCall):
+                    is_drawn = (
+                        event.name in shown and (event.name == "question" or not is_story_mode)
+                        if event.name in ("question", "note")
+                        else not is_story_mode
+                    )
+                    chat.status_line.set_note(
+                        "" if is_drawn else (event.label or event.name).lower()
+                    )
+                elif not isinstance(event, AssistantMessage):
+                    chat.status_line.set_note("")
                 # No thinking in the canvas: the one text has no place for
                 # it, and it is never stored — the spinner turns on through it.
                 if is_story_mode and isinstance(event, AssistantReasoning):
                     continue
+                if isinstance(event, AssistantReasoning) and not show_thinking:
+                    # Folded: drawn as a tool turn is, the label alone, once
+                    # a run, a space after it so the cursor does not touch
+                    # it; the status row says the thinking goes on.
+                    if thought_at is None:
+                        put_label(_THINKING)
+                        thought_at = time.monotonic()
+                    continue
                 spinner.stop()  # idempotent — the first real signal clears it
-                # The status row names a call while its pieces stream, any
-                # tool's, and while a tool otaku runs works after the reply
-                # holding the call landed — gone with whatever comes next.
-                if isinstance(event, AssistantToolCall):
-                    chat.status_line.set_note(event.status)
-                elif not isinstance(event, AssistantMessage):
-                    chat.status_line.set_note("")
+                settle()
+                if call_label and not isinstance(
+                    event, (AssistantToolCall, AssistantMessage, ToolMessage)
+                ):
+                    relabel(call_label)  # cut before its tool ran: the label as it is
+                    call_label = ""
                 if isinstance(event, UserMessage):
                     if is_story_mode:
                         # The canvas: the played line is prose in the one
@@ -277,9 +353,13 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                         continue
                     if event.actor is Actor.SYSTEM:
                         # A call otaku runs — the search's query — is the
-                        # model's, not the story's: nothing drawn, as
-                        # `render.message` draws nothing for it; the result
-                        # follows as a block of its own (`ToolMessage`).
+                        # model's, not the story's: the backend's sentence for
+                        # it while it runs, the line's first word capitalized,
+                        # rewritten to its turn's label as that lands
+                        # (`ToolMessage`).
+                        if not call_label:
+                            call_label = event.label
+                            put_label(f"{event.status[:1].upper()}{event.status[1:]}…")
                         after_call = True
                         continue
                     if event.name in ("question", "note"):
@@ -329,26 +409,22 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                     # drawn as it streamed: nothing to draw.
                     continue
                 elif isinstance(event, ToolMessage):
-                    # The reply holding the call ended at it; the tool turn
-                    # is drawn as its own dim block behind the bar, the label
-                    # alone — the result is the model's to read, not the
-                    # story's — as `render.message` draws it again on a
-                    # resume; the reply that continues streams under it, set
-                    # apart as after any block. Story mode's text draws none:
-                    # the reply that continues goes on as its join says, in
-                    # the paragraph the call interrupted (`render.flow`).
+                    # The reply holding the call ended at it; the call's label
+                    # becomes the tool turn's, a dim block of the label alone
+                    # — the result is the model's to read, not the story's —
+                    # as `render.message` draws it again on a resume; the
+                    # reply that continues streams under it, set apart as
+                    # after any block. Story mode's text draws none: the
+                    # reply that continues goes on as its join says, in the
+                    # paragraph the call interrupted (`render.flow`).
                     if is_story_mode:
                         continue
-                    close_block()
                     call_open = False
-                    block = BlockStream(out, terminal_width(), dim=True)
-                    block_name = "tool"
-                    fed += block.open(streamer, fed)
-                    in_text = False
-                    written = block.feed(event.message.tool_label or "")
-                    fed += written
-                    streamed = streamed or bool(written)
-                    close_block()
+                    if call_label:
+                        relabel(event.message.tool_label or "")
+                        call_label = ""
+                    else:
+                        put_label(event.message.tool_label or "")
                 elif isinstance(event, Declined):
                     if is_story_mode:
                         # on the status row, as a failure is: the text whole
@@ -392,6 +468,9 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                 signal.signal(signal.SIGINT, previous_handler)
             spinner.stop()
             close_block()  # a ^C inside a block: its end drawn before the prompt
+            settle()  # a stream ended inside the thinking
+            if call_label:
+                relabel(call_label)  # or inside a call, its tool never run
             streamer.flush()
             # Cancel-and-keep: closing the generator makes the backend
             # record the partial; a plain iterator has nothing to close.

@@ -57,15 +57,17 @@ reply cut at the length limit keeps its call open.
 ## How the frontends draw a call
 
 Both frontends draw a tool message as its `tool_label` alone — the result
-is the model's to read, not the story's: the page's hover hint, nowhere
-in the terminal — and nothing for a call otaku runs, the status row
-saying it is being called.
+is the model's to read, not the story's: the page's hover hint and the
+same text under the label when the reader opens the block, nowhere in
+the terminal. A call otaku runs is the call's `status` while it runs —
+the terminal's line, rewritten to the turn's label as that lands; the
+page's status row, the page drawing the call itself as nothing.
 
 Both frontends draw what the `Story` says: the question it stands on
-(`Story.question`) and the tools whose calls are shown (`shown_tools`);
-the page also draws those it folds (`folded_tools`) by their label, which
-the terminal, with no hover, leaves out. `ToolQuestion._OPTION`'s rule is
-copied in the page as `readAsk`, for a question still streaming.
+(`Story.question`) and the tools whose calls are shown (`shown_tools`),
+and nothing for any other — the notes with their display switch off
+included. `ToolQuestion._OPTION`'s rule is copied in the page as
+`readAsk`, for a question still streaming.
 
 ## Injections
 

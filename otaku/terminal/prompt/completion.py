@@ -352,7 +352,7 @@ def _subcommand_leaf(name: str) -> "CompletionTree | str | None":
         return THINK_LEAF
     if name == "parameter":
         return PARAMETER_LEAF
-    if name in ("verbose", "autocorrect", "notification", "serve"):
+    if name in ("verbose", "autocorrect", "notification", "show_thinking", "serve"):
         return {"on": None, "off": None}
     if name == "mode":
         return {"chat": None, "story": None}

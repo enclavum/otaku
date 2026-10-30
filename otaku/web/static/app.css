@@ -835,8 +835,8 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 .otk-transcript[data-transcript="canvas"] [data-join="inline"] .otk-typeset > .otk-ask--first { margin-top: var(--otk-block-gap); }
 /* No thinking in the one text: it would split the line the reply goes on
    from, and leave a hole when a redraw takes it away (it is never stored).
-   The status row says the model is reasoning. */
-.otk-transcript[data-transcript="canvas"] .otk-reasoning { display: none; }
+   The status row says the model is thinking. */
+.otk-transcript[data-transcript="canvas"] .otk-ask--thinking { display: none; }
 /* nor a stats line a reply landed with in another layout: the canvas keeps
    the stats as the reply's hover hint (`transcript.done`) */
 .otk-transcript[data-transcript="canvas"] .otk-verbose { display: none; }
@@ -892,6 +892,11 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
    is the text's from text, the transcript's one prose line. */
 .otk-transcript[data-transcript="chat"] .otk-reply,
 .otk-transcript[data-transcript="chat"] .otk-tool { max-width: 75%; margin-right: auto; padding-left: 22px; }
+/* A box sized to its text would stand an openable block's toggle right after
+   its label: one holding such a block takes the side's whole width instead,
+   the toggle at its right edge, where a long reply's lines end. */
+.otk-transcript[data-transcript="chat"] .otk-tool,
+.otk-transcript[data-transcript="chat"] .otk-reply:has(> .otk-call) { width: 100%; }
 .otk-transcript[data-transcript="chat"] .otk-turn {
   width: fit-content; max-width: 75%; margin-left: auto; align-items: stretch; gap: 7px;
   padding-right: 22px;
@@ -941,8 +946,17 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
    the one mark on the story's side. They keep a small inset, so they still
    read as set apart from the prose. */
 .otk-transcript[data-transcript="chat"] .otk-error,
-.otk-transcript[data-transcript="chat"] .otk-ask,
-.otk-transcript[data-transcript="chat"] .otk-reasoning { border-left: 0; padding-left: 3px; }
+.otk-transcript[data-transcript="chat"] .otk-ask { border-left: 0; padding-left: 3px; }
+/* the thinking keeps no inset: dimmed, it is set apart already, and stands
+   on the text's own edge */
+.otk-transcript[data-transcript="chat"] .otk-ask--thinking { padding-left: 0; }
+/* and 17px off the rubric above it: 10px over the 7px the rubric keeps from
+   its first block, which reads as the 12px below once the line boxes' own
+   room is counted */
+.otk-transcript[data-transcript="chat"] .otk-reply > .otk-ask--thinking { margin-top: 10px; }
+/* the thinking stands 12px off what follows it, pulled up against the
+   reply's gap as the rubric is */
+.otk-transcript[data-transcript="chat"] .otk-reply > .otk-ask--thinking:not(:last-child) { margin-bottom: calc(12px - var(--otk-block-gap)); }
 /* A landed reply keeps its status row's slot so nothing moves (below); here
    the slot would show as the rule running on under the text. So the row goes
    and the article keeps the same room as a margin, outside the rule, for as
@@ -966,6 +980,10 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
   background: var(--otk-accent); vertical-align: text-bottom;
   animation: otk-blink 1.1s steps(1, end) infinite;
 }
+/* waiting for the reply's first text, it stands where that text will start:
+   no gap, with nothing before it — but in the one text, where it goes on
+   after the text above */
+.otk-transcript:not([data-transcript="canvas"]) .otk-caret--waiting { margin-left: 0; }
 
 /* The reply as it arrives: its paragraphs, and the status beneath them. The
    block IS the reply (the article carries `.otk-reply` too), so it sets no gap
@@ -997,18 +1015,6 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 .otk-generating--idle .otk-generating__status { visibility: hidden; }
 .otk-generating--idle .otk-caret { display: none; }
 .otk-generating__elapsed { font-variant-numeric: tabular-nums; color: var(--otk-body); }
-
-/* the model's own reasoning, while it streams: not the story, dressed as the
-   notes block is (`.otk-ask--notes` and its body: the mark's width of border,
-   the same inset, prose at the note's size, the model's line breaks kept) —
-   the text dimmed, and the border in the rules' colour where a note's is the
-   faint text's */
-.otk-reasoning {
-  margin: 0; padding: 2px 0 2px 22px;
-  border-left: var(--otk-mark) solid var(--otk-line);
-  font-family: var(--otk-font-prose); font-size: 15px; line-height: var(--otk-leading-page);
-  color: var(--otk-faint); white-space: pre-wrap; text-wrap: pretty; overflow-wrap: anywhere;
-}
 
 /* Verbose: what the terminal prints after a reply. Machine, so mono — and
    ONE LINE always, ellipsised rather than wrapped, so a long stats line
@@ -1107,20 +1113,25 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
    ink — the two are one gesture — and the accent when pointed at. `hidden`
    — no vision — wins over it, so the rule is written for the shown state. It
    takes the row's height rather than one of its own: it comes and goes with
-   the mode, and the composer must not grow when it does. */
-.otk-attach-btn:not([hidden]) { flex: none; align-self: stretch; display: inline-flex; align-items: center; justify-content: center; width: 36px; padding: 0; color: var(--otk-ink); cursor: pointer; }
-.otk-attach-btn:hover, .otk-attach-btn:focus-visible { color: var(--otk-accent); }
+   the mode, and the composer must not grow when it does. Revert is the same
+   bare glyph, so the two read as one pair of tools. */
+.otk-attach-btn:not([hidden]),
+.otk-revert:not([hidden]) { flex: none; align-self: stretch; display: inline-flex; align-items: center; justify-content: center; width: 36px; padding: 0; color: var(--otk-ink); cursor: pointer; }
+.otk-attach-btn:hover, .otk-attach-btn:focus-visible,
+.otk-revert:hover, .otk-revert:focus-visible { color: var(--otk-accent); }
+/* the two glyphs sit unevenly in their boxes: nudged onto one line */
+.otk-attach-btn svg { transform: translateY(1px); }
 .otk-composer__verbs { flex: 0 1 auto; margin-left: auto; display: flex; align-items: center; gap: 7px; }
-/* Revert: a square glyph button just left of Send, shown after a Regen or an
-   Undo while there is something to take back. It waits, then fades, and the
-   app sets [hidden] on animationend; hovering or focusing it holds it, so a
-   slow reach still lands, and showing it again restarts the wait. */
-.otk-revert { width: 28px; height: 28px; padding: 0; justify-content: center; align-self: center; color: var(--otk-muted); border-color: var(--otk-line-soft); }
-.otk-revert:hover { color: var(--otk-ink); }
+/* Revert: the first of the verbs, shown after a Regen or an Undo while there
+   is something to take back. It waits, then fades, and the app sets [hidden]
+   on animationend; hovering or focusing it holds it, so a slow reach still
+   lands, and showing it again restarts the wait. Beside the clip it stands
+   tight against it, the two glyphs as close as the design sets them. */
+.otk-revert:has(+ .otk-attach-btn:not([hidden])) { margin-right: -13px; }
 @keyframes otk-revert-fade { to { opacity: 0; } }
 .otk-revert:not([hidden]) { animation: otk-revert-fade var(--otk-revert-fade) ease-in var(--otk-revert-hold) forwards; }
 .otk-revert:hover, .otk-revert:focus-visible { animation-play-state: paused; }
-.otk-revert__icon { display: block; transform: scaleX(-1); fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.otk-revert__icon { display: block; transform: translate(-1px, -1px) scaleX(-1); fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .otk-hints { margin: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 16px; font-family: var(--otk-font-mono); font-size: var(--otk-size-tag); letter-spacing: var(--otk-track-foot); text-transform: uppercase; color: var(--otk-faint); }
 .otk-hints > * { white-space: nowrap; }
 /* A touch screen has no keys to hint at, and on a phone the row costs lines
@@ -1416,8 +1427,8 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
 .otk-ask__foot { font-family: var(--otk-font-prose); font-size: var(--otk-size-note); font-style: italic; color: var(--otk-faint); }
 /* the live one sits under the reply's last line, inside its article */
 .otk-ask--live { margin-top: 0; }  /* a block of the reply's: its gap is the article's */
-/* the model's notes: the question's shape, its text a size down, and the
-   line breaks the notes' own */
+/* the model's notes, and the blocks drawn as they are — a tool turn, the
+   thinking: the question's shape, its border the faint text's */
 .otk-ask--notes { border-left-color: var(--otk-faint); }
 /* a block among the reply's text stands the one gap from whatever is on either
    side of it; one that opens or closes the reply (`replyNodes` marks which)
@@ -1425,10 +1436,28 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
 .otk-typeset > .otk-ask { margin: var(--otk-block-gap) 0; }
 .otk-typeset > .otk-ask--first { margin-top: 0; }
 .otk-typeset > .otk-ask--last { margin-bottom: 0; }
-.otk-ask--notes .otk-ask__body { font-size: 15px; white-space: pre-wrap; }
-/* a question already answered: the same shape, quieter, and no verbs */
-.otk-ask--past { border-left-color: var(--otk-line); }
-.otk-ask--past .otk-ask__label, .otk-ask--past .otk-ask__n { color: var(--otk-faint); }
+/* the model's own thinking, not the story: dimmed — the border in the rules'
+   colour, the label a tool turn's in the faint text's colour */
+.otk-ask--thinking { border-left-color: var(--otk-line); }
+.otk-ask--thinking .otk-ask__label { color: var(--otk-faint); }
+/* how long, in its own case: "4S" does not read as seconds */
+.otk-ask__time { text-transform: none; }
+/* a block whose text is the model's — the notes, a tool turn, the thinking
+   folded: its label with a toggle beside it, and opened, the text of its
+   hover hint under the label, the model's line breaks kept */
+.otk-call__head { display: flex; align-items: baseline; gap: 14px; }
+.otk-call__toggle { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; font-family: var(--otk-font-mono); font-size: var(--otk-size-label); letter-spacing: 0.06em; text-transform: uppercase; color: var(--otk-faint); white-space: nowrap; }
+.otk-call__toggle:hover { color: var(--otk-accent-ink); }
+.otk-call__chev { display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.otk-call[data-open="true"] .otk-call__chev { transform: rotate(180deg); }
+.otk-call__body { display: none; margin: 0; font-family: var(--otk-font-prose); font-size: var(--otk-size-read); line-height: 1.6; color: var(--otk-body); text-wrap: pretty; white-space: pre-wrap; overflow-wrap: anywhere; }
+.otk-call[data-open="true"] .otk-call__body { display: block; }
+/* the thinking opened: a tool turn's text, faint as the thinking is */
+.otk-ask--thinking .otk-call__body { color: var(--otk-faint); }
+/* a question already answered: the same shape, its border and label a tool
+   turn's (`.otk-ask--notes`), and no verbs */
+.otk-ask--past { border-left-color: var(--otk-faint); }
+.otk-ask--past .otk-ask__n { color: var(--otk-faint); }
 .otk-ask--past .otk-ask__pick { color: var(--otk-muted); cursor: default; }
 
 /* the Tools pane: one capped column that scrolls, like the premise */

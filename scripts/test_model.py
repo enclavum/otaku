@@ -84,9 +84,21 @@ CONTINUATIONS = (
 )
 THOUGHTS = (
     "The reader wants to go in. The door was left unlocked in the last scene, so it opens; "
-    "keep the ferryman out of sight for now and let the room speak first.",
+    "keep the ferryman out of sight for now and let the room speak first. What does the room "
+    "hold? The lamp, cold since the morning; the table with the map still spread on it; the "
+    "smell of tar and wet rope from the pier below. Nothing should move yet — the stillness is "
+    "the point, and it makes the reader listen. The ferryman is close, though: a chair pushed "
+    "back, a cup still warm. Give one of those, not both, so the reader has something to "
+    "wonder about. End on a sound from the river side, a step or a creak, and leave it "
+    "unexplained so the next line is theirs.",
     "Two things are pending: the map and the missing courier. Nudge toward the map — it is "
-    "on the table already — and leave the courier for the next beat.",
+    "on the table already — and leave the courier for the next beat. The map matters more "
+    "right now: the reader asked about the crossing twice, and the map is where the crossing "
+    "is drawn. Someone has marked it since they last saw it, a cross in charcoal by the weir. "
+    "That mark ties back to the courier without naming him, which keeps the thread alive "
+    "without spending it. Keep the description short — three details at most — and let the "
+    "reader decide whether to touch it. If they ask who made the mark, the ferryman can "
+    "answer later, and badly; he should not be the one to explain it.",
 )
 NOTES = (
     "Thread: the cross by the weir marks where the courier went into the water.",
@@ -126,6 +138,7 @@ def main() -> None:
     server.template_reads = set()
     server.chunk_size = 6
     server.chunk_delay = args.pace
+    server.headers_delay = 2.0  # the prefill: nothing until the first token
     server.script = reply
     server.refuse = refuse
     server.refusal = "the test model failed, as -1 asks"

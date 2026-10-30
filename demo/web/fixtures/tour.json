@@ -15,8 +15,7 @@
   "completion_type": "chat",
   "can_attach": false,
   "question": null,
-  "shown_tools": [],
-  "folded_tools": []
+  "shown_tools": []
  },
  "messages": [
   {

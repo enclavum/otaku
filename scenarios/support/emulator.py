@@ -185,9 +185,21 @@ def model_server() -> ModelServer:
     server.template_reads = set()
     server.chunk_size = 6
     server.chunk_delay = 0.01
-    server.script = TM.reply
+    server.script = _short_thinking
     server.refuse = _refuse
     return server
+
+
+def _short_thinking(body: dict[str, Any]) -> str | tuple[str, str]:
+    """The test model's reply, its thinking cut to its first sentence. A
+    folded thinking prints nothing while it lasts, and a check waits for
+    the screen's silence (`Emulated.quiet`): a thought of seconds would be
+    judged halfway."""
+    result = TM.reply(body)
+    if isinstance(result, tuple):
+        thought, text = result
+        return thought.split(". ")[0] + ".", text
+    return result
 
 
 def _refuse(body: dict[str, Any]) -> int | None:
@@ -295,8 +307,9 @@ def mismatch(live: Emulated, *, story_mode: bool, still: float = 1.5) -> list[st
 
 def _stored_rows(lines: list[str], cursor_row: int) -> tuple[list[str], int]:
     """`lines` without what the store never holds — the thinking's rows,
-    an error's line, the verbose stats line — and the blank a block of
-    them stood on; the cursor's row moved up with them."""
+    or its label where it is folded, an error's line, the verbose stats
+    line — and the blank a block of them stood on; the cursor's row moved
+    up with them."""
     kept: list[str] = []
     cut = 0
     dropping = False
@@ -305,7 +318,9 @@ def _stored_rows(lines: list[str], cursor_row: int) -> tuple[list[str], int]:
             kept.append(line)
             continue
         thinking = line.startswith("│") and (
-            dropping or (len(line) > 6 and any(line[2:32] in t for t in TM.THOUGHTS))
+            dropping
+            or line.startswith(("│ Thinking…", "│ Thought for "))
+            or (len(line) > 6 and any(line[2:32] in t for t in TM.THOUGHTS))
         )
         unstored = thinking or line.startswith(("[ error:", "[ total"))
         if unstored or (dropping and not line.strip()):

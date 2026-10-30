@@ -172,25 +172,22 @@ class TestSettingsOfTools:
 
 class TestShownTools:
     """Which tools' calls a reader is shown, as the story says it: the
-    notes open while their display switch is on, folded while it is off —
-    a frontend that can fold draws them by their label — and nowhere
-    while the tool is off."""
+    notes while their tool is on with its display switch, and nowhere
+    otherwise."""
 
-    def test_notes_are_shown_while_displayed_folded_while_not_and_gone_when_off(
-        self, app: App
-    ) -> None:
+    def test_notes_are_shown_while_displayed_and_gone_while_not_or_when_off(self, app: App) -> None:
         story = app.ensure_story()
         app.api.stories.settings.update(
             story, "allow_assistant_notes", enabled=True, display_notes=True
         )
         facts = app.api.stories.get(story)
-        assert ("note" in facts.shown_tools, "note" in facts.folded_tools) == (True, False)
+        assert "note" in facts.shown_tools
         app.api.stories.settings.update(story, "allow_assistant_notes", display_notes=False)
         facts = app.api.stories.get(story)
-        assert ("note" in facts.shown_tools, "note" in facts.folded_tools) == (False, True)
+        assert "note" not in facts.shown_tools
         app.api.stories.settings.update(story, "allow_assistant_notes", enabled=False)
         facts = app.api.stories.get(story)
-        assert "note" not in facts.shown_tools | facts.folded_tools
+        assert "note" not in facts.shown_tools
 
 
 class TestSettingsOfReminders:

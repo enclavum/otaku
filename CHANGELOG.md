@@ -19,6 +19,9 @@ Improvements:
   a button in the web interface or Ctrl+Y in the terminal.
 - See undone and regenerated messages in the messages list (`h` in the terminal, a switch in the web
   interface) and resume or fork from any of them.
+- Web interface: thinking blocks, notes and tool calls can be opened and closed; thinking starts
+  closed.
+- Terminal: `/set show_thinking on|off` turns printing the model's thinking as it streams on or off.
 
 Renames and replacements:
 

@@ -25,6 +25,22 @@ reply's frames and while the model is silent, and the page sends every
 read as a GET (`js/api/_http.js`) — a read filed as a POST would queue
 behind a reply and leave every screen dead while the model talks.
 
+## Text that stays keeps its place — VERY IMPORTANT
+
+**This rule is never broken, and every change to the page is checked
+against it.** Once the transcript's text is drawn, some of it may be
+cleared — an undo, a regenerate — but the text that stays keeps its
+position: it moves neither down nor up. It moves up only as the reader
+at the end is carried along by what is added below it (`follow`); the
+one exception is the reader opening a block (`openable`), which pushes
+what stands under it down. A change that shortens the flow — a caret
+taken off a row of its own, a block giving way to a shorter one, a turn
+taken off — holds the space it gave up (`transcript.holdSpace`) until
+what comes next grows into it. Every streamed event is drawn inside it
+(`draw`), and so are an undo (`takeBack`), a regenerate's start and a
+landing (`endTurn`); a new change to the flow outside those goes
+through it too.
+
 ## The HTTP conventions
 
 - **No request leans on another**: the server keeps nothing between
