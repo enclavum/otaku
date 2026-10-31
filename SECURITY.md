@@ -50,9 +50,13 @@ history. The log directory is yours to prune.
 
 ## What leaves the machine
 
-Your stories go to the model you point otaku at, and nowhere else. Beyond that, otaku contacts two
-services, and only when you ask it to:
+Your stories go to the model you point otaku at, and nowhere else. Beyond that, otaku contacts three
+services: one on its own, the other two only when you ask it to.
 
+- **The update check**: once a day, otaku asks GitHub which release is current, to name a newer
+  one at the next launch. The request carries nothing of yours beyond what any web request does
+  (your IP address), not even otaku's version. `check_updates = false` in `config.toml` turns it
+  off.
 - **Web search**, a tool a story switches on: the model's search queries — written from your
   story — go to Tavily or Exa, whichever your key belongs to.
 - **A support request** sends what you typed, the email address you give, and the otaku version to
@@ -60,13 +64,16 @@ services, and only when you ask it to:
 
 ## The web interface
 
-`otaku web` serves one open session to a browser. By default it listens on loopback, port 9600,
-over plain HTTP, and asks for no password: whoever can reach the port has the session — every
-story, the ability to play, and the provider fields. On loopback that means programs on this
-machine, and that is the design.
+`otaku serve`, or the terminal UI after `/set serve on`, serves one open session to a browser. By
+default it listens on loopback, port 9600, over plain HTTP, and asks for no password: whoever can
+reach the port has the session — every story, the ability to play, and the provider fields. On
+loopback that means programs on this machine, and that is the design.
 
 Reaching it from another machine is a decision made in `configs/config.toml`'s `[web]` section,
-and two settings beside `host` exist for it.
+and two settings beside `host` exist for it. The `OTAKU_WEB_HOST`, `OTAKU_WEB_HTTPS` and
+`OTAKU_WEB_PASSWORD` environment variables override those keys. Docker's `compose.yaml` uses them
+to listen on every interface, with no TLS and no password, and publishes the port to the network:
+set `OTAKU_WEB_PASSWORD` there before starting it anywhere others can reach.
 
 - **`https = true`** serves over TLS. otaku generates a self-signed certificate into the state
   dir's `cert/` on first use and never writes over it after, so a certificate of your own

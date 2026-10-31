@@ -15,7 +15,7 @@ Past releases:
 | 0.6 | vision and tool calls | 2026-09-26 |
 | 0.7 | text completion and story mode, a web search tool call | 2026-10-06 |
 | 0.8 | characters library, adding and removing characters outside stories, inviting characters into a story | 2026-10-17 |
-| 0.9 | chapters, pinned messages, structured context preview | ... |
+| 0.9 | chapters, pinned messages, structured context preview | 2026-10-31 |
 
 Planned releases:
 

@@ -46,6 +46,9 @@ Writing:
 - **automatic summaries**: as the number of messages grows, intermediate messages are split into
   scenes and are automatically summarized; when the story no longer fits the context, its middle
   is replaced by scene summaries;
+- **pinned messages**: a message you pin is always sent to the model as it is, even after its
+  scene is summarized;
+- **chapters**: split a story into chapters with the `/chapter` command;
 - **custom context size limit**: you can cap the context size yourself;
 - **transparent context**: you can see what will be sent to the model with the `/context` command;
 - **attaching pictures**: if the model supports vision, you can attach pictures to your messages;
@@ -145,6 +148,8 @@ In the terminal, type one of the two commands:
 - `otaku` — opens the terminal UI;
 - `otaku serve` — makes the web interface available at http://localhost:9600 (can be
   [configured](#web-interface-settings)).
+
+The terminal UI can also serve the web interface while it runs: type `/set serve on`.
 
 On first start, you choose a provider and a model. Otaku automatically detects local LLM
 backends, while for cloud providers (OpenRouter, NanoGPT) you have to enter their API keys.
@@ -258,8 +263,8 @@ You can use the `/context` command to see what exactly will be sent to the model
 
 Everything lives in the state dir, `~/.otaku` by default:
 
-- `configs/config.toml` — context shape, extraction thresholds, encryption, backups, and web
-  settings.
+- `configs/config.toml` — context shape, extraction thresholds, encryption, backups, and terminal
+  and web settings.
 - `configs/providers.toml` — one section per provider (URL, API key). The model picker edits it
   for you, and API keys are stored sealed.
 - `configs/integrations.toml` — the web search key, stored sealed; the Tools tab edits it for you.
