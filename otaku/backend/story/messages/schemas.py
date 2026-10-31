@@ -53,6 +53,8 @@ def as_events(found: Generator[domain_messages.Event, None, None]) -> Iterator[P
                     yield Declined(reason)
                 case domain_messages.Failed(reason=reason):
                     yield Failed(reason)
+                case domain_messages.EmptyReply(note=note):
+                    yield EmptyReply(note)
                 case domain_messages.Finished(
                     stats=stats, context_in_force=in_force, verbose=verbose
                 ):
@@ -210,6 +212,14 @@ class Failed(Schema):
     reason: str
 
 
+class EmptyReply(Schema):
+    """The reply brought no text — whitespace, or thinking alone: nothing
+    is recorded, and the stream ends here. `note` is the sentence to
+    show."""
+
+    note: str
+
+
 class Done(Schema):
     """The stream's end: what the reply came to (None when the stream
     said nothing of itself) and the verbose stats line — the report's
@@ -300,5 +310,6 @@ PlayEvent = (
     | ToolMessage
     | Declined
     | Failed
+    | EmptyReply
     | Done
 )

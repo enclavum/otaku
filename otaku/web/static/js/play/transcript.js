@@ -335,11 +335,14 @@ export function showTail() {
         event.preventDefault();
         return;
       }
-      // the turn's two verbs, as the composer answers them
-      const verb = { r: "regen", u: "undo" }[event.key];
+      // the turn's verbs, as the composer answers them: Revert by its
+      // button too, which says so when there is nothing to put back
+      const verb = { r: '[data-turn="regen"]', u: '[data-turn="undo"]', y: "[data-revert]" }[
+        event.key
+      ];
       if (verb && event.ctrlKey && !event.metaKey && !event.altKey) {
         event.preventDefault();
-        $(`[data-turn="${verb}"]`)?.click();
+        $(verb)?.click();
         return;
       }
       if ((event.key === "ArrowUp" || event.key === "ArrowDown") && !event.shiftKey && atEdge(event.key)) {
@@ -1647,6 +1650,12 @@ function beginTurn(regenerate, { continues = false } = {}) {
       seam?.remove();
     });
   }
+  // the refusals and failures standing in the transcript are past once a
+  // new attempt starts: their doors go, their rule quiets as an answered
+  // question's does, and the room the doors took is held
+  holdSpace(() => {
+    for (const box of $$(".otk-error", transcript)) box.classList.add("otk-error--past");
+  });
   arriving = new AbortController();
   let over;
   settled = new Promise((resolve) => (over = resolve));
@@ -1924,6 +1933,12 @@ const DRAW = {
   declined(turn, happened) {
     turn.article.insertBefore(
       failure("The model declined", happened.reason),
+      $(".otk-generating__status", turn.article),
+    );
+  },
+  empty_reply(turn, happened) {
+    turn.article.insertBefore(
+      failure("No reply", happened.note),
       $(".otk-generating__status", turn.article),
     );
   },

@@ -36,6 +36,7 @@ from otaku.backend.story.messages.schemas import (
     AssistantText,
     AssistantToolCall,
     Done,
+    EmptyReply,
     RawFile,
     ToolMessage,
     UserMessage,
@@ -258,6 +259,30 @@ class TestReplyReport:
         assert isinstance(done, Done)
         assert done.report is not None and not done.report.truncated
         assert done.report.notice == "" and done.stats == ""  # verbose is off
+
+
+class TestEmptyReply:
+    """A reply that brings no text — whitespace, or thinking alone —
+    records no row, and the stream ends saying so rather than as if the
+    model had answered."""
+
+    def test_whitespace_alone_records_nothing_and_ends_empty(self, app: App) -> None:
+        app.server.script = lambda body: "\n"
+        story = app.ensure_story()
+        events = list(
+            app.api.stories.messages.create(story, line="I wait.", expected_head=app.head())
+        )
+        assert isinstance(events[-1], EmptyReply)
+        assert [m.role for m in app.messages] == ["user"]
+
+    def test_thinking_alone_records_nothing_and_ends_empty(self, app: App) -> None:
+        app.server.script = lambda body: ("Perhaps I should say nothing.", "")
+        story = app.ensure_story()
+        events = list(
+            app.api.stories.messages.create(story, line="I wait.", expected_head=app.head())
+        )
+        assert isinstance(events[-1], EmptyReply)
+        assert [m.role for m in app.messages] == ["user"]
 
 
 class TestProviderFailures:

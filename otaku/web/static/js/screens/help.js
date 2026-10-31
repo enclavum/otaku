@@ -1,9 +1,10 @@
-/* The help docket: the language, the two keys that go with it, and what
+/* The help docket: the language, the keys that go with it, and what
    the transcript answers to — and the support docket its footer opens.
 
    What a reader needs written down is what they cannot see on the page:
-   the words a line may open or close with, the two verbs that have a
-   key, and the double click that opens a message — no button says so. Everything else IS on the page — a row in the contents, a
+   the words a line may open or close with, the verbs that have a key
+   (ctrl+y here alone, the hints under the box having no room for it),
+   and the double click that opens a message — no button says so. Everything else IS on the page — a row in the contents, a
    button on its panel, a hint under the box — which is what the footer
    says.
 
@@ -29,6 +30,7 @@ const _KEYS = {
   playing: [
     [["ctrl", "r"], "re-run the last prompt"],
     [["ctrl", "u"], "take back the last exchange"],
+    [["ctrl", "y"], "put back what the last undo or re-run took"],
   ],
 };
 

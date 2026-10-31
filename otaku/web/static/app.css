@@ -1041,6 +1041,10 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 }
 .otk-error__body { margin: 0; font-family: var(--otk-font-prose); font-size: var(--otk-size-read); line-height: 1.55; color: var(--otk-body); }
 .otk-error__actions { display: flex; gap: 8px; padding-top: 4px; }
+/* one the story has moved past: no doors out, its rule an answered
+   question's (`.otk-ask--past`) */
+.otk-error--past { border-left-color: var(--otk-faint); }
+.otk-error--past .otk-error__actions { display: none; }
 
 /* the space the flow holds open so the page does not move under the reader */
 .otk-gap { flex: none; width: 100%; }

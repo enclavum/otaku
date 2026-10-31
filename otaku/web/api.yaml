@@ -2821,6 +2821,11 @@ components:
             type: { const: failed }
             reason: { type: string }
         - type: object
+          description: The reply brought no text — whitespace, or thinking alone; nothing is recorded.
+          properties:
+            type: { const: empty_reply }
+            note: { type: string }
+        - type: object
           description: The stream's end. Every message landed before it.
           properties:
             type: { const: done }

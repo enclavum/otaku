@@ -18,6 +18,7 @@ from otaku.backend.story.messages.schemas import (
     AssistantToolCall,
     Declined,
     Done,
+    EmptyReply,
     Failed,
     PlayEvent,
     ReplyReport,
@@ -47,6 +48,7 @@ class TestEvent:
         assert event(ToolMessage(result))["type"] == "tool_message"
         assert event(Declined("no model"))["type"] == "declined"
         assert event(Failed("the provider hung up"))["type"] == "failed"
+        assert event(EmptyReply("sent nothing"))["type"] == "empty_reply"
         assert event(Done(report=None, stats="7 tok/s"))["type"] == "done"
 
     def test_the_union_is_covered(self) -> None:
@@ -61,6 +63,7 @@ class TestEvent:
             "ToolMessage",
             "Declined",
             "Failed",
+            "EmptyReply",
             "Done",
         }
 
@@ -148,9 +151,10 @@ class TestEvent:
         # a reply cut short says so
         assert done["notice"] == report.notice != ""
 
-    def test_declined_and_failed_carry_their_sentence(self) -> None:
+    def test_declined_failed_and_empty_carry_their_sentence(self) -> None:
         assert event(Declined("no model"))["reason"] == "no model"
         assert event(Failed("hung up"))["reason"] == "hung up"
+        assert event(EmptyReply("sent nothing"))["note"] == "sent nothing"
 
 
 def handed(*rows: Message) -> list[Handed]:

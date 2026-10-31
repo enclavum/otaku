@@ -10,7 +10,7 @@ row that landed is a `*Message` — `UserMessage`, `AssistantMessage`,
 `ToolMessage` — named by the row's role and carrying the row as a
 client draws it; a piece of the reply as it streams is `AssistantText`,
 `AssistantReasoning` or `AssistantToolCall`; and exactly one of
-`Declined`, `Failed` and `Done` ends the stream. The engine is the
+`Declined`, `Failed`, `EmptyReply` and `Done` ends the stream. The engine is the
 domain's (`story.messages.services`), with events of its own that this
 module tells in these (`as_events`). Closing mid-stream keeps and
 records what arrived — Ctrl+C and Ctrl+R are the frontend closing the
@@ -102,7 +102,8 @@ class MessagesResource(Resource):
         before anything is recorded. Then the line records and is told
         (UserMessage), and the reply streams as AssistantReasoning /
         AssistantText / AssistantToolCall pieces and lands as
-        AssistantMessage, Failed on a stream error, Done at the end. With
+        AssistantMessage, Failed on a stream error, EmptyReply where it
+        brought no text, Done at the end. With
         no model selected the line is still recorded — it is story — and
         Declined ends the stream after UserMessage. Closing the generator
         mid-stream records the partial reply and its usage."""

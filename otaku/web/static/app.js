@@ -173,7 +173,8 @@ function start() {
       // typed: the caret comes back to the box.
       refocus();
     }
-    // Revert, beside Send: what the last Undo or Regen took, put back.
+    // Revert, the first of the verbs: what the last Undo or Regen took, put
+    // back — pressed by ctrl+y on the canvas too, hidden or not.
     if (event.target.closest("[data-revert]")) {
       runCommand("/revert");
       refocus();

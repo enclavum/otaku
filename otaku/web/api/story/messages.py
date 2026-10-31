@@ -16,6 +16,7 @@ from otaku.backend.story.messages.schemas import (
     AssistantToolCall,
     Declined,
     Done,
+    EmptyReply,
     Failed,
     RawFile,
     ToolMessage,
@@ -104,6 +105,8 @@ def event(happened: PlayEvent) -> dict[str, Any]:
             return {"type": "declined", "reason": happened.reason}
         case Failed():
             return {"type": "failed", "reason": happened.reason}
+        case EmptyReply():
+            return {"type": "empty_reply", "note": happened.note}
         case Done():
             report = happened.report
             return {

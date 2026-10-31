@@ -305,12 +305,14 @@ function onKey(event) {
     at = null;
     return;
   }
-  /* The two verbs beside the box, on the keys the hints advertise —
+  /* The verbs of the last exchange, on the terminal's keys — ctrl+r and
+     ctrl+u as the hints advertise, ctrl+y named in the help window alone —
      answered only HERE, while the box has focus: anywhere else ctrl+r
      belongs to whatever owns it (and ⌘R stays the browser's reload). */
-  if (event.ctrlKey && !event.metaKey && (event.key === "r" || event.key === "u")) {
+  const verb = { r: "/regen", u: "/undo", y: "/revert" }[event.key];
+  if (verb && event.ctrlKey && !event.metaKey) {
     event.preventDefault();
-    run(event.key === "r" ? "/regen" : "/undo");
+    run(verb);
     return;
   }
   if ((event.key === "ArrowUp" || event.key === "ArrowDown") && _walkable()) {

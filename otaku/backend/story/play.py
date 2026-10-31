@@ -8,7 +8,7 @@ reply as it streams is `ProsePiece`, `ReasoningPiece` or `CallPiece` (a
 piece of a call, the tool's name and its inside, never a fence — the
 deltas are fed through a `ReplyParser`, so nothing above parses; the
 provider's own chunks never leave this module); and exactly one of
-`Declined`, `Failed` and `Finished` ends it. What is RECORDED is
+`Declined`, `Failed`, `EmptyReply` and `Finished` ends it. What is RECORDED is
 everything that arrived, fences included; a call of a tool the user
 answers or otaku runs ends the reply, and nothing past it is read.
 Closing mid-stream keeps and records what arrived. A new reply arms the
@@ -50,6 +50,9 @@ _TOO_MANY = f"At most {_MAX_PICTURES} pictures on one turn."
 # A picture is refused over the text wire though the model sees: the
 # request is one text, which has no room for one (`ModelFacts.can_attach`).
 NO_PICTURE_ON_TEXT = "The request is one text here: no picture can ride it."
+# A reply that brought no text — whitespace, or thinking alone: no row is
+# recorded, and the stream says so rather than end as if it had answered.
+_EMPTY_REPLY = "The model sent an empty reply."
 # An empty line outside the canvas, where an empty line is nothing.
 NOTHING_TO_SEND = "Nothing to send: type a line."
 # A regenerate with no reply to take again — no story at all included.
@@ -120,6 +123,15 @@ class Failed:
 
 
 @dataclass(frozen=True)
+class EmptyReply:
+    """The reply brought no text — whitespace, or thinking alone: nothing
+    is recorded, and the stream ends here. `note` is the sentence to
+    show."""
+
+    note: str
+
+
+@dataclass(frozen=True)
 class Finished:
     """The turn's end: the stream's own account of the reply (None when
     it said nothing of itself), the context the prompt was cut to — the
@@ -144,7 +156,7 @@ class _Attempt:
     error: str | None = None
 
 
-Event = Landed | ProsePiece | ReasoningPiece | CallPiece | Declined | Failed | Finished
+Event = Landed | ProsePiece | ReasoningPiece | CallPiece | Declined | Failed | EmptyReply | Finished
 
 # How many times one turn may call a tool otaku runs before the reply
 # stands as it is: a model that calls in a loop gets this many results
@@ -495,7 +507,10 @@ def _reply_events(
         if attempt.error is not None:
             yield Failed(attempt.error)
             return
-        if tool_call is None or tool_call.actor is not Actor.SYSTEM or reply is None:
+        if reply is None:
+            yield EmptyReply(_EMPTY_REPLY)
+            return
+        if tool_call is None or tool_call.actor is not Actor.SYSTEM:
             break
         _land_tool_message(app, story_id, chain, tool_call, mode)
         yield _landed(chain)

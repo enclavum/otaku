@@ -30,6 +30,7 @@ from otaku.terminal.api import (
     AssistantToolCall,
     Declined,
     Done,
+    EmptyReply,
     Failed,
     JoinType,
     Message,
@@ -433,6 +434,18 @@ def show(chat: Chat, events: Iterator[PlayEvent]) -> bool:
                     else:
                         lead = "\n" if placed and not streamed else ""
                         out.write(lead + event.reason + "\n")
+                elif isinstance(event, EmptyReply):
+                    # nothing to keep: the sentence set as the terminal's dim
+                    # report, lowercase in its brackets as the stats line is
+                    # — on the status row in story mode, as the stats are
+                    report = event.note.rstrip(".")
+                    report = report[:1].lower() + report[1:]
+                    if is_story_mode:
+                        chat.status_note = report
+                        end_row = streamed or placed
+                    else:
+                        lead = "\n" if placed and not streamed else ""
+                        out.write(f"{lead}{DIM}[ {report} ]{RESET}\n")
                 elif isinstance(event, Failed):
                     close_block()
                     streamer.flush()

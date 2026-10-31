@@ -15,6 +15,7 @@ from otaku.backend.errors import NO_SUCH_MESSAGE, NO_SUCH_STORY, Invalid, NotFou
 from otaku.backend.story.chain import reply_start_index
 from otaku.backend.story.play import CallPiece as CallPiece
 from otaku.backend.story.play import Declined as Declined
+from otaku.backend.story.play import EmptyReply as EmptyReply
 from otaku.backend.story.play import Event as Event
 from otaku.backend.story.play import Failed as Failed
 from otaku.backend.story.play import Finished as Finished
