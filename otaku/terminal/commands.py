@@ -7,7 +7,7 @@ reads the typed argument, makes the interface call and answers the
 sentence. INTERACTIVE is a sequence the terminal owns — a screen, an
 ask, paging — every state touch still an interface call. SYNTAX is the story's language, typed inside a played
 line and read by the backend at play: its tokens and argument shapes are
-the backend's (`backend.api.story.language`), its captions this table's.
+the backend's (`backend.story.language`), its captions this table's.
 
 Nothing here is shared: the page has no commands — a button calls an
 endpoint — and what both frontends say alike is the language's alone. A
@@ -20,7 +20,7 @@ import sys
 from dataclasses import dataclass
 from typing import NamedTuple
 
-from otaku.terminal.api.story import language as api_language
+from otaku.terminal.api import language as api_language
 
 # The row /help opens the playing group with — prose is the surface's
 # real first row. It is not a command and has no spec: what a help page
@@ -41,7 +41,6 @@ GROUP_LABELS: dict[str, str] = {
     "transfer": "Import/export",
     "settings": "Models and settings",
     "special": "Special",
-    "web": "Web UI",
     "meta": "Meta",
 }
 
@@ -97,6 +96,7 @@ COMMANDS: tuple[CommandSpec, ...] = (
     # The mid-stream take is the terminal's POSIX-only watcher — the
     # Windows consoles have no termios, so there the row must not say more.
     CommandSpec("/regen", "", "Re-run the last prompt" + ("" if sys.platform == "win32" else " (mid-stream: cancel + regen)"), "playing", CommandType.INTERACTIVE),
+    CommandSpec("/revert", "", "Revert the last /undo or /regen", "playing", CommandType.INTERACTIVE),
     CommandSpec("/last", "[N]", "Show the last N turns (default 5)", "playing", CommandType.INTERACTIVE),
     CommandSpec("/clear", "", "Clear the screen", "playing", CommandType.INTERACTIVE),
     # Inside a prompt
@@ -104,6 +104,7 @@ COMMANDS: tuple[CommandSpec, ...] = (
     _syntax("… /cue", "Steer just the next reply — not kept in context afterwards", "inline"),
     # Stories
     CommandSpec("/stories", "", "Browse stories, resume an old one", "stories", CommandType.INTERACTIVE),
+    _syntax("/chapter", "Start a new chapter at the end of the story", "stories"),
     CommandSpec("/fork", "[TITLE]", "Continue in a copy of this story; the original stays", "stories", CommandType.OPERATION),
     CommandSpec("/system", "<text | FILE>", "Set the system prompt for this story — from text or a file; - clears it", "stories", CommandType.INTERACTIVE),
     CommandSpec("/title", "NEW", "Set the story title", "stories", CommandType.OPERATION),
@@ -127,28 +128,35 @@ COMMANDS: tuple[CommandSpec, ...] = (
     CommandSpec("/set parameter", "<name> <val>", "Set an inference parameter for the model", "settings", CommandType.OPERATION),
     CommandSpec("/set mode", "chat|story", "Read the story as a chat, or as one text", "settings", CommandType.OPERATION),
     CommandSpec("/set think", "<level>", "Set the thinking effort for the model, or a thinking budget in tokens where supported", "settings", CommandType.OPERATION),
+    CommandSpec("/set show_thinking", "on|off", "Print the model's thinking as it streams", "settings", CommandType.OPERATION),
     CommandSpec("/set verbose", "on|off", "Show the stats line after each reply", "settings", CommandType.OPERATION),
     CommandSpec("/set autocorrect", "on|off", "Settle a character name you type in /you and /me commands to the cast's own spelling", "settings", CommandType.OPERATION),
     CommandSpec("/set notification", "on|off", "Play a sound when a reply lands (the sound is configs/config.toml's notification_sound)", "settings", CommandType.OPERATION),
     CommandSpec("/set max_context", "<tokens>", "Cap the prompt at this many tokens; 0 = the model's own max context", "settings", CommandType.OPERATION),
+    CommandSpec("/set serve", "on|off", "Serve the web interface while the terminal runs", "settings", CommandType.OPERATION),
     # Special
     _syntax("/roll", "Roll real dice (1d20+5, 3d6, 2d20kh1) — the model narrates exactly what fell", "special"),
     # Meta
-    CommandSpec("/web", "", "Open this session in a browser", "web", CommandType.INTERACTIVE),
     CommandSpec("/support", "TEXT", "Send feedback or a support request — leave your email to get an answer", "meta", CommandType.OPERATION),
     CommandSpec("/help", "", "Show this help", "meta", CommandType.INTERACTIVE),
-    CommandSpec("/bye", "", "Exit", "meta", CommandType.INTERACTIVE),
+    CommandSpec("/quit", "", "Exit", "meta", CommandType.INTERACTIVE),
 )
 # fmt: on
+
+# Other names a command answers to, hidden: typed, each runs its command,
+# but no menu and no /help offers it.
+ALIASES: dict[str, str] = {"/bye": "/quit", "/exit": "/quit"}
 
 # The terminal's shortcut keys, by the token they run.
 SHORTCUTS: dict[str, Shortcut] = {
     "/regen": Shortcut("c-r", "Ctrl+R"),
     "/undo": Shortcut("c-u", "Ctrl+U"),
+    "/revert": Shortcut("c-y", "Ctrl+Y"),  # takes prompt_toolkit's yank, as /undo took its Ctrl+U
     "/stories": Shortcut("c-t", "Ctrl+T"),
     "/lore": Shortcut("c-l", "Ctrl+L"),
     "/model": Shortcut("c-o", "Ctrl+O"),  # Ctrl+M is unusable — the terminal sends it as Enter
-    "/bye": Shortcut("c-d", "Ctrl+D"),
+    "/context": Shortcut("c-q", "Ctrl+Q"),
+    "/quit": Shortcut("c-d", "Ctrl+D"),
 }
 
 

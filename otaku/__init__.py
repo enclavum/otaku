@@ -6,4 +6,4 @@ frontends (terminal, web) reach the app through `backend.api` alone;
 idleness; `context` composes what the model sees.
 """
 
-__version__ = "0.8.0"
+__version__ = "0.9.0"

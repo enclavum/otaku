@@ -154,7 +154,7 @@ class TestRowShape:
         assert _shown("/model").startswith("/model [PROVIDER/MODEL]")
 
     def test_the_keys_share_one_column(self) -> None:
-        starts = {_shown(command).index("Ctrl+") for command in ("/undo", "/model", "/bye")}
+        starts = {_shown(command).index("Ctrl+") for command in ("/undo", "/model", "/quit")}
         assert len(starts) == 1
 
     def test_a_command_without_one_shows_none(self) -> None:
@@ -188,7 +188,7 @@ class TestTakesArgument:
             assert _takes(command) is True, command
 
     def test_a_command_that_takes_nothing_does_not(self) -> None:
-        for command in ("/undo", "/regen", "/clear", "/info", "/help", "/bye"):
+        for command in ("/undo", "/regen", "/clear", "/info", "/help", "/quit"):
             assert _takes(command) is False, command
 
     def test_a_subcommand_counts_as_a_follower(self) -> None:
@@ -244,6 +244,24 @@ class TestModeMenu:
 
     def test_nothing_follows_a_mode(self) -> None:
         assert _offered("/set mode story ") == []
+
+
+class TestHiddenAliases:
+    """An alias runs its command (`commands.ALIASES`), but no menu offers
+    it."""
+
+    def test_the_menu_offers_the_command_and_not_its_aliases(self) -> None:
+        offered = _offered("/")
+        assert "/quit" in offered
+        assert "/bye" not in offered and "/exit" not in offered
+
+
+class TestSwitchMenu:
+    """The /set switches offer the two words a switch takes."""
+
+    def test_every_switch_offers_on_and_off(self) -> None:
+        for switch in ("verbose", "autocorrect", "notification", "serve"):
+            assert _offered(f"/set {switch} ") == ["on", "off"], switch
 
 
 class TestCastSuggestions:
@@ -314,7 +332,7 @@ def _takes(command: str) -> bool:
 
 # The captions arrive as DATA (`chat.bindings.SHORTCUTS` in the app);
 # these rows test the column mechanism with the same shape injected.
-SHORTCUTS = {"/undo": "Ctrl+U", "/model": "Ctrl+O", "/bye": "Ctrl+D"}
+SHORTCUTS = {"/undo": "Ctrl+U", "/model": "Ctrl+O", "/quit": "Ctrl+D"}
 
 
 def _rows_for(text: str) -> list[Completion]:

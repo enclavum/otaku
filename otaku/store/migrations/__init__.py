@@ -1,7 +1,7 @@
 """Schema migrations: an old database brought to the current version.
 
 This module is the machinery — the ladder, the backup, the refusals; the
-steps live one module per version (`v2` … `v13`), each frozen WHOLE: a
+steps live one module per version (`v2` … `v14`), each frozen WHOLE: a
 step writes what its target version WAS, as literals kept beside it, and
 its helpers are its own, shared with no sibling — so no later change can
 silently rewrite what an old step writes and break every precondition
@@ -43,7 +43,7 @@ import sqlite3
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from otaku.store.migrations import v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13
+from otaku.store.migrations import v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13, v14
 from otaku.store.schema import SCHEMA_VERSION
 
 if TYPE_CHECKING:  # circular at runtime: database runs this ladder
@@ -64,6 +64,7 @@ _STEPS = {
     11: v11.to_11,
     12: v12.to_12,
     13: v13.to_13,
+    14: v14.to_14,
 }
 
 

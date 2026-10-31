@@ -388,7 +388,7 @@ export async function exportStory({ storyId = null } = {}) {
   // Any story exports from where it is read; without one, the open
   // story. With no story at all there is nothing to address, and no id
   // to ask with — so the sentence is COPIED from its home
-  // (`backend.domain.story.transfer.NOTHING_TO_EXPORT`), which says it
+  // (`backend.story.transfer.services.NOTHING_TO_EXPORT`), which says it
   // in every other case.
   const id = storyId ?? held.story();
   if (id === null) {

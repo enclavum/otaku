@@ -42,5 +42,7 @@ class, tests follow the story's logical order.
 
 The fast offline suite is `-m "not live and not cli"`: `live` talks to
 real providers, `cli` drives the real binary in a subprocess or a pty
-(the markers are declared in `pyproject.toml`); `slow` runs only with
-`--slow` (`make regression`), whatever `-m` says.
+(the markers are declared in `pyproject.toml`). `slow` takes minutes,
+and only a selector leaves it out: the Makefile and CI name theirs, and
+a pytest run outside them adds `and not slow` to its `-m`, or passes
+`-m "not slow"` when it has none.

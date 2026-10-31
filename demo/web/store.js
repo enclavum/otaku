@@ -63,7 +63,7 @@ const unavailable = (detail) => new Refused(502, detail);
 // The sentences more than one operation refuses with (`backend.errors`).
 const NO_SUCH_STORY = "No such story.";
 const OFF_CHAIN = "That message is not on the story's current chain.";
-const HEAD_MOVED = "The story moved on since you last saw it — nothing was changed.";
+const HEAD_MOVED = "The story was continued on another device — nothing was changed.";
 const NOT_IN_DEMO = (what) => `${what} is not in the demo — ${INSTALL}.`;
 
 // ---------- the state ----------
@@ -77,7 +77,7 @@ const state = {
   model: MODELS[0].name,
   pinned: null, // the model lore extraction is pinned to; null follows the one above
   loaded: new Set([MODELS[0].name]),
-  launch: { notices: [], hint: "" },
+  launch_facts: { notices: [], hint: "", newer_version: "" },
   version: "",
   settings: null, // `Settings`, minus what the demo keeps elsewhere
   language: null,
@@ -101,7 +101,7 @@ const state = {
 export function seed(fixtures) {
   const { app, river, tour, codex } = fixtures;
   state.version = app.app.version;
-  state.launch = { notices: [], hint: app.app.launch.hint };
+  state.launch_facts = { notices: [], hint: app.app.launch_facts.hint, newer_version: "" };
   state.settings = structuredClone(app.settings);
   state.language = app.language;
   state.defaults = app.story_defaults;
@@ -195,6 +195,7 @@ function storyOf(story) {
     premise: story.premise,
     head: newest?.id ?? null,
     message_count: story.messages.length,
+    word_count: wordsOf(story),
     updated_at: story.updatedAt,
     layout,
     mode: modeOf(layout),
@@ -207,7 +208,8 @@ function storyOf(story) {
     can_attach: MODEL_CAPABILITIES.vision,
     question: questionOf(story),
     shown_tools: shownTools(story),
-    folded_tools: foldedTools(story),
+    // the demo keeps no discards: an undo here deletes, so nothing reverts
+    can_revert: false,
   };
 }
 
@@ -221,8 +223,23 @@ function summaryOf(story) {
     model: "",
     updated_at: story.updatedAt,
     message_count: story.messages.length,
+    word_count: wordsOf(story),
   };
 }
+
+// The story's words, counted as the store counts each message
+// (`store.ops.stories._count_words`): a tool's result none, a Chinese or
+// Japanese character one, then every run between spaces holding a letter
+// or a digit.
+const CHARACTER_WORDS = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uff66-\uff9f]/gu;
+const wordsOf = (story) =>
+  story.messages
+    .filter((message) => message.role !== "tool")
+    .reduce((sum, { body }) => {
+      const characters = body.match(CHARACTER_WORDS)?.length ?? 0;
+      const runs = body.replace(CHARACTER_WORDS, " ").split(/\s+/).filter((run) => /[\p{L}\p{N}]/u.test(run));
+      return sum + characters + runs.length;
+    }, 0);
 
 const layoutOf = (story) => story.settings.find((row) => row.name === "layout")?.layout ?? "manuscript";
 // `Layout.mode`: the canvas and the novel are read as one text
@@ -239,7 +256,7 @@ function labelOf(story) {
    greeting — and no line break stands between them; PARAGRAPH otherwise. */
 function joinOf(previous, next) {
   if (previous === null) return "paragraph";
-  const alone = (row) => row.kind === "card" || row.provider === "card";
+  const alone = (row) => row.kind === "card" || row.kind === "chapter" || row.provider === "card";
   const inline =
     previous.mode === "story" &&
     next.mode === "story" &&
@@ -256,11 +273,6 @@ function shownTools(story) {
   const notes = settingOf(story, "allow_assistant_notes");
   if (notes?.enabled && notes.display_notes) shown.push("note");
   return shown;
-}
-
-function foldedTools(story) {
-  const notes = settingOf(story, "allow_assistant_notes");
-  return notes?.enabled && !notes.display_notes ? ["note"] : [];
 }
 
 /* The question the story stands on (`messages.posed_question`), copied:
@@ -288,7 +300,7 @@ export function app() {
   const extracting = state.pinned ?? state.model;
   return {
     version: state.version,
-    launch: structuredClone(state.launch),
+    launch_facts: structuredClone(state.launch_facts),
     model: {
       provider: PROVIDER,
       name: model.name,
@@ -309,7 +321,7 @@ export function app() {
 }
 
 /* The model in use and the one lore extraction is pinned to — the
-   product's sentences (`domain.app.providers`), its refusals. */
+   product's sentences (`app.providers.services`), its refusals. */
 export function updateApp({ model, extraction_model: pin } = {}) {
   const said = [];
   if (model !== undefined) {
@@ -373,7 +385,7 @@ export function settings() {
   return structuredClone(state.settings);
 }
 
-/* The fields given, each with its sentence (`domain.app.settings`). */
+/* The fields given, each with its sentence (`app.settings.services`). */
 export function updateSettings(fields) {
   const said = [];
   for (const name of ["verbose", "autocorrect", "notification"]) {
@@ -591,7 +603,7 @@ export function modelSettings(providerName, name) {
 }
 
 /* A model's thinking level and its parameters, read against the model's
-   vocabulary (`domain.app.models`) — the levels the template carries, the
+   vocabulary (`app.models.services`) — the levels the template carries, the
    bounds each parameter states. */
 export function updateModelSettings(providerName, name, { think, parameters }) {
   const held = modelSettings(providerName, name);
@@ -727,7 +739,7 @@ export function story(id) {
 }
 
 /** Every other story a chain of forks joins this one to, most recently
-    played first (`domain.story.stories.list_family`). */
+    played first (`story.stories.services.list_family`). */
 export function forks(id) {
   held(id);
   const family = familyOf(id);
@@ -879,6 +891,14 @@ export function undo(id, expected) {
   return { value: storyOf(story), notice: `Took back the last exchange (${popped.length} messages).` };
 }
 
+/** A revert: nothing to put back, ever — the demo's undo deletes what it
+    takes, and its story says so (`can_revert`). */
+export function revert(id, expected) {
+  held(id);
+  checkHead(id, expected);
+  throw conflict("Nothing to revert.");
+}
+
 function landedLine(story, verb) {
   const label = cut(labelOf(story), LABEL_WIDTH);
   const head = label ? `Story: ${label}. ` : "";
@@ -899,21 +919,63 @@ export function message(id, messageId) {
   return structuredClone(found);
 }
 
-export function updateMessage(id, messageId, body) {
+/** A message corrected, or pinned or unpinned, as the product's
+    `stories.messages.update` does: either field or both, the sentences
+    joined; a pin refused where `can_pin` says so, an unpin never. */
+export function updateMessage(id, messageId, { body, pinned }) {
   const story = held(id);
   const found = story.messages.find((row) => row.id === messageId);
   if (!found) throw notFound(OFF_CHAIN);
-  if (!body.trim()) throw invalid("A message cannot be emptied — undo the exchange instead.");
-  found.body = body;
-  found.segments = [{ kind: "prose", text: body }];
+  if (body === undefined && pinned === undefined) throw invalid("Nothing to change.");
+  const said = [];
+  if (body !== undefined) {
+    if (!body.trim()) throw invalid("A message cannot be emptied — undo the exchange instead.");
+    found.body = body;
+    found.segments = found.kind === "chapter" ? headingOf(story, found) : [{ kind: "prose", text: body }];
+    said.push("Message edited.");
+  }
+  if (pinned !== undefined) {
+    if (pinned && !found.can_pin) throw invalid("A card or a tool result can't be pinned.");
+    found.pinned = pinned;
+    said.push(pinned ? "Message pinned." : "Message unpinned.");
+  }
   touch(story);
   moved(story);
-  return { value: structuredClone(found), notice: "Message edited." };
+  return { value: structuredClone(found), notice: said.join(" ") };
 }
+
+// ---------- chapters ----------
+
+/* A chapter opened at the story's end by a `/chapter TITLE` line: the
+   reader's row of kind 'chapter', the line as typed its body, shown as its
+   number and title — numbered along the chain, split as the product's
+   `Line.shown` splits it (`context.syntax`); the framing is the built-in
+   `chapter_framing`. */
+export function openChapter(id, line) {
+  const story = held(id);
+  record(id, "user", line, {
+    kind: "chapter",
+    template: '((OOC: Chapter "{body}" starts here.))',
+  });
+  const opened = story.messages.at(-1);
+  opened.segments = headingOf(story, opened);
+  return structuredClone(opened);
+}
+
+const chapterOf = (story, row) =>
+  story.messages.slice(0, story.messages.findIndex((each) => each.id === row.id) + 1)
+    .filter((each) => each.kind === "chapter").length;
+// the title: the line after its token, as `syntax.read` gives it
+const titleOf = (body) => body.trim().replace(/^\/chapter(\s+|$)/, "");
+const headingOf = (story, row) => [
+  { kind: "chapter_number", text: `Chapter ${chapterOf(story, row)}` },
+  { kind: "prose", text: ". " },
+  { kind: "chapter_title", text: titleOf(row.body) },
+];
 
 /** One row recorded at the story's head, in the shape the product's rows
     take — the demo's model writes prose and no tool call, so a row is
-    one prose segment, its own unit. */
+    one prose segment, its own reply's start. */
 export function record(id, role, body, extra = {}) {
   const story = held(id);
   const previous = story.messages.at(-1) ?? null;
@@ -928,14 +990,19 @@ export function record(id, role, body, extra = {}) {
     model: role === "assistant" ? state.model : null,
     attachments: [],
     mode: modeOf(layoutOf(story)),
+    pinned: false,
+    can_pin: true,
     segments: [{ kind: "prose", text: body }],
     join_type: "paragraph",
     tool_label: null,
-    unit: 0,
+    reply_start_id: 0,
+    discarded: false,
     ...extra,
   };
+  // every row but a card's and a tool's (`messages.services.can_pin`)
+  row.can_pin = row.kind !== "card" && row.role !== "tool";
   row.join_type = joinOf(previous, row);
-  row.unit = row.id;
+  row.reply_start_id = row.id;
   story.messages.push(row);
   touch(story);
   moved(story);
@@ -987,7 +1054,7 @@ function knownSetting(story, name) {
 }
 
 /* One setting, the fields given laid over it — what it takes decided and
-   said as `domain.story.settings` decides and says it, copied. */
+   said as `story.settings.services` decides and says it, copied. */
 export function updateStorySetting(id, name, fields) {
   const story = held(id);
   const setting = knownSetting(story, name);
@@ -1102,7 +1169,7 @@ export function checkLink(id, characterId, cardId) {
 }
 
 /* Whether a character's card picture rides its card row
-   (`domain.story.lore.set_portrait_sent`): refused where no card row
+   (`story.lore.services.set_portrait_sent`): refused where no card row
    brought it in, or there is no picture to send. */
 function sendPortrait(story, row, sent) {
   if (row.portrait_sent === null || row.portrait_sent === undefined) {
@@ -1120,7 +1187,7 @@ function sendPortrait(story, row, sent) {
 
 /* A story character's profile corrected field by field and its TOML
    written again, the names it binds and its file kept
-   (`domain.story.lore.update_profile`). */
+   (`story.lore.services.update_profile`). */
 function correctCopy(row, changes) {
   if (!Object.keys(changes).length) throw invalid("Nothing to change.");
   if (!row.profile_fields) throw invalid(`${row.name} has no card to correct.`);
@@ -1148,7 +1215,7 @@ function boundOf(profile) {
 }
 
 /* A story's character linked to a codex card — its copies too where
-   asked — or unlinked with null, alone, as `domain.story.lore.set_card_id`
+   asked — or unlinked with null, alone, as `story.lore.services.set_card_id`
    links it: nothing else on either changes. */
 function linkCharacter(id, row, cardId, withCopies = false) {
   if (cardId === null) {
@@ -1174,7 +1241,7 @@ function linkRows(rows, card) {
 }
 
 /* What a story character shows of its linked card — its name and its
-   first picture (`backend.api.story.lore._character`) — or of none. */
+   first picture (`backend.story.lore._character`) — or of none. */
 function showCard(row, card) {
   row.card_name = card?.name ?? null;
   row.card_portrait = portraitOf(card);
@@ -1184,7 +1251,7 @@ function portraitOf(card) {
   return card?.pictures.length ? structuredClone(card.pictures[0]) : null;
 }
 
-/* The card a link joins, refused as `domain.story.lore._linkable` says. */
+/* The card a link joins, refused as `story.lore.services._linkable` says. */
 function linkable(id, row, cardId) {
   if (cardId === row.card_id) throw invalid("Nothing to change.");
   const card = cardRow(cardId);
@@ -1193,7 +1260,7 @@ function linkable(id, row, cardId) {
   return card;
 }
 
-/* A story character's copies (`domain.codex.cards.find_copies`): in every
+/* A story character's copies (`codex.cards.services.find_copies`): in every
    story forks join its own to, the one unlinked character of its very
    name — a story holding two passed over, as is one where `cardId`
    links another already. */
@@ -1213,7 +1280,7 @@ function copyRow({ story_id: story, character_id: character }) {
 }
 
 /* What a link says of the copies it took along
-   (`domain.codex.cards.linked_copies`). */
+   (`codex.cards.services.linked_copies`). */
 function linkedCopies(count) {
   return count ? ` Linked in ${count} other ${count === 1 ? "story" : "stories"} too.` : "";
 }
@@ -1382,7 +1449,7 @@ function bringIn(story, { id: cardId, name, aliases = [], copy, user, line, with
     card_portrait: portraitOf(card),
     portrait_sent: riding !== null,
     // a card made it, and is answered with no model
-    // (`backend.api.story.lore._character`)
+    // (`backend.story.lore._character`)
     provider: "card",
     model: null,
     updated_at: now(),
@@ -1423,7 +1490,7 @@ export function profileToml(card, user) {
 
 // ---------- the codex ----------
 
-/* All characters, as `backend.domain.codex.cards` keeps them: the cards,
+/* All characters, as `backend.codex.cards.services` keeps them: the cards,
    the stories each is in read off the casts as the store reads them, the
    digest of each card file a card was made from, and the stories'
    characters no card claims. A picture added to a card is not kept: the
@@ -1507,7 +1574,7 @@ const cleanAliases = (aliases, name) => [
 ];
 
 /* A reminder goes before one of the reader's messages, the newest 1
-   (`backend.domain.codex.cards._checked_profile`). */
+   (`backend.codex.cards.services._checked_profile`). */
 function checkDepth(fields) {
   const depth = fields.reminder_depth;
   if (depth !== undefined && !(Number.isInteger(depth) && depth >= 1)) {
@@ -1535,7 +1602,7 @@ function makeCard({ name, aliases = [], tagline = "", fields = {}, fileName = ""
 }
 
 // What a card made by hand is called where no name is given
-// (`backend.domain.codex.cards.NEW_CARD_NAME`).
+// (`backend.codex.cards.services.NEW_CARD_NAME`).
 const NEW_CARD_NAME = "New card";
 
 export function createCard({ name = NEW_CARD_NAME, aliases = [], tagline = "", fields = {} }) {
@@ -1557,14 +1624,14 @@ export function updateCard(id, { before, ...fields }) {
 }
 
 /* A move refused before anything is written, as
-   `backend.domain.codex.cards.check_move` refuses it. */
+   `backend.codex.cards.services.check_move` refuses it. */
 function checkMove(card, before) {
   if (before === card.id) throw invalid("A card cannot go before itself.");
   if (before !== null) cardRow(before);
 }
 
 /* A card put just before `before`, or last for null
-   (`backend.domain.codex.cards.move_card`). */
+   (`backend.codex.cards.services.move_card`). */
 function moveCard(card, before) {
   const order = [...state.cards.values()].filter((each) => each.id !== card.id);
   const at = before === null ? order.length : order.findIndex((each) => each.id === before);
@@ -1813,10 +1880,54 @@ export function context(id) {
       }),
     // the recompute assembles no injection, so it reports none, honestly
     injections: [],
-    parts: [
-      ...(story.premise ? [{ role: "system", body: story.premise, pictures: 0 }] : []),
-      ...story.messages.map((row) => ({ role: row.role === "tool" ? "user" : row.role, body: row.body, pictures: 0 })),
-    ],
+    parts: laid([
+      ...(story.premise ? [part("system", story.premise, "system", "system")] : []),
+      ...story.messages.map((row) =>
+        row.kind === "card"
+          ? { ...part(row.role, row.body, "card", row.speaker ? `card · ${row.speaker}` : "card"), card_name: row.speaker ?? "" }
+          : part(row.role, row.body, "message", row.role),
+      ),
+    ]),
+  };
+}
+
+/* A separator between two parts that stand apart — the product's rule
+   (`story.context.services.separate`), copied: a run reads as one — of
+   messages, of the summary's history and scene summaries, of pinned
+   messages; a header — the summary's, the pinned messages' — opens what
+   follows it; every other part stands apart. */
+function laid(parts) {
+  const runs = ["message message", "history scene", "scene scene", "pinned_message pinned_message"];
+  const headers = ["header", "pinned_header"];
+  return parts.flatMap((each, at) => {
+    const previous = parts[at - 1];
+    const apart =
+      previous !== undefined &&
+      !headers.includes(previous.provenance) &&
+      !runs.includes(`${previous.provenance} ${each.provenance}`);
+    return apart ? [{ kind: "separator" }, each] : [each];
+  });
+}
+
+/** One part of the recomputed preview, in the product's shape: the role
+    it goes in, its text, where it comes from, and its caption — the
+    product's words for those three (`story.context.schemas._caption`),
+    copied — no injection, scene or summary in a recompute, so their
+    fields stand empty. */
+function part(role, body, provenance, caption) {
+  return {
+    kind: "part",
+    role,
+    body,
+    pictures: 0,
+    provenance,
+    scene_num: null,
+    scene_title: "",
+    injection_label: "",
+    injection_position: null,
+    injection_position_text: "",
+    card_name: "",
+    caption,
   };
 }
 

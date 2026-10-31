@@ -21,6 +21,7 @@ import time
 from dataclasses import replace
 from typing import Any, ClassVar
 
+from otaku.providers.clients import local_engines_host
 from otaku.providers.errors import ProviderError
 from otaku.providers.http import PROBE_TIMEOUT, Cut, Http, positive_int
 from otaku.providers.openai.auth import OpenAIAuth
@@ -268,6 +269,7 @@ class OllamaClient(OpenAIClient):
         """The first-run section, its host and port from OLLAMA_HOST — a
         remote server stays remote."""
         scheme, host, port, path = _parse_ollama_host(os.environ.get("OLLAMA_HOST") or "")
+        host = local_engines_host() if host == "localhost" else host
         return ProviderConfig(
             name=cls.id,
             url=f"{scheme}://{host}:{port}{path}/v1",

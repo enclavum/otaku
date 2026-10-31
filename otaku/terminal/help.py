@@ -18,7 +18,7 @@ import textwrap
 from collections.abc import Mapping
 
 from otaku.terminal import commands
-from otaku.terminal.api.story import language as api_language
+from otaku.terminal.api import language as api_language
 from otaku.terminal.tty.cursor import terminal_width
 
 # /help spells a few rows shorter than the table does: its command
@@ -32,7 +32,9 @@ _SPELLINGS: dict[str, tuple[str, str]] = {
     "/set verbose": ("", ""),
     "/set autocorrect": ("", ""),
     "/set notification": ("", ""),
+    "/set show_thinking": ("", ""),
     "/set max_context": ("", ""),
+    "/set serve": ("", ""),
 }
 
 # The keys the prompt itself answers to — no command of their own, so

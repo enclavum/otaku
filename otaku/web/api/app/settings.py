@@ -4,7 +4,7 @@ own — the story last landed in, the switches, the context limit."""
 from typing import Any
 
 from otaku.backend.api import Api
-from otaku.backend.api.app.settings import WebSettings as WebSettings
+from otaku.backend.app.settings.schemas import WebSettings as WebSettings
 from otaku.web.api._request import Ask, Route, changed, plain
 
 

@@ -58,11 +58,12 @@ const SCREENS = {
   "/extract": extractNow,
   "/undo": undo,
   "/regen": regenerate,
+  "/revert": revert,
   "/last": () => refresh(),
   "/clear": () => clear(),
   // A tab is not the server: closing one must not stop a server the
-  // reader may be using from another, so /bye says where the exit is.
-  "/bye": () => tell("Close the tab. The server stops in the terminal."),
+  // reader may be using from another, so /quit says where the exit is.
+  "/quit": () => tell("Close the tab. The server stops in the terminal."),
 };
 
 export async function run(token) {
@@ -197,11 +198,47 @@ async function undo() {
   if (!answer.refused) takeBack(await api.stories.messages.list(story), answer.value.question);
   await landed("");
   if (answer.refused) tell(answer.notice, "otk-error");
+  else if (answer.value.can_revert) offerRevert("undo");
 }
 
 /* What the backend says with no exchange to take back — COPIED, as the
-   page has no story to ask (`backend.domain.story.stories.NOTHING_TO_UNDO`). */
+   page has no story to ask (`backend.story.stories.services.NOTHING_TO_UNDO`). */
 const _NOTHING_TO_UNDO = "Nothing to undo.";
+
+async function revert() {
+  /* What the newest Undo or Regen set aside, put back: the transcript is
+     drawn again from the store, as a turn may come back or be replaced.
+     Revert stays, its wait restarted, while there is more to take back;
+     a refusal speaks under the prompt. */
+  if (midReply()) return;
+  const story = held.story();
+  const answer =
+    story === null ? { notice: _NOTHING_TO_REVERT, refused: true } : await api.stories.reverts.create(story);
+  await landed("", { redraw: "always", keepPlace: true });
+  if (answer.refused) tell(answer.notice, "otk-error");
+  else if (answer.value.can_revert) offerRevert();
+}
+
+/* What the backend says with nothing to put back — COPIED, as the page
+   has no story to ask (`backend.story.stories.services.NOTHING_TO_REVERT`). */
+const _NOTHING_TO_REVERT = "Nothing to revert.";
+
+/** Revert, offered — after an Undo or a Regen, named by `verb` in its
+    caption, or again after a revert that left more to take back — its
+    wait started anew: shown from hidden, the fade's delay restarts
+    (`.otk-revert`). */
+function offerRevert(verb = null) {
+  const button = $("[data-revert]");
+  if (!button) return;
+  if (verb) {
+    const does = `Revert the last ${verb}`;
+    button.title = does;
+    button.setAttribute("aria-label", does);
+  }
+  button.hidden = true;
+  void button.offsetWidth; // the hidden state takes, so showing restarts the animation
+  button.hidden = false;
+}
 
 async function regenerate() {
   /* Mid-reply, regenerate means "not this one, try again", as `/regen`
@@ -215,7 +252,12 @@ async function regenerate() {
     await play(null, { regenerate: true });
   } catch (e) {
     if (e?.answered) tell(String(e.message ?? e), "otk-error");
+    return;
   }
+  // the take stands: the reply it set aside can be taken back
+  const story = held.story();
+  const facts = story === null ? null : await api.stories.get(story);
+  if (facts && !facts.refused && facts.can_revert) offerRevert("regen");
 }
 
 // The page's own sentence: a fault of the medium, not the story's.
@@ -240,7 +282,7 @@ export async function editTurn(position, drawn, text) {
 /* What the backend says when there is no story to act on. COPIED,
    because the page cannot ask: these endpoints address a story by id,
    and with no story there is no id for the path. Their homes are
-   `backend.domain.story.stories.fork_story` and `backend.errors.NO_STORY_HINT`. */
+   `backend.story.stories.services.fork_story` and `backend.errors.NO_STORY_HINT`. */
 const _NO_STORY = {
   fork: "Nothing to fork yet — send a message first.",
   extract: "No story yet — send a message first.",

@@ -12,7 +12,7 @@ Tokens are signed with the stored password hash as the HMAC key rather
 than a secret of their own, so a changed password — a new hash, with a new
 random salt — invalidates every token ever issued, with no list to keep.
 Checking a typed password is not this module's: that is
-`backend.domain.app._passwords`', and its cost is the rate limiting. Nor does a token
+`backend.app.passwords`', and its cost is the rate limiting. Nor does a token
 captured off the wire help anyone guess at the password: the hash that
 signed it is out of reach without the salt, which never leaves the file.
 

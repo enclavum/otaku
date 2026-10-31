@@ -1,0 +1,95 @@
+# Lint, typecheck and the offline suite on every push to main or a release
+# branch and on every pull request; the slow screen tests on Linux and macOS.
+# The pseudo-terminal scenarios, the screen tests among them, may fail in a
+# job that still passes (continue-on-error): read the run for failed tests.
+# Live tests need real engines and keys, so they stay on the maintainer's
+# machine.
+name: CI
+
+on:
+  push:
+    branches: [main, "release/**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: lint and typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: "3.11"
+      - run: uv run ruff check otaku/ tests/ scenarios/
+      - run: uv run ruff format --check otaku/ tests/ scenarios/
+      - run: uv run mypy
+      # mypy checks only the branches of the platform it runs on.
+      - name: mypy, as on Windows
+        run: uv run mypy --platform win32
+      - name: mypy, as on macOS
+        run: uv run mypy --platform darwin
+
+  tests:
+    name: tests (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.11", "3.12", "3.13", "3.14", "3.15"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: ${{ matrix.python }}
+      # Windows has no pty, so it cannot even import the pseudo-terminal scenarios.
+      - name: offline suite, without the pseudo-terminal scenarios
+        run: uv run pytest tests/ scenarios/ -m "not live and not cli and not slow" --ignore=scenarios/cli
+      - name: pseudo-terminal scenarios, failures tolerated
+        if: runner.os != 'Windows' && !cancelled()
+        continue-on-error: true
+        run: uv run pytest scenarios/ -m "not live and cli and not slow"
+
+  docker:
+    name: docker image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - run: docker build -t otaku-ci .
+      # The container as compose runs it (-t): the web interface.
+      - name: The page answers from a running container
+        run: |
+          docker run -dt --name otaku-ci -p 9600:9600 otaku-ci
+          for attempt in $(seq 1 30); do
+            if curl -fsS -o /dev/null http://127.0.0.1:9600/api/app/status; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs otaku-ci
+          exit 1
+
+  screen:
+    name: slow screen tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: "3.14"
+      - name: slow screen tests, failures tolerated
+        continue-on-error: true
+        run: uv run pytest scenarios/ -m "not live and slow"

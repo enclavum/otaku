@@ -13,7 +13,7 @@ from typing import Any
 import httpcore
 import pytest
 
-from otaku.providers.http import _LOOPBACK_CONNECT_TIMEOUT, Cut, Http, _Backend
+from otaku.providers.http import _LOOPBACK_CONNECT_TIMEOUT, Cut, Http, _Backend, _Sliced
 
 
 class TestCut:
@@ -59,6 +59,47 @@ class TestCut:
             with contextlib.suppress(Exception):  # a refused read ends it just the same
                 assert stream.read(1, timeout=2.0) == b""
             assert time.monotonic() - started < 1.0
+        finally:
+            listener.close()
+
+    def test_a_looking_read_ends_at_a_cut_its_socket_never_heard(self) -> None:
+        # Windows wakes no read on a shutdown, so there the read looks at
+        # the cut; a cut never armed on the socket stands in for that.
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        cut = Cut()
+        try:
+            raw = httpcore.SyncBackend().connect_tcp(
+                "127.0.0.1", listener.getsockname()[1], timeout=2.0
+            )
+            stream = _Sliced(raw, cut)
+            outcome: list[bytes] = []
+            reader = threading.Thread(
+                target=lambda: outcome.append(stream.read(1, timeout=5.0)), daemon=True
+            )
+            reader.start()
+            reader.join(0.2)
+            assert reader.is_alive()
+            cut.cut()
+            reader.join(1.0)
+            assert not reader.is_alive()
+            assert outcome == [b""]  # as a shut-down socket's read ends
+        finally:
+            listener.close()
+
+    def test_a_looking_read_still_times_out(self) -> None:
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        try:
+            raw = httpcore.SyncBackend().connect_tcp(
+                "127.0.0.1", listener.getsockname()[1], timeout=2.0
+            )
+            started = time.monotonic()
+            with pytest.raises(httpcore.ReadTimeout):
+                _Sliced(raw, Cut()).read(1, timeout=0.3)
+            assert 0.3 <= time.monotonic() - started < 1.0
         finally:
             listener.close()
 

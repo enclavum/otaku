@@ -6,8 +6,9 @@ into a turn's `template` verbatim — nothing is filled at write time, so
 the turn keeps the wording this file had when it played; `{name}` and
 `{body}` mark where the turn's own name and text slot in at wire time.
 The lore templates build the memory; `recap_header` carries the finished
-scene summaries back into the request; a tool's prompt is sent while
-the tool is switched on, never stored — and is the one text edited from
+scene summaries back into the request, and `pinned_header` opens the
+pinned messages quoted among them; a tool's prompt is sent while the
+tool is switched on, never stored — and is the one text edited from
 inside the app (`set_prompt`).
 
 The stub is written on first use with every template active; once the
@@ -48,6 +49,11 @@ ROLL_FRAMING_DEFAULT = (
     "the outcome of exactly this result; never reroll it, change it, or "
     "roll on your own.))\n{body}"
 )
+
+# A chapter's start, as the model reads the row that opens one: out of
+# character, so it is read as the story's structure and never as a line
+# to answer; its title (`{body}`), unnumbered.
+CHAPTER_FRAMING_DEFAULT = '((OOC: Chapter "{body}" starts here.))'
 
 # A card's block, a line per field — a line whose fields are all empty is
 # left out (`context.cards.card_to_wire`), so the block's close stands on
@@ -183,8 +189,15 @@ Rules:
 {entries}
 """
 
+# The line over the recap's summaries — the story so far, the scene
+# summaries — that stand in for the middle of the story (`context.assembler`).
+RECAP_HEADER_DEFAULT = "[The story so far — the scenes between these moments:]"
+
+# The line over the pinned messages the recap quotes after a summary.
+PINNED_HEADER_DEFAULT = "[Key messages from earlier, word for word:]"
+
 # The tools' prompts: what tells the model how a tool is used
-# (`backend.domain.story._tools`). Sent as an injection while the tool is switched on
+# (`backend.story.tools`). Sent as an injection while the tool is switched on
 # for the story — bare in the system message, inside the OOC enclosure
 # in chat — so neither carries an enclosure of its own.
 TOOL_QUESTIONS_DEFAULT = """\
@@ -279,12 +292,14 @@ _DEFAULTS = {
     "you_framing": YOU_FRAMING_DEFAULT,
     "ooc_framing": OOC_FRAMING_DEFAULT,
     "roll_framing": ROLL_FRAMING_DEFAULT,
+    "chapter_framing": CHAPTER_FRAMING_DEFAULT,
     "card_framing": CARD_FRAMING_DEFAULT,
     "story_framing": STORY_FRAMING_DEFAULT,
     "extract_prompt": EXTRACT_DEFAULT,
     "scene_history_prompt": SCENE_HISTORY_DEFAULT,
     "journal_history_prompt": JOURNAL_HISTORY_DEFAULT,
-    "recap_header": "[The story so far — the scenes between these moments:]",
+    "recap_header": RECAP_HEADER_DEFAULT,
+    "pinned_header": PINNED_HEADER_DEFAULT,
     "tool_questions_prompt": TOOL_QUESTIONS_DEFAULT,
     "tool_assistant_notes_prompt": TOOL_ASSISTANT_NOTES_DEFAULT,
     "tool_system_info_prompt": TOOL_SYSTEM_INFO_DEFAULT,
@@ -304,6 +319,9 @@ _REQUIRED = {
     # {dice} is the roll itself — without it the numbers never reach the
     # model and the command is a no-op wearing a frame.
     "roll_framing": ("dice", "body"),
+    # {body} is the chapter's title — without it the model reads a heading
+    # naming nothing.
+    "chapter_framing": ("body",),
     # Only {name}: a card template line whose OTHER placeholders are absent
     # is a choice — omitting {examples} is how a user keeps examples off
     # the wire — and compose drops the lines of fields a card lacks.
@@ -333,11 +351,13 @@ class Prompts:
     you_framing: str = _DEFAULTS["you_framing"]
     ooc_framing: str = _DEFAULTS["ooc_framing"]
     roll_framing: str = _DEFAULTS["roll_framing"]
+    chapter_framing: str = _DEFAULTS["chapter_framing"]
     card_framing: str = _DEFAULTS["card_framing"]
     extract_prompt: str = _DEFAULTS["extract_prompt"]
     scene_history_prompt: str = _DEFAULTS["scene_history_prompt"]
     journal_history_prompt: str = _DEFAULTS["journal_history_prompt"]
     recap_header: str = _DEFAULTS["recap_header"]
+    pinned_header: str = _DEFAULTS["pinned_header"]
     tool_questions_prompt: str = _DEFAULTS["tool_questions_prompt"]
     tool_assistant_notes_prompt: str = _DEFAULTS["tool_assistant_notes_prompt"]
     tool_system_info_prompt: str = _DEFAULTS["tool_system_info_prompt"]

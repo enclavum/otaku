@@ -1,27 +1,22 @@
 ---
 paths:
-  - "otaku/backend/domain/story/settings.py"
-  - "otaku/backend/domain/story/prompts.py"
-  - "otaku/backend/domain/story/_play.py"
-  - "otaku/backend/domain/story/_chain.py"
-  - "otaku/backend/domain/story/_request.py"
-  - "otaku/backend/domain/story/messages.py"
-  - "otaku/backend/domain/story/context.py"
-  - "otaku/backend/domain/app/models.py"
-  - "otaku/backend/api/story/settings.py"
-  - "otaku/backend/api/story/prompts.py"
-  - "otaku/backend/api/story/context.py"
-  - "otaku/backend/api/story/stories.py"
-  - "otaku/backend/api/story/messages.py"
+  - "otaku/backend/story/settings/*.py"
+  - "otaku/backend/story/prompts/*.py"
+  - "otaku/backend/story/play.py"
+  - "otaku/backend/story/chain.py"
+  - "otaku/backend/story/request.py"
+  - "otaku/backend/story/messages/*.py"
+  - "otaku/backend/story/context/*.py"
+  - "otaku/backend/app/models/*.py"
+  - "otaku/backend/story/stories/*.py"
   - "otaku/context/assembler.py"
   - "otaku/providers/openai/templates.py"
   - "otaku/store/schema.py"
   - "otaku/settings/prompts.py"
   - "otaku/web/api/story/settings.py"
   - "otaku/web/api/story/prompts.py"
-  - "otaku/terminal/api/story/settings.py"
-  - "otaku/terminal/api/story/prompts.py"
-  - "otaku/terminal/dispatch/story/settings.py"
+  - "otaku/terminal/api/prompts.py"
+  - "otaku/terminal/dispatch/settings.py"
   - "otaku/terminal/screens/dossier/tools.py"
   - "otaku/terminal/chat/**/*"
   - "otaku/terminal/tty/render.py"
@@ -40,7 +35,7 @@ paths:
 
 What a user sees as features are, below the frontends, a STORY's
 settings: one switch each, one class each in
-`backend.domain.story.settings`, which says what each injects and when.
+`backend.story.settings.services`, which says what each injects and when.
 One setting is a VALUE rather than a switch: the LAYOUT the story is
 read in (`novel`, `canvas`, `manuscript`, `chat`). Two facts derive from
 it — the look (`mode`) and the wire (`completion_type`) — and the
@@ -79,7 +74,7 @@ are `providers.openai.templates`'.
 ## A setting as a frontend sees it
 
 Every setting reaches a frontend as the same row, the interface's
-`StorySetting` (`backend.api.story.settings`), so a frontend draws them
+`StorySetting` (`backend.story.settings`), so a frontend draws them
 alike. A settings write moves no head, so it names none. Both Tools tabs
 keep one caption table, `_ABOUT`, in the same order and groups —
 `terminal/screens/dossier/tools.py` and `web/static/js/screens/tools.js`:
@@ -87,7 +82,7 @@ change one, change both.
 
 An injection setting's PROMPT is "prompt" on the backend and the wire,
 whatever a frontend calls it (the page's "Prompt", the terminal's
-"[ instructions ]"); `backend.api.story.prompts` says how each is
+"[ instructions ]"); `backend.story.prompts` says how each is
 reached.
 
 One story's settings are the database's because they must fork and die

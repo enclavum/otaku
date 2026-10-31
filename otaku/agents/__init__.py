@@ -31,7 +31,7 @@ from otaku.agents.extraction import ExtractionSettings, Extractor, PassResult, R
 from otaku.context import assembler
 from otaku.context.assembler import ContextShape, PromptTexts
 from otaku.context.injections import Injection
-from otaku.context.tool_calls import ToolSet
+from otaku.context.tools import ToolSet
 from otaku.formatting import format_duration
 from otaku.logging import ErrorLog, SystemLog
 from otaku.providers import Locality, ModelInfo, OpenAIClient, ProviderError, Registry
@@ -370,7 +370,7 @@ class Worker:
                 # The turn's own prefix, pictures included where the model
                 # sees them — a warm-up without them warms nothing.
                 pictures_ride=client.pictures_ride(job.model),
-            ).messages
+            ).as_chat()
         except assembler.ContextOverflowError:
             # Nothing sendable to warm with — the next turn will say so.
             self._log.record(f"warm-up skipped (story {job.story_id}): context over the limit")

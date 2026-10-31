@@ -1,5 +1,5 @@
 """Single keys off the terminal while a frontend owns the screen — what
-`otaku web` answers Ctrl+D and Ctrl+R with. The terminal is taken out
+`otaku serve` answers Ctrl+D and Ctrl+R with. The terminal is taken out
 of line mode for the watch, so a key arrives as it is pressed rather
 than after Enter, and given back after; Ctrl+C stays the signal it is.
 Nothing is read where stdin is not a terminal, so a piped launch is
@@ -8,6 +8,7 @@ does is the caller's.
 """
 
 import contextlib
+import errno
 import os
 import select
 import sys
@@ -69,7 +70,7 @@ def _watch(fd: int, keys: Mapping[bytes, Callable[[], None]], done: threading.Ev
 def _pressed(fd: int) -> bytes:
     """The key pressed within one look, or b"" — the look is what lets
     the watch notice it has been asked to end."""
-    if termios is None:
+    if sys.platform == "win32":
         import msvcrt  # Windows only, and only here
 
         if msvcrt.kbhit():
@@ -87,11 +88,17 @@ def _unlined(fd: int) -> Iterator[None]:
     cbreak changes are put back — not a snapshot — so this composes
     with whoever else restores the terminal meanwhile (the ticker's
     quiet), in whichever order the two let go."""
-    if termios is None:
+    if sys.platform == "win32" or termios is None:
         yield
         return
     before = termios.tcgetattr(fd)
-    tty.setcbreak(fd)
+    while True:
+        try:
+            tty.setcbreak(fd)
+            break
+        except termios.error as e:
+            if e.args[0] != errno.EINTR:  # a signal landed mid-call: again
+                raise
     try:
         yield
     finally:

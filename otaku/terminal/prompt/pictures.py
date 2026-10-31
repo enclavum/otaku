@@ -15,9 +15,9 @@ completion trigger, and this module is never asked.
 
 import re
 from collections.abc import Callable
-from pathlib import Path
 
-from otaku.terminal.api.story.messages import RawFile
+from otaku.terminal.api import RawFile
+from otaku.terminal.prompt import paths
 
 SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif"})
 # An `@` that opens a token (nothing but whitespace before it), then the
@@ -77,7 +77,7 @@ def unescape(token: str) -> str:
 def _read(path: str) -> RawFile | None:
     """The filesystem's answer: an existing file with a picture's
     extension, `~` expanded, as the bytes and the name; None otherwise."""
-    candidate = Path(path).expanduser()
-    if candidate.suffix.lower() not in SUFFIXES or not candidate.is_file():
+    candidate = paths.existing_file(path)
+    if candidate is None or candidate.suffix.lower() not in SUFFIXES:
         return None
     return RawFile(candidate.read_bytes(), candidate.name)

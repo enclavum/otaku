@@ -38,8 +38,8 @@ class StateConfig:
     """What state.toml holds: the settings otaku writes itself as they
     change — the model to resume and the one saved for lore extraction
     (specs as the file spells them), the story to reattach, the /set
-    switches. A config, not the app's state: the app reads it from the
-    file whenever it changed."""
+    switches, and what the update check last learned. A config, not the
+    app's state: the app reads it from the file whenever it changed."""
 
     model: str = ""  # "provider/model" to resume; "" = open the picker
     extraction_model: str = ""  # "provider/model" lore extraction uses; "" = `model`
@@ -47,6 +47,10 @@ class StateConfig:
     verbose: bool = False
     autocorrect: bool = True
     notification: bool = False
+    update_checked_at: str = ""  # when the update check last asked, ISO 8601 in UTC; "" = never
+    update_latest_version: str = (
+        ""  # the version announced as current when it last answered; "" = unknown
+    )
 
     @property
     def model_ref(self) -> ModelRef | None:
@@ -75,22 +79,25 @@ def load(path: Path) -> tuple[StateConfig, list[str]]:
         verbose=bool(raw.get("verbose", False)),
         autocorrect=bool(raw.get("autocorrect", True)),
         notification=bool(raw.get("notification", False)),
+        update_checked_at=str(raw.get("update_checked_at", "")),
+        update_latest_version=str(raw.get("update_latest_version", "")),
     ), []
 
 
 def save(path: Path, state: StateConfig) -> None:
+    # fmt: off
     body = "\n".join(
         [
             "# Written by otaku — what it remembers between sessions.",
             row(f"model = {toml_scalar(state.model)}", "bare `otaku` resumes this model"),
-            row(
-                f"extraction_model = {toml_scalar(state.extraction_model)}",
-                'lore extraction uses this model; "" = the one above',
-            ),
+            row(f"extraction_model = {toml_scalar(state.extraction_model)}", 'lore extraction uses this model; "" = the one above'),
             row(f"story = {state.story}", "and reattaches this story (0 = none)"),
             row(f"verbose = {str(state.verbose).lower()}", "/set verbose"),
             row(f"autocorrect = {str(state.autocorrect).lower()}", "/set autocorrect"),
             row(f"notification = {str(state.notification).lower()}", "/set notification"),
+            row(f"update_checked_at = {toml_scalar(state.update_checked_at)}", "when otaku last checked for a newer version (UTC)"),
+            row(f"update_latest_version = {toml_scalar(state.update_latest_version)}", "the latest release that check found"),
         ]
     )
+    # fmt: on
     write_atomic(path, body + "\n")

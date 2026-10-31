@@ -47,6 +47,7 @@ import email.utils
 import ipaddress
 import socket
 import ssl
+import sys
 import threading
 import time
 from collections.abc import Callable, Generator, Iterable
@@ -67,6 +68,8 @@ LOAD_TIMEOUT = 600.0  # a load or unload, start to finish: weights read from dis
 # How often a thread waiting on another's call asks its caller whether
 # anybody still waits (`ticking`).
 _IDLE_TICK = 0.05
+# How often a read on Windows looks at its cut (`_Sliced`).
+_CUT_LOOK = 0.1
 
 # The handshake's own cap, see the module docstring.
 _CONNECT_TIMEOUT = 2.0  # a request that has to get through
@@ -342,7 +345,8 @@ class Cut:
     first token, so during a prefill there is no response to close. The
     stream then ends as the reader's own doing (`StreamCut`), never as
     the transport's failure. Armed by the transport at connect time; a
-    cut asked before the connection exists lands the moment it does."""
+    cut asked before the connection exists lands the moment it does.
+    Windows wakes no read on a shutdown: there the read looks (`_Sliced`)."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -440,7 +444,48 @@ class _Backend(httpcore.SyncBackend):
     def _armed(self, stream: httpcore.NetworkStream) -> httpcore.NetworkStream:
         if self._cut is not None:
             self._cut._arm(stream.get_extra_info("socket"))
+            if sys.platform == "win32":
+                return _Sliced(stream, self._cut)
         return stream
+
+
+class _Sliced(httpcore.NetworkStream):
+    """A stream whose reads wait in short slices and look at the cut
+    between them, where a shut-down socket leaves a blocked read waiting
+    out its timeout (Windows). A cut read ends as a shut-down one does."""
+
+    def __init__(self, stream: httpcore.NetworkStream, cut: Cut) -> None:
+        self._stream = stream
+        self._cut = cut
+
+    def read(self, max_bytes: int, timeout: float | None = None) -> bytes:
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while not self._cut.asked:
+            look = _CUT_LOOK
+            if deadline is not None:
+                look = min(look, deadline - time.monotonic())
+                if look <= 0:
+                    raise httpcore.ReadTimeout("timed out")
+            with contextlib.suppress(httpcore.ReadTimeout):
+                return self._stream.read(max_bytes, look)
+        return b""
+
+    def write(self, buffer: bytes, timeout: float | None = None) -> None:
+        self._stream.write(buffer, timeout)
+
+    def close(self) -> None:
+        self._stream.close()
+
+    def start_tls(
+        self,
+        ssl_context: ssl.SSLContext,
+        server_hostname: str | None = None,
+        timeout: float | None = None,
+    ) -> httpcore.NetworkStream:
+        return _Sliced(self._stream.start_tls(ssl_context, server_hostname, timeout), self._cut)
+
+    def get_extra_info(self, info: str) -> Any:
+        return self._stream.get_extra_info(info)
 
 
 def _is_loopback(host: str) -> bool:

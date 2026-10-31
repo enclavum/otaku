@@ -8,13 +8,19 @@ the rows the store never holds (the thinking, an error, the verbose
 stats) are left out of the comparison.
 
 Minutes, not seconds: every check launches a second app for its echo. So
-the module is `slow` besides `cli`, and runs only when asked for with
-`--slow` (`make regression`).
+the module is `slow` besides `cli`: `make regression` runs it, and any
+other run leaves it out with `-m "not slow"`. A check that fails says
+what tracing it takes: the seed of the fake model's picks
+(`OTAKU_SCREEN_SEED` replays it), the live screen and a fresh launch's,
+and the last bytes written.
 """
 
 import contextlib
+import os
+import random
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -27,11 +33,14 @@ from scenarios.support.emulator import (
     CTRL_J,
     CTRL_R,
     CTRL_U,
+    CTRL_Y,
     DOWN,
     ENTER,
     RIGHT,
     ROWS,
+    TM,
     Emulated,
+    echo,
     jumps,
     mismatch,
     model_server,
@@ -41,6 +50,9 @@ from scenarios.support.emulator import (
 from scenarios.support.harness import read_store
 
 pytestmark = [pytest.mark.cli, pytest.mark.slow]
+
+# The seed of the test running now, for its failure to name (`Played`).
+_SEED = [0]
 
 # A step: what a failure calls it, what it does to the terminal, and
 # whether it erases what stood drawn by design — an undo, a regenerate, an
@@ -98,6 +110,25 @@ class TestChatMode:
         )
         assert not problems, "\n".join(problems)
 
+    def test_an_undo_and_a_regenerate_reverted(self, played: "Played") -> None:
+        """A revert draws back in place what the undo or the regenerate
+        took: the exchange under the ending it left, the earlier take where
+        the fresh one stood."""
+        term = played(Layout.MANUSCRIPT)
+        problems = run(
+            term,
+            [
+                line("Go on."),
+                line("And on."),
+                key("undo", CTRL_U, erases=True),
+                key("revert the undo", CTRL_Y, erases=True),
+                key("regenerate", CTRL_R, erases=True),
+                key("revert the regenerate", CTRL_Y, erases=True),
+                line("Short."),
+            ],
+        )
+        assert not problems, "\n".join(problems)
+
     def test_the_verbose_line_stands_beside_its_turn(self, played: "Played") -> None:
         term = played(Layout.MANUSCRIPT, verbose=True)
         problems = run(
@@ -124,7 +155,7 @@ class TestChatMode:
         assert not problems, "\n".join(problems)
 
     def test_a_resumed_reply_goes_with_its_tool_rounds(self, played: "Played") -> None:
-        """A launch echoes a reply with tool rounds as one unit: a
+        """A launch echoes a reply with tool rounds whole: a
         regenerate redraws every round, and an undo takes every round off
         the screen, as the backend takes every row."""
         term = played(Layout.MANUSCRIPT, ("The ferry left.", "4 What time is it?"))
@@ -178,6 +209,38 @@ class TestStoryMode:
             if row.role == "assistant" and prose:
                 assert prose[:40] in shown, prose[:60]
 
+    def test_a_sentence_ending_on_the_last_column_keeps_its_last_letter(
+        self, played: "Played"
+    ) -> None:
+        """A call's note repaints the status row the moment the sentence
+        before it fills its row to the last column, where the cursor waits
+        to wrap: the repaint waits for the text to move on, so the words
+        after the call never land on that last letter — some terminals
+        forget the wait across the repaint's cursor restore."""
+        term = played(Layout.CANVAS)
+        said = "Go on."
+        # the reply begins after the reader's line and the join's space,
+        # the terminal wrapping letter by letter
+        start = (term.cursor[1] + len(said) + 1) % term.cols
+        sentence = _filling(term.cols - start if term.cols - start >= 20 else 2 * term.cols - start)
+        call = "```otk-system-info\n```"
+
+        def script(body: dict[str, Any]) -> str | tuple[str, str]:
+            messages = body.get("messages") or []
+            if len(messages) >= 2 and sentence in TM.content_text(messages[-2]):
+                # the round after the call, a paragraph after it: the prompt
+                # draws the text's last line again, which would mend that row
+                return "The rest of it came slowly.\n\nThen the bells stopped."
+            if messages and said in TM.content_text(messages[-1]):
+                return f"{sentence}\n\n{call}"
+            return TM.reply(body)  # the lore pass, and anything else
+
+        played.server.script = script
+        problems = run(term, [line(said)], story_mode=True)
+        assert not problems, "\n".join(problems)
+        # the premise: the sentence did fill its row to the last column
+        assert any(len(row) == term.cols and row.endswith(sentence[-8:]) for row in term.lines())
+
     def test_a_line_opening_with_a_dash_runs_on(self, played: "Played") -> None:
         term = played(Layout.CANVAS)
         problems = run(term, [line("- Try."), line("-2 Again.")], story_mode=True)
@@ -194,6 +257,23 @@ class TestStoryMode:
                 line("And on."),
                 key("undo", CTRL_U, erases=True),
                 key("regenerate, failing again", CTRL_R, erases=True),
+            ],
+            story_mode=True,
+        )
+        assert not problems, "\n".join(problems)
+
+    def test_an_undo_and_a_regenerate_reverted(self, played: "Played") -> None:
+        term = played(Layout.CANVAS)
+        problems = run(
+            term,
+            [
+                line("Go on."),
+                line("And on."),
+                key("undo", CTRL_U, erases=True),
+                key("revert the undo", CTRL_Y, erases=True),
+                key("regenerate", CTRL_R, erases=True),
+                key("revert the regenerate", CTRL_Y, erases=True),
+                line("Further."),
             ],
             story_mode=True,
         )
@@ -327,6 +407,9 @@ class Played:
     one state dir each; ends every terminal and the server with the test."""
 
     def __init__(self, tmp_path: Path) -> None:
+        # the fake model's picks from a seed a failure names, to replay them
+        _SEED[0] = int(os.environ.get("OTAKU_SCREEN_SEED") or random.randrange(1_000_000))
+        random.seed(_SEED[0])
         self.server = model_server()
         self._tmp_path = tmp_path
         self._terms: list[Emulated] = []
@@ -391,6 +474,12 @@ def key(name: str, data: bytes, *, erases: bool = False) -> Step:
     return name, act, erases
 
 
+def _filling(length: int) -> str:
+    """A sentence exactly `length` letters long, its full stop the last."""
+    words = ("The bells rang over the water once more " * 4)[: length - 1].rstrip()
+    return words.ljust(length - 1, "s") + "."
+
+
 def midway(text: str, data: bytes) -> Step:
     """A line sent, and `data` pressed while its reply streams."""
 
@@ -411,9 +500,38 @@ def run(term: Emulated, steps: list[Step], *, story_mode: bool = False) -> list[
         with term.recording() as frames:
             act(term)
             term.quiet()
-        found = ([] if erasing else jumps(frames)) + mismatch(term, story_mode=story_mode)
+        differs = mismatch(term, story_mode=story_mode)
+        if differs:
+            # Both captures wait for a moment's silence, not for the turn's
+            # end: a second look after a longer one tells a slow end of
+            # turn from a screen that is wrong.
+            term.quiet(still=3.0)
+            later = mismatch(term, story_mode=story_mode, still=4.0)
+            verdict = "still there after a longer quiet" if later else "gone after a longer quiet"
+            differs = [f"{problem} [{verdict}]" for problem in differs]
+        found = ([] if erasing else jumps(frames)) + differs
         problems += [f"{name}: {problem}" for problem in found[:6]]
+    if problems:
+        problems.append(_evidence(term))
     return problems
+
+
+def _evidence(term: Emulated) -> str:
+    """What a failed check takes to trace: the seed the fake model's picks
+    came from, the live screen and a fresh launch's, row by row, and the
+    last bytes the app wrote."""
+    rows, _ = echo(term.root, rows=term.rows, cols=term.cols)
+    return "\n".join(
+        [
+            f"seed {_SEED[0]} (OTAKU_SCREEN_SEED={_SEED[0]} replays its picks)",
+            "--- the live screen ---",
+            *(f"{n:2}|{row}" for n, row in enumerate(term.lines())),
+            "--- a fresh launch's ---",
+            *(f"{n:2}|{row}" for n, row in enumerate(rows)),
+            "--- the last bytes the app wrote ---",
+            repr(term.raw[-2000:]),
+        ]
+    )
 
 
 def painted(raw: bytes) -> bool:

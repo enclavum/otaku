@@ -12,9 +12,7 @@ from otaku.backend.api import (
     ModelRef,
     Refused,
 )
-from otaku.backend.api.story.messages import (
-    RawFile,
-)
+from otaku.backend.story.messages.schemas import RawFile
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch, set_config_provider
 

@@ -3,7 +3,7 @@ them: the file and its thumbnail, by the name their rows carry — bytes,
 which a browser may keep, since a file never changes once written."""
 
 from otaku.backend.api import Api
-from otaku.backend.api.app.pictures import Picture
+from otaku.backend.app.pictures.schemas import Picture
 from otaku.web.api._request import Blob, Route
 
 

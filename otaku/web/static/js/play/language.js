@@ -6,7 +6,7 @@
    and the help sheet read the language without depending on any screen.
    Loaded at boot from /api/language, and again whenever a restarted
    otaku comes back — the language is the backend's (`context.syntax`,
-   reaching here through `backend.api.story.language`), and the page
+   reaching here through `backend.story.language`), and the page
    never keeps a stale copy of one. */
 
 // The whole payload once, and the lookups built from it.
@@ -22,7 +22,7 @@ export function load(loaded) {
     .flatMap((row) => row.token.split(" "))
     .filter((word) => /^\/[a-z]+$/.test(word));
   // Plus the ONE command a transcript can carry: importing a character
-  // records its `/card FILE` line (`backend.api.story.cards`), and that
+  // records its `/card FILE` line (`backend.story.cards`), and that
   // row must read as a command here the way the terminal's block reads.
   tokens.push("/card");
 }

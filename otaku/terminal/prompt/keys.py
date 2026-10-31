@@ -26,7 +26,7 @@ _CONTROL_ENTER = ("\x1b[27;5;13~", "\x1b[13;5u")
 for _sequence in _CONTROL_ENTER:
     ANSI_SEQUENCES[_sequence] = (Keys.Escape, Keys.ControlJ)
 
-# Ctrl+D submits /bye only on an empty line — the terminal convention.
+# Ctrl+D submits /quit only on an empty line — the terminal convention.
 # With a draft on the line it falls through to delete-forward, so readline
 # muscle memory can never quit the app over a draft.
 _EMPTY_LINE = Condition(lambda: not get_app().current_buffer.text)
@@ -141,10 +141,12 @@ def make_bindings(
     # entry.
     @kb.add("up")
     def _up(event: Any) -> None:
+        carry.recalled = carry.recalled or not event.current_buffer.complete_state
         _menu_or_history_up(event.current_buffer, event.arg)
 
     @kb.add("down")
     def _down(event: Any) -> None:
+        carry.recalled = carry.recalled or not event.current_buffer.complete_state
         _menu_or_history_down(event.current_buffer, event.arg)
 
     # PROTOTYPE: in the canvas Up/Down walk the history across both places
@@ -171,6 +173,7 @@ def make_bindings(
             text = entries[at]
             command = text.startswith("/")
         if command == carry.command_paragraph:
+            carry.recalled = at != -1
             buffer.document = Document(text, len(text))
             return
         # the other place: the prompt hands over, as `/` and Esc do, and

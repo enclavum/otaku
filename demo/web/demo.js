@@ -116,6 +116,10 @@ const ROUTES = {
     const story = num(p.story);
     return changed(store.undo(story, expectedHead(story, ask)));
   },
+  "POST /api/stories/{story}/reverts": (p, q, b, ask) => {
+    const story = num(p.story);
+    return changed(store.revert(story, expectedHead(story, ask)));
+  },
   "GET /api/stories/{story}/export": (p) => store.exportDocument(num(p.story)),
   "POST /api/imports": (p, q, b) => {
     const landed = store.importDocument(need(b, "text"), need(b, "file_name"));
@@ -125,8 +129,12 @@ const ROUTES = {
   "GET /api/stories/{story}/messages": (p, q) =>
     items(store.messages(num(p.story), q.get("last") == null ? null : Number(q.get("last")))),
   "GET /api/stories/{story}/messages/{message}": (p) => store.message(num(p.story), num(p.message)),
-  "PATCH /api/stories/{story}/messages/{message}": (p, q, b) =>
-    changed(store.updateMessage(num(p.story), num(p.message), need(b, "body"))),
+  "PATCH /api/stories/{story}/messages/{message}": (p, q, b) => {
+    const fields = {};
+    if ("body" in b) fields.body = need(b, "body");
+    if ("pinned" in b) fields.pinned = flag(b, "pinned");
+    return changed(store.updateMessage(num(p.story), num(p.message), fields));
+  },
   "GET /api/stories/{story}/settings": (p) => items(store.storySettings(num(p.story))),
   "GET /api/stories/{story}/settings/{setting}": (p) => store.storySetting(num(p.story), p.setting),
   "PATCH /api/stories/{story}/settings/{setting}": (p, q, b) =>
@@ -388,7 +396,7 @@ function expectedHead(story, ask) {
   const found = stated.length === 1 ? /^"(\d+)"$/.exec(stated[0]) : null;
   if (found) return Number(found[1]) || null;
   if (stated.includes(etag(head))) return head;
-  throw new store.Refused(412, "The story moved on since you last saw it — nothing was changed.", { head });
+  throw new store.Refused(412, "The story was continued on another device — nothing was changed.", { head });
 }
 
 const etag = (head) => `"${head ?? 0}"`;
@@ -396,7 +404,7 @@ const etag = (head) => `"${head ?? 0}"`;
 // ---------- character cards ----------
 
 /* The real import, one layer down: the parse mirrors
-   `otaku/backend/domain/_formats/cards.py` — the PNG text chunks and JSON,
+   `otaku/backend/formats/cards.py` — the PNG text chunks and JSON,
    ccv3 preferred, the same allowlist, the same refusal sentences — and the
    flow mirrors `web.api.story.cards`: the file vetted with
    `?validate_only=true` and nothing stored, then imported by the same
@@ -405,7 +413,7 @@ const etag = (head) => `"${head ?? 0}"`;
    numbers always are. */
 
 const _PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
-const _LARGE_CARD_TOKENS = 4000; // the warning threshold of `backend.domain.story.cards`
+const _LARGE_CARD_TOKENS = 4000; // the warning threshold of `backend.story.cards.services`
 const _CHAR_MACRO = /\{\{\s*char\s*\}\}|<BOT>/gi;
 const _USER_MACRO = /\{\{\s*user\s*\}\}|<USER>/gi;
 const _ANY_MACRO = /\{\{[^{}]{1,40}\}\}/g;
@@ -478,7 +486,7 @@ function _normalizeCard(payload) {
       ? extensions.depth_prompt
       : {};
   // SillyTavern counts every message, otaku the reader's
-  // (`backend.domain._formats.cards._reminder_depth`)
+  // (`backend.formats.cards._reminder_depth`)
   const depth = Number.isInteger(prompt.depth) ? prompt.depth : 4;
   return {
     name,
@@ -593,7 +601,7 @@ async function makeCard(query, body) {
   return created(made, `/api/cards/${made.value.id}`);
 }
 
-/* A card into a story, always through the codex (`domain.story.cards`):
+/* A card into a story, always through the codex (`story.cards.services`):
    a file goes into the codex first — a file the codex holds brings its
    card in, `reuse` names the one the reader says it is — and a codex
    card (`card_id`) is invited as it stands. The head is checked before
@@ -677,6 +685,23 @@ async function card(story, query, body, ask) {
    product's order: the line as recorded (`user_message`), the reply's
    pieces (`assistant_text`, the first saying how it joins), the reply as
    recorded (`assistant_message`), and `done`. */
+/** A chapter's stream: the row that opens it, and nothing after — the
+    answer `play` gives, as the product's stream answers. */
+function chapterStream(opened) {
+  const encoder = new TextEncoder();
+  const event = { type: "user_message", message: opened, note: "" };
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+      controller.close();
+    },
+  });
+  return new Response(stream, {
+    status: 200,
+    headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-store" },
+  });
+}
+
 function play(story, body, ask, regenerate, signal) {
   store.story(story);
   const expected = expectedHead(story, ask);
@@ -688,6 +713,12 @@ function play(story, body, ask, regenerate, signal) {
       throw new store.Refused(409, "This model cannot see pictures.");
     }
     if (!line.trim() && facts.mode !== "story") throw new store.Refused(422, "Nothing to send: type a line.");
+  }
+  // `/chapter TITLE` opens a chapter: its row recorded and the stream
+  // over, no reply (`context.syntax`'s one unanswered direction)
+  if (!regenerate && /^\s*\/chapter(\s|$)/.test(line)) {
+    if (!line.trim().slice("/chapter".length).trim()) throw new store.Refused(422, "Usage: /chapter TITLE");
+    return chapterStream(store.openChapter(story, line.trim()));
   }
   const events = [];
   if (regenerate) store.dropReply(story);

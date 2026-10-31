@@ -23,6 +23,9 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import pytest
+from prompt_toolkit.application import create_app_session
+from prompt_toolkit.input import create_pipe_input
+from prompt_toolkit.output import DummyOutput
 
 from otaku.backend import launch as backend_launch
 from otaku.backend.api import Api, Refused
@@ -97,7 +100,7 @@ class TestProviderPanel:
         keys += ENTER + ESC + ESC
         picked = run_screen(keys, lambda: screen_models.pick(app.api))
         assert picked is None
-        raw = app.paths.providers_file.read_text()
+        raw = app.paths.providers_file.read_text(encoding="utf-8")
         assert 'url = "http://localhost:7777/v1"' in raw
         assert "[ollama]" in raw  # the other sections survived
         assert app.api.providers.get("generic").url == "http://localhost:7777/v1"
@@ -117,13 +120,13 @@ class TestProviderPanel:
         configured provider's url at another host, which is where the
         next turn would send its api key."""
         hostile = 'pwn]\n[openrouter]\nurl = "http://attacker"\n[x'
-        before = app.paths.providers_file.read_text()
+        before = app.paths.providers_file.read_text(encoding="utf-8")
         # A section is its provider's name, so a name no supported provider answers to
         # is refused before anything is written — nothing conjured out
         # of its rows, and the file as it was.
         with pytest.raises(Refused):
             app.api.providers.update(hostile, url="http://evil")
-        assert app.paths.providers_file.read_text() == before
+        assert app.paths.providers_file.read_text(encoding="utf-8") == before
         parsed = tomllib.loads(before)
         assert "openrouter" not in parsed
         assert parsed["generic"]["url"] == app.server.url
@@ -134,7 +137,7 @@ class TestProviderPanel:
         monkeypatch.setattr(clipboard, "paste", lambda: "sk-pasted")
         keys = _panel_walk(app, "generic", "api_key") + CTRL_V + ESC + ESC
         run_screen(keys, lambda: screen_models.pick(app.api))
-        entry = tomllib.loads(app.paths.providers_file.read_text())["generic"]
+        entry = tomllib.loads(app.paths.providers_file.read_text(encoding="utf-8"))["generic"]
         assert _unsealed(app, entry["api_key"]) == "sk-pasted"
 
     def test_a_terminal_paste_sets_the_field_too(self, app: App) -> None:
@@ -143,7 +146,7 @@ class TestProviderPanel:
         # binding alone would leave the field untouched.
         keys = _panel_walk(app, "generic", "api_key") + pasted("sk-from-cmd-v") + ESC + ESC
         run_screen(keys, lambda: screen_models.pick(app.api))
-        entry = tomllib.loads(app.paths.providers_file.read_text())["generic"]
+        entry = tomllib.loads(app.paths.providers_file.read_text(encoding="utf-8"))["generic"]
         assert _unsealed(app, entry["api_key"]) == "sk-from-cmd-v"
 
     def test_a_paste_inside_the_editor_stays_an_ordinary_paste(self, app: App) -> None:
@@ -152,20 +155,22 @@ class TestProviderPanel:
         keys = _panel_walk(app, "generic", "api_key") + ENTER + "head-" + pasted("tail")
         keys += ENTER + ESC + ESC
         run_screen(keys, lambda: screen_models.pick(app.api))
-        entry = tomllib.loads(app.paths.providers_file.read_text())["generic"]
+        entry = tomllib.loads(app.paths.providers_file.read_text(encoding="utf-8"))["generic"]
         assert _unsealed(app, entry["api_key"]) == "head-tail"
 
     def test_ctrl_v_sets_a_url_the_same_way(self, app: App, monkeypatch) -> None:
         monkeypatch.setattr(clipboard, "paste", lambda: "http://localhost:7777/v1")
         keys = _panel_walk(app, "generic", "url") + CTRL_V + ESC + ESC
         run_screen(keys, lambda: screen_models.pick(app.api))
-        assert 'url = "http://localhost:7777/v1"' in app.paths.providers_file.read_text()
+        assert 'url = "http://localhost:7777/v1"' in app.paths.providers_file.read_text(
+            encoding="utf-8"
+        )
         assert app.api.providers.get("generic").url == "http://localhost:7777/v1"
 
     def test_a_saved_api_key_is_sealed_never_plain(self, app: App) -> None:
         keys = _panel_walk(app, "generic", "api_key") + ENTER + "hunter-2" + ENTER + ESC + ESC
         run_screen(keys, lambda: screen_models.pick(app.api))
-        raw = app.paths.providers_file.read_text()
+        raw = app.paths.providers_file.read_text(encoding="utf-8")
         assert "hunter-2" not in raw  # never plain text in the config
         entry = tomllib.loads(raw)["generic"]
         assert entry["url"] == app.server.url  # the key edit left the url alone
@@ -197,7 +202,7 @@ class TestProviderPanel:
         # nowhere to ask, is no longer connected.
         keys = _panel_walk(app, "llamacpp", "url") + _DEL + ESC + ESC
         run_screen(keys, lambda: screen_models.pick(app.api))
-        raw = app.paths.providers_file.read_text()
+        raw = app.paths.providers_file.read_text(encoding="utf-8")
         assert tomllib.loads(raw)["llamacpp"]["url"] == ""
         assert app.api.providers.get("llamacpp").url == ""
         panel = app.api.providers.list()
@@ -209,7 +214,7 @@ class TestProviderPanel:
         keys = _panel_walk(app, "generic", "api_key") + ENTER + "hunter-2" + ENTER + _DEL
         keys += ESC + ESC
         run_screen(keys, lambda: screen_models.pick(app.api))
-        raw = app.paths.providers_file.read_text()
+        raw = app.paths.providers_file.read_text(encoding="utf-8")
         assert tomllib.loads(raw)["generic"]["api_key"] == ""
         assert app.api.providers.get("generic").key_source is None
 
@@ -272,8 +277,8 @@ class TestGenericProvider:
         try:
             listed = app.api.providers.list(probe=False).providers
             assert "mybox" not in {row.id for row in listed if row.configured}
-            assert any("[mybox]" in notice for notice in app.api.app.get().launch.notices)
-            assert tomllib.loads(app.paths.providers_file.read_text())["mybox"]
+            assert any("[mybox]" in notice for notice in app.api.app.get().launch_facts.notices)
+            assert tomllib.loads(app.paths.providers_file.read_text(encoding="utf-8"))["mybox"]
         finally:
             app.close()
 
@@ -421,12 +426,14 @@ class TestCloudProviders:
             # ...and the picker fetches them after opening: the rows land
             # in the background and the pending mark drains.
             providers = list(app.api.providers.list(probe=False).providers)
-            picker = screen_models.ModelPicker(app.api, providers, [], fetch=["openrouter"])
-            deadline = time.monotonic() + 5
-            while picker.pending and time.monotonic() < deadline:
-                time.sleep(0.02)
-            assert picker.pending == set()
-            assert {e.full_spec for e in picker.all} == {"openrouter/test-model"}
+            # Built off any console, as every screen here is (Windows has none).
+            with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
+                picker = screen_models.ModelPicker(app.api, providers, [], fetch=["openrouter"])
+                deadline = time.monotonic() + 5
+                while picker.pending and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                assert picker.pending == set()
+                assert {e.full_spec for e in picker.all} == {"openrouter/test-model"}
         finally:
             app.close()
 

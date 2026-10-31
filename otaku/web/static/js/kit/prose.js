@@ -58,7 +58,7 @@ const _BREAK = /^\s*(?:\*\s*){3,}$|^\s*(?:-\s*){3,}$|^\s*(?:_\s*){3,}$/;
 
 // A fence line — three or more backticks at the head of a line, up to
 // three spaces in — is block structure: the characters typed, never
-// three code spans flipping. The rule is `context.tool_calls`' (`_BARE`).
+// three code spans flipping. The rule is `context.tools`' (`_BARE`).
 const _FENCE = /^ {0,3}`{3,}/;
 
 /** One paragraph as NODES, ready to put in a `<p>`: the runs above, each

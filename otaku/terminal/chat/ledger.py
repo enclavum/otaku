@@ -362,6 +362,13 @@ class ScreenLedger:
         sys.stdout.flush()
 
     @property
+    def is_live(self) -> bool:
+        """Whether an exchange the stack holds still ends the screen —
+        nothing printed past it since — so a turn echoed now reads on from
+        it, in place."""
+        return bool(self._stack)
+
+    @property
     def reply_turns(self) -> int | None:
         """How many of the story's last rows the top exchange's reply
         shows, where a launch echo cut the reply's unit; None where it
@@ -394,6 +401,12 @@ class ScreenLedger:
         """The column the text on screen ends at — the last line measured
         as the terminal lays it out, wrapping included."""
         return _column(self._tail, terminal_width())
+
+    @property
+    def waiting_to_wrap(self) -> bool:
+        """Whether the cursor stands past a full row's last letter, the
+        terminal waiting to wrap at the next one (`resume_tail`)."""
+        return self.tail_column >= terminal_width()
 
     def note_printed(self, text: str) -> None:
         """Keep where the text ends as `text` prints: the last line's
@@ -746,7 +759,7 @@ class ScreenLedger:
         under the reply's text — a paragraph's standing blank becomes that
         line, the reply's own row now — and `text` ending its row as a
         reply does. What an undo that left the story on a question draws
-        the question back with (`dispatch.story.stories`)."""
+        the question back with (`dispatch.stories`)."""
         entry = self._top()
         lead = "\n"
         if self._pending >= 2:

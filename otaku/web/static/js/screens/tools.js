@@ -403,7 +403,7 @@ function reminderBody(view, text, write) {
 function keyButton(view) {
   /* The web search key — "Search API key" on the page — in a dialog: ONE box,
      no engine named; the backend tells the engine from the key's shape
-     and says which it chose (`backend.api.app.integrations`). A key that is
+     and says which it chose (`backend.app.integrations`). A key that is
      set shows masked, as a provider's does (`models.keyField`); Save
      writes what was typed, and a box emptied of a key forgets it — the
      backend's sentence says which. */

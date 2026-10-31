@@ -12,7 +12,7 @@
 import { api } from "../api/index.js";
 import { ask, askWriting, browser, footnote, guard, popups, report } from "../kit/browser.js";
 import { $, actionButton, element, row, span } from "../kit/dom.js";
-import { ago, label, since, when } from "../kit/format.js";
+import { ago, count, label, since, when } from "../kit/format.js";
 import * as held from "../play/held.js";
 import { landed } from "../play/shell.js";
 import { confirmFork, land, openStory } from "./dossier.js";
@@ -33,7 +33,7 @@ export async function openStories(answered = "", { selectId = null } = {}) {
       const drawn = row(span("otk-row__title", label(story.label) || "(untitled)"));
       if (story.id === held.story()) drawn.append(span("otk-tag", "open"));
       drawn.append(
-        span("otk-row__num otk-row__num--count", String(story.message_count)),
+        span("otk-row__num otk-row__num--messages", `${story.message_count} msg`),
         span("otk-row__num otk-row__num--ago", since(story.updated_at)),
       );
       return drawn;
@@ -73,6 +73,7 @@ export async function openStories(answered = "", { selectId = null } = {}) {
         span(
           "otk-meta",
           `${story.message_count} ${story.message_count === 1 ? "message" : "messages"}` +
+            ` · ${count(story.word_count)} ${story.word_count === 1 ? "word" : "words"}` +
             (story.model ? ` · ${story.model}` : ""),
         ),
         story.story_so_far && section("The story so far", story.story_so_far),

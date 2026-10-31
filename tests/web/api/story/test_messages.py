@@ -11,21 +11,23 @@ from dataclasses import replace
 from typing import get_args
 
 from otaku.backend.api import Actor, JoinType
-from otaku.backend.api.story.messages import (
+from otaku.backend.story.messages.schemas import (
     AssistantMessage,
     AssistantReasoning,
     AssistantText,
     AssistantToolCall,
     Declined,
     Done,
+    EmptyReply,
     Failed,
     PlayEvent,
     ReplyReport,
     ToolMessage,
     UserMessage,
-    _as_messages,
+    _as_message,
 )
-from otaku.backend.api.story.messages import Message as Handed
+from otaku.backend.story.messages.schemas import Message as Handed
+from otaku.backend.story.messages.services import _listed
 from otaku.providers import Stats
 from otaku.store.schema import Message
 from otaku.web.api.story.messages import event
@@ -46,6 +48,7 @@ class TestEvent:
         assert event(ToolMessage(result))["type"] == "tool_message"
         assert event(Declined("no model"))["type"] == "declined"
         assert event(Failed("the provider hung up"))["type"] == "failed"
+        assert event(EmptyReply("sent nothing"))["type"] == "empty_reply"
         assert event(Done(report=None, stats="7 tok/s"))["type"] == "done"
 
     def test_the_union_is_covered(self) -> None:
@@ -60,6 +63,7 @@ class TestEvent:
             "ToolMessage",
             "Declined",
             "Failed",
+            "EmptyReply",
             "Done",
         }
 
@@ -118,7 +122,7 @@ class TestEvent:
         assert message["tool_label"] == "Web search call"
         assert message["provider"] == "web-search"
         # the reply holding the call and the result are one unit
-        assert message["unit"] == call.id
+        assert message["reply_start_id"] == call.id
 
     def test_done_without_a_report_says_nothing(self) -> None:
         assert event(Done(report=None, stats="")) == {
@@ -147,15 +151,19 @@ class TestEvent:
         # a reply cut short says so
         assert done["notice"] == report.notice != ""
 
-    def test_declined_and_failed_carry_their_sentence(self) -> None:
+    def test_declined_failed_and_empty_carry_their_sentence(self) -> None:
         assert event(Declined("no model"))["reason"] == "no model"
         assert event(Failed("hung up"))["reason"] == "hung up"
+        assert event(EmptyReply("sent nothing"))["note"] == "sent nothing"
 
 
 def handed(*rows: Message) -> list[Handed]:
     """Store rows as the messages an event carries — built as the backend
     builds them, each numbered by its position."""
-    return _as_messages([replace(row, id=index + 1) for index, row in enumerate(rows)])
+    chain = [replace(row, id=index + 1) for index, row in enumerate(rows)]
+    return [
+        _as_message(listed.row, listed.previous, listed.reply_start_id) for listed in _listed(chain)
+    ]
 
 
 def _call() -> AssistantToolCall:

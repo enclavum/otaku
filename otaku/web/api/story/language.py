@@ -3,7 +3,7 @@ may start with and the inliners it may carry, tokens and argument
 shapes, and what a line with none of them does — what the composer's
 menu offers and the help sheet lists. What each one MEANS in a menu is
 the page's own caption; the rules a line not stored yet is read by are
-copied in the page, citing `backend.api.story.language`."""
+copied in the page, citing `backend.story.language`."""
 
 from otaku.web.api._request import Route, plain
 

@@ -74,6 +74,8 @@ const _MENU = {
   // the caption matches the terminal's group label for /roll
   // (`terminal.commands.GROUP_LABELS["special"]`), so the two menus file it alike
   "/roll": ["Special", "roll real dice; the model narrates"],
+  // the terminal's group label for /chapter (`terminal.commands.GROUP_LABELS["stories"]`)
+  "/chapter": ["Stories", "a new chapter at the story's end"],
 };
 
 /** The word itself, without the `… ` the table marks an inliner with: the
@@ -148,7 +150,7 @@ export async function submit(line) {
   // with an unknown slash word is prose that starts with a slash. On
   // the canvas a line plays AS TYPED, the breaks at its edges its
   // paragraphs — from the text before it and to the model's continuation
-  // (`domain.story._play.submit_line` records them so); a command never does.
+  // (`backend.story.play.submit_line` records them so); a command never does.
   const verbatim = continuing() && said && !said.startsWith("/");
   playLine(verbatim ? line : said, files);
 }
@@ -303,12 +305,14 @@ function onKey(event) {
     at = null;
     return;
   }
-  /* The two verbs beside the box, on the keys the hints advertise —
+  /* The verbs of the last exchange, on the terminal's keys — ctrl+r and
+     ctrl+u as the hints advertise, ctrl+y named in the help window alone —
      answered only HERE, while the box has focus: anywhere else ctrl+r
      belongs to whatever owns it (and ⌘R stays the browser's reload). */
-  if (event.ctrlKey && !event.metaKey && (event.key === "r" || event.key === "u")) {
+  const verb = { r: "/regen", u: "/undo", y: "/revert" }[event.key];
+  if (verb && event.ctrlKey && !event.metaKey) {
     event.preventDefault();
-    run(event.key === "r" ? "/regen" : "/undo");
+    run(verb);
     return;
   }
   if ((event.key === "ArrowUp" || event.key === "ArrowDown") && _walkable()) {

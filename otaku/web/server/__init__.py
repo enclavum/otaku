@@ -10,9 +10,9 @@ up without a restart and without a reload anybody has to remember.
 
 What a request MEANS is `web.api`'s: a handler looks a path up — in the
 asset table below, or in `api`'s own tables — and carries the result.
-The thread that owns the app is `web.thread`; everything above HTTP
-(the banner, the tail, Ctrl+C, the wiring of all three) is `web.run`,
-which is also the only place anything is printed: the serving is handed
+The thread that owns the app is the backend's (`App.run`); everything
+above HTTP (the banner, the tail, Ctrl+C, the wiring of all three) is
+`web.run`, which is also the only place anything is printed: the serving is handed
 one line per request worth showing (`Hooks`) and knows nothing about
 where it appears. What the stdlib would have put in the terminal on its
 own — an access line per font, a traceback per closed tab — is answered
@@ -59,17 +59,17 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
 
+from otaku.console import banner
 from otaku.web import api
-from otaku.web.api import Api, App, Refused
+from otaku.web.api import App, Refused, StoppingError
 from otaku.web.api.app.settings import WebSettings
 from otaku.web.server import assets
 from otaku.web.server.assets import ASSETS, CSS, CUSTOM_FONTS, NO_STORE, PRIVATE_IMMUTABLE
 from otaku.web.server.base import LOOPBACK, RETRY_AFTER, Hooks, Server
 from otaku.web.server.guards import LOGIN, Guards
 from otaku.web.server.streams import WATCH, Streams
-from otaku.web.thread import AppRunner, StoppingError
 
-__all__ = ["LOOPBACK", "Hooks", "bind"]
+__all__ = ["LOOPBACK", "Hooks", "Server", "bind", "web_facts"]
 
 # The lane is the METHOD. A GET only READS the app and is answered on
 # the read queue — during a reply as well as between them, which is what
@@ -143,7 +143,7 @@ _QUIET = (set(ASSETS) | {"/custom.css", _STATUS, WATCH}) - {"/"}
 
 def bind(
     config: WebSettings,
-    runner: AppRunner[App],
+    app: App,
     custom_web_dir: Path,
     hooks: Hooks,
     tls_context: ssl.SSLContext | None = None,
@@ -161,16 +161,30 @@ def bind(
     before this was called — nothing here can fail for want of one.
 
     `password_hash` is the hash of `[web] password` the launch made —
-    never the typed password (`backend.domain.app._passwords`). None is the default
+    never the typed password (`backend.app.passwords`). None is the default
     configuration, where nobody is asked for anything."""
     return Server(
         (config.host, config.port),
         Handler,
-        runner=runner,
+        app=app,
+        address=banner.link_target(web_facts(config)),
         custom_web_dir=custom_web_dir,
         hooks=hooks,
         tls_context=tls_context,
         password_hash=password_hash,
+    )
+
+
+def web_facts(config: WebSettings, newer_version: str = "") -> banner.WebFacts:
+    """What a banner states of the address `config` gives: where the page
+    listens, whether a password guards it — and `newer_version`, the
+    newer version the last update check found."""
+    return banner.WebFacts(
+        host=config.host,
+        port=config.port,
+        is_https=config.https,
+        password_set=bool(config.password),
+        newer_version=newer_version,
     )
 
 
@@ -263,7 +277,7 @@ class Handler(Guards, Streams):
             if streams:
                 self._stream(lambda interface: call(interface, ask))
             else:
-                self._answer(lambda app: call(Api(app), ask), reading=self.command == _READING)
+                self._answer(lambda: call(self.server.api, ask), reading=self.command == _READING)
             return
         allowed = self._allowed()
         if allowed:
@@ -333,8 +347,9 @@ class Handler(Guards, Streams):
 
     # ---------- answering ----------
 
-    def _answer(self, produce: Callable[[App], object], *, reading: bool = False) -> None:
-        """Run on the app's thread and reply with what came back.
+    def _answer(self, produce: Callable[[], object], *, reading: bool = False) -> None:
+        """Run as one unit on the app's thread (`App.run`) and reply with
+        what came back.
         `reading` declares that `produce` only READS the app — it is
         what lets the job run between the frames of a reply, and every
         screen in the app is one of those. A Refused is an ANSWER — "No
@@ -343,7 +358,7 @@ class Handler(Guards, Streams):
         only a bug is a 500, and its traceback goes where the reader
         is."""
         try:
-            payload = self.server.runner.run(produce, reading=reading)
+            payload = self.server.app.run(produce, reading=reading)
         except StoppingError:
             # The reader stopped otaku while this was in the queue. An
             # ordinary end, not a fault: no traceback, nothing recorded.

@@ -30,14 +30,15 @@ from prompt_toolkit.styles import Style
 
 from otaku.formatting import flatten, truncate
 from otaku.terminal.api import Api
-from otaku.terminal.api.app.models import ModelSettings
+from otaku.terminal.api.models import ModelSettings
 from otaku.terminal.prompt.answers import AnswerMenu
 from otaku.terminal.prompt.caret import Caret, caret_painter
 from otaku.terminal.prompt.completion import SlashCompleter
 from otaku.terminal.prompt.keys import make_bindings
 from otaku.terminal.prompt.lines import Carry, LineAssembler
-from otaku.terminal.tty import HIDE_CURSOR, statusline
+from otaku.terminal.tty import HIDE_CURSOR
 from otaku.terminal.tty.render import message
+from otaku.terminal.tty.statusline import StatusLine
 from otaku.terminal.tty.theme import theme
 
 # The empty line's hint in chat mode; story mode shows its caret instead
@@ -91,13 +92,12 @@ def build_prompt(
     story: Callable[[], int | None],
     can_attach: Callable[[], bool],
     shortcuts: Mapping[str, tuple[str, str]],
-    aside: Callable[[], str],
-    note: Callable[[], str] = lambda: "",
+    status_line: StatusLine,
 ) -> tuple[PromptSession[str], AnswerMenu]:
     """The assembled prompt session and the answer menu it draws above
-    its line: history, menu, style, the activity toolbar reading `note()`
-    and the worker's line with `aside()` against its right edge, and the
-    shortcut keybindings — the story played read off `story()`, and
+    its line: history, menu, style, the status row as its toolbar
+    (`status_line`, which owns how it reads), and the shortcut
+    keybindings — the story played read off `story()`, and
     whether a picture may ride the line off `can_attach()`, both the
     caller's to know;
     `shortcuts` maps a command token to its key in both spellings, the
@@ -133,12 +133,20 @@ def build_prompt(
         completer=completer,
         lexer=_CommandLexer(),
         key_bindings=make_bindings(carry, menu_line, shortcuts, answers, api.history.list),
-        complete_while_typing=menu_line,
+        # The menu's rows are kept free under a command line being typed,
+        # never under one the history recalled, which opens no menu.
+        complete_while_typing=menu_line & ~Condition(lambda: carry.recalled),
         enable_history_search=False,
         style=_prompt_style(),
         cursor=Caret(carry),
-        bottom_toolbar=_activity_toolbar(api, aside, note),
+        bottom_toolbar=status_line.fragments,
     )
+
+    def typed(_buffer: Buffer) -> None:
+        """A character typed on a recalled line makes it the reader's."""
+        carry.recalled = False
+
+    prompt_session.default_buffer.on_text_insert += typed
     # A prompt standing in the story's text (`Carry.in_text`) ends leaving
     # what it drew, the caret back where its drawing began: the ledger
     # writes the text's last line over itself and erases what follows in
@@ -248,35 +256,15 @@ def _prompt_style() -> Style:
             "scrollbar.background": "bg:default",
             "scrollbar.button": "bg:ansibrightblack",
             # prompt_toolkit styles the bottom toolbar `reverse` by default — a
-            # full-width grey bar; noreverse leaves it plain, dim like the
-            # pinned row it hands off to.
+            # full-width grey bar; noreverse leaves it plain, its text painted
+            # as the pinned row's (`statusline._paints`).
             "bottom-toolbar": "noreverse",
-            "bottom-toolbar.text": "noreverse fg:ansibrightblack",
             # The answer rows above the prompt: the one under the cursor in
             # the accent, as the command menu picks its row out.
             "answer": "fg:default",
             "answer.current": accent,
         }
     )
-
-
-def _activity_toolbar(
-    api: Api, aside: Callable[[], str], note: Callable[[], str]
-) -> Callable[[], FormattedText]:
-    """The prompt's activity line: `note()` — the last reply's stats in
-    story mode — and what the background worker is doing, either blank,
-    and `aside()` against the right edge. Always present —
-    the row is reserved for the whole prompt, so it never reflows the
-    screen. `statusline.render`, not a local format string: the pinned row
-    draws the same line on the same terminal row, and any difference shows
-    as a twitch when a reply starts streaming."""
-
-    def render() -> FormattedText:
-        width = get_app().output.get_size().columns
-        line = statusline.render(api.app.status.get(), aside(), width, note())
-        return FormattedText([("class:bottom-toolbar.text", line)])
-
-    return render
 
 
 # ---------- the completion menu ----------

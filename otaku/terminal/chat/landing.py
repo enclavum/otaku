@@ -21,16 +21,19 @@ def land_from_screen(chat: Chat, landed: tuple[int, str] | None) -> None:
     echo_landing(chat, line)
 
 
-def catch_up(chat: Chat) -> None:
+def catch_up(chat: Chat) -> bool:
     """Before each prompt: the story as it stands, echoed under the break
     rule where it moved on elsewhere since this terminal drew it, or said
-    gone where it was deleted under it."""
+    gone where it was deleted under it — whether either was printed."""
     played = chat.story_id
     if chat.catch_up():
         assert chat.story is not None
         echo_landing(chat, chat.story.landed_line("Caught up"))
-    elif played is not None and chat.story_id is None:
+        return True
+    if played is not None and chat.story_id is None:
         chat.say(_STORY_DELETED)
+        return True
+    return False
 
 
 def echo_landing(chat: Chat, line: str) -> None:

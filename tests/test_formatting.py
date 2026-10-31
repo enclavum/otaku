@@ -44,10 +44,10 @@ class TestDecodeText:
 
 class TestPrettyPath:
     def test_shortens_a_path_under_home(self) -> None:
-        assert pretty_path(Path.home() / "notes" / "a.md") == "~/notes/a.md"
+        assert pretty_path(Path.home() / "notes" / "a.md") == str(Path("~", "notes", "a.md"))
 
     def test_leaves_a_path_outside_home_alone(self) -> None:
-        assert pretty_path(Path("/etc/hosts")) == "/etc/hosts"
+        assert pretty_path(Path("/etc/hosts")) == str(Path("/etc/hosts"))
 
     def test_shortens_home_itself(self) -> None:
         assert pretty_path(Path.home()) == "~"

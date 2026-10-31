@@ -41,7 +41,7 @@ __all__ = [
 class Integrations:
     """Every integration as the app holds it, by id: each bound to its
     section of integrations.toml, or to the one it is founded with where
-    the file has none. A key saved rebinds one (`backend.api.app.integrations`)."""
+    the file has none. A key saved rebinds one (`backend.app.integrations`)."""
 
     by_id: Mapping[str, Integration]
 

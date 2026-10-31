@@ -3,7 +3,7 @@ character shows, in what order, and which of them a hand may correct —
 the description and an imported card, each journal entry scene by scene
 in story order, and the arc so far, which is the extractor's own."""
 
-from otaku.terminal.api.story.lore import Character, Journal, Lore, Scene
+from otaku.terminal.api.lore import Character, Journal, Lore, Scene
 from otaku.terminal.screens.dossier.cast import char_fields
 
 

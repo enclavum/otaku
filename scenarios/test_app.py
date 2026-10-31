@@ -1,5 +1,6 @@
 """The launch itself (`otaku.app`): the key ceremony and what it seals,
-the daily backup snapshot, and resuming over a story that is gone.
+the daily backup snapshot, resuming over a story that is gone, and the
+purge that `otaku uninstall` asks for.
 
 Encryption runs the real path end to end — the "command" KEK provider
 with a scripted retrieve_command — so these stories prove the core
@@ -12,6 +13,7 @@ import re
 import secrets
 import sqlite3
 import subprocess
+import sys
 import tomllib
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -22,9 +24,9 @@ from otaku import encryption
 from otaku import logging as otaku_logging
 from otaku.backend import launch as backend_launch
 from otaku.backend.api import Api, ModelRef
-from otaku.backend.api.story.messages import RawFile
-from otaku.backend.domain.app import pictures as backend_files
-from otaku.backend.domain.app._paths import Paths
+from otaku.backend.app.paths import Paths
+from otaku.backend.app.pictures import services as backend_files
+from otaku.backend.story.messages.schemas import RawFile
 from otaku.encryption import Cipher, EncryptionError, PlainCipher
 from otaku.formatting import toml_string
 from otaku.settings import config as config_mod
@@ -45,6 +47,7 @@ from otaku.store.migrations import v10 as store_v10
 from otaku.store.migrations import v11 as store_v11
 from otaku.store.migrations import v12 as store_v12
 from otaku.store.migrations import v13 as store_v13
+from otaku.store.migrations import v14 as store_v14
 from otaku.store.schema import (
     SCHEMA_DDL,
     SCHEMA_VERSION,
@@ -180,12 +183,13 @@ class TestBackups:
         for stale in app.paths.backups_dir.iterdir():
             stale.unlink()
         app.paths.backups_dir.rmdir()
-        app.paths.backups_dir.write_text("not a directory")
+        app.paths.backups_dir.write_text("not a directory", encoding="utf-8")
 
         relaunched = launch(root, server)
         try:
             assert any(
-                "backup failed" in notice for notice in relaunched.api.app.get().launch.notices
+                "backup failed" in notice
+                for notice in relaunched.api.app.get().launch_facts.notices
             )
         finally:
             relaunched.close()
@@ -337,7 +341,7 @@ class TestSchemaMigration:
         _v1_database(root)
         app = launch(root, server)
         try:
-            assert any("migrated" in notice for notice in app.api.app.get().launch.notices)
+            assert any("migrated" in notice for notice in app.api.app.get().launch_facts.notices)
         finally:
             app.close()
 
@@ -431,7 +435,7 @@ class TestSchemaMigration:
         proc = subprocess.run(
             ["git", "show", "v0.2.2:otaku/store/schema.py"],
             capture_output=True,
-            text=True,
+            encoding="utf-8",
             check=False,
         )
         if proc.returncode != 0:
@@ -458,7 +462,7 @@ class TestSchemaMigration:
         proc = subprocess.run(
             ["git", "show", "v0.5.0:otaku/store/schema.py"],
             capture_output=True,
-            text=True,
+            encoding="utf-8",
             check=False,
         )
         if proc.returncode != 0:
@@ -474,7 +478,7 @@ class TestSchemaMigration:
         proc = subprocess.run(
             ["git", "show", "v0.7.0:otaku/store/schema.py"],
             capture_output=True,
-            text=True,
+            encoding="utf-8",
             check=False,
         )
         if proc.returncode != 0:
@@ -566,6 +570,51 @@ class TestSchemaMigration:
         try:
             assert store.cards.get(card).profile == "description = 'A keeper.'"
             assert [c.profile for c in store.characters.list(story)] == [copy]
+        finally:
+            store.close()
+
+    def test_step_14_counts_a_plain_librarys_words_and_admits_a_chapter(self, tmp_path) -> None:
+        # A version-13 row has no count: on a plain database the step counts
+        # every row — a tool's result as none, a Chinese or Japanese
+        # character as a word — and a chapter's row may be stored after it.
+        paths = _state(tmp_path)
+        store = _open(paths)
+        try:
+            story = store.stories.add("A")
+            _say(store, story, "The keeper waits at the gate.")
+            _say(store, story, "雨が降る")
+            result = Message(
+                role="tool", kind="tool", body="three more words", provider="web-search"
+            )
+            store.stories.append(story, result, after=store.stories.get_head(story))
+        finally:
+            store.close()
+        _taken_back(paths, 13)
+        store = _open(paths)
+        try:
+            (listing,) = store.stories.list()
+            assert listing.word_count == 6 + 4
+            chapter = Message(role="user", kind="chapter", body="/chapter The Flood")
+            store.stories.append(story, chapter, after=store.stories.get_head(story))
+        finally:
+            store.close()
+
+    def test_step_14_leaves_an_encrypted_librarys_words_uncounted(self, tmp_path) -> None:
+        # A step never holds the cipher: the rows it found stay uncounted,
+        # and a row written since is counted as it lands.
+        paths = _state(tmp_path)
+        store = _sealed(paths)
+        try:
+            story = store.stories.add("A")
+            _say(store, story, "The keeper waits at the gate.")
+        finally:
+            store.close()
+        _taken_back(paths, 13)
+        store = _sealed(paths)
+        try:
+            assert store.stories.list()[0].word_count == 0
+            _say(store, story, "She opens it.")
+            assert store.stories.list()[0].word_count == 3
         finally:
             store.close()
 
@@ -803,8 +852,8 @@ class TestConfigMigration:
         # real autoconfigured key must never reach the OS keychain here.
         paths.config_key_file.write_bytes(secrets.token_bytes(32))
         _cfg, providers = load_config(paths)
-        assert "[providers." not in paths.config_file.read_text()
-        rendered = paths.providers_file.read_text()
+        assert "[providers." not in paths.config_file.read_text(encoding="utf-8")
+        rendered = paths.providers_file.read_text(encoding="utf-8")
         for section in ("[llamacpp]", "[koboldcpp]", "[ollama]", "[omlx]", "[lmstudio]"):
             assert section in rendered
         assert set(providers) == {"llamacpp", "koboldcpp", "ollama", "omlx", "lmstudio"}
@@ -816,7 +865,7 @@ class TestConfigMigration:
         load_config(paths)
         # every configurable integration's section with no key: web
         # search's, one key and no engine named
-        assert tomllib.loads(paths.integrations_file.read_text()) == {
+        assert tomllib.loads(paths.integrations_file.read_text(encoding="utf-8")) == {
             "web_search": {"api_key": ""},
         }
 
@@ -826,12 +875,12 @@ class TestConfigMigration:
         paths = Paths.resolve(tmp_path / "state")
         paths.ensure_tree()
         paths.config_key_file.write_bytes(secrets.token_bytes(32))
-        paths.config_file.write_text("[settings]\nshow_banner = false\n")
+        paths.config_file.write_text("[settings]\nshow_banner = false\n", encoding="utf-8")
         paths.integrations_file.write_text(
-            '[proxy]\nurl = "https://x.test/api"\napi_key = "plain-k"\n'
+            '[proxy]\nurl = "https://x.test/api"\napi_key = "plain-k"\n', encoding="utf-8"
         )
         load_config(paths)
-        raw = paths.integrations_file.read_text()
+        raw = paths.integrations_file.read_text(encoding="utf-8")
         assert "plain-k" not in raw
         file = tomllib.loads(raw)
         assert file["web_search"] == {"api_key": ""}
@@ -854,7 +903,7 @@ class TestConfigMigration:
         _cfg, providers = load_config(paths)
         assert providers["openrouter"].url == "https://openrouter.ai/api/v1"
         assert providers["openrouter"].api_key == ""
-        rendered = paths.providers_file.read_text()
+        rendered = paths.providers_file.read_text(encoding="utf-8")
         assert "from-env" not in rendered
         assert rendered.index("[openrouter]") < rendered.index("prompt_cache")
         assert "[nanogpt]" not in rendered
@@ -896,13 +945,13 @@ class TestConfigMigration:
         config_file = app.paths.config_file
         old = "\n".join(
             line
-            for line in config_file.read_text().splitlines()
+            for line in config_file.read_text(encoding="utf-8").splitlines()
             if not line.startswith(("[terminal]", "dialogue_color =", "dialogue_bold ="))
         )
-        config_file.write_text(old + "\n# my note\n")
+        config_file.write_text(old + "\n# my note\n", encoding="utf-8")
 
         cfg, _providers = load_config(app.paths)
-        migrated = config_file.read_text()
+        migrated = config_file.read_text(encoding="utf-8")
         assert "[terminal]" in migrated
         assert 'dialogue_color = "auto"' in migrated
         # Anchored below [settings], where a fresh config renders it.
@@ -912,7 +961,7 @@ class TestConfigMigration:
         assert cfg.dialogue_color == "auto"
         backups = list(app.paths.config_backups_dir.iterdir())
         assert len(backups) == 1
-        assert "[terminal]" not in backups[0].read_text()
+        assert "[terminal]" not in backups[0].read_text(encoding="utf-8")
 
     def test_an_old_context_section_gains_the_max_context_row(
         self, server: ModelServer, tmp_path
@@ -926,20 +975,20 @@ class TestConfigMigration:
         config_file = app.paths.config_file
         old = "\n".join(
             line
-            for line in config_file.read_text().splitlines()
+            for line in config_file.read_text(encoding="utf-8").splitlines()
             if not line.startswith("max_context")
         )
-        config_file.write_text(old + "\n")
+        config_file.write_text(old + "\n", encoding="utf-8")
 
         cfg, _providers = load_config(app.paths)
-        migrated = config_file.read_text()
+        migrated = config_file.read_text(encoding="utf-8")
         assert "max_context = 0" in migrated
         assert "0 = the model's own max context" in migrated  # the comment rides it
         assert migrated.index("[context]") < migrated.index("max_context")
         assert cfg.context_limit == 0
         backups = sorted(app.paths.config_backups_dir.iterdir())
         load_config(app.paths)
-        assert config_file.read_text() == migrated
+        assert config_file.read_text(encoding="utf-8") == migrated
         assert sorted(app.paths.config_backups_dir.iterdir()) == backups
 
     def test_tail_messages_renames_to_min_tail_and_keeps_its_value(
@@ -953,19 +1002,19 @@ class TestConfigMigration:
         config_file = app.paths.config_file
         old = "\n".join(
             "tail_messages = 77" if line.startswith("min_tail_messages") else line
-            for line in config_file.read_text().splitlines()
+            for line in config_file.read_text(encoding="utf-8").splitlines()
         )
         assert "tail_messages = 77" in old
-        config_file.write_text(old + "\n")
+        config_file.write_text(old + "\n", encoding="utf-8")
 
         cfg, _providers = load_config(app.paths)
-        migrated = config_file.read_text()
+        migrated = config_file.read_text(encoding="utf-8")
         assert "min_tail_messages = 77" in migrated
         assert "tail_messages = 77\n" not in migrated  # the old spelling is gone
         assert "at least this many recent messages" in migrated  # the comment rides it
         assert cfg.min_tail_messages == 77
         load_config(app.paths)  # converged: a second launch changes nothing
-        assert config_file.read_text() == migrated
+        assert config_file.read_text(encoding="utf-8") == migrated
 
     def test_an_old_openrouter_section_gains_the_prompt_cache_row(
         self, server: ModelServer, tmp_path
@@ -981,13 +1030,13 @@ class TestConfigMigration:
         # The pre-upgrade shape: the section without the key.
         old = "\n".join(
             line
-            for line in paths.providers_file.read_text().splitlines()
+            for line in paths.providers_file.read_text(encoding="utf-8").splitlines()
             if not line.startswith("prompt_cache")
         )
-        paths.providers_file.write_text(old + "\n")
+        paths.providers_file.write_text(old + "\n", encoding="utf-8")
 
         load_config(paths)
-        migrated = paths.providers_file.read_text()
+        migrated = paths.providers_file.read_text(encoding="utf-8")
         assert 'prompt_cache = "5m"' in migrated
         assert migrated.count("prompt_cache") == 1  # [openrouter] alone
         assert "1h suits slow-paced play" in migrated  # the comment rides it
@@ -997,7 +1046,7 @@ class TestConfigMigration:
         # Converged: a second launch changes nothing and takes no backup.
         backups = sorted(paths.config_backups_dir.iterdir())
         load_config(paths)
-        assert paths.providers_file.read_text() == migrated
+        assert paths.providers_file.read_text(encoding="utf-8") == migrated
         assert sorted(paths.config_backups_dir.iterdir()) == backups
 
     def test_a_set_prompt_cache_value_survives_the_migration(
@@ -1007,7 +1056,7 @@ class TestConfigMigration:
         set_config_provider(root, server, name="openrouter", prompt_cache="off")
         paths = Paths.resolve(root)
         load_config(paths)
-        assert 'prompt_cache = "off"' in paths.providers_file.read_text()
+        assert 'prompt_cache = "off"' in paths.providers_file.read_text(encoding="utf-8")
 
     def test_a_stale_prompt_template_follows_the_built_in(
         self, server: ModelServer, tmp_path
@@ -1020,16 +1069,16 @@ class TestConfigMigration:
         app = launch(tmp_path / "state", server)
         app.close()
         prompts_file = app.paths.prompts_file
-        stub = prompts_file.read_text()
+        stub = prompts_file.read_text(encoding="utf-8")
         stale = stub.replace(
             toml_string(prompts_mod.EXTRACT_DEFAULT),
             toml_string(EXTRACT_0_2_2),
         )
         assert stale != stub  # the stub really held the current built-in
-        prompts_file.write_text(stale + "# my note\n")
+        prompts_file.write_text(stale + "# my note\n", encoding="utf-8")
 
         load_config(app.paths)
-        migrated = prompts_file.read_text()
+        migrated = prompts_file.read_text(encoding="utf-8")
         assert tomllib.loads(migrated)["extract_prompt"] == prompts_mod.EXTRACT_DEFAULT
         assert "# my note" in migrated
         assert any(p.name.startswith("prompts-") for p in app.paths.config_backups_dir.iterdir())
@@ -1040,22 +1089,22 @@ class TestConfigMigration:
         app = launch(tmp_path / "state", server)
         app.close()
         prompts_file = app.paths.prompts_file
-        stub = prompts_file.read_text()
+        stub = prompts_file.read_text(encoding="utf-8")
         stale = stub.replace(
             toml_string(prompts_mod.CARD_FRAMING_DEFAULT), toml_string(CARD_FRAMING_0_7_0)
         )
         assert stale != stub
-        prompts_file.write_text(stale)
+        prompts_file.write_text(stale, encoding="utf-8")
         load_config(app.paths)
-        migrated = tomllib.loads(prompts_file.read_text())
+        migrated = tomllib.loads(prompts_file.read_text(encoding="utf-8"))
         assert migrated["card_framing"] == prompts_mod.CARD_FRAMING_DEFAULT
 
     def test_a_current_config_is_left_untouched(self, server: ModelServer, tmp_path) -> None:
         app = launch(tmp_path / "state", server)
         app.close()
-        before = app.paths.config_file.read_text()
+        before = app.paths.config_file.read_text(encoding="utf-8")
         load_config(app.paths)
-        assert app.paths.config_file.read_text() == before
+        assert app.paths.config_file.read_text(encoding="utf-8") == before
         assert not app.paths.config_backups_dir.exists()
 
     def test_a_missing_providers_file_is_refounded(self, tmp_path) -> None:
@@ -1064,17 +1113,18 @@ class TestConfigMigration:
         paths = Paths.resolve(tmp_path / "state")
         paths.ensure_tree()
         paths.config_key_file.write_bytes(secrets.token_bytes(32))
-        paths.config_file.write_text("[settings]\nshow_banner = false\n")
+        paths.config_file.write_text("[settings]\nshow_banner = false\n", encoding="utf-8")
         _cfg, providers = load_config(paths)
         assert paths.providers_file.exists()
         assert set(providers) == {"llamacpp", "koboldcpp", "ollama", "omlx", "lmstudio"}
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="Windows has no POSIX mode bits")
     def test_backups_are_private(self, tmp_path) -> None:
         """Every backup is born 0600 in a 0700 dir — a pre-seal copy may
         hold a plain api key."""
         paths = Paths.resolve(tmp_path / "state")
         paths.ensure_tree()
-        paths.providers_file.write_text('[a]\nurl = "x"\napi_key = ""\n')
+        paths.providers_file.write_text('[a]\nurl = "x"\napi_key = ""\n', encoding="utf-8")
         assert surgery.update_providers(
             paths.providers_file,
             paths.config_backups_dir,
@@ -1101,19 +1151,20 @@ class TestConfigMigration:
             "supports_thinking = true\n"
             "\n"
             "[settings]\n"
-            "show_banner = false\n"
+            "show_banner = false\n",
+            encoding="utf-8",
         )
         _cfg, providers = load_config(paths)
         assert providers["mine"].url == "http://localhost:9/v1"
         assert _unsealed(paths, providers["mine"].api_key) == "plain-secret"
-        moved = paths.providers_file.read_text()
+        moved = paths.providers_file.read_text(encoding="utf-8")
         assert "# the box in the closet\n[mine]\n" in moved
         assert "supports_thinking" not in moved
         assert "plain-secret" not in moved  # sealed on the way over
         # The backends this old config never knew arrived alongside.
         assert "[llamacpp]" in moved
         assert "[lmstudio]" in moved
-        conf = paths.config_file.read_text()
+        conf = paths.config_file.read_text(encoding="utf-8")
         assert "[providers.mine]" not in conf
         assert "show_banner = false" in conf
         # The pre-move config waits in backups; a second launch moves
@@ -1129,24 +1180,27 @@ class TestConfigMigration:
         paths = Paths.resolve(tmp_path / "state")
         paths.ensure_tree()
         paths.config_key_file.write_bytes(secrets.token_bytes(32))
-        paths.providers_file.write_text('[mine]\nurl = "http://localhost:9/v1"\napi_key = ""\n')
+        paths.providers_file.write_text(
+            '[mine]\nurl = "http://localhost:9/v1"\napi_key = ""\n', encoding="utf-8"
+        )
         paths.config_file.write_text(
-            '[providers.mine]\nurl = "http://old:9/v1"\n\n[settings]\nshow_banner = false\n'
+            '[providers.mine]\nurl = "http://old:9/v1"\n\n[settings]\nshow_banner = false\n',
+            encoding="utf-8",
         )
         _cfg, providers = load_config(paths)
-        assert "[providers.mine]" not in paths.config_file.read_text()
+        assert "[providers.mine]" not in paths.config_file.read_text(encoding="utf-8")
         assert providers["mine"].url == "http://localhost:9/v1"  # the new home won
 
     def test_a_hand_typed_plain_key_seals_at_the_next_launch(self, tmp_path) -> None:
         paths = Paths.resolve(tmp_path / "state")
         paths.ensure_tree()
         paths.config_key_file.write_bytes(secrets.token_bytes(32))
-        paths.config_file.write_text("[settings]\nshow_banner = false\n")
+        paths.config_file.write_text("[settings]\nshow_banner = false\n", encoding="utf-8")
         paths.providers_file.write_text(
-            '[mine]\nurl = "http://localhost:9/v1"\napi_key = "pasted-plain"\n'
+            '[mine]\nurl = "http://localhost:9/v1"\napi_key = "pasted-plain"\n', encoding="utf-8"
         )
         _cfg, providers = load_config(paths)
-        assert "pasted-plain" not in paths.providers_file.read_text()
+        assert "pasted-plain" not in paths.providers_file.read_text(encoding="utf-8")
         assert _unsealed(paths, providers["mine"].api_key) == "pasted-plain"
 
 
@@ -1169,17 +1223,18 @@ class TestFirstLaunch:
             assert story_id is not None
             story = app.store.stories.get(story_id)
             assert story.title == "The River That Forgot Its Name"
-            assert len(app.messages) == 16
+            assert len(app.messages) == 18
+            assert app.messages[0].kind == "chapter"  # told in chapters from its first row
             # The sample's pictures, shipped in the samples' images, landed
             # on the message they are named for, through the app's own
             # intake: the files and their thumbnails are in the folder.
-            pictured = app.messages[14]
+            pictured = app.messages[16]
             assert pictured.role == "user" and len(pictured.attachments) == 2
             for picture in pictured.attachments:
                 assert app.store.files.get(picture.file) is not None
                 assert app.store.files.get_thumb(picture.file) is not None
                 assert picture.width <= 1568 and picture.height <= 1568
-            assert all(not m.attachments for i, m in enumerate(app.messages) if i != 14)
+            assert all(not m.attachments for i, m in enumerate(app.messages) if i != 16)
             ids = app.store.stories.get_messages_ids(story_id)
             assert len(app.store.scenes.get_current(story_id, ids)) == 2
             assert [c.name for c in app.store.characters.list(story_id)] == ["Maren", "Tallis"]
@@ -1196,7 +1251,8 @@ class TestFirstLaunch:
             tour = app.store.stories.get(others[0].id)
             assert not [s.name for s in tour.settings if s.enabled]
             tour_ids = app.store.stories.get_messages_ids(others[0].id)
-            assert len(tour_ids) == 318
+            assert len(tour_ids) == 323
+            assert app.store.messages.get(tour_ids[0]).kind == "chapter"
             tour_scenes = app.store.scenes.get_current(others[0].id, tour_ids)
             assert len(tour_scenes) == 15
             assert all(s.history for s in tour_scenes)
@@ -1219,7 +1275,9 @@ class TestFirstLaunch:
         app = launch(tmp_path / "state", server)
         try:
             manifest = tomllib.loads(
-                (Path(backend_launch.__file__).parent / "samples" / "cards.toml").read_text()
+                (Path(backend_launch.__file__).parent / "samples" / "cards.toml").read_text(
+                    encoding="utf-8"
+                )
             )
             named = {row["name"]: row["tagline"] for row in manifest["card"]}
             cards = app.api.cards.list()
@@ -1270,7 +1328,7 @@ class TestFirstLaunch:
             app.play("Hello? Is someone there?")
             assert "No model selected" in capsys.readouterr().out
             assert app.server.requests == []
-            assert len(app.messages) == 17  # the turn is story, kept
+            assert len(app.messages) == 19  # the turn is story, kept
         finally:
             app.close()
 
@@ -1303,6 +1361,29 @@ class TestFirstLaunch:
         assert app.store.stories.list() == []
 
 
+class TestPurge:
+    """The state dir deleted — otaku's own folders, and the dir itself
+    where they were all it held — with its keys in the OS keychain."""
+
+    def test_a_used_state_dir_is_gone(self, app: App) -> None:
+        app.play("I enter the hall.")
+        root = app.paths.root
+        app.close()
+        assert backend_launch.purge(root) == root
+        assert not root.exists()
+
+    def test_what_else_the_dir_holds_stays_and_the_dir_with_it(self, app: App) -> None:
+        root = app.paths.root
+        (root / "notes.txt").write_text("mine", encoding="utf-8")
+        app.close()
+        backend_launch.purge(root)
+        assert sorted(entry.name for entry in root.iterdir()) == ["notes.txt"]
+
+    def test_a_dir_never_made_is_purged_without_a_fault(self, tmp_path: Path) -> None:
+        # nothing there, nothing under its keychain service: nothing fails
+        backend_launch.purge(tmp_path / "state")
+
+
 class TestResume:
     def test_a_deleted_remembered_story_starts_fresh(self, app: App) -> None:
         app.play("I enter the hall.")
@@ -1321,12 +1402,16 @@ class TestResume:
         state_file = app.paths.state_file
         model = app.api.app.get().model
         assert model is not None
-        text = state_file.read_text().replace(f'"{model.provider}/{model.name}"', '"ghost/model"')
-        state_file.write_text(text)
+        text = state_file.read_text(encoding="utf-8").replace(
+            f'"{model.provider}/{model.name}"', '"ghost/model"'
+        )
+        state_file.write_text(text, encoding="utf-8")
         opened = backend_launch.open_app(app.paths.root)
         try:
             assert Api(opened).app.get().model is None
-            assert any("ghost/model" in notice for notice in Api(opened).app.get().launch.notices)
+            assert any(
+                "ghost/model" in notice for notice in Api(opened).app.get().launch_facts.notices
+            )
         finally:
             opened.close()
 
@@ -1338,7 +1423,10 @@ class TestResume:
         app.api.app.update(extraction_model=ModelRef("generic", "extract-model"))
         state_file = app.paths.state_file
         state_file.write_text(
-            state_file.read_text().replace('"generic/extract-model"', '"ghost/extract-model"')
+            state_file.read_text(encoding="utf-8").replace(
+                '"generic/extract-model"', '"ghost/extract-model"'
+            ),
+            encoding="utf-8",
         )
         opened = backend_launch.open_app(app.paths.root)
         try:
@@ -1348,7 +1436,7 @@ class TestResume:
             assert facts.model is not None and facts.extraction_model is not None
             followed = (facts.extraction_model.provider, facts.extraction_model.name)
             assert followed == (facts.model.provider, facts.model.name)
-            notices = Api(opened).app.get().launch.notices
+            notices = Api(opened).app.get().launch_facts.notices
             assert any("ghost/extract-model" in notice for notice in notices)
         finally:
             opened.close()
@@ -1451,6 +1539,11 @@ def _open(paths: Paths) -> Store:
     return Store.open(paths.database_file, PlainCipher(), backups_dir=paths.backups_dir, keep=0)
 
 
+def _sealed(paths: Paths) -> Store:
+    """The store over an encrypted database."""
+    return Store.open(paths.database_file, Cipher(FILES_KEY), backups_dir=paths.backups_dir, keep=0)
+
+
 def _state(tmp_path) -> Paths:
     paths = Paths.resolve(tmp_path / "state")
     paths.ensure_tree()
@@ -1525,8 +1618,10 @@ def _taken_back(paths: Paths, version: int) -> None:
     """A database this build wrote, put back to what `version` shipped:
     each later step's tables as the step found them — the record format is
     positional, so the rows read as that version's — the fork points step
-    12 works out emptied, and the stamp set: what the ladder takes up."""
+    12 works out and the columns step 14 adds emptied, and the stamp set:
+    what the ladder takes up."""
     undo = {
+        14: (("messages", store_v14._V13_MESSAGES),),
         13: (("cards", store_v13._V12_CARDS), ("characters", store_v13._V12_CHARACTERS)),
         12: (("stories", store_v12._V11_STORIES),),
         11: (("cards", store_v11._V10_CARDS),),
@@ -1534,6 +1629,8 @@ def _taken_back(paths: Paths, version: int) -> None:
     conn = sqlite3.connect(paths.database_file)
     if version < 12:
         conn.execute("UPDATE stories SET forked_from_message_id = NULL")
+    if version < 14:
+        conn.execute("UPDATE messages SET pinned = 0, word_count = NULL")
     conn.execute("PRAGMA writable_schema = ON")
     for step in range(int(SCHEMA_VERSION), version, -1):
         for table, ddl in undo[step]:

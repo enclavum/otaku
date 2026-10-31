@@ -12,9 +12,10 @@ whose answer is the reply as it arrives, each event named on the wire by
 `event`. What is NOT here is HTTP: `web.server` matches a request against
 these tables and carries the result, and nothing else.
 
-The package mirrors `backend.api`, three packages of twins: `app`, the
-installation (the app itself, `machine`, `settings`, `providers`,
-`models`, `integrations`, `history`, `pictures`, `reports`), `codex`,
+The package mirrors the backend's resource folders, three packages of
+twins: `app`, the installation (`core`, the app itself, `machine`,
+`settings`, `providers`, `models`, `integrations`, `history`, `pictures`,
+`reports`), `codex`,
 what every story may draw on (`cards`), and `story`, a story and what it
 holds (`stories`, `settings`, `messages`, `lore`, `cards`, `context`,
 `transfer`, `prompts`, `language`) — each module translating its twin's
@@ -71,11 +72,11 @@ from otaku.backend.api import (
     ModelState,
     NotFound,
     Refused,
+    StoppingError,
     StoryMode,
     Unavailable,
     Unchanged,
 )
-from otaku.web.api import app
 from otaku.web.api._request import (
     Accepted,
     Ask,
@@ -88,6 +89,7 @@ from otaku.web.api._request import (
     etag,
 )
 from otaku.web.api.app import (
+    core,
     history,
     integrations,
     machine,
@@ -142,16 +144,17 @@ __all__ = [
     "PreconditionRequired",
     "Refused",
     "Route",
+    "StoppingError",
     "StoryMode",
     "Stream",
     "Tagged",
     "Unavailable",
     "Unchanged",
-    "app",
     "app_settings",
     "cards",
     "codex_cards",
     "context",
+    "core",
     "etag",
     "event",
     "history",
@@ -196,7 +199,7 @@ def _merged(*tables: Mapping[tuple[str, str], _Row]) -> dict[tuple[str, str], _R
 # paths the server holds itself — `/api/app/status` and `/api/watch`,
 # which never touch the app's thread, and `/api/login`.
 ROUTES: dict[tuple[str, str], Route] = _merged(
-    app.ROUTES,
+    core.ROUTES,
     machine.ROUTES,
     app_settings.ROUTES,
     providers.ROUTES,

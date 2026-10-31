@@ -4,7 +4,7 @@ what each account has left, /info what otaku knows of this run.
 
 import re
 
-from otaku.backend.api.app.reports import InfoReport
+from otaku.backend.app.reports.schemas import InfoReport
 from otaku.formatting import format_context
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch, set_config, set_config_provider
@@ -173,6 +173,11 @@ class TestInfo:
         # unknown, which the app offers nothing on.
         rows = _rows(app.api.info.get(story_id=app.story_id))
         assert (rows["Reasoning"], rows["Capabilities"]) == ("unknown", "unknown")
+
+    def test_the_story_is_counted_in_messages_and_words(self, app: App) -> None:
+        app.play("I open the door.")  # and the scripted reply's ten words
+        rows = _rows(app.api.info.get(story_id=app.story_id))
+        assert (rows["Messages"], rows["Words"]) == ("2", "14")
 
     def test_without_a_model_the_session_half_still_reports(self, server, tmp_path, capsys) -> None:
         # A model is one of the things /info reports, not its

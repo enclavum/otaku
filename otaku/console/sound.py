@@ -3,7 +3,7 @@ the terminal's own bell.
 
 `/set notification` decides WHETHER a landed reply rings; this is the
 how, for both frontends: the chat rings the terminal it is drawn in,
-and `otaku web` rings the terminal it was launched from — the same desk
+and `otaku serve` rings the terminal it was launched from — the same desk
 either way, which is why the sound lives HERE, in what both print
 through. No dependency for it: every platform can play a sound of its
 own — the posix ones by spawning a player, Windows through `winsound` in

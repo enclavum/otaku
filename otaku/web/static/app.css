@@ -73,6 +73,21 @@
   --otk-chat-story:  var(--otk-ok);           /* the story's rule, chat layout */
   --otk-chat-you:    var(--otk-accent);       /* the reader's rule, chat layout */
 
+  /* -- the request's bands, in the context panel -------------------------- */
+  --otk-inject-bg:    oklch(0.975 0.022 85);   /* a text injected besides the story */
+  --otk-inject-line:  oklch(0.80 0.07 85);
+  --otk-inject-ink:   oklch(0.50 0.09 75);
+  --otk-system-bg:    oklch(0.972 0.016 282);  /* the system message               */
+  --otk-system-line:  oklch(0.78 0.06 282);
+  --otk-system-ink:   oklch(0.47 0.10 282);
+  --otk-card-bg:      oklch(0.974 0.018 350);  /* a character card                 */
+  --otk-card-line:    oklch(0.80 0.06 350);
+  --otk-card-ink:     oklch(0.49 0.10 350);
+  --otk-pinned-bg:    oklch(0.973 0.018 205);  /* the pinned messages, word for word */
+  --otk-pinned-line:  oklch(0.79 0.055 205);
+  --otk-pinned-ink:   oklch(0.47 0.08 215);
+  --otk-summary-bg:   oklch(0.982 0.004 175);  /* the summary: paper's lightness, greyed */
+
   /* -- three voices, one job each ----------------------------------------- */
   --otk-font-prose:   'Newsreader', 'Literata', Georgia, serif;
   --otk-font-display: 'Archivo', 'IBM Plex Sans', system-ui, sans-serif;
@@ -122,6 +137,10 @@
   --otk-rail-w:      250px;
   --otk-page-max:    820px;
 
+  /* -- motion ------------------------------------------------------------- */
+  --otk-revert-hold: 10s;      /* how long Revert waits before it fades    */
+  --otk-revert-fade: 0.8s;
+
   /* -- scrollbars --------------------------------------------------------- */
   --otk-scrollbar-w:  10px;    /* the app styles its own scrollbars        */
   --otk-scrollbar-thumb: oklch(0.60 0.011 165);  /* ink-family: it reads as drawn */
@@ -131,6 +150,7 @@
   --otk-col-lamp:     10px;    /* the resident/connected lamp gutter      */
   --otk-col-size:     66px;    /* a model's size column                   */
   --otk-col-count:    46px;    /* a count column                          */
+  --otk-col-messages: 66px;    /* a story's "1234 msg" column             */
   --otk-col-ago:      30px;    /* a "2h ago" column                       */
   --otk-reader-w:     400px;   /* the right pane, identical in all lenses  */
   --otk-measure:      860px;   /* a reading line, wherever prose is set    */
@@ -169,6 +189,19 @@
   --otk-accent:      oklch(0.68 0.13 55);
   --otk-accent-ink:  oklch(0.74 0.12 55);
   --otk-accent-tint: oklch(0.68 0.13 55 / 0.14);
+  --otk-inject-bg:    oklch(0.31 0.03 85);
+  --otk-inject-line:  oklch(0.52 0.07 85);
+  --otk-inject-ink:   oklch(0.82 0.09 80);
+  --otk-system-bg:    oklch(0.30 0.03 282);
+  --otk-system-line:  oklch(0.48 0.07 282);
+  --otk-system-ink:   oklch(0.80 0.08 282);
+  --otk-card-bg:      oklch(0.30 0.03 350);
+  --otk-card-line:    oklch(0.50 0.07 350);
+  --otk-card-ink:     oklch(0.80 0.08 350);
+  --otk-pinned-bg:    oklch(0.30 0.028 205);
+  --otk-pinned-line:  oklch(0.50 0.06 205);
+  --otk-pinned-ink:   oklch(0.80 0.07 205);
+  --otk-summary-bg:   oklch(0.265 0.006 200);
   --otk-dialogue:    oklch(0.76 0.12 244);
   --otk-scrollbar-thumb: oklch(0.50 0.01 165);
   --otk-scrollbar-track: oklch(0.30 0.008 90);
@@ -195,6 +228,19 @@
     --otk-accent:      oklch(0.68 0.13 55);
     --otk-accent-ink:  oklch(0.74 0.12 55);
     --otk-accent-tint: oklch(0.68 0.13 55 / 0.14);
+    --otk-inject-bg:    oklch(0.31 0.03 85);
+    --otk-inject-line:  oklch(0.52 0.07 85);
+    --otk-inject-ink:   oklch(0.82 0.09 80);
+    --otk-system-bg:    oklch(0.30 0.03 282);
+    --otk-system-line:  oklch(0.48 0.07 282);
+    --otk-system-ink:   oklch(0.80 0.08 282);
+    --otk-card-bg:      oklch(0.30 0.03 350);
+    --otk-card-line:    oklch(0.50 0.07 350);
+    --otk-card-ink:     oklch(0.80 0.08 350);
+    --otk-pinned-bg:    oklch(0.30 0.028 205);
+    --otk-pinned-line:  oklch(0.50 0.06 205);
+    --otk-pinned-ink:   oklch(0.80 0.07 205);
+    --otk-summary-bg:   oklch(0.265 0.006 200);
     --otk-dialogue:    oklch(0.76 0.12 244);
     --otk-scrollbar-thumb: oklch(0.50 0.01 165);
     --otk-scrollbar-track: oklch(0.30 0.008 90);
@@ -574,6 +620,38 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
   margin-top: calc(var(--otk-block-gap) - var(--otk-turn-gap));
 }
 .otk-turn__rubric { font-family: var(--otk-font-mono); font-size: var(--otk-size-tag); letter-spacing: 0.26em; text-transform: uppercase; color: var(--otk-accent); }
+/* A chapter: a heading between turns, where a new chapter begins — 44px
+   above it, its top margin set against the flow's own gap between turns,
+   and that gap below it. */
+.otk-chapter {
+  display: flex; flex-direction: column; align-items: center; gap: 9px;
+  margin: calc(44px - var(--otk-turn-gap)) 0 0;
+  text-align: center;
+}
+.otk-chapter__num {
+  display: flex; align-items: center; gap: 14px; width: 100%; max-width: 420px;
+  font-family: var(--otk-font-mono); font-size: var(--otk-size-label);
+  letter-spacing: var(--otk-track-label); text-transform: uppercase; color: var(--otk-accent-ink);
+}
+.otk-chapter__num::before, .otk-chapter__num::after { content: ""; flex: 1; height: var(--otk-hair); background: var(--otk-line); }
+.otk-chapter__title {
+  margin: 0; max-width: 560px;
+  font-family: var(--otk-font-prose); font-size: 26px; font-weight: 500; font-style: normal;
+  line-height: 1.25; letter-spacing: -0.005em; color: var(--otk-ink); text-wrap: balance;
+}
+/* The turn that opens a chapter starts on a raised initial: a large accent
+   letter standing on the first line's baseline, rising into the space
+   above, a real span (`.otk-dropcap`) around its first letter. It has no
+   line height of its own, so the lines stay even, and the box holding
+   it lets it rise past the box's top, which the editor's shared class
+   clips (`.otk-editable`). The letter may sit inside a run of speech,
+   hence any depth. */
+.otk-dropcap { font-size: 46px; line-height: 0; font-weight: 500; color: var(--otk-accent-ink); }
+.otk-typeset:has(.otk-dropcap) { overflow: visible; }
+/* the chat layout alone shows a turn's label just above its text: the
+   paragraph moves down by the letter's rise, so it clears the label as
+   the text does */
+.otk-transcript[data-transcript="chat"] .otk-typeset:has(.otk-dropcap) { margin-top: 0.75em; }
 /* the manuscript's mark before a played line's rubric, decoration alone;
    the chat's rubrics go without it */
 .otk-transcript[data-transcript="manuscript"] .otk-turn__rubric::before { content: "◆ "; content: "◆ " / ""; }
@@ -655,6 +733,10 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
    a line of text or after the field a paragraph became, where two breaks
    would make two blank lines. The first turn opens the text. */
 .otk-transcript[data-transcript="canvas"] > [data-join="paragraph"]:not(:first-child)::before { content: ""; display: block; height: var(--otk-block-gap); }
+/* the canvas has no gap between turns: a chapter's margins stand whole,
+   and the paragraph after it opens without its own gap line */
+.otk-transcript[data-transcript="canvas"] > .otk-chapter { margin: 44px 0 25px; }
+.otk-transcript[data-transcript="canvas"] > .otk-chapter + [data-join="paragraph"]::before { display: none; }
 /* The canvas is typed in where the story is: its end editable — the TAIL
    (`transcript.showTail`) — in the text's own face, the composer's box
    standing disabled below with its verbs. */
@@ -753,8 +835,8 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 .otk-transcript[data-transcript="canvas"] [data-join="inline"] .otk-typeset > .otk-ask--first { margin-top: var(--otk-block-gap); }
 /* No thinking in the one text: it would split the line the reply goes on
    from, and leave a hole when a redraw takes it away (it is never stored).
-   The status row says the model is reasoning. */
-.otk-transcript[data-transcript="canvas"] .otk-reasoning { display: none; }
+   The status row says the model is thinking. */
+.otk-transcript[data-transcript="canvas"] .otk-ask--thinking { display: none; }
 /* nor a stats line a reply landed with in another layout: the canvas keeps
    the stats as the reply's hover hint (`transcript.done`) */
 .otk-transcript[data-transcript="canvas"] .otk-verbose { display: none; }
@@ -810,6 +892,11 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
    is the text's from text, the transcript's one prose line. */
 .otk-transcript[data-transcript="chat"] .otk-reply,
 .otk-transcript[data-transcript="chat"] .otk-tool { max-width: 75%; margin-right: auto; padding-left: 22px; }
+/* A box sized to its text would stand an openable block's toggle right after
+   its label: one holding such a block takes the side's whole width instead,
+   the toggle at its right edge, where a long reply's lines end. */
+.otk-transcript[data-transcript="chat"] .otk-tool,
+.otk-transcript[data-transcript="chat"] .otk-reply:has(> .otk-call) { width: 100%; }
 .otk-transcript[data-transcript="chat"] .otk-turn {
   width: fit-content; max-width: 75%; margin-left: auto; align-items: stretch; gap: 7px;
   padding-right: 22px;
@@ -859,8 +946,17 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
    the one mark on the story's side. They keep a small inset, so they still
    read as set apart from the prose. */
 .otk-transcript[data-transcript="chat"] .otk-error,
-.otk-transcript[data-transcript="chat"] .otk-ask,
-.otk-transcript[data-transcript="chat"] .otk-reasoning { border-left: 0; padding-left: 3px; }
+.otk-transcript[data-transcript="chat"] .otk-ask { border-left: 0; padding-left: 3px; }
+/* the thinking keeps no inset: dimmed, it is set apart already, and stands
+   on the text's own edge */
+.otk-transcript[data-transcript="chat"] .otk-ask--thinking { padding-left: 0; }
+/* and 17px off the rubric above it: 10px over the 7px the rubric keeps from
+   its first block, which reads as the 12px below once the line boxes' own
+   room is counted */
+.otk-transcript[data-transcript="chat"] .otk-reply > .otk-ask--thinking { margin-top: 10px; }
+/* the thinking stands 12px off what follows it, pulled up against the
+   reply's gap as the rubric is */
+.otk-transcript[data-transcript="chat"] .otk-reply > .otk-ask--thinking:not(:last-child) { margin-bottom: calc(12px - var(--otk-block-gap)); }
 /* A landed reply keeps its status row's slot so nothing moves (below); here
    the slot would show as the rule running on under the text. So the row goes
    and the article keeps the same room as a margin, outside the rule, for as
@@ -884,6 +980,10 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
   background: var(--otk-accent); vertical-align: text-bottom;
   animation: otk-blink 1.1s steps(1, end) infinite;
 }
+/* waiting for the reply's first text, it stands where that text will start:
+   no gap, with nothing before it — but in the one text, where it goes on
+   after the text above */
+.otk-transcript:not([data-transcript="canvas"]) .otk-caret--waiting { margin-left: 0; }
 
 /* The reply as it arrives: its paragraphs, and the status beneath them. The
    block IS the reply (the article carries `.otk-reply` too), so it sets no gap
@@ -916,18 +1016,6 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 .otk-generating--idle .otk-caret { display: none; }
 .otk-generating__elapsed { font-variant-numeric: tabular-nums; color: var(--otk-body); }
 
-/* the model's own reasoning, while it streams: not the story, dressed as the
-   notes block is (`.otk-ask--notes` and its body: the mark's width of border,
-   the same inset, prose at the note's size, the model's line breaks kept) —
-   the text dimmed, and the border in the rules' colour where a note's is the
-   faint text's */
-.otk-reasoning {
-  margin: 0; padding: 2px 0 2px 22px;
-  border-left: var(--otk-mark) solid var(--otk-line);
-  font-family: var(--otk-font-prose); font-size: 15px; line-height: var(--otk-leading-page);
-  color: var(--otk-faint); white-space: pre-wrap; text-wrap: pretty; overflow-wrap: anywhere;
-}
-
 /* Verbose: what the terminal prints after a reply. Machine, so mono — and
    ONE LINE always, ellipsised rather than wrapped, so a long stats line
    cannot push the turn below it out of rhythm. It reports on the reply above
@@ -953,6 +1041,10 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 }
 .otk-error__body { margin: 0; font-family: var(--otk-font-prose); font-size: var(--otk-size-read); line-height: 1.55; color: var(--otk-body); }
 .otk-error__actions { display: flex; gap: 8px; padding-top: 4px; }
+/* one the story has moved past: no doors out, its rule an answered
+   question's (`.otk-ask--past`) */
+.otk-error--past { border-left-color: var(--otk-faint); }
+.otk-error--past .otk-error__actions { display: none; }
 
 /* the space the flow holds open so the page does not move under the reader */
 .otk-gap { flex: none; width: 100%; }
@@ -1025,10 +1117,25 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
    ink — the two are one gesture — and the accent when pointed at. `hidden`
    — no vision — wins over it, so the rule is written for the shown state. It
    takes the row's height rather than one of its own: it comes and goes with
-   the mode, and the composer must not grow when it does. */
-.otk-attach-btn:not([hidden]) { flex: none; align-self: stretch; display: inline-flex; align-items: center; justify-content: center; width: 36px; padding: 0; color: var(--otk-ink); cursor: pointer; }
-.otk-attach-btn:hover, .otk-attach-btn:focus-visible { color: var(--otk-accent); }
+   the mode, and the composer must not grow when it does. Revert is the same
+   bare glyph, so the two read as one pair of tools. */
+.otk-attach-btn:not([hidden]),
+.otk-revert:not([hidden]) { flex: none; align-self: stretch; display: inline-flex; align-items: center; justify-content: center; width: 36px; padding: 0; color: var(--otk-ink); cursor: pointer; }
+.otk-attach-btn:hover, .otk-attach-btn:focus-visible,
+.otk-revert:hover, .otk-revert:focus-visible { color: var(--otk-accent); }
+/* the two glyphs sit unevenly in their boxes: nudged onto one line */
+.otk-attach-btn svg { transform: translateY(1px); }
 .otk-composer__verbs { flex: 0 1 auto; margin-left: auto; display: flex; align-items: center; gap: 7px; }
+/* Revert: the first of the verbs, shown after a Regen or an Undo while there
+   is something to take back. It waits, then fades, and the app sets [hidden]
+   on animationend; hovering or focusing it holds it, so a slow reach still
+   lands, and showing it again restarts the wait. Beside the clip it stands
+   tight against it, the two glyphs as close as the design sets them. */
+.otk-revert:has(+ .otk-attach-btn:not([hidden])) { margin-right: -13px; }
+@keyframes otk-revert-fade { to { opacity: 0; } }
+.otk-revert:not([hidden]) { animation: otk-revert-fade var(--otk-revert-fade) ease-in var(--otk-revert-hold) forwards; }
+.otk-revert:hover, .otk-revert:focus-visible { animation-play-state: paused; }
+.otk-revert__icon { display: block; transform: translate(-1px, -1px) scaleX(-1); fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .otk-hints { margin: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 16px; font-family: var(--otk-font-mono); font-size: var(--otk-size-tag); letter-spacing: var(--otk-track-foot); text-transform: uppercase; color: var(--otk-faint); }
 .otk-hints > * { white-space: nowrap; }
 /* A touch screen has no keys to hint at, and on a phone the row costs lines
@@ -1099,8 +1206,10 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 .otk-prefixes { position: absolute; left: 14px; bottom: 100%; margin-bottom: 8px; width: 428px; max-width: calc(100% - 28px); display: flex; flex-direction: column; padding: 4px 0 6px; background: var(--otk-paper); border: var(--otk-hair) solid var(--otk-line); box-shadow: var(--otk-shadow-slip); }
 .otk-prefixes__group { display: flex; align-items: baseline; gap: 9px; padding: 7px 16px 3px; }
 .otk-prefixes__group::after { content: ""; flex: 1; height: var(--otk-hair); background: var(--otk-line-soft); }
-.otk-prefix { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: 10px; align-items: baseline; width: 100%; padding: 3px 16px; }
-.otk-prefix__token { font-family: var(--otk-font-mono); font-size: var(--otk-size-mono-sm); color: var(--otk-accent-ink); }
+/* neither column wraps: the token's is as wide as the longest token and
+   kept on one line, as a browser may break one after a slash */
+.otk-prefix { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px; align-items: baseline; width: 100%; padding: 3px 16px; }
+.otk-prefix__token { white-space: nowrap; font-family: var(--otk-font-mono); font-size: var(--otk-size-mono-sm); color: var(--otk-accent-ink); }
 .otk-prefix__desc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--otk-font-prose); font-size: var(--otk-size-note); line-height: var(--otk-leading-row); color: var(--otk-body); }
 .otk-prefixes--cast { width: 320px; max-height: 200px; overflow-y: auto; }
 .otk-prefix--name { grid-template-columns: minmax(0, 1fr); }
@@ -1168,6 +1277,10 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
 .otk-tab { font-family: var(--otk-font-display); font-size: 16px; font-weight: 600; letter-spacing: -0.01em; padding-bottom: 14px; color: var(--otk-muted); border-bottom: var(--otk-mark) solid transparent; }
 .otk-tab[aria-selected="true"] { color: var(--otk-ink); border-bottom-color: var(--otk-accent); }
 .otk-tabs__aside { margin-left: auto; padding-bottom: 14px; font-family: var(--otk-font-mono); font-size: var(--otk-size-small); color: var(--otk-faint); }
+/* the dossier's count, midway between the head's buttons and the rule
+   under the tabs: the row centres it, and the padding under it matches
+   the 10px the head leaves under its buttons */
+.otk-tabs__aside--centered { padding-bottom: 10px; }
 /* five tabs and the aside outrun a phone's width: the strip swipes sideways
    instead of clipping, the gaps drawn in */
 @media (max-width: 600px) {
@@ -1208,19 +1321,45 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
 .otk-row[aria-selected="true"] { border-left-color: var(--otk-accent); background: var(--otk-accent-tint); }
 .otk-row__title { flex: 1 1 0%; min-width: 132px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--otk-font-prose); font-size: var(--otk-size-row); line-height: var(--otk-leading-row); color: var(--otk-body); }
 /* a title with a note right after its words: the words give way, the note
-   never does. The note is centred on the words' CAPITALS — the band from
-   the cap line to the baseline — not on their line: the line's descender
-   room lies below, so a box centred on it (or set on the baseline) hangs
-   under the words. The band's centre sits a tenth of the prose size above
-   the line's, hence the bottom margin of twice that. Words that are none
-   take no room, so the note starts where they would. */
+   never does, centred on their line — the row's centre in the one list
+   that has one (`.otk-col--messages`); words that are none take no room */
 .otk-row__title--noted { display: flex; align-items: center; gap: 10px; }
-.otk-row__title--noted > .otk-tag { margin-bottom: calc(var(--otk-size-row) * 0.2); }
+/* a tag after the title, among the figures (the open story): centred on
+   the row, whose default padding sets its centre a tenth of the prose
+   size above the line's — hence the lift of twice that; prose rows alone */
+.otk-row:not(.otk-row--mono) > .otk-tag { align-self: center; margin-bottom: calc(var(--otk-size-row) * 0.2); }
 .otk-row__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .otk-row__text:empty { display: none; }
 .otk-row__id { width: 26px; flex: none; text-align: right; font-family: var(--otk-font-mono); font-size: var(--otk-size-mono-sm); line-height: var(--otk-leading-row); color: var(--otk-faint); font-variant-numeric: tabular-nums; }
 .otk-row__who { width: 58px; flex: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--otk-font-mono); font-size: var(--otk-size-label); line-height: var(--otk-leading-row); letter-spacing: 0.14em; text-transform: uppercase; color: var(--otk-faint); }
 .otk-row__who--you { color: var(--otk-accent-ink); }
+/* the number and the speaker, digits and capitals smaller than the
+   words: centred in the row, since small type set on its baseline sits low */
+.otk-row__id, .otk-row__who { align-self: center; }
+/* A message's number is also its pin: pinned, a filled accent pin stands
+   in its place; a pointer over the number of a row that may be pinned
+   turns it into an outline pin to press. */
+.otk-row__id[data-pinned] { display: flex; align-items: center; justify-content: flex-end; height: 1.35em; cursor: pointer; }
+.otk-row__id .otk-pin { display: none; fill: none; stroke: currentColor; stroke-width: 1.2; stroke-linejoin: round; }
+.otk-row__id[data-pinned="true"] .otk-row__ordinal,
+.otk-row__id[data-pinned]:hover .otk-row__ordinal { display: none; }
+.otk-row__id[data-pinned="true"] .otk-pin,
+.otk-row__id[data-pinned]:hover .otk-pin { display: block; }
+.otk-row__id[data-pinned="true"] .otk-pin { fill: var(--otk-accent); stroke: var(--otk-accent); }
+/* The messages list can show the discarded turns — undone, or replaced by a
+   regen — faint and unnumbered, after the turn they leave from; the switch
+   beside the filter says whether it does. */
+.otk-discarded { flex: none; display: inline-flex; align-items: center; gap: 8px; margin-left: 14px; cursor: pointer; }
+.otk-discarded__word { font-family: var(--otk-font-prose); font-size: var(--otk-size-note); color: var(--otk-faint); }
+.otk-col--messages[data-discarded="shown"] .otk-discarded__word { color: var(--otk-ink); }
+.otk-row--discarded { display: none; }
+.otk-col--messages[data-discarded="shown"] .otk-row--discarded { display: flex; }
+.otk-row--discarded .otk-row__who,
+.otk-row--discarded .otk-row__title { color: var(--otk-faint); }
+/* a discarded turn has no number: its id column says "undone" in small
+   caps, right-aligned so it runs out into the row's left padding */
+.otk-row--discarded .otk-row__id { display: flex; justify-content: flex-end; overflow: visible; white-space: nowrap; }
+.otk-row__why { font-size: var(--otk-size-tag); letter-spacing: var(--otk-track-foot); text-transform: uppercase; color: var(--otk-faint); }
 .otk-row__num { flex: none; text-align: right; font-family: var(--otk-font-mono); font-size: var(--otk-size-mono-sm); line-height: var(--otk-leading-row); color: var(--otk-muted); font-variant-numeric: tabular-nums; }
 .otk-row--mono .otk-row__title { font-family: var(--otk-font-mono); font-size: var(--otk-size-mono); }
 .otk-row[aria-selected="true"] .otk-row__title { color: var(--otk-ink); }
@@ -1238,6 +1377,7 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
 .otk-stack > .otk-choice__name { line-height: var(--otk-leading-row); }
 .otk-row__num--size  { width: var(--otk-col-size); }
 .otk-row__num--count { width: var(--otk-col-count); }
+.otk-row__num--messages { width: var(--otk-col-messages); }
 .otk-row__num--ago   { width: var(--otk-col-ago); }
 /* a phone's row: the indent and the gaps close up, and a hosted model's
    empty size column gives its width to the name — the rows of one group
@@ -1291,8 +1431,8 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
 .otk-ask__foot { font-family: var(--otk-font-prose); font-size: var(--otk-size-note); font-style: italic; color: var(--otk-faint); }
 /* the live one sits under the reply's last line, inside its article */
 .otk-ask--live { margin-top: 0; }  /* a block of the reply's: its gap is the article's */
-/* the model's notes: the question's shape, its text a size down, and the
-   line breaks the notes' own */
+/* the model's notes, and the blocks drawn as they are — a tool turn, the
+   thinking: the question's shape, its border the faint text's */
 .otk-ask--notes { border-left-color: var(--otk-faint); }
 /* a block among the reply's text stands the one gap from whatever is on either
    side of it; one that opens or closes the reply (`replyNodes` marks which)
@@ -1300,10 +1440,28 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
 .otk-typeset > .otk-ask { margin: var(--otk-block-gap) 0; }
 .otk-typeset > .otk-ask--first { margin-top: 0; }
 .otk-typeset > .otk-ask--last { margin-bottom: 0; }
-.otk-ask--notes .otk-ask__body { font-size: 15px; white-space: pre-wrap; }
-/* a question already answered: the same shape, quieter, and no verbs */
-.otk-ask--past { border-left-color: var(--otk-line); }
-.otk-ask--past .otk-ask__label, .otk-ask--past .otk-ask__n { color: var(--otk-faint); }
+/* the model's own thinking, not the story: dimmed — the border in the rules'
+   colour, the label a tool turn's in the faint text's colour */
+.otk-ask--thinking { border-left-color: var(--otk-line); }
+.otk-ask--thinking .otk-ask__label { color: var(--otk-faint); }
+/* how long, in its own case: "4S" does not read as seconds */
+.otk-ask__time { text-transform: none; }
+/* a block whose text is the model's — the notes, a tool turn, the thinking
+   folded: its label with a toggle beside it, and opened, the text of its
+   hover hint under the label, the model's line breaks kept */
+.otk-call__head { display: flex; align-items: baseline; gap: 14px; }
+.otk-call__toggle { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; font-family: var(--otk-font-mono); font-size: var(--otk-size-label); letter-spacing: 0.06em; text-transform: uppercase; color: var(--otk-faint); white-space: nowrap; }
+.otk-call__toggle:hover { color: var(--otk-accent-ink); }
+.otk-call__chev { display: block; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.otk-call[data-open="true"] .otk-call__chev { transform: rotate(180deg); }
+.otk-call__body { display: none; margin: 0; font-family: var(--otk-font-prose); font-size: var(--otk-size-read); line-height: 1.6; color: var(--otk-body); text-wrap: pretty; white-space: pre-wrap; overflow-wrap: anywhere; }
+.otk-call[data-open="true"] .otk-call__body { display: block; }
+/* the thinking opened: a tool turn's text, faint as the thinking is */
+.otk-ask--thinking .otk-call__body { color: var(--otk-faint); }
+/* a question already answered: the same shape, its border and label a tool
+   turn's (`.otk-ask--notes`), and no verbs */
+.otk-ask--past { border-left-color: var(--otk-faint); }
+.otk-ask--past .otk-ask__n { color: var(--otk-faint); }
 .otk-ask--past .otk-ask__pick { color: var(--otk-muted); cursor: default; }
 
 /* the Tools pane: one capped column that scrolls, like the premise */
@@ -1475,6 +1633,12 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 .otk-detail--reader { flex: 0 1 var(--otk-reader-w); min-width: 300px; }
 .otk-detail__scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
 .otk-detail__head { display: flex; align-items: baseline; gap: 10px; }
+/* the open message's pin, at the end of the reader's header, in step
+   with the number-pin in the list */
+.otk-detail__pin { margin-left: auto; display: flex; padding: 2px; line-height: 0; color: var(--otk-faint); cursor: pointer; transform: translateY(3px); }
+.otk-detail__pin .otk-pin { display: block; fill: none; stroke: currentColor; stroke-width: 1.2; stroke-linejoin: round; }
+.otk-detail__pin[data-pinned="true"] .otk-pin { fill: var(--otk-accent); stroke: var(--otk-accent); }
+.otk-detail__pin:hover { color: var(--otk-ink); }
 .otk-detail__title { margin: 12px 0 10px; font-family: var(--otk-font-display); font-size: var(--otk-size-title); font-weight: 800; letter-spacing: -0.02em; color: var(--otk-ink); overflow-wrap: anywhere; }
 .otk-detail__section { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; padding-top: 14px; border-top: var(--otk-hair) solid var(--otk-line-soft); }
 .otk-fact { display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr); gap: 12px; padding: 7px 0; border-bottom: var(--otk-hair) solid var(--otk-line-soft); font-family: var(--otk-font-mono); font-size: var(--otk-size-mono-sm); margin: 0; }
@@ -1519,7 +1683,7 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 .otk-context__stages { display: flex; border: var(--otk-hair) solid var(--otk-ink); background: var(--otk-band); }
 /* the injections, bracketed between the stages and an ink rule: a section
    head with the total, then fixed depth and token columns so every row lines up */
-.otk-context__injected { display: flex; flex-direction: column; gap: 6px; padding-bottom: 14px; border-bottom: var(--otk-hair) solid var(--otk-ink); margin-bottom: 6px; }
+.otk-context__injected { display: flex; flex-direction: column; gap: 6px; padding-bottom: 14px; border-bottom: var(--otk-hair) solid var(--otk-line); margin-bottom: 0; }
 .otk-context__injrow { display: grid; grid-template-columns: auto minmax(24px, 1fr) 84px 118px; column-gap: 8px; align-items: baseline; padding: 3px 0; }
 /* the head is a section head without its rule: the rows follow it at the
    head's 8px margin plus the column's 6px gap, and stand 14px of padding over
@@ -1530,6 +1694,10 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 .otk-context__injat, .otk-context__injtok { font-family: var(--otk-font-mono); font-size: var(--otk-size-mono); font-weight: 400; letter-spacing: 0; color: var(--otk-muted); font-variant-numeric: tabular-nums; }
 .otk-context__injtok { text-align: right; }
 .otk-context__injhead .otk-context__injtok { color: var(--otk-body); }
+/* the heading over the request's text stands 21px off the rule above it
+   and off the text below: the head's 14px gap plus 7px over it, its 16px
+   plus the wire's 5px under it */
+.otk-context__wirehead { margin: 7px 0 16px; }
 .otk-context__cell { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 5px; padding: 18px 14px; background: var(--otk-paper); }
 .otk-context__cell + .otk-context__cell { border-left: var(--otk-hair) solid var(--otk-line); }
 .otk-context__cell--idle { background: none; }
@@ -1549,7 +1717,56 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
   .otk-context__injname { font-size: var(--otk-size-ui); white-space: nowrap; }
   .otk-context__injat, .otk-context__injtok { white-space: nowrap; font-size: 13px; }
 }
-.otk-context__wire { display: flex; flex-direction: column; gap: 20px; padding-top: 6px; }
+.otk-context__wire { display: flex; flex-direction: column; gap: 5px; padding-top: 0; }
+/* 5px from the head's last rule down to the first block: the wire follows
+   the stages and the costed lists, and .otk-context's gap is 22px */
+.otk-context > .otk-v + .otk-context__wire { margin-top: -17px; }
+/* The request in bands: the system message, a card, an injection and the
+   pinned messages each in a band of its own hue, the summary in a grey
+   fold; each reaches the panel's edges and labels itself in the left
+   gutter, reading bottom-to-top. Plain messages sit on the panel's own
+   left edge; only the bands step in. */
+.otk-fold {
+  position: relative; margin: 0 -30px; padding: 16px 30px 16px 64px;
+  border-top: var(--otk-hair) dotted var(--otk-line);
+  border-bottom: var(--otk-hair) dotted var(--otk-line);
+  background: var(--otk-summary-bg);
+  display: flex; flex-direction: column; gap: 24px;
+}
+.otk-fold__label {
+  position: absolute; left: 4px; width: 56px;
+  display: flex; flex-direction: column; align-items: center; gap: 15px;
+  font-family: var(--otk-font-mono); font-size: var(--otk-size-tag);
+  letter-spacing: var(--otk-track-tag); text-transform: uppercase;
+  color: var(--otk-faint);
+}
+.otk-fold__label--top { top: 24px; }
+.otk-fold__label--bottom { bottom: 24px; }
+.otk-fold__word { writing-mode: vertical-rl; transform: rotate(180deg); }
+.otk-fold__arrow { display: flex; align-items: center; justify-content: center; width: 1em; height: 1em; font-size: 12px; line-height: 1; letter-spacing: 0; }
+.otk-inject {
+  position: relative; margin: 0 -30px; padding: 16px 30px 16px 64px;
+  --band-bg: var(--otk-inject-bg); --band-line: var(--otk-inject-line); --band-ink: var(--otk-inject-ink);
+  border-top: var(--otk-hair) dotted var(--band-line);
+  border-bottom: var(--otk-hair) dotted var(--band-line);
+  background: var(--band-bg);
+  display: flex; flex-direction: column; gap: 12px;
+}
+.otk-inject__label {
+  position: absolute; left: 4px; width: 56px; top: 50%; transform: translateY(-50%);
+  display: flex; justify-content: center;
+  font-family: var(--otk-font-mono); font-size: var(--otk-size-tag);
+  letter-spacing: var(--otk-track-tag); text-transform: uppercase;
+  color: var(--band-ink);
+}
+.otk-inject .otk-passage__rubric { color: var(--band-ink); }
+.otk-inject--system { --band-bg: var(--otk-system-bg); --band-line: var(--otk-system-line); --band-ink: var(--otk-system-ink); }
+.otk-inject--card   { --band-bg: var(--otk-card-bg);   --band-line: var(--otk-card-line);   --band-ink: var(--otk-card-ink); }
+.otk-inject--pinned { --band-bg: var(--otk-pinned-bg); --band-line: var(--otk-pinned-line); --band-ink: var(--otk-pinned-ink); }
+/* a run of plain messages starts as far below a band's rule as a band's own
+   text sits inside it: 5px gap + 11px = the bands' 16px */
+.otk-context__wire > :is(.otk-inject, .otk-fold) + .otk-passage { padding-top: 11px; }
+.otk-context__wire > .otk-passage:has(+ :is(.otk-inject, .otk-fold)) { padding-bottom: 11px; }
 
 /* =============================================================================
    DOCKET — a slip for every small report
@@ -1680,9 +1897,6 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 .otk-keys__plus { padding-left: 6px; font-family: var(--otk-font-mono); font-size: var(--otk-size-label); color: var(--otk-faint); }
 .otk-keys-grid { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 11px 30px; align-items: baseline; }
 .otk-keys__meaning { font-family: var(--otk-font-prose); font-size: var(--otk-size-read); color: var(--otk-muted); }
-/* A key box sits on its row's baseline and hangs below it, so the help
-   sheet's last row needs room of its own above the docket's foot. */
-[data-help-body] > :last-child { margin-bottom: 16px; }
 
 /* inside a docket */
 .otk-leader__aside { align-self: flex-end; font-family: var(--otk-font-mono); font-size: var(--otk-size-small); color: var(--otk-faint); }
@@ -1710,7 +1924,9 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 }
 
 .otk-col--messages { flex: 1 1 0%; min-width: 300px; padding: 12px 22px; }
-.otk-col--messages .otk-row { padding-left: 14px; padding-right: 14px; }
+/* a message is a sentence, its body its lowercase: even padding sets that
+   body on the row's centre, where the default's centres a name's capitals */
+.otk-col--messages .otk-row { padding: 3px 14px; }
 .otk-col--messages .otk-col__pinned { padding: 11px 0 0; margin-left: 14px; border-top: 0; }
 
 /* =============================================================================

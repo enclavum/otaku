@@ -13,9 +13,9 @@ typography.
 import json
 from pathlib import Path
 
-from otaku.backend.domain._formats import EXPORT_MARKER
-from otaku.backend.domain._formats.exports import read_story
-from otaku.backend.domain._formats.imports import parse_story
+from otaku.backend.formats import EXPORT_MARKER
+from otaku.backend.formats.exports import read_story
+from otaku.backend.formats.imports import parse_story
 from scenarios.support import server as scripted
 from scenarios.support.harness import App
 
@@ -60,7 +60,8 @@ class TestImport:
 
     def test_the_reimported_story_equals_the_file(self, app: App, tmp_path: Path) -> None:
         app.play(f"/import {CHAPEL}")
-        assert read_story(app.store, app.story_id) == parse_story(CHAPEL.read_text())
+        chapel = CHAPEL.read_text(encoding="utf-8")
+        assert read_story(app.store, app.story_id) == parse_story(chapel)
 
     def test_a_missing_file_imports_nothing(self, app: App, capsys) -> None:
         app.play(f"/import {Path('/nowhere') / 'gone.md'}")
@@ -82,7 +83,7 @@ class TestImport:
         # The marker claims the native format; a failed parse must refuse,
         # never degrade the scaffolding into a plain-text story.
         broken = tmp_path / "broken.md"
-        broken.write_text("<!-- otaku export -->\nno structure here")
+        broken.write_text("<!-- otaku export -->\nno structure here", encoding="utf-8")
         app.play(f"/import {broken}")
         assert "to import" in capsys.readouterr().out  # refused, not imported
         assert app.story_id is None
@@ -96,8 +97,10 @@ class TestImport:
         # test here), a newer one refuses instead of importing silently
         # wrong.
         newer = tmp_path / "newer.md"
+        chapel = CHAPEL.read_text(encoding="utf-8")
         newer.write_text(
-            CHAPEL.read_text().replace(EXPORT_MARKER, f"{EXPORT_MARKER}\nformat-version: 99", 1)
+            chapel.replace(EXPORT_MARKER, f"{EXPORT_MARKER}\nformat-version: 99", 1),
+            encoding="utf-8",
         )
         app.play(f"/import {newer}")
         assert "newer otaku" in capsys.readouterr().out
@@ -108,7 +111,7 @@ class TestImport:
         self, app: App, capsys, tmp_path: Path
     ) -> None:
         data = tmp_path / "data.jsonl"
-        data.write_text('{"hello": "world"}\n')
+        data.write_text('{"hello": "world"}\n', encoding="utf-8")
         app.play(f"/import {data}")
         assert "not a SillyTavern chat" in capsys.readouterr().out
         assert app.story_id is None
@@ -118,11 +121,11 @@ class TestImport:
         # The file's name and contents must agree: an unknown extension,
         # or a .md without the export marker, match nothing.
         stray = tmp_path / "story.doc"
-        stray.write_text("Some prose.")
+        stray.write_text("Some prose.", encoding="utf-8")
         app.play(f"/import {stray}")
         assert "Cannot detect file format" in capsys.readouterr().out
         markerless = tmp_path / "story.md"
-        markerless.write_text("Just markdown prose.")
+        markerless.write_text("Just markdown prose.", encoding="utf-8")
         app.play(f"/import {markerless}")
         assert "Cannot detect file format" in capsys.readouterr().out
         assert app.story_id is None
@@ -225,7 +228,7 @@ class TestPlaintext:
         self, app: App, tmp_path: Path, capsys
     ) -> None:
         path = tmp_path / "chapel.txt"
-        path.write_text(PROSE)
+        path.write_text(PROSE, encoding="utf-8")
         app.play(f"/import {path}")
         assert "Imported" in capsys.readouterr().out
 
@@ -272,7 +275,7 @@ class TestExport:
         app.play("I enter the hall.")
         app.play("/title Hall")
         app.play("/export")
-        exported = parse_story((tmp_path / "hall.md").read_text())
+        exported = parse_story((tmp_path / "hall.md").read_text(encoding="utf-8"))
         assert exported is not None
         assert exported.title == "Hall"
         assert [m.body for m in exported.messages] == [
@@ -294,7 +297,7 @@ class TestExport:
         app.play("/title Glade")
         archive = app.store.characters.find(app.story_id, "Seraphina").profile
         app.play("/export")
-        document = (tmp_path / "glade.md").read_text()
+        document = (tmp_path / "glade.md").read_text(encoding="utf-8")
         assert f"/card {card}" in document
         assert "#### Seraphina" in document
 
@@ -335,13 +338,13 @@ class TestExport:
     def test_a_name_without_an_extension_gets_md(self, app: App, tmp_path: Path) -> None:
         app.play("I enter the hall.")
         app.play(f"/export {tmp_path / 'glade'}")
-        assert (tmp_path / "glade.md").read_text().startswith(EXPORT_MARKER)
+        assert (tmp_path / "glade.md").read_text(encoding="utf-8").startswith(EXPORT_MARKER)
         assert not (tmp_path / "glade").exists()
 
     def test_a_name_with_one_keeps_it(self, app: App, tmp_path: Path) -> None:
         app.play("I enter the hall.")
         app.play(f"/export {tmp_path / 'glade.txt'}")
-        assert (tmp_path / "glade.txt").read_text().startswith(EXPORT_MARKER)
+        assert (tmp_path / "glade.txt").read_text(encoding="utf-8").startswith(EXPORT_MARKER)
         assert not (tmp_path / "glade.txt.md").exists()
 
     def test_an_existing_directory_is_left_to_fail(self, app: App, tmp_path: Path, capsys) -> None:
@@ -359,15 +362,15 @@ class TestExport:
         self, app: App, tmp_path: Path, monkeypatch
     ) -> None:
         target = tmp_path / "kept.md"
-        target.write_text("precious notes")
+        target.write_text("precious notes", encoding="utf-8")
         app.play("I enter the hall.")
         monkeypatch.setattr("builtins.input", lambda prompt="": "")  # the [y/N] default
         app.play(f"/export {target}")
-        assert target.read_text() == "precious notes"
+        assert target.read_text(encoding="utf-8") == "precious notes"
 
 
 
 def tavern_file(tmp_path: Path) -> Path:
     path = tmp_path / "elara.jsonl"
-    path.write_text("\n".join(json.dumps(line) for line in TAVERN_LINES))
+    path.write_text("\n".join(json.dumps(line) for line in TAVERN_LINES), encoding="utf-8")
     return path

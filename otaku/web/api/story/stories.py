@@ -1,10 +1,11 @@
 """Stories, as the page asks for them: the collection, one story, and
 the actions on one — a copy, a fresh take on the last reply (a write
 whose answer is the reply's event stream, `STREAMS`), the trailing
-exchange taken back — and the two rules every path inside a story
-keeps, kept here, with the story: an answer is told with the head the
-story stands at (`tagged`), and a write that moves the head names the
-one it moves from (`expected_head`)."""
+exchange taken back, what the newest discard took put back — and the
+two rules every path inside a story keeps, kept here, with the story:
+an answer is told with the head the story stands at (`tagged`), and a
+write that moves the head names the one it moves from
+(`expected_head`)."""
 
 from __future__ import annotations
 
@@ -148,6 +149,15 @@ def _undo(api: Api, ask: Ask) -> dict[str, Any]:
     )
 
 
+def _revert(api: Api, ask: Ask) -> dict[str, Any]:
+    """What the newest discard took put back, from the head `If-Match`
+    names — the story as it now stands."""
+    story_id = ask.id("story")
+    return changed(
+        api.stories.reverts.create(story_id, expected_head=expected_head(api, ask, story_id))
+    )
+
+
 # ---------- the rows ----------
 
 
@@ -166,6 +176,7 @@ ROUTES: dict[tuple[str, str], Route] = {
     },
     ("POST", "/api/stories/{story}/forks"): _fork,
     ("POST", "/api/stories/{story}/undos"): tagged(_undo),
+    ("POST", "/api/stories/{story}/reverts"): tagged(_revert),
 }
 
 # The write whose answer is the reply as it arrives — matched as the

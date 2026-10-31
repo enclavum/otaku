@@ -1,6 +1,6 @@
 """Managing stories: browsing and resuming, forking, /title, /system, /new —
 and the actions on one: /undo takes the trailing exchange back, /regen
-sets the reply aside for a fresh take.
+sets the reply aside for a fresh take, /revert puts back what they took.
 
 The browser itself is a full-screen surface driven headless below; for
 the routing stories it is a stubbed `screens.stories.pick` — patched at
@@ -12,15 +12,17 @@ fork, truncate — and about the story commands' effects on the store, the
 story the chat plays, and the remembered state.
 """
 
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from otaku.backend.api import Api, Layout, Refused
-from otaku.backend.api.codex.cards import RawFile
-from otaku.backend.domain.app._paths import Paths
-from otaku.terminal.api.story.prompts import read_prompt
+from otaku.backend.app.paths import Paths
+from otaku.backend.codex.cards.schemas import RawFile
+from otaku.store.schema import Message
+from otaku.terminal.api.prompts import read_prompt
 from otaku.terminal.screens import stories as screen_stories
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch, set_config
@@ -42,6 +44,7 @@ HOW_TO_ASK = "ASK LIKE THIS"
 
 
 CAT = Path(__file__).parents[2] / "fixtures" / "cat.jpg"
+SERAPHINA = Path(__file__).parents[2] / "fixtures" / "seraphina.png"
 
 
 class TestBrowsing:
@@ -118,7 +121,7 @@ class TestResumeDialog:
         assert app.story_id == first
         assert [m.body for m in app.messages] == ["The first story begins."]
         # The abandoned reply still exists in the tree — nothing was deleted.
-        assert app.store.messages.count_body_chars([reply_id]) > 0
+        assert app.store.messages.get(reply_id) is not None
 
 
 class TestStoryBrowser:
@@ -204,6 +207,32 @@ class TestStoryBrowser:
         first, _second = two_stories(app)
         self.pick(app, BACKSPACE + "y" + ESC)
         assert [row.id for row in app.store.stories.list()] == [first]
+
+    def test_h_shows_the_discarded_and_enter_resumes_on_one(self, app: App) -> None:
+        # The undone exchange is listed under the message it left from
+        # once `h` shows it; Resume, the dialog's first choice, moves the
+        # head onto it — and leaves nothing to revert.
+        app.play("One.")
+        app.play("Two.")
+        app.play("/undo")
+        story = app.story_id
+        reply = app.store.stories.get_discarded(story)[-1][1].id
+        self.pick(app, ENTER + DOWN + ENTER)  # hidden: the tail resumes as it stands
+        assert app.store.stories.get_head(story) != reply
+        self.pick(app, ENTER + "h" + DOWN + DOWN + ENTER + ENTER)
+        assert app.store.stories.get_head(story) == reply
+        assert [m.body for m in app.messages][-2:] == ["Two.", scripted.CHAT_REPLY]
+        assert not app.api.stories.get(story).can_revert
+
+    def test_a_discarded_message_forks_from_the_dialog(self, app: App) -> None:
+        app.play("One.")
+        app.play("Two.")
+        app.play("/undo")
+        story = app.story_id
+        self.pick(app, ENTER + "h" + DOWN + ENTER + DOWN + ENTER)
+        assert app.story_id != story
+        assert [m.body for m in app.messages] == ["One.", scripted.CHAT_REPLY, "Two."]
+        assert app.store.stories.get_head(story) == app.store.stories.get_messages(story)[-1].id
 
     def test_backspace_inside_the_filter_never_deletes(self, app: App) -> None:
         # While a filter is open backspace edits it, so the `y` lands in
@@ -318,6 +347,62 @@ class TestFork:
             app.api.stories.forks.list(999)
 
 
+class TestWordCount:
+    """A story's words, counted as each turn lands and summed along its
+    current chain: a word is a run between spaces holding a letter or a
+    digit, a Chinese or Japanese character a word of its own, and a
+    tool's result none. The scripted reply is ten words."""
+
+    def test_the_turns_are_counted_as_they_land(self, app: App) -> None:
+        app.play("I open — the door.")  # a lone dash is no word
+        story = app.story_id
+        assert app.api.stories.get(story).word_count == 4 + 10
+        assert [s.word_count for s in app.api.stories.list() if s.id == story] == [14]
+
+    def test_an_edit_counts_the_message_again(self, app: App) -> None:
+        app.play("I open the door.")
+        story = app.story_id
+        app.api.stories.messages.update(story, app.messages[0].id, body="I knock twice, then wait.")
+        assert app.api.stories.get(story).word_count == 5 + 10
+
+    def test_an_undone_exchange_leaves_the_count(self, app: App) -> None:
+        app.play("I open the door.")
+        app.play("I step inside.")
+        app.play("/undo")
+        assert app.api.stories.get(app.story_id).word_count == 4 + 10
+
+    def test_a_fork_carries_the_count(self, app: App) -> None:
+        app.play("I open the door.")
+        app.play("/fork")
+        assert app.api.stories.get(app.story_id).word_count == 4 + 10
+
+    def test_a_chinese_or_japanese_character_is_a_word(self, app: App) -> None:
+        app.play("雨が降る")
+        assert app.api.stories.get(app.story_id).word_count == 4 + 10
+
+    def test_a_tools_result_counts_none(self, app: App) -> None:
+        app.play("I open the door.")
+        story = app.story_id
+        result = Message(
+            role="tool", kind="tool", body="the internet's many words", provider="web-search"
+        )
+        app.store.stories.append(story, result, after=app.store.stories.get_head(story))
+        assert app.api.stories.get(story).word_count == 4 + 10
+
+
+class TestTheFirstLinePlayed:
+    def test_a_chapters_heading_and_a_cards_line_are_passed_over(self, app: App) -> None:
+        # What names an untitled story with no memory yet, and what the
+        # browsers show as its first prompt: the reader's first line.
+        app.play("/chapter The Gate")
+        story = app.story_id
+        card = Message(role="user", kind="card", body="/card keeper.json", provider="card")
+        app.store.stories.append(story, card, after=app.store.stories.get_head(story))
+        app.play("I knock.")
+        (listed,) = [s for s in app.api.stories.list() if s.id == story]
+        assert listed.first_message == "I knock."
+
+
 class TestSystem:
     def test_system_with_no_story_makes_one_and_plays_on_it(self, app: App) -> None:
         app.play("/system You are the narrator.")
@@ -393,6 +478,9 @@ class TestSystem:
         app.play("/system /nowhere/gone.md")
         assert app.premise == "/nowhere/gone.md"
 
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="a mode of 0o000 does not stop a read on Windows"
+    )
     def test_an_unreadable_file_changes_nothing(self, app: App, capsys, tmp_path) -> None:
         sealed = tmp_path / "sealed.md"
         sealed.write_text("You are the narrator.", encoding="utf-8")
@@ -534,6 +622,85 @@ class TestRegenerate:
             app.close()
 
 
+class TestRevert:
+    """/revert puts back what the newest /undo or /regen took — again,
+    back through a run of them — until anything else moves the head."""
+
+    def test_revert_puts_back_what_an_undo_took(self, app: App) -> None:
+        app.play("The first turn.")
+        app.play("The second turn.")
+        played = [m.id for m in app.messages]
+        app.play("/undo")
+        app.play("/revert")
+        assert [m.id for m in app.messages] == played
+
+    def test_reverts_walk_back_a_run_of_undos(self, app: App) -> None:
+        for line in ("One.", "Two.", "Three."):
+            app.play(line)
+        played = [m.id for m in app.messages]
+        app.play("/undo")
+        app.play("/undo")
+        assert can_revert(app)
+        app.play("/revert")
+        assert [m.id for m in app.messages] == played[:4]
+        app.play("/revert")
+        assert [m.id for m in app.messages] == played
+        assert not can_revert(app)
+        app.play("/revert")  # nothing left: refused, nothing moves
+        assert [m.id for m in app.messages] == played
+
+    def test_revert_puts_back_the_take_a_regen_replaced(self, app: App) -> None:
+        app.play("I roll the dice.")
+        first_take = app.messages[-1].id
+        app.server.script = lambda body: "It came up six."
+        app.play("/regen")
+        fresh = app.messages[-1].id
+        app.play("/revert")
+        assert app.messages[-1].id == first_take
+        assert app.store.messages.get(fresh) is not None  # set aside, never deleted
+
+    def test_a_line_or_a_rewind_leaves_nothing_to_revert(self, app: App) -> None:
+        app.play("One.")
+        app.play("Two.")
+        app.play("/undo")
+        app.play("Three.")
+        assert not can_revert(app)
+        app.play("/undo")
+        assert can_revert(app)
+        story, first = app.story_id, app.messages[0].id
+        app.api.stories.update(story, head=first, expected_head=app.api.stories.get(story).head)
+        assert not can_revert(app)
+
+    def test_an_edit_and_a_pin_keep_what_there_is_to_revert(self, app: App) -> None:
+        app.play("One.")
+        app.play("Two.")
+        played = [m.id for m in app.messages]
+        app.play("/undo")
+        story, first = app.story_id, app.messages[0].id
+        app.api.stories.messages.update(story, first, body="One, corrected.")
+        app.api.stories.messages.update(story, first, pinned=True)
+        app.play("/revert")
+        assert [m.id for m in app.messages] == played
+
+    def test_an_undo_that_took_a_cards_character_leaves_nothing_to_revert(self, app: App) -> None:
+        # The character went with the undone import and nothing brings
+        # it back, so the import's rows never come back without it.
+        app.play(f"/card {SERAPHINA}")
+        app.play("/undo")
+        assert not can_revert(app)
+        app.play("/revert")
+        assert app.store.stories.get_messages(app.story_id) == []
+
+    def test_a_revert_from_a_stale_head_is_refused(self, app: App) -> None:
+        app.play("One.")
+        app.play("Two.")
+        app.play("/undo")
+        story, stale = app.story_id, app.messages[0].id
+        with pytest.raises(Refused):
+            app.api.stories.reverts.create(story, expected_head=stale)
+        assert can_revert(app)
+
+
 class TestStartWithCards:
     """A story started with codex cards: a card row and a linked character
     each, in pick order, then the first card's greeting — one voice opens
@@ -662,6 +829,11 @@ def picks(story_id: int, upto: int | None = None, action: str = "resume") -> Pic
     return pick
 
 
+def can_revert(app: App) -> bool:
+    """Whether a revert would put something back in the story played."""
+    return app.api.stories.get(app.story_id).can_revert
+
+
 def two_stories(app: App) -> tuple[int, int]:
     """A titled two-turn story, then a fresh current one. Returns their
     ids (first, current)."""
@@ -677,7 +849,10 @@ def with_prompt(root, server) -> App:
     """The app over a prompts.toml whose questions prompt is `HOW_TO_ASK`."""
     paths = Paths.resolve(root)
     paths.ensure_tree()
-    paths.prompts_file.write_text(f'tool_questions_prompt = "{HOW_TO_ASK}"\n')
+    # LF, as otaku writes it: a CRLF file is healed with a backup of its own.
+    paths.prompts_file.write_text(
+        f'tool_questions_prompt = "{HOW_TO_ASK}"\n', encoding="utf-8", newline="\n"
+    )
     return launch(root, server)
 
 

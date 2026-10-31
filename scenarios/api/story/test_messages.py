@@ -1,10 +1,11 @@
 """Playing a story: turns, the wire promise, the roleplay commands /me,
 /you, /ooc, the inline pair typed inside a line, the tools a reply
 calls and the answers to a question, the novel and the canvas — and a
-message corrected.
+message corrected, and the discarded ones listed with the chain.
 """
 
 import contextlib
+import re
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -26,21 +27,22 @@ from otaku.backend.api import (
     Refused,
     StoryMode,
 )
-from otaku.backend.api.app import ModelInUse
-from otaku.backend.api.story.messages import (
+from otaku.backend.app.core.schemas import ModelInUse
+from otaku.backend.app.paths import Paths
+from otaku.backend.formats import EXPORT_MARKER
+from otaku.backend.story import request as story_request
+from otaku.backend.story.messages.schemas import (
     AssistantMessage,
     AssistantText,
     AssistantToolCall,
     Done,
+    EmptyReply,
     RawFile,
     ToolMessage,
     UserMessage,
 )
-from otaku.backend.api.story.stories import Story
-from otaku.backend.domain._formats import EXPORT_MARKER
-from otaku.backend.domain.app._paths import Paths
-from otaku.backend.domain.story import _request
-from otaku.backend.domain.story._play import NO_PICTURE_ON_TEXT, NOTHING_TO_SEND
+from otaku.backend.story.play import NO_PICTURE_ON_TEXT, NOTHING_TO_SEND
+from otaku.backend.story.stories.schemas import Story
 from otaku.context.assembler import JoinType, estimate_tokens
 from otaku.settings import models as models_file
 from otaku.store.schema import Message
@@ -157,7 +159,8 @@ class TestTurns:
         paths.prompts_file.write_text(
             'me_framing = "<<{name} speaks>>\\n{body}"\n'
             'you_framing = "<<now play {name}>>"\n'
-            'ooc_framing = "<<aside: {body}>>"\n'
+            'ooc_framing = "<<aside: {body}>>"\n',
+            encoding="utf-8",
         )
         app = launch(root, server)
         try:
@@ -177,13 +180,17 @@ class TestTurns:
         root = tmp_path / "state"
         paths = Paths.resolve(root)
         paths.ensure_tree()
-        paths.prompts_file.write_text('me_framing = "<<first {name}>>\\n{body}"\n')
+        paths.prompts_file.write_text(
+            'me_framing = "<<first {name}>>\\n{body}"\n', encoding="utf-8"
+        )
         app = launch(root, server)
         try:
             app.play("/me Elara: one.")
         finally:
             app.close()
-        paths.prompts_file.write_text('me_framing = "<<second {name}>>\\n{body}"\n')
+        paths.prompts_file.write_text(
+            'me_framing = "<<second {name}>>\\n{body}"\n', encoding="utf-8"
+        )
         app = launch(root, server)
         try:
             app.play("/me Elara: two.")
@@ -252,6 +259,30 @@ class TestReplyReport:
         assert isinstance(done, Done)
         assert done.report is not None and not done.report.truncated
         assert done.report.notice == "" and done.stats == ""  # verbose is off
+
+
+class TestEmptyReply:
+    """A reply that brings no text — whitespace, or thinking alone —
+    records no row, and the stream ends saying so rather than as if the
+    model had answered."""
+
+    def test_whitespace_alone_records_nothing_and_ends_empty(self, app: App) -> None:
+        app.server.script = lambda body: "\n"
+        story = app.ensure_story()
+        events = list(
+            app.api.stories.messages.create(story, line="I wait.", expected_head=app.head())
+        )
+        assert isinstance(events[-1], EmptyReply)
+        assert [m.role for m in app.messages] == ["user"]
+
+    def test_thinking_alone_records_nothing_and_ends_empty(self, app: App) -> None:
+        app.server.script = lambda body: ("Perhaps I should say nothing.", "")
+        story = app.ensure_story()
+        events = list(
+            app.api.stories.messages.create(story, line="I wait.", expected_head=app.head())
+        )
+        assert isinstance(events[-1], EmptyReply)
+        assert [m.role for m in app.messages] == ["user"]
 
 
 class TestProviderFailures:
@@ -523,7 +554,9 @@ class TestRoll:
         root = tmp_path / "state"
         paths = Paths.resolve(root)
         paths.ensure_tree()
-        paths.prompts_file.write_text('roll_framing = "<<rolled {dice}>> {body}"\n')
+        paths.prompts_file.write_text(
+            'roll_framing = "<<rolled {dice}>> {body}"\n', encoding="utf-8"
+        )
         app = launch(root, server)
         try:
             app.play("/roll 1d4 I duck.")
@@ -538,6 +571,223 @@ class TestRoll:
         app.play("/roll banana I flail.")
         assert app.story_id is None
         assert app.server.requests == []
+
+
+class TestChapter:
+    """`/chapter TITLE`: a row of its own kind at the story's end, played
+    without an answer, numbered along the chain when it is shown."""
+
+    def test_a_chapter_lands_without_asking_the_model(self, app: App) -> None:
+        app.play("I enter the hall.")
+        asked = len(app.server.requests)
+        app.play("/chapter The Flood")
+        assert len(app.server.requests) == asked
+        last = app.store.stories.get_messages(app.story_id)[-1]
+        assert (last.role, last.kind, last.body) == ("user", "chapter", "/chapter The Flood")
+
+    def test_the_chapters_are_numbered_along_the_chain(self, app: App) -> None:
+        app.play("/chapter The Gate")
+        app.play("I enter the hall.")
+        app.play("/chapter The Flood")
+        shown = app.api.stories.messages.list(app.story_id)
+        assert [_heading(m.segments) for m in shown if m.kind == "chapter"] == [
+            (1, "The Gate"),
+            (2, "The Flood"),
+        ]
+
+    def test_a_landed_chapter_is_told_numbered(self, app: App) -> None:
+        app.play("/chapter The Gate")
+        story = app.story_id
+        events = list(
+            app.api.stories.messages.create(
+                story, line="/chapter The Flood", expected_head=app.api.stories.get(story).head
+            )
+        )
+        (told,) = [e for e in events if isinstance(e, UserMessage)]
+        assert _heading(told.message.segments) == (2, "The Flood")
+        assert not [e for e in events if isinstance(e, AssistantMessage)]
+
+    def test_the_framing_comes_from_the_prompts_file(self, server, tmp_path) -> None:
+        # Like every direction: the file IS the injection (see TestTurns),
+        # read by the model with the reply that follows.
+        root = tmp_path / "state"
+        paths = Paths.resolve(root)
+        paths.ensure_tree()
+        paths.prompts_file.write_text('chapter_framing = "<<chapter {body}>>"\n', encoding="utf-8")
+        app = launch(root, server)
+        try:
+            app.play("/chapter The Flood")
+            app.play("I wade in.")
+            wire = "\n".join(scripted.content_text(m) for m in app.server.requests[-1]["messages"])
+            assert "<<chapter The Flood>>" in wire
+            assert "/chapter" not in wire
+        finally:
+            app.close()
+
+    def test_a_regenerate_answers_a_chapter_like_any_line(self, app: App) -> None:
+        app.play("I enter the hall.")
+        app.play("/chapter The Flood")
+        app.play("/regen")
+        chain = app.store.stories.get_messages(app.story_id)
+        assert (chain[-2].kind, chain[-1].role) == ("chapter", "assistant")
+
+    def test_undo_takes_a_chapter_back_like_a_line(self, app: App) -> None:
+        app.play("I enter the hall.")
+        app.play("/chapter The Flood")
+        app.play("/undo")
+        chain = app.store.stories.get_messages(app.story_id)
+        assert [m.body for m in chain] == ["I enter the hall.", scripted.CHAT_REPLY]
+
+
+class TestPin:
+    """A message pinned or unpinned on the story's chain: the store keeps
+    the mark, the message says it and whether it may be pinned, a fork and
+    an export keep it. A card's or a tool's row is never pinned, and any
+    row may be unpinned."""
+
+    def test_a_pin_is_kept_and_taken_back(self, app: App) -> None:
+        app.play("I enter the hall.")
+        story = app.story_id
+        line = app.api.stories.messages.list(story)[0]
+        assert (line.pinned, line.can_pin) == (False, True)
+        changed = app.api.stories.messages.update(story, line.id, pinned=True)
+        assert changed.notice and changed.value.pinned
+        assert [m.pinned for m in app.api.stories.messages.list(story)] == [True, False]
+        app.api.stories.messages.update(story, line.id, pinned=False)
+        assert not app.store.messages.get(line.id).pinned
+
+    def test_a_card_is_never_pinned_but_always_unpinned(self, app: App) -> None:
+        app.play("I enter the hall.")
+        story = app.story_id
+        card = Message(role="user", kind="card", body="/card keeper.json", provider="card")
+        card_id = app.store.stories.append(story, card, after=app.store.stories.get_head(story))
+        (shown,) = [m for m in app.api.stories.messages.list(story) if m.id == card_id]
+        assert not shown.can_pin
+        with pytest.raises(Invalid):
+            app.api.stories.messages.update(story, card_id, pinned=True)
+        assert not app.store.messages.get(card_id).pinned
+        app.store.messages.set_pinned(card_id, True)  # by hand, or by an older document
+        app.api.stories.messages.update(story, card_id, pinned=False)
+        assert not app.store.messages.get(card_id).pinned
+
+    def test_an_update_names_something_to_change(self, app: App) -> None:
+        app.play("I enter the hall.")
+        with pytest.raises(Invalid):
+            app.api.stories.messages.update(app.story_id, app.messages[0].id)
+
+    def test_a_correction_and_a_pin_in_one_update(self, app: App) -> None:
+        app.play("I enter the hall.")
+        changed = app.api.stories.messages.update(
+            app.story_id, app.messages[0].id, body="I leave the hall.", pinned=True
+        )
+        assert (changed.value.body, changed.value.pinned) == ("I leave the hall.", True)
+
+    def test_a_fork_keeps_the_pins(self, app: App) -> None:
+        app.play("I enter the hall.")
+        app.api.stories.messages.update(app.story_id, app.messages[1].id, pinned=True)
+        app.play("/fork")
+        assert [m.pinned for m in app.messages] == [False, True]
+
+    def test_an_export_and_its_import_keep_the_pins(self, app: App) -> None:
+        app.play("I enter the hall.")
+        story = app.story_id
+        app.api.stories.messages.update(story, app.messages[1].id, pinned=True)
+        text = app.api.stories.export.get(story).text
+        imported = app.api.imports.create(text=text, file_name="hall.md").value.story_id
+        assert [m.pinned for m in app.api.stories.messages.list(imported)] == [False, True]
+
+
+class TestDiscarded:
+    """Every message a story holds, listed (`with_discarded`): under each
+    message of the chain the branches an undo or a regenerate left from
+    it, oldest first, each read along its own branch — normal messages,
+    edited, pinned, forked from and resumed on like any."""
+
+    def test_an_undone_exchange_stands_under_the_message_it_left(self, app: App) -> None:
+        app.play("One.")
+        app.play("Two.")
+        app.play("/undo")
+        app.play("Three.")
+        full = app.api.stories.messages.list(app.story_id, with_discarded=True)
+        assert [(m.body, m.discarded) for m in full] == [
+            ("One.", False),
+            (scripted.CHAT_REPLY, False),
+            ("Two.", True),
+            (scripted.CHAT_REPLY, True),
+            ("Three.", False),
+            (scripted.CHAT_REPLY, False),
+        ]
+        # the chain alone lists none of them
+        assert not any(m.discarded for m in app.api.stories.messages.list(app.story_id))
+
+    def test_the_takes_a_regen_replaced_come_oldest_first(self, app: App) -> None:
+        app.play("I roll the dice.")
+        for take in ("It came up two.", "It came up six."):
+            app.server.script = lambda body, take=take: take
+            app.play("/regen")
+        full = app.api.stories.messages.list(app.story_id, with_discarded=True)
+        assert [(m.body, m.discarded) for m in full] == [
+            ("I roll the dice.", False),
+            (scripted.CHAT_REPLY, True),
+            ("It came up two.", True),
+            ("It came up six.", False),
+        ]
+
+    def test_a_discarded_chapter_is_numbered_along_its_own_branch(self, app: App) -> None:
+        app.play("/chapter The Gate")
+        app.play("I enter the hall.")
+        app.play("/chapter The Flood")
+        app.play("/undo")  # the second chapter, discarded
+        full = app.api.stories.messages.list(app.story_id, with_discarded=True)
+        assert [(_heading(m.segments), m.discarded) for m in full if m.kind == "chapter"] == [
+            ((1, "The Gate"), False),
+            ((2, "The Flood"), True),
+        ]
+
+    def test_a_discarded_message_is_edited_pinned_and_forked_from(self, app: App) -> None:
+        app.play("One.")
+        app.play("Two.")
+        app.play("/undo")
+        story = app.story_id
+        full = app.api.stories.messages.list(story, with_discarded=True)
+        aside = next(m for m in full if m.discarded and m.role == "user")
+        app.api.stories.messages.update(story, aside.id, body="Two, corrected.")
+        app.api.stories.messages.update(story, aside.id, pinned=True)
+        stored = app.store.messages.get(aside.id)
+        assert (stored.body, stored.pinned) == ("Two, corrected.", True)
+        fork = app.api.stories.forks.create(story, at=aside.id).value.id
+        assert [m.body for m in app.store.stories.get_messages(fork)] == [
+            "One.",
+            scripted.CHAT_REPLY,
+            "Two, corrected.",
+        ]
+
+    def test_resuming_on_a_discarded_message_moves_the_head_onto_it(self, app: App) -> None:
+        app.play("One.")
+        app.play("Two.")
+        app.play("/undo")
+        app.play("Three.")
+        story = app.story_id
+        full = app.api.stories.messages.list(story, with_discarded=True)
+        aside = next(m for m in full if m.discarded and m.role == "assistant")
+        app.api.stories.update(story, head=aside.id, expected_head=app.api.stories.get(story).head)
+        assert app.store.stories.get_head(story) == aside.id
+        relisted = app.api.stories.messages.list(story, with_discarded=True)
+        # the ending it left is discarded in its turn: nothing is lost
+        assert [m.body for m in relisted if m.discarded] == ["Three.", scripted.CHAT_REPLY]
+
+    def test_a_message_of_another_story_is_refused(self, app: App) -> None:
+        app.play("One.")
+        other = app.messages[0].id
+        app.play("/new")
+        app.play("Two.")
+        story = app.story_id
+        with pytest.raises(Refused):
+            app.api.stories.messages.update(story, other, pinned=True)
+        with pytest.raises(Refused):
+            app.api.stories.update(story, head=other, expected_head=app.api.stories.get(story).head)
+        with pytest.raises(Refused):
+            app.api.stories.forks.create(story, at=other)
 
 
 class TestInliners:
@@ -634,28 +884,29 @@ class TestPromptCache:
 
 
 class TestCancelAndKeep:
-    def test_a_ctrl_c_in_the_wait_keeps_the_partial_with_smoothing_on(
+    def test_a_cancel_in_the_wait_keeps_the_partial_with_smoothing_on(
         self, server, tmp_path
     ) -> None:
         # With smoothing on, the wait is the wrapper's own tick inside the
-        # play's frame, and that is where a Ctrl+C lands: what streamed
-        # must be recorded all the same, the way a closed stream's is.
+        # play's frame, and that is where a cancel is seen — a Ctrl+C
+        # closes the stream, and the app's thread, asked through its idle
+        # hook, answers that nobody reads it any more: what streamed must
+        # be recorded all the same.
         server.script = lambda body: "The light went out, and something stirred in the dark. " * 8
         server.chunk_size = 6
         server.chunk_delay = 0.03
         set_config(tmp_path / "state", smooth_streaming=True)
         app = launch(tmp_path / "state", server)
         try:
-            ticks = 0
-
-            def interrupt() -> None:
-                nonlocal ticks
-                ticks += 1
-                if ticks == 40:  # some 0.8 s into the reply: words have streamed
-                    raise KeyboardInterrupt
-
-            app.backend.set_on_idle(interrupt)
-            app.play("I enter the hall.")
+            events = app.api.stories.messages.create(
+                app.ensure_story(), line="I enter the hall.", expected_head=app.head()
+            )
+            pieces = 0
+            for event in events:
+                pieces += isinstance(event, AssistantText)
+                if pieces == 10:  # words have streamed
+                    break
+            events.close()  # type: ignore[attr-defined]
             reply = app.store.stories.get_messages(app.story_id)[-1]
             assert reply.role == "assistant"
             assert 0 < len(reply.body) < len(server.script({}))
@@ -1015,7 +1266,7 @@ class TestTheNovel:
             reply = app.store.stories.get_messages(app.story_id)[-1]
             assert reply.body == "\n\nThe rain fell."
             assert (
-                _request.assemble(app.backend, app.story_id, None)
+                story_request.assemble(app.backend, app.story_id, None)
                 .as_story_text()
                 .endswith("It was late.\n\nThe rain fell.")
             )
@@ -1058,21 +1309,25 @@ class TestTheNovel:
             app.play("/system Be brief.")
             app.play("I was waiting for")
             report = app.api.stories.context.get(app.story_id)
-            # one part, the text as sent, its tokens the text's estimate
-            assert [part.role for part in report.parts] == ["prompt"]
+            # the parts joined are the text as sent, its tokens the text's estimate
+            wire = "".join(getattr(part, "body", "") for part in report.parts)
             assert report.template == "plain"
-            assert report.total_tokens == estimate_tokens(report.wire)
+            assert report.figures.total_tokens == estimate_tokens(wire)
             # the next request IS the preview, the typed line after it
             app.play("Then?")
-            assert app.server.requests[-1]["prompt"] == report.wire + " Then?"
-            # and the terminal prints the text as sent, under the one
-            # marker that stands for the field
+            assert app.server.requests[-1]["prompt"] == wire + " Then?"
+            # and the terminal prints the text as sent, part by part
             report = app.api.stories.context.get(app.story_id)
             capsys.readouterr()
             app.play("/context")
             printed = capsys.readouterr().out
-            assert "[prompt]" in printed and printed.endswith(report.wire + "\n")
-            assert " Then?" in report.wire
+            lines = [
+                line
+                for part in report.parts
+                for line in getattr(part, "body", "").splitlines()
+                if line.strip()
+            ]
+            assert lines and all(line in printed for line in lines)
 
     def test_a_reply_outside_story_mode_is_recorded_in_chat_mode(self, app: App) -> None:
         app.play("I open the door.")
@@ -1096,7 +1351,9 @@ class TestTheCanvasOverTheChatWire:
         root = tmp_path / "state"
         paths = Paths.resolve(root)
         paths.ensure_tree()
-        paths.prompts_file.write_text('emulate_text_completion_prompt = "CONTINUE HOW"\n')
+        paths.prompts_file.write_text(
+            'emulate_text_completion_prompt = "CONTINUE HOW"\n', encoding="utf-8"
+        )
         app = launch(root, server)
         try:
             app.play("/system Be terse.")
@@ -1125,8 +1382,8 @@ class TestTheCanvasOverTheChatWire:
         _layout(app, Layout.CANVAS)
         _emulating(app)
         app.play("One.")
-        turn = [i.owner for i in _request.assemble(app.backend, app.story_id, None).injections]
-        job = [i.owner for i in _request.build_job(app.backend, app.story_id).injections]
+        turn = [i.owner for i in story_request.assemble(app.backend, app.story_id, None).injections]
+        job = [i.owner for i in story_request.build_job(app.backend, app.story_id).injections]
         assert turn == job == ["emulate_text_completion"]
 
     def test_a_reply_goes_on_in_the_paragraph_it_follows(self, app: App) -> None:
@@ -1244,7 +1501,7 @@ class TestToolsOtakuRuns:
         root = tmp_path / "state"
         paths = Paths.resolve(root)
         paths.ensure_tree()
-        paths.prompts_file.write_text('tool_framing = "<<{tool}: {body}>>"\n')
+        paths.prompts_file.write_text('tool_framing = "<<{tool}: {body}>>"\n', encoding="utf-8")
         app = launch(root, server)
         try:
             app.api.stories.settings.update(app.ensure_story(), "allow_system_info", enabled=True)
@@ -1347,7 +1604,7 @@ class TestLegacyTurns:
             "The hall answers.\n"
         )
         path = tmp_path / "old.md"
-        path.write_text(document)
+        path.write_text(document, encoding="utf-8")
         app.play(f"/import {path}")
         app.play("She waits.")
         wire = app.server.requests[-1]["messages"]
@@ -1377,7 +1634,7 @@ def _continuing_omlx(
         set_config_provider(root, server, name="omlx")
         paths = Paths.resolve(root)
         if framing is not None:
-            paths.prompts_file.write_text(f'story_framing = "{framing}"\n')
+            paths.prompts_file.write_text(f'story_framing = "{framing}"\n', encoding="utf-8")
         if template_line is not None:
             entry = {models_file.TEMPLATE_KEY: template_line}
             models_file.save(paths.models_file, "test-model", entry)
@@ -1448,6 +1705,12 @@ def _after_the_tool(then: str, *, first: str, marker: str = "Time: ") -> Callabl
     return script
 
 
+def _heading(segments: tuple[dict[str, object], ...]) -> tuple[int, str]:
+    """A chapter's number and title, off the segments a frontend draws."""
+    parts = {part["kind"]: str(part["text"]) for part in segments}
+    return int(re.sub(r"\D", "", parts["chapter_number"])), parts["chapter_title"]
+
+
 def _landed(events: list) -> Message:
     """The reply as recorded, off the event that told it."""
     return next(e for e in events if isinstance(e, AssistantMessage)).message
@@ -1512,7 +1775,7 @@ class Prompting:
                 story=lambda: chat.story_id,
                 can_attach=lambda: chat.can_attach,
                 shortcuts=SHORTCUTS,
-                aside=lambda: "",
+                status_line=chat.status_line,
             )
             answers.top_row = top_row
 

@@ -2,7 +2,7 @@
 
 <!-- otaku export
 otaku-version: 0.2.0
-format-version: 3
+format-version: 4
 model: handwritten
 exported: 2026-07-31 12:00
 -->
@@ -25,7 +25,7 @@ You are the narrator of a quiet fantasy mystery. Write in second person, present
 ## Scenes
 
 ### 1 · The Dry Bed
-- **Messages:** 1-6
+- **Messages:** 1-7
 
 Maren, a traveling cartographer, follows the post road into the Meade valley and finds the river missing from its bed: a channel of pale dry stones, fish bones weathered far older than three days, and the ferry up on chocks with its rope still strung across the air. The only person left at the crossing is Tallis, the old ferryman. He tells her the water departed three nights ago and — quietly, like a man afraid of being overheard — that it went uphill. Maren writes his words in her notebook where he can watch her do it, choosing to treat his account as testimony rather than grief.
 
@@ -42,7 +42,7 @@ Maren, a traveling cartographer, follows the post road into the Meade valley and
 **Entry:** A mapmaker came down the road — first stranger since the water left. She didn't laugh when I said the river went uphill. She wrote it down where I could see the words, and she pressed her palm to the bed the way you'd check a sick animal for fever. Maybe her map remembers what this valley is trying to forget.
 
 ### 2 · The Map That Moved
-- **Messages:** 7-10
+- **Messages:** 8-11
 
 Tallis leads Maren up the empty channel, where every mark a river leaves behind — scour grooves, combed grass, a climbing waterline — runs against the slope: the water was walking uphill when it left. Back on the ferry deck, Maren unrolls her survey and asks him to point to where the river bent wrong. His finger comes down on the weir at Harrow Lock, and before both their eyes the inked river shifts a hair's width toward his hand and holds its new course. Maren marks the true course in red ink and, with dusk coming down, sets out alone along the towpath for Harrow Lock.
 
@@ -62,28 +62,31 @@ Tallis leads Maren up the empty channel, where every mark a river leaves behind 
 
 ## Messages
 
-### 1 · user · Maren
+### 1 · user (chapter) · "((OOC: Chapter \"{body}\" starts here.))"
+/chapter Uphill
+
+### 2 · user · Maren
 I follow the post road down into the Meade valley, checking the hills against my survey as I go.
 
-### 2 · assistant
+### 3 · assistant
 The road knows the way better than the map does. You crest the last rise as the afternoon goes amber, and the valley opens below you: hedgerows, a scatter of roofs, the gray sag of the ferry house — and a wrongness you feel a full breath before you can name it.
 
 The river is not there.
 
 Not low. Not narrowed by drought. Gone. A long channel of pale stones curves through the valley like a shed skin, and where your survey shows a confident blue line labeled MEADE, there is only dust hanging in the light. Down by the far landing, a flat-bottomed ferry sits on wooden chocks, tilted, its guide-rope still strung taut across the empty air.
 
-### 3 · user · Maren · "((OOC: The user writes as Maren.))\n{body}"
+### 4 · user · Maren · "((OOC: The user writes as Maren.))\n{body}"
 I kneel at the bank and press my palm to the riverbed.
 
-### 4 · assistant
+### 5 · assistant
 The stones are dry the way a hearth is dry — warmed through, settled, as if no water has touched them in years rather than days. Fish bones lie wedged in the cracks, bleached brittle and clean. Three days dead, they should stink. They don't. They look like relics from someone else's century.
 
 Up by the beached ferry, something moves: a figure straightens out of the hull's shadow, a coil of rope over one shoulder, and goes very still — watching you the way people watch weather coming over a ridge.
 
-### 5 · user · Maren
+### 6 · user · Maren
 I raise a hand in greeting and call out: "I'm a mapmaker. I think my map is wrong — I'd be glad to be told how."
 
-### 6 · assistant
+### 7 · assistant
 "Wrong." The figure turns the word over like a coin he suspects is clipped. He comes down the landing steps stiff-kneed — an old man, river-tanned to the elbows, with a ferryman's way of standing that keeps his weight ready for a deck that is no longer there.
 
 "Tallis," he says. "Ferryman. Was." He looks at your hand until you lower it, then nods once, which seems to settle something. "Your map's not wrong, mapmaker. It's out of date by three nights. The river left."
@@ -92,20 +95,20 @@ He says it the way a man reports a death in the family — and then, quieter, wi
 
 "It went uphill."
 
-### 7 · user · Maren
+### 8 · user · Maren
 "Uphill," I repeat, and I write it in my notebook where he can watch me do it. "I take you at your word, Tallis. Show me."
 
-### 8 · assistant
+### 9 · assistant
 Something eases in the old man's shoulders — the particular relief of a person believed. He takes you up the old channel at a ferryman's pace, reading the banks the way you read contour lines.
 
 And the banks agree with him. The scour marks — the long grooves a river drags into its own bed — run against the slope. Grass along the margins lies combed uphill, stiff with dried silt. A waterline stain climbs from stone to stone like a stair. Everything a river leaves behind is here, and all of it is facing the wrong way.
 
 "Three nights ago I heard it go," Tallis says. "Not a flood-sound. A walking-sound."
 
-### 9 · user · Maren · "((OOC: The user writes as Maren.))\n{body}"
+### 10 · user · Maren · "((OOC: The user writes as Maren.))\n{body}"
 Back at the ferry, I unroll my survey on the deck and weight its corners with stones. "Point," I say. "Where did it bend wrong?"
 
-### 10 · assistant
+### 11 · assistant
 Tallis dries his hands on his coat with old habit before he touches the map — a riverman's courtesy to paper. His finger circles the valley once, hesitating, and comes down hard on a narrow throat of the river two leagues upstream, where your fine black linework marks the weir at Harrow Lock.
 
 "There," he says. "It always fought the weir. This time—"
@@ -114,18 +117,21 @@ He stops, because you have both seen it: under his fingertip, the inked river mo
 
 Maps record. Maps do not move. Yours just did.
 
-### 11 · user · Maren
+### 12 · user (chapter) · "((OOC: Chapter \"{body}\" starts here.))"
+/chapter Harrow Lock
+
+### 13 · user · Maren
 I mark the river's true course in red ink, roll the map, and take the towpath toward Harrow Lock while there's still light.
 
-### 12 · assistant
+### 14 · assistant
 Tallis gives you the way — towpath to the milestone, then the cut through the alder wood — and does not offer to come. He stands by his beached ferry with his coil of rope, and you leave him there in the failing light, ashamed and alone and glad of you, all three at once.
 
 The towpath climbs with the old channel beside it, dry stones going blue in the dusk. By the time the lock rises ahead of you — twin gates standing open on their chamber like a door left ajar — the first stars are out. And you hear it before you see anything: somewhere below the weir, faint and steady, the sound of running water in a valley that has none.
 
-### 13 · user · Maren · "((OOC: The user writes as Maren.))\n{body}"
+### 15 · user · Maren · "((OOC: The user writes as Maren.))\n{body}"
 I climb down the ladder into the lock chamber and stand very still, listening.
 
-### 14 · assistant
+### 16 · assistant
 The chamber swallows the last of the light. Ladder rungs cold under your hands, the smell of wet stone in a dry country — and there, along the chamber floor, you find it: a sheet of water no deeper than a coin, sliding smooth and purposeful UP the slope, threading between the stones, carrying dead alder leaves against gravity toward the black mouth of the culvert.
 
 You stand in the dark with your map case on your back, and the water parts around your boots without hurry, as if it has somewhere to be.
@@ -134,10 +140,10 @@ From inside the culvert, conversational, a voice:
 
 "You're late, mapmaker."
 
-### 15 · user · Maren
+### 17 · user · Maren
 I hold the lantern over my map, then over the chamber floor, and look from one to the other.
 
-### 16 · assistant
+### 18 · assistant
 The lantern shows what the dark would not. On the map, the red line you drew runs on past the lock and up the hill, into country you have never surveyed. On the floor, the water runs the same way.
 
 "Well?" says the voice from the culvert. "Are you coming?"

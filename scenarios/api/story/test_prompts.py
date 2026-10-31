@@ -8,7 +8,7 @@ import pytest
 
 from otaku.backend.api import Refused
 from otaku.settings.prompts import Prompts
-from otaku.terminal.api.story.prompts import write_prompt
+from otaku.terminal.api.prompts import write_prompt
 from scenarios.api.story.test_stories import HOW_TO_ASK, messages, prompt_of, with_prompt
 from scenarios.support.harness import App
 
@@ -26,12 +26,12 @@ class TestSettingPrompts:
             app.api.stories.settings.update(app.ensure_story(), "allow_questions", enabled=True)
             said = set_prompt_of(app, "allow_questions", "ASK ANEW")
             assert said
-            text = app.paths.prompts_file.read_text()
+            text = app.paths.prompts_file.read_text(encoding="utf-8")
             assert text.count("tool_questions_prompt = ") == 1 and "ASK ANEW" in text
             assert HOW_TO_ASK not in text
             kept = list(app.paths.config_backups_dir.iterdir())  # the pre-edit file waits
             assert [path.name[: len("prompts-")] for path in kept] == ["prompts-"]
-            assert HOW_TO_ASK in kept[0].read_text()
+            assert HOW_TO_ASK in kept[0].read_text(encoding="utf-8")
             assert prompt_of(app, "allow_questions") == "ASK ANEW"
             app.play("I push the door.")
             assert messages(app, "I push the door.") == [
@@ -44,7 +44,7 @@ class TestSettingPrompts:
         app = with_prompt(tmp_path / "state", server)
         try:
             set_prompt_of(app, "allow_questions", "  ")
-            assert "tool_questions_prompt" not in app.paths.prompts_file.read_text()
+            assert "tool_questions_prompt" not in app.paths.prompts_file.read_text(encoding="utf-8")
             shipped = Prompts().tool_questions_prompt
             assert prompt_of(app, "allow_questions") == shipped
         finally:

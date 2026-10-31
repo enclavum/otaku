@@ -2,10 +2,10 @@
 
 Two questions, one vocabulary. Reading: `read(line)` binds a typed line
 to whatever opened it — a direction (/me, /you, /ooc) or prose when
-nothing did. Writing: `to_wire` is the ONE dispatch turning a stored turn into wire
-text, whatever its kind — prose parses for its syntax, a direction's
-stored template fills, a card row takes the block composed from its
-character's profile, a recap row IS its text.
+nothing did. Writing: `to_wire` is the ONE dispatch turning a stored
+turn into wire text, whatever its kind — prose parses for its syntax, a
+direction's stored template fills, a card row takes the block composed
+from its character's profile.
 
 A line is stored exactly as typed and read again whenever the turn is
 used. Templates are data on the turn (`Message.template`); at RECORD
@@ -21,7 +21,7 @@ on the wire, and the worker's extraction composes rows the same way
 reading and writing are one vocabulary — the same Line classes that
 parse a typed line define how its stored turn composes — so splitting
 them across packages would put one language in two homes.
-`backend.api.story.language` is what frontends may apply of it to a line not
+`backend.story.language` is what frontends may apply of it to a line not
 stored yet — its tokens, what a line opens with, and `spans`, a line's
 story and out-of-character runs, which they draw apart; the language
 itself lives at the lowest package everything that speaks it can reach.
@@ -56,6 +56,12 @@ INLINERS: tuple[str, ...] = ("/ooc", "/cue")
 # and `https://x.co/cue` all carry a slash that follows a non-space.
 _INLINERS_REGEX = re.compile(r"(?<=\s)(" + "|".join(INLINERS) + r")(?=\s|$)")
 
+# What a /chapter line is shown as: its number and its title, two runs a
+# client may set apart, the join between them so that joined they read
+# as one line.
+_CHAPTER_NUMBER = "Chapter {number}"
+_CHAPTER_JOIN = ". "
+
 
 class Line:
     """One typed line, read. The base class is prose — playing the story,
@@ -71,6 +77,9 @@ class Line:
     # The side the named character speaks: "request" (/me — the line IS
     # their words), "reply" (/you — it asks them to answer), "" for none.
     speaks: ClassVar[str] = ""
+    # Whether the model answers the line once it is played: /chapter
+    # alone is recorded and left for what follows.
+    needs_answer: ClassVar[bool] = True
     needs_name: ClassVar[bool] = False
     needs_text: ClassVar[bool] = False
     template_field: ClassVar[str] = ""  # the prompts.toml key; "" = none
@@ -143,10 +152,20 @@ class Line:
         /roll rolled)."""
         return ""
 
+    def shown(self, chapter: int | None) -> list[tuple[str, str]]:
+        """The stored line as both frontends show it, as runs of text and
+        their kind: the line as typed — its story `prose`, its words with
+        the model `ooc` (`spans`) — but where a direction shows something
+        in its place: a /chapter line its `chapter_number` and its
+        `chapter_title`. Joined, the runs read as one line. `chapter` is
+        the one the line stands in, counted along its chain, None where
+        unknown."""
+        return [(text, "ooc" if ooc else "prose") for text, ooc in spans(self.line)]
+
 
 class _Me(Line):
-    """`/me NAME: PROMPT` — the writer speaks as NAME. The only direction
-    carrying both a name and prose, so the only one that splits."""
+    """`/me NAME: PROMPT` — the writer speaks as NAME, the PROMPT their
+    words."""
 
     token = "/me"
     args = "NAME: PROMPT"
@@ -212,10 +231,11 @@ class _Roll(Line):
     """`/roll DICE [PROMPT]` — the writer rolls REAL dice and plays the
     result: otaku rolls at record time (never the model — asked to roll,
     a model picks dramatic numbers and bends them mid-narration), the
-    numbers freeze into the stored template, and the optional PROMPT is
-    the action the roll decides. DICE is `1d20+5`-shaped — `NdS` terms
-    and flat modifiers chained with + and -, `kh`/`kl` keeping the
-    highest or lowest (advantage and disadvantage).
+    numbers freeze into the stored template (its `{dice}`), and the
+    optional PROMPT is the action the roll decides. DICE is
+    `1d20+5`-shaped — `NdS` terms and flat modifiers chained with + and
+    -, `kh`/`kl` keeping the highest or lowest (advantage and
+    disadvantage).
 
     The spec rides the NAME slot — the first token, what the command is
     about — so the base machinery does its usual work: `needs_name`
@@ -257,15 +277,42 @@ class _Roll(Line):
         return f"dice: {self._rolled}" if self._rolled else ""
 
 
+class _Chapter(Line):
+    """`/chapter TITLE` — a chapter opens at the story's end: a row of its
+    own kind, which the model reads through its framing and both
+    frontends draw under its heading. The one direction played without
+    an answer: what follows is the writer's, or the model's on a
+    continue or a regenerate."""
+
+    token = "/chapter"
+    args = "TITLE"
+    request_kind = "chapter"
+    needs_answer = False
+    needs_text = True
+    template_field = "chapter_framing"
+
+    def shown(self, chapter: int | None) -> list[tuple[str, str]]:
+        # its chapter's heading, once the number is known
+        if chapter is None:
+            return super().shown(chapter)
+        number = _CHAPTER_NUMBER.replace("{number}", str(chapter))
+        return [(number, "chapter_number"), (_CHAPTER_JOIN, "prose"), (self.text, "chapter_title")]
+
+
 # Every direction, keyed by the token that opens it — the one registry;
 # iterating it yields exactly the tokens the menus may offer.
-DIRECTIONS: dict[str, type[Line]] = {cls.token: cls for cls in (_Me, _You, _Ooc, _Roll)}
+DIRECTIONS: dict[str, type[Line]] = {cls.token: cls for cls in (_Me, _You, _Ooc, _Chapter, _Roll)}
 
 
 def read(line: str) -> Line:
     """The line, read as whatever direction opened it — prose when none
     did, so every caller gets an answer instead of a None to test."""
     return DIRECTIONS.get(line.split(" ", 1)[0], Line)(line)
+
+
+def shown(line: str, *, chapter: int | None = None) -> list[tuple[str, str]]:
+    """A stored line as both frontends show it (`Line.shown`)."""
+    return read(line).shown(chapter)
 
 
 def spans(line: str) -> list[tuple[str, bool]]:
@@ -275,7 +322,7 @@ def spans(line: str) -> list[tuple[str, bool]]:
     token (both send an out-of-character request), and whatever follows
     an inliner to the line's end; the rest is story, the tokens
     themselves included. The breaks a line keeps at its edges are read
-    past (`domain.story._play.submit_line`)."""
+    past (`backend.story.play.submit_line`)."""
     lead = len(line) - len(line.lstrip())
     words = line[lead:].split(None, 1)
     direction = DIRECTIONS.get(words[0]) if words else None
@@ -320,7 +367,7 @@ def to_wire(message: Message, *, is_last: bool, card_block: str | None = None) -
     if frame.tail and (frame.inliner == "/ooc" or (frame.inliner == "/cue" and is_last)):
         parts.append(OOC_FRAME.replace("{body}", frame.tail))
     # The breaks at a line's edges are its paragraph breaks
-    # (`assembler.get_join_type`, `domain.story._play.submit_line`): the leading from the text
+    # (`assembler.get_join_type`, `backend.story.play.submit_line`): the leading from the text
     # before, the trailing to the model's continuation, both typed so in
     # the canvas and riding the wire as they stand — the reader trims them
     # off the line's text, so they are put back here. A block line has none.

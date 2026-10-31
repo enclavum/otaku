@@ -8,6 +8,7 @@ already there.
 """
 
 import ssl
+import sys
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -26,8 +27,12 @@ class TestServingOverTls:
         assert b"<title>otaku</title>" in secure.get("/")
 
     def test_the_certificate_on_disk_is_the_one_on_the_wire(self, secure: Page) -> None:
-        assert _served(secure) == (secure.root / "cert" / "cert.pem").read_text().strip()
+        assert (
+            _served(secure)
+            == (secure.root / "cert" / "cert.pem").read_text(encoding="utf-8").strip()
+        )
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="Windows has no POSIX mode bits")
     def test_the_key_is_the_reader_s_alone(self, secure: Page) -> None:
         # The one file here that is a secret, and the directory around it.
         assert (secure.root / "cert" / "key.pem").stat().st_mode & 0o777 == 0o600

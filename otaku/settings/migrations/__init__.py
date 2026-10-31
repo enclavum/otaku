@@ -102,7 +102,7 @@ _CONFIG_MIGRATIONS: list[Migration] = [
             "network — set https and a password first",
         )
         + "\n"
-        + row("port = 9600", "the port `otaku web` listens on"),
+        + row("port = 9600", "the port `otaku serve` listens on"),
         after="terminal",
     ),
     # 0.4.0 — the background stops being guessed in silence. The ask
@@ -174,6 +174,37 @@ _CONFIG_MIGRATIONS: list[Migration] = [
         ),
         after="https",
     ),
+    # 0.9.0 — the chat learns to print a reply's thinking, and to serve
+    # the web interface beside it, both off until asked (`/set
+    # show_thinking`, `/set serve`).
+    ensure_key(
+        "terminal",
+        "show_thinking",
+        row(
+            "show_thinking = false",
+            "print the model's thinking as it streams (/set show_thinking)",
+        ),
+        after="dialogue_bold",
+    ),
+    ensure_key(
+        "terminal",
+        "serve",
+        row(
+            "serve = false",
+            "the terminal UI also serves the web interface while it runs (/set serve)",
+        ),
+        after="show_thinking",
+    ),
+    # 0.9.0 — the update check, on until turned off.
+    ensure_key(
+        "settings",
+        "check_updates",
+        row(
+            "check_updates = true",
+            "once a day, check GitHub for a new release",
+        ),
+        after="show_banner",
+    ),
 ]
 
 
@@ -216,7 +247,7 @@ _PROMPT_MIGRATIONS: list[Migration] = [
 
 # The prompt_cache row as the file spells it — ONE rendering, shared by
 # the migration below and the picker's section founding
-# (`backend.domain.app.providers.update_provider`), so an upgraded file and a
+# (`backend.app.providers.services.update_provider`), so an upgraded file and a
 # freshly founded section carry the same line.
 PROMPT_CACHE_ROW = row(
     'prompt_cache = "5m"', 'prompt caching: "off" | "5m" | "1h" — 1h suits slow-paced play'

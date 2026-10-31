@@ -2,7 +2,7 @@
 
 <!-- otaku export
 otaku-version: 0.4.0
-format-version: 3
+format-version: 4
 model: openrouter/anthropic/claude-opus-5
 exported: 2026-09-01 09:42
 -->
@@ -127,7 +127,7 @@ file_name = 'falk.json'
 ## Scenes
 
 ### 1 · The Vermilion Players Hire a Stage Manager
-- **Messages:** 5-24
+- **Messages:** 1-25
 
 Bell Harrow arrives at the Corona through an open stage door, notice in hand, answering a call for a stage manager with the Vermilion Players. Emeran Falk, drinking brandy, agrees the door shouldn't be open and warns her about a loose board. Odalric Vane tests her with a question about calling a show off an unknown book; prompted by Mirelle Sorel from the fly floor, he hands her the prompt book — thick with others' writing, one page torn out near the back. Harrow accepts, conditionally, and demands plot tables, a daylight walk of the stage, and a bucket for the leaking prompt corner. Vane promises fair pay from Vessendal. Mirelle mentions a bucket under the star trap "since Katterau," and the word stops Falk mid-motion.
 
@@ -177,7 +177,7 @@ Harrow knocks on the trunk—no answer. At her lodging, an unexplained note awai
 **Entry:** Reported to Herr Vane that the fire notice by the scene dock had fallen again and found a stranger on the stage: the new stage manager. Gave my name and office and asked for hers, spelled — H, A, double R, O, W, Bell as in the thing you ring — for the certificate. Held my lamp over the iron trunk in the passage and asked whether it was hers; she said nothing in the house was hers until she had walked it. It is not numbered. Wrote in my book, under the thunder trough: unsecured iron, height. Re-hung the fire notice level, two taps, and found a second notice behind it — older, worse, concerning the storing of unnumbered property in the passages, signed Hessel Vorn, District Officer of Public Order, Katterau, and stamped twice, the first strike crooked: SEEN. NOT APPROVED. I asked whether to bring it; she said bring it, notices are hers now, the reading and the taking-down both. She copied the officer's name into her own notebook and told me to file it under found level. I said what I should not have said aloud: the Office approves, proscribes, or refers. Not approved is what a man writes when he has been told to write nothing. I have been seconded since Merrow. Katterau is on no itinerary I was given, and yet everyone in this company has been there. Then I took my lamp and went to get dry.
 
 ### 2 · Four Acts and a Storm
-- **Messages:** 25-44
+- **Messages:** 26-45
 
 Before the chain came off her door, Bell found a copperplate letter tucked under her candle-end: unsigned, addressed "for Herr M. Skarke, by his hand." It named the Vermilion Players' debt — vacant since the 14th of last month — securing the wagons, canvas, counterweights, horses, and every taking to Vessendal, interest running weekly. She was to present herself at the Corona box office on the third performance's morning for a counting before an agent; no need to tell Vane. One item stood apart: "1 trunk, iron, contents unspecified" — not to be opened, not sold. The landlady mentioned a civil gentleman asking after her room; Bell told her to say the stage manager keeps clean books, then filed the letter behind Vorn's name.
 
@@ -244,7 +244,7 @@ I woke frightened, made coffee, put up the shutter, read the Advertiser aloud on
 **Entry:** Came over from the smithy for the Vermilion when the new stage manager sent word — a shilling and a brandy in hand, though Vane's name had said one-and-six. Showed her the hinge, proud of it, and had the stage door biting its frame on the first try by noon.
 
 ### 3 · Ropes at First Light
-- **Messages:** 45-64
+- **Messages:** 46-65
 
 In the wet passage, Harrow inventories by lamplight and states three facts: nobody passed Prewick's doors, the plum coat stayed, the counting is at Vessendal. She orders load-out at first light, the trunk roped and in her sight, and demands Falk explain the fifth act. Falk says the pages come blank; the trunk has been clean paper for fourteen years, "and every so often it is not." There is no fifth act—only a thing after the fourth with no name in the folio—and at Katterau they never staged it and it happened anyway. The late man is a creditor from nine years past; the bell rings, nothing answers, then the play "simply arranges." He claims the trunk for his own wagon.
 
@@ -337,7 +337,7 @@ On the road I answered present with my hatbox on my knees and heard Boyle say th
 **Entry:** Came at first light for the eleven shillings and took the second wagon on with my cart, the axle honest as promised. Six days of road ahead; by mid-morning I was whistling, four notes and stopping in the middle of the fifth, over and over, without noticing.
 
 ### 4 · Behind the Lion
-- **Messages:** 65-84
+- **Messages:** 66-86
 
 At the fire, Bell Harrow rules with the book shut. Katterau will not be settled "this tour, and not for money" — but "not never." Vessendal must give a matinee across three nights; the 3rd stands; Boyle takes the toll road. From tonight, nothing may be spoken on or off stage unless it's in a certified copy — no wagers, no bottles, no lines invented to cover a broken scene. She tells Prewick he has "also arrived with" and orders Vane to drive for Vessendal. Prewick, having only Ilsabet, The Widow's Toll, and Vane's cut of the Wolf King, demands certified copies of everything and vows to sit up comparing. Falk repeats "Not never," touches Bell's head, and leaves muttering toll distances. Vane weeps himself to sleep in his coat. Mirelle reveals that Anna Sorel was her sister, that she kept Vane's accounts that year, and that any signed receipt went into her box.
 
@@ -534,7 +534,7 @@ There were others on the stair — a woman breathing steadily, and starch, an of
 **Entry:** Not present.
 
 ### 5 · Unpaid
-- **Messages:** 85-104
+- **Messages:** 87-106
 
 Harrow lays out three asks; Perlmann agrees in order: he will swear his account Thursday at nine before Registrar Braun, with his own clerk and Bettina writing while he marks. Skarke's assignment is good but the debt is dead — a paid debt is paid — though a magistrate wants corroboration, and since the money came in a bank's bag, banks keep counterfoils. Vane names the bank, then corrects himself: no branch here; he drew it at Achterhalt and carried it two days on his knees. The three executor items were Brandt's wool-loft lease (sold), his marriage certificate, and a sealed packet marked TO THE VERMILION PLAYERS WHEN THEY NEXT COME, AND NOT BEFORE, unopened nine years. Anna Sorel had asked whether a sealed deposit could ever be read by anyone, even the registrar; told no, she wept with relief. Perlmann asks which of them is Sorel — it's only Prewick, who names himself and produces his certified register copy: "It is a record, boy." Bettina brings the tin box; Harrow writes and Perlmann marks a receipt. Perlmann tells Vane to change his coat.
 
@@ -715,7 +715,7 @@ Next load-in at ten, and the counterweights exactly as bad as I had warned her, 
 **Entry:** Load-in at ten and the counterweights exactly as bad as I warned her they were, and I said so more than once. They had some business in my yard before that with a parcel and a great deal of standing about in silence, and one of them went into my green room and came out again, and I asked no questions, having swept that stage once already for a man's madness.
 
 ### 6 · Our Left, and the Man in Row Four
-- **Messages:** 105-124
+- **Messages:** 107-126
 
 At the Athenaeum, Bell Harrow sends Vane to bank the takings with Boyle and sits by Herr Skarke in row four, a small, hungry man who admits he has waited since age nine to sit among such people, has thirty pages of theatrical inheritance and could never buy the rest, and asks nothing tonight. Bell warns him half a play is hungrier than none.
 
@@ -892,7 +892,7 @@ That was the whole of my part in it. It was mine.
 **Entry:** Thursday at nine, as I knew it would be: my arm for him to lean on up the steps, and my hand to write it out, and my finger on the place for his mark. Braun was civil and quick, which I did not expect of a magistrate. They took a copy and sealed it, and I brought my father home and put him in his chair, and he was tired in the good way. That is the whole of my part in it, and it was mine.
 
 ### 7 · Bills for a Road We Have Stopped Walking
-- **Messages:** 125-144
+- **Messages:** 127-147
 
 On the Athenaeum steps Harrow named her price for the float bag: at Achterhalt Vane must walk her into the Farriers' and Merchants' himself, hat on, and close the fifth-year business he'd owed the town for nine years of avoidance. Vane agreed, admitting they'd once held him four hours in a back room while a boy rode to Vessendal to vouch for him, and promised her a magnificent sky and a rounded-down price. Frau Loewe waved goodbye; Falk lifted Skarke's rug to her; the column rolled.
 
@@ -1023,7 +1023,7 @@ Saturday I saw them out clean, arms folded on my own step while they roped and l
 **Entry:** Came across my own square before dinner with two constables because there'd been a bill cried for a play by command and the Office was in Hessler's shop and nobody had told me a thing. The stage manager sorted it in two sentences — hers the players, the Office's the matter — and gave me the clerk, who is the useful sort: nine bills off my bellman, a hundred and ninety-one off the printer, coin impounded, order book inspected, and Hessler blameless, which I could have told them. No order at all, then, which my constable had off the bellman and which I'd called a story. The clerk wrote out that the forgery of a Palace command is beyond a district bailiff and beyond a Clerk Third Class, and that we both report upward and neither of us touches it, in those words, so neither can hang it on the other — a man I can work with. Gave them the strongroom under the weigh-house for their sacks and kept the key myself, and the Office pays me a shilling to make it lawful. Told her the Corn Exchange is the only house in town and my brother-in-law will ask eighteen and take twelve, and warned her that the last company's leading man went off with a farrier's wife, so we are not sentimental here. Then dinner.
 
 ### 8 · A Sky, a Returned Chalk, and Room Fourteen
-- **Messages:** 145-164
+- **Messages:** 148-167
 
 Achterhalt, morning: Harrow walked Vane to the Farriers' and Merchants' door. The clerk didn't know him; the five-year-old ledger entry read "paid in coin to bearer, Vane, O., on account of Brandt, H." — a copy made for twopence, the amber notice tucked away. At the ironmonger's Vane, eyes shut, chose a great black plate of a sky — "has a floor in it" — twenty-two shillings, no rounding. The Corn Exchange went for thirteen.
 
@@ -1162,7 +1162,7 @@ At Achterhalt I warned Falk beforehand, then Krug stood on the mounting block in
 **Entry:** Big gentleman in a good coat came in with a lady and neither of them asked me a thing, which suited me, so I leaned on the counter and watched him go down my whole wall with his eyes shut, flicking each sheet with a fingernail and naming them like dogs — biscuit, rain on a hat. He stopped at the long black plate at the end and hit it and the shop hummed, and he stood there with his hand flat on it till it went quiet. Twenty-two shillings, I said. He opened his mouth to beat me down, looked at the lady, and paid it, and a shilling more for my boy to carry it, and made a speech about not rounding. Best sale of the market week, and the strangest.
 
 ### 9 · As the Company Shall Determine
-- **Messages:** 165-184
+- **Messages:** 168-187
 
 Harrow spends her hour on three questions. Lenz's ledger: of fourteen prior speakings, eight had audiences and six were mere readings; the Office's unpopular finding is that audiences are never harmed, but a house is required, since the readings did nothing. He'd once written "appetite" in a margin and was told to strike it. Blame/credit rhymes for makers: speakers first, then whoever gave room, money, paper — Anna Sorel for accounts, Krug in pencil. The third party is Marius Skarke, whose father lodged the thirty pages years ago; Skarke paid the fee and asks only to attend. Assessment's honest opinion: yes — once, whole, correctly, complete, no wagers, called by someone competent, stopped by nobody. All fourteen were interrupted by someone brave, and the aftermath was worse than the play. "It has never been tried. That is not the same as no." Lenz warns her name is now in the file, offering to absorb any refusal if she writes before the 2nd. Outside, Prewick says he's the wrong rank and will fix that.
 
@@ -1313,7 +1313,7 @@ I swept nine hundred seats for a bun. At the hearing I said I'm in; Krul said yo
 **Entry:** Carried a sealed letter to a theatre in the fourth ward and walked into a yard where eleven people looked at me as though I'd brought the pox. The stage manager came straight over with her hand out and read the direction out loud so they could all hear it was for her, gave me a shilling, and I got out. Odd house. Not my business.
 
 ### 10 · Nine Hundred and Thirty-Nine In
-- **Messages:** 185-204
+- **Messages:** 188-208
 
 At the Baraque, Harrow rules that Ansel Grelle, if alive, is owed seven pounds and eleven years of mourning, not hunted. She advertises for the Merrow property list, promising the Vermilion Players pay debts. Krug reveals Katterau's Wednesday take was exactly seven pounds, and that in the seventh year he pasted bills beside a nameless left-handed man. Vane gives Frau Hentsch's address, orders the seven pounds paid above his own boots.
 
@@ -1448,7 +1448,7 @@ Both remaining nights I paid at the door and sat where I sit and sent nothing fu
 **Entry:** I paid at the door like anybody and took my seat, fourth row centre, in a plain black coat, no rug, hands empty, the programme shut on my knee. I had written my undertaking out beforehand and given it to the man on the pit doors: I will not move from this seat and I will not say one word of it aloud. When she passed at hat-distance I told her so, without turning, and let her see my hands shaking, and said the only other true thing I had: it's a lovely house.
 
 ### 11 · The Fifteenth Speaking
-- **Messages:** 205-224
+- **Messages:** 209-228
 
 Row eleven, seat one stays sold and empty — confirmed with Toby before the night begins. *Ilsabet's Ransom* plays to full houses: Falk stops the show, Vane weeps on cue, Hebel's gaswork excels, four curtain calls for Falk alone. Nobody leaves at interval.
 
@@ -1626,7 +1626,7 @@ I was sent round to the same theatre on the 3rd, and this time got no further th
 **Entry:** Sent round to that theatre again on the 3rd, and this time I got no further than the corridor door. Told the stage manager there was a gentleman at the front of house who would not come in and would not go away — small man in black — and that he said to say he was still in row four and would wait till she was free. She took it without a blink. Odd house. Cold soup smell in the wings and a child in it. Not my business.
 
 ### 12 · Given, Not Collected
-- **Messages:** 225-244
+- **Messages:** 229-248
 
 In the emptied Theatre Royal, Harrow blocks the aisle before the pass door — a boy asleep behind it — and demands name and business. It is Ilse Bacher, arrived off the ten o'clock goods train in a horse-box, gloves stripped off and fisted; she has already moved Grelle off the door. She explains in a rush: a gloved lady came Tuesday, knew about the Rose and the door she'd opened, lied that a bill in Achterhalt carried her name, and said Fenner's only safety was to be seen and counted somewhere respectable — a theatre, the capital, a programme — so his name would sit in the right ledger. The lady left a five-pound note and vanished. Harrow's wire to Kessel had already put a constable at Ilse's gate. Harrow says "Unhurt. Fed twice," takes the note as "Exhibit, not money," and opens the pass door full width.
 
@@ -1849,7 +1849,7 @@ Then a boy of ten spoke of a lady in a cab on Tuesday, and I gave Harrow Frau Di
 **Entry:** The Office man came down with a lady in a good coat, three floors under the Hall of Records, and had me solder a lead case: eleven minutes and a stink of hot metal. He would not touch the papers again once they were in. Stamped his seal twice, straight both times, wrote his label, and pasted a second slip beside it saying one leaf was lodged unread and was not to be corrected. I have never carried that instruction before. Shelf, row nine. My key, my iron door.
 
 ### 13 · Rain on the Trunk, and Row Four at Katterau
-- **Messages:** 245-264
+- **Messages:** 249-269
 
 Harrow files her correction at the Depository, posts a notice rather than striking any line, and lets the copyist cut what's unneeded. She shakes Lenz's hand and invites him to tea; he agrees to come on the 9th, then goes up to the Hall of Records.
 
@@ -2084,7 +2084,7 @@ And at Katterau I bought the same seat off the mayor's clerk and asked that she 
 **Entry:** Big old gentleman in a good coat came in by the front door in the afternoon and bought a loaf and paid what it costs, and then stood in the middle of the taproom looking round the walls like he'd lost something, and put his hand on the scullery door without opening it. Took the bread out to the yard and gave it to the Mahl children, who ran off with it. Then laughed, out there, on his own. There was a woman with him who never touched a thing.
 
 ### 14 · Top of List
-- **Messages:** 265-284
+- **Messages:** 270-289
 
 At Katterau, Harrow's four-word message — "the house knows him" — clears Marius Skarke's seat, and the show plays whole: Mirelle opens, Falk enters through Boyle's door to a standing house, Krug runs gas for the absent Hebel, and the storm comes right. Three curtain calls; Skarke claps and leaves unremarked, owing nothing. Toby's count is full.
 
@@ -2284,7 +2284,7 @@ A full house, no scandal, and twenty years ended quietly. That was how this town
 **Entry:** The schoolmaster asked me and I thought about it for two days, and then I asked whether the lady was from the theatre on the bills, and he said she was, so I said yes. She came up the lane on the first day and I stood up on the wall to be nearer, and she put out her hand and did not touch me, and said something short. Then we sat on the wall and I showed her my paper and she looked at all of it. There was another lady standing away at the turn of the lane who did not come nearer. Afterwards I learned to spell vermilion and I write it on things, and I drew the wagon with the red box on the back for her to have.
 
 ### 15 · Harbor, and the Line Left Blank
-- **Messages:** 285-318
+- **Messages:** 290-323
 
 Late in a wing, stove ticking, Bell Harrow finally asks Emeran Falk why "Harbor." Falk tells her of a bad season in a port, walking the mole at 4 a.m. watching boats come in shipping water — the harbour asked nothing, wasn't interested in bravery, just held still and let you tie up. He'd been drinking at nine every morning for eleven years when Vane hired Bell in ten minutes and she stepped over the third board unprompted, then posted a notice about a bucket. "So. Harbor." Bell keeps the name and gives her side: a harbor's pay is getting to be one — before this company no one ever tied up. She banks the stove; the tailboard reads T. LENZ, 2ND ON BOOK, FOR B. HARROW, S.M.
 
@@ -2452,22 +2452,25 @@ My clerk came back with four words for the gentleman in row four: the house know
 
 ## Messages
 
-### 1 · user (card) · Odalric Vane
+### 1 · user (chapter) · "((OOC: Chapter \"{body}\" starts here.))"
+/chapter The Prompt Book
+
+### 2 · user (card) · Odalric Vane
 /card vane.json
 
-### 2 · user (card) · Mirelle Sorel
+### 3 · user (card) · Mirelle Sorel
 /card sorel.json
 
-### 3 · user (card) · Casimir Prewick
+### 4 · user (card) · Casimir Prewick
 /card prewick.json
 
-### 4 · user (card) · Emeran Falk
+### 5 · user (card) · Emeran Falk
 /card falk.json
 
-### 5 · user · Bell Harrow
+### 6 · user · Bell Harrow
 I come in out of the rain through the stage door of the Corona, boots loud on the boards, and hold the coaching-inn notice up so whoever is nearest can read it: WANTED — A STAGE MANAGER, THE VERMILION PLAYERS, APPLY WITHIN. "Your door was open," I say to the half-dark. "It shouldn't be."
 
-### 6 · assistant
+### 7 · assistant
 A match scrapes somewhere off left, and the half-dark acquires a face: long, grey, handsome the way a cliff is handsome, above a glass of brandy the size of a thimble. "It shouldn't be," Emeran Falk agrees, without moving. "Nor should the roof leak over the prompt corner, nor the ghost light gutter, nor I be awake at this hour. Yet here we all are, child, in the wrong condition." He tips his glass an inch toward the auditorium. "Mind the third board from the pass door. It sings."
 
 The plum coat arrives before the man does — a great shine of it out of the wings, catching the one working lamp. "Open! Of course it's open, we are a *welcoming* house—" Odalric Vane takes in the notice in your hand, the rain still coming off your hat, and something in his face resolves like a curtain finding its line. "You read. You came in out of weather. You noticed the door." He counts these on three fingers as though they were references. "Can you call a show off a book you have never seen, in a town you have never played, for actors who will lie to you about their entrances?"
@@ -2476,10 +2479,10 @@ Above you, on the fly floor, a woman's voice says, flat and unbothered, "Say yes
 
 Vane presses the prompt book into your hands — fat with other people's handwriting, a page torn out near the back — and behind him, roped and chalk-marked and shoved against the brick, sits an iron trunk with rain beading on its lid, though the roof there does not leak.
 
-### 7 · user · Bell Harrow
+### 8 · user · Bell Harrow
 "Yes," I say, "if the book is honest and the liars are consistent." I weigh the prompt book in one hand, thumb the cut edge where a page is gone near the back, and file that question for daylight. "I'll want the plot tables tonight, and a walk of the stage before anyone rehearses on it. Also a bucket for the prompt corner, until your roof learns manners." I step over the third board from the pass door without being told twice, and Falk's glass tips me another inch of approval. "Bell Harrow. When do I start?"
 
-### 8 · assistant
+### 9 · assistant
 "You started when you stepped over the board," Vane says, and means it so warmly that for a moment you can see how a man borrows money from strangers. "Salary — we shall say a *fair* figure, Harrow, and I shall round it kindly upward at Vessendal when the take is in. Plot tables you shall have. A bucket you shall have. Honesty in the book —" a small graceful lie of a pause — "the book is as honest as books are."
 
 "There's a bucket under the star trap," Mirelle says from the fly floor. "It's been there since Katterau." The word lands and does nothing at all to her voice. Down in the dark by the brick, Falk's glass stops halfway up and finishes its journey very slowly.
@@ -2488,10 +2491,10 @@ A door opens off the corridor and admits a thin young man with wet shoulders and
 
 Vane's hand comes down on your shoulder, steering you stagewards, plum sleeve shining at the cuff. "Tomorrow, *Ilsabet's Ransom*, one o'clock, four scenes and a storm. Tonight, walk your stage." He does not steer you past the iron trunk; he steers you around it, a wide unhurried arc, still talking. Behind you, Prewick has stopped to hold his lamp over the trunk's chalked lid, where the rain-beads sit, and says, in the voice of a man reading a form he does not understand, "Madam Stage Manager — is this one of yours? It isn't numbered."
 
-### 9 · user · Bell Harrow
+### 10 · user · Bell Harrow
 "H, A, double R, O, W," I say over my shoulder. "Bell as in the thing you ring." And to the lamp behind me: "It isn't one of mine yet. Nothing in this house is, until I've walked it." I let Vane's arc carry me past the trunk at exactly his chosen distance, counting my steps the way I'd count any piece of the plot. Six, wide. "Four scenes and a storm by one o'clock, then," I say. "Show me where you keep the thunder."
 
-### 10 · assistant
+### 11 · assistant
 "Thunder," Vane says, as if introducing a favorite nephew, "lives *up*." He takes you to the ladder at the back wall and gestures at the darkness above the scene dock: a wooden trough running the width of the stage on a slant, and at the top of it a crate of iron balls the size of oranges. "You loose them, they go rumbling down the run, they arrive in the audience's chest. Terrifying. Cost me nothing but the balls. There is also a sheet —" he raps a hanging plate of tin, which mutters — "for weather of the nearer sort."
 
 "The trough wants a nail at the third joint," Falk offers from below, not looking up. "It has wanted one since the spring. Two seasons ago a ball came out of the side of it at Merrow and struck a farmer in the pit. He asked for his money back and Odalric gave him a speech instead."
@@ -2504,10 +2507,10 @@ Prewick has got out a small notebook and is writing, with genuine pain, *unsecur
 
 The ladder's foot rocks under your weight; the iron trunk is against it, chalk-marked, faintly wet, and Vane has gone very quiet behind you.
 
-### 11 · user · Bell Harrow
+### 12 · user · Bell Harrow
 I take my weight off the ladder as easily as I put it on. "Herr Vane," I say, not turning around, "your ladder wants its foot a hand's breadth left. I'll go find that bucket for the prompt corner while you arrange it." And I go, obedient as a good clock — but the tin sheet hangs along my way, and in its dull mirror I can keep the whole stage behind me: plum coat, chalk marks, and all.
 
-### 12 · assistant
+### 13 · assistant
 The tin gives you the stage in brown, wobbling, the way a fever gives you a room. You watch Vane wait until Mirelle's footsteps have gone out to the front of house and Prewick has drifted after the smell of a fire notice he can re-hang. Then the big man crouches — not gracefully; his knees complain out loud — and does three things in an order that is clearly not the first time. He wipes the beading off the lid with his own cuff. He touches the chalk mark, not to smudge it but to press it, the way a man presses a plaster flat. He says something too low for tin.
 
 Then he lifts one end. It comes up wrong: too easy, as if it were a hatbox, and he sets it down again fast and takes his hands away and stands looking at it with the expression of a man who has spoken to a horse that answered. After a moment he shoves it — properly, heavily, scraping, a sound like a barn door — a hand's breadth and a little more, and stands there breathing.
@@ -2516,10 +2519,10 @@ Then he lifts one end. It comes up wrong: too easy, as if it were a hatbox, and 
 
 The bucket is where Mirelle said, under the star trap, and it is not empty. Sitting in three inches of old rainwater, curled and swollen and legible, is a single torn page of handwriting — the cut edge exactly the shape of the gap near the back of your prompt book.
 
-### 13 · user · Bell Harrow
+### 14 · user · Bell Harrow
 I fish the page out by one corner and hold it dripping over the bucket, tilting toward the ghost light to read. Whatever it says, I read it twice. Then I wring it softly, roll it, and put it in my coat — not in the prompt book. "Nothing goes back in the book," I tell the bucket, quiet, "until I know why it left." Overhead, the rain has found the roof again, and out front Prewick's hammer taps his fire notice home: twice, exact.
 
-### 14 · assistant
+### 15 · assistant
 The water has been kind to it, or the ink has. Nothing has run. The hand is not the hand that wrote the rest of the book — smaller, older, upright, a copyist's hand that never hurried:
 
 *He enters late, and by the wrong door, and the house does not know him. A bell is rung and nothing answers. Nine years, and the debt comes in a plum coat.*
@@ -2530,10 +2533,10 @@ No character names. No scene number. No line of *Ilsabet's Ransom* anywhere in f
 
 Rain on the roof, steady now. Out front, two taps of a hammer, exact, and then Prewick's voice raised in mild triumph: "Madam Stage Manager! The notice is level, and I have found a second one behind it — older, and much worse. It concerns *the storing of unnumbered property in the passages*, and it is signed by a district officer at Katterau." A pause; the lamp swings; his shadow lengthens up the pass door. "Should I bring it to you, or would you prefer I not?"
 
-### 15 · user · Bell Harrow
+### 16 · user · Bell Harrow
 "Bring it," I call. "Notices are mine now — the reading and the taking-down both." When the lamp arrives I read the old one over his shoulder, copy the district officer's name into my own notebook — mine, not the theater's — and hand it back. "File it under found level, Herr Prewick. Then get dry. Tomorrow has four scenes and a storm in it, and I mean to count your fire buckets before the house opens."
 
-### 16 · assistant
+### 17 · assistant
 The name is *Hessel Vorn, District Officer of Public Order, Katterau* — and under it, in a stamp that has been struck twice because the first strike was crooked, *SEEN. NOT APPROVED.* Prewick reads it too, upside down, and you feel him go still beside you.
 
 "Not approved," he says. "That is not a form the Office issues, Madam Stage Manager. We approve, or we proscribe, or we refer. *Not approved* is what a man writes when he has been told to write nothing." He takes the paper back with both hands, as though it were hot, and squares it against his notebook. "Found level. Yes. I shall file it." Then, with the awful dignity of a young man saying something he knows he shouldn't: "I have been seconded to this company since Merrow. Katterau is not on my itinerary. It is not on any itinerary I was given. And yet everyone here has been there."
@@ -2542,10 +2545,10 @@ He gets dry, more or less, by holding his coat away from himself and walking off
 
 Which leaves you the stage, the ghost light, the rain, and Falk sitting on the sill of the star trap with his empty thimble-glass, looking up at the thunder trough. "It wants a nail at the third joint," he says. "There is a nail in the tin box under the counterweights. I would do it myself, child, but I do not go up ladders after dark." He turns his head, and the ghost light does his eyes no favors at all. "Ask me anything but one thing, and I will answer it while you climb."
 
-### 17 · user · Bell Harrow
+### 18 · user · Bell Harrow
 I find the nail in the tin box under the counterweights, borrow the hammer beside it, and go up with both in my belt. Halfway, I put my question between taps. "The prompt book's written in two hands." Tap. "The big scrawl that hurries — that's the man who left. But the small upright one that never hurries, the one somebody's been cutting out of the back of the book—" tap, and the third joint takes its nail like it's wanted one for two seasons, "—whose is that?" I come back down facing him. "And the nail's free, whatever you answer."
 
-### 18 · assistant · Emeran Falk
+### 19 · assistant · Emeran Falk
 Falk doesn't take the hammer back. He looks at the trough overhead for a long moment, as if the nail had settled something for him.
 
 "The hurrying scrawl was Anselm Krug's, who kept your book before you and left Katterau in the night without his boots. A good man; loud; wrote *STORM* four times where once would do." He turns the empty glass in his fingers. "The small upright hand belongs to no one living. It is a copyist's — a fair copy made in Vessendal a great while ago, by a man paid by the page and paid well, because of what he was copying. That copy does not travel in your prompt book, child. It travels in Odalric's iron trunk, and it has never once been opened on this tour."
@@ -2554,10 +2557,10 @@ The rain fills the pause. "Krug found pages of it in his book. Loose. In the bac
 
 He puts one hand out, palm up, not quite reaching for your coat. "Give it here and I will carry it in my lining with the others, where it can do less. Or keep it, and know that whatever it says has begun." Out in the passage, the scrape of a barn door: someone is shifting the iron trunk again, and the plum coat is nowhere in the house.
 
-### 19 · user · Bell Harrow
+### 20 · user · Bell Harrow
 I hand him the page — no ceremony, the way you pass over a prop that has misbehaved. "Then it's begun with a bell rung and nothing answering, and a debt in a plum coat. If it means Vane, it can take that up with the management." The scrape comes again through the passage wall, long and patient. I settle the hammer back in my belt — not because it will help, but because my hands like knowing their business — and go toward the sound.
 
-### 20 · assistant
+### 21 · assistant
 Behind you Falk takes the page as though it were a communion wafer, or a splinter. There's a small sound of thread giving up — he has picked the lining of his coat open at a seam that has been picked open before — and then the whisper of paper going in among paper. More than one. Several. "There," he says. "Good night, harbor."
 
 The passage is dark and smells of wet brick. The scrape stops before you reach it, the way a mouse stops. When you get your lamp round the corner the iron trunk is back against the wall — hard against it, snug into the ladder's foot, exactly where it sat when you first put your weight on the rung — and the chalk mark on the lid has been dragged into a long white smear along the brick, four feet of it, at trunk height. Nobody in the passage. No footprints in the wet; your own go in and stop.
@@ -2566,10 +2569,10 @@ At the far end, a lamp comes up: Mirelle, cloaked, a hatbox under one arm, on he
 
 "He'll say the porters did it," she says. "The Corona has no porters." She sets the hatbox down, comes and stands beside you with her lamp held low, and studies the trunk the way you'd study a horse you have to pass in a narrow lane. "Harrow. What did the page say?"
 
-### 21 · user · Bell Harrow
+### 22 · user · Bell Harrow
 "Word for word?" I give it to her the way I'd give a line note, flat and exact: "He enters late, and by the wrong door, and the house does not know him. A bell is rung and nothing answers. Nine years, and the debt comes in a plum coat." I watch her lamp rather than her face; a lamp always tells first. "Under it, in pencil, someone had written cut, cut, cut. Falk carries the page now, in his lining with the rest." A beat. "You knew Krug. Did the pages start before Katterau — or after?"
 
-### 22 · assistant · Mirelle Sorel
+### 23 · assistant · Mirelle Sorel
 The lamp does tell. It dips an inch when you say *nine years*, and steadies, and the hand holding it is entirely quiet after that, which is worse.
 
 "Before," Mirelle says. "Vessendal, two springs ago. Krug showed me the first one; he thought it was a joke of Falk's. It described a horse going lame on a hill road. Four weeks later the near-side mare went down outside Merrow and Odalric wept over her and rounded her age kindly." She looks at the smear along the brick. "Slantwise and late. Never the way you'd guess from the words. That's the whole of what I know, and I have been careful to know no more."
@@ -2578,20 +2581,20 @@ She picks up her hatbox. At the passage door she stops, and says it to the rain 
 
 Then she's gone into the wet, and the passage is yours: the trunk snug against the ladder's foot, the white smear at trunk height, and the lamp showing you one thing you hadn't seen — pressed into the dust under the trunk's near corner, the clean square print of where it stood before, a hand's breadth and a little more to the left.
 
-### 23 · user · Bell Harrow
+### 24 · user · Bell Harrow
 I stand a minute with the lamp over the dust-print, then leave the trunk to its preferences. The bucket goes under the prompt corner's leak. The ghost light gets its wick trimmed. Into my notebook, under today's date, go three lists: REPAIRS — trough nailed, stage door wants a carpenter. OWED — plot tables, a daylight walk of the stage. SIX O'CLOCK — the ostler's yard. On my way out I stop at the trunk and, because a stage manager greets whatever she works with, I knock twice on the lid, soft. "Good night to the house," I say, and take my lamp out into the rain to find my lodging.
 
-### 24 · assistant
+### 25 · assistant
 Two knocks, soft, on iron. Nothing answers, and you notice that you had been waiting to find out — which is a thing to be annoyed with yourself about all the way down the passage.
 
 The rain has thinned to the kind that gets in anyway. The Corona's stage door won't sit in its frame; you lift it by the handle to make the latch catch, and file *carpenter* one line higher in your head. Across the yard the inn has one window lit and a smell of cabbage doing its best. Somewhere behind the church a bell begins the hour and gets it wrong by one, the way provincial bells do, and you count the strokes without deciding to.
 
 At your lodging the landlady has left the door on the chain and a candle-end on the sill, and pinned under the candle-end, dry, is a folded paper with your name on it — *Stage Mgr., Vermilion Players* — in a clerk's copperplate that is not Prewick's. Not sealed. Not from anyone in this town, because nobody in this town knew there was a stage manager until three hours ago.
 
-### 25 · user · Bell Harrow
+### 26 · user · Bell Harrow
 I lift the candle-end and slip the paper from under it, and I read it right there on the step, before the chain comes off the door — some letters you don't carry across a threshold until you know what they are.
 
-### 26 · assistant
+### 27 · assistant
 The copperplate is beautiful and cost someone nothing, because clerks are cheap in the capital.
 
 *Madam — You are newly engaged. Congratulations are in order; the position has been vacant since the 14th of last month, which is longer than Herr Vane will have told you.*
@@ -2606,10 +2609,10 @@ The copperplate is beautiful and cost someone nothing, because clerks are cheap 
 
 No name. No address. The candle-end has burned down to the sill and gutters as you finish, and in the sudden dark the chain rattles behind the door — the landlady, awake, saying through three inches of gap, "That'll be for Vane's lot, will it? There was a gentleman left it. Very civil. He asked which room, and I told him none of your business, and he wrote it down."
 
-### 27 · user · Bell Harrow
+### 28 · user · Bell Harrow
 "Civil," I say to the gap in the door. "If he comes again, tell him the stage manager keeps clean books — and let him write that down too." Inside, the letter goes into my own notebook, on the page after the district officer's name: a page for things that believe they own us. Sleep happens, more or less. At six I am in the ostler's yard with the cold making a fact of my breath, plot tables wanted and not yet had, listening for Mirelle.
 
-### 28 · assistant
+### 29 · assistant
 Six o'clock in a provincial yard is a colour, not a time: grey with straw in it. The horses are two, as advertised, and one of them is a good deal older than any number Vane has said aloud. The ostler is asleep on a bale with a cat on him.
 
 Mirelle is already there, on the mounting block, cloak spread under her against the wet, and she does not say good morning. She holds up two hands. In the left, a fold of paper. In the right, an apple. "Plot tables," she says, and gives you the left. "You won't get them from Odalric before noon; I copied Krug's off the back of the storm plot last winter, and mine are honest, which is a thing you can't say of the book." The tables are in a clean small script — hers, businesslike, nothing like the copyist's. Four scenes, a storm, and beside the storm, in the margin: *tin only. NOT the trough, in houses under 40 ft.* The Corona's grid is thirty-two.
@@ -2618,10 +2621,10 @@ The apple goes to the old horse. "Now," she says, and the poise slides off her l
 
 Across the way the inn door opens and Prewick comes out, hatless, ironing-board straight, with his oilcloth bundle under one arm and a look on his face like a man who has been up all night with arithmetic. He sees you both, hesitates at the edge of the scene the way a man hesitates at water, and calls, "Madam Stage Manager — the itinerary. May I see the itinerary? The *real* one, if there are two."
 
-### 29 · user · Bell Harrow · "((OOC: The user writes as {name}.))\n{body}"
+### 30 · user · Bell Harrow · "((OOC: The user writes as {name}.))\n{body}"
 /me Bell: I give Prewick a nod that means wait, and Mirelle her cue the way the prompt book would say it — flat as a board and just as kind: "You were not sent for." And while she turns into somebody else's winter, I hold my new tables up toward Prewick like a season ticket. "One itinerary that I know of, Herr Prewick. Bring me yours after this hearing, and we'll see whether they rhyme."
 
-### 30 · assistant
+### 31 · assistant
 Mirelle takes the cue like a woman taking a hand out of cold water. "*You were not sent for,*" she repeats — not to you, to somebody who isn't there — and then, low: "No. I came because the gate was open and the dogs know me. That is not the same as being sent for, and you will not make it the same by saying it twice." Nothing large. No gesture. The ostler's cat sits up.
 
 Prewick has stopped where he stood. He does not come closer and he does not look away, and one hand goes flat over the oilcloth bundle as though holding a hat on in wind. When she finishes the speech he says, "Oh," very quietly, and then, with horror, discovers he has said it aloud, and straightens his cuffs at nobody.
@@ -2632,10 +2635,10 @@ He crosses the straw and unfolds it against the mounting block: Office paper, ru
 
 "There it is again," Prewick says. "Not on mine. And, Madam Stage Manager — " he lays a thin finger on the red mark — "the 3rd is not a date the Office chooses. It is the date the *Palace* chooses. Which means someone has told Herr Vane a different one, or Herr Vane has told everyone a different one." He looks up, pale, brave, entirely out of his depth. "May I ask him? Or would you rather ask him, and let me stand where I can see his hands?"
 
-### 31 · user · Bell Harrow
+### 32 · user · Bell Harrow
 "I'll ask him," I say. "After the house is set and before the half — a man answers dates better with a show in front of him. You stand where you can see his hands; I'll stand where I can see his eyes; and neither of us says Katterau first." I fold my tables away with his. "Meanwhile: fire buckets, Herr Prewick — count them with me. And when the storm gets rigged, I'm ruling tin only. The grid here is under forty foot, and no company needs to hit a farmer twice in its history."
 
-### 32 · assistant
+### 33 · assistant
 "Tin only," Prewick repeats, and writes it down with visible pleasure. "I shall like this show enormously."
 
 The buckets take twenty minutes and prove the sort of thing you were hired for. Nine, notionally. Five with water. Two with straw in the water, one with a dead mouse, and one that has been used to mix whiting and is now a solid white drum, which Prewick taps with a knuckle and declares "not a bucket, madam, but a monument." Two are missing entirely from the scene dock hooks. He finds them behind the star trap holding a broken bench leg apiece, and stands there with one in each hand looking like justice.
@@ -2644,10 +2647,10 @@ Mirelle passes through going front, cloak over her arm, and says without stoppin
 
 And Vane is: seated in the little box office window with the shutter up, plum coat over his shoulders like a cape, reading aloud to nobody from a folded strip of newsprint gone amber at the creases. "*—Herr Vane's Lear was a ruin against which the storm itself seemed provincial. — the Vessendal* Advertiser, *and they were not a generous paper.*" He looks up and sees you, and the fright goes under the warmth so fast it's almost a kindness. "Harrow! Two hours of daylight and the stage is yours. Ask me for a thing."
 
-### 33 · user · Bell Harrow
+### 34 · user · Bell Harrow
 "Three things, while yes is cheap," I say, borrowing Mirelle's arithmetic. "A carpenter for the stage door — today, before the weather learns the trick of it. Your blessing on tin-only for the storm; the grid here is under forty foot, and Krug's own margin says so. And ten minutes before the half: you and me over the book, private, for the kind of housekeeping a manager and his stage manager do standing up." I do not say the word itinerary. "Which of those do I have?"
 
-### 34 · assistant
+### 35 · assistant
 "All three," Vane says at once, expansive, and then hears himself. He folds the amber notice along its creases, once, twice, and puts it away in the plum coat's breast, which is a gesture you will come to know. "The carpenter — Krebs, over the smithy, tell him it's for the Vermilion and he'll come for a shilling; say I said one-and-six, and pay him the shilling, and let him feel he has won something. Tin only, of course, of *course*, we are not barbarians and thirty-two feet is thirty-two feet." He rounds nothing at all, which is how you know he's read the same margin.
 
 The third thing gets him out of the box office. He stands up, filling the doorway, and looks down at you with real fondness and real evasion holding hands. "Ten minutes over the book. Standing up." A beat. "Harrow, if it is about the properties list, the properties list is a document of *aspiration*—"
@@ -2658,10 +2661,10 @@ Vane's face does something quick and complicated. Then he laughs, too big for th
 
 Falk watches the doors swing. "He'll be back by noon smelling of the Blue Boar and having bought nothing," he says. "Krebs is over the smithy. Take the shilling from the float and make him show you the hinge." He hands you, unexpectedly, the untouched brandy — "For Krebs, not for you; he is a man who bargains better wet" — and goes to sit in the dark of the house, where he can watch the empty stage, which is the only thing he seems to want at this hour.
 
-### 35 · user · Bell Harrow
+### 36 · user · Bell Harrow
 Krebs comes for the shilling and the brandy, shows me the hinge like a tooth he's proud of, and by noon the stage door bites its frame on the first try. I chalk my running plot in the prompt corner, walk all four scenes against Mirelle's honest tables, hang my watch on its nail, and at the quarter-to-the-half I go looking for the housekeeping I'm still owed — the box office first, then the Blue Boar side of the foyer, wearing the face I keep for men who owe me ten minutes.
 
-### 36 · assistant
+### 37 · assistant
 He isn't in the box office. The shutter's down and the float is short by exactly the shilling you took and the pencil you were using, which he has borrowed the way weather borrows a roof.
 
 You get him in the foyer, cornered by his own poster — *THE VERMILION PLAYERS, ILSABET'S RANSOM, ONE NIGHT ONLY* — with his hat off and his hair wet and no smell of the Blue Boar on him at all, which is worse than if there were. He's holding a card in one hand: cream, small, a clerk's copperplate you have seen before, on a step, by candlelight.
@@ -2672,10 +2675,10 @@ He turns the little card over and over. "Skarke's man is in this town. He has co
 
 Out on the stage, through the pass door, Prewick's voice, delighted and slightly appalled: "Madam Stage Manager! The *tin* — I have discovered that if one shakes it *low*, it is thunder, and if one shakes it *high*, it is merely tin! Is that in your plot?"
 
-### 37 · user · Bell Harrow
+### 38 · user · Bell Harrow
 "I keep books that only need reading once," I say. "Clean isn't a favour to you — it's the trade itself. So here's mine. Tonight, after the show, you and I lay the road out against the 3rd — the real one — and if Katterau fits inside the truth, we fit it; and if it doesn't, you tell this company what date they're walking toward." I put my hand out for the cream card and keep it there until it's mine. Then, over my shoulder, through the pass door: "It's in the plot now, Herr Prewick — low for heaven's anger, high for the tea tray. Places in twenty."
 
-### 38 · assistant
+### 39 · assistant
 He gives you the card. It takes him a moment; his fingers behave like a man handing over a bird, and then it's yours: *for Herr M. Skarke, by his hand in this district* — the same nothing, no name, no address, and pencilled faintly on the back in a different, blunter hand, *Corona, 3 perfs, 340 seats, 2 wagons, 2 horses, and the trunk.*
 
 "After the show," Vane says. "Yes. Bring the map, and something to drink, and — " he catches himself rounding a number and turns it into a sigh — "and be pitiless, Harrow, it's the only kindness I can afford." He puts his hat back on, and the actor-manager comes up in him like water in a lock: shoulders, chest, chin. "Twenty minutes! I heard the woman! *Places in twenty*, and I want the pass door SHUT this time, Emeran, the draught took Ilsabet's hair off in Merrow—"
@@ -2684,10 +2687,10 @@ And then the rhythm changes and the house takes over. Twenty becomes ten becomes
 
 The pass door bites its frame on the first try. Your watch is on its nail. Out front, thirty rows of wet coats and one empty seat dead centre of the fourth row, which nobody has bought and nobody sits in, and the front of house boy comes to your elbow, breathless: "Madam — a gentleman's asking will there be a *fifth* act. I said there's four. He said he'd wait."
 
-### 39 · user · Bell Harrow · "((OOC: Dice roll d20 = 9 (9). The dice are already rolled and the result is final — narrate the outcome of exactly this result; never reroll it, change it, or roll on your own.))\n{body}"
+### 40 · user · Bell Harrow · "((OOC: Dice roll d20 = 9 (9). The dice are already rolled and the result is final — narrate the outcome of exactly this result; never reroll it, change it, or roll on your own.))\n{body}"
 /roll d20 "Tell your gentleman there are four acts and a storm," I say to the boy, "and that fifth acts are discussed with the management, in daylight." Then the watch comes off its nail into my palm, and the show is mine: "Beginners, please." Four scenes I call clean from the corner, cue by chalked cue — and at Ilsabet's flight I lean to the tin and bring heaven in: "Storm — go." Prewick's sheet, low, under my hand. The old tin decides tonight how much anger heaven can afford.
 
-### 40 · assistant
+### 41 · assistant
 The tin comes in low and it is glorious for about four seconds. Prewick has it exactly: the shake down at the knees, the sound arriving under the floor rather than over it, and out front thirty rows of wet coats stop breathing. Mirelle turns into the storm and you can hear the pit lean.
 
 Then the old sheet finds the split it has been keeping for two seasons — a bright metal bark, wrong, and the low anger of heaven goes up half an octave into tea tray. Prewick's eyes come to you white as a horse's. You have a fraction of a second and you take it: hand flat, *keep going, softer*, and he keeps going, softer, and the split rides the top of it like a bad string on a good fiddle. Not thunder. Not nothing. Weather from a poor district.
@@ -2698,10 +2701,10 @@ In the corner, Prewick has set the split sheet down very carefully and put both 
 
 Out front, the fourth row centre is still empty. The seat beside it now has a hat on it, crown down, and no gentleman in sight; and the front-of-house boy is coming up the aisle toward your corner with a folded paper held out at arm's length, walking fast.
 
-### 41 · user · Bell Harrow
+### 42 · user · Bell Harrow
 I set the split sheet down in its felt the way you lay up something wounded, not something guilty. "You didn't break the sky, Herr Prewick. You held it up with your wrists while it broke — that's the job entire. The tin is older than the two of us together, and I mean to bury it with honours at Vessendal." Then I turn to the boy and take the folded paper by one corner, the way I take everything folded in this town, and I read it where I stand.
 
-### 42 · assistant
+### 43 · assistant
 The paper is not copperplate. It is pencil, blunt, hurried, on the back of your own playbill — torn from the foyer wall; you can see the pin holes.
 
 *Fifth act as follows. The bell is rung. Nothing answers. He enters late and by the wrong door, and the house does not know him.*
@@ -2714,10 +2717,10 @@ And in the wings, Falk has heard nothing and knows everything: he is standing ve
 
 "—*a bell is rung, and nothing answers*," Falk says, in a voice that has been sober all night. Then he closes the pass door properly, so the draught won't take Ilsabet's hair off, and turns to you. "Whoever wrote that has read the page. Which means he has read a page you have not shown him." A breath. "Where's Odalric?"
 
-### 43 · user · Bell Harrow
+### 44 · user · Bell Harrow
 "Counting something, if we're lucky." I'm already moving. "Herr Prewick — front of house: walk the rows, and bring me that hat with your handkerchief round your hand; touch nothing else it may be sitting on. Herr Falk — the passage and the scene dock, if your evening allows." I take the prompt-corner lamp and go for the box office myself, watch in my fist, walking the way I walk when running would frighten people.
 
-### 44 · assistant
+### 45 · assistant
 The box office shutter is up and the drawer is out and the float has been counted, twice, in Vane's own hand on the back of an envelope, and the second count is smaller than the first because the first was hopeful. No Vane. His hat is not on the hook. The plum coat *is* — hung, actually hung, on the peg, which stops you cold: you have not seen him out of it once.
 
 Behind you, Prewick's careful footsteps down the aisle, and then his voice pitched to carry only as far as it must. "Madam Stage Manager. There is no hat." A pause. "There is a *place* where a hat has been — the plush is pressed — and the seat is warm. Fourth row centre and the one beside it, both warm, and nobody came past me at the doors. I was at the doors the whole while. I count house, madam. It is the one thing I am for."
@@ -2728,10 +2731,10 @@ The passage smells of wet brick and, faintly, of brandy that nobody has drunk. F
 
 It is not empty. Inside, in a neat stack, is a great deal of blank paper. On the flagstones beside it, face down, is Vane's hat, and one glove, and no Vane.
 
-### 45 · user · Bell Harrow
+### 46 · user · Bell Harrow
 I crouch at the lamp's edge and make myself take inventory, the way I'd strike any scene: hat, face down. One glove. Lid up. Paper — blank, a ream of it, corners squared. I lift the top sheet by a corner and turn it to the light, both sides, once. "Three facts," I say, as steady as I can afford. "Nobody passed Herr Prewick's doors. The coat stayed. And the counting is at Vessendal — whoever holds this debt expects the company to arrive, so the company arrives. Load-out at first light; the trunk travels closed and roped, and it rides where I can see it." I stand and face Falk. "And tonight — ladders or no ladders, Emeran — you tell me what the fifth act says about the man who enters late."
 
-### 46 · assistant · Emeran Falk
+### 47 · assistant · Emeran Falk
 Falk looks at the blank sheet in your hand as though it had asked him something.
 
 "They come blank," he says. "The whole of it. That is the trunk's habit — Odalric's had it fourteen years and it has been a chest of clean paper every day of them, and every so often it is not." He does not touch it. He takes the sheet from you between two fingers, holds it edge-on to the lamp, and sets it back on the stack, squared, exactly as it was. "As for the fifth act — child, there is no fifth act. That play has four, and a thing after the fourth that is not an act, and no name in the folio, and at Katterau we did not stage it, and it happened anyway."
@@ -2744,10 +2747,10 @@ Then, from the far end of the passage — the stage door end, the door Krebs men
 
 "Harrow!" he says, delighted. "There is a *carpenter* in this town after all. I have been to see about—" He sees the trunk in the middle of the passage. The chestnuts go down on the flagstones, gently, as if the floor were a table.
 
-### 47 · user · Bell Harrow
+### 48 · user · Bell Harrow
 "You're late," I say, "and by the wrong door, and for a quarter of an hour this house did not know you. So stand there and be looked at." I put his hat into his hands, and the torn playbill on top of it, pencil side up. "Somebody sent you a fifth act tonight, care of the front of house. Read it. Then eat your chestnuts while they're still something, and tell me — plainly, Odalric, chestnut-plain — where you have been since curtain."
 
-### 48 · assistant · Odalric Vane
+### 49 · assistant · Odalric Vane
 He reads it. The rain runs off his hair and lands on the paper and he doesn't move it. Twice through — you watch his lips do *nine years* and stop.
 
 "The Blue Boar," he says. "Chestnut-plain: the Blue Boar, where I did not drink, which you will not believe, and Krebs's brother-in-law, who has a cart and no scruples and will take our second wagon to Vessendal for eleven shillings — I said *twelve*, so that he might feel he had lost something and be honest about the axle." He puts a hand flat on the trunk's closed lid, absently, the way a man steadies himself on a horse. "I was gone forty minutes. Not fifteen. Ask the boy at the doors."
@@ -2758,10 +2761,10 @@ He reads it. The rain runs off his hair and lands on the paper and he doesn't mo
 
 Out in the rain, past the mended door, a cart goes by very slowly, and the driver whistles four notes and stops in the middle of the fifth.
 
-### 49 · user · Bell Harrow
+### 50 · user · Bell Harrow
 I take the playbill back and fold it into my own notebook — the page for things that believe they own us is filling up. "Then Vessendal gets clean books and a bad surprise," I say. "A signature nobody gave loses to a debt somebody watched being paid. Between here and there you'll give me every name that was in that room nine years ago, and I'll do the finding. Now — bed, all of you. First light: ropes; the trunk in Falk's wagon; the tin in felt; and someone put those chestnuts where they'll do good." I bank the lamps myself, last look down the passage — chalk smear, squared paper, shut lid — and hang my watch on its nail till morning.
 
-### 50 · assistant
+### 51 · assistant
 Vane goes, obedient as a man who has been given a task instead of a verdict, calling back from the corridor with something dangerously like hope: "Names! I shall write out *names*, Harrow, in the wagon, in ink — there was a notary present, I am nearly certain, there is *always* a notary at a deathbed—" and then the sound of him giving the chestnut bag to the front-of-house boy and telling him a story about Vessendal that will make the boy late home.
 
 Falk stays until the lamps are down. He picks up the split tin sheet in its felt and carries it under his arm like a wounded bird, because you said Vessendal and honours and he intends to hold you to it. At the passage mouth he says, without turning, "You did well tonight, harbor. You held the corner and you did not shout." A beat. "Prewick is sitting in the fourth row. He has been there since you sent him. I did not disturb him."
@@ -2770,10 +2773,10 @@ He is: dead centre, coat buttoned, hat on his knees, oilcloth bundle beside him,
 
 "Madam Stage Manager," Prewick says, "I have written nothing down. I want you to know that I *chose* not to, which is a thing I have never done." His hands are shaking, very slightly, and he lets you see it. "Two seats warm and nobody past the doors. Sound going up half an octave when the sky broke and Herr Falk saying a line that is in no copy of *Ilsabet's Ransom* I have certified." He turns his head at last. "I am to certify Vessendal in six days. Before I do, I should like to be told what travels in that trunk — and I should like to be told by you, and not by the Office, and not too late."
 
-### 51 · user · Bell Harrow
+### 52 · user · Bell Harrow
 I sit down one seat away from him — hat-distance — and give it to him the way I'd give a line note, everything I hold, in order. A fair copy with no name in its folio, made in Vessendal long ago, paid by the page. Pages that leave it and arrive in prompt books. What it stages coming true — slantwise, and late. Katterau, where they did not stage it, and it happened anyway. A chest that is clean paper every day for fourteen years, except when it isn't. "That is my whole ledger, Herr Prewick. Entered as heard; none of it certified. And here's the trade: you will know what I know inside the hour I know it — and in return you'll teach me what the Office can read, so that I never again make you choose between your seal and this company."
 
-### 52 · assistant · Casimir Prewick
+### 53 · assistant · Casimir Prewick
 He listens the way he counts house: absolutely, without once helping you along. When you finish he sits with his hands on his hat brim for a long moment, and the theatre is so quiet you can hear the last gas tick as it cools.
 
 "Then I will tell you what the Office can read," Prewick says. "It reads *text*. Only text. A certificate names a title, an author, and a house, and my seal swears that what was spoken from the boards matched a copy I have compared line by line against the Index." He unwraps the oilcloth on his knee — a squat black book, corners bound in brass, and he opens it not to the front but to the back, where three pages have been *sewn* in with black thread, coarse work, not the binder's. "This is the Proscribed section. Thirty-one titles. Twenty-nine have authors. Two are entered as *anonymous folio, four acts, and a matter following.*" His finger stops above one line and does not touch it. "Neither has a title printed. Both entries are stamped *not to be described aloud in the making of any report.* I have read that instruction eleven times in eleven months and thought it a piece of departmental theatre."
@@ -2782,10 +2785,10 @@ He closes the book. "So: the Office cannot read a trunk. It cannot read a page i
 
 He stands and puts his hat on straight. "I find I do not like being useful in that way. Inside the hour — yes. Agreed. And in exchange, one instruction from me, Madam Stage Manager, as your clerk: do not let Herr Falk speak any line that is not in a copy I have compared. Not for a laugh. Not to cover a broken sky." At the aisle he stops. "He said it *upstage*, tonight. Toward the trunk."
 
-### 53 · user · Bell Harrow
+### 54 · user · Bell Harrow
 First light comes grey and honest, and I stand at the wagons with my book open and take the company the way I take inventory — name by name, out loud, so the road knows who it's carrying. Vane. Sorel. Falk. One seconded clerk. And whoever else answers, answers now. Krebs's brother-in-law arrives for his eleven shillings and his honest axle; the trunk goes up into Falk's wagon roped, lid to the boards, tin in felt beside it. "Vessendal," I say, pencil ready. "Six days. Sing out or be left behind."
 
-### 54 · assistant
+### 55 · assistant
 "Vane," says Vane, from the box of the first wagon, hat brushed, plum coat shining wetly at the cuffs, sitting up like a man who has slept four hours and rounded it kindly to seven. "Present, solvent, and *magnificent*."
 
 "Sorel." Mirelle, hatbox on her knees, gloves on. "Present."
@@ -2798,10 +2801,10 @@ First light comes grey and honest, and I stand at the wagons with my book open a
 
 Six days of road unrolls: mud, then a hill, then a bad bridge, then better mud. By mid-morning the town is a smudge behind you and Krebs's brother-in-law is whistling four notes and stopping in the middle of the fifth, over and over, without knowing he does it. And around noon, from the back of Falk's wagon, Falk calls your name — flat, once, the way he did in the passage — and when you come alongside he lifts the felt where the tin lies, and shows you what has come to sit on top of the split sheet, dry, in a copyist's small upright hand: a single page, and a number in it, and the number is ten.
 
-### 55 · user · Bell Harrow
+### 56 · user · Bell Harrow
 I look at it just long enough to know the hand and the number, and not a word longer. "Face-down," I say, "and it goes to her. Standing order, older than the hour — don't ask, Emeran." I carry it along the column pressed under my coat like a splint, fall in beside the first wagon, and hold it out. "Sorel. A page has come, and there's a ten in it. I've read the number and nothing else. Where do you want to be when you read the rest?"
 
-### 56 · assistant · Mirelle Sorel
+### 57 · assistant · Mirelle Sorel
 Mirelle looks at the page in your hand for a long moment without taking it. Then she says, "Stop the wagon," and Vane, who is a fool about money and never about people, hauls without a question and gets very busy examining a strap.
 
 She walks off the road. Not far — twenty yards, to a stone marker in the wet grass with a saint's face worn off it — and she does not tell you to stay, which you take as an instruction, so you follow to about ten paces and turn your back to the road so the column has something to look at that isn't her.
@@ -2814,10 +2817,10 @@ Paper unfolding. Nothing for the space of six breaths.
 
 Mirelle folds it along the crease it came with. "That is not the capital's business and it is not the Office's business," she says, "and it is now yours, because I have let you read it, and I am too tired to be careful this morning." She looks at the road, the wagons, the small figure of Prewick standing up on the box to count heads. "The 3rd of Frost. He told you the real date, didn't he. Don't answer if he asked you not to."
 
-### 57 · user · Bell Harrow
+### 58 · user · Bell Harrow
 "He told me, and asked for no silence," I say. "The Palace set the 3rd. He's been selling the company the 17th to buy himself Katterau — six hundred seats and a mayor's old favour — and tonight the road gets laid against the truth, out loud, all of it." I nod at the folded page in her hand. "As for that — Falk carries its brothers in his coat lining, where he says they do less. Yours can ride with them, or in your hatbox, or nowhere near us. Only not the fire; the fire, I'm told, mails them back. Your crease, your call."
 
-### 58 · assistant · Mirelle Sorel
+### 59 · assistant · Mirelle Sorel
 She thinks about it with the page held between two fingers, the way you'd hold a bill you intend to pay.
 
 "Not Falk," she says. "He has enough of other people's endings sewn into him." She turns the page over, once, and puts it inside her glove — the mended one, palm side, flat against her wrist, and pulls the glove on over it. "There. It rides where I can feel it. I'd rather be told by my own hand than by a coat."
@@ -2828,10 +2831,10 @@ The afternoon goes in mud and one shed wheel-rim that Boyle fixes with wire and 
 
 "Madam," he says, "there's a gentleman down the Vessendal road, sitting on a milestone. He asked was this the Vermilion Players. I said yes. He said good — he's early."
 
-### 59 · user · Bell Harrow
+### 60 · user · Bell Harrow
 "Then he can be early exactly where he sits." I take my lamp and my book, and give camp its orders over my shoulder: fire small, supper hot, nobody down the road behind me — and if I'm gone longer than the soup, Falk sings something and everybody stays inside the light. Then I walk the Vessendal road until the milestone shows, stop at talking distance, and open my book between us like a shop counter. "Bell Harrow, stage manager, the Vermilion Players. I'm told you're early. For what, exactly?"
 
-### 60 · assistant · Skarke's agent
+### 61 · assistant · Skarke's agent
 He's a small neat man in a coat too thin for the season, sitting on the milestone with a leather case across his knees and his boots not muddy at all, which is the first wrong thing.
 
 "For the counting," he says. He has the voice of someone reading a weight off a scale. "Vessendal, Friday, at the box office, in company. I am the agent." He does not offer a name and you do not ask twice; you write *agent, no name given, boots clean* and he waits politely for you to finish writing it. "You are the stage manager. Good. I would rather deal with someone who owns nothing. Herr Vane weeps."
@@ -2840,10 +2843,10 @@ The lamp shows you the case: brass corners, a small lock, and stamped along the 
 
 "Three matters, and then you may go back to your soup." He counts them off on gloved fingers, in the same order as the letter, which tells you the letter was his. "One: takings from Vessendal are counted before they are spent. Two: the properties on the schedule are not to be sold, pledged, or repaired at expense. Three—" and the second wrong thing happens: he pauses, and something almost human goes across his face, and he looks past you up the dark road toward the fire. "Three. The trunk is valued separately and Herr Skarke has instructed that it be *inspected* at Vessendal. Not opened. Inspected." He looks at you. "Madam, I have carried out eleven of these schedules. I have never before been told to look at a thing and not open it. Do you know why that instruction exists?"
 
-### 61 · user · Bell Harrow
+### 62 · user · Bell Harrow
 "I know this much of it: the man who gave you that instruction has read something you haven't." I let that sit in the lamp light. "Now my three, since we're counting. One — Vessendal counts against my book: entered daily, and you initial what you read. Two — the nine-year matter. Your master bought papers off a deathbed. Bring the instrument itself to the counting, because I'm bringing what I find, and one of them will be worth more afterward. Three — your inspection happens at ten paces, in daylight, hands in pockets. Nobody in my company handles that trunk beyond roping it, and neither do you." I close the book on my pencil. "Last thing, and then soup. Nine miles from anywhere in the wet — why are your boots clean?"
 
-### 62 · assistant · Skarke's agent
+### 63 · assistant · Skarke's agent
 He looks down at them. Both of you look at them. Clean to the welt, on a road that has taken three inches off the wagon wheels.
 
 "I came out from Vessendal on Kohl's cart this afternoon," he says. "It set me down here and went on. I have not walked." A pause. He turns the case flat across his knees and rests one glove on it. "The initialling — agreed. Daily. It is better practice than I am used to and I will report it as such. The instrument — I am not permitted to bring the original out of the strongbox, but I will bring a certified copy and the strongbox will be in the room. If what you find is worth more than the copy, you will want the original produced in front of a magistrate, not in front of me, and you should say so in those words on Friday."
@@ -2852,10 +2855,10 @@ Then he stands, and he is shorter than you thought, and for the first time he do
 
 Behind you, up at the barn, Falk has started singing — not a song, a hymn, low and immense — which means you have been gone longer than the soup.
 
-### 63 · user · Bell Harrow
+### 64 · user · Bell Harrow
 Back inside the light I let the soup happen first — bad news counts better on full stomachs. Then the book comes out by the fire. "Company hearing. Dates, unrounded." I read them the Palace's 3rd, and Skarke's Friday counting, and the road as it actually lies: two days to Vessendal, a three-night stand, Achterhalt after — and the capital by the 3rd leaves no days for Katterau. I count it off on my fingers the way Vane counts virtues. "That's the arithmetic. The rest isn't mine to rule alone. Katterau is either a grief we can't afford or a debt this company owes itself, and I'll hear everyone. Boyle first — soldiers know marching sums."
 
-### 64 · assistant
+### 65 · assistant
 "Sums," Boyle says, and spits professionally away from the fire. "Two days to Vessendal's two days if Kohl's brother's axle holds and three if it don't. Achterhalt to the capital's a hundred and ten mile, madam, and there's a toll road for eight shilling or a hill road for free that killed a horse on us in a wet year." He rubs his knuckles. "Katterau's *back*. Not on. That's the sum nobody's said yet. It's twenty-two mile the wrong way and twenty-two back. Four days of legs for one night's six hundred seats." He shrugs. "I'll walk it if it's ruled. I'd rather not walk it for a favour a mayor may have died of."
 
 "The queen's slippers have got two more towns in them at best," says Dessa Krul, without looking up from a hem. "And I'll say the other thing while I'm allowed. Krug went at Katterau and came back for nothing, not his boots, and I packed his box myself and it was still warm. I don't want another warm box."
@@ -2872,10 +2875,13 @@ Then Falk, who has not moved, and whose voice comes out of the dark on the far s
 
 And Vane, in the silence after, standing up with his hat in his hands: "Harrow. Rule it. I asked you to be pitiless and I meant it — I am no good at this, I will only weep and quote the *Advertiser*. Rule Katterau, and I shall drive where you point."
 
-### 65 · user · Bell Harrow
+### 66 · user (chapter) · "((OOC: Chapter \"{body}\" starts here.))"
+/chapter Certified Copies Only
+
+### 67 · user · Bell Harrow
 I close the book, because rulings are given standing and shut. "Katterau: no. Not this tour, and not for money." To Falk, across the fire: "And not never — a thing half-read is a debt too, I've learned that much. But we don't pay it broke, late, and stupid, in the town where it knows the doors." Then the rest, counted plain: "The seats we lose, Vessendal finds — I'll have a matinee out of a three-night stand or know the reason. The 3rd stands. Boyle, we take the toll road; eight shillings is cheaper than a horse. And from tonight, company law in every town: nothing is spoken, on a stage or off it, that isn't in a certified copy. No wagers. No bottles. No lines to cover a broken sky — the sky can look after its own dignity. Herr Prewick's seal and my book agree from here to the capital." I look at Prewick. "You were asked. Consider yourself also arrived with." And last, to Vane, with the finger he asked for: "Drive for Vessendal."
 
-### 66 · assistant
+### 68 · assistant
 Nobody says *aye*; theater companies don't. Boyle nods once and goes to look at the axle by lamplight; Dessa Krul bites off her thread; Toby Lenz sits down hard, disappointed and relieved, and will tell people for the rest of his life he nearly played Katterau.
 
 Prewick stands, and he is trembling slightly again, and again he lets you see it. "Then I shall need certified copies," he says. "Of everything. I have *Ilsabet*, and *The Widow's Toll*, and Herr Vane's cut of the *Wolf King*, and nothing else — no farces, madam, and the company plays four. I will sit up and compare them tonight if someone will bring the parts and a candle." He hesitates. "It is the most work I have ever set myself and I am extremely pleased about it."
@@ -2888,10 +2894,10 @@ Mirelle stays by the fire while you bank it. She has her glove off; the page is 
 
 Across the camp, in the dark under the tithe-barn's broken eave, Falk's lamp is still lit — and moving. He has the tarpaulin back off the trunk, and he is standing over it with the felt bundle in his arms and his head bent, listening to something.
 
-### 67 · user · Bell Harrow
+### 69 · user · Bell Harrow
 I bank the fire to one red eye, cross the camp on the sides of my feet, and stop where Falk can know it's me without turning. Whatever he is listening to, I give it thirty seconds of my own ear first — one hand flat on the wagon board, the night doing its work around us. Then, barely above the boards: "What does it say, Emeran?"
 
-### 68 · assistant · Emeran Falk
+### 70 · assistant · Emeran Falk
 Thirty seconds of night: wet grass ticking, a horse shifting, the barn breathing out cold. And under all that, from inside the roped iron, a sound so small and so ordinary it takes you a moment to name it — paper. A dry, unhurried, page-by-page sound, the sound of a man in a library who has all evening.
 
 "It says nothing," Falk murmurs. "It reads." He does not take his eyes off the lid. "I have heard it twice before. At Katterau, the night after the wager. And in Merrow, the week Krug cut the ninth page." His arms tighten round the felt. "Odalric will tell you it is mice. There are no mice; I have looked; a trunk that sits in wet passages and stays dry does not keep mice."
@@ -2902,10 +2908,10 @@ Falk breathes out. "There. Now it will be quiet till Vessendal." He lays the fel
 
 And as you turn for your own blankets, your foot finds something on the boards at the wagon's tail — square, dry, pale in the dark. A single sheet of blank paper, on the outside of the roped and closed lid.
 
-### 69 · user · Bell Harrow
+### 71 · user · Bell Harrow
 I pick it up by one corner, the way I now pick up everything in this company's life, and turn it once to the little light — blank, both sides. "It was outside the ropes, Emeran." I don't put it in my book; pages have a way of moving into books, and mine is spoken for. Into the felt it goes instead, beside the tin. "If it's grown words by Vessendal, we'll know who it was addressed to. If it's still blank, the trunk can have its bookmark back." Then my blankets, the wagon box creaking above me where a tragedian keeps watch, and sleep like a coin dropped down a well.
 
-### 70 · assistant
+### 72 · assistant
 You sleep the way stage managers sleep: hard, and shallow, and with one ear on the horses. Twice in the night the wagon board creaks above you and Falk shifts and does not cough, which is his way of being companionable. Once, very late, you hear him say a line into the dark — one line, in a voice you have not heard him use on stage — and then stop himself, hard, mid-word, and the silence after is a man refusing to drink from his own well.
 
 Grey again. Frost on the tarpaulin, the fire dead, Dessa Krul swearing at a wet stocking, Prewick asleep sitting up with four playscripts on his knees, a candle burned to nothing, and *compared, ll. 1–412* written in his notebook in a hand that gets looser and happier as it goes. Boyle has the axle wired and is loudly certain about it. Vane emerges from his wagon in yesterday's coat, and Toby Lenz has boiled water without being asked, which you note in your book under a heading you have just invented: *worth keeping*.
@@ -2916,30 +2922,30 @@ Falk has gone very quiet on his box. Mirelle has not looked at the town once; sh
 
 And at the Athenaeum's stage door, waiting under the lamp with the collar of his thin coat turned up, is the agent with the brass-cornered case, and beside him a woman in a good grey dress holding a ledger, and neither of them is looking at the wagons. They are both looking at Falk's wagon, and at the roped shape under the tarpaulin.
 
-### 71 · user · Bell Harrow
+### 73 · user · Bell Harrow
 I drop from the board before the wagons commit to the yard and put myself between the stage door and my column, book already open. "Herr Agent. Punctual to the town, at least. The terms stand — the counting Friday, against my book; the inspection at ten paces, in daylight, hands in pockets. And it is not Friday, so today nobody looks at anything of ours but the stage and the billing." Then, level, to the grey dress and the ledger: "Madam. Bell Harrow, stage manager; that's my company behind me. A ledger in a theatre doorway can mean six different professions. Which is yours?"
 
-### 72 · assistant
+### 74 · assistant
 "Loewe," the woman says. "Frau Loewe. I hold the lease of the Athenaeum, madam, and this ledger is the letting book. Six professions is generous; in this town it means two, and I am the one that gets paid first." She has an accent from further south and the manner of somebody who has thrown out better men than the agent. "Your Herr Vane owes me nine shillings from the spring and a repaired gas tap. He may open on that debt if he prefers, but he will not close on it."
 
 "I am not looking at anything," the agent says mildly. "I have eyes and the road is where it is." He does, however, take a step back from Falk's wagon, and his gloved hand goes flat on the case. "Friday. Ten paces. Daylight. I have written it in my instruction book, madam, in your words, and Herr Skarke will read it and be displeased with me, and it will stand." He touches his hat. "One courtesy, unasked: the strongbox came up from the capital this morning, by coach, in company with a gentleman who did not come up with it in the coach. He rode ahead. He is in the town." He steps off the step. "Good afternoon. I shall be at the Swan and I do not drink."
 
 Frau Loewe watches him go with frank dislike. "That one's been in my doorway since noon." Then she opens the letting book against the wall. "Now, madam. Load-in until six; the gas man comes at five and wants watching; the traps are sound and the counterweights are not, and I do not permit smoking in the flies, and I permit *nothing* in the under-stage, which floods." She looks past you at the wagons and her face changes very slightly. "Is that Emeran Falk? God's sake. He hasn't played this town since—" She stops herself, professionally. "Nine shillings, madam. And I'll want the trunk out of my passage; last time it was here it left a mark on my brick."
 
-### 73 · user · Bell Harrow
+### 75 · user · Bell Harrow
 "The nine shillings pays now, from my hand, unrounded." I count them into her palm from the float purse. "The gas man is mine at five. The counterweights are mine before that. Nothing of ours goes near your under-stage — and the trunk never crosses your threshold at all: it stays roped in the yard, wagon and watch. It's marked your brick once, and my company's bricks are all spoken for." Then, book out, pencil ready: "One more line before load-in, Frau Loewe. Finish your sentence. Herr Falk hasn't played this town since — when? I keep this company's history now, and I like it in dates."
 
-### 74 · assistant · Frau Loewe
+### 76 · assistant · Frau Loewe
 Frau Loewe counts the nine shillings twice, because she is that sort of woman, and puts them away, and warms by about a degree.
 
 "Since the winter of the fifth year," she says. "Four years ago. He came alone, madam, no company, and asked me for the house for one night at his own cost, and I let it him for two shillings because he was Falk and I was young enough to be impressed." She squares the letting book. "He never opened it. He paid, and he sat in that house with the gas down for a night and a day, and I sent a boy in with bread twice, and on the second evening he came out and gave me back my key and said thank you very kindly. And there was chalk on the stage — a great deal of chalk, marks and numbers, a plot for something big — and I swept it myself because I wasn't having the boy see a man's madness." She looks at you steadily. "Put that in your dates, then. And put this: there was a woman came asking for him a week after, from Katterau, with a child. I told her he'd gone south. He'd gone north." She shrugs. "I'd tell the same lie again. Load-in until six."
 
 Behind you, the yard has begun: Boyle backing the second wagon, Toby Lenz already dropping the tailboard, Dessa Krul with the queen's slippers held above her head like relics, Vane declaring that the Athenaeum is "a house that *knows* what it has*"* and going straight past you toward the front doors and the box office and the number of seats sold. Falk has not got down. He sits on his box with the reins in his hands and the tarpaulin behind him, looking up at the stone front and the bills with his name on them, and his jaw is working.
 
-### 75 · user · Bell Harrow
+### 77 · user · Bell Harrow
 I let the yard flow around us and go stand at his wheel. "Load-in's mine. The house is Loewe's. The bills are paper with your name spelled right, and that's all they are." Nothing. So I give him what I'd give any of them — a job. "Emeran. Tonight after load-in I bury that tin with honours, as promised. By the river, I thought. You'll say the words — you're the only one of us the sky would believe." I put my hand on the footboard, once, the way he blessed the gatepost. "Come down when you're ready. The trunk keeps its wagon, Boyle takes first watch, and nobody in this town gets told anything by me."
 
-### 76 · assistant · Emeran Falk
+### 78 · assistant · Emeran Falk
 It takes him a while. The jaw stops working, and then, in a voice that is almost conversational: "Four years ago I chalked a full plot for it on that stage, harbor. All four acts and the matter following. From memory, which is the curse. I wanted to see whether the arranging would come if I *staged* it properly, on a board, alone, without a house — whether I could get it over with. Take the whole of it onto one man." He winds the reins round his fist. "It would not come. It wants an audience. It is a *play*, God help us; that is the whole of what's wrong with it."
 
 Then he climbs down, stiff, and stands and looks at the front of the Athenaeum for one more second, and turns his back on it. "Words at the river. Yes. I shall say the sailors' one; a tin sheet is a sort of small drowned thing." He rolls his sleeves like a man twenty years younger. "Now. Where do you want the flats?"
@@ -2950,10 +2956,10 @@ At half past six, with the flats up and the house cold and quiet, Toby Lenz appe
 
 "Madam. Front of house. A gentleman left this and didn't wait, and he *didn't* come in by the doors — I was on the doors, madam, I've learned that." The card is cream, and the copperplate is the one you know. On the back, in blunt pencil: *Fourth row centre, all three nights. Paid. No hat wanted.*
 
-### 77 · user · Bell Harrow
+### 79 · user · Bell Harrow
 I read the card twice — it's not a page, I'm allowed. "Then it's sold," I say, "and sold things get service." Into my book it goes: fourth row centre, three nights, paid, no hat. "Toby — each night, a programme laid on that seat before the house opens. And you count row four when they go in and when they come out. Counts only. No staring." I pocket the card with its brothers. "If our patron wants a fifth act, he can apply to the management in daylight like the rest of this town. Now fetch Herr Falk his coat — we've a tin to bury before supper, by the river, and everyone who ever broke a sky is invited."
 
-### 78 · assistant
+### 80 · assistant
 The river at Vessendal is broad and slow and the colour of used tea, and there is a mud beach below the wool warehouses where the town throws things it doesn't want. Nine of you come down with two lanterns: Falk, Vane in his coat with his hat off, Mirelle, Boyle relieved by Toby for twenty minutes and grumbling about it, Dessa Krul, Toby Lenz himself sprinting to catch up, and Prewick, who has been fetched from his comparing and has brought his own small notebook and no idea what is expected of him.
 
 Falk carries the felt bundle to the water's edge and unwraps the split tin sheet and holds it up so the lanterns run along the crack. "Sailors' words," he says, and gives them — six lines, plain, no ornament at all, in that voice, and the wool warehouses give it back a little, and the river takes no notice, and it is somehow enormous. Then: "It made thunder for eleven years in twenty-nine towns, and it broke honestly, in service, and the man who held it did not let go." He looks at Prewick. "Herr Clerk. It is your tin. Put it in."
@@ -2964,10 +2970,10 @@ Vane weeps. Dessa Krul says "there'll be new tin at Achterhalt, or a copper kett
 
 Walking back up the mud, Mirelle falls in beside you and says, low, "The registry of deeds is behind the lion in the square, open eight to noon. Anna's box would have gone to the town whose name was on the lease, and in the fifth year the lease was Vessendal's." A pause. "I can't go in. My name is in that building on paper I'd rather not stand next to. You can."
 
-### 79 · user · Bell Harrow
+### 81 · user · Bell Harrow
 Morning, over bread and bad coffee at the lodging: "Names, Odalric. In ink, as promised." I copy his list into my book while he watches me not round anything. Then I take my clerk. "Herr Prewick — collar, seal, and your best regulation walk. You and I are going behind the lion. The Office reads text, and this morning it finds itself curious about a lease from the fifth year, a deceased gentleman's deeds, and one deposited box in the name of Sorel, Anna." At the registry door by eight, book open, I let Prewick's seal go first through it like a lamp.
 
-### 80 · assistant
+### 82 · assistant
 Vane's list, in ink, in a hand that gets grander as it gets less certain:
 
 *Hessel Brandt, wool factor, deceased (the friend). His house on the Kohlgasse.*
@@ -2985,10 +2991,10 @@ And Sorel, Anna: **deposited, one box, sealed, fifth year.** No release. Present
 
 The clerk reads it upside down and says, comfortably, "Eighteen shillings, madam, and I can't give it to you. Only the depositor, or kin with proof, or an officer with a warrant." He glances at Prewick's seal, and then, with the faintest smugness of a small man on a firm rule: "Your seal certifies plays, Herr Clerk. Not boxes."
 
-### 81 · user · Bell Harrow
+### 83 · user · Bell Harrow
 "Then we'll do everything lawful, in reverse order." Eighteen shillings go onto the counter, counted twice so he can watch. "One — the company kept Frau Sorel's books the year she kept ours; storage is a debt, and I pay debts where I find them. Stop the clock on that box." I nod to Prewick. "Two — your seal certifies text, as the gentleman says. So certify text: copy those three register lines where you stand, word for word, seal at the foot — a record of what was seen, by an officer, on this morning." Back to the clerk: "Three — Brandt's release went to an executor with a scrawl where a name belongs. Executors are named in full on the probate roll. Fetch it, please. And four — in writing, since your rules are firm ones: what proof does this counter accept from kin?"
 
-### 82 · assistant
+### 84 · assistant
 The counter clerk looks at the eighteen shillings for slightly too long, and then does what small men on firm rules do when handed lawful work: he becomes helpful.
 
 "Clock's stopped," he says, entering it. "Receipt in a moment. Kin's proof, in writing — " he writes it out, dips, writes again — "*a certificate of birth or of marriage naming the depositor, produced in person; or two ratepayers of this town swearing kinship before the registrar; or a magistrate's order.* Registrar's Tuesdays and Thursdays. He's a fair man and slow."
@@ -2999,10 +3005,10 @@ The probate roll comes up in two volumes and a cloud. Brandt, Hessel, wool facto
 
 "Perlmann," says the counter clerk. "Ah. He's above the saddler's in the Kohlgasse still — he doesn't practise, he's eighty and he's blind, but he's *there*. His daughter takes in sewing." He blots the receipt for eighteen shillings and slides it across, and then, because he has decided to like you: "Madam. That box has been asked after before. Twice. Same gentleman both times, and not kin, and he came with money and then with a lawyer's letter and got nowhere, and the second time he asked me what was in it and I told him I don't know and he said —" the clerk frowns, remembering an oddity — "he said *paper, I expect. It usually is.*"
 
-### 83 · user · Bell Harrow
+### 85 · user · Bell Harrow
 Receipt filed, copies filed, morning re-plotted. "Herr Prewick — with me, and bring the clean stamp. We collect Herr Vane on the way." Because a blind man's evidence lives in his ears, and the voice Josias Perlmann heard at that deathbed nine years ago was Odalric's, saying goodbye to a friend. Up the saddler's stair before ten, I set Vane in front of the door and step back myself. "You knock. You talk. And for once, Odalric — no performance. Give him only the voice he already knows."
 
-### 84 · assistant · Josias Perlmann
+### 86 · assistant · Josias Perlmann
 The stair is steep and smells of leather. Vane goes up it like a man going to the block, hat already off, and knocks — three soft knocks, the smallest sound you have heard him make.
 
 The daughter opens it, sewing over one arm, and looks at three strangers with the flat calculation of a woman who guards somebody. Then, from inside, a thin old voice: "Who is on my stair, Bettina?"
@@ -3015,10 +3021,10 @@ Silence. Then a chair, and slippers, and the daughter stepping back because what
 
 He turns his white eyes toward the sound of your breathing, and then to Prewick's — the starch, probably. "There are more of you. Say what you want and be quick; I am old and I am not deaf, which is worse."
 
-### 85 · user · Bell Harrow
+### 87 · user · Bell Harrow
 "Bell Harrow, stage manager to the company. I keep the books now, so being quick is mine to do. Friday, a man named Skarke counts our takings at the Athenaeum and sets Brandt's estate against us, on papers he bought — a debt you watched being paid onto a counterpane. Three asks, Herr Perlmann. First: your account — sealed today, or sworn Friday before a magistrate. Your unfinished instrument, finished as testimony. Second: the registry names you Brandt's executor, three items released in the sixth year. What were they, and where did they go? Third: Anna Sorel put a box into the registry the year she died. If you know what is in it, say. And if you know what shouldn't be — say that first."
 
-### 86 · assistant · Josias Perlmann
+### 88 · assistant · Josias Perlmann
 Perlmann lets go of Vane's cuff. He turns and finds his chair without help and sits, and the daughter puts a shawl over him and stays in the room with her arms folded, which is her right.
 
 "Take them in order," he says. "One. My account you may have, and you may have it *sworn*; the registrar is Braun and he sits Thursdays and he was my clerk. I will go on my daughter's arm and I will say what I said just now, and Bettina will write it out and I will make my mark. Skarke's papers will be an assignment of a debt — the assignment will be good, the debt will not, because a debt paid is paid whether or not a dying man liked ink. A magistrate will want *corroboration*." He raises one finger. "So: the money came in a bag. A bag from a bank, with a bank's mark on it. Banks keep the counterfoil. That is your corroboration, if you can name the bank."
@@ -3031,10 +3037,10 @@ He stops. The room goes very quiet.
 
 "Three," Perlmann says. "Anna Sorel. Yes. She came to me the week before she died and asked me a question about deposits, and I gave her the answer, and I did not ask what for." His fingers work in the shawl. "But I will tell you what I said, since you asked me to say the wrong thing first. She asked whether a thing deposited sealed in the registry could be *read* by anyone. And I said no. And she said: *not by anyone at all, ever? Not even by the registrar, for storage, after years?* And I said no, madam, it is a box, it will sit there. And she was so relieved she wept." He turns his white eyes up. "Now. Which of you is Sorel? The breathing at the back has not moved since I said her name."
 
-### 87 · user · Bell Harrow
+### 89 · user · Bell Harrow
 I write the receipt while his question stands in the room — one sealed packet, endorsed as read to us, taken this day, B. Harrow for the Vermilion Players — and set it and my pencil down on his table, and say nothing at all. Some cues are not the stage manager's to give. I move to the window instead, out of the line between the door and his chair, and wait with my book shut.
 
-### 88 · assistant · Casimir Prewick
+### 90 · assistant · Casimir Prewick
 The breathing at the back is Prewick's, and it has not moved because Prewick is standing very still, holding his stamp in both hands, having just understood a great deal at once.
 
 "I am not Sorel," he says. "Casimir Prewick, Clerk Third Class, seconded. Sir — my breathing is my own fault." He comes forward and sets his sealed copy of the register lines on the table beside your receipt. "But this may be of use to your Thursday. It is the register entry, certified this morning: *Sorel, Anna, one box, sealed, fifth year, no release.* An officer saw it. It is not much, but it is dated and it is mine."
@@ -3047,10 +3053,10 @@ Perlmann takes your pencil and makes his mark on the receipt, slowly, exactly wh
 
 On the stair, Vane is shaking. The packet is heavier than paper. Something inside it slides, small and hard, when you tilt it.
 
-### 89 · user · Bell Harrow
+### 91 · user · Bell Harrow
 On the stair I keep the packet flat under my arm like a call-board notice. "Odalric — the bank, now, while your memory's warm. Which branch filled that bag? Herr Prewick drafts the request for the counterfoil in his best Office prose, and if this town keeps a telegraph, it earns its wages today." Then, before either can ask: "The packet opens the way it was addressed — to the Players. All of them, in our own yard, in daylight, before the half. And nobody reads one word of anything aloud. We look first." Vane's still shaking, so I give him the steadiest sentence I own: "It kept nine years, Odalric. It will keep to the yard."
 
-### 90 · assistant · Odalric Vane
+### 92 · assistant · Odalric Vane
 "The Kohlgasse branch," Vane says, "on the corner where the ironmonger — no. *No.* The Farriers' and Merchants' had no branch here in the fifth year; I got the bag at Achterhalt and carried it two days on my knees. Achterhalt, Harrow. I remember the seat of that coach as I remember my mother." He is still shaking, and holding the rail, and looking at the packet under your arm with the face of a man watching a friend come round a corner nine years late.
 
 Vessendal does keep a telegraph — in the post house by the market, a brass affair with a boy in charge of it. Prewick drafts standing up, and the Office prose is a marvel: *OFFICE OF PUBLIC MORALS, SECONDED CLERK 3, REQUESTS BY RETURN CONFIRMATION AND COUNTERFOIL PARTICULARS OF SUM DRAWN IN COIN, ACHTERHALT BRANCH, FIFTH YEAR, MONTH OF FROST, TO ORDER O. VANE — PURPOSE: EVIDENCE, MAGISTRATE'S HEARING VESSENDAL THURSDAY 9 A.M.* He hesitates over one word, then adds, *REPLY PAID*, and pays it himself out of his own purse, four shillings, and will not be argued with.
@@ -3061,10 +3067,10 @@ By half past eleven you are back in the Athenaeum's yard. Boyle wakes Toby for t
 
 Sun, thin and real. The packet on the tailboard of the second wagon. Nine of the company round it, and nobody talking, and the tape gone soft as ribbon under your thumb.
 
-### 91 · user · Bell Harrow
+### 93 · user · Bell Harrow
 I untie the tape the way you unlace an old boot — patience, not strength — and fold the brown paper back once, twice, keeping my shoulder between the wind and whatever's inside. "Look first," I remind the circle, quiet. "Nobody reads a word of anything aloud. Nobody touches. I turn what needs turning." And I look.
 
-### 92 · assistant · Emeran Falk
+### 94 · assistant · Emeran Falk
 Inside, laid flat: a letter, two pages, in the merchant's blunt hand. Under it, a bank's counterfoil, buff, dated, printed COIN, and a sum written twice, in figures and in words. Under *that*, folded once, a page in a copyist's small upright hand.
 
 And in the fold at the bottom, the small hard thing that slid: a key. Iron, four inches, blackened, with a paper tag tied to it in the same blunt hand, and one word on the tag, and the word is not a name.
@@ -3077,10 +3083,10 @@ Falk has come off the brick without meaning to and stopped again, staring at the
 
 The tag turns over in the wind. The word on it, in Brandt's hand, is **UNPAID**.
 
-### 93 · user · Bell Harrow
+### 95 · user · Bell Harrow
 The counterfoil goes into my book against Thursday — banks love being asked for their own records, and here is Brandt asking for us, nine years early. The face-down page I pass without turning it: "Emeran. Your lining. Unread." The letter I hand to the man it names: "Silently, Odalric. Twice if you need to. We'll be standing here." And the key stays in my fist, tag outward, where the whole company can see the word and nobody can reach the iron. "The cupboard keeps until the letter is known. Brandt sealed them together — we honour his order of operations."
 
-### 94 · assistant · Odalric Vane
+### 96 · assistant · Odalric Vane
 Falk takes the copyist's page between two fingers, doesn't look at it, and picks the seam of his coat open with a thumbnail; there's a whisper of paper meeting paper, more than you like the sound of. "There," he says. "Now it can wait with the others."
 
 Vane reads standing up, hat under his arm, lips shut. The first page takes him a long time. Halfway down the second he stops, looks up at the theatre wall, and reads it again — the whole thing, both pages, twice, exactly as told. Nobody in that yard moves. Dessa Krul's thimble goes tap, tap against her thumbnail and stops.
@@ -3093,10 +3099,10 @@ He hands you the letter — face down, both pages, his own choice — and looks 
 
 "Harrow. The other party's marker. Hessel Brandt did not hold papers." His voice cracks and he does not hide it. "He held a *play*."
 
-### 95 · user · Bell Harrow
+### 97 · user · Bell Harrow
 "Then we go and be counted to it." Through the stage door, prompt side, the green room smelling of old gas and older luck. I set the doors as I'd set a scene: inside, myself, Odalric, Emeran; Herr Prewick at the threshold with his notebook and his silence; everyone else holds the yard. At the cupboard under the chalk board I seat the key and look back once. "Same law as the yard. Whatever is in here gets looked at, not read. If it's text, it travels face-down." Then I turn the iron.
 
-### 96 · assistant
+### 98 · assistant
 It turns hard, and then easily, and the door swings with the little sucking sound of nine years of paint.
 
 The cupboard is a foot deep. Inside: a stub of candle, a tin cash-box with the lid open and empty, a mouse's nest gone to felt, and, standing upright at the back where a man would put something he wanted found, a flat parcel wrapped in oilcloth and tied with butcher's string.
@@ -3113,10 +3119,10 @@ From the threshold, Prewick, very quietly, not writing: "Madam Stage Manager. If
 
 Out in the yard, a horse shifts, and Boyle's voice says, mild and carrying: "Madam? There's the little man with the brass case at the gate. Says it isn't Friday and he knows it, and he's asking after you by name."
 
-### 97 · user · Bell Harrow
+### 99 · user · Bell Harrow
 The parcel does not cross the yard. "It stays this side of the brick. These two halves have kept nine years apart, and they'll keep apart on my watch." Under my coat it goes, flat against the ribs that already know cold paper. "Emeran — not your lining, not this one; you carry enough. Herr Prewick — your arithmetic about the Index goes into no report yet, not till I understand what it adds to." Then the gate. "Boyle — open it to talking distance and no farther." I walk out to the little man with my book open against my forearm. "It isn't Friday, Herr Agent. What is it instead?"
 
-### 98 · assistant · Skarke's agent
+### 100 · assistant · Skarke's agent
 "It is nine o'clock on Wednesday," the agent says, "and my instructions have changed by telegraph, and I have come to tell you so in daylight because you have been decent with me." He is greyer than yesterday. He does not look at the theatre and he does not look at your coat. "The counting is brought forward. This evening, after the first performance, in the box office, with the strongbox present."
 
 He waits while you write it, as he did on the milestone.
@@ -3127,10 +3133,10 @@ He holds out a folded sheet. Not copperplate; not pencil; a heavy educated hand 
 
 Behind you, from the stage door, Falk has come out into the yard and stopped dead at the sight of the case.
 
-### 99 · user · Bell Harrow
+### 101 · user · Bell Harrow
 I take it by one corner — habit is armour by now — and unfold it at arm's length, in the open daylight, where paper behaves worst and honesty best. And I read it once.
 
-### 100 · assistant
+### 102 · assistant
 *Madam — I am told you keep clean books. Good. Then you will understand a valuation.*
 
 *I hold an assignment of the Brandt debt and I hold, in my strongbox, thirty pages lodged as security by my own father in the year the Vermilion Players were poor. I do not want your wagons. I have never wanted your wagons.*
@@ -3147,10 +3153,10 @@ Falk has come as far as the wheel of the second wagon and stopped, one hand on t
 
 The agent is looking at his own clean boots. In the yard behind you the roped tarpaulin sits quiet in the thin sun, and out on the square the lion's bell — the town clock — begins striking the quarter, and gets it right, and Boyle, holding the gate at talking distance, says to nobody: "That's the quarter. Load-in for the matinee's at ten, madam."
 
-### 101 · user · Bell Harrow
+### 103 · user · Bell Harrow
 I fold his letter into my book, onto the crowded page. "Emeran." Flat, because he asked for it flat. "M. Skarke. And a message with it: he says he was the child in the passage at Katterau. Nine years old. He says you will remember the door he came in by." I hold his eye while it lands, and then I turn to the agent. "Tell your client the counting stands — tonight, against my book, his witnesses welcome. And the trunk's answer he will have from me at the counting, spoken, in front of everyone. That is how valuations are done." The quarter has struck; the day doesn't care. "Boyle — gates. Load-in at ten. We have a matinee."
 
-### 102 · assistant
+### 104 · assistant
 The agent touches his hat and goes, and if a schedule man can look grateful, he does.
 
 Falk does not move from the wheel. He says, "The scullery door," and it is barely anything. "There was a boy in the passage at Katterau, and I thought he was the innkeeper's, and he came in by the scullery door, and he stood there through the whole of the reading with his hands behind his back, and at the end he said *is that the finish?* and Odalric laughed and said no, boy, that's three and a half." His hand comes off the felloe. "We gave him bread and sent him back through the scullery. Nine years old." He looks at the tarpaulin. "He has been arranging for twenty years, harbor. He has had the other thirty pages since before we knew there were thirty pages missing. And he does not want the wagons."
@@ -3161,10 +3167,10 @@ Boyle swings the gates. Ten o'clock happens: flats, gas, Frau Loewe complaining 
 
 And at the half, in the prompt corner, with the parcel of thirty pages still flat against your ribs and your watch coming off its nail, Mirelle appears at your elbow with her gloves on and says, "Harrow. Tonight, at the counting. He'll ask you a question with a number in it." She's very calm. "If the number is nine, that's Odalric's. If it's twenty, that's Falk's. If it's ten —" a small breath — "that one's mine, and I'll answer it myself. Don't spare me. Ring your bell and I'll come."
 
-### 103 · user · Bell Harrow
+### 105 · user · Bell Harrow
 The matinee gets half a house and honest laughter, and the Athenaeum's own trough gives the storm real shoulders — I write in my book that this town's sky is better nailed than most. Between shows there are sandwiches, and I find Falk in the wings with the one sum I still can't do. "Before tonight, Emeran. If it were ever finished properly — stage, gas, house, all four acts and the matter following, done right, start to end — what happens to the people watching? Katterau was nine of you and a half-reading, and it collected for years. I need the other end of that arithmetic before I open my mouth at a counting on this company's behalf."
 
-### 104 · assistant · Emeran Falk
+### 106 · assistant · Emeran Falk
 Falk puts his sandwich down on a flat and does not pick it up again.
 
 "I have thought about it every day for twenty years and I will give you what I have, and you will notice it is not much." He folds his hands. "A half-reading, sitting down, nine men, no house: it took four years and it took three people and a voice and a nerve. Slantwise and late, every time — never the thing on the page, always the thing *beside* it. Anna Sorel did not die in a passage the way the passage scene goes; she died of a fever in a good bed, and the fever came at the hour the scene falls." He looks at you. "That is the pattern. It does not copy. It *rhymes*."
@@ -3173,10 +3179,10 @@ Falk puts his sandwich down on a flat and does not pick it up again.
 
 Behind you the pass door goes and Vane's voice arrives ahead of him, jubilant, terrible in its timing: "Harrow! *Harrow* — the take from the matinee, and you will not believe the *word* of it — " and then he sees your two faces and stops in the doorway with his hat in his hand and the cash-bag hanging from his fist, and out in the house Toby Lenz calls, "Half hour, madam! And the gentleman's in the fourth row already — he's come in early and he's *reading his programme*."
 
-### 105 · user · Bell Harrow
+### 107 · user · Bell Harrow
 "Bank the bag with Boyle, Odalric — the word can keep for the counting." The half moves; the house hums itself awake. And I take my walk front-of-house the long way, as any stage manager might: down the centre aisle, unhurried, chalk in one hand, past row four at programme-reading distance. Just a woman checking her sightlines. What I see, I see.
 
-### 106 · assistant · M. Skarke
+### 108 · assistant · M. Skarke
 The centre aisle at the half is the best-lit lonely place in any theatre. Nobody stops you.
 
 He's small. That's the first thing, and it undoes you a little: a slight man in a good plain black coat, no more than thirty, hair going early, sitting with his knees together and the programme held up at reading distance in both hands. Ordinary boots, walked in. No hat, wanted or otherwise. A folded rug over the seat beside him, on the plush that Prewick found warm.
@@ -3189,10 +3195,10 @@ He doesn't look at you. You are three feet away and he does not look at you; he 
 
 Then, without turning his head, in an educated voice pitched exactly for two: "It's better nailed than Katterau. The trough, I mean. You can hear it in the run." A pause. "I do beg your pardon, Madam Harrow. That was uncivil of me. It is only that I have been waiting to be in a theatre with you people since I was nine, and now I am, and I find I cannot stop counting the joints."
 
-### 107 · user · Bell Harrow
+### 109 · user · Bell Harrow
 I sit down one seat away — hat-distance; it's the only etiquette I know for a fourth row. "Nine years old, and Odalric gave you bread and three and a half acts. That was the wrong ration, Herr Skarke. Half a play is hungrier than none." I look at the set with him, at the practical door his hands wanted to hang straight. "Tonight after curtain we'll count money in a small room, and it will be the smallest thing done in this building today. But tickets first — it's my half hour. Enjoy Ilsabet. She gets her whole ending, every performance, on the hour, honestly nailed." I stand, chalk still in hand. "We do finishes here. It's the house speciality."
 
-### 108 · assistant · M. Skarke
+### 110 · assistant · M. Skarke
 He takes that the way a man takes a blow he has been waiting for since childhood: without moving, and with something like gratitude.
 
 "On the hour," he repeats. "Yes." He straightens the programme on his knee. "You should know that I do not believe I am a wicked man, madam. I am a man with thirty pages who has never in twenty years been able to buy the other hundred and seventy, and every year I have got richer and it has not helped, and I have watched your company go about the provinces carrying the thing under a tarpaulin and *not reading it*, and I could not understand it." He looks up at the flats. "I understand it better since I sat down. It is a lovely room. I had not expected the room to be lovely."
@@ -3203,10 +3209,10 @@ Beat, and the house lights come up a notch, and the front doors go, and the firs
 
 Up in your corner the watch is on its nail, and Toby Lenz's voice comes down the aisle: "*Beginners*, madam! Herr Falk wants you before he goes on — he says one line, and he says it's about a door."
 
-### 109 · user · Bell Harrow
+### 111 · user · Bell Harrow
 I'm up the aisle and through the pass door before Toby finishes the call, watch already in my fist. "I'm here, Emeran. One line — then places."
 
-### 110 · assistant · Emeran Falk
+### 112 · assistant · Emeran Falk
 Falk is standing in the wings in the Marshal's coat with his hands hanging at his sides, and he is entirely sober and grey as ash, and he looks past you at the practical door in the second-scene flat.
 
 "The door," he says. "Ours is stage left. At Katterau the scullery door was stage left of the green room, and the boy came in by it, and in the *play* — " he stops, restarts, low and fast, because there are two minutes — "in the play the creditor enters late by the wrong door, and the wrong door in the folio is *stage left*, and I have played on this set for two days and only just seen it." He breathes. "Harrow. He is sitting in the fourth row and our practical door is stage left and I go through it in twenty minutes."
@@ -3215,10 +3221,10 @@ Toby, from the corner, urgent: "*Beginners*, madam — Frau Sorel's on, Boyle's 
 
 "I can go round," Falk says. "Enter upstage right, take the cross behind the settle, six extra steps, nobody in that house will know. Or I go through the door as blocked, as certified, as your law says." His jaw works. "One line, and it is yours to say, and I will do what you rule and not argue: which door do I come in by?"
 
-### 111 · user · Bell Harrow
+### 113 · user · Bell Harrow
 "As blocked. As certified." No hesitation, because he needs there to be none. "Ours-whole beats theirs-half, Emeran — that's the entire theology I own, and you taught it me yourself: the moment we start dodging its shapes, it's directing us. It has eaten interruptions for two hundred years; it doesn't get ours. That door was hung by Boyle and painted by Dessa Krul and it opens onto a play with an ending. It is OUR left. Walk through it on the hour, the way you have six hundred times, and let the fourth row learn what a door is for." I step back into my corner and lift the watch. "Places."
 
-### 112 · assistant
+### 114 · assistant
 He takes it standing up, the way he takes notes. "*Our* left," he says once, to himself, and then straightens the Marshal's coat, and the ruin goes out of him and the size comes in.
 
 Places. The house settles: drovers, wet wool, a baby somewhere that Dessa will glare at through a gap in the flats. Prewick in the stalls with his script and his oilcloth. Fourth row centre, a small man in black with a rug on his knees.
@@ -3231,10 +3237,10 @@ And in the fourth row, dead centre, Herr M. Skarke — who has waited twenty yea
 
 At the curtain the house stands up. Toby Lenz, hoarse with joy at your elbow: "Madam — row four went in one and came out none. He's *gone*. And he left the rug on the seat, and there's a paper pinned to it."
 
-### 113 · user · Bell Harrow
+### 115 · user · Bell Harrow
 "Curtain calls first — nobody skips a bow in my house." And when the iron's down and the house lights up, I go out to row four myself, unpin the paper from the rug, and read it standing in the emptying stalls, once, in the honest gaslight.
 
-### 114 · assistant
+### 116 · assistant
 Three calls, and Falk gets a third one alone that he did not ask for, and Vane weeps at the back of the wings and mouths *the* Advertiser *would not have been generous* at nobody.
 
 Then the iron, the house lights, the drovers filing out arguing pleasurably about the storm. The rug is good wool, folded neatly, still faintly warm. The paper is pinned to it with a proper dressmaker's pin, and it is his real ink and his educated hand and it is short.
@@ -3253,10 +3259,10 @@ Then the iron, the house lights, the drovers filing out arguing pleasurably abou
 
 Behind you, up in the corner, Toby is putting the chalk back in its tin. Frau Loewe is walking the aisles with a lamp looking for lost gloves. And down the centre aisle, in the doorway of the pass door, in his shirtsleeves with the Marshal's coat over his arm, Falk is standing quite still, watching you read, waiting to be told.
 
-### 115 · user · Bell Harrow
+### 117 · user · Bell Harrow
 I fold the letter into the book and come down the aisle with the rug over my arm. "He withdraws the debt claim — tonight at least; we bank Perlmann's sworn word Thursday all the same, promises being weather. He'll be back tomorrow, paying at the door like a Christian, his words." I stop in front of Falk and hold out the rug. "And there's a postscript, and it's yours, so here it is told plain: your hands were cold in the second act. The whole house saw, and someone should have told you. So — told. The rug's from the fourth row, for the man who walked through his own door." Then, because the night isn't done: "Counting in ten, Emeran. Wear the coat."
 
-### 116 · assistant
+### 118 · assistant
 Falk takes the rug and looks at it. Good wool, folded. He holds it the way a man holds something he has no procedure for.
 
 "I have been given jewellery by an empress," he says, "and a horse by a mayor, and neither of them noticed my hands." He puts it over his arm on top of the Marshal's coat, very carefully, and his voice does something and recovers. "Ten minutes. Yes. The coat." At the pass door he stops. "Harrow. Nothing came for me tonight. Twenty years, and I went through that door and nothing came." He says it like a man testing ice. "That is not a thing I know how to do with. I shall want to be told what to do at intervals for the rest of the evening, if you can spare it."
@@ -3269,10 +3275,10 @@ He leaves. Vane sits down on the box-office stool, which is far too small for hi
 
 "Harrow," he says. "It is nine o'clock on a Wednesday and I owe no man anything." A beat. "What in God's name do we do now?"
 
-### 117 · user · Bell Harrow
+### 119 · user · Bell Harrow
 "Now?" I close the book on the initialed page. "Now you learn the rarest role in the repertory, Odalric: a solvent man. Two more nights here. Thursday at nine we bank Perlmann's sworn word all the same — promises are weather. Then Achterhalt. Then the capital, where this company arrives early for the first time in its history, which will frighten the Palace more than anything we could stage." The float bag goes on its hook; the book under my arm. "The appetite in the yard is still owed. The halves stay apart. Row four stays row four. Those are tomorrow's books." Through the wall, Dessa's pot is announcing itself. "Tonight we drink to Hessel Brandt, wool factor, who kept nine years of faith wrapped in oilcloth. Come and be toasted, the pair of you."
 
-### 118 · assistant
+### 120 · assistant
 Dessa Krul's pot has been going since the second act and is beyond all criticism: mutton, barley, and something illegal she got in the market. The green room fills. Somebody puts two candles on the cupboard under the chalk board and nobody remarks on it. Boyle brings up a jug and says the horses are fed and the trunk is roped and Toby has the watch till midnight for a penny and a plate.
 
 Falk stands with the rug over his shoulders like a man on a quay, and lets himself be handed a small brandy and doesn't drink it, which is his way. Prewick, having stamped everything in the world, is persuaded onto a crate and given a plate and, on his third mouthful, discovers to his ruin that he is happy. Frau Loewe comes up with her lamp, is given soup, complains about the counterweights, and stays.
@@ -3285,10 +3291,10 @@ Mirelle, beside you, does not lift her glass with the others; she waits, and the
 
 Out in the yard, past the doorway, the tarpaulin sits under the lamp with Toby Lenz on the tailboard eating soup off his knees. Somewhere in the town the lion's bell strikes ten and gets it right. And on the chalk board above the two candles, in your own hand from load-in, is your running plot for tomorrow — four scenes and a storm, tin at Achterhalt, *matinee 2, evening 7* — waiting for you to strike a line through today.
 
-### 119 · user · Bell Harrow
+### 121 · user · Bell Harrow
 I strike one clean line through today on the chalk board — a day's full stop — and carry the last of my jug out to the yard steps, where Mirelle has gone to not-smoke and watch Toby eat. I put it plain, because she'd mend my gloves if I performed. "Braun sits at nine tomorrow. The counter takes a certificate, or two ratepayers swearing kinship, or a magistrate's order. And here's my own entry first: nothing says that box ever opens. Your sister built the one shelf in the world the thing can't read — opening it might be the only way to break her work. But a kin claim, once entered, keeps every lawyer Skarke ever buys off that shelf for good." I set the jug between us. "If you want the ratepayer road, I'll find you two who'd swear on a needle's evidence — Loewe likes you, and Perlmann already knows your breathing. Your name, your risk, your call."
 
-### 120 · assistant · Mirelle Sorel
+### 122 · assistant · Mirelle Sorel
 Mirelle takes the jug and doesn't drink from it, just holds it on her knees where the warmth is.
 
 "Two ratepayers of this town," she says. "Swearing kinship. Loewe would, and Perlmann would, and both of them would put down the name Sorel." A long pause. Down in the yard Toby scrapes his plate. "Harrow, my name is not Sorel. It never was. Anna Sorel was my sister and I was born a name that is in a police file in the capital under a matter that has a date and a magistrate on it, and the passport in my hatbox spells a third thing over a town I have never seen. If I stand in front of Braun and let two honest women swear I am Anna Sorel's kin, I am putting my true name on a register with a clerk's copy, in ink, twelve days before I walk into the capital by invitation."
@@ -3297,10 +3303,10 @@ She turns the jug once. "Which is what the page said. *A woman crosses a border 
 
 Then, quietly: "But eighteen shillings buys the clock stopped, and you bought it, and a stopped clock does not care about names." She hands the jug back. "So: Thursday, nine o'clock, Perlmann swears his evidence and we take it, because that's Odalric's neck. Not mine. Mine keeps until the capital tells me what it wants." She stands, and brushes down her skirt, and is entirely herself again. "One thing you can do for me instead, if you meant the offer. Ask Frau Loewe who came to the Athenaeum asking for Falk four years ago, from Katterau, with a child. And how old the child was."
 
-### 121 · user · Bell Harrow
+### 123 · user · Bell Harrow
 I find Frau Loewe locking the front of house with her lamp turned low, and put it to her between managers, no audience. "One more line for my book, and it stays in my book. Four years back — the woman who came from Katterau asking after Falk, the one you sent south. Who was she? What did she look like? And the child with her — how old?"
 
-### 122 · assistant · Frau Loewe
+### 124 · assistant · Frau Loewe
 Frau Loewe finishes turning the key before she answers, which is how you know you'll get the truth.
 
 "She gave a name and I've lost it — Bauer, Bacher, something a woman gives when she doesn't want to give one. Thirty, thirty-five. Countrywoman's coat, town boots. Not poor and not asking for money; she was very clear about that in the first minute, which is why I've remembered her at all." She hangs the lamp on the hook by the paybox. "Dark, and thin in the face, and she stood the way your Frau Sorel stands — hands still. And she didn't ask *is Emeran Falk here*. She asked *does Emeran Falk still travel with the Vermilion Players*. Different question. A woman who's been keeping track."
@@ -3309,10 +3315,10 @@ She rubs her thumb on the paybox ledge. "The child was five or six. A boy. Sat o
 
 She picks up her lamp. "Five or six then. Nine or ten now." A beat. "Nine or ten, madam. I know what your face is doing. Good night. Matinee's at two and I want that trough sheeted, it drips."
 
-### 123 · user · Bell Harrow
+### 125 · user · Bell Harrow
 Thursday runs on rails. Braun at nine: Perlmann on Bettina's arm, the account sworn, copied, sealed straight; and at the post house the telegraph's reply-paid answer is in — the Achterhalt branch confirms the draw, coin, fifth year, to order O. Vane. Banked, all of it, against weather. Then my two deliveries, in their right order. To Mirelle, exact as testimony: a name like Bauer or Bacher, thirty-odd, countrywoman's coat, town boots, not poor and said so first; stood hands-still — stood, says Loewe, the way you stand; didn't ask if Falk was here, asked whether he still travels with us. A boy, five or six then, drilled polite; she never once looked at him while she spoke. And to Falk, later, in the empty wings, word for word and nothing added: "Four years ago a woman from Katterau left you a message with Frau Loewe. She said — tell him, when it comes round again, that it was not his."
 
-### 124 · assistant
+### 126 · assistant
 Mirelle takes it standing, and does not ask you to repeat any of it, and at *stood the way you stand* her hand goes to her own wrist and stops there. "That's my mother's coat she's describing," she says. "Anna's, then mine, then — " She doesn't finish. "Thank you, Harrow. Say nothing to anyone else. I'll want the road to Achterhalt to think about, and after that I may ask you for something large."
 
 Falk takes it worse and better. He goes very still in the wings, and then he sits down on the settle from the second scene — a prop settle, not built for a big man's weight, and it holds — and puts his hands on his knees.
@@ -3325,10 +3331,13 @@ Then load-out: flats down, gas off, Loewe paid, the trough sheeted because she w
 
 "Achterhalt," he says. "Where the tin is, and where I got the bag nine years ago, and where I have not been since." He looks up at the grey. "Harrow, ask me for a thing."
 
-### 125 · user · Bell Harrow
+### 127 · user (chapter) · "((OOC: Chapter \"{body}\" starts here.))"
+/chapter Debts Paid in Coin
+
+### 128 · user · Bell Harrow
 "Then here's my thing. At Achterhalt you walk me into the Farriers' and Merchants' yourself — front door, hat on — and close the fifth-year business square. Not for evidence; we're past evidence. Because you've owed that town a different debt: nine years of going around it. We'll bank the take while we're in there, the way solvent men do." I sling the float bag over my shoulder like it's always lived there. "And after the bank, the ironmonger. This company needs new thunder, and you're the only man I'd trust to choose a sky by ear."
 
-### 126 · assistant · Odalric Vane
+### 129 · assistant · Odalric Vane
 Vane's face does the thing it does — the fright going under the warmth — except that this time there's less to hide, and what comes up is very nearly plain.
 
 "The front door. Hat on." He turns it over. "You know they had me in a back room in the fifth year for four hours while a boy went to Vessendal on a horse to ask if I was good for it, and I sat in that room and read a pamphlet about drainage nineteen times." He laughs, wetly, once. "Yes. Front door. And I shall choose you a sky, Harrow, and it will be *magnificent*, and I shall pay whatever the man asks and then round it down aloud in front of you, which is the most romantic thing I know how to do."
@@ -3339,10 +3348,10 @@ Then the road: Vessendal out of the flat behind you, the river bridge, the hedge
 
 Twenty miles in, the road climbs, and at the top of it there's a milestone in the wet grass, and Achterhalt on the sign, and something small and pale caught under the stone's lip — a corner of paper, folded once, dry, in the copyist's small upright hand — and Boyle sees it too and pulls up without being told, and says, "Madam. Do we look?"
 
-### 127 · user · Bell Harrow
+### 130 · user · Bell Harrow
 "We look. One of us." I climb down and wave the column to stay mounted — nobody reads over my shoulder, and nobody says anything aloud. I work it out from under the stone's lip by its corner: dry under wet stone, which is its signature by now. Unfold once. Read once, silent. And whatever number is in it will decide whose it is to carry.
 
-### 128 · assistant
+### 131 · assistant
 Dry paper under a wet stone. It comes away clean.
 
 *The boy is brought to the theatre by a woman who does not go in. He is given a seat and a programme and no one asks whose he is. In the fourth act he says, aloud, is that the finish, and nobody answers him, and the house does not know him.*
@@ -3359,10 +3368,10 @@ Falk has got down off his wagon. He does it slowly, one hand on the wheel, and h
 
 Ahead, down the long slope, Achterhalt sits in the dip with its two church towers and a smudge of coal smoke over it, an hour off — and on the wind, faintly, coming up the hill, a bell.
 
-### 129 · user · Bell Harrow
+### 132 · user · Bell Harrow
 "No number, Emeran. First time." I keep my hand flat off the pocket, because he's watching it. "Its subject is a boy at a theatre — brought by a woman who doesn't go in. He asks a question in the fourth act, and nobody answers him, and the house does not know him." I look down the slope at the two towers and the coal smudge. "So, no. Not yours. Ours. It's about a thing that hasn't happened yet — and my whole trade, from the day I signed Odalric's book, is houses that answer." I climb back up. "On, all of you. We've a sky to buy and a bank to walk into by the front door. And Boyle — when we're down that hill, find out what that bell is, before it decides it's ours."
 
-### 130 · assistant
+### 133 · assistant
 "Aye," Boyle says, and clicks the horses on, and the column goes over the crest and down.
 
 Falk climbs back on his box, and after half a mile he starts saying the toll-road distances in verse again, which is how he prays. Vane, from the first wagon, has begun explaining the acoustics of a copper kettle versus a proper hung sheet, to nobody, at length. Prewick writes something in his notebook, reads it, and crosses it out.
@@ -3375,10 +3384,10 @@ He is standing on a barrel at the edge of the square with the bell in one fist, 
 
 Boyle has stopped the wagon. Behind you, Falk has gone silent mid-line.
 
-### 131 · user · Bell Harrow
+### 134 · user · Bell Harrow
 "Nobody says one word of what's on that barrel aloud." The law holds even here — especially here. Then I deal in coin, not commands: "Toby — a penny to the bellman for a rest; his throat's earned it." To Prewick, low: "Herr Clerk. An announced performance, uncertified, under a command nobody gave — that's not my jurisdiction. It's yours, entire. Take one bill down and certify it as seen — records are the whole of the defence — then tell me what the law lets us do about the rest, because whatever that bill believes, this company is not playing it." And to Boyle, already scanning shopfronts: "Find me the printer. Wet ink means a fresh order, and order books remember what hands forget."
 
-### 132 · assistant
+### 135 · assistant
 "Yes," Prewick says, and gets down off the wagon like a man stepping onto a stage. He does not run. He crosses the square with his collar straight and his oilcloth under his arm, and he says to the bellman, in the flattest Office voice you have yet heard from him, "Office of Public Morals. This bill and any duplicates, and no further crying of it. Thank you." The bellman looks at the seal, then at Prewick, then hands over the whole roll from inside his coat — nine of them — and takes Toby's penny and sits on his own barrel, aggrieved and relieved together.
 
 Prewick brings them to the wagon and does the certifying there, standing, on the tailboard: *seen this day, uncertified matter announced by public bell, nine copies impounded, C. Prewick, Clerk 3.* Stamp straight. Then, quietly, to you:
@@ -3389,10 +3398,10 @@ Boyle comes back at a jog. "Printer's Hessler, off the north side, and he's *shu
 
 And Mirelle, who has come up beside you without a sound and is looking at the top bill in Prewick's hand, says, in the calmest voice in the square: "Harrow. Look at the type. The company name, the acts, the command — all fresh. But look at the bottom line." She puts one gloved fingertip beside it: the date, the house, and the price of seats, in type that is worn, and slightly out of alignment, and grey with age. "That bottom line has been standing set in his tray for years. Somebody kept the forme."
 
-### 133 · user · Bell Harrow
+### 136 · user · Bell Harrow
 "Then we knock on a shut shop." Order of march: Prewick's seal first, my book second, Boyle at the corner wearing his mildness. The nine bills go under the tailboard tarpaulin — not one stays in that square. At Hessler's door I let the Office do the knocking — three, official, unhurried — and while we wait I watch the lamp behind the shutters: whether it moves, and how fast, tells you what a knock means inside a house.
 
-### 134 · assistant · Hessler
+### 137 · assistant · Hessler
 Three knocks, official, unhurried.
 
 The lamp behind the shutters does not move for four seconds. Then it moves fast — away, toward the back — and stops again, and comes back slowly, which in a stage manager's arithmetic means: put something down, think better of running, come to the door.
@@ -3407,10 +3416,10 @@ Bolts. Two. The door opens a foot on a man of sixty in an apron with ink to the 
 
 He points at the line strung above the press. Wet proofs, hanging like washing. "Two hundred, madam. Nine went to the bellman. I've a hundred and ninety-one in that stack, and I want them off my premises, and I'll take no money for them, and I'd be glad if the gentleman would write down that I said so."
 
-### 135 · user · Bell Harrow
+### 138 · user · Bell Harrow
 "He'll write it down — he writes everything, it's the whole of his recreation." I open my own book beside Prewick's. "Now read me your bottom line, Herr Hessler. The standing one, the old Vermilion forme — what house, what prices, and what date, exactly as it has sat in your tray nine years." And while he reads it: "The hundred and ninety-one go to the Office's custody tonight, with the coin, wrapped and witnessed. And the forme — you'll break it up in front of us, distribute every letter back to the case under our eyes. If your type has set itself again by morning, you touch nothing and you send for me at the theatre. I pay faster than it does."
 
-### 136 · assistant
+### 139 · assistant
 "Read it out, then." Hessler holds the proof to the lamp and reads with the flat competence of a man who has read a million wrong letters.
 
 "*THE ATHENAEUM, VESSENDAL — Boxes 3s, Pit 1s 6d, Gallery 8d — Thursday, the 14th of Frost, at seven.*" He lowers it. "That's my old standing line, and I'll tell you what I told my boy: the 14th of Frost is a *Thursday* this year, which it hasn't been since the fifth year, and that's chance, and I don't like it. And the house is Vessendal, madam. Not here. Achterhalt's crier cried a Vessendal house this morning."
@@ -3423,10 +3432,10 @@ The wet proofs sway on their line. A hundred and ninety-one dry bills go into tw
 
 And as you're tying the second sack, Boyle puts his head in from the corner and says, "Madam. There's a woman across the way's been watching this shop since we knocked. Countrywoman's coat, town boots. She's not moving off."
 
-### 137 · user · Bell Harrow
+### 140 · user · Bell Harrow
 "Sacks to the wagon. Nobody follows me." I cross the way at walking pace, both hands visible, and stop at hat-distance from a stranger in a coat I've had described to me twice. "Bell Harrow. Stage manager, the Vermilion Players." No book; this one gets my eyes. "Four years ago you left a message with the Athenaeum's mistress for Emeran Falk. He has it now — delivered word for word, an hour outside Vessendal, three days ago. It has come round again." And then I do the harder half of my trade: I wait.
 
-### 138 · assistant · Ilse Bacher
+### 141 · assistant · Ilse Bacher
 She doesn't move off, and she doesn't come closer. Thin in the face, forty perhaps, and the hands are still — Loewe was exact about that.
 
 "Then he knows," she says. "Good." A pause; the market noise goes on behind her. "I'm not here for him. I've been across from Hessler's since Thursday morning, because I came in to sell butter and saw a bill on that barrel with *four acts and a matter following* on it, and I sat down on the kerb, madam, in front of people." Her mouth does something. "I know that phrase. I heard it through a scullery door when I was fifteen years old, carrying bread to nine men in a green room at Katterau."
@@ -3437,10 +3446,10 @@ The square keeps going around you both.
 
 Then, flatly, the way people say the thing they came to say: "Is he well? And is that bill yours, or does it belong to the thing?"
 
-### 139 · user · Bell Harrow
+### 142 · user · Bell Harrow
 "He's well. Sober, on his box, on watch — gruff as a harbour and twice as useful. Two nights ago six hundred people stood up for him, and a man he fears sent him a rug for his cold hands. Your message reached him word for word, and I watched it take twenty years of the wrong weight off." Then, because she asked straight: "The bill isn't ours. All two hundred are impounded and the forme's broken to the case. It belongs to the thing — and the thing is billing a theatre we've left, on a date we've refused, and my whole intention is that it plays to nothing." I let that stand, then trade her question for question. "The man who came round Katterau four years back promising a reckoning — name, face, year, whatever you keep. And the boy who sat on the Athenaeum's step and thanked Frau Loewe like a drilled little soldier. Whose is he?"
 
-### 140 · assistant · Ilse Bacher
+### 143 · assistant · Ilse Bacher
 Ilse Bacher takes the first part standing very straight, and at *twenty years of the wrong weight* she looks at the cobbles for a moment.
 
 "Then I'm glad. That's all. I'm glad." Then she is business again, and quick, because market days don't wait. "The man who came round: no name, and he wanted none. Winter of the fifth year — no, the *seventh*. Thirties. Town clothes, cheap. He had a little book and he asked in the taproom who'd been at the Rose the night of the reading, and he *knew* it had happened, madam, which nobody in Katterau said aloud even then. He said there'd be a reckoning and he said it like a man reading a list. He paid for information in shillings and he wrote in the book with his left hand." She meets your eye. "Skarke's, I supposed. But he was too poor and too frightened, and Skarke's people aren't frightened. And he asked one thing nobody else ever asked me: *how far did they get?* Not what happened after. How far in the play did they get."
@@ -3449,10 +3458,10 @@ She turns her head to check her stall and turns back. "As for the boy on the ste
 
 She lifts her basket. "Madam — you've been honest with me, so: I brought butter in to sell and I've sold it, and I've a cart going back to Katterau at four. If you want to know what's standing at the Rose, I'll go and look and I'll send word. I can go in by the scullery. It's how I know that house." A beat. "But you'll want to tell me now if I oughtn't. You're the one that keeps the books."
 
-### 141 · user · Bell Harrow
+### 144 · user · Bell Harrow
 "Then here's the book's answer: no. A door you've paid twenty years for doesn't get opened twice on my account — not by the scullery, not by the front, not for anyone's curiosity, mine included. Sell your butter and go home to the butter man." And then the instruction, plain as a half-hour call: "One thing instead, Frau Bacher, and it weighs more than any scouting. On the 14th of Frost — whatever bill goes up, whatever bell cries it, however kind the invitation reads — keep Fenner home. No theatre, no square, no step. If ever a woman is written to bring a boy to a playhouse door and not go in, it will not be you, and it will not be him." I give her the road for word — Frau Loewe at the Athenaeum forwards to the company — and my hand, which she can take or leave.
 
-### 142 · assistant
+### 145 · assistant
 She takes it. Butter-cold, and a grip like someone who's carried things for a living.
 
 "The 14th," she says. "Home. Both of us. I'll put a bolt on the door and I'll tell Bacher we're playing at hermits." Then, with the first crack in her steadiness: "Is that what's coming for him? A woman bringing a boy to a door?"
@@ -3463,10 +3472,10 @@ She goes to her cart. The market closes around her.
 
 And when you get back to the wagons, Achterhalt has begun to notice you properly: a boy running to tell his mother, a shopkeeper out on his step, and — coming across the square at a smart clip with a chain of office bouncing on his chest and two constables behind him — a stout man in a good hat, who arrives, takes off the hat, and says, "Madam. Which of you is in charge? I'm Kessel, bailiff of this town. I'm told there's a bill cried this morning for a play by *command*, and I'm told the Office is in Hessler's shop impounding it, and nobody's told *me* anything, and I'd like to know before dinner whether I've got a company of players in my square or a criminal matter."
 
-### 143 · user · Bell Harrow
+### 146 · user · Bell Harrow
 "Of the players — me. Of the matter — the Office." Hat-nod, book shut, everything a bailiff likes. "Bell Harrow, stage manager. The company's papers are stamped and dull, Herr Kessel, and the bills we put up in your town will say Ilsabet's Ransom, certified, and nothing stranger." Then I hand him the good half: "Herr Prewick, Clerk Third Class, seconded, holds the criminal side: nine bills off the bellman, a hundred ninety-one off the printer's line, coin impounded, order book inspected, the printer cooperative and blameless in his own ink. You'll have his certified account before your dinner — he writes faster than most men read. And should the Office's matter want a room, the town is welcome to charge the Office rent."
 
-### 144 · assistant
+### 147 · assistant
 Kessel's face rearranges itself into that of a man whose afternoon has just been saved.
 
 "Before dinner," he repeats, hopeful. "And the printer blameless." He turns his hat round in his hands. "Hessler's a stubborn old article but he's never once passed off a bill. Right." Then, more shrewdly: "*Nobody* ordered it, then? Because that's what my constable had off the bellman and I told him he'd been sold a story."
@@ -3477,10 +3486,10 @@ Kessel reads it, and grunts, and something between them settles that will make y
 
 He goes, constables trailing. The square exhales. Vane, who has been standing three feet behind you throughout in his plum coat with his hat off, being magnificently silent, now says, "*Twelve*," in the voice of a man in love. "Harrow. The bank, and then the ironmonger, and then I shall haggle with a bailiff's brother-in-law, and it will be the happiest day of my life."
 
-### 145 · user · Bell Harrow
+### 148 · user · Bell Harrow
 The bank first, as asked — front door, hat on, my arm not offered because he doesn't need it, whatever his face thinks. I watch nine years come off Odalric Vane at a marble counter: the fifth-year business closed square, the take banked like any dull man's money, and a receipt he holds a half-second too long before it goes into the breast pocket where the old notice lives. Then the ironmonger's, where I say only: "Choose me a sky." And I stand back and watch a big man walk a wall of hanging metal with his eyes shut, flicking each sheet with one fingernail, listening.
 
-### 146 · assistant
+### 149 · assistant
 The clerk at the Farriers' and Merchants' is young, and calls him *sir*, and has never heard of him, which is the kindest thing that has happened to Odalric Vane in a decade. The fifth-year business takes eleven minutes; the ledger is fetched, the coin draw found, the marginal note read out — *paid in coin to bearer, Vane, O., on account of Brandt, H.* — and a copy made for you at twopence. The take goes in. The receipt comes out. He holds it, and then puts it away over the amber notice, and says nothing at all on the steps, which from him is a psalm.
 
 The ironmonger's is a cave of hanging metal, and the ironmonger himself is delighted to be ignored. Vane goes down the wall with his eyes shut, one fingernail, tick — tick — tick, head tilted. A galvanised sheet: "Biscuit." A thin bright one: "Rain on a hat. Useful, not a sky." A great black plate at the end, longer than a man: he flicks it and the whole shop hums, and he stands there with his hand flat on it until it stops.
@@ -3491,10 +3500,10 @@ It goes into the wagon in felt, on the boards, next to nothing else.
 
 At the Corn Exchange he gets the hall for thirteen and considers it a defeat and is happy. And that evening, in the empty hall with the trestles stacked and one lamp lit, while you chalk your plot on the flags because there's no board, Falk comes in and stands over the new sheet in its felt, and says: "Harrow. Ilse from the Rose. Boyle told me a woman spoke to you in the square." He doesn't ask. He waits, exactly as you wait, having learned it from you.
 
-### 147 · user · Bell Harrow
+### 150 · user · Bell Harrow
 I set the chalk down and give it to him the way I gave the first one — exact, nothing added, nothing softened. "Her name is Ilse Bacher. Ilse of the Rose, in service there at fifteen. She's well — married to a good butter man, a boy of ten named Fenner who can read. She sat down on a kerb in front of people when she saw that bill, because she knew the phrase through a scullery door twenty years ago. She says the fault was never yours to carry — it was hers. She opened the door." I hold his eye for the last of it. "And she sent you this, word for word: his voice is still the loudest thing that ever came through a scullery door. He'll know what I mean. He shouted at Odalric Vane for laughing." And then I wait, exactly as taught.
 
-### 148 · assistant · Emeran Falk
+### 151 · assistant · Emeran Falk
 Falk stands with his hand on the felt over the new sheet and doesn't move for a long moment, and then he laughs — one short surprised bark, up in the rafters of the Corn Exchange, and it hangs there.
 
 "I did," he says. "I did shout at him. He laughed when the boy asked *is that the finish*, and I shouted at him across the table and called him a — " he stops, and looks almost young — "well, I called him a great deal of things and one of them was in Latin. And I have remembered that room every night for twenty years and I never once remembered *that*, that I got angry, that somebody in that room said no. It has been nine men and a bottle and a wager in my head all this time." He takes his hand off the felt. "Ilse of the Rose. Fifteen years old, carrying bread. She opened the door for a child with nowhere to go, and she has been paying interest on that for twenty years, same as Odalric on his four hundred and twelve." He shakes his head slowly. "*Not mine.* She meant the wager. She thought I'd be carrying the wager."
@@ -3505,10 +3514,10 @@ He picks up your chalk and holds it out to you, handle-first, like a sword being
 
 He goes out to the yard. Your chalk plot is half done on the flags, one lamp, the new sky in its felt, and out through the open door the tarpaulin under the lamp with a big man settling onto the tailboard beside it.
 
-### 149 · user · Bell Harrow
+### 152 · user · Bell Harrow
 I take the chalk back the way you take a returned sword — by the handle, with respect for both ends. "Then it goes in the book, Emeran. The standing page, not the crowded one: Asked — Corn Exchange, one lamp. Answer owed when the capital is done and this company is safe." And because he'd want the shape of my yes known in advance: "If it's ever yes, it wears these clothes: everyone who chooses, and they choose after hearing Katterau entire — no wagers, no bottles, nobody who signs the small print of nothing unread. And a boy named Fenner Bacher stays home. Whatever house. Whatever date." I finish the plot on the flags, strike the day, and carry the lamp out to the tailboard — some askings deserve company after, and the watch was mine anyway.
 
-### 150 · assistant
+### 153 · assistant
 He hears the terms out with his head down, and at *no wagers, no bottles* he makes a sound that is nearly a laugh, and at *a boy named Fenner Bacher stays home* he says, "Yes. That first, and the rest after."
 
 You sit on the tailboard with the lamp between you. The trunk under the tarpaulin does nothing at all, and goes on doing nothing, which is how the good nights go. The Achterhalt watch cries eleven; a cat kills something in the yard next door; Boyle comes out at midnight with his pipe unlit and takes over without a word and Falk lets him, which is new.
@@ -3521,10 +3530,10 @@ At the Northgate customs post a clerk in a green coat reads Prewick's papers, th
 
 "Vermilion Players. You're expected." He stamps twice. "You'll go to the Baraque Theatre in the fourth ward, not the Palace — the command's at the Palace on the 3rd, but you rehearse and lodge at the Baraque, and there's a gentleman been waiting on you there since Tuesday." He hands the papers back. "And madam — the stage manager's wanted at the Office of Public Morals tomorrow morning, ten o'clock, Room Fourteen. Not the clerk. You."
 
-### 151 · user · Bell Harrow
+### 154 · user · Bell Harrow
 Through the gate with my questions in march order. To Prewick, first, quiet: "Room Fourteen. What is it, who sits in it, and what do they drink?" To the column: "The Baraque, load-in tonight, and the trunk stays wagon-bound — city yard, double watch, Boyle and Toby splitting till I've walked the ground." And to the gatekeeping clerk, mild as milk: "Tell Room Fourteen the stage manager keeps clean books and keeps appointments the same way." Then we roll for the fourth ward — and whoever has been waiting at the Baraque since Tuesday gets met by me, before anyone so much as unpacks a slipper.
 
-### 152 · assistant
+### 155 · assistant
 The green-coated clerk writes *told* against your name and waves you through, and the capital swallows the wagons whole.
 
 Prewick answers as you go, sitting bolt upright with the noise of the city going over him. "Room Fourteen is the second floor, east corridor. It is Assessment. Not Enforcement, madam — Enforcement is Nine. Fourteen is where they *read*." He wets his lips. "Herr Undersecretary Lenz sits in it. No relation to Toby, I assure you. He is the man who put those two anonymous folios into the Index, or rather his predecessor was, and Lenz has kept the entry unchanged for nineteen years and refused four applications to strike either of them out. I know this because I copied the refusals in my first month and I remember them because they were the only interesting thing I have ever copied." A pause. "He drinks nothing. He is famous for it. He offers tea and does not have any himself, and the tea is very good, and it is a great deal like being weighed."
@@ -3535,10 +3544,10 @@ He is about forty. Ink on his right hand. And when he sees you drop from the boa
 
 "You'd be the stage manager. Good." He holds out his hand. "Anselm Krug. I kept that book before you did, and I left Katterau in the night without my boots, and I have been waiting since Tuesday to find out whether Odalric will let me back or have me thrown in the river."
 
-### 153 · user · Bell Harrow
+### 156 · user · Bell Harrow
 "Bell Harrow." One shake, dry hand. "You keep a decent margin note, Herr Krug — your tin-only line spared a farmer his second concussion." Then the truth of the yard, fast, because wheels are turning in behind me: "It's not my river and it's not my door. But here's how it plays. You stand where you stand; I announce nobody; Odalric sees you when he sees you. And whatever you came to say gets said whole — to his face first, then to the company at supper, Katterau and all. We're past half-told things in this troupe." And I stay planted beside him as the first wagon rounds the gate — a stage manager stands where the scene is about to happen.
 
-### 154 · assistant
+### 157 · assistant
 The first wagon comes in with Boyle swearing at the arch, and the second, and Falk's last, and the yard fills with the noise of arrival — and then Vane comes round the tailboard with his hat off, mid-sentence about the roof, and stops.
 
 Nobody says anything. Toby freezes with a hamper. Dessa Krul puts down the slippers.
@@ -3555,10 +3564,10 @@ Falk has come round the wagon and stopped dead with the rug over his arm. From t
 
 And Vane, on the mounting block, in the wet, nods, and gets out, "Yes. Yes. All of it," and then, hopelessly, out of pure habit: "Harrow — ask me for a thing."
 
-### 155 · user · Bell Harrow
+### 158 · user · Bell Harrow
 "Then here it is. Before supper: three letters, in ink, unrounded — to the three companies that wouldn't have him. The theft unsaid, the fault named as yours, your signature large enough to cost you something. Toby runs them to the evening post before the soup's on." And to Krug, because a yard should know its own weather: "You eat with us tonight. Whatever else gets decided, nobody in my company interviews a man hungry." Then, over my shoulder, the day going on because days do: "Load-in continues. Dessa — the slippers were down four seconds, that's three too many."
 
-### 156 · assistant
+### 159 · assistant
 "Three letters," Vane says, from the mounting block, "in ink," and gets up, and goes into the theatre in search of a table like a man walking to his own second act.
 
 Dessa Krul picks up the slippers and says, "Four seconds is my *whole* opinion of a man, madam," and carries them in.
@@ -3573,10 +3582,10 @@ Vane writes three letters at the props table with his hat off. Toby runs them. T
 
 "Nine pages," Krug says. "I cut ten out of that book and I burned nine of them, and the tenth came back, and I ran. That's the lie I've been living: I never burned any. I couldn't. They're all here." He puts both hands flat on his knees. "And I have read every one of them, madam, which nobody else in this company has done, and I know what's in the ones that haven't happened yet."
 
-### 157 · user · Bell Harrow
+### 160 · user · Bell Harrow
 I don't touch the parcel. Custody first: "Tonight that goes into Emeran's lining with its kin — after you and I count them into the book together. Nine, numbered as found." Then I open the one lawful door for what he carries: "And you'll give this table what you know, Herr Krug — but as report. Your words. Plain summary, dates where you hold them. Nothing recited, nothing quoted — the play does not speak at my suppers, even secondhand." I look round the flats and hampers, at every face that chose this table. "Anyone stays who wants to stay; anyone may go and no note made of it. This is Katterau's account, the pending column." I nod to Krug. "Begin with what hasn't happened yet."
 
-### 158 · assistant · Anselm Krug
+### 161 · assistant · Anselm Krug
 Nobody goes. Toby's ears go red with the effort of not being sent out; Dessa Krul folds her arms; Prewick puts his notebook away, closed, in his coat, and folds his hands on top of it, which is the most eloquent thing he has ever done.
 
 Krug does it well. He is a stage manager, so he does it as a plot.
@@ -3593,10 +3602,10 @@ Krug does it well. He is a stage manager, so he does it as a plot.
 
 The gas hisses. Somewhere out in the nine hundred empty seats the roof drips onto the O.P. side, exactly where your notice says it does.
 
-### 159 · user · Bell Harrow
+### 162 · user · Bell Harrow
 "Then the book gets three new lines tonight." To Krug, first: "You kept it after all, Herr Krug — one page of it, two years, for a stranger you'd never met. That's the job description entire." The procedure follows: after supper he and I count nine pages into the book, numbered as found; the parcel goes to Emeran's lining with its kin — "except page eight. That one comes to me. My name is in the work, and my coat is already load-bearing." Then tomorrow, plainly, so nobody frets in private: "Room Fourteen owes me tea now. If a man who doesn't drink asks me one question three times, he will get the same true answer three times. Clean books read identically on every audit — that is what clean means. Herr Prewick, you'll walk me to the door, wait outside with your watch running, and if I'm longer than an hour, fetch nobody and note the time." I stand, and the flats become a bedroom wall again. "Sleep, all of you. We're eleven days early, and I intend to spend them like a rich woman."
 
-### 160 · assistant
+### 163 · assistant
 They sleep, more or less: bodies on flats, Dessa Krul in the wardrobe cage with the slippers under her head, Boyle and Toby splitting the yard, Krug on a hamper in the O.P. wing because he will not take a bed until he is told he belongs. The counting is done at the props table by one candle — nine pages, face-down, numbered aloud, entered by you and initialled by him. Falk's coat takes eight of them; the seam whispers.
 
 Page eight goes into your coat. You do not read it. That takes more than you expected.
@@ -3609,10 +3618,10 @@ Undersecretary Lenz is sixty, dry, small, and unremarkable in a way that is clea
 
 "Madam Harrow. Nineteen days in post." He turns a page. "You have posted eleven safety notices, buried a sheet of tin with a hymn, stopped a bill in Achterhalt, paid a nine-year storage debt on a stranger's box, ruled out Katterau, and brought this company into the capital eleven days early, which no company has ever done." He looks up, and his eyes are perfectly mild. "First question. Do you know what is in Odalric Vane's iron trunk?"
 
-### 161 · user · Bell Harrow
+### 164 · user · Bell Harrow
 I drink some of the tea first, because it's good and because refusing it would be a performance. "I have seen inside it once — in a passage in Grevenholt, at night: a ream of blank paper, corners squared. That is the whole of my certified knowledge." Cup down, level. "What I believe is in it I hold as hearsay from men I trust — entered in my book as heard, and marked uncertified. And I notice, Herr Undersecretary, that your own Index stamps a certain entry not to be described aloud in the making of any report. I keep other people's rules when they are better than mine. Ask me what I have seen, and you will get all of it — the same answer every time, three times if you like. Clean books read identically on every audit."
 
-### 162 · assistant · Undersecretary Lenz
+### 165 · assistant · Undersecretary Lenz
 Lenz does not smile. But he sets his pen down, which for him may be the same thing.
 
 "Not to be described aloud," he repeats. "Yes. My predecessor wrote that in the ninth year, and I have declined four applications to strike it, and I have been passed over twice for doing so." He closes the folder. "You may keep your hearsay. I have plenty of my own; the Office is a great warehouse of it. What I want from you is *seen*, as you say. So."
@@ -3629,10 +3638,10 @@ He turns the tea tray a quarter turn, tidying it.
 
 Then, mildly: "The fifteenth is scheduled. The Palace command of the 3rd of Frost was not requested by the Palace. It was requested *of* the Palace, in writing, by a private party, and granted, and I have seen the requisition and the hand it is written in, and it is a very good hand." He pushes a single sheet across the desk to you, face-down. "That is a copy of the play list attached to the command. Turn it over. You are the stage manager; you will be the person expected to call it."
 
-### 163 · user · Bell Harrow
+### 166 · user · Bell Harrow
 I set my cup well aside first, so nothing drips on what I'm about to be responsible for. Then I turn it over the way I turn everything now — one motion, both eyes, once, my face doing bookkeeping and nothing else.
 
-### 164 · assistant
+### 167 · assistant
 One sheet, ruled, Palace paper, and the printing is beautiful.
 
 **BY COMMAND — THE 3rd OF FROST — THE VERMILION PLAYERS**
@@ -3651,10 +3660,10 @@ Lenz watches you with his hands folded. "He filed it two years ago, madam, six w
 
 Outside in the corridor, faintly, Prewick's watch is going, and Prewick with it.
 
-### 165 · user · Bell Harrow
+### 168 · user · Bell Harrow
 "Then I'll spend mine in the right order too." I square the sheet between us. "One. Your ledger of fourteen: what does a speaking cost the house? Not the readers — the audience. Two hundred years of your own records: what happened to the people watching?" I let him reach for the press if he wants it. "Two. The third party of considerable standing. We can both spell it, but I want it said in this room, where things are deniable." A breath. "Three. Your office said yes. So give me Assessment's honest opinion, the one you've been passed over twice for holding: can a fifteenth speaking be done so that it ends the account — finished, once, correctly — or does your ledger say there is no such thing as correctly?" And when he's done: "After which I'm going back to my theatre to discuss with a man in a bottle-green coat the difference between a report and a confession."
 
-### 166 · assistant · Undersecretary Lenz
+### 169 · assistant · Undersecretary Lenz
 Lenz answers the first question by getting up, which takes him a while, and pulling a ledger from the second press. He sets it down open at a ribbon.
 
 "Fourteen speakings. Audience present at eight of them; the other six were readings among players, like Katterau." His finger goes down a column of dates. "The Office's honest finding, madam, and it is the finding that has made me unpopular: *the audience is not harmed.* In two hundred years, not one recorded instance of harm to a person who only watched." He closes the ledger. "The rhyming comes for the ones who *make* it. Speakers, principally. Then whoever provided the room, the money, the paper. Anna Sorel kept the accounts and she is in this ledger. Your Herr Krug cut pages and did not speak a word and he is in this ledger too, in pencil, which is how we mark the ones we are not sure of." He looks at the tea you have not finished. "The house comes to no harm. But the house is *required*. Six readings without an audience did nothing at all, and the Office does not know why, and I have written *appetite* in a margin once and been told to strike it."
@@ -3669,10 +3678,10 @@ He rings a small bell on his desk — a real one; it makes a real, ordinary soun
 
 Prewick's watch says fifty-one minutes when the frosted door shuts behind you.
 
-### 167 · user · Bell Harrow
+### 170 · user · Bell Harrow
 "Fifty-one minutes, and none of them wasted — walk with me." Down the grey stairs, past the bicycles. "On the way I'll sort what's tellable from what I drank with the tea. Tonight, after rehearsal: a company hearing. The full kind — benches, soup, everyone; the biggest determination this company will ever sit for." And through the Baraque's gate, before my coat is even off: "Herr Krug. Props table. Now, please. And bring the difference between a report and a confession — I know it's in that portmanteau, because I've just seen your handwriting on Palace paper."
 
-### 168 · assistant
+### 171 · assistant
 Prewick keeps up with the shorthand of it — *audience unharmed; the house is required; the requisition was Krug's; Skarke paid the fee; the Office's refusal is on offer until the 2nd* — and by the courtyard gate he has gone the colour of his collar and said only, "Then I am the wrong rank for the next fortnight and I shall have to be the right one anyway."
 
 Krug comes to the props table at once. He looks at your face and does not sit down.
@@ -3683,10 +3692,10 @@ He swallows. "Then two years went by and nothing came, and I got work as a bill-
 
 Out in the house the gasman is testing the board, and the lights come up on nine hundred empty seats, all at once, brighter than anyone needs.
 
-### 169 · user · Bell Harrow
+### 172 · user · Bell Harrow
 "Sit down, Anselm Krug." Full name; the register of rulings. "Last night was a report. This, just now, was a confession. And the thing you filed two years ago is neither — it's a design, and it's the best-built thing anyone has brought me on this tour. Fire watch. Gasman. Eight exits. A house present by order, not by wager. You thought like a stage manager thinking twenty years ahead of his book." I let that stand a breath. "So here's what it buys. Tonight, at the hearing, you give this company the design brief — why the Palace, room by room, exit by exit — and you answer questions till the candle dies. Belonging is theirs to vote on. The cot by the props table is mine to give, and it's yours as of now."
 
-### 170 · assistant
+### 173 · assistant
 Krug sits. Then he puts his face in his hands, briefly, the way Vane does, and comes out of it dry-eyed and business-like, which is a stage manager's version of weeping.
 
 "Design brief. Room by room." He nods. "I'll need paper and I'll want to walk the Palace stage before I open my mouth — they'll let us in on the 1st for a technical, and if they won't, I'll get in with a bill-poster's ladder and beg pardon after." A pause. "Madam. Thank you for *design*. I've been calling it a betrayal for two years and it's been sitting in me like a stone."
@@ -3699,10 +3708,10 @@ Vane stands, and for once does not speak. He looks at you and sits down again.
 
 Which leaves the hearing yours to open, twelve faces in the gaslight and a blank line on a Palace play list.
 
-### 171 · user · Bell Harrow
+### 174 · user · Bell Harrow
 I stand with the book shut, because this part I know by heart. "Company hearing. The matter: a blank line on a Palace play list that reads — as the company shall determine. Hear the whole account before anyone leans." I give it in order, flat as figures. "The door out: real, and open. We play Ilsabet on the 3rd, determine nothing, go home free; the Office will even put its own name on the refusal until the 2nd. Nobody at this table gets to call that cowardice — it's a clean page and I'll rule for it gladly if it's ruled." Then the other column. "The account against: the thing in our yard has never once been finished — fourteen speakings in two hundred years, every one interrupted by somebody brave, and every interruption billed the makers worse than the play. The Office's own ledger says the audience is never harmed — not once — but the house is required. The makers pay: speakers first, then whoever gives the room, the money, the paper. Sit in that arithmetic before you speak." I lay my two pages face-down on the trestle. "Full disclosure, as ruled: page eight says a stage manager rings the bell. Page nine is a cast list — twelve names, blank, and the house entire. There are twelve of us on these benches tonight. Count yourselves." A breath. "Any yes this company determines wears clothes I've already cut: whole, once, correctly; everyone who makes it chooses knowing Katterau entire; a house that knows what it's watching; no wagers, no bottles; a boy named Fenner Bacher stays home — and nobody in the building brave. Herr Krug speaks first: the design, room by room. Then every voice here. Frau Sorel has asked to speak last, and will. I rule after, and not before." I sit. "Anselm. The Palace."
 
-### 172 · assistant
+### 175 · assistant
 Krug stands and gives it like a plot call, and his hands stop shaking on the third sentence.
 
 "The Palace Theatre Royal. Nine hundred and forty seats, four levels, three staircases from the pit, eight exits and every one of them a legal one — I've counted them from the street and I'll count them from inside on the 1st. Fire watch of two men on duty by statute whenever the gas is lit, one downstage prompt side, one on the fly floor; that's a Palace rule and no company can wave it. Gasman is the house's, not ours, and the board's out of the wings where no actor can reach it. Iron curtain that drops in eleven seconds — I timed it from the gods at a pantomime in the spring." He looks round the benches. "Why the Palace and not a barn: because in a barn, when it gets bad, someone runs, and running is interrupting. In the Palace the doors stand open, the exits are lit, the house has been *told* to be there, and any soul who wants out walks out and the play does not stop. Nobody has to be brave. That's the whole design. It's built so that bravery isn't required."
@@ -3721,10 +3730,10 @@ Vane stands last of the men, hat in his hands, and does not quote a single notic
 
 Then the candle has burned an inch, and everyone at the trestle turns, and Mirelle Sorel puts down her spoon.
 
-### 173 · user · Bell Harrow
+### 176 · user · Bell Harrow
 I let the benches go quiet the way a house goes quiet — on their own, all at once. "Last voice before the ruling. Frau Sorel."
 
-### 174 · assistant · Mirelle Sorel
+### 177 · assistant · Mirelle Sorel
 Mirelle stands. She never stands to speak, and the change alone makes Toby sit up.
 
 "You've all been kind enough for ten years not to ask my name, so I'll give it to you and then we can stop being polite." She has her gloves off; the mended one is on the trestle in front of her. "My sister was Anna Sorel, who kept Odalric's accounts in the fifth year, and who deposited a sealed box in the Vessendal registry the week before she died, and whose name is in the Office's ledger for a play she never spoke a word of. She kept accounts. That's all she did. And the thing rhymed her a fever in a good bed at the hour a scene falls."
@@ -3741,10 +3750,10 @@ She sits, and picks up her spoon, and adds, in her ordinary voice: "One conditio
 
 Eleven faces turn to you. The candle has three-quarters of an inch left.
 
-### 175 · user · Bell Harrow
+### 178 · user · Bell Harrow
 "Then hear the ruling while the candle lasts." I stand with the book shut; this one goes in after, fair-copied, because it will be read for years. "The company determines: Part the Second plays. Once. Whole. Correctly. On conditions entered now as law. Emeran speaks the lead and no other voice touches it. Hebel holds the wheel, in writing, and no hand but his. Dessa dresses it and gets her slow reading — and here is when: on the morning of the 2nd, cold, no soup, no candle, every name re-asked and every yes re-given, because a vote by candlelight has to survive a grey morning before I'll spend it. Anyone's no on the 2nd is a no, private, unminuted, and drives home with Odalric's gratitude and mine. Herr Prewick writes his letter to Room Fourteen tonight and I countersign it. Frau Sorel's condition binds: Anna's box stays shut, its storage endowed for fifty years before any other shilling moves. Toby serves the house, not the stage — programmes, rows, doors; the house's people are not makers and they stay that way. Odalric's ask for the clean page is minuted, honoured, and overruled." A breath, and the last of it: "Page nine keeps its twelfth line blank. We are eleven, and Wenzel has the horses. Nobody recruits a twelfth — if the thing wants one more maker, it can apply to the management in daylight, like the rest of this town." I pinch the candle out with two fingers. "Rulings end in smoke, not wind. Bed, all of you. Rehearsal at ten — Ilsabet doesn't care what else we're planning."
 
-### 176 · assistant
+### 179 · assistant
 Nobody moves for a moment. Then Boyle says, "Aye," the way a man says it at the end of a service, and the benches empty in ordinary noise: hampers dragged, plates stacked, Toby aggrieved about programmes and secretly delighted, Dessa Krul telling Wenzel he's got the best job in the building.
 
 Prewick writes his letter at the props table by the light of the gas pilot, in his best hand, and hands it to you to countersign, and reads it aloud once before he seals it, and it is four sentences and it costs him everything.
@@ -3757,10 +3766,10 @@ Vane is last, in the dark by the pass door, holding his hat. "Minuted, honoured,
 
 Then the theatre goes quiet, nine hundred seats in the dark. Your chalk is on the flags; your watch is on its nail; the smoke of the candle is still in the air. And out in the yard, past the propped stage door, Boyle's lantern is up on the tailboard — and the tarpaulin is thrown back, and Boyle is standing well clear of it with his pipe out of his mouth, looking at the iron trunk, whose lid is up.
 
-### 177 · user · Bell Harrow
+### 180 · user · Bell Harrow
 "Stand where you are, Boyle — you're doing it right." I take his lantern, cross the cobbles alone, and hold the light over the open iron at arm's length. One look. Once. My face on bookkeeping duty, whatever the trunk has filed tonight.
 
-### 178 · assistant
+### 181 · assistant
 The lantern shows you the inside of the trunk, and it is not blank paper.
 
 It is a full folio. Two hundred pages and more, stacked square, the copyist's small upright hand in even columns, and lying on top of the stack — placed, deliberately, the way a stage manager leaves a note on a prompt desk — a single sheet in that same hand.
@@ -3777,10 +3786,10 @@ Ten names. Not eleven. Wenzel is not on it, and Wenzel took the horses. And the 
 
 Boyle, from the gate, keeping his distance because you told him to and because he is not a fool: "Madam. Is it a cast list?"
 
-### 179 · user · Bell Harrow
+### 182 · user · Bell Harrow
 "It's a cast list," I tell him, straight, because half-told things died at a fire outside Halbern. "Mostly ours. Ten names, one struck, one blank — and it can keep its own files; I keep mine." I don't touch the sheet. The lid I close with both hands, the way I'd close any company property at night, and Boyle ropes it while I hold the lantern. "Your watch has company till two — fetch my coat and the coffee that's left." And tomorrow's first item files itself in my head as the ropes creak: the ink wrote Lenz, and this building holds two of those — a boy who serves the house, and an Undersecretary who's been asked to come and certify. Before Ilsabet at ten, the company hears its casting. And the Office hears my question about which Lenz it lent to the ink.
 
-### 180 · assistant
+### 183 · assistant
 Boyle brings the coat and the coffee and ropes the lid, and then, because his hands need a job, ropes it again a different way.
 
 "Ten names and one struck," he says, at last, into the dark. "Madam, I've been the one that carried it, the one that ropes it, the one on the tailboard. Twenty-two years with this company. I'd rather be *on* a list than off it, and I'd rather know than not." He puts the pipe back in his mouth unlit. "Wenzel's off it and Wenzel's got the horses, and that's your ruling doing its work — that's what I'll tell him. He'll like that better than being spared."
@@ -3797,10 +3806,10 @@ Prewick, gone the colour of paste: "Madam Stage Manager. My letter went last nig
 
 And at nine, before you've settled a thing, the stage door bangs and a Palace footman in Palace livery is standing in the yard with a sealed letter and no idea why eleven people are looking at him like that.
 
-### 181 · user · Bell Harrow
+### 184 · user · Bell Harrow
 "Good morning. You've found the Vermilion Players and nobody's going to bite." I cross the yard with my hand already out and my company behind me pretending to work. "Who is it directed to?" — and whoever it names, I read the direction aloud so the yard hears it before imaginations do, tip the man his shilling from the float, and let him escape with his livery intact.
 
-### 182 · assistant
+### 185 · assistant
 The footman hands it over with visible relief. Heavy cream paper, Palace seal, and the direction in a clerk's flawless hand.
 
 "*To the Stage Manager, the Vermilion Players, at the Baraque Theatre, fourth ward,*" you read out, and the yard breathes. Not Prewick. Not Lenz. Not Falk. The shilling goes over, the footman goes off at speed, and Boyle shuts the gate behind him.
@@ -3819,10 +3828,10 @@ You open it standing where everyone can see you open it.
 
 At the bottom, added in a different, older, tireder hand: *Madam, the man who came was left-handed and wrote in a little book. He is not from the Palace and he is not from the Office. I have had the file moved. R.H.*
 
-### 183 · user · Bell Harrow
+### 186 · user · Bell Harrow
 I read the whole of it aloud to the wing, postscript included — the law is the law, and this house hears its own weather. Then the day gets its orders: "Anselm — the 1st is yours to plot, eight to noon, every exit timed twice, the iron dropped till you trust it. Toby — programmes and rows and doors, and the word Lenz means the Office man until ink says otherwise; you have my ruling and my ruling doesn't blink." Then I sit down opposite Falk with the letter still in my hand. "Emeran. Twenty years ago the thing took the boy Grelle. Took — how? Because a left-handed man with a little book has been reading our file this week, and he asked Ilse Bacher only one question in Katterau: how far did they get. Before I hunt him through the fourth ward, I need to know whether I'm looking for a victim, a scholar, or the eleventh line."
 
-### 184 · assistant
+### 187 · assistant
 Falk sits down slowly and puts both hands flat on the props table.
 
 "Grelle," he says. "Yes. All right." He looks at the letter, not at you. "Ansel Grelle was our second boy at Katterau. Fifteen, sixteen. He wasn't in the green room; boys weren't. He was in the *passage* with the trays." A pause. "He heard it. Three and a half acts through a door, same as Ilse. And he stayed with the company two more years after, and he got taller and quieter, and in the seventh year he left us at Merrow with his box and a good character, and I gave him three shillings and Odalric gave him a speech." His hand closes. "Took. I said *took* because in the eighth year a letter came to Odalric from a landlady in this city saying a young man had died in her room owing four weeks, and would the Vermilion Players pay it, and Odalric paid it and cried and we all said the play had taken him. I never saw a body. I never saw the letter after Odalric had it."
@@ -3833,10 +3842,13 @@ Behind you at the pass door, Vane — who has come in halfway and heard the whol
 
 Krug, at the fly rail, has gone perfectly still with a rope in his hand.
 
-### 185 · user · Bell Harrow
+### 188 · user (chapter) · "((OOC: Chapter \"{body}\" starts here.))"
+/chapter The Fifteenth Speaking
+
+### 189 · user · Bell Harrow
 "Say it, Anselm — ropes don't need that much holding." And while he finds his voice: "Odalric. The landlady's letter — name, street, whatever your grief kept of it. And hear my ruling on Ansel Grelle before anybody's feet move: if he's alive, he is not prey, and he is not a line on anything's list. He is owed seven pounds, four weeks' lodging, and eleven years of being mourned wrong. We do not hunt a frightened man through a city he knows better than us." I turn to our bill-poster. "We advertise. Tonight, one small bill, in the places where a man who reads everything reads: WANTED — A PROPERTY LIST KEPT AT MERROW IN THE SEVENTH YEAR. THE VERMILION PLAYERS PAY THEIR DEBTS. ASK AT THE BARAQUE STAGE DOOR FOR THE STAGE MANAGER. ANY HOUR."
 
-### 186 · assistant · Anselm Krug
+### 190 · assistant · Anselm Krug
 Krug lets the rope go and belays it before he speaks, because he is what he is.
 
 "Seven pounds," he says. "Katterau's Wednesday take was seven pounds. That's why the number went in my ear when Odalric said it just now." He comes down off the rail. "And here's mine, and I've never said it out loud. In the seventh year, before I kept your book, I was a bill-poster in this city for four months — this ward. And there was a young fellow pasting the north side who was left-handed and had been on the road with a company, and we never swapped names because bill-posters don't. And when I came back to this trade two years ago I went to the same firm and they said the north-side man had gone off years back, owing nothing, and left an address for letters." He rubs his mouth. "I never followed it up. Why would I. Madam, I can go and ask them tonight."
@@ -3847,10 +3859,10 @@ And the bill goes up that night. Krug pastes it himself in eleven places — the
 
 At four in the morning somebody knocks at the Baraque stage door. Three knocks. Unhurried. Official-sounding, almost — the knock of a man who has been practising it in his head all the way across the city.
 
-### 187 · user · Bell Harrow
+### 191 · user · Bell Harrow
 The advertised words were mine, so the door is mine. Boyle gets my flat hand and stays put. I take the lamp down low — light on the floorboards, not in anybody's face — and open the door its whole width, because nothing arrives half at this address. "Stage door of the Baraque," I say, ordinary as bread. "You're asked-for, not expected, which is the better way to arrive. Harrow — stage manager. The kettle's not long off the gas, there's one chair in this building that doesn't wobble, and nobody else is awake." And I step back and give the doorway all its width.
 
-### 188 · assistant · Ansel Grelle
+### 192 · assistant · Ansel Grelle
 He comes in the way a man comes in who has been outside a long time in the rain: sideways, so as not to bring the weather with him.
 
 Thirty-five perhaps, in a bill-poster's coat with paste dried white along the cuffs. Tall, and thin, and quiet in the shoulders, and left-handed on the doorframe. He looks at your lamp on the floorboards and something in him settles slightly, because you have not looked at his face.
@@ -3859,10 +3871,10 @@ Thirty-five perhaps, in a bill-poster's coat with paste dried white along the cu
 
 Behind you in the dark of the wing, a floorboard shifts. Falk has come out of nowhere, in his shirtsleeves with the rug over his shoulders, and has stopped dead six feet back, out of the lamplight, saying nothing at all — because you have taught this company to wait.
 
-### 189 · user · Bell Harrow
+### 193 · user · Bell Harrow
 "In your order, then." I keep my voice at floor-level, like the lamp. "One: alive. Sober, on watch most nights, gruff as a harbour. And nearer than you think — six feet behind me, in his shirtsleeves, stopped dead the moment you knocked, waiting on your leave. Nobody in this company gets seen before they're ready; it's a law. Two: true. The 3rd, at the Palace. Once, whole, correctly, by choice — with a house that knows what it's watching. You'll read every condition we've cut before you decide anything about anything. Three: since ten o'clock tonight — he learned you weren't dead standing beside the fact that he never paid Frau Hentsch, and his next sentence was: put Grelle's seven pounds above my own boots. Four: both. Seven and the four weeks. A dead landlady doesn't cancel a debt — it re-addresses it, to the man who carried it eleven years." I move to the gas ring. "So. Tea first, or Falk first. Your call entirely, and no wrong answer exists."
 
-### 190 · assistant
+### 194 · assistant
 The rug slides half off Falk's shoulder and he doesn't notice.
 
 "Falk first," Grelle says, and turns to the dark.
@@ -3875,10 +3887,10 @@ Grelle says, "I did try to write. In the ninth year. I got as far as *Dear Herr 
 
 Out in the yard the four o'clock rain gets heavier on the tarpaulin. Falk still has not let go of his shoulder.
 
-### 191 · user · Bell Harrow
+### 195 · user · Bell Harrow
 "Straight, then. You're my left-handed man." I let it land whole. "And here's what that makes you, Ansel Grelle: the only soul in this empire who has spent eleven years doing Assessment's work with clean hands and no office. Your sixty-one pages are the census this company needs before any curtain rises — who is exposed, who must be told, who stays home behind a bolted door. On paper alone, that's a threat. Beside a stage manager's book, it's a guest list done right." Then the rulings, counted plain: "The seven-and-four-weeks pays at dawn, from the float, receipted, above Odalric's boots. The second cot by the props table is yours. And hear this before anything: the cast list in that trunk has its eleventh line struck through by somebody's pen, and it will not be you. On the night, you stand house-side, on the doors, with Toby — you've been on the wrong side of a door for twenty years, Herr Grelle. Come stand on the right side of ours." The kettle sings behind me. "And the tea was never a lie here."
 
-### 192 · assistant
+### 196 · assistant
 Grelle looks at the kettle rather than at either of you, which is how men that thin in the shoulders keep their faces private, and says, "House-side," and then, "On the doors," and then nothing at all for a while.
 
 Falk lets go of his shoulder at last and turns him round by it, gently, like a man moving furniture he loves. "Sit in the chair that doesn't wobble," he says. "It's the one with the rope round the leg. She'll pour."
@@ -3893,10 +3905,10 @@ And it's Grelle who says, without looking up from the plate, "I know. I heard yo
 
 The wing goes very quiet. Somewhere above, the roof drips into the bucket you posted the notice about. And Prewick — who has been standing in the pass door for a full minute with an unopened letter in his hand and his hat still on — says, "Madam Stage Manager. From Room Fourteen. It is addressed to *both* of us, jointly, which is not a thing the Office does."
 
-### 193 · user · Bell Harrow
+### 197 · user · Bell Harrow
 "Jointly addressed, jointly opened." I cross to him and hold the envelope flat while he breaks the seal — his letter bought this answer; his voice can carry it. "Read it out, Herr Prewick. To both of us, and to the room, because I suspect Room Fourteen knows exactly how large this room is."
 
-### 194 · assistant · Casimir Prewick
+### 198 · assistant · Casimir Prewick
 Prewick breaks the seal, holds it at his regulation reading distance, and reads it out in a voice that starts formal and stops being formal by the fourth sentence.
 
 "*To Clerk Third Class C. Prewick, seconded, and to Madam B. Harrow, Stage Manager, jointly —*
@@ -3917,10 +3929,10 @@ Prewick lowers the letter. His hands are shaking so hard the paper rattles, and 
 
 Toby Lenz, from the back of the wing, with his ears scarlet: "Madam — did he mean *me*? The postscript. Did the Undersecretary of Assessment write a postscript about *me*?"
 
-### 195 · user · Bell Harrow
+### 199 · user · Bell Harrow
 "He means you, Toby Lenz. And he means the difference that keeps this whole house standing, so hear it properly: ink casts. Men choose. The play wrote a Lenz on its list; the Undersecretary chooses to stand at my prompt desk anyway, on his own two feet — which unwrites nothing, and outranks everything. Learn that by heart. It's the best line in the building and it isn't in any play." Then the day gets its orders. "Herr Prewick — the determination, minuted fair: every name, every condition, signed by every hand, lodged with Room Fourteen. Yours is the best hand we have and it's just stopped shaking. Anselm, Emeran — with me in the yard after breakfast. The Office wants the text itself, whole, in Room Fourteen by six tomorrow — which means the folio comes out of that trunk and crosses this city in daylight, and I want three opinions on how such a thing is carried. And company law, addendum, effective now: nobody — nobody — volunteers for line eleven."
 
-### 196 · assistant · Anselm Krug
+### 200 · assistant · Anselm Krug
 "Signed by every hand," Prewick repeats, and sits straight down at the props table with his own pen and starts ruling columns, and Dessa Krul moves his plate to his elbow without being asked.
 
 The yard after breakfast: thin sun, wet cobbles, the tarpaulin thrown half back, three of you standing well clear of it.
@@ -3933,10 +3945,10 @@ Falk, slower. "Two hundred pages, harbor. Somebody has to lift it out and carry 
 
 The trunk sits in the sun and does nothing at all. From inside the theatre, faintly, Prewick's voice reading a condition aloud to Boyle for spelling.
 
-### 197 · user · Bell Harrow
+### 201 · user · Bell Harrow
 "It's mine." Flat, before the debate can breed. "The worst fifteen feet in this company belong to the stage manager by job description — on the night I stand at Lenz's elbow with the prompt copy regardless; my hands were always cast. And I will not ask the one grown man the ink spared to come and introduce himself for our convenience." The plot stands as Krug drew it: hamper, Dessa on top and told the whole of what she's sitting on — law's law — Boyle driving, the courtyard at nine, the trunk roped with Wenzel seated on it doing an excellent impression of nothing happening. "Emeran, you'll stand at the yard gate with your back to me while I lift; if the thing wants a witness it can make do with the rug. And I wear my gloves doubled — not superstition. Bookkeeping. Nine o'clock tomorrow."
 
-### 198 · assistant
+### 202 · assistant
 "With my back to you," Falk says. "Yes. I can do that." He does not thank you; he does something better, which is to take the rug off his shoulders and hand it to Krug, and go and stand at the gate at once, out of habit, six hours early, and be sent away by Boyle for cluttering the arch.
 
 The rest of the day is the ordinary miracle: *Ilsabet* at ten in a nine-hundred-seat house with the pit stalls unbolted so the sound behaves, and Mirelle finding a new pause in the second act that makes the cleaners stop sweeping. Prewick's minute goes round the wing at four and is signed by every hand, Hebel with a wheel-shaped smudge, Toby laboriously and twice because he blotted it, Wenzel with a cross and his name written after by Dessa. Grelle sleeps for nine hours on the second cot and wakes up asking for a broom.
@@ -3949,10 +3961,10 @@ The trunk's lid comes up easy — it's been unlocked since Grevenholt, and nobod
 
 Fifteen feet. Doubled gloves. And the strangest part is how completely ordinary it is: paper is heavy, that's all, and cold, and it slides the way big stacks slide, and your arms know exactly what to do because arms always do.
 
-### 199 · user · Bell Harrow
+### 203 · user · Bell Harrow
 The cast list stays where it lay — it isn't text, it's the play's own paperwork, and I don't deliver another author's memos. Folio into the hamper, costumes folded over, lid strapped; Dessa up and sitting still as advertised; Wenzel achieving nothing on the trunk with real dedication. We roll into the morning traffic like laundry with opinions. At the Office courtyard — bicycles, clerks, paste and coal — I carry it up the east stair myself, both arms, doubled gloves, and put it into Undersecretary Lenz's own hands in Room Fourteen and not one step short of it. "The whole of it, as required." And then, because I am what I am: "I'll want a receipt."
 
-### 200 · assistant · Undersecretary Lenz
+### 204 · assistant · Undersecretary Lenz
 Lenz stands up when you come in, which Prewick will not believe.
 
 He takes it in both arms — he is small and sixty-one and he takes it properly, from underneath, the way a man takes something he has thought about for nineteen years — and carries it four steps to his own desk and sets it down and squares the stack with two hands. Then he sits, and rings his small ordinary bell, and says to the clerk who opens the door: "Nobody at all, until I say. Not the Comptroller."
@@ -3965,10 +3977,10 @@ Then he takes off his spectacles and looks at you with his bare, tired, unremark
 
 "Madam. Thirty-one hours. I shall read it all today and all tonight, and I shall be at your prompt desk at six tomorrow with a page turned down where I think a company will want a caution." A pause. "May I ask you one thing not in the correct order? You have the eleventh line struck in a trunk in a yard and a whole company obeying you and a text you have never read a word of." His hand rests flat on the folio. "How do you intend to call a play you do not know?"
 
-### 201 · user · Bell Harrow
+### 205 · user · Bell Harrow
 "The way I called Ilsabet my first night in Grevenholt — off the stage, not off the page." I fold the receipt into my book. "A play tells you what it needs next if you watch the actors' weight; that's the trade. And this one has been telling people what comes next for two hundred years — it is the most over-rehearsed script in the empire. The words are the one part that was never mine to know, and my hands stay clean of them to the end: Emeran Falk carries it whole in the curse of his memory, and he will build me a plot with no text in it — machinery, not words: gas up at the third knock, iron ready on the last speech of the fourth act, a chalk mark where the matter follows. You'll turn down your caution page. And then I'll do the job as it has always actually been done, Herr Undersecretary." I stand and settle my coat. "You don't call what's written. You call what's happening."
 
-### 202 · assistant
+### 206 · assistant
 Lenz sits with that for a moment, and then does something with his mouth which after nineteen years in Assessment is a smile.
 
 "*You call what's happening.*" He picks up his pen and writes it down — not in the folder, in a small private notebook that comes out of his own waistcoat — and puts it away again. "My predecessor's file on Katterau says the reading failed to finish because a stage manager was not present. I have always taken that for a sneer at a trade. Thirty-one hours." He puts his spectacles back on and the folio has already got his whole attention; you are, courteously, gone.
@@ -3983,10 +3995,10 @@ Then it's the 3rd of Frost. Six o'clock. The Theatre Royal: gas up, eight exits 
 
 Your watch is on its nail. Falk, in the wings, in his own clothes, waiting to be told.
 
-### 203 · user · Bell Harrow
+### 207 · user · Bell Harrow
 "Then be told." I stop in front of him with the watch already warm in my fist. "Weight on both feet. You are not paying tonight, Emeran — you are being paid: twenty years of interest, collected in one house, in your own voice, to the end. When the matter comes, look to the corner if you need to: you'll find two people who know every word — and me, who knows you, which is better." I straighten nothing on him, because nothing needs it. "Beginners in fifteen. I'm going to walk my house." And I go out through the pass door to walk it — exits, aisles, doors, programmes, and one look, unhurried, at the fourth row, centre.
 
-### 204 · assistant
+### 208 · assistant
 The Theatre Royal at a quarter to seven is a great warm animal. Nine hundred and forty seats going full: officers with their collars undone, a bishop's household, three rows of the Chamberlain's clerks, drovers up in the gods who got in for eightpence because a Palace command still sells cheap seats, and children — more than you'd like, four or five of them, and none of them named Bacher, and you check.
 
 The exits stand open. Eight of them, lit, with the night coming in cold at each; Grelle has propped every one and stationed himself at the pit doors where he can see six. Toby is doing programmes with the ferocity of a boy who has been given the house to hold, and getting the fourth row right by instinct.
@@ -3999,10 +4011,10 @@ Behind you, back through the pass door, the wings are filling with the particula
 
 Toby, at your elbow, breathless, at four minutes to: "Madam. House is set. Doors open, all eight, and Herr Grelle says to tell you the count — nine hundred and thirty-nine in, and one seat empty."
 
-### 205 · user · Bell Harrow
+### 209 · user · Bell Harrow
 "Which seat, Toby?" — and whatever the answer does to the back of my neck, it goes in the book, entered as heard. "Keep a programme on it. Nobody's moved into it, nobody's moved out of it; it gets service like any sold thing in my house." Then the watch comes off its nail into my palm, and the oldest words in the trade do their work: "Places, please. Part the First." And I call Ilsabet's Ransom in the Palace the way I called it in a corn hall full of merchants — clean, cue by chalked cue, a woman doing her job while her job is still simple.
 
-### 206 · assistant
+### 210 · assistant
 "Row eleven," Toby says. "Seat one. End of the row, prompt side, by the exit." He is already turning to go do it. "It sold, madam — it's on the plan as sold. Nobody's in it."
 
 *Entered as heard.* He puts a programme on it and comes back and stands at the pit door where Grelle can see him.
@@ -4017,10 +4029,10 @@ And then the wings go quiet, and Vane comes to your corner in his plum coat with
 
 Someone has to walk out in front of nine hundred and thirty-nine people and tell them what they are about to be part of, and it cannot be a lie, and it cannot be a performance.
 
-### 207 · user · Bell Harrow
+### 211 · user · Bell Harrow
 I hand Toby my watch, because a stage manager doesn't carry her corner onto a stage. Then I walk out in front of the interval curtain in my working clothes, chalk dust and all, and I stand where the light is and wait for nine hundred and thirty-nine conversations to notice, which takes eleven seconds, and I give it to them the way I'd give a call. "My name is Bell Harrow. I'm the stage manager of this company, and what I'm for is making sure everyone in a house knows what happens next. So: Part the Second is not printed in your programme, and it has no title I can give you, because it has no title at all. It is a play of four acts and a matter following, two hundred years old, and it has never once been finished — every company that tried was interrupted by somebody brave. The people who made it and carried it and speak it tonight are the ones who bear its weight — in two hundred years of careful records, no soul who only watched has ever taken harm, and you have an actuary's word on that, and he is sitting at my prompt desk. What we ask of you is the oldest thing a theatre asks: witness. Stay, if you choose. Leave, if you choose — now, or at any moment; the exits are lit, all eight, and this play will not stop for a leaver, and nobody in this building is required to be brave tonight. Any child here sits by an open door, and any child who'd rather have the foyer and a bun has my note for both. If anyone comes in late, by any door, the house will know them — we keep count here. One seat in row eleven is sold and empty and stays so; let it be. That's everything I know how to tell you honestly, and it's all of it." I look once around the whole house, gallery to pit, the way you check a rig. "The Vermilion Players will finish it tonight. Those who stay — thank you for your witness."
 
-### 208 · assistant
+### 212 · assistant
 Silence, and then a house doing something you will remember for the rest of your life: nobody applauds. Nine hundred and thirty-nine people sit and look at you, and then a great deal of quiet movement begins.
 
 Twenty-odd get up. An officer takes his wife out by the pit door and she is arguing and he is not. Two of the Chamberlain's clerks go, decently, without hurry. A woman in the second circle collects three children and a bag and Grelle has the door for her before she reaches it and says something that makes her nod. One drover comes *down* from the gods and takes a seat in the empty front row, closer, which is not what you expected. The bishop's household stays entire. Skarke does not move a muscle.
@@ -4035,10 +4047,10 @@ Ninety seconds. Falk turns his head, and asks you for it, the way he has asked a
 
 "What am I in, harbor?"
 
-### 209 · user · Bell Harrow
+### 213 · user · Bell Harrow
 "The one with the ending." I give it to him whole. "Four acts and a matter following, played to the finish for the first time in two hundred years. And you're not in it alone — count the wings." The watch settles into my palm as if it grew there. "Places, please. Part the Second." And then my first call of the fifteenth speaking, low, to Hebel at his wheel: "House to half. Stage to warm. Slow as a sunrise, Herr Hebel — we have all night, and it's ours."
 
-### 210 · assistant
+### 214 · assistant
 Hebel takes the wheel with both hands.
 
 The house goes to half slower than any house has ever gone, and the stage warms the way a stove warms, and Toby out in the aisle actually stops breathing. Somewhere in the pit a man clears his throat and is shushed by his own neighbour. Nine hundred-odd faces go from gold to amber to shadow.
@@ -4053,10 +4065,10 @@ The first act runs eighteen minutes and is a play about a house waiting for some
 
 And then Falk turns upstage, and Mirelle steps past you into the light without being told, and behind you — very quietly, at the prompt desk, in a voice meant only for you — Undersecretary Lenz says: "Madam. The knock is in ninety seconds, and it is not written as a sound. It is written as *a knock, three times, from outside the theatre.*"
 
-### 211 · user · Bell Harrow
+### 215 · user · Bell Harrow
 "Then we answer it." Ninety seconds is a luxury; I've cued storms on four. Toby goes at a walk, not a run, with my exact words: Boyle takes the stage door — the wrong door, the one no audience uses. On the third knock, not before, he opens it wide, lamp held low, light on the boards and not in the face, and whoever stands there hears this house's own liturgy: you're asked-for, not expected. A grown man comes to my corner. A boy — Toby walks him down himself, programme in hand, to row eleven, seat one, the sold seat by the lit exit, and stays within arm's reach all night on my authority. Nobody is turned away, and nobody is unknown. The house knows its latecomers — that is the whole doctrine of this management." And to Lenz, flat, eyes on the stage: "Keep reading me the shapes as they come, Herr Undersecretary. You're the best flyman I've ever had."
 
-### 212 · assistant
+### 216 · assistant
 Lenz says, "Yes," and turns the folio's page, and does not look up again.
 
 Toby goes at a walk. You watch him the length of the pit — the walk of a boy carrying somebody's exact words like a full cup — and Boyle takes the stage door on the wrong side of the building, out of sight of every soul in the house.
@@ -4083,10 +4095,10 @@ And in the doorway, out of the dark, with paste dried white on his cuffs and no 
 
 "*Is this the finish?*"
 
-### 213 · user · Bell Harrow
+### 217 · user · Bell Harrow
 I am three steps from my corner, and I take them. Low, backstage-sized, level as a fact, looking at the boy and not over his head: "Yes. This is the finish. And you're in time for it." Then the doctrine, whole: "You're asked-for, not expected — the both of you. This house knows its latecomers." My hand tells Toby: programme, row eleven, seat one, arm's reach, all night. My eyes tell the man with paste on his cuffs: my corner, and your name can wait for the act's end. And I am back at my desk inside eight seconds, because the other half of the vow is that the play does not stop — "Herr Hebel. Nothing changes on the wheel."
 
-### 214 · assistant
+### 218 · assistant
 "Nothing changes," Hebel says, and it doesn't.
 
 Toby does it exactly. He takes the boy's other hand without hurry, gives him the programme, says something quiet that makes the child look up at him, and walks him down the prompt-side aisle to row eleven, seat one, by the lit exit — the sold, empty, serviced seat — and puts him in it, and sits on the aisle step beside him within arm's reach, and does not once look at the stage.
@@ -4101,10 +4113,10 @@ Act four. Lenz's turned-down page. He puts one finger on it and says, without lo
 
 Falk turns downstage on the last speech of act four. Krug's hand goes to the iron's release and stops there, ready and not used. The house is absolutely silent.
 
-### 215 · user · Bell Harrow
+### 219 · user · Bell Harrow
 The last speech of act four ends the way the great ones end — on a held breath instead of a full stop. And there is a small ordinary bell on my desk, because there has always been a bell on every desk in the world. I look at my stage once, the way I'd check any rig: Falk's weight on both feet. Mirelle's hands still. The wings full of people who chose twice, cold and warm. A house witnessing, entire. A boy in row eleven with a programme on his knees, in arm's reach of a friend. Everything is where I set it. So I do the job the two hundred years were waiting for: I take up the bell and ring it once, clear, the way you call an act — and then I answer it myself, out loud, because in my house nothing rings unanswered. "Beginners, please. The matter following."
 
-### 216 · assistant
+### 220 · assistant
 The bell goes out into nine hundred and forty seats — small, ordinary, bright, the sound of every prompt desk in the world.
 
 And nothing answers it. Not for one whole second. And in that second you understand, with a completeness that will stay with you for the rest of your life, what has been the matter with this play for two hundred years: it wasn't a curse. It was a bell rung in an empty house, fourteen times, and nobody once on duty to say *heard*.
@@ -4123,10 +4135,10 @@ Krug drops the iron. Eleven seconds.
 
 And in the wings, the O.P. side, the P.S. side, the fly floor, the pit doors — nobody moves, and nobody cheers, and out beyond the iron nine hundred people are getting to their feet and making a noise you have never heard a house make before, which is not applause, and Grelle is standing at the pit door with both hands over his face, and Toby has the boy's hand, and your watch says twenty-two minutes past ten.
 
-### 217 · user · Bell Harrow
+### 221 · user · Bell Harrow
 "House out slow and warm — all eight doors, Grelle; Toby, the boy stays with you till somebody claims him properly, and nobody claims him improperly." The machine runs; my people run it. Then, and only then, I turn to the man at my corner with the paste dried white on his cuffs, who has watched the whole of it with his mouth open and said not one word, exactly as the house's law prefers. "Now, then. The act's ended, and I'm owed a name. Who are you — and whose boy did you bring to my wrong door?"
 
-### 218 · assistant · Fenn Halloran
+### 222 · assistant · Fenn Halloran
 He takes a while to come back from wherever the last hour put him, and when he does he wipes his eyes with the paste-white cuff and looks at it in surprise.
 
 "Fennimore," he says. "Fenn Halloran. I paste bills on the north side — the other half of Grelle's beat, madam, we split the wall by the newspaper offices." He gets his breath. "He's not mine. He's — " he turns and finds the boy down at row eleven with Toby, and something in his face collapses with relief at seeing him still there. "He was on the Baraque's step this afternoon. Alone. A woman brought him in a cab and put him out and said she'd be back and told him to be good and *didn't go in*, and she never came back, and the stage door was shut and there was nobody in the yard but a man on a trunk who wouldn't move off it and said to fetch you and he couldn't leave his post. So I took the child to my room and gave him bread and he wouldn't eat it, and he said he'd been told he was expected at the theatre tonight." He swallows. "And your man Ansel had pasted your bills all over my wall this week, madam, and I've read every one of them eleven times, same as him. *Ask at the stage door for the stage manager, any hour.* So I came to the wrong door and I knocked three times, because it was the door I knew, and — that's all. That's all I did. I only knocked."
@@ -4135,10 +4147,10 @@ Down the aisle, the house going out slow and warm around him, the boy has stood 
 
 "He says his name's Fenner," Halloran says. "Fenner Bacher. He can read."
 
-### 219 · user · Bell Harrow
+### 223 · user · Bell Harrow
 "Fenn Halloran. You did every part of it right — the bread, the coming here, the knocking. In my books that's three debts, and this company pays its debts; you'll eat with us tonight and be walked home by a man with a lantern." Then the machine turns, quiet and fast. "The boy: soup, warmth, Dessa's corner of the wing — he stays in our keeping tonight, Toby on the cot beside him, and nobody asks him anything past his supper except one question, put kindly: where does his mother think he is." And the wire, before anything else in this city sleeps: "Herr Prewick — Room Fourteen's channel or the Comptroller's, whichever wakes faster. To Bailiff Kessel of Achterhalt, tonight, constable to the Bacher farm by morning: FENNER SAFE, IN THE VERMILION PLAYERS' KEEPING, CAPITAL, UNHURT. COME BY FIRST COACH. FARE PAID AT THE DOOR. — HARROW."
 
-### 220 · assistant
+### 224 · assistant
 "Room Fourteen's channel," Prewick says, already moving. "The Office keeps a night telegraph for enforcement matters and I am about to discover whether Assessment may use it." Lenz, from the prompt desk, without looking up from squaring the folio: "It may. Say Assessment, and say my name, and if the operator refuses tell him Room Fourteen will read his file in the morning."
 
 It goes at twenty to eleven.
@@ -4151,10 +4163,10 @@ Across the wing, Mirelle Sorel is standing perfectly still with a cloak half ove
 
 Behind you, in the doorway from the corridor, a Palace footman coughs and says, "Madam. There's a gentleman at the front of house won't come in and won't go away. Small man in black. He says to tell you he's still in row four and he'll wait till you're free."
 
-### 221 · user · Bell Harrow
+### 225 · user · Bell Harrow
 I pick up the other half of the cloak she's holding and fold it with her, shoulder to shoulder, both of us facing the wing wall — the oldest privacy in theatre. "Tuesday," I say, quiet. "The word did something to you. So: tell me what you know about a lady with gloves who hands out buns and knows my name — or tell me you can't say yet, and I'll hold the ground either way, same as always. But if your kind invitation and his bun came out of the same reticule, Mirelle, I need it in the book tonight, because tomorrow I answer to two mothers."
 
-### 222 · assistant · Mirelle Sorel
+### 226 · assistant · Mirelle Sorel
 Mirelle folds her half of the cloak with you, and her hands are shaking so slightly that only someone folding with her would know.
 
 "I can say it," she says. "I've been trying to find the hour since Halbern."
@@ -4167,10 +4179,10 @@ She looks at you for the first time.
 
 "Harrow. My child is ten this winter. Ilse Bacher's boy is ten this winter. And somebody with good paper and a cab has just spent a week making certain that a boy of ten arrived at a theatre door tonight brought by a woman who didn't go in." Her voice does not rise at all. "It is not Fenner. It cannot be Fenner; Ilse bore him and I know when I bore mine and I know what I signed. Which means somebody used that child as a *sentence*." She sets the folded cloak down. "Put it in the book. All of it. And then ask your small man in black what a bank knows about placements in the fifth year, because he has been buying clerks for twenty years and I am done being delicate."
 
-### 223 · user · Bell Harrow
+### 227 · user · Bell Harrow
 I go out through the pass door into the half-lit, emptied house. Skarke sits where he swore to sit, hands on his knees, face like a man who has been somewhere and come back the long way. I take my seat one away — hat-distance, our custom by now — and give him a moment of the quiet he paid for. "It finished," I say, because he above everyone is owed the word. Then: "And now I need the bank in you, not the boy. The fifth year: a child was placed out of the capital — placements move money. Nurse fees, school fees, a quiet annuity, somebody's discretion bought annually on good paper. A gloved woman calling herself Frau Dietz runs kind errands for a certain family, and this week she moved two mothers like furniture. Mirelle Sorel is done being delicate, Herr Skarke, and so am I. What does a bank know?"
 
-### 224 · assistant · M. Skarke
+### 228 · assistant · M. Skarke
 Skarke does not look at you. He looks at the iron curtain, which is down, with the whole finished thing behind it.
 
 "It finished," he repeats. Then he closes his eyes for a moment, and when he opens them the boy is gone out of them and something older and much more useful is there instead.
@@ -4183,10 +4195,10 @@ Then, quietly: "There's a second thing, and you'll not like it. The requisition 
 
 Out in the foyer, a door bangs and Grelle's voice says, "Madam Harrow's inside — sir, *sir*, you can't—" and there are footsteps on the aisle carpet, quick and light, and someone is coming down toward the fourth row who has not been announced.
 
-### 225 · user · Bell Harrow
+### 229 · user · Bell Harrow
 I'm on my feet and into the aisle before the footsteps resolve — square between whoever this is and the pass door, because a boy is asleep behind it. "The house is closed," I say into the half-light, level as a sill. "But I'm the stage manager, and if you've come this far past a man on a door, the stage manager is exactly who you want. Name and business. In that order."
 
-### 226 · assistant · Ilse Bacher
+### 230 · assistant · Ilse Bacher
 The footsteps stop three rows short. In the half-light it is a woman: a good travelling coat, hat askew, gloves — and then she takes the gloves off, which is the first thing she does, and holds them in one fist like a woman who has been told about gloves.
 
 "Ilse Bacher," she says. "Of Achterhalt. I've come off the ten o'clock goods train in a horse-box and I've walked from the yards, and a man on your door told me my son was inside and *safe*, and then he said I couldn't come in, and I'm sorry for him, madam, I moved him." Her voice cracks straight down the middle. "Where's Fenner?"
@@ -4197,10 +4209,10 @@ Grelle arrives at the top of the aisle at a run, dishevelled, mortified, and sto
 
 Behind you, through the pass door, very faintly, Toby's voice saying something and a child laughing at it.
 
-### 227 · user · Bell Harrow
+### 231 · user · Bell Harrow
 "Unhurt. Fed twice. Currently laughing at my props boy, which you can hear for yourself." I step out of her road as it lands, and take the crumpled note from her hand by one corner as she passes — "Exhibit, not money. It stops owning you the moment it's evidence; it goes in the book with the rest of what that woman touched." Then I hold the pass door its whole width, the way this house opens doors, and say the only other thing she needs: "Through here, Frau Bacher. Mind the third board — it sings."
 
-### 228 · assistant
+### 232 · assistant
 She goes past you on the sides of her feet without being told, the way people do when they can hear a child.
 
 The third board sings anyway. Fenner's head comes round the wardrobe cloaks at the sound of it, and then the boy is off the nest and across the wing at full speed, and Ilse Bacher goes down onto her knees on the boards of the Theatre Royal and takes the whole of him against her coat, and neither of them says anything intelligible for some time.
@@ -4213,10 +4225,10 @@ Ilse's voice, eventually, into the boy's hair, thick and shaking: "You *bolt* th
 
 And into the middle of it, quietly, at your elbow — Skarke, who has followed you in and who is standing where a man of considerable standing has no business standing, holding his hat: "Madam. The five-pound note. May I see it, without touching it?" He looks at it in your hand, at the crumple, at the black stamp along the top edge, and goes very still. "That's not a bank note out of a purse. That's from a sealed hundred — the Kanzelgasse draws them for the families, ten notes to a wrapper, and they're numbered in sequence." His voice is barely there. "I can find out which family drew that wrapper, and when. Tomorrow. Before noon."
 
-### 229 · user · Bell Harrow
+### 233 · user · Bell Harrow
 "Tomorrow, before noon, then. Thank you — and I'll let you not want anything for it, which we both know is the price." Then the night gets struck like a set. "Beds where bodies drop: Ilse and Fenner keep the nest, together. Halloran gets walked home behind a lantern by Boyle. Grelle — the door you couldn't hold was my mother-shaped door; it's forgiven twice over; stand down. And somebody take a lamp across town to Wenzel — he's been sitting six hours on a finished thing and doesn't know either fact. Relieve him gently; he'll argue." Last, at the prompt desk, where a small dry man is squaring two hundred and eleven leaves: "Herr Lenz. Your receipt says the folio returns into these hands, and it's past that hour. So say what Assessment wants done with a finished thing — because my hands would like to know what they're for now."
 
-### 230 · assistant · Undersecretary Lenz
+### 234 · assistant · Undersecretary Lenz
 Lenz has the stack squared and his own hands flat on top of it, and he has been waiting for you to come to him, and he does not stand up this time.
 
 "What Assessment wants," he says, "and what Assessment can *do*, are two entries." He taps the folio once. "This is proscribed. Nothing tonight changes that; my seal certified a performance, not a text. In law it goes back into your Herr Vane's trunk, and the trunk goes back on the road, and the Index entry stands, and my office minds the two of them for another nineteen years." A pause. "That is what will happen if you and I do nothing clever."
@@ -4229,10 +4241,10 @@ He folds his hands.
 
 "Bring me the halves and the loose leaves, all of it, before the 6th, and I will retire it. And then, Madam Harrow, your hands are for what they were always for: a company, a book, a bucket under a leak." A beat. "And the trunk will be a trunk."
 
-### 231 · user · Bell Harrow
+### 235 · user · Bell Harrow
 "Before the 6th, you'll have the whole of it. On one condition of manner: each piece is given, not collected. Every holder of those pages has paid rent on them in years of their lives — they surrender by their own hand at your desk or not at all, and I stand at each surrendering." Then the inventory, aloud, because that's what a yes sounds like from me: "The strongbox thirty — Skarke, tomorrow noon; it will cost him more than anything he's bought in twenty years, and he'll pay it. The lining — Emeran's, ten and some odd, in the morning, with the rug on. Sorel's one — hers to carry to this desk herself, nobody's errand. The cupboard parcel of thirty — mine to give, and here." I lay it on the folio. "And my last two. The milestone's page — there. And page eight —" I take it out and set it face-down on the stack, my hand flat on it one second, no more — "which I never read, and now never will. Enter it exactly so: surrendered unread. Some accounts close by paying, Herr Undersecretary. That one closes by declining to collect."
 
-### 232 · assistant · Undersecretary Lenz
+### 236 · assistant · Undersecretary Lenz
 Lenz enters it exactly so — he takes up his pen there and then, on the corner of the prompt desk, and writes the whole inventory in that unremarkable hand while you watch, and reads it back aloud as he goes, which is by now the way the two of you do business.
 
 "*Cupboard parcel, thirty leaves, surrendered by B. Harrow, this date. Milestone leaf, surrendered by B. Harrow, this date. One leaf, endorsed by A. Krug as page the eighth, surrendered by B. Harrow unread.*" He pauses over the last one. "I have written *unread* and I have underlined it. In nineteen years I have never had a document lodged with that word on it, and my successor will think it a clerical error and I intend to leave a note forbidding him to correct it."
@@ -4247,10 +4259,10 @@ And Vane comes to your corner at last, hat in hand, in the plum coat gone shiny 
 
 Your watch is on its nail. There is chalk on your hands. The house is empty and warm and yours.
 
-### 233 · user · Bell Harrow
+### 237 · user · Bell Harrow
 "You're in a solvent company, Odalric Vane. With a certified miracle behind it, no man's debt on it, and chalk on its stage manager." I let him have the whole of it, because he's earned the unrounded version. "And you're in a booking. The 14th of Frost, the Athenaeum, one night only — by command. The bill exists; I impounded two hundred of them at Achterhalt, but the words on it belong to us now. So we honour it, on our own terms: Ilsabet, front doors standing wide, the tour's last night played for nothing but joy. Loewe's house. Perlmann on Bettina's arm. Ilse and Fenner through the front door this time, in the good seats. And the company's dead toasted at the interval — Hessel, Anna, Frau Hentsch, and every stage manager who ever rang a bell to an empty house." I take my watch off its nail, last thing, like every night. "By command: ours. Now go to bed — you're driving me to a bank at noon."
 
-### 234 · assistant · Odalric Vane
+### 238 · assistant · Odalric Vane
 Vane opens his mouth to weep, and then, visibly, decides against it, which is the single most impressive thing he has done all tour.
 
 "*By command: ours,*" he says. "I shall have that printed. In Hessler's own case, with a note that the man was blameless in his own ink." He turns his hat round once. "Fourteenth of Frost. Loewe will let us the house for thirteen and call it eleven and I shall pay her fifteen and *not round it down*, and there will be no bills cried by any bellman anywhere, and Toby may hold the doors, and Grelle may hold the doors, and Wenzel may hold the horses and be told to his face that it is the best job in the building."
@@ -4261,10 +4273,10 @@ Then he goes, and the Theatre Royal gives you its last lamp: Hebel bringing the 
 
 Chalk on your hands. Watch in your palm. Down in the wing a child turns over in the queen's cloaks and Dessa Krul says *sssh* to nobody. And out through the propped stage door, in the yard, under a sky going grey at one edge, the iron trunk sits roped on the tailboard with a man asleep against it — Wenzel, who argued, and lost — and its lid shut, and rain beading on it, though there is nothing overhead but morning.
 
-### 235 · user · Bell Harrow
+### 239 · user · Bell Harrow
 Morning does what mornings do after miracles: porridge, and a props list. Ilse and Fenner go home on the midday coach, fares paid, a hamper from Dessa, and a promise extracted in return — the 14th, the Athenaeum, the front door, the good seats, Bacher the butter man included. Grelle walks them to the coach office himself, on the theory that a man should get to be on the right side of a departure for once. Then noon: Vane drives me through the fourth ward with his hat brushed, and I walk into the Skarke bank with my book under my arm to be told what a sealed wrapper knows about a certain family.
 
-### 236 · assistant · M. Skarke
+### 240 · assistant · M. Skarke
 The Skarke bank has a marble hall and a lift with a boy in it, and the lift boy calls Vane *sir*, and Vane very nearly bursts.
 
 Skarke does not keep you waiting. He has three things laid out on the desk when you come in: the strongbox — open, with thirty pages in it — and a wrapper of five-pound notes with two gone from the sequence, and a single slip of paper.
@@ -4277,10 +4289,10 @@ Then he stands and lifts the thirty pages out of the strongbox himself and holds
 
 Out in the marble hall, Vane has got into conversation with the lift boy about the acoustics of the Corn Exchange, and is being listened to.
 
-### 237 · user · Bell Harrow
+### 241 · user · Bell Harrow
 Room Fourteen at half past twelve. I stand at the surrendering as I promised I'd stand at every one — one step back, book shut, witness and nothing else — while a small bald man carries thirty pages his father lodged before he was born across a government carpet. Whatever he says over them is his to say; I keep only the entry: given, not collected. And when it's done and the receipt read aloud, I put my hand out to him — the second time ever — and then take my name-shaped news home to the Baraque, because a woman there hears the word Vorn from me before any office in this city learns that I hold it.
 
-### 238 · assistant
+### 242 · assistant
 Lenz stands up for it, as sworn. Skarke sets the thirty pages down beside the folio, and what he says over them is: "My father lodged these against seven pounds and a wool factor's kindness, and I have wanted them for twenty years, and they are not mine and they never were." He puts his hat back on before his face can do anything, and Lenz reads the receipt aloud — *thirty leaves, surrendered by M. Skarke, this date, given not collected* — and the handshake happens over the desk of the Office of Public Morals, which is where they usually don't.
 
 Then the fourth ward at one o'clock, and the Baraque's yard, and Mirelle in the wardrobe cage with her sleeves rolled, mending the hem she tore in the second act of a play she had never read.
@@ -4291,10 +4303,10 @@ The needle stops. She sits for a long moment with the hem in her lap.
 
 "Vorn," she says. "Well." And then, in the flattest voice you have ever heard from her: "Harrow, the matter of ten years ago concerned a young man of that house, and a magistrate's summons that was to be served on me on a Tuesday morning, and a child born in the fifth year, five years before that — and I have spent ten years assuming those were two griefs and not one." She looks up. "They have been paying for him since the fifth year. Which means they *kept* him. Which means the kind invitation on good paper is not a family being generous to a woman they wronged. It's a family that has just discovered their placement is ten this winter and their name is about to be read out in a Palace by a company of players." Her hands come back to the hem, quite steady. "Sit down. Take out your book. I'll give you the whole of it now, from the beginning, and then you'll tell me what a stage manager does with it — because I have never in my life had anyone to hand a thing to."
 
-### 239 · user · Bell Harrow
+### 243 · user · Bell Harrow
 I sit on the hamper across from her, take out the book, and sharpen nothing — the pencil's ready, like it's been ready for weeks. "From the beginning, then. Entered as heard. Kept as mine. Spent only as you rule it — that's the whole contract, and it doesn't expire." And I write while she talks, the way I'd hold a ladder while somebody climbs.
 
-### 240 · assistant · Mirelle Sorel
+### 244 · assistant · Mirelle Sorel
 She gives it to you in order, the way she gives a cue: names, dates, no adjectives.
 
 Her own name, which you write and will not repeat. A ward in the capital and a house at the Bittersee, and a young man called Rupert Vorn who came four nights running to a theatre in the second year and was charming and nineteen and lied about nothing in particular. A child born in the fifth year, in a lying-in house in the eighth ward, and papers signed by a woman of twenty-three with no money and no advice, and a fee paid, and a promise that the child would be *placed* and that she would be told the ward. She was never told the ward.
@@ -4307,10 +4319,10 @@ The needle goes still.
 
 "Now. What does a stage manager do with it."
 
-### 241 · user · Bell Harrow
+### 245 · user · Bell Harrow
 "First — you just said it out loud. My son. Say it as often as you like from now on; this cage has good acoustics." I let that sit exactly one breath, then I do my trade. "What a stage manager does with it is what I did with a two-hundred-year-old play: rule bravery out of the building, light every exit, and make the house answer when the bell rings. In order. One: no mother meets her son with a summons standing — the paper dies first, in writing, withdrawn and expunged, before any meeting is so much as discussed. They're frightened; frightened people sign quickly; Skarke's lawyers and a Comptroller who remembers what stage managers are for will draft it by Thursday. Two: the boy's keeping gets verified by someone you name — Skarke can audit a nursery out of a florist's ledger. Three: the meeting, if you want it, happens as a house of ours: your date, your ground, your witness, gloves off at the door, the child's own pace ruling everything inside — he's ten, and he chooses like anyone else in my buildings. And four, the payment that costs us nothing: their name, never spoken by this company — their discretion bought with the one coin we mint honestly. Kindness answered with terms, Mirelle. That's what the book does with it." I turn the pencil round and hold it out to her. "You rule. I call."
 
-### 242 · assistant · Mirelle Sorel
+### 246 · assistant · Mirelle Sorel
 She takes the pencil.
 
 She holds it for a moment, and then she does something you did not expect and will remember for years: she writes in your book. In her own clean businesslike hand, on the page under your notes, four lines.
@@ -4328,10 +4340,10 @@ And then Mirelle Sorel puts her face in her hands and cries the way people cry w
 
 Outside the cage the Baraque goes on: Boyle whistling four notes and finishing the fifth for the first time in a fortnight, Toby dragging a hamper, Falk's voice somewhere out on the stage saying to Krug, "*Our* left, you see. She said *our left*—" and Grelle laughing at something, out loud, in a theatre, which nobody in this company has heard him do before.
 
-### 243 · user · Bell Harrow
+### 247 · user · Bell Harrow
 The days between do what ruled days do: they comply. Thursday, the paper dies — Behn & Sonder sign quickly, as frightened firms sign; withdrawn, expunged, in writing, with a Comptroller's wording and a banker's witnesses, and clause four paid in the only coin we mint. The surrenders go one at a time to Room Fourteen, Lenz standing for each as sworn: Emeran goes with the rug on and gives up the lining — ten leaves and some odd, twenty years of ballast — and walks out visibly lighter than the arithmetic allows. Mirelle carries her one page alone, and comes back with her gloves folded in her pocket instead of on her hands. And on the morning of the 6th I put on my better coat and go down with Lenz to the Depository under the Hall of Records, book under my arm, to see a two-hundred-year account closed — and to spend the one question I've been saving since a lamplit yard: who struck the eleventh line?
 
-### 244 · assistant · Undersecretary Lenz
+### 248 · assistant · Undersecretary Lenz
 The Depository is three floors under the Hall of Records and smells of cold stone and paraffin. There is a keeper with a ring of keys the size of a horse-collar, and a hundred yards of iron shelving, and a great many sealed boxes with dates on them going back four hundred years, and it is so quiet you can hear the paraffin in the lamp.
 
 Lenz does it himself. The whole of it — folio, thirty, thirty, ten and some odd, two, one unread — goes into a lead-lined case; he squares the stack one last time and then does not touch it again. The keeper solders the seam, which takes eleven minutes and smells sharply of hot metal; Lenz stamps the seal twice, straight both times, and writes on the label in his unremarkable hand: *ACCOUNTED CLOSED. Four acts and a matter following. Certified performance, the 3rd of Frost. Audience: nine hundred and thirty-nine, and one seat sold and empty. No harm recorded.* And then, on a separate slip pasted beside it: *One leaf lodged unread. This is not an error. Do not correct it. — Lenz, Assessment.*
@@ -4346,10 +4358,13 @@ He looks back down at you.
 
 "My finding, for what an old clerk's finding is worth: it wrote an eleventh line because it expected one more maker. And somebody had already ruled that nobody could volunteer." A pause; the paraffin hisses. "You struck it, madam. Nine days before it was written."
 
-### 245 · user · Bell Harrow
+### 249 · user (chapter) · "((OOC: Chapter \"{body}\" starts here.))"
+/chapter Katterau
+
+### 250 · user · Bell Harrow
 "Then enter my correction, for the file's sake: I didn't strike a line. I posted a notice — and the copyist read it and did his job. Cut what isn't needed." I put my hand out on the landing, because some partings are transactions and this one is a pleasure. "Best colleague I never met, Herr Undersecretary. The tea's owed in the other direction now — the Baraque's is terrible, and you'll drink none of it with us any time you like." Then the walk home through the grey, and the yard gate, and I stop where I stopped the first night in Grevenholt — and I look at the trunk, roped on the tailboard, under a sky that can't decide about rain, to see what the iron does now that the account is closed.
 
-### 246 · assistant
+### 251 · assistant
 Lenz takes your hand and shakes it once, briskly, and says, "Terrible tea and a bucket under a leak. I shall come on the 9th," and goes off up the stairs into the Hall of Records with his hat on straight.
 
 The walk home through the grey. The fourth ward, the coal smoke, the Baraque's arch.
@@ -4362,10 +4377,10 @@ Boyle looks up, and looks at it, and looks at you.
 
 "Madam," he says slowly, "that's *leaking*."
 
-### 247 · user · Bell Harrow
+### 252 · user · Bell Harrow
 "Then it gets what every leaking thing in my house gets." I write the notice where I stand and Boyle holds out his hand for it, grinning like his hinge. "And after the bucket: paint. Dessa chooses — vermilion, if the ironmonger stocks honesty — and when it's dry, it carries the thunder. The sheet rides in a box that's learned to hold its tongue." Then the week gets its plot: "The 9th, tea for an Undersecretary — somebody find the pot without the chip. The 11th we roll for Vessendal, all wagons. Skarke's standing invitation goes in writing today: row four, any house of ours, any night, paying at the door like a Christian. And wake Wenzel gently — he's been off duty three days and deserves to hear it sitting down."
 
-### 248 · assistant
+### 253 · assistant
 Boyle takes the notice and pins it to the trunk itself, on the wet iron, at trunk height, and the paper immediately goes limp and unreadable, and he leaves it there anyway, because it's the principle.
 
 Dessa Krul chooses vermilion, and the ironmonger stocks it, and it takes two coats and Toby's whole Thursday and comes out the colour of a stage's idea of blood. Falk stands over it for a long time while it dries and finally says, "It's vulgar," in a tone of enormous approval, and puts the felt with the black sheet in it inside, and shuts the lid, and it stays shut like a box.
@@ -4380,10 +4395,10 @@ Vane climbs up and settles his coat and takes the reins, and looks down at you s
 
 "Vessendal," he says. "The 14th of Frost. By command." He grins like a boy. "Harrow — ask me for a thing."
 
-### 249 · user · Bell Harrow
+### 254 · user · Bell Harrow
 "Then here it is, and it's overdue: pay me." I hold out my hand flat, in the arch, in front of everybody. "Nineteen days, stage manager's wages, in coin, on this spot, unrounded. The last open account in this company's book is mine, Odalric Vane, and I close my books before I travel." And because his face is doing several expensive things at once: "And when you've counted it into my palm — drive for Vessendal, and sing something vulgar going out the arch."
 
-### 250 · assistant · Odalric Vane
+### 255 · assistant · Odalric Vane
 The yard goes quiet in the way it does when everyone decides at once to watch and not to help.
 
 Vane comes down off the box. He takes out the float purse and hands it to Boyle to hold, and then out of his own breast pocket — over the amber notice, under the bank receipt — he takes a folded paper he has evidently been carrying since the 4th, and he counts, into your flat palm, in coin, aloud, nineteen days of a stage manager's wages at a figure that is not the one he mumbled in a dark theatre in Grevenholt but rather two shillings a day more.
@@ -4396,10 +4411,10 @@ The wagons go out one by one into the fourth ward: Boyle, Vane, Falk and Krug, G
 
 The arch is yours for one more second. Book under your arm, chalk on your cuff, four pounds five and six in your fist, and a hundred and ten miles of road to Vessendal with your name at the top of the call-list.
 
-### 251 · user · Bell Harrow
+### 256 · user · Bell Harrow
 The road north does what roads do when nobody owes anything on them: it's just weather and miles. Achterhalt on the second evening — Kessel waves us through his square like old custom, and Hessler prints the new bill in his own case with his own hands: THE VERMILION PLAYERS — ILSABET'S RANSOM — THE ATHENAEUM, ONE NIGHT ONLY — BY COMMAND: OURS — and under it, in the old standing type he re-set himself because printers are magpies twice over: the 14th of Frost, at seven. He takes no money and asks to keep one for the shop wall. And when we roll out at dawn there's a butter cart in the column — Ilse, Bacher the butter man, and Fenner riding up beside Toby, bound for the front door of a theatre by invitation that has nothing kind about it, only true. Vessendal by dusk on the 13th, and Frau Loewe on the Athenaeum steps with her arms folded, counting wagons.
 
-### 252 · assistant
+### 257 · assistant
 Frau Loewe counts the wagons twice, and then counts them again because of the butter cart, and says, "Madam Harrow. You've come back with more than you left with, which nobody does."
 
 The nine shillings and the gas tap are ancient history; she lets you the house for thirteen and Vane pays her fifteen and refuses to be argued down, which offends her so deeply she has to go and stand in the box office for a while. Perlmann is sent for, and comes on Bettina's arm at ten the next morning to walk the stage he has never seen, and is put in a chair in the middle of it and told where everything is, and says, "It is smaller than it sounds," which is the truest note anybody gives all tour.
@@ -4416,10 +4431,10 @@ And in the prompt corner, with the second half about to go and your watch in you
 
 "Harrow. Skarke's audit came this morning, to me and not to them." She has the letter in her hand, unopened. "I've been carrying it about since ten o'clock. I find I can't open it alone and I can't open it in front of Odalric." A pause. "Beginners is in four minutes. Tell me when."
 
-### 253 · user · Bell Harrow
+### 258 · user · Bell Harrow
 "Not four minutes before an entrance — I don't spend your instrument." I say it like a cue, because that's what it is. "When is tonight, after the iron: the wardrobe cage, the kettle on, the two of us, and you'll open it with the play already given away and nothing in your hands but your own name. And hear the standing law before you go on: whichever way that letter reads, the ruling holds — your ground, his pace, me present. Nothing in an envelope amends my book." I take the letter from her and put it in my coat, where things wait safely for their hour. "Places, Frau Sorel. You have a house to lift."
 
-### 254 · assistant · Mirelle Sorel
+### 259 · assistant · Mirelle Sorel
 She goes on and lifts it. Whatever else the road has done to her, the woman can make a house of drovers forget the rain, and tonight she makes them forget it for nothing, which is harder.
 
 Falk comes on stage left through the door Boyle hung, and Vessendal — which is his own worst town, the town he sat in for a night and a day with the gas down four years ago — stands up before he has said a word. He stands in it, and gives them nothing extra, and afterwards Frau Loewe is discovered in her own box office with the door shut.
@@ -4436,10 +4451,10 @@ Four pages, and she reads them all before she says anything, and then she sits d
 
 Then she puts her hands over her face and says, from behind them, "*Twelve.* I have had ten in my head for a decade. Every page that came to me had a ten in it and I thought — " She stops. "Harrow. The pages were never counting his age."
 
-### 255 · user · Bell Harrow
+### 260 · user · Bell Harrow
 I read the schoolmaster's three lines twice, because they're not a page and they're the best text this tour has produced, and I hand them back. "Then let the tens retire, Mirelle. You don't need a cipher anymore — you have a schoolmaster." I pour the tea, because kettles exist for exactly this minute. "He's twelve. He draws. He can't spell. He's real, and he's well, and none of those facts expire while you decide the rest. The ruling stands as written in my book by your own hand: he gets asked, and if he says yes — your ground, his pace, me present. There's no hurry left in it; the paper's dead, the family's bought their silence with ours, and a boy who draws will still draw in the spring." Then, because she's still behind her hands: "And whatever the pages were counting — they're in a lead box under the Hall of Records, sealed by a man who stands up for surrenders. Let them do their arithmetic in the dark."
 
-### 256 · assistant
+### 261 · assistant
 She takes the cup. She doesn't drink it, but she holds it, which is what the cup is for.
 
 "In the spring," she says, and it steadies her more than the tea would have. "Yes. He's got a term to finish. And I—" a breath, "—I have never once in my life had a thing I was allowed to do *slowly*."
@@ -4454,10 +4469,10 @@ And Toby Lenz comes to the cage door, breathless, holding the box office slate.
 
 "Madam. Row four, centre. It went out full — nine hundred and one bodies for nine hundred seats, and Herr Grelle says the odd one was a man who came in late, by the front door, and paid at the door, and sat in four centre, and left before the calls." He turns the slate round. On it, in someone's blunt pencil, in the box office's own hand: *Row 4 c. — pd. 1s 6d. — no hat.*
 
-### 257 · user · Bell Harrow
+### 262 · user · Bell Harrow
 "Enter it exactly as the slate has it — paid, one and six, no hat — and post nothing about it. Our patron pays retail now. That's the whole of the miracle, and miracles don't need notices." Then I carry my book out onto the stage, where a tragedian in shirtsleeves is letting an empty house look at him, and I sit down on the other end of Ilsabet's settle with the standing page open between us. "Emeran. There's an entry here that reads: Asked — Corn Exchange, one lamp. Answer owed when the capital is done and the company is safe." I turn it toward him. "The capital's done. The company's safe. And the answer went and performed itself before I could give it. So tell me, as one keeper of accounts to another — how does a bookkeeper close a question the world answered first?"
 
-### 258 · assistant · Emeran Falk
+### 263 · assistant · Emeran Falk
 Falk looks at the page for a long time, at his own asking written in your hand and the pencil answer that never came.
 
 "You don't close it," he says. "You *transfer* it." He takes the book from you — the only time all tour — and holds it on his knee in the empty house. "That is what a company is, harbor. A ledger with legs. The thing I asked you for on a flagstone floor in Achterhalt got paid by nine hundred and thirty-nine strangers and a boy in row eleven and a man who does not drink, and I did not have to be brave once, and I have been trying for a fortnight to find where to put the balance." He hands it back. "Put it where the good notices go. Not the crowded page."
@@ -4470,10 +4485,10 @@ Out in the wings, someone drops a hamper. Vane's voice comes up out of the yard,
 
 Your chalk is in your pocket. The house is dark and empty and the gas is at its pilot, and there's a hundred and ten miles of the rest of it in every direction.
 
-### 259 · user · Bell Harrow
+### 264 · user · Bell Harrow
 "You're in the repertory, Emeran Falk." I write the transfer as I say it, where the good notices go. "Ilsabet at Achterhalt on Thursday. The Wolf King whenever Prewick finishes comparing it. Whatever Katterau asks for in the spring — played by daylight, front doors wide, bills by Hessler. You're in things now, instead of carrying them. That's what you bought at the Palace; it cost twenty years, and it's paid, and I keep the receipts." Then, because he asked to be ruled something for the morning: "Tomorrow you teach Fenner Bacher how to stand — weight on both feet, voice up out of the boots. Skills like that should travel by hand, not by page." I strike the standing page clean across, the way you strike a day that ended well, and I shut the book.
 
-### 260 · assistant · Emeran Falk
+### 265 · assistant · Emeran Falk
 He takes that standing in the dark of the Athenaeum, and it does the thing to his face that no notice ever did.
 
 "*In things.*" He tries it out twice. "I have been the thing being carried since I was thirty years old." Then, briskly, because a great ruin can only stand so much: "Weight on both feet, and the voice up out of the boots. Nine o'clock. Tell the child to eat first; nobody learns to stand on an empty stomach." He goes off toward the pass door, and stops, and says without turning round: "The rug is his if he wants it. His hands will be cold on that cart in the morning."
@@ -4486,10 +4501,10 @@ And on the wall by the stage door, where you posted it three weeks ago and nobod
 
 The bucket is still under it. It is empty, and dry, and Krebs's hinge bites the frame on the first try.
 
-### 261 · user · Bell Harrow
+### 266 · user · Bell Harrow
 Winter does what winter does to a company that owes nothing: it is merely cold. Achterhalt on the Thursday plays to Kessel in the second row, chain of office and all. Winter quarters follow in a market town with a dry hall and honest stoves. Prewick's papers come through at midwinter — attached clerk, permanent, at the Office's pleasure and the company's expense — and his mother now writes weekly to a theatre and is answered. Krug takes the second book and the advance work, which suits a man who likes arriving first. Lenz comes twice for terrible tea and drinks three cups both times. Skarke's quarterly audit of nothing arrives punctually, with two row-four ticket stubs pinned to it as receipts. And in the first week of spring, on the road to Katterau — daylight, front doors, Hessler's bills ahead of us — Mirelle climbs up beside me on the box, sits the way she sits, and asks her enormous thing, exactly as contracted. I say yes before she finishes the sentence. That was also the contract.
 
-### 262 · assistant · Mirelle Sorel
+### 267 · assistant · Mirelle Sorel
 She takes yes the way she takes a cue — without ceremony, and slightly annoyed at being got ahead of.
 
 "You don't know what it is."
@@ -4504,10 +4519,10 @@ Ahead, the road bends, and Katterau comes up out of the flat: a church, an inn w
 
 Behind you, the vermilion trunk rides on the tailboard with the black sheet in it and Toby asleep against it in the sun.
 
-### 263 · user · Bell Harrow
+### 268 · user · Bell Harrow
 Katterau by daylight is what every haunted name turns out to be: a town, with washing out. We're billed for seven — ILSABET'S RANSOM, BY COMMAND: OURS, Hessler's type — and the load-in runs itself these days, which leaves the afternoon. Falk finds me at the props table and asks, in the voice he saves for small enormous things, whether I'd walk with him — not to the theatre. To the Rose. He goes in by the front door, upright, and buys bread at the counter like any man with coin, and I stand where he can see me and touch nothing. Whatever he does with the bread and the scullery door is his to do; I keep only the entry, and I keep it in pencil.
 
-### 264 · assistant
+### 269 · assistant
 The Rose is not haunted either. It is a taproom with a low ceiling and a dog and a girl of about sixteen behind the counter who has never heard of him.
 
 He buys a loaf and pays and doesn't overpay, which for him is a kind of discipline. Then he stands with it in the middle of the room and turns his head slowly, the way a man reads a set: the passage there, the door to the green room there, the scullery there, still on the left. His shoulders come down about an inch.
@@ -4526,10 +4541,10 @@ And at the half, in a prompt corner in Katterau, with your watch coming off its 
 
 *Madam — one seat sold, row four centre, paid at the door, gentleman declines a programme and asks that you not be told until the half. He says: on the hour.*
 
-### 265 · user · Bell Harrow
+### 270 · user · Bell Harrow
 "Then he's in time for it." I send four words back with the mayor's clerk — *the house knows him* — and take my watch off its nail into my palm, where it has worn its own bright patch by now. "Places, please." And Katterau gets its play: whole, on the hour, front doors wide, in the town that taught everyone living the price of stopping early.
 
-### 266 · assistant
+### 271 · assistant
 Krug goes; the slip goes into your coat with the rest of them.
 
 Katterau gets its play. Mirelle takes the first scene and the room forgets its own name. Falk comes on stage left through Boyle's door and this town — this town — stands up, and it takes a while, and he lets it, and then goes on. Hebel isn't with you, but Krug's on the gas and knows what warm means. The storm comes in low out of the vermilion trunk with a floor in it, and somewhere in the third row a farmer says "God almighty" and is not shushed.
@@ -4542,10 +4557,10 @@ Toby, at your elbow, with the slate: "Row four went out with the house, madam. F
 
 And the stage door bangs, and Vane's voice comes booming up from the yard, and he is holding a letter and his hat is on the back of his head: "*Harrow!* There is a man in Vessendal who wants us for a fortnight in Reap, and a fair at Merrow that pays *actual money*, and I have said yes to both because I am solvent and reckless — ask me for a thing!"
 
-### 267 · user · Bell Harrow
+### 272 · user · Bell Harrow
 "Then here's the thing, and it books ahead of your bookings." I come down into the yard with the slate still in my hand. "A place held open, Reap to Frost. Frau Sorel takes a season's leave — hers by contract with me, her reasons hers to keep, and nobody in this company asks her a question about it, you first of all. She comes back in Frost to a repertory with her name still at the top of it. Book Vessendal, book Merrow, book the moon if it pays actual money — around her, Odalric. Never over her." I hold his eye until the nod is real, and then I let the night have him back. "And yes to Loewe's fortnight regardless. Her counterweights miss us."
 
-### 268 · assistant
+### 273 · assistant
 Vane takes it exactly right, which after nineteen days and a winter he now reliably does: no speech, no tears, just the hat coming off.
 
 "Held open," he says. "Reap to Frost. Nobody asks her anything." He turns the hat round once. "Harrow, I have never in thirty years managed a company that could afford to lose its leading lady for a season, and I find that I can, and that it is the *proudest* thing—" He stops himself, visibly, and rounds nothing. "Vessendal a fortnight. Merrow's fair. And I shall write to Loewe tonight and tell her her counterweights are missed."
@@ -4560,10 +4575,10 @@ Mirelle is in the wardrobe cage taking her hair down, and she does not turn roun
 
 Out in the dark of the Katterau house, the last gas goes down to its pilot. Somebody has left your chalk on the props table with your book squared beside it, which nobody in this company did nineteen days ago.
 
-### 269 · user · Bell Harrow
+### 274 · user · Bell Harrow
 The letter goes as she ruled it — a stage manager's hand, not an office's: a woman is coming who does not perform for the people she cares about; she keeps her promises to the minute; references, a clerk who cannot lie. The schoolmaster's answer takes a fortnight and is four lines, and the line that matters says the boy was asked, and thought about it for two days, and then asked whether the lady was from the theatre on the bills, and said yes. So Reap comes, and the Bittersee turns out to be small water and clean light, and on the first day I do exactly what was contracted: I stand at the turn of the lane, where she can see me, and no nearer. And Mirelle Sorel walks the last forty yards alone, not performing, toward a garden wall where a boy who draws is sitting with a paper in his hands. What happens at that wall is theirs. For the first time in my working life, I keep no entry at all.
 
-### 270 · assistant
+### 275 · assistant
 You keep none.
 
 The lane holds its light for a long time — small water, clean light, a wall of loose stones and a boy sitting on it with paper on his knees. You watch her cross the last forty yards, and she doesn't perform, and when she is ten feet off the boy stands up on the wall, because that is what children do to be nearer to something, and you see her put a hand out and *not* touch him, and say something short.
@@ -4578,10 +4593,10 @@ Frost comes cold and early. And on the fourteenth, in a yard in Achterhalt with 
 
 Your chalk is in your pocket. Boyle is holding the gate. It is one hour to load-out, and nobody in the yard is looking at the trunk.
 
-### 271 · user · Bell Harrow
+### 276 · user · Bell Harrow
 I open it against the gatepost in the cold, the yard's good noise going on behind me, and I read it twice — it isn't a page; some letters are for savouring. Then I fold it into the book beside the struck standing page, take out my chalk, and do the last job of the day, which is the first job of the season: I chalk the call on the tailboard where the whole company will read it at load-out.
 
-### 272 · assistant
+### 277 · assistant
 The letter is four lines and a postscript, and the last line is: *Frost, as booked. I shall want a needle, my own light, and my place at the top of the call-list. He can spell "vermilion." I have taught him nothing else.*
 
 The chalk squeaks on the tailboard. You write it the way you write everything: legibly, and where it can't be missed.
@@ -4596,10 +4611,10 @@ And Falk comes across the cobbles and stands beside you looking at your own hand
 
 An hour to load-out. Your chalk is worn to a stub. The vermilion trunk sits on the tailboard under your call with the thunder inside it, doing nothing, wanting paint again by spring — and out on the Vessendal road, a coach is coming in the cold with a woman on it who keeps her promises to the minute.
 
-### 273 · user · Bell Harrow
+### 278 · user · Bell Harrow
 The coach comes in with the cold riding on it, and the yard does not perform its joy — it simply stops working for one whole minute, which from this company is a standing ovation. I meet her at the gate with call-list chalk still on my fingers, and I say the only thing a stage manager says to a returning lead: "Frau Sorel. Beginners at six forty-five. Your light is trimmed, your needle is where you left it, and the third board still sings." And then I take her hatbox, because some things you carry for people whether they allow it or not.
 
-### 274 · assistant
+### 279 · assistant
 She lets you take it, which from her is an entire speech.
 
 "Harrow," she says. Then she looks past you at the yard — the stopped work, Dessa with the pins out, Toby on the tailboard, Falk standing on both feet, Vane holding his hat in both hands and managing, for once in his life, to say nothing at all — and she looks back at you, and her mouth does something it has not done all tour.
@@ -4612,10 +4627,10 @@ You carry the hatbox in yourself and set it in the wardrobe cage under her own l
 
 It is not a page. It is drawn in soft pencil, badly and with great care: a wagon, a horse too small for it, a box on the tailboard coloured in hard with something red, and along the bottom, spelled correctly, the one word he has been taught.
 
-### 275 · user · Bell Harrow
+### 280 · user · Bell Harrow
 I leave it exactly as propped — some notices post themselves, and this house doesn't move other people's mail. The afternoon does its good ordinary work: Ilse's cart at four with butter and the butter man and Fenner, who marches straight to Falk and demonstrates standing — weight on both feet, voice up out of the boots — and is inspected like a soldier and passed. Kessel sends word he's coming in his chain. Prewick and I count fire buckets out of pure ceremony, nine of nine, no mice. And at the half I knock at the wardrobe cage the way I knocked on iron once — twice, soft — and ask through the door if the hem sits.
 
-### 276 · assistant · Mirelle Sorel
+### 281 · assistant · Mirelle Sorel
 The needle stops on the other side of the door.
 
 "The hem sits," Mirelle says. A pause; a small movement of paper. "Harrow — come in a moment."
@@ -4632,10 +4647,10 @@ And out beyond the cage the Achterhalt hall is filling: Kessel's chain catching 
 
 Your watch is on its nail in the prompt corner, three feet from a stub of chalk, on a call you wrote yourself this morning.
 
-### 277 · user · Bell Harrow
+### 282 · user · Bell Harrow
 "Called, then." Places, and the hall settles the way honest halls settle — coughs spent early, Kessel's chain going still in the second row. Krug takes the gas board and knows what warm means; I bring the house to half slow as a sunrise, out of respect for old habits that earned it. And then Ilsabet's Ransom goes up in Achterhalt with a returning lead at the top of the call-list, and I stand in my corner with the watch in my palm and let the first scene rise to meet her.
 
-### 278 · assistant
+### 283 · assistant
 It rises. Mirelle Sorel walks on into the warm and Achterhalt — a hall of corn merchants who laugh in the wrong places — goes quiet by the third line, which is one line faster than they managed at midsummer.
 
 You call it the way you have called it forty times now: cue by chalked cue, off the actors' weight rather than off the page, the plot running in your hands like something with its own pulse. Falk's entrance stage left. Vane's tears at the top of act three, on the beat, and meant. The storm in low out of the vermilion trunk with a floor in it, and Fenner Bacher visibly *waiting for it*, and getting it.
@@ -4648,10 +4663,10 @@ At half eleven the vermilion trunk goes back on the tailboard with the black she
 
 And in the prompt corner, on the last look round with the gas at its pilot, your watch comes off its nail into your palm — worn bright, warm, entirely yours — and there is chalk on the ledge, and the call-list for tomorrow blank and waiting, and Vane's voice out in the yard already saying, "Vessendal, and then the fair, and after that I have an *idea*, and Harrow will rule on it—"
 
-### 279 · user · Bell Harrow
+### 284 · user · Bell Harrow
 Soup happens, because soup is the one law older than mine. I let the benches fill — pins, thimble, chain of office departed, a boy of ten allowed up late against all butter-man judgement — and then I rule on the standing offer. "The idea, Odalric. Out loud, to the table, the way ideas get their weight taken." And while he draws breath I open the floor the old way: "And after him, the spring — every voice, youngest last, because the youngest has been rehearsing his and deserves a warmed house." Under the table, Toby Lenz sits up like a rope gone taut. "And somebody write to Hebel this week. A wheel that good shouldn't winter unwritten-to."
 
-### 280 · assistant
+### 285 · assistant
 Vane stands, and he has to be told twice to sit, and then does the thing he has learned this year, which is to say a plan without a single rounded number in it.
 
 "A second wagon *properly*," he says. "Not Krebs's brother-in-law's cart. And a fit-up: our own flats, our own door — Boyle's door, the very same one, taken off its hinges and carried — so that we do not depend on what a hall keeps in its scene dock, and so that when we come to a town with no theatre we are *the* theatre. Eighty-two pounds, Harrow. Not eighty. Eighty-two, and I have Krug's figures and Loewe's fortnight and the fair, and it can be done by Reap if nobody buys a new coat." He sits. "That is the idea and I have not once said the word miracle."
@@ -4668,10 +4683,10 @@ Toby: "I'm *nineteen*."
 
 Eleven faces turn, as they do, to you.
 
-### 281 · user · Bell Harrow
+### 286 · user · Bell Harrow
 "The eighty-two: ruled yes." I say it into my book as I write it. "Entered at eighty-two, spent to the penny — and the first plank of that fit-up carries Hessel Brandt's initials somewhere only this company knows to look. A theatre we carry ought to carry him." Then I look at the boy standing in his own scarlet ears. "Toby Lenz. Second on the book — ruled, with terms. You chalk tomorrow's call under my eye. The bucket rounds are yours alone from tonight. You learn the plot tables from Krug, who kept a book before either of us. And in the spring, at Katterau —" I let it land the way he's been waiting two seasons for it to land — "a house of six hundred, and you call the storm. You, on the book, me standing behind you saying nothing." A beat, house-timing. "And you're nineteen the day you call it clean. Until then, Dessa's arithmetic stands."
 
-### 282 · assistant
+### 287 · assistant
 Toby sits down very suddenly, and then stands up again because he can't stay in the chair, and says, "Yes, madam," in a voice that goes nowhere near where he wants it to.
 
 Dessa Krul says, "Eighteen," with enormous satisfaction, and puts a second bowl in front of him.
@@ -4686,10 +4701,10 @@ Then the benches break up, and the wing goes down to lamp and stove: Prewick wri
 
 And Toby Lenz comes to the prompt corner with the chalk in his hand and looks at the blank tailboard and then at you, waiting to be told how a call gets written.
 
-### 283 · user · Bell Harrow
+### 288 · user · Bell Harrow
 "Then hear the whole church of it, because it's short." I don't take the chalk from him; that's the point. "Legibly, and where it can't be missed — that's half. The beginners time goes first and largest, because the entire day hangs from that one nail. Names before numbers; a call is about people, the arithmetic only serves them. Nothing on the board you haven't checked with your own feet — if the call says the wagon leaves at eight, you have stood in the yard and looked at the wagon. And at the bottom, your name, every time. A call is a promise with a signature on it, Toby Lenz. That's why it works." I step back from the tailboard and put my hands behind me. "Vessendal. Load-out at eight, beginners six forty-five the day after. Write it."
 
-### 284 · assistant
+### 289 · assistant
 He looks at the tailboard for a long moment, and then he does the thing that tells you the ruling was right: he goes and stands in the yard first, in the cold, and looks at the wagon, and puts his hand on the wheel, and comes back.
 
 Then he writes. The letters are too big at the start and too small at the end and he has to squeeze **HARROW'S** into a corner, and he spells *beginners* with three n's and fixes it with his sleeve, and it takes him nine minutes.
@@ -4705,10 +4720,10 @@ Behind you, in the doorway with the stove-light on him, Falk reads it over the b
 
 The yard is quiet. The vermilion trunk sits under the new call with the thunder inside it. Your watch is in your pocket and the chalk is in the boy's hand, and there is nothing at all to keep you up — which, after this year, is the strangest sentence in the world.
 
-### 285 · user · Bell Harrow
+### 290 · user · Bell Harrow
 There being nothing to keep me up, I stay up anyway — old habit, good stove. Falk is at it with the after-show brandy he finally drinks now, one thimble, slow. I sit on the other stool and hold my hands to the iron, and spend the quiet on the one thing I never bought all year. "Twenty years, you told the boy. He'll get the rest of the trade from me. So here's the one thing I never got from you, Emeran. Harbor. You've called me it since my second night in Grevenholt, and I never once asked."
 
-### 286 · assistant · Emeran Falk
+### 291 · assistant · Emeran Falk
 Falk turns the thimble round on his knee and looks at the stove for a while.
 
 "When I was young and stupid and *the* Falk, I played a season in a port," he says. "Not a good season. And there was a harbor there — a working one, ugly, coal and fish — and I used to walk out on the mole at four in the morning when I couldn't be in a room with myself, and watch the boats come in." He drinks about a third of the thimble, which for him is a great deal. "And they came in bad. Some of them shipping water, some of them with a man hurt, some with nothing in the hold and a crew that had been out too long and knew what they'd be told at the counting-house. Every one of them mattering to somebody. And the harbor took every single one exactly the same. It didn't ask what you'd caught. It didn't ask if you'd been brave. It didn't ask you to be interesting, harbor, that's the whole of it — it just held still and let you tie up."
@@ -4719,10 +4734,10 @@ He sets the thimble down.
 
 The stove ticks. Out in the yard, the tailboard call sits crooked and legible in the dark, with everybody's name on it, and a signature.
 
-### 287 · user · Bell Harrow
+### 292 · user · Bell Harrow
 I take it the way harbors take things: still, and without making it interesting. "Then I'll keep the name." The stove ticks between us once, twice. "And here's your side of the ledger, Emeran, since we're settling: a harbor's pay is getting to be one. Before this company I managed houses — good houses, clean books, and nobody ever once tied up." I stand and bank the stove, last job of the last hour. "Bed. Load-out's at eight, and for the first time in my working life the call has my name on it underneath somebody else's — which I find I like."
 
-### 288 · assistant
+### 293 · assistant
 He doesn't say anything to that, and doesn't need to; he lifts the thimble an inch, the way he did in a dark theatre in Grevenholt the night you walked in out of the rain, and drinks it off, and gets up and goes to his wagon with the rug over his shoulder and his weight on both feet.
 
 You bank the stove. The wing goes to red and then to nothing much.
@@ -4735,10 +4750,10 @@ For now: the stove ticking down, your watch in your pocket with its bright worn 
 
 **— T. LENZ, 2ND ON BOOK, FOR B. HARROW, S.M.**
 
-### 289 · user · Bell Harrow
+### 294 · user · Bell Harrow
 Winter is Vessendal's fortnight, Merrow's fair, and a fit-up growing in Loewe's scene dock: our own flats, our own proscenium, and Boyle's door taken off its hinges and carried like a relic — with H.B. cut into the first plank by Vane's own hand, badly, exactly as promised, and varnished over so it stays badly forever. Hebel writes back that the capital is dull and the Baraque's new gasman is a vandal, and to send for him if we ever play a house worth a wheel. Lenz comes at midwinter, drinks three cups, and inspects the fit-up like a text. Skarke's quarterly audit of nothing arrives with one Katterau stub pinned to it. Drawings come with the post now — the newest is a theatre, and every door in it is drawn standing open. Toby learns plot tables until Krug dreams in them. And when the roads dry, the letters go and come: Katterau, two nights, the mayor's own favour. We roll in the first clean week of spring, the whole book of us, front doors first.
 
-### 290 · assistant
+### 295 · assistant
 The spring road is dry and loud and full of blossom that gets in the horses' ears.
 
 Katterau by daylight, second time: a town with washing out, a church, an inn with a scullery door, and Hessler's bills already up because Krug went ahead on Wednesday and pasted them himself. The mayor meets you in the square with her own favour, which turns out to be the loan of the town's carpenters and a barrel for the company. The fit-up goes up in five hours and looks — Vane says it aloud, twice — *like a theatre*, and H.B. sits in the first plank badly cut and varnished forever, at ankle height, where only this company knows to look.
@@ -4753,10 +4768,10 @@ And the second night is Toby's, as ruled two seasons ago in a wing in Achterhalt
 
 Your watch is in your palm and there is chalk on the ledge, and behind you, in the dark of a house that has been waiting twenty years for this company to be ordinary in it, six hundred people are coming in through open front doors.
 
-### 291 · user · Bell Harrow
+### 296 · user · Bell Harrow
 "Nobody remembers what warm means at the half. I've gone grey at forty halves; the grey is the trade arriving." I turn him by the shoulder to face the stage, not the book. "Warm was never in your pages, Toby. It's out there. You don't call what's written — you call what's happening. Watch Falk's shoulders. Watch Sorel's hands. Watch the house breathe, and the storm will ask you for itself at the only moment it can, same as it's asked me forty times." Then I do the thing I've been saving two seasons: I put my watch — nail-worn, palm-bright, the only one it's ever been — into his hand and close his fingers on it. "Mine. For tonight. It knows the weight of a house; let it teach your hand. You give it back at the iron." And I step into the shadow behind the corner, where saying nothing is the whole of my job.
 
-### 292 · assistant · Toby Lenz
+### 297 · assistant · Toby Lenz
 He looks at the watch in his fist as though you had handed him a live bird, and then he stops shaking. Not gradually. All at once, the way it happens the first time.
 
 "Beginners, please," Toby Lenz says, and his voice goes exactly where he sends it.
@@ -4773,10 +4788,10 @@ Iron down. Three calls. Falk gets a fourth and gives it to Mirelle, who gives it
 
 And in the prompt corner, with the gas going to its pilot and the good noise breaking out behind him, Toby turns round and holds out the watch on his flat palm — bright-worn, warm from an hour in a boy's fist — and cannot say a single word.
 
-### 293 · user · Bell Harrow
+### 298 · user · Bell Harrow
 I take the watch off his palm and weigh it once — same weight, warmer — and put it back on its nail, where it lives. Then I say it at wing volume, because rulings are public or they're nothing: "Two seconds late on the act-two flat, and Herr Krug's wheel will be bought a drink about it. Otherwise: clean. Toby Lenz called Katterau — six hundred, both doors, a storm on its only moment — clean." And I look past his shoulder to the wardrobe doorway, where a woman with pins in her mouth has been watching the whole act, and I wait for the arithmetic to be conceded.
 
-### 294 · assistant · Dessa Krul
+### 299 · assistant · Dessa Krul
 Dessa Krul takes the pins out of her mouth, one at a time, without hurry, and sticks them in her cuff.
 
 "Well," she says. And then, to the whole wing, in the voice she uses for men who put wet chestnuts in slippers: "He's nineteen."
@@ -4789,10 +4804,10 @@ Later — much later, benches, soup, the barrel the mayor sent — the noise thi
 
 And your call-list for tomorrow is still blank on the tailboard, and the chalk is in the tin, and Toby is out there in the dark with a lantern, standing in the yard with his hand on a wheel, checking a wagon before he writes a number down.
 
-### 295 · user · Bell Harrow
+### 300 · user · Bell Harrow
 The season runs the way solvent seasons run: towns, weather, the fit-up going up in five hours and coming down in four. Reap brings Loewe's fortnight, and the Athenaeum takes us back like a relative — counterweights sound, gas tap repaired, the brick in the passage scrubbed pale where a smear once was. And mid-fortnight, at the corner before the half, Mirelle comes to me with a letter in her hand and her gloves nowhere at all. The schoolmaster's hand. She holds it out and lets me read it whole: term's ended; the boy has asked — asked himself, in his own words, spelled his one word right in the middle of them — whether he might come as far as the door of the theatre where the wagon lives. I fold it back into her hand and give her the only ruling this company has ever really had. "Doors are what we're for. Name the day, and I'll have the front ones standing wide."
 
-### 296 · assistant · Mirelle Sorel
+### 301 · assistant · Mirelle Sorel
 She takes it back and folds it into three, which is exactly how she folded a page in a wet field outside Halbern a year and a half ago, and puts it in her pocket rather than her glove, because she does not wear the gloves for that any more.
 
 "The 20th," she says. "Loewe's last Thursday. He'll come on the coach with the schoolmaster's sister — she's a sensible woman, apparently, and has been briefed." A breath. "As far as the door, Harrow. That's what he asked for. Not a seat, not the house. He wants to see where the wagon lives, and then go away again, and I have decided that is the wisest thing anybody in this business has said in ten years."
@@ -4805,10 +4820,10 @@ Anton comes as far as the door. He stops in the doorway of the Athenaeum with th
 
 And in the passage, out of sight of the doorway, Emeran Falk puts his hand flat over his mouth and turns away.
 
-### 297 · user · Bell Harrow
+### 302 · user · Bell Harrow
 "It is," I agree, from my side of the threshold, because the truest notes get seconded in this house. "Smaller than it sounds, and bigger than it looks. Most good things run that way." And then I honor the terms of a wise contract to the letter: "The wagon lives through the yard door, off the passage — the red box rides its tailboard, and the horse that pulls it is exactly the wrong size, as somebody's drawing correctly reported. That far is still 'as far as the door,' if you want it. Your pace rules everything inside these walls; it's the law here, and I keep the book." And I step back, and leave the passage to Mirelle and the boy, and go stand where stage managers stand — near enough to be found, far enough to be no part of the scene.
 
-### 298 · assistant · Anton
+### 303 · assistant · Anton
 You stand at the pass door with your hands behind you and the whole business happens twenty feet off and none of it is yours.
 
 He takes the wagon. He walks through the passage — past the pale scrubbed brick, past the ladder whose foot sits flat now — and out into the Athenaeum's yard, and he looks at the vermilion trunk on the tailboard and then at the horse, and he says, "The horse *is* too small," in the tone of a man whose professional judgement has been confirmed after long doubt.
@@ -4827,10 +4842,10 @@ At the top of the street he turns round and shouts back, at full volume, in fron
 
 And then he's gone, and the yard is very quiet, and Mirelle Sorel stands in it with her hands at her sides, and Frau Loewe, from the stage door, says gruffly to nobody, "Doors open at half six, and the gas tap's a *disgrace*," and goes inside so as to be no trouble.
 
-### 299 · user · Bell Harrow
+### 304 · user · Bell Harrow
 Doors at half six, and the evening does what this company's evenings do now: it simply works. And after the iron, with the good noise gone off to its soup, I sit at the prompt corner and open the book to the end of the old pages, and make the season's last entries before I rule it off. The play: finished, retired, shelf row nine, no harm recorded. The company: solvent, twelve strong, carrying its own theatre and one badly cut set of initials. Sorel, M.: shaken hands with, at the top of a street. Lenz, T.: nineteen, clean, second on the book. Falk, E.: in things. Grelle, Prewick, Krug, Boyle, Krul, Wenzel, Hebel corresponded-with: worth keeping, every one. Harrow, B.: paid, unrounded — and home, which is a thing with wheels. Then I strike the season clean across, hang my watch on its nail, and put the chalk back in its tin — and I leave the last line of the page unwritten, for the house to fill, since it always does anyway.
 
-### 300 · assistant
+### 305 · assistant
 The chalk goes in the tin. The watch hangs on its nail. The book lies open at a ruled-off season with one blank line at the foot of the page, and the Athenaeum's gas drops to its pilot, and the house does what it has always done and fills the line without asking you.
 
 Out in the passage a bucket gets set down under a leak that doesn't exist yet, because Toby Lenz checks with his own feet now. Boyle's voice in the yard, arguing about a knot with nobody. Vane, further off, magnificent and solvent: "*Merrow*, and then a man in Grevenholt has written about the Corona — the roof, Harrow, the roof is *mended*—" Krul telling him there's a child asleep, and no child anywhere, and Vane lowering his voice anyway. Falk's thimble on wood, once, set down empty. Mirelle's needle. Prewick's pen. Grelle propping a door open because it's what he does now instead of standing outside one.
@@ -4839,10 +4854,10 @@ And on the tailboard in the dark, under the frost that isn't coming yet because 
 
 Load-out at eight. Beginners the day after. And your bucket, dry and where you left it, holding still and letting the whole thing tie up.
 
-### 301 · user · Bell Harrow
+### 306 · user · Bell Harrow
 The season's last letters bring the loop round the way good ledgers do: the Corona at Grevenholt, roof mended, a manager's hopeful hand, and Vane's face over the breakfast table doing arithmetic and sentiment at once. I rule yes without being asked twice. So Frost finds the wagons rolling into the town where a wet woman once held up a coaching-inn notice — a year and a half ago, give or take a world — and I go to the stage door first, out of old habit. It's latched. Krebs's hinge has held all this time; the door bites its frame like it means it, exactly as invoiced. So I do the thing the house taught me and knock: three, soft, unhurried — the knock of a woman who has been practising it across two seasons.
 
-### 302 · assistant · Krebs the doorkeeper
+### 307 · assistant · Krebs the doorkeeper
 Three knocks, soft, on a door that bites its frame.
 
 Footsteps inside — slippers, and slow — and then bolts, two of them, and the door comes open a foot on an old man with a lamp held at the height regulations prefer.
@@ -4859,10 +4874,10 @@ Behind you the wagons are coming in under the arch: Boyle swearing at it, Vane s
 
 And inside, in the half-dark of a house with a mended roof, the third board from the pass door waits to sing at you for the second time in your life.
 
-### 303 · user · Bell Harrow
+### 308 · user · Bell Harrow
 "Then let's hear it." I step in over the threshold and put my weight on the third board on purpose. It sings — same note, held all this time — and I write in my book that some repairs are not wanted and never will be. At the prompt corner I find the bucket exactly where my first notice put it, and I make the ruling Krebs has clearly been waiting a year and a half to witness: "The bucket stands. It's the oldest notice in this company's church, and it's on permanent duty now, dry or not." Then the yard pours in behind me — flats, hampers, the red trunk on Toby's count — and I give the Corona its news like a gift: "Load-in tonight, two nights billed. Ilsabet the first. And the second night, Herr Krebs, this house gets a debut: the Wolf King, certified at last, with a storm in it that has a floor."
 
-### 304 · assistant
+### 309 · assistant
 Krebs sets his lamp on the prompt shelf, next to the bucket, and stands looking at the pair of them for a moment with the satisfaction of a man whose long private opinion has been ratified by an authority.
 
 "Permanent duty," he says. "I'll tell the gas boy. He's been trying to fill it with rags since June."
@@ -4877,10 +4892,10 @@ And the second night: Prewick's *Wolf King*, compared line by line, certified, s
 
 Then the last curtain of the season falls in the house where you were hired in ten minutes, and Vane comes to your corner with his hat in his hands and asks you for a thing — and this time, for the first time in two years, you already know what he's going to ask, because Krug's datebook is open on the props table and there are eleven towns in it and none of them empty.
 
-### 305 · user · Bell Harrow
+### 310 · user · Bell Harrow
 "Then ask it with the book open, Odalric." I turn it round on the props table so the eleven towns face him. "I like my questions documented, and you've never once asked me a small one in this building."
 
-### 306 · assistant · Odalric Vane
+### 311 · assistant · Odalric Vane
 He puts his hat down on the datebook — on the whole spring, hat over eleven towns — which is a thing he has never done.
 
 "It's not a booking," he says. "Harrow, I am fifty-four, and I have a company that owes nothing and carries its own theatre, and a second on the book who is nineteen and getting better than either of us, and one day I am going to be a man in a chair in a wing." He looks at the eleven towns under the hat. "The name is mine. The wagons are mine. The trunk was mine and now it's just a box with the thunder in it. And when I go — and I *shall* go, I intend to go grandly and probably mid-speech — I want it minuted, in a book, with a signature, that the Vermilion Players go to whoever is keeping the book. Not to a creditor. Not to a nephew. To the stage manager." He gets it out without one tear, which costs him visibly. "So. That's my thing. Will you have them?"
@@ -4889,10 +4904,10 @@ Behind him the wing is doing what it does after a last curtain: Krul packing, Bo
 
 Your book is open on the table under his hat, and there is a pencil in your pocket, and the ink is in the box where the ink always is.
 
-### 307 · user · Bell Harrow
+### 312 · user · Bell Harrow
 "Yes." Plain and first, because he asked plainly and it cost him. Then I reach for the ink, because pencil is for opinions. "But I'll have it written better than you asked it, Odalric. Not to Bell Harrow — to the book. The Vermilion Players pass to whoever keeps the company's book: me this year, and in forty years somebody neither of us has ever met, who checks wagons with their own feet and signs what they post. That way you're not leaving them to a woman. You're leaving them to the trade — and the trade doesn't die mid-speech." I clear his hat off the datebook and set the page straight. "Herr Prewick writes it fair, the wing witnesses, you sign it unrounded. And I countersign underneath — where my name likes living these days."
 
-### 308 · assistant · Odalric Vane
+### 313 · assistant · Odalric Vane
 Vane's mouth opens, and nothing grand comes out of it. He sits down on the hamper instead and says, "*To the book*," and then, quietly, "That's better than mine. That's *much* better than mine," and puts his face in his hands for a moment, and then gets up and hollers for Prewick with his whole chest.
 
 Prewick writes it fair on the props table of the Corona at eleven at night, in his ironed hand, and reads it aloud twice — *The name, the wagons, the properties, the fit-up, the debts if any, and the goodwill of the Vermilion Players pass upon the death or retirement of Odalric Vane to the keeper of the company's book, and thereafter to each keeper in turn* — and it takes two sheets, and he numbers them.
@@ -4907,10 +4922,10 @@ And Odalric Vane, in the archway, in the plum coat gone shiny at the cuffs, turn
 
 "*Ask me for a thing.*"
 
-### 309 · user · Bell Harrow
+### 314 · user · Bell Harrow
 "Then here's my thing, and it winters well." I close the book over the new minute. "When the notices go up in spring, the first soul who comes in out of the weather answering one is mine to hire. My door, my lamp, my ten minutes. You stood a wet stranger in front of a company once and had her signed inside ten minutes — I want to learn what that costs to do. You may watch from the wings and weep." He accepts on the spot, magnificently. And winter takes us: quarters, stoves, plot tables, Krug's datebook fattening. And in the first wet week of spring, in a market town with a hall and no pit band, I write the notice myself and post it where coaching-inns post things: WANTED — A MUSICIAN, FOR A COMPANY THAT CARRIES ITS OWN THEATRE. APPLY AT THE STAGE DOOR. ASK FOR THE STAGE MANAGER.
 
-### 310 · assistant · Rosza Emmerich
+### 315 · assistant · Rosza Emmerich
 The notice goes up on a Tuesday, in the wet, on a board that already carries a horse auction and two lost dogs.
 
 It takes four days. Then, on the Saturday afternoon, with the fit-up half up and Boyle arguing with a beam, the stage door opens without a knock and a woman comes in out of the weather with a fiddle case under her coat, sopping to the shoulders, and stands on the third board and looks around at nine hundred years of other people's chalk marks.
@@ -4923,10 +4938,10 @@ Behind you, out of sight in the wing, someone stops breathing — Vane, in the s
 
 The lamp is at your elbow. Your book is under your arm. And ten minutes is precisely as long as it has ever been.
 
-### 311 · user · Bell Harrow
+### 316 · user · Bell Harrow
 "It was open on purpose." I come out of the corner into the lamp's spill and turn the lamp down low as I come — light on the boards, not in her face. "We latch it when the house sleeps and we open it when weather's coming. It took this company two seasons to learn which is which. Bell Harrow, stage manager — you're inside my ten minutes, and they started when you stepped on the singing board." I set the book on the props table, open, pencil across it. "So: your name. What the fiddle can do when a house of six hundred leans in. And why a company that carries its own theatre should carry you. Any order you like — and drip all you want, the boards have heard weather before."
 
-### 312 · assistant · Rosza Emmerich
+### 317 · assistant · Rosza Emmerich
 She thinks about the order. That's the first good sign; she doesn't just start talking.
 
 "Rosza Emmerich." She sets the case down on the boards where she is standing — not on your table, which is the second good sign — and thumbs the catches without opening it. "What it can do when a house leans in: hold them there. I played four years for a dancing school, which is where you learn that nobody in the room is watching you and the tempo is your entire job. Then two years in a pit band in Kessarine, until the pit band stopped being paid, and then a winter of weddings and one funeral a week, which is where you learn to change a tune when a room changes." She wipes rain off her chin with the back of her wrist. "I can read. I can transpose while playing, which the last man in this trade could not, and I know it because I've asked. I don't drink at work. I can mend a bow and I can't mend anything else."
@@ -4937,10 +4952,10 @@ Then, the third question, and she looks straight at you for it.
 
 Out in the wing, in the dark, Vane makes a small sound and gets himself under control.
 
-### 313 · user · Bell Harrow
+### 318 · user · Bell Harrow
 I count it back to her on three fingers, the way I watched a man do it once, in this trade's other famous ten minutes. "You thought about the order before you spoke. You set the case on the boards and not on my table. And you told me the truth when a lie stood cheaper." Then the terms, which are short because they're real: "Wages plain, posted on the board, paid to the minute, unrounded — nobody in this company is paid out of a hat. A line in the book today; a bunk in the second wagon; and the church is four sentences long: check with your own feet, sign what you post, nothing sounds on our stage that isn't in a certified copy — your tunes will be, there's a clerk who'll love the work — and when the third board sings, let it." I turn the book to face her and hold out the pencil. "Rosza Emmerich, musician. Sign."
 
-### 314 · assistant · Rosza Emmerich
+### 319 · assistant · Rosza Emmerich
 She takes the pencil in a hand that is shaking with cold rather than nerves, and reads the line above hers — the whole call-list, every name, and *T. LENZ, 2ND ON BOOK, FOR B. HARROW, S.M.* at the foot of it — and she takes a moment over that. Then she signs, carefully, her whole name, and puts the pencil down across the page exactly where you had it.
 
 "Beginners at what hour?" she says.
@@ -4951,10 +4966,10 @@ Behind him: Boyle still arguing with the beam, Toby crossing the stage with a la
 
 The board sings under Rosza's boot. Your lamp is low. Your ten minutes are up with four to spare.
 
-### 315 · user · Bell Harrow
+### 320 · user · Bell Harrow
 "Ruling: that's the management," I tell her. "It's harmless before supper, and the stove is real — accept both." Then I give the last order of the day, which has been waiting two seasons for someone to give it to: "But first. The house is empty, the gas is warm, and this company has carried its own theatre a year and a half without one note of music inside it. Play us something, Frau Emmerich. Whatever eleven miles sounds like when it comes out right." And I step back into my corner and hang the watch on its nail — beginners can stand four minutes; we're owed a tune — and I let the doorways fill.
 
-### 316 · assistant · Rosza Emmerich
+### 321 · assistant · Rosza Emmerich
 She takes the fiddle out with wet hands and tunes it against her ear, quickly, badly, then properly. Then she straightens, and puts her weight on both feet without being told, and plays.
 
 It isn't grand. It's a dance tune out of somewhere flat and cold, in a minor she doesn't apologise for, and she plays it at walking speed, the tempo of eleven miles — and the Corona's borrowed cousin of a hall, with your own proscenium half up in it and H.B. at ankle height, does what a house does: it gives it back a little, and the sound gets bigger than the woman making it.
@@ -4967,10 +4982,10 @@ Falk says, into the whole warm empty house: "God almighty. We've had thunder for
 
 And your watch is on its nail, and the fit-up is half up, and there is chalk in the tin, and a new name in the book, and the third board waiting to sing at the next soul who comes in out of the weather.
 
-### 317 · user · Bell Harrow
+### 322 · user · Bell Harrow
 "Supper," I call into the warm, "and then beginners for the season." And late, when the hall is down to stove and lamp and somebody's fiddle case is drying in the wardrobe cage with the queen's slippers, I make the day's entry, which is the last of my part to tell: Emmerich, R., musician — hired inside ten minutes, four to spare. Eleven miles, walking tempo. Worth keeping. Then the watch on its nail, the chalk in its tin, the lamp down to its blue tooth — and the last line of the page left open for the house, since the house always fills it anyway.
 
-### 318 · assistant · Rosza Emmerich
+### 323 · assistant · Rosza Emmerich
 The lamp goes down to its blue tooth and the hall makes its night noises: the stove ticking, Boyle's beam finally beaten and lying where it belongs, Wenzel asleep somewhere he shouldn't be, Krul's pins going into the tin one at a time. In the wardrobe cage the fiddle case steams gently beside the queen's slippers, which Dessa has decided is acceptable and will not be discussing.
 
 Out in the wing, Falk sets his thimble down empty; Prewick's pen scratches to his mother; Mirelle's needle goes on a while longer than anyone's. And on the tailboard in the yard, by lantern, a boy of nineteen who has stood with his hand on the wheel first writes the call for tomorrow with everybody's name on it and two signatures at the foot — and the newest name in the book, spelled right, because he asked her twice.

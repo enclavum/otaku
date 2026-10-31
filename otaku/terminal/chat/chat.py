@@ -11,12 +11,25 @@ import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from otaku.terminal.api import NO_STORY_HINT, Api, App, Conflict, Layout, NotFound, StoryMode
-from otaku.terminal.api.story.messages import Message
-from otaku.terminal.api.story.settings import DEFAULT_LAYOUT, LAYOUT_SETTING
-from otaku.terminal.api.story.stories import Story
+from otaku import web as web_frontend
+from otaku.terminal.api import (
+    DEFAULT_LAYOUT,
+    LAYOUT_SETTING,
+    NO_STORY_HINT,
+    Api,
+    App,
+    Conflict,
+    HeadMoved,
+    Layout,
+    Message,
+    NotFound,
+    Refused,
+    StoryMode,
+)
+from otaku.terminal.api.stories import Story
 from otaku.terminal.chat.ledger import ScreenLedger
-from otaku.terminal.tty.render import flow_offsets, turn, unit_start
+from otaku.terminal.tty import error_line
+from otaku.terminal.tty.render import flow_offsets, reply_start_index, turn
 from otaku.terminal.tty.statusline import StatusLine
 
 # Turns echoed when a story (re)opens (the launch, a browser pick, an
@@ -44,7 +57,7 @@ class Chat:
     draft_layout: Layout | None
     ledger: ScreenLedger
     status_line: StatusLine
-    # The loop's exit flag: /bye (and Ctrl+D) raise it, and the run loop
+    # The loop's exit flag: /quit (and Ctrl+D) raise it, and the run loop
     # leaves after the current submission instead of unwinding mid-command.
     quit: bool
     # The submission being played is the canvas's CONTINUE — an empty
@@ -53,7 +66,7 @@ class Chat:
     # the one submission, cleared with it.
     continuing: bool
     # A reply streamed this submission (`stream.show`), or an undo left
-    # the story on the question a reply ended on (`dispatch.story.stories`):
+    # the story on the question a reply ended on (`dispatch.stories`):
     # the prompt after it may offer the answers, where one after any other
     # command, its output standing between, offers none. Cleared by the
     # loop with each submission.
@@ -68,6 +81,9 @@ class Chat:
     # right ("85% of 128K"); "" while the window is not known.
     # Read again by the loop before every prompt.
     context_fill: str
+    # The server of the page served beside the chat (`/set serve`), while
+    # it serves.
+    server: web_frontend.Server | None
 
     def __init__(self, app: App) -> None:
         self.app = app
@@ -81,10 +97,17 @@ class Chat:
         self.replied = False
         self.status_note = ""
         self.context_fill = ""
+        self.server = None
         # One renderer for the prompt's toolbar and the pinned row, both
         # reading the same channels, so the line never twitches at the
         # streaming handoff.
-        self.status_line = StatusLine(self.api.app.status.get, lambda: self.context_fill)
+        self.status_line = StatusLine(
+            worker=self.api.app.status.get,
+            fill=lambda: self.context_fill,
+            served_at=lambda: self.server.address if self.server is not None else "",
+            last_note=lambda: self.status_note,
+            waiting_to_wrap=lambda: self.ledger.waiting_to_wrap,
+        )
         # An erase the ledger makes mid-stream takes the pinned row with it.
         self.ledger = ScreenLedger(repaint=self.status_line.refresh)
 
@@ -227,21 +250,59 @@ class Chat:
             self.story_id is not None and self.api.stories.get(self.story_id).question is not None
         )
 
+    # ---------- the page served beside it ----------
+
+    def serve(self) -> str | None:
+        """Serve the page beside the chat, the app shared with it
+        (`web.run_beside`); the sentence where it cannot be served,
+        nothing served. Serving already, nothing to do."""
+        if self.server is None:
+            try:
+                self.server = web_frontend.run_beside(self.app)
+                self.status_line.refresh()  # the mark, on the row pinned meanwhile
+            except web_frontend.ServeError as e:
+                # the web's own sentence, made a sentence here (it is bare
+                # for `otaku serve`'s `otaku: …` line)
+                said = str(e).rstrip(".")
+                return f"{said[:1].upper()}{said[1:]}."
+        return None
+
+    def stop_serving(self) -> None:
+        """Stop serving the page, where it is served."""
+        if self.server is not None:
+            self.server.stop()
+            self.server = None
+            self.status_line.refresh()
+
     # ---------- what it prints ----------
 
-    def say(self, text: str) -> None:
+    def say(self, text: str, *, spaced: bool = False) -> None:
         """Print command output below the typed line: the lead blank on
         the first write, ledger invalidation where due — every handler
         answers through here (or through the ledger's own channels).
-        Multi-line text is one answer: the bookkeeping runs once."""
-        sys.stdout.write(self.ledger.said() + text + "\n")
+        Multi-line text is one answer: the bookkeeping runs once.
+        `spaced`: a blank line above it, the lead blank or one of its own."""
+        lead = self.ledger.said()
+        if spaced and not lead:
+            text = "\n" + text
+        sys.stdout.write(lead + text + "\n")
         sys.stdout.flush()
         self.ledger.note_printed(text + "\n")
+
+    def refuse(self, refused: Refused) -> None:
+        """Say a refusal. A story moved on elsewhere (`HeadMoved`) is no
+        slip of the reader's but a write lost: in the error color, a blank
+        line above it. Any other is the app answering, said plainly
+        (`error_line`)."""
+        if isinstance(refused, HeadMoved):
+            self.say(error_line(str(refused)), spaced=True)
+        else:
+            self.say(str(refused))
 
     def restore_tail(self, count: int, above: str = "") -> None:
         """Hand the just-echoed tail (`render.last_turns(…, count)`) to
         the ledger, grouped the way /undo pops — a reply with its tool
-        chain (`Message.unit`) plus the one user row before it,
+        chain (`Message.reply_start_id`) plus the one user row before it,
         either alone when the other is missing — so
         the shown turns can be taken back off the screen without having
         been played. `above` names the report line printed (with its
@@ -254,8 +315,9 @@ class Chat:
         messages = self.messages()
         shown = messages[-count:]
         offset = len(messages) - len(shown)
-        # indexes into `shown`: the prompt, and the reply's unit — its first
-        # row and the row after its last — and whether the echo cut the unit
+        # indexes into `shown`: the prompt, and the reply with its tool
+        # chain — its first row and the row after its last — and whether the
+        # echo cut the reply
         groups: list[tuple[int | None, int | None, int, bool]] = []
         i = len(shown)
         while i > 0:
@@ -263,7 +325,7 @@ class Chat:
             if shown[i - 1].role == "assistant":
                 # the reply with its tool chain, as /undo pops it — the part
                 # the echo shows, where it cut the chain
-                begins = unit_start(messages, offset + i)
+                begins = reply_start_index(messages, offset + i)
                 cut = begins < offset
                 reply = i = max(begins, offset) - offset
             prompt = i - 1 if i > 0 and shown[i - 1].role == "user" else None

@@ -5,6 +5,7 @@ and read them off it, which the guards, the streams and the dispatcher
 all share. Nothing here decides what a path MEANS."""
 
 import json
+import socketserver
 import ssl
 import sys
 import threading
@@ -17,9 +18,8 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 from otaku.web import api
-from otaku.web.api import App, HeadMoved, Invalid, NotFound, Refused, Unavailable
+from otaku.web.api import Api, App, HeadMoved, Invalid, NotFound, Refused, Unavailable
 from otaku.web.server.assets import JSON, NO_STORE, PROBLEM
-from otaku.web.thread import AppRunner
 
 # How a request ENDS when the reader closes a tab, reloads mid-reply or
 # stops otaku while the page is still streaming — and, under TLS, how one
@@ -46,13 +46,18 @@ _WILDCARD = ("0.0.0.0", "::", "")
 
 # What a request body may weigh. A turn's pictures are the heaviest thing
 # the page sends — eight of 10 MB each at most (the play's
-# `_MAX_PICTURES` and `backend.domain.app.pictures.MAX_BYTES`, copied),
+# `_MAX_PICTURES` and `backend.app.pictures.services.MAX_BYTES`, copied),
 # base64 in the JSON — and nothing else comes close.
 MAX_BODY = 8 * 10 * 1024 * 1024 * 4 // 3 + 1024 * 1024
 
 # When to ask again after a 503: otaku is stopping, and a reader's Ctrl+R
 # brings it back within a second or two.
 RETRY_AFTER = "5"
+
+# How often the serving loop polls for a shutdown request (`serve_forever`'s
+# poll interval): the stdlib's half second is a pause the reader sees at
+# `/set serve off` and on the way out.
+_SHUTDOWN_POLL_INTERVAL = 0.05
 
 
 class BodyError(Exception):
@@ -83,27 +88,34 @@ class Hooks:
 
 
 class Server(ThreadingHTTPServer):
-    """The threading server plus what a handler needs: the runner that
-    reaches the app, where the reader's own files live, and the hooks. Daemon threads because a
-    held-open event stream must never outlive the interrupt that stopped
-    the server."""
+    """The threading server plus what a handler needs: the app and the
+    interface over it, where the reader's own files live, and the hooks —
+    and where it is (`address`), as a link to it opens it, and its `stop`.
+    Daemon threads because a held-open event stream must never outlive the
+    interrupt that stopped the server."""
 
     daemon_threads = True
-    allow_reuse_address = True
+    # A restart rebinds at once past TIME_WAIT. Windows binds past it
+    # without the option, and with it binds over a port another process
+    # is listening on.
+    allow_reuse_address = sys.platform != "win32"
 
     def __init__(
         self,
         bound: tuple[str, int],
         handler: Any,
         *,
-        runner: AppRunner[App],
+        app: App,
+        address: str,
         custom_web_dir: Path,
         hooks: Hooks,
         tls_context: ssl.SSLContext | None = None,
         password_hash: str | None = None,
     ) -> None:
         super().__init__(bound, handler)
-        self.runner = runner
+        self.app = app
+        self.api = Api(app)
+        self.address = address
         self.custom_web_dir = custom_web_dir
         self.hooks = hooks
         self.tls_context = tls_context
@@ -138,6 +150,25 @@ class Server(ThreadingHTTPServer):
         # would do nothing and the only way out of a wedged engine would
         # be `kill`.
         self.stopping = threading.Event()
+
+    def server_bind(self) -> None:
+        """The socket bound, without the stdlib's reverse lookup of the
+        host's name between the bind and the listen: a slow DNS holds the
+        port shut for as long as it takes, and nothing reads the name."""
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = str(self.server_address[0]), self.server_address[1]
+
+    def serve_forever(self, poll_interval: float = _SHUTDOWN_POLL_INTERVAL) -> None:
+        """Serve until stopped, looking for the stop every `poll_interval`
+        — the longest a stop waits."""
+        super().serve_forever(poll_interval)
+
+    def stop(self) -> None:
+        """Stop serving: a reply a browser is reading ends where it stands,
+        kept, as at the first Ctrl+C, and the socket closes."""
+        self.stopping.set()
+        self.shutdown()
+        self.server_close()
 
     def get_request(self) -> tuple[Any, Any]:
         """The accepted connection, wrapped when this server serves TLS —

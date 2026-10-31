@@ -1,6 +1,8 @@
 """The registry: one client per configured section, the engine chosen by
 the section's name, and the names no engine serves set aside."""
 
+from urllib.parse import urlsplit
+
 import pytest
 
 from otaku.providers import ALL_CLIENTS, ProviderConfig, Registry, autoconfigure
@@ -50,6 +52,28 @@ class TestAutoconfigure:
         monkeypatch.setenv("OLLAMA_API_KEY", "from-env")
         monkeypatch.setenv("GENERIC_API_KEY", "from-env")
         assert list(autoconfigure()) == [*self.LOCAL, "openrouter"]
+
+    def test_a_local_engine_is_founded_on_the_host_the_variable_names(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """otaku apart from its engines — in a container — names the machine
+        they run on (`OTAKU_LOCAL_ENGINES_HOST`) in every local section it
+        founds; with no variable, `localhost`."""
+        monkeypatch.delenv("OLLAMA_HOST", raising=False)
+        monkeypatch.delenv("OTAKU_LOCAL_ENGINES_HOST", raising=False)
+        founded = autoconfigure()
+        assert {urlsplit(founded[name].url).hostname for name in self.LOCAL} == {"localhost"}
+        monkeypatch.setenv("OTAKU_LOCAL_ENGINES_HOST", "host.docker.internal")
+        founded = autoconfigure()
+        for name in self.LOCAL:
+            assert urlsplit(founded[name].url).hostname == "host.docker.internal", name
+
+    def test_an_ollama_host_on_another_machine_stays_there(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("OTAKU_LOCAL_ENGINES_HOST", "host.docker.internal")
+        monkeypatch.setenv("OLLAMA_HOST", "box:11435")
+        assert autoconfigure()["ollama"].url == "http://box:11435/v1"
 
 
 class TestSections:

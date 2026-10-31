@@ -13,8 +13,8 @@ from pathlib import Path
 import pytest
 
 from otaku.backend.api import Refused
-from otaku.backend.api.codex.cards import RawFile
-from otaku.backend.domain.codex.cards import NEW_CARD_NAME
+from otaku.backend.codex.cards.schemas import RawFile
+from otaku.backend.codex.cards.services import NEW_CARD_NAME
 from otaku.store.schema import Message
 from scenarios.support.harness import App
 

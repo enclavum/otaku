@@ -16,11 +16,11 @@ from dataclasses import replace
 
 from prompt_toolkit.utils import get_cwidth
 
-from otaku.backend.api.story.messages import _as_messages
-from otaku.backend.domain.story._tools import ToolQuestion
-from otaku.backend.domain.story.messages import segments as split
+from otaku.backend.story.messages.schemas import _as_message
+from otaku.backend.story.messages.services import _listed, segments
+from otaku.backend.story.tools import ToolQuestion
 from otaku.store.schema import Message, StoryMode
-from otaku.terminal.api.story.messages import Message as Drawn
+from otaku.terminal.api import Message as Drawn
 from otaku.terminal.tty import DIM
 from otaku.terminal.tty.render import (
     BAR,
@@ -32,8 +32,8 @@ from otaku.terminal.tty.render import (
     flow_offsets,
     last_turns,
     message,
+    reply_start_index,
     spaced,
-    unit_start,
     user_block,
 )
 
@@ -46,8 +46,13 @@ NOTES = frozenset({"note"})
 class TestCommandTokens:
     def test_names_every_command_the_help_lists(self) -> None:
         tokens = command_tokens()
-        for command in ("/me", "/you", "/ooc", "/cue", "/undo", "/set", "/info", "/bye"):
+        for command in ("/me", "/you", "/ooc", "/cue", "/undo", "/set", "/info", "/quit"):
             assert command in tokens, command
+
+    def test_names_the_hidden_aliases_too(self) -> None:
+        # typed, an alias runs its command, so it reads as one
+        tokens = command_tokens()
+        assert "/bye" in tokens and "/exit" in tokens
 
     def test_holds_each_name_once(self) -> None:
         # `/ooc` is written twice — opening a line, and inside one.
@@ -346,15 +351,15 @@ class TestFlow:
         assert flow(handed(rows), shown=NOTES) == "One.\n\nTwo."
 
 
-class TestUnitStart:
-    """`unit_start` — where the reply ending a list of rows begins as ONE
-    unit, as its `unit` names it: the reply, and where a tool turn stands
-    right before it, that turn and the reply holding its call, again and
-    again (the backend's rule, the chain's `take_reply_unit`)."""
+class TestReplyStartIndex:
+    """`reply_start_index` — where the reply ending a list of rows begins,
+    as its `reply_start_id` names it: the reply, and where a tool turn
+    stands right before it, that turn and the reply holding its call,
+    again and again (the backend's rule, the chain's `take_reply`)."""
 
-    def test_a_reply_alone_is_its_own_unit(self) -> None:
+    def test_a_reply_alone_starts_on_itself(self) -> None:
         rows = [chat("user", "Go."), chat("assistant", "Gone.")]
-        assert unit_start(handed(rows), 2) == 1
+        assert reply_start_index(handed(rows), 2) == 1
 
     def test_a_reply_takes_its_tool_chain(self) -> None:
         rows = [
@@ -365,16 +370,16 @@ class TestUnitStart:
             tool_turn("Six."),
             chat("assistant", "High at six."),
         ]
-        assert unit_start(handed(rows), 6) == 1
-        assert unit_start(handed(rows), 4) == 1
+        assert reply_start_index(handed(rows), 6) == 1
+        assert reply_start_index(handed(rows), 4) == 1
 
-    def test_two_replies_side_by_side_are_two_units(self) -> None:
+    def test_two_replies_side_by_side_are_two_replies(self) -> None:
         rows = [chat("user", "Go."), chat("assistant", "One."), chat("assistant", "Two.")]
-        assert unit_start(handed(rows), 3) == 2
+        assert reply_start_index(handed(rows), 3) == 2
 
     def test_a_chain_that_opens_the_rows_starts_at_the_first(self) -> None:
         rows = [tool_turn("Tides."), chat("assistant", "High.")]
-        assert unit_start(handed(rows), 2) == 0
+        assert reply_start_index(handed(rows), 2) == 0
 
 
 class TestLastTurns:
@@ -414,11 +419,19 @@ def asked_block(text: str, *, width: int) -> str:
     return out.getvalue()
 
 
+def split(body: str) -> list[dict[str, object]]:
+    """A reply's body split as the backend hands it over (`segments`)."""
+    return segments(Message(role="assistant", body=body))
+
+
 def handed(rows: Sequence[Message]) -> list[Drawn]:
     """Store rows as the messages the terminal is handed — split, joined
-    and placed in their reply units as the backend builds them — each
+    and placed in their replies as the backend builds them — each
     numbered by its position."""
-    return _as_messages([replace(row, id=index + 1) for index, row in enumerate(rows)])
+    chain = [replace(row, id=index + 1) for index, row in enumerate(rows)]
+    return [
+        _as_message(listed.row, listed.previous, listed.reply_start_id) for listed in _listed(chain)
+    ]
 
 
 def tool_turn(body: str) -> Message:

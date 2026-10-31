@@ -1,19 +1,19 @@
 ---
 paths:
-  - "otaku/context/tool_calls.py"
+  - "otaku/context/tools.py"
   - "otaku/context/injections.py"
   - "otaku/context/assembler.py"
-  - "otaku/backend/domain/story/_tools.py"
-  - "otaku/backend/domain/story/_play.py"
-  - "otaku/backend/domain/story/messages.py"
-  - "otaku/backend/domain/story/settings.py"
-  - "otaku/backend/api/story/messages.py"
+  - "otaku/backend/story/tools.py"
+  - "otaku/backend/story/play.py"
+  - "otaku/backend/story/messages/*.py"
+  - "otaku/backend/story/settings/*.py"
   - "otaku/web/api/story/messages.py"
   - "otaku/settings/prompts.py"
   - "otaku/terminal/tty/render.py"
   - "otaku/terminal/chat/stream.py"
   - "otaku/web/static/js/play/transcript.js"
   - "tests/context/test_assembler.py"
+  - "tests/context/test_tools.py"
   - "docs/tools_design.md"
 ---
 
@@ -22,9 +22,9 @@ paths:
 ## Tool calls
 
 A model uses a tool by writing a TOOL CALL in its reply, an `otk-NAME`
-fenced block (`context.tool_calls`). otaku owns the convention, never the
+fenced block (`context.tools`). otaku owns the convention, never the
 API's `tools` field, so it works on every engine (`docs/tools_design.md`
-is the decision and the engine facts behind it). `tool_calls` lives in
+is the decision and the engine facts behind it). The grammar lives in
 `context` because the worker and the assembler read it below the
 backend.
 
@@ -35,7 +35,7 @@ frontend draws it — the reader sees what the model reads.
 
 ## The tools
 
-The tools are `backend.domain.story._tools`'. "Answer" is the question
+The tools are `backend.story.tools`'. "Answer" is the question
 tool's word alone: the user's. A tool otaku runs is handed the whole app
 (`run(app)`), so a tool to come finds what it needs.
 
@@ -49,23 +49,25 @@ shipped: `otk-note`, Notes, `allow_assistant_notes`.
 
 ## The play
 
-The play's events are `_play`'s own, told as the interface's by
-`as_events` (`backend.api.story.messages`); the wire names them the same
+The play's events are `play`'s own, told as the interface's by
+`as_events` (`backend.story.messages`); the wire names them the same
 in snake case (`web.api.story.messages.event`: `user_message`, …). A
 reply cut at the length limit keeps its call open.
 
 ## How the frontends draw a call
 
 Both frontends draw a tool message as its `tool_label` alone — the result
-is the model's to read, not the story's: the page's hover hint, nowhere
-in the terminal — and nothing for a call otaku runs, the status row
-saying it is being called.
+is the model's to read, not the story's: the page's hover hint and the
+same text under the label when the reader opens the block, nowhere in
+the terminal. A call otaku runs is the call's `status` while it runs —
+the terminal's line, rewritten to the turn's label as that lands; the
+page's status row, the page drawing the call itself as nothing.
 
 Both frontends draw what the `Story` says: the question it stands on
-(`Story.question`) and the tools whose calls are shown (`shown_tools`);
-the page also draws those it folds (`folded_tools`) by their label, which
-the terminal, with no hover, leaves out. `ToolQuestion._OPTION`'s rule is
-copied in the page as `readAsk`, for a question still streaming.
+(`Story.question`) and the tools whose calls are shown (`shown_tools`),
+and nothing for any other — the notes with their display switch off
+included. `ToolQuestion._OPTION`'s rule is copied in the page as
+`readAsk`, for a question still streaming.
 
 ## Injections
 

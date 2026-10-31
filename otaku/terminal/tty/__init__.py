@@ -142,7 +142,7 @@ def ask(query: str, response: "re.Pattern[bytes]") -> "re.Match[bytes] | None":
     response and dropped: the window is a few milliseconds, and a
     swallowed keystroke costs one re-press, while preserving it would
     cost a screen model."""
-    if termios is None or _tty is None:
+    if sys.platform == "win32" or termios is None or _tty is None:
         return None
     try:
         fd = sys.stdin.fileno()

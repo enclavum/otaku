@@ -5,16 +5,17 @@ managed engine's models.
 """
 
 import contextlib
+import threading
 import time
 import tomllib
 
 import pytest
 
 from otaku.backend.api import NotFound, Refused
-from otaku.backend.api.app.models import ParameterSetting
-from otaku.backend.domain.app._paths import Paths
-from otaku.backend.domain.app.models import PARAMETERS, THINK_MENU
-from otaku.terminal.api.app import models as api_models
+from otaku.backend.app.models.schemas import ParameterSetting
+from otaku.backend.app.models.services import PARAMETERS, THINK_MENU
+from otaku.backend.app.paths import Paths
+from otaku.terminal.api import models as api_models
 from otaku.terminal.screens import models as screen_models
 from scenarios.api.app.test_app import (
     _DOWN,
@@ -29,6 +30,10 @@ from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch, set_config_provider
 from scenarios.support.screens import ENTER, ESC, run_screen
 from scenarios.support.server import ModelServer
+
+# A picker's watchdog outlasts the five seconds its rows may take to land
+# before its keys are read (`settled_pick`): a slow runner needs them.
+_SETTLING = 10.0
 
 
 class TestThink:
@@ -66,11 +71,14 @@ class TestThink:
         app.play("/set think unset")
         app.play("/model generic/test-model")
         assert _think(app) == "high"
-        saved = tomllib.loads(app.paths.models_file.read_text())
+        saved = tomllib.loads(app.paths.models_file.read_text(encoding="utf-8"))
         assert saved["test-model"]["think"] == "high"
         assert saved["other-model"]["think"] == "unset"
         app.play("/set think none")
-        assert tomllib.loads(app.paths.models_file.read_text())["test-model"]["think"] == "none"
+        assert (
+            tomllib.loads(app.paths.models_file.read_text(encoding="utf-8"))["test-model"]["think"]
+            == "none"
+        )
 
     def test_the_level_an_older_state_held_moves_to_its_model(self, server, tmp_path) -> None:
         # Before 0.5.0 the level was one for every model and lived in
@@ -82,13 +90,15 @@ class TestThink:
         root = tmp_path / "state"
         set_config_provider(root, server)
         paths = Paths.resolve(root)
-        paths.state_file.write_text('model = "generic/test-model"\nstory = 0\nthink = "none"\n')
+        paths.state_file.write_text(
+            'model = "generic/test-model"\nstory = 0\nthink = "none"\n', encoding="utf-8"
+        )
         app = launch(root, server)
         try:
             assert _think(app) == "none"
-            saved = tomllib.loads(paths.models_file.read_text())
+            saved = tomllib.loads(paths.models_file.read_text(encoding="utf-8"))
             assert saved["test-model"]["think"] == "none"
-            assert "think" not in tomllib.loads(paths.state_file.read_text())
+            assert "think" not in tomllib.loads(paths.state_file.read_text(encoding="utf-8"))
         finally:
             app.close()
 
@@ -99,13 +109,17 @@ class TestThink:
         root = tmp_path / "state"
         set_config_provider(root, server)
         paths = Paths.resolve(root)
-        paths.state_file.write_text('model = "generic/test-model"\nthink = "default"\n')
+        paths.state_file.write_text(
+            'model = "generic/test-model"\nthink = "default"\n', encoding="utf-8"
+        )
         app = launch(root, server)
         try:
             assert _think(app) == "unset"
-            assert "think" not in tomllib.loads(paths.state_file.read_text())
+            assert "think" not in tomllib.loads(paths.state_file.read_text(encoding="utf-8"))
             saved = (
-                tomllib.loads(paths.models_file.read_text()) if paths.models_file.exists() else {}
+                tomllib.loads(paths.models_file.read_text(encoding="utf-8"))
+                if paths.models_file.exists()
+                else {}
             )
             assert "think" not in saved.get("test-model", {})
         finally:
@@ -120,19 +134,23 @@ class TestThink:
         root = tmp_path / "state"
         set_config_provider(root, server)
         paths = Paths.resolve(root)
-        paths.models_file.write_text('[test-model]\nthink = "low"\n')
-        paths.state_file.write_text('model = "generic/test-model"\nthink = "high"\n')
+        paths.models_file.write_text('[test-model]\nthink = "low"\n', encoding="utf-8")
+        paths.state_file.write_text(
+            'model = "generic/test-model"\nthink = "high"\n', encoding="utf-8"
+        )
         app = launch(root, server)
         try:
             assert _think(app) == "low"
-            assert "think" not in tomllib.loads(paths.state_file.read_text())
+            assert "think" not in tomllib.loads(paths.state_file.read_text(encoding="utf-8"))
         finally:
             app.close()
-        paths.state_file.write_text('model = ""\nthink = "high"\n')
+        paths.state_file.write_text('model = ""\nthink = "high"\n', encoding="utf-8")
         app = launch(root, server)
         try:
-            assert "think" not in tomllib.loads(paths.state_file.read_text())
-            assert tomllib.loads(paths.models_file.read_text()) == {"test-model": {"think": "low"}}
+            assert "think" not in tomllib.loads(paths.state_file.read_text(encoding="utf-8"))
+            assert tomllib.loads(paths.models_file.read_text(encoding="utf-8")) == {
+                "test-model": {"think": "low"}
+            }
         finally:
             app.close()
 
@@ -199,7 +217,10 @@ class TestThink:
             try:
                 assert _think(app) == "off"
                 assert (
-                    tomllib.loads(app.paths.models_file.read_text())["test-model"]["think"] == "off"
+                    tomllib.loads(app.paths.models_file.read_text(encoding="utf-8"))["test-model"][
+                        "think"
+                    ]
+                    == "off"
                 )
                 app.play("Hello.")
                 assert app.server.requests[-1]["reasoning_effort"] == "none"
@@ -207,12 +228,12 @@ class TestThink:
                 assert _think(app) == "unset"
                 app.play("Again.")
                 assert "reasoning_effort" not in app.server.requests[-1]
-                saved = tomllib.loads(app.paths.models_file.read_text())
+                saved = tomllib.loads(app.paths.models_file.read_text(encoding="utf-8"))
                 assert saved["test-model"]["think"] == "unset"
                 app.play("/model ollama/plain-model")
                 assert _think(app) == "unset"
                 app.play("/set parameter temperature 0.5")
-                saved = tomllib.loads(app.paths.models_file.read_text())
+                saved = tomllib.loads(app.paths.models_file.read_text(encoding="utf-8"))
                 assert "think" not in saved["plain-model"]
                 app.play("Hello.")
                 assert "reasoning_effort" not in app.server.requests[-1]
@@ -315,7 +336,7 @@ class TestThink:
                 assert "thinking_budget" not in body
                 app.play("/set think 0")
                 assert _think(app) == "0"
-                saved = tomllib.loads(app.paths.models_file.read_text())
+                saved = tomllib.loads(app.paths.models_file.read_text(encoding="utf-8"))
                 assert saved["test-model"]["think"] == "0"
             finally:
                 app.close()
@@ -367,6 +388,7 @@ class TestThink:
 
     def test_thinking_streams_but_is_never_saved(self, app: App, capsys) -> None:
         app.play("/set think high")
+        app.play("/set show_thinking on")
         app.server.script = lambda body: ("Let me consider the hall.", "The door creaks open.")
         app.play("I enter the hall.")
         # Streamed as a dim block behind the bar, apart from the reply.
@@ -380,6 +402,15 @@ class TestThink:
         # ...so the next turn's context carries no thinking either.
         app.play("I look around.")
         assert "consider" not in str(app.server.requests[-1]["messages"])
+
+    def test_thinking_off_prints_none_of_its_text(self, app: App, capsys) -> None:
+        # off (the default), the terminal stands a label in for it
+        app.play("/set think high")
+        app.server.script = lambda body: ("Let me consider the hall.", "The door creaks open.")
+        app.play("I enter the hall.")
+        shown = capsys.readouterr().out
+        assert "consider" not in shown
+        assert "The door creaks open." in shown
 
     def test_llamacpp_gets_both_knobs_and_none_turns_the_flag_off(self, server, tmp_path) -> None:
         # llama.cpp's server reads no reasoning_effort of its own and hands
@@ -624,7 +655,7 @@ class TestParameters:
         assert _params(app)["stop"] == ["\nUser:", "The End"]
         app.play("I enter the hall.")
         assert app.server.requests[-1]["stop"] == ["\nUser:", "The End"]
-        saved = tomllib.loads(app.paths.models_file.read_text())
+        saved = tomllib.loads(app.paths.models_file.read_text(encoding="utf-8"))
         assert saved["test-model"]["stop"] == ["\nUser:", "The End"]
         relaunched = launch(app.paths.root, app.server)
         try:
@@ -713,31 +744,30 @@ class TestManagedPicker:
         finally:
             app.close()
 
-    def test_a_turns_load_ticks_the_idle_hook(self, tmp_path) -> None:
-        # The hook the session was handed — the web's one thread
-        # answering its reads — is ticked through a cold model's load,
-        # as through the reply after it.
+    def test_a_read_is_answered_while_a_turn_loads_a_cold_model(self, tmp_path) -> None:
+        # The app's one thread spends a cold model's load answering the
+        # reads queued meanwhile, as it does the reply after it: a screen
+        # opened mid-load opens at once, not when the model is up.
         app, server = self.launch_managed(tmp_path)
-        server.load_delay = 0.4
-        ticks = 0
-
-        def tick() -> None:
-            nonlocal ticks
-            ticks += 1
-
-        app.backend.set_on_idle(tick)
+        server.load_delay = 1.0
+        story = app.ensure_story()
+        playing = threading.Thread(target=app.play, args=("I enter the hall.",))
         try:
-            app.play("I enter the hall.")
+            playing.start()
+            time.sleep(0.3)  # into the load
+            app.api.stories.get(story)
+            assert playing.is_alive()  # answered while the turn still loads
+            playing.join()
             assert "/api/generate" in server.posts
-            assert ticks > 0
         finally:
+            playing.join()
             app.close()
 
     def test_l_loads_the_model_after_a_confirm(self, tmp_path) -> None:
         app, server = self.launch_managed(tmp_path)
         try:
             with contextlib.suppress(EOFError):
-                run_screen("ly" + ESC, lambda: self.settled_pick(app))
+                run_screen("ly" + ESC, lambda: self.settled_pick(app), patience=_SETTLING)
             assert server.loaded == {"alpha"}
             # The load request carried the provider's keep_alive.
             load = next(r for r in server.requests if r.get("prompt") == "")
@@ -750,10 +780,10 @@ class TestManagedPicker:
         app, server = self.launch_managed(tmp_path)
         try:
             with contextlib.suppress(EOFError):
-                run_screen(_DOWN + "x" + ESC, lambda: self.settled_pick(app))
+                run_screen(_DOWN + "x" + ESC, lambda: self.settled_pick(app), patience=_SETTLING)
             assert _extraction(app) == "ollama/beta"
             with contextlib.suppress(EOFError):
-                run_screen(_DOWN + "x" + ESC, lambda: self.settled_pick(app))
+                run_screen(_DOWN + "x" + ESC, lambda: self.settled_pick(app), patience=_SETTLING)
             assert _pinned(app) == ""
             assert _model(app) == "alpha"  # the story's model never moved
         finally:
@@ -812,7 +842,7 @@ class TestManagedPicker:
         server.loaded = {"alpha"}
         try:
             with contextlib.suppress(EOFError):
-                run_screen("uy" + ESC, lambda: self.settled_pick(app))
+                run_screen("uy" + ESC, lambda: self.settled_pick(app), patience=_SETTLING)
             assert server.loaded == set()
             unload = next(r for r in server.requests if r.get("keep_alive") == 0)
             assert unload["model"] == "alpha"
@@ -852,7 +882,7 @@ class TestManagedPicker:
             return picker.run()
 
         try:
-            notice = run_screen(ENTER, settled)
+            notice = run_screen(ENTER, settled, patience=_SETTLING)
             assert notice is not None and "ollama/beta" in notice
         finally:
             app.close()
@@ -861,7 +891,7 @@ class TestManagedPicker:
     def test_enter_on_a_not_loaded_model_loads_it_first(self, tmp_path) -> None:
         app, server = self.launch_managed(tmp_path)
         try:
-            notice = run_screen(ENTER, lambda: self.settled_pick(app))
+            notice = run_screen(ENTER, lambda: self.settled_pick(app), patience=_SETTLING)
             # The pick EXECUTES the switch and answers with its notice —
             # here a no-op notice, since the launch already stood on it.
             assert notice is not None and "ollama/alpha" in notice

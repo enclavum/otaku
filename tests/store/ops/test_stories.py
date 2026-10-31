@@ -1,7 +1,9 @@
 """Naming a story: the numbering every way of making one goes through —
-a fork of another, a document imported twice, a title typed twice."""
+a fork of another, a document imported twice, a title typed twice. And
+counting a message's words: a run between spaces holding a letter or a
+digit, each Chinese or Japanese character a word of its own."""
 
-from otaku.store.ops.stories import unique_title
+from otaku.store.ops.stories import _count_words, unique_title
 
 
 class TestUniqueTitle:
@@ -36,3 +38,25 @@ class TestUniqueTitle:
 
     def test_an_untitled_source_forks_untitled(self) -> None:
         assert unique_title("", set()) is None
+
+
+class TestCountWords:
+    def test_a_word_is_a_run_between_spaces(self) -> None:
+        assert _count_words("The keeper waits at the gate.") == 6
+        assert _count_words("Room 14, then\nthe stair.") == 5
+
+    def test_a_run_without_a_letter_or_a_digit_is_no_word(self) -> None:
+        assert _count_words("I open — the door. * * *") == 4
+        assert _count_words("___ ...") == 0
+
+    def test_nothing_counts_none(self) -> None:
+        assert _count_words("") == 0
+        assert _count_words(" \n\t ") == 0
+
+    def test_a_chinese_or_japanese_character_is_a_word(self) -> None:
+        assert _count_words("雨が降る") == 4
+        assert _count_words("下雨了") == 3
+        assert _count_words("I said 雨 twice") == 4
+
+    def test_korean_counts_its_words_as_they_stand(self) -> None:
+        assert _count_words("비가 온다") == 2

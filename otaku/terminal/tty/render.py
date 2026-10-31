@@ -32,10 +32,9 @@ from typing import TextIO
 from prompt_toolkit.utils import get_cwidth
 
 from otaku.formatting import printable
-from otaku.terminal.api import JoinType
-from otaku.terminal.api.story.language import is_option, spans
-from otaku.terminal.api.story.messages import Message
-from otaku.terminal.commands import COMMANDS
+from otaku.terminal.api import JoinType, Message
+from otaku.terminal.api import language as api_language
+from otaku.terminal.commands import ALIASES, COMMANDS
 from otaku.terminal.tty import DIM, user_block
 from otaku.terminal.tty.cursor import terminal_width
 from otaku.terminal.tty.theme import theme
@@ -108,6 +107,7 @@ class BlockStream:
     def close(self) -> str:
         written = self._place_word() + (_NORMAL if self._dim else "")
         self._out.write(written)
+        self._out.flush()
         return written
 
     def _take(self, ch: str) -> str:
@@ -182,7 +182,7 @@ class QuestionStream(BlockStream):
 
     def close(self) -> str:
         held = ""
-        if not self._options and not self._decided and not is_option(self._line):
+        if not self._options and not self._decided and not api_language.is_option(self._line):
             held = self._pass(self._line)  # a last line without its newline, the question's
         self._line = ""
         self._out.write(held)
@@ -194,7 +194,7 @@ class QuestionStream(BlockStream):
         if ch == "\n":
             out = ""
             if not self._decided:
-                if is_option(self._line):
+                if api_language.is_option(self._line):
                     self._options = True
                     return ""
                 out = self._pass(self._line)
@@ -205,7 +205,11 @@ class QuestionStream(BlockStream):
         self._line += ch
         # At the first token's end, the line tells: an option's head keeps
         # it held to its newline; anything else is the question's, and flows.
-        if ch.isspace() and self._line.strip() and not is_option(self._line.strip() + " x"):
+        if (
+            ch.isspace()
+            and self._line.strip()
+            and not api_language.is_option(self._line.strip() + " x")
+        ):
             self._decided = True
             return self._pass(self._line)
         return ""
@@ -233,11 +237,13 @@ def message(
     `shown` holds its tool (`shown_tools`), else left out — blocks behind the bar,
     wrapped at `width`, the terminal's unless the caller draws into a
     narrower place. In story mode's one text (`story`) a call of a tool
-    this build does not know is left out too. A reply is drawn from its
-    `segments`, its body as the backend split it (`Message.segments`); None
-    draws `text` as prose alone — a cut of a body, which no split
-    matches. Takes no settings besides that — the user's colors reached
-    the theme at launch, so a caller only has to say WHAT it is drawing.
+    this build does not know is left out too. A stored turn is drawn
+    from its `segments`, its body as the backend split it
+    (`Message.segments`) — a chapter's, its heading; None draws `text`:
+    a reply's as prose alone (a cut of a body, which no split matches),
+    a line not stored yet as the language reads it. Takes no settings
+    besides that — the user's colors reached the theme at launch, so a
+    caller only has to say WHAT it is drawing.
     The one renderer for showing AND measuring, so the ledger can never
     disagree with an echo."""
     if role == "user":
@@ -247,7 +253,7 @@ def message(
             f"{DIM}{highlight_commands(run, tokens)}{_NORMAL}"
             if ooc
             else highlight_commands(run, tokens)
-            for run, ooc in spans(text)
+            for run, ooc in _line_runs(text, segments)
         )
         if pictures:
             marker = f"{DIM}{pictures_note(pictures)}{_NORMAL}"
@@ -303,7 +309,7 @@ def message(
             continue
         else:
             # the calls with no look yet print as they streamed, in the
-            # language's canonical form (`context.tool_calls`), which the
+            # language's canonical form (`context.tools`), which the
             # terminal may not import — `chat.stream` spells it the same
             piece = f"```otk-{segment['tool']}\n{piece}\n```"
             streamer.feed(piece)
@@ -369,7 +375,9 @@ def turn(item: Message, *, shown: frozenset[str] = frozenset(), story: bool = Fa
     canvas, and a block stands alone: nothing of them is drawn."""
     body = item.body.strip()
     if item.role == "user":
-        return user_block(message(body, "user", pictures=len(item.attachments)))
+        return user_block(
+            message(body, "user", segments=item.segments, pictures=len(item.attachments))
+        )
     drawn = message(
         body,
         item.role,
@@ -423,12 +431,13 @@ def last_turns(
     return "\n".join(out).lstrip("\n")
 
 
-def unit_start(items: Sequence[Message], end: int) -> int:
-    """Where the reply ending at `items[end - 1]` begins as ONE unit —
-    what /undo and /regen take: the turn its `unit` names, found among
-    `items` (the turn itself where `items` starts after it)."""
-    unit = items[end - 1].unit
-    return next((at for at in range(end - 1, -1, -1) if items[at].id == unit), end - 1)
+def reply_start_index(items: Sequence[Message], end: int) -> int:
+    """Where in `items` the reply ending at `items[end - 1]` begins — the
+    whole of what /undo and /regen take: the turn its `reply_start_id`
+    names, found among `items` (the turn itself where `items` starts
+    after it)."""
+    first = items[end - 1].reply_start_id
+    return next((at for at in range(end - 1, -1, -1) if items[at].id == first), end - 1)
 
 
 def flow(
@@ -466,7 +475,11 @@ def flow_offsets(
         # there as the reader's line; the one the story stands on is drawn
         newest = posed and index == len(items) - 1
         seen = shown & {"question"} if newest else frozenset()
-        piece = prose(body.body) if item.role == "user" else turn(body, shown=seen, story=True)
+        piece = (
+            prose(line_text(item).strip(" \t"))
+            if item.role == "user"
+            else turn(body, shown=seen, story=True)
+        )
         if not out:
             starts.append(0)
             out = piece
@@ -491,6 +504,27 @@ def prose(text: str) -> str:
     return out.getvalue()
 
 
+def line_text(item: Message) -> str:
+    """A stored reader's line as it reads: its segments joined — its body
+    as typed, or a chapter's heading."""
+    return "".join(str(segment["text"]) for segment in item.segments)
+
+
+def _line_runs(
+    text: str, segments: Sequence[Mapping[str, object]] | None
+) -> list[tuple[str, bool]]:
+    """A reader's line as its runs of story and of words with the model:
+    a stored one's as the backend split it, its edges trimmed as `text`
+    is; a line not stored yet's as the language reads it."""
+    if segments is None:
+        return api_language.spans(text)
+    runs = [(str(segment["text"]), segment["kind"] == "ooc") for segment in segments]
+    if runs:
+        runs[0] = (runs[0][0].lstrip(), runs[0][1])
+        runs[-1] = (runs[-1][0].rstrip(), runs[-1][1])
+    return [run for run in runs if run[0]]
+
+
 def typeset_line(streamer: Streamer, text: str) -> None:
     """The reader's line into story mode's one text: its story typeset as
     a reply's prose is, through `streamer` — the reply's own, live, so a
@@ -504,7 +538,7 @@ def typeset_line(streamer: Streamer, text: str) -> None:
     streamer.feed(lead)
     tokens = command_tokens()
     command = theme().command.fg
-    for run, ooc in spans(core):
+    for run, ooc in api_language.spans(core):
         if ooc:
             streamer.aside(run, DIM)
             continue
@@ -521,6 +555,7 @@ def command_tokens() -> tuple[str, ...]:
     """Every slash word the app answers to, in table order — the commands
     typed at a line's start and the inliners typed inside one. What
     display reads to tell a command from prose: `/me` is one, `and/or`
-    is not, so a highlighter never has to guess from the slash alone."""
-    found = (word for spec in COMMANDS for word in spec.token.split())
+    is not, so a highlighter never has to guess from the slash alone. A
+    hidden alias is one too: typed, it runs its command."""
+    found = [word for spec in COMMANDS for word in spec.token.split()] + list(ALIASES)
     return tuple(dict.fromkeys(word for word in found if _COMMAND_WORD.match(word)))

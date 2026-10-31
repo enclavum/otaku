@@ -1,8 +1,8 @@
 # otaku - top level diagrams
 
 Two drawings of the same program at two scales: the packages and how
-they depend on each other, and the inside of `web`, where one thread and
-three secrets need a picture more than the rest of the code does.
+they depend on each other, and the inside of `web`, where the calls no
+import shows need a picture more than the rest of the code does.
 
 The RULES live in `docs/code_structure.md` — the layer table above all,
 which `tests/test_architecture.py` holds. What is here is only the shape
@@ -25,7 +25,7 @@ under the graph state the edges ASCII cannot draw cleanly.
              both ─► console   ▼
             ┌─────────────────────────┐   schedules  ┌──────────────────────┐
             │         backend         │ ───────────► │        agents        │ ◄── idle deadline
-            │  api · domain · launch  │              │ extraction · warm-up │
+            │ api · groups · launch   │              │ extraction · warm-up │
             └─┬──┬──┬──┬──┬──┬──┬─────┘              └──┬────┬────┬────┬────┘
               │  │  │  │  │  │  └► integrations         │    │    │    │
               │  │  │  │  │  └───► settings             │    │    │    │
@@ -36,9 +36,11 @@ under the graph state the edges ASCII cannot draw cleanly.
               │                      │ reads                           │
               └──────────────────► store ◄─────────────────────────────┘
 
-    backend: a frontend reaches it through `backend.api` alone (cli adds
-             `backend.launch`); inside, `errors` ◄ `domain.app` ◄ `domain.codex`
-             ◄ `domain.story` ◄ `api` ◄ `launch` — `docs/code_structure.md`,
+    backend: a frontend reaches it through the interface alone — `backend.api`
+             and the resources' and schemas' modules (cli adds `backend.launch`);
+             inside, a resource folder per resource in the groups `app`, `codex`,
+             `story`; the services `errors` ◄ `app` ◄ `codex` ◄ `story`, then the
+             schemas, the resources, `api` ◄ `launch` — `docs/code_structure.md`,
              "The backend"
     sealing: store · logging ─► encryption — the DATA plane (one session cipher
              for the database and the request log, BY DESIGN); backend ─► encryption
@@ -49,7 +51,7 @@ under the graph state the edges ASCII cannot draw cleanly.
              context ─► providers (the wire's types); logging ─► providers
     dashed, injected at composition (no import): the worker's status ─► a frontend's
              repaint · ask_secret ─► a frontend
-    terminal ─► web: /web serves the app the terminal holds to a browser and waits.
+    terminal ─► web: /set serve serves the app the terminal holds beside its chat.
              The one arrow between the frontends, and it points only this way — a
              page has nowhere to send anybody back to
     console: what a frontend draws in the terminal it was LAUNCHED from — the
@@ -59,12 +61,14 @@ under the graph state the edges ASCII cannot draw cleanly.
 
 ## Inside `web`
 
-Four modules and three secrets: `thread` (WHEN work runs), `api` (WHAT
-may be asked, as data), `server` (HOW it arrives) — with `run` above all
-three, owning the frontend's life and the terminal it prints into.
+Three modules and two secrets: `api` (WHAT may be asked, as data) and
+`server` (HOW it arrives) — with `run` above both, owning the frontend's
+life and the terminal it prints into. WHEN work runs is not the web's:
+the app has a thread of its own, the backend's (`backend.app.thread`),
+and every call is handed to it.
 
-                        cli ──► web/__init__ ──► run          (re-exports: run, run_shared,
-                                                               serve, settings, ServeError)
+                        cli ──► web/__init__ ──► run          (re-exports: run, run_beside,
+                                                               settings, Server, ServeError)
 
       user's terminal                                          browser
             │                                                     │
@@ -76,70 +80,54 @@ three, owning the frontend's life and the terminal it prints into.
       │ life; the ONLY    │ ◄───────────────────── │  guards · streams · assets   │
       │ module that       │   Hooks: show · record │                              │
       │ prints            │   working · ring ·     └───┬──────────────────────┬───┘
-      └────┬─────────┬────┘   check_password           │ run(work,            │ ROUTES · STREAMS
-           │         │        (injected, no            │ reading=…)           │ Ask · Created ·
-           │         │        import — see below)      │ drain()              │ Accepted · Tagged
-           │         └─────────────────────────────────┤                      │ Blob · event
-           │  AppRunner()                              ▼                      ▼
-           │  .loop(stopping) · .abandon()   ┌──────────────────┐   ┌──────────────────┐
-           └────────────────────────────────►│      thread      │   │       api        │
-                                             │ ONE thread owns  │   │ what the page    │
-                                             │ the app; two     │   │ may ask, as data │
-                                             │ queues           │   │                  │
-                                             └────────┬─────────┘   └────────┬─────────┘
-                                                      │ hands the app        │ Api(app)
-                                                      ▼ to the work          ▼
+      └───────────────────┘   check_password           │ app.run(work,        │ ROUTES · STREAMS
+                              (injected, no            │ reading=…)           │ Ask · Created ·
+                              import — see below)      │                      │ Accepted · Tagged
+                                                       │                      │ Blob · event
+                                                       │                      ▼
+                                                       │            ┌──────────────────┐
+                                                       │            │       api        │
+                                                       │            │ what the page    │
+                                                       │            │ may ask, as data │
+                                                       │            └────────┬─────────┘
+                                                       │                     │ Api(app)
+                                                       ▼                     ▼
                                                 ┌───────────────────────────────┐
-                                                │       backend (the app)       │
+                                                │ backend: the app, on its own  │
+                                                │ thread — every call queued,   │
+                                                │ in two lanes                  │
                                                 └───────────────────────────────┘
 
       run also ─► console (banner, keys, sound, ticker) · api (the slice it
                   listens on) · cert (the TLS pair)
       api  ─► backend.api only — no HTTP, no threads, nothing above it
-      thread ─► nothing: its runner is generic over the app it is handed
 
-Three edges are calls WITHOUT imports, which is why the cycle cannot be
-seen from the import list alone:
+Two edges are calls WITHOUT imports:
 
-- **`Hooks`** — `run.serve` builds five callables (`show`, `record`,
+- **`Hooks`** — `run._bind_server` builds five callables (`show`, `record`,
   `working`, `ring`, `check_password`) and hands them to `bind`. The
   server calls them and never imports `run`.
-- **`app.set_on_idle(runner.drain)`** — the APP calls the thread back
-  while a reply is only being waited for. Neither knows the other's
-  module.
-- **`runner.run(work)`** where `work` is `lambda app: call(Api(app),
-  ask)` — the api runs inside the thread's loop without either importing
-  the other.
+- **`app.run(work)`** where `work` is `lambda: call(api, ask)` — a route
+  runs as one unit on the app's thread, the backend knowing nothing of
+  the web's tables.
 
-And the import chain that settles whether `thread` could be folded into
-`run`: `run → server → thread`, plus `run → thread` directly. Fold it and
-`server → thread` becomes `server → run`, while `run → server` already
-exists — a cycle. It is not accidental: the thread that owns the app
-sits BELOW HTTP because HTTP hands work down to it, and the frontend's
-life sits ABOVE because it binds the server and prints about it.
+### When the app's thread is reached
 
-### When the thread is called
-
-Five moments, and the middle three are the whole reason the page stays
+Four moments, and the middle two are the whole reason the page stays
 answerable while the model is talking.
 
-1. **It becomes the main thread, once.** `run.serve` builds the
-   `AppRunner`, then gives the main thread to `AppRunner.loop` and puts
-   HTTP on a daemon thread beside it. The signal handler goes there too —
-   it is the only thread that can take one.
-2. **Every API request, from a handler thread.** The handler calls
-   `runner.run(work, reading=<method is GET>)` and blocks until the loop
-   picks the job up. `reading` chooses which of the two queues it joins,
-   and that is the whole of the lane rule.
-3. **Every reply, as one long job.** `Streams._pump` writes the entire
-   streaming reply — headers, every frame, the final ring — inside one
-   job on the app's thread.
-4. **Draining, from three directions, all on the app's own thread.**
-   The loop between jobs; `_pump` after every frame; and the idle hook
-   during the wait for a first token (`app.set_on_idle`: `run`'s
-   `runner.drain`, and for each reply `_drain_and_look`, which also
-   answers whether the page is still there). Reads are answered in each
-   of those gaps, which is why no lock appears anywhere in `thread.py`.
-5. **Shutdown.** `runner.abandon()` answers every job still queued, and
-   every one still to come, with `StoppingError` — including the handler
-   of a keep-alive connection that outlives the serving.
+1. **Every API request, from a handler thread.** The handler calls
+   `app.run(work, reading=<method is GET>)` and blocks until the app's
+   thread picks the job up. `reading` chooses which of the two lanes it
+   joins, and that is the whole of the lane rule.
+2. **Every reply, as one long job.** The stream verb queues the whole
+   turn as one job on the app's thread (`App.stream`); `Streams._pump`
+   writes the frames on the handler's own thread as the events are
+   handed across, and a watcher beside it closes the reply when the page
+   goes or the server stops — during the model's silence too.
+3. **Draining, on the app's own thread.** Between jobs, between a
+   reply's events, and while a job waits on the model (`AppThread.idle`)
+   the reads queued meanwhile are answered — which is why no lock guards
+   the app.
+4. **Shutdown.** `run` returns once the server is shut; closing the app
+   answers every job still queued with `StoppingError` (`App.close`).

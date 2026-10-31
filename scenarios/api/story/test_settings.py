@@ -19,9 +19,9 @@ from otaku.backend.api import (
     Layout,
     Refused,
 )
-from otaku.backend.api.app.integrations import WebSearch
-from otaku.backend.api.story.settings import LAYOUT_SETTING, StorySetting
-from otaku.backend.domain.app._paths import Paths
+from otaku.backend.app.integrations.schemas import WebSearch
+from otaku.backend.app.paths import Paths
+from otaku.backend.story.settings.schemas import LAYOUT_SETTING, StorySetting
 from otaku.settings import models as models_file
 from otaku.store.schema import StorySettingDB
 from otaku.terminal.screens import dossier as screen_dossier
@@ -172,25 +172,22 @@ class TestSettingsOfTools:
 
 class TestShownTools:
     """Which tools' calls a reader is shown, as the story says it: the
-    notes open while their display switch is on, folded while it is off —
-    a frontend that can fold draws them by their label — and nowhere
-    while the tool is off."""
+    notes while their tool is on with its display switch, and nowhere
+    otherwise."""
 
-    def test_notes_are_shown_while_displayed_folded_while_not_and_gone_when_off(
-        self, app: App
-    ) -> None:
+    def test_notes_are_shown_while_displayed_and_gone_while_not_or_when_off(self, app: App) -> None:
         story = app.ensure_story()
         app.api.stories.settings.update(
             story, "allow_assistant_notes", enabled=True, display_notes=True
         )
         facts = app.api.stories.get(story)
-        assert ("note" in facts.shown_tools, "note" in facts.folded_tools) == (True, False)
+        assert "note" in facts.shown_tools
         app.api.stories.settings.update(story, "allow_assistant_notes", display_notes=False)
         facts = app.api.stories.get(story)
-        assert ("note" in facts.shown_tools, "note" in facts.folded_tools) == (False, True)
+        assert "note" not in facts.shown_tools
         app.api.stories.settings.update(story, "allow_assistant_notes", enabled=False)
         facts = app.api.stories.get(story)
-        assert "note" not in facts.shown_tools | facts.folded_tools
+        assert "note" not in facts.shown_tools
 
 
 class TestSettingsOfReminders:
@@ -329,13 +326,13 @@ class TestToolsTab:
         # the key is typed over where it stands and saved with Ctrl+S
         self.tools(app, DOWN + ENTER + DOWN + ENTER + "tvly-abc" + CTRL_S + ESC + ESC)
         assert app.api.integrations.web_search.get() == WebSearch(True)
-        raw = app.paths.integrations_file.read_text()
+        raw = app.paths.integrations_file.read_text(encoding="utf-8")
         assert "tvly-abc" not in raw  # never plain in the file
         assert tomllib.loads(raw)["web_search"]["api_key"].startswith("sealed:")
         # Delete on the field forgets it, file and app both
         self.tools(app, DOWN + ENTER + DOWN + DELETE + ESC + ESC)
         assert app.api.integrations.web_search.get() == WebSearch(False)
-        file = tomllib.loads(app.paths.integrations_file.read_text())
+        file = tomllib.loads(app.paths.integrations_file.read_text(encoding="utf-8"))
         assert file["web_search"]["api_key"] == ""
 
     def test_the_emulation_is_the_last_row_its_instructions_then_its_depth(self, app: App) -> None:
@@ -369,7 +366,7 @@ class TestToolsTab:
     def test_the_prompts_file_holds_what_was_saved(self, app: App) -> None:
         app.play("I push the door.")
         self.tools(app, ENTER + ENTER + "Be brief. " + CTRL_S + ESC + ESC)
-        text = app.paths.prompts_file.read_text()
+        text = app.paths.prompts_file.read_text(encoding="utf-8")
         assert "Be brief. " in text
 
     def tools(self, app: App, keys: str) -> None:

@@ -22,9 +22,9 @@ from urllib.parse import urlsplit
 import pytest
 
 from otaku.backend.api import Layout
-from otaku.backend.domain.app._paths import Paths
-from otaku.backend.domain.app.models import PARAMETERS, THINK_MENU
-from otaku.backend.domain.codex.cards import NEW_CARD_NAME
+from otaku.backend.app.models.services import PARAMETERS, THINK_MENU
+from otaku.backend.app.paths import Paths
+from otaku.backend.codex.cards.services import NEW_CARD_NAME
 from otaku.integrations import SupportDesk
 from otaku.settings import models as models_file
 from otaku.store.files import Owner
@@ -75,7 +75,7 @@ class TestServing:
         assert page.headers("/web-fonts/Mine.woff2")["content-type"] == "font/woff2"
         # Absent, wrong kind, and a name that is not a name at all.
         assert page.status("/web-fonts/Absent.woff2") == 404
-        (theirs / "notes.txt").write_text("not a typeface")
+        (theirs / "notes.txt").write_text("not a typeface", encoding="utf-8")
         assert page.status("/web-fonts/notes.txt") == 404
         assert page.status("/web-fonts/../../configs/providers.toml") == 404
 
@@ -173,6 +173,7 @@ class TestTheSurface:
         path = f"/api/stories/{story}"
         assert page.status(path, method="PATCH", data=json.dumps({"head": first}).encode()) == 428
         assert page.status(f"{path}/undos", method="POST") == 428
+        assert page.status(f"{path}/reverts", method="POST") == 428
         # a title moves no head and names none
         assert page.status(path, method="PATCH", data=b'{"title": "The Weir"}') == 200
 
@@ -319,12 +320,12 @@ class TestReading:
         # out again.
         page.patch("/api/providers/openrouter", {"api_key": "k-test"})
         providers = page.root / "configs/providers.toml"
-        assert tomllib.loads(providers.read_text())["openrouter"]["api_key"]
+        assert tomllib.loads(providers.read_text(encoding="utf-8"))["openrouter"]["api_key"]
         answer = page.patch("/api/providers/openrouter", {"api_key": ""})
         assert answer["value"]["key_source"] is None
-        assert tomllib.loads(providers.read_text())["openrouter"]["api_key"] == ""
+        assert tomllib.loads(providers.read_text(encoding="utf-8"))["openrouter"]["api_key"] == ""
         page.patch("/api/providers/generic", {"url": ""})
-        assert tomllib.loads(providers.read_text())["generic"]["url"] == ""
+        assert tomllib.loads(providers.read_text(encoding="utf-8"))["generic"]["url"] == ""
 
     def test_a_provider_says_where_its_key_comes_from(self, page: Page, monkeypatch) -> None:
         # The field's caption, never the value: the section's key while
@@ -427,6 +428,17 @@ class TestReading:
         last = page.get(f"/api/stories/{page.story}/messages?last=1")["items"]
         assert [m["id"] for m in last] == [page.messages()[-1]["id"]]
         assert page.status(f"/api/stories/{page.story}/messages?last=0") == 400
+
+    def test_the_discarded_come_with_the_chain_where_they_are_asked_for(self, page: Page) -> None:
+        page.play("I listen at the culvert mouth.")
+        page.post(f"/api/stories/{page.story}/undos", if_match="*")
+        path = f"/api/stories/{page.story}/messages"
+        assert page.get(path)["items"] == []
+        listed = page.get(f"{path}?with_discarded=true")["items"]
+        assert [(m["role"], m["discarded"]) for m in listed] == [
+            ("user", True),
+            ("assistant", True),
+        ]
 
     def test_a_path_whose_id_is_not_one_addresses_nothing(self, page: Page) -> None:
         # A row id is digits, so a path carrying anything else names no
@@ -580,11 +592,24 @@ class TestWrites:
         assert answer["notice"] and answer["value"]["body"] == "I listen."
         assert page.store.stories.get_messages(page.story)[0].body == "I listen."
 
-    def test_a_malformed_body_is_the_page_s_fault_not_a_crash(self, page: Page) -> None:
-        # A field the page did not send is a bad request, not a 500.
+    def test_a_message_pinned_lands_in_the_store(self, page: Page) -> None:
         page.play("I listen at the culvert mouth.")
         first = page.store.stories.get_messages(page.story)[0]
-        assert page.status(f"/api/stories/{page.story}/messages/{first.id}", method="PATCH") == 400
+        path = f"/api/stories/{page.story}/messages/{first.id}"
+        answer = page.patch(path, {"pinned": True})
+        assert answer["notice"] and answer["value"]["pinned"] is True
+        assert page.store.messages.get(first.id).pinned
+        # a pin is a boolean, never a word that reads as one
+        assert page.status(path, method="PATCH", data=b'{"pinned": "yes"}') == 400
+
+    def test_a_malformed_body_is_the_page_s_fault_not_a_crash(self, page: Page) -> None:
+        # A text sent as null is a bad request, not a 500; a body naming
+        # nothing to change is the backend's refusal, with its sentence.
+        page.play("I listen at the culvert mouth.")
+        first = page.store.stories.get_messages(page.story)[0]
+        path = f"/api/stories/{page.story}/messages/{first.id}"
+        assert page.status(path, method="PATCH", data=b'{"body": null}') == 400
+        page.refused("PATCH", path, {})
 
     def test_a_journal_state_has_no_write(self, page: Page) -> None:
         # The entry is a journal's one writable field; a state is the
@@ -644,6 +669,17 @@ class TestWrites:
         story = page.made()
         null = b'{"head": null}'
         assert page.status(f"/api/stories/{story}", method="PATCH", data=null) == 400
+
+    def test_a_revert_puts_back_what_the_undo_took(self, page: Page) -> None:
+        page.play("I listen at the culvert mouth.")
+        story, head = page.story, page.messages()[-1]["id"]
+        undone = page.post(f"/api/stories/{story}/undos", if_match="*")
+        assert undone["value"]["can_revert"]
+        reverted = page.post(f"/api/stories/{story}/reverts", if_match="*")
+        assert reverted["notice"]
+        assert reverted["value"]["head"] == head and not reverted["value"]["can_revert"]
+        problem = page.refused("POST", f"/api/stories/{story}/reverts", if_match="*")
+        assert problem["status"] == 409
 
     def test_nothing_to_undo_is_an_answer_the_page_shows(self, page: Page) -> None:
         # An expected answer: the status that says why, and the sentence —
@@ -845,6 +881,13 @@ class TestStorySettings:
         ]
         assert all(i["tokens"] > 0 for i in injections)
 
+    def test_each_part_of_the_context_preview_carries_its_caption(self, page: Page) -> None:
+        # the words the terminal heads the part with, for the page to head it with too
+        page.play("I listen at the culvert mouth.")
+        parts = page.get(f"/api/stories/{page.story}/context")["parts"]
+        drawn = [part for part in parts if part["kind"] == "part"]
+        assert drawn and all(part["caption"] for part in drawn)
+
     def test_the_context_preview_carries_the_cards_and_what_they_inject(self, page: Page) -> None:
         page.play("I listen at the culvert mouth.")
         story = page.story
@@ -872,7 +915,7 @@ class TestStorySettings:
         answer = page.patch(path, {"text": "ASK ANEW"})
         assert answer["notice"] and answer["value"]["text"] == "ASK ANEW"
         assert page.get(path)["text"] == "ASK ANEW"
-        assert "ASK ANEW" in Paths.resolve(page.root).prompts_file.read_text()
+        assert "ASK ANEW" in Paths.resolve(page.root).prompts_file.read_text(encoding="utf-8")
         page.patch(path, {"text": ""})
         assert page.get(path)["text"] == shipped
         # a name no tool answers to
@@ -1471,9 +1514,9 @@ class TestTheNovelOverTheWire:
             # the preview is the one text the wire sends: the story in it,
             # and none of an instruct template's turn markers
             preview = page.get(f"/api/stories/{page.story}/context")
-            assert [part["role"] for part in preview["parts"]] == ["prompt"]
-            assert "\n\nI was waiting for" in preview["parts"][0]["body"]
-            assert "<|turn>" not in preview["parts"][0]["body"]
+            text = "".join(part.get("body", "") for part in preview["parts"])
+            assert "\n\nI was waiting for" in text
+            assert "<|turn>" not in text
             assert preview["shape"]["total_tokens"] > 0
             # a line played in the novel, then an empty line, the continue:
             # no message of the reader's for it; the line opens a paragraph
@@ -1504,7 +1547,7 @@ class TestWebSearchKeyOverTheWire:
         answer = page.patch(path, {"api_key": "tvly-abc"})
         assert answer["notice"] and answer["value"] == {"has_key": True}
         assert page.get(path) == {"has_key": True}
-        raw = Paths.resolve(page.root).integrations_file.read_text()
+        raw = Paths.resolve(page.root).integrations_file.read_text(encoding="utf-8")
         assert "tvly-abc" not in raw and "tavily" not in raw
         page.patch(path, {"api_key": "any-other"})
         assert page.get(path) == {"has_key": True}
@@ -1568,7 +1611,7 @@ class TestToolMessagesOverTheWire:
         ]
         assert rows[-1]["body"] == "It is late."
         # the reply holding the call and the result are one unit with the reply
-        assert rows[-1]["unit"] == rows[-3]["id"]
+        assert rows[-1]["reply_start_id"] == rows[-3]["id"]
 
 
 class TestSupportOverTheWire:

@@ -12,12 +12,12 @@ The layout follows the app's own seams:
   it carries the `cli` marker, because driving the real binary costs
   seconds where the in-process kind costs milliseconds. `test_screen.py`
   is the terminal's screen itself, emulated and held against its own
-  echo turn by turn: minutes, so `slow` too, run only with `--slow`.
-- `web/` — the page over a real app. Its `page` fixture serves on a
-  thread and speaks HTTP, holding the story it plays as the page does;
-  the app is opened on THAT thread, because a sqlite connection answers
-  only the one that opened it, and the test asserts through its own
-  store connection.
+  echo turn by turn: minutes, so `slow` too, which only `-m "not slow"`
+  leaves out.
+- `web/` — the page over a real app. Its `page` fixture serves the app
+  beside the test (`web.run_beside`) and speaks HTTP, holding the story
+  it plays as the page does; the test asserts through its own store
+  connection. `test_beside.py` is the page served beside the chat.
 - `live/` — the smokes that talk to real providers, one module per
   provider, each skipping itself when its server or api key is absent.
 - `providers/` — the providers' transport against a real socket on this

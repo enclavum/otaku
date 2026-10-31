@@ -30,7 +30,8 @@ the paragraph before it, as every reply that opens without a break does:
 
 A line whose number is `-1` fails half the time: the engine answers 500
 before a word arrives, and the reply stops on the failure; the other half,
-and so a retry may, it gets a paragraph of prose.
+and so a retry may, it gets a paragraph of prose. A line whose number is
+`-2` gets an empty reply: a newline alone, as some engines send.
 
 On the text wire a line runs on in the paragraph before it, so the line
 read there is what the story gained after the fake's own last reply. The
@@ -84,9 +85,21 @@ CONTINUATIONS = (
 )
 THOUGHTS = (
     "The reader wants to go in. The door was left unlocked in the last scene, so it opens; "
-    "keep the ferryman out of sight for now and let the room speak first.",
+    "keep the ferryman out of sight for now and let the room speak first. What does the room "
+    "hold? The lamp, cold since the morning; the table with the map still spread on it; the "
+    "smell of tar and wet rope from the pier below. Nothing should move yet — the stillness is "
+    "the point, and it makes the reader listen. The ferryman is close, though: a chair pushed "
+    "back, a cup still warm. Give one of those, not both, so the reader has something to "
+    "wonder about. End on a sound from the river side, a step or a creak, and leave it "
+    "unexplained so the next line is theirs.",
     "Two things are pending: the map and the missing courier. Nudge toward the map — it is "
-    "on the table already — and leave the courier for the next beat.",
+    "on the table already — and leave the courier for the next beat. The map matters more "
+    "right now: the reader asked about the crossing twice, and the map is where the crossing "
+    "is drawn. Someone has marked it since they last saw it, a cross in charcoal by the weir. "
+    "That mark ties back to the courier without naming him, which keeps the thread alive "
+    "without spending it. Keep the description short — three details at most — and let the "
+    "reader decide whether to touch it. If they ask who made the mark, the ferryman can "
+    "answer later, and badly; he should not be the one to explain it.",
 )
 NOTES = (
     "Thread: the cross by the weir marks where the courier went into the water.",
@@ -126,6 +139,7 @@ def main() -> None:
     server.template_reads = set()
     server.chunk_size = 6
     server.chunk_delay = args.pace
+    server.headers_delay = 2.0  # the prefill: nothing until the first token
     server.script = reply
     server.refuse = refuse
     server.refusal = "the test model failed, as -1 asks"
@@ -138,7 +152,7 @@ def main() -> None:
     print("A number in a line: 1 think · 2 note · 3 question · 4 system info · 5 search")
     print(
         "  6 long · 7 continuation · 8 paragraph · 0 everything — combine them: 13 or 1,3 …"
-        " · -1 a failure, half the time",
+        " · -1 a failure, half the time · -2 an empty reply",
         flush=True,
     )
     restore = _quiet_interrupt()
@@ -180,7 +194,10 @@ def reply(body: dict[str, Any]) -> str | tuple[str, str]:
     global _answered
     if "messages" not in body:
         # The text wire: one text, the newest line run on into it.
-        composed = _compose(_choices(_text_line(str(body.get("prompt", "")))), rounds=0)
+        line = _text_line(str(body.get("prompt", "")))
+        if _asks_empty(line):
+            return "\n"
+        composed = _compose(_choices(line), rounds=0)
         _answered = composed if isinstance(composed, str) else composed[1]
         return composed
     messages: list[dict[str, Any]] = body["messages"]
@@ -196,7 +213,10 @@ def reply(body: dict[str, Any]) -> str | tuple[str, str]:
         rounds, at = rounds + 1, at - 2
     line = content_text(messages[at]) if messages[at].get("role") == "user" else ""
     # the line's own paragraph: an injection merged into its row stands before it
-    return _compose(_choices(line.rstrip().rsplit("\n\n", 1)[-1]), rounds=rounds)
+    line = line.rstrip().rsplit("\n\n", 1)[-1]
+    if _asks_empty(line):
+        return "\n"
+    return _compose(_choices(line), rounds=rounds)
 
 
 def refuse(body: dict[str, Any]) -> int | None:
@@ -232,10 +252,17 @@ def _text_line(prompt: str) -> str:
     return prompt.rstrip().rsplit("\n\n", 1)[-1]
 
 
+def _asks_empty(line: str) -> bool:
+    """Whether `line`'s number is -2: an empty reply."""
+    found = _NUMBERS.search(line)
+    return found is not None and re.match(r"-2(?!\d)", found.group(0)) is not None
+
+
 def _choices(line: str) -> set[str]:
     """What `line` asks for: every digit of its first number, or of each
     number in a comma-separated list; none for a line without one, or
-    for one whose number is negative (-1 fails, `refuse`)."""
+    for one whose number is negative (-1 fails, `refuse`; -2 answers
+    empty, `reply`)."""
     found = _NUMBERS.search(line)
     if found is None or found.group(0).startswith("-"):
         return set()

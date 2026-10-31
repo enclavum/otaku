@@ -10,7 +10,7 @@ from collections.abc import Sequence
 from typing import Any, ClassVar
 from urllib.parse import quote
 
-from otaku.providers.clients import read_home_json
+from otaku.providers.clients import local_engines_host, read_home_json
 from otaku.providers.errors import StatusError
 from otaku.providers.http import ASK_TIMEOUT, PROBE_TIMEOUT, Cut, Http, positive_int
 from otaku.providers.openai import reasoning, templates
@@ -240,7 +240,7 @@ class OmlxClient(OpenAIClient):
         port = positive_int(server.get("port")) if isinstance(server, dict) else None
         auth = settings.get("auth")
         key = auth.get("api_key") if isinstance(auth, dict) else None
-        url = f"http://localhost:{port or 8000}/v1"
+        url = f"http://{local_engines_host()}:{port or 8000}/v1"
         return ProviderConfig(name=cls.id, url=url, api_key=str(key) if key else "")
 
 

@@ -1,29 +1,45 @@
 """A typed command carried out. The routing: the line split into its
 command and its argument (`find`, `raw_argument`), the sentence for one
-no row answers (`unknown_notice`), and every handler merged into one
-table (`HANDLERS` — a token two modules answer is a fault at import).
-The handlers are laid out as the door is (`terminal.api`), a module for
-each resource that has commands (`app`, `story`) — what the terminal
-does with a command: the door's call, then what is drawn, where it
-lands, which screen opens — and the four the terminal answers itself
-are here, as the web's server holds its own paths: the /help page, the
-app served to a browser (/web), the screen cleared, the session ended.
-A handler takes the chat and the argument as typed, and answers the
+no row answers (`unknown_notice`), and every command's handler in one
+table (`HANDLERS`). A resource whose commands do more than call the
+door has a module of handlers, flat as the door is (`terminal.api`),
+named after it, `app` the app's own — what the terminal does with a
+command: the door's call, then what is drawn, where it lands, which
+screen opens. A command that is one call is its row's lambda, and the
+three the terminal answers itself are here, as the web's server holds
+its own paths: the /help page, the screen cleared, the session ended. A
+handler takes the chat and the argument as typed, and answers the
 sentence to say — or None, where it said its own."""
 
-from collections.abc import Callable, Mapping
+import contextlib
+from collections.abc import Callable
 
-from otaku import web as web_frontend
 from otaku.terminal import help as help_page
 from otaku.terminal.api import Refused
+from otaku.terminal.api import lore as api_lore
+from otaku.terminal.api import models as api_models
+from otaku.terminal.api import reports as api_reports
+from otaku.terminal.api import settings as api_settings
+from otaku.terminal.api import stories as api_stories
 from otaku.terminal.chat.chat import Chat
-from otaku.terminal.commands import COMMANDS, SHORTCUTS, CommandSpec, is_command
-from otaku.terminal.dispatch import app
-from otaku.terminal.dispatch.app import integrations, models, reports
-from otaku.terminal.dispatch.app import settings as app_settings
-from otaku.terminal.dispatch.story import cards, context, lore, messages, stories, transfer
-from otaku.terminal.dispatch.story import settings as story_settings
-from otaku.terminal.tty import error_line
+from otaku.terminal.commands import (
+    ALIASES,
+    COMMANDS,
+    SHORTCUTS,
+    CommandSpec,
+    CommandType,
+    is_command,
+)
+from otaku.terminal.dispatch import (
+    app,
+    cards,
+    context,
+    lore,
+    messages,
+    settings,
+    stories,
+    transfer,
+)
 from otaku.terminal.tty.render import command_tokens
 from otaku.terminal.tty.typography import highlight_commands
 
@@ -37,7 +53,7 @@ Handler = Callable[[Chat, str], str | None]
 # lands below the last exchange and invalidates on its first say — the
 # dispatch window watches for the write rather than assuming one, so a
 # picker left without a choice costs the exchanges above it nothing.
-_PLAYING = {"/undo", "/regen", "/card"}
+_PLAYING = {"/undo", "/regen", "/revert", "/card"}
 
 
 def dispatch(chat: Chat, line: str) -> bool:
@@ -48,7 +64,13 @@ def dispatch(chat: Chat, line: str) -> bool:
         return False
     spec = find(line)
     token = spec.token if spec else line.split()[0]
-    with chat.ledger.command_output(manages_screen=token in _PLAYING):
+    # A command that only prints keeps the status row standing through its
+    # run, as a reply does: the prompt's toolbar is gone the moment the
+    # line is sent. One that draws on the screen itself — erases rows,
+    # opens a screen, pages, asks — is left the whole terminal.
+    printing = spec is None or spec.kind is CommandType.OPERATION
+    row = chat.status_line.pinned() if printing else contextlib.nullcontext()
+    with chat.ledger.command_output(manages_screen=token in _PLAYING), row:
         try:
             if spec is None:
                 chat.say(unknown_notice(line))
@@ -57,7 +79,7 @@ def dispatch(chat: Chat, line: str) -> bool:
                 if said is not None:
                     chat.say(said)
         except Refused as e:
-            chat.say(str(e))
+            chat.refuse(e)
     return True
 
 
@@ -66,8 +88,11 @@ def find(token: str) -> CommandSpec | None:
     "/set think medium" finds the "/set think" row; None for an unknown
     command (bare "/set" included: the family's usage line is `unknown_notice`'s
     to compose, below). Inliner rows (`… /ooc`) never match — they close
-    a line, they do not open one."""
+    a line, they do not open one. A hidden alias finds its command's row
+    (`commands.ALIASES`)."""
     words = token.split()
+    if words and words[0] in ALIASES:
+        words[0] = ALIASES[words[0]]
     for depth in (2, 1):
         head = " ".join(words[:depth])
         for spec in COMMANDS:
@@ -117,69 +142,69 @@ def _help(chat: Chat, raw: str) -> None:
     chat.say(highlight_commands(help_page.text(captions), command_tokens()))
 
 
-def _web(chat: Chat, raw: str) -> None:
-    """Serve this app to a browser and stand here until the reader
-    stops it, then carry on at the prompt below. One app throughout:
-    the other frontend is handed the open one rather than opening its
-    own, and closing it stays cli's either way.
-
-    This is the one place the terminal reaches the other frontend, and
-    the arrow points only this way — a page has nowhere to send anybody
-    back to."""
-    # The other frontend prints into this terminal itself, which is
-    # printing PAST `say` — so the say protocol is announced here
-    # instead: the blank under the typed line, the stack invalidated
-    # (what it prints lands past every row the ledger was counting), and
-    # the gap before the next prompt earned. Without this the banner
-    # opens flush against `/web` and the loop prints no gap at all.
-    print(chat.ledger.said(), end="")
-    try:
-        web_frontend.run_shared(chat.app)
-    except web_frontend.ServeError as e:
-        # The address is configuration, and a reader who cannot have the
-        # browser keeps the chat: a sentence, not a crash. The
-        # reason is web's own words, under this medium's.
-        chat.say(error_line(f"The web interface could not start: {e}"))
-
-
 def _clear(chat: Chat, raw: str) -> None:
     """Wipe the screen; the story is untouched and /last brings the
     scene back. The next prompt opens at the top."""
     chat.ledger.clear()
 
 
-def _bye(chat: Chat, raw: str) -> None:
+def _quit(chat: Chat, raw: str) -> None:
     chat.quit = True
 
 
 # ---------- the rows ----------
 
 
-def _merged(*tables: Mapping[str, Handler]) -> dict[str, Handler]:
-    """The command modules' rows as one table; a token two modules claim
-    is a bug, caught here rather than by whichever import ran last."""
-    out: dict[str, Handler] = {}
-    for table in tables:
-        twice = set(out) & set(table)
-        if twice:
-            raise AssertionError(f"a command in two modules: {sorted(twice)}")
-        out.update(table)
-    return out
-
-
-# Every command the terminal answers, by its token.
-HANDLERS: dict[str, Handler] = _merged(
-    {"/help": _help, "/web": _web, "/clear": _clear, "/bye": _bye},
-    app.HANDLERS,
-    models.HANDLERS,
-    app_settings.HANDLERS,
-    reports.HANDLERS,
-    integrations.HANDLERS,
-    stories.HANDLERS,
-    story_settings.HANDLERS,
-    messages.HANDLERS,
-    lore.HANDLERS,
-    cards.HANDLERS,
-    context.HANDLERS,
-    transfer.HANDLERS,
-)
+# Every command the terminal answers, by its token, under the resource it
+# reaches; a command that is one call of the door is a lambda, the door's
+# answer (a report's `text()`) the sentence.
+HANDLERS: dict[str, Handler] = {
+    # the terminal's own
+    "/help": _help,
+    "/clear": _clear,
+    "/quit": _quit,
+    # the app itself (`backend.app.core`)
+    "/model": app.model,
+    # the installation's settings (`backend.app.settings`)
+    "/set verbose": lambda chat, raw: api_settings.set_verbose(chat.api, raw),
+    "/set autocorrect": lambda chat, raw: api_settings.set_autocorrect(chat.api, raw),
+    "/set notification": lambda chat, raw: api_settings.set_notification(chat.api, raw),
+    "/set show_thinking": lambda chat, raw: api_settings.set_show_thinking(chat.api, raw),
+    "/set max_context": lambda chat, raw: api_settings.set_max_context(chat.api, raw),
+    "/set serve": settings.set_serve,
+    # the model in use's own settings (`backend.app.models`)
+    "/set think": lambda chat, raw: api_models.set_think(chat.api, raw),
+    "/set parameter": lambda chat, raw: api_models.set_parameter(chat.api, raw),
+    # a support request (`backend.app.integrations`): the whole line, an
+    # address to answer at included
+    "/support": lambda chat, raw: chat.api.integrations.support_requests.create(body=raw).notice,
+    # the reports (`backend.app.reports`)
+    "/usage": lambda chat, raw: api_reports.usage(chat.api, chat.story_id, raw).text(),
+    "/info": lambda chat, raw: chat.api.info.get(story_id=chat.story_id).text(),
+    "/balance": lambda chat, raw: chat.api.balance.get().text(),
+    # the stories (`backend.story.stories`)
+    "/stories": stories.stories,
+    "/new": stories.new,
+    "/fork": stories.fork,
+    "/title": lambda chat, raw: api_stories.title(chat.api, chat.story_id, raw, make=chat.writing),
+    "/system": stories.system,
+    "/regen": stories.regen,
+    "/undo": stories.undo,
+    "/revert": stories.revert,
+    # a story's settings (`backend.story.settings`)
+    "/set mode": settings.set_mode,
+    # its messages (`backend.story.messages`)
+    "/last": messages.last,
+    # its lore (`backend.story.lore`)
+    "/lore": lore.lore,
+    "/cast": lore.cast,
+    "/extract": lore.extract,
+    "/merge": lambda chat, raw: api_lore.merge(chat.api, chat.played(), raw),
+    # a character card brought in (`backend.story.cards`)
+    "/card": cards.card,
+    # its next request (`backend.story.context`)
+    "/context": context.context,
+    # the story in and out as a document (`backend.story.transfer`)
+    "/import": transfer.import_,
+    "/export": transfer.export,
+}

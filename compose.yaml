@@ -1,0 +1,37 @@
+# otaku in a container: the web on port 9600, the library in the
+# `otaku_data` volume.
+#
+# Note: with docker, you cannot access the terminal interface. To use it,
+# install otaku without docker.
+
+name: otaku
+
+services:
+  otaku:
+    container_name: otaku
+    image: otaku
+    build: .
+    pull_policy: build
+    tty: true
+    ports:
+      - "9600:9600"
+    volumes:
+      - data:/data
+    environment:
+      # Lets otaku connect to local backends on this machine: their default
+      # URLs name this host, since localhost inside the container is the
+      # container itself (extra_hosts maps the name on Linux).
+      OTAKU_LOCAL_ENGINES_HOST: "host.docker.internal"
+      OTAKU_WEB_HOST: "0.0.0.0"
+      OTAKU_WEB_PORT: "9600"
+      OTAKU_WEB_PASSWORD: ""  # set one, as the page can be reachable from your network
+      OTAKU_WEB_HTTPS: "off"
+      OTAKU_TERMINAL_SERVE: "on"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # On Linux, uncomment to reach backends that listen on 127.0.0.1 only,
+    # and set OTAKU_LOCAL_ENGINES_HOST above to "localhost".
+    # network_mode: host
+
+volumes:
+  data:

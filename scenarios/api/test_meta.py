@@ -1,4 +1,4 @@
-"""Meta commands: /help and /bye — about the app, not the story."""
+"""Meta commands: /help and /quit — about the app, not the story."""
 
 from scenarios.support.harness import App
 
@@ -18,7 +18,7 @@ class TestCrashContainment:
         assert "Command failed (RuntimeError)" in out
         assert "error-" in out  # the notice names the log
         errors = [f for f in (app.paths.root / "logs").rglob("error-*") if f.is_file()]
-        assert errors and "Traceback" in errors[0].read_text()
+        assert errors and "Traceback" in errors[0].read_text(encoding="utf-8")
         # The session lives on: the next line plays normally.
         app.play("I enter the hall.")
         assert app.messages[-1].body
@@ -30,3 +30,12 @@ class TestUnknown:
         assert "abracadabra" in capsys.readouterr().out
         assert app.story_id is None  # nothing was created...
         assert app.server.requests == []  # ...and nothing was sent
+
+
+class TestQuit:
+    def test_quit_and_its_old_names_end_the_session(self, app: App) -> None:
+        # `/bye`, its name before 0.9.0, and `/exit` are hidden aliases
+        for typed in ("/quit", "/bye", "/exit"):
+            app.chat.quit = False
+            app.play(typed)
+            assert app.chat.quit, typed

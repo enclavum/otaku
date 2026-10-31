@@ -9,7 +9,7 @@ import base64
 from typing import Any
 
 from otaku.backend.api import UNCHANGED, Api, Unchanged
-from otaku.backend.api.codex.cards import RawFile
+from otaku.backend.codex.cards.schemas import RawFile
 from otaku.web.api._request import Ask, Created, Route, changed, plain
 
 

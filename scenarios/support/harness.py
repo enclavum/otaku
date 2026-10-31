@@ -27,10 +27,10 @@ from otaku import encryption
 from otaku.backend import launch as backend_launch
 from otaku.backend.api import Api, Layout, ModelRef
 from otaku.backend.api import App as BackendApp
-from otaku.backend.api.app.models import ModelSettings
-from otaku.backend.api.story.messages import Message
-from otaku.backend.api.story.settings import DEFAULT_LAYOUT
-from otaku.backend.domain.app._paths import Paths
+from otaku.backend.app.models.schemas import ModelSettings
+from otaku.backend.app.paths import Paths
+from otaku.backend.story.messages.schemas import Message
+from otaku.backend.story.settings.schemas import DEFAULT_LAYOUT
 from otaku.encryption import seal
 from otaku.settings import config as config_file
 from otaku.settings import providers as providers_file
@@ -127,6 +127,7 @@ class App:
         run.submit(self.chat, line)
 
     def close(self) -> None:
+        self.chat.stop_serving()
         self.store.close()
         self.backend.close()
 
@@ -135,10 +136,7 @@ def read_store(root: Path) -> Store:
     """A second connection over the same database, for assertions —
     unlocked the way the launch unlocks (the scripted `command` KEK
     provider works headless), so no scenario reaches into the app's
-    package-private store. WAL makes the concurrent read safe.
-
-    A connection answers only the thread that opened it, so a scenario
-    that serves on another thread opens its own here."""
+    package-private store. WAL makes the concurrent read safe."""
     paths = Paths.resolve(root)
     cfg = config_file.load(paths.config_file)
     cipher = encryption.unlock(
@@ -165,9 +163,14 @@ def run_otaku(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, "-c", "from otaku.cli import main; main()", *args],
         capture_output=True,
-        text=True,
+        encoding="utf-8",
         timeout=30,
-        env={**os.environ, "OTAKU_CONFIG_DIR": str(root), "COLUMNS": "200"},
+        env={
+            **os.environ,
+            "OTAKU_CONFIG_DIR": str(root),
+            "COLUMNS": "200",
+            "OTAKU_UPDATE_URL": "http://127.0.0.1:9/",  # never GitHub
+        },
         check=False,
     )
 

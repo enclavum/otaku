@@ -184,7 +184,8 @@ export function wireFilter(popup, { refilter, focus }, signal, root = popup) {
 export function browser(popup, options) {
   /* Every callback a screen hands in reaches otaku and can fail,
      so every one of them is answered for here. */
-  const { rows, drawRow, drawPreview, groupOf, drawGroup, search, onKey, empty } = options;
+  const { drawRow, drawPreview, groupOf, drawGroup, search, onKey, empty } = options;
+  let rows = options.rows; // another set swapped in by `replace`
   const onOpen = guard(options.onOpen);
   const onDelete = guard(options.onDelete);
   const onEdit = guard(options.onEdit);
@@ -367,6 +368,17 @@ export function browser(popup, options) {
     /** And what `enter` does to it, for the button that says so. */
     open() {
       if (shown.length) onOpen?.(shown[cursor]);
+    },
+    /** Another set of rows in place of these, the filter kept and the
+        cursor on the first row `keeps` matches where there is one. */
+    async replace(next, keeps) {
+      rows = next;
+      await refilter(filtering);
+      const found = shown.findIndex(keeps);
+      if (found >= 0) {
+        cursor = found;
+        mark();
+      }
     },
   };
 }

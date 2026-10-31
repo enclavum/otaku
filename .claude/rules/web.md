@@ -4,6 +4,7 @@ paths:
   - "demo/**/*"
   - "scenarios/web/**/*"
   - "otaku/cli.py"
+  - "otaku/backend/app/thread.py"
 ---
 
 # The web
@@ -14,13 +15,31 @@ modules, the page and the demo, held by `scenarios/web`.
 
 ## The one thread
 
-ONE THREAD owns the app (`web.thread`): a handler reaches it only
-through `AppRunner.run` or a `Hooks` callable (`web.server.base`), each
-safe from any thread. The METHOD is the lane (`web.server`): a route is
-a GET exactly when its call only reads, since a read is answered between
-a reply's frames, and the page sends every read as a GET
-(`js/api/_http.js`) — a read filed as a POST would queue behind a reply
-and leave every screen dead while the model talks.
+ONE THREAD owns the app, and it is the backend's (`backend.app.thread`):
+a handler runs each route as one unit on it (`App.run`) or calls a
+`Hooks` callable (`web.server.base`), each safe from any thread, and a
+reply's frames are written on the handler's own thread as the events are
+handed across. The METHOD is the lane (`web.server`): a route is a GET
+exactly when its call only reads, since a read is answered between a
+reply's frames and while the model is silent, and the page sends every
+read as a GET (`js/api/_http.js`) — a read filed as a POST would queue
+behind a reply and leave every screen dead while the model talks.
+
+## Text that stays keeps its place — VERY IMPORTANT
+
+**This rule is never broken, and every change to the page is checked
+against it.** Once the transcript's text is drawn, some of it may be
+cleared — an undo, a regenerate — but the text that stays keeps its
+position: it moves neither down nor up. It moves up only as the reader
+at the end is carried along by what is added below it (`follow`); the
+one exception is the reader opening a block (`openable`), which pushes
+what stands under it down. A change that shortens the flow — a caret
+taken off a row of its own, a block giving way to a shorter one, a turn
+taken off — holds the space it gave up (`transcript.holdSpace`) until
+what comes next grows into it. Every streamed event is drawn inside it
+(`draw`), and so are an undo (`takeBack`), a regenerate's start and a
+landing (`endTurn`); a new change to the flow outside those goes
+through it too.
 
 ## The HTTP conventions
 
@@ -43,9 +62,8 @@ and leave every screen dead while the model talks.
   fault and the credential guard's 401 never carry a `detail`.
 - **A port outside 1–65535 never reaches the bind**, whichever source
   names it: the file's is clamped at load (`settings.config`),
-  `OTAKU_WEB_PORT`'s is rejected (`web.run.settings`), `--port` is
-  refused by the parser (`cli`) — the address is printed before the
-  bind.
+  `OTAKU_WEB_PORT`'s is passed over (`settings.services.get_web_settings`)
+  and the launch says so — the address is printed before the bind.
 - **The state dir's `web/`** (`custom.css`, `fonts/`) is the reader's
   alone, never written by the app; the `--otk-*` tokens and documented
   hooks are a public contract (`docs/web_tokens.md`), a rename a

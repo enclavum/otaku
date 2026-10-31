@@ -551,6 +551,7 @@ def _patch_threads() -> None:
     import otaku.terminal.screens.models as screens_models
     from otaku.agents import Worker
     from otaku.agents.extraction import Extractor, PassResult, Report
+    from otaku.backend.app.thread import AppThread
     from otaku.providers import smoothing
     from otaku.providers.registry import Registry
 
@@ -592,6 +593,10 @@ def _patch_threads() -> None:
 
     chat_stream.Spinner = DemoSpinner
     chat_stream._StreamWatcher = DemoStreamWatcher
+
+    # The app's own thread cannot start either: with none started, every
+    # call runs where it is made (`AppThread`), on the demo's one thread.
+    AppThread.start = lambda self: None  # type: ignore[method-assign]
 
     # The worker's two daemon threads cannot start; the demo never
     # schedules idle passes (lore_enabled=False), and a FORCED pass —
@@ -687,7 +692,7 @@ def _seed_state_dir(root: Path) -> None:
     one scripted provider, smoothing off (the pacing is the script's),
     idle extraction off (a browser tab has no worker thread to run it —
     /extract is the demo's door), samples on."""
-    from otaku.backend.domain.app._paths import Paths
+    from otaku.backend.app.paths import Paths
     from otaku.settings import config as config_file
     from otaku.settings import providers as providers_file
     from otaku.settings import write_atomic
@@ -733,7 +738,7 @@ def main() -> None:
     from prompt_toolkit.application import create_app_session
 
     import otaku.terminal.dispatch as dispatch
-    import otaku.terminal.dispatch.story.context as story_context
+    import otaku.terminal.dispatch.context as dispatch_context
     import otaku.terminal.tty as tty_mod
     from otaku.backend import launch as backend_launch
     from otaku.backend.api import Api, ModelRef
@@ -747,15 +752,15 @@ def main() -> None:
     providers_registry.ALL_CLIENTS[PROVIDER] = _build_demo_client()
     _patch_threads()
 
-    # Two doors a tab cannot honor: /web binds a socket, and /bye — with
-    # Ctrl+D, the app's own shortcut submitting /bye on an empty line —
+    # Two doors a tab cannot honor: /set serve binds a socket, and /quit — with
+    # Ctrl+D, the app's own shortcut submitting /quit on an empty line —
     # would end a session only a reload can restart. Both answer with
     # one sentence instead.
     def demo_disabled(chat, raw: str) -> None:
         chat.say("This command is disabled in the demo.")
 
-    dispatch.HANDLERS["/web"] = demo_disabled
-    dispatch.HANDLERS["/bye"] = demo_disabled
+    dispatch.HANDLERS["/set serve"] = demo_disabled
+    dispatch.HANDLERS["/quit"] = demo_disabled
 
     # /card is REAL here — parser, persona ask, join, greeting all run —
     # so a bare /card points at the card the demo ships instead of
@@ -771,7 +776,7 @@ def main() -> None:
 
     dispatch.HANDLERS["/card"] = demo_card
     # /context pages through `less`; the terminal here scrolls instead.
-    story_context.click = SimpleNamespace(
+    dispatch_context.click = SimpleNamespace(
         echo_via_pager=lambda text, color=True: (
             sys.stdout.write(text if text.endswith("\n") else text + "\n"),
             sys.stdout.flush(),

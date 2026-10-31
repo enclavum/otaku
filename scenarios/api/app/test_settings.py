@@ -1,11 +1,19 @@
 """The installation's settings: /set verbose and /set notification, kept
 in the app's own state, and /set max_context, config.toml's [context]
 value edited in place, its one home — each remembered across a
-relaunch.
+relaunch; and /set serve, the page served beside the chat, its switch
+in config.toml's [web]. The environment's variables over the file's:
+the web's host, port, password and https, and the terminal's serving.
 """
 
-from otaku.backend.api.app.settings import Settings
-from otaku.backend.api.story.messages import Done
+import socket
+import urllib.request
+
+import pytest
+
+from otaku.backend.app.settings.schemas import Settings
+from otaku.backend.errors import Invalid
+from otaku.backend.story.messages.schemas import Done
 from otaku.terminal.chat import stream
 from scenarios.support.harness import App, launch, set_config, set_config_provider
 from scenarios.support.server import ModelServer
@@ -60,7 +68,7 @@ class TestMaxContext:
 
     def test_the_set_value_lands_in_config_toml_and_is_remembered(self, app: App) -> None:
         app.play("/set max_context 32000")
-        migrated = app.paths.config_file.read_text()
+        migrated = app.paths.config_file.read_text(encoding="utf-8")
         assert "max_context = 32000" in migrated
         assert migrated.count("max_context") == 1  # edited in place, not appended
         assert "0 = the model's own max context" in migrated  # the comment rides it
@@ -97,14 +105,14 @@ class TestMaxContext:
         capsys.readouterr()
         app.play("/set max_context")
         assert "32,000 tokens" in capsys.readouterr().out
-        assert "max_context = 32000" in app.paths.config_file.read_text()
+        assert "max_context = 32000" in app.paths.config_file.read_text(encoding="utf-8")
 
     def test_the_prompt_may_use_the_whole_window_until_a_cap_is_set(self, app: App) -> None:
         # 0 is what a fresh config carries: the window a model advertises
         # is the one it can use, and a reader who wants the prompt kept
         # smaller than that says so.
         assert _settings(app).context_limit == 0
-        assert "max_context = 0" in app.paths.config_file.read_text()
+        assert "max_context = 0" in app.paths.config_file.read_text(encoding="utf-8")
 
     def test_a_story_over_the_cap_declines_with_the_sentence(self, app: App, capsys) -> None:
         for i in range(8):
@@ -115,6 +123,180 @@ class TestMaxContext:
         app.play("We continue.")
         assert len(app.server.requests) == before  # nothing was sent
         assert "does not fit the context limit" in capsys.readouterr().out
+
+
+class TestServe:
+    """`/set serve`: the page served beside the chat, on the address
+    config.toml's [web] names — a free port here, so no test ever reaches
+    a real otaku's — and the switch kept in its [terminal] (`serve`), off
+    until asked."""
+
+    def test_on_serves_the_page_and_off_stops_it(self, app: App, monkeypatch) -> None:
+        port = _free_port(monkeypatch)
+        app.play("/set serve on")
+        assert _answers(port)
+        app.play("/set serve off")
+        assert not _listening(port)
+
+    def test_the_switch_lands_in_config_toml(self, app: App, monkeypatch) -> None:
+        _free_port(monkeypatch)
+        app.play("/set serve on")
+        assert "\nserve = true" in app.paths.config_file.read_text(encoding="utf-8")
+        app.play("/set serve off")
+        assert "\nserve = false" in app.paths.config_file.read_text(encoding="utf-8")
+
+    def test_the_page_is_served_again_right_after_off(self, app: App, monkeypatch) -> None:
+        # the closed connections still linger on the port when it is asked
+        # for again
+        port = _free_port(monkeypatch)
+        app.play("/set serve on")
+        assert _answers(port)
+        app.play("/set serve off")
+        app.play("/set serve on")
+        assert _answers(port)
+
+    def test_a_port_already_held_serves_nothing_and_keeps_the_switch(
+        self, app: App, monkeypatch
+    ) -> None:
+        port = _free_port(monkeypatch)
+        with socket.socket() as holder:
+            holder.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            holder.bind(("127.0.0.1", port))
+            holder.listen()
+            app.play("/set serve on")
+        assert not _listening(port)  # nothing of otaku's took it
+        assert app.api.settings.terminal.get().serve is True
+
+    def test_a_config_from_before_the_switch_gets_it_at_the_launch(self, app: App) -> None:
+        config = app.paths.config_file
+        config.write_text(
+            "".join(
+                row
+                for row in config.read_text(encoding="utf-8").splitlines(True)
+                if not row.startswith("serve ")
+            ),
+            encoding="utf-8",
+        )
+        relaunched = launch(app.paths.root, app.server)
+        assert "\nserve = false" in config.read_text(encoding="utf-8")
+        assert relaunched.api.settings.terminal.get().serve is False
+        relaunched.close()
+
+
+class TestShowThinking:
+    """`/set show_thinking`: the terminal prints a reply's thinking, or
+    only how long it took — the terminal's own setting, kept in
+    config.toml's [terminal], off until asked."""
+
+    def test_the_switch_lands_in_config_toml_and_reads_back(self, app: App) -> None:
+        assert app.api.settings.terminal.get().show_thinking is False
+        app.play("/set show_thinking on")
+        assert "\nshow_thinking = true" in app.paths.config_file.read_text(encoding="utf-8")
+        assert app.api.settings.terminal.get().show_thinking is True
+        app.play("/set show_thinking off")
+        assert "\nshow_thinking = false" in app.paths.config_file.read_text(encoding="utf-8")
+        assert app.api.settings.terminal.get().show_thinking is False
+
+    def test_bare_or_a_word_it_cannot_read_moves_nothing(self, app: App) -> None:
+        app.play("/set show_thinking on")
+        app.play("/set show_thinking")
+        app.play("/set show_thinking sometimes")
+        assert app.api.settings.terminal.get().show_thinking is True
+        assert "\nshow_thinking = true" in app.paths.config_file.read_text(encoding="utf-8")
+
+    def test_the_shared_settings_do_not_carry_it(self, app: App) -> None:
+        # the terminal's alone: the page draws its thinking as blocks to open
+        assert not hasattr(app.api.settings.get(), "show_thinking")
+
+    def test_a_config_from_before_the_switch_gets_it_at_the_launch(self, app: App) -> None:
+        config = app.paths.config_file
+        config.write_text(
+            "".join(
+                row
+                for row in config.read_text(encoding="utf-8").splitlines(True)
+                if not row.startswith("show_thinking ")
+            ),
+            encoding="utf-8",
+        )
+        relaunched = launch(app.paths.root, app.server)
+        assert "\nshow_thinking = false" in config.read_text(encoding="utf-8")
+        assert relaunched.api.settings.terminal.get().show_thinking is False
+        relaunched.close()
+
+
+class TestVariables:
+    """Each web setting is the environment's where a variable sets it —
+    read with every call — and config.toml's otherwise; the file is
+    never written."""
+
+    def test_the_web_settings_are_the_variables_over_the_file(self, app: App, monkeypatch) -> None:
+        before = app.api.settings.web.get().config
+        assert (before.host, before.port, before.https) == ("localhost", 9600, False)
+        monkeypatch.setenv("OTAKU_WEB_HOST", "0.0.0.0")
+        monkeypatch.setenv("OTAKU_WEB_PORT", "9601")
+        monkeypatch.setenv("OTAKU_WEB_HTTPS", "on")
+        after = app.api.settings.web.get().config
+        assert (after.host, after.port, after.https) == ("0.0.0.0", 9601, True)
+        config = app.paths.root / "configs" / "config.toml"
+        assert 'host = "localhost"' in config.read_text(encoding="utf-8")
+
+    def test_off_turns_off_what_the_file_turns_on(self, app: App, monkeypatch) -> None:
+        set_config(app.paths.root, web_https=True, serve=True)
+        monkeypatch.setenv("OTAKU_WEB_HTTPS", "off")
+        monkeypatch.setenv("OTAKU_TERMINAL_SERVE", "off")
+        assert app.api.settings.web.get().config.https is False
+        assert app.api.settings.terminal.get().serve is False
+
+    def test_the_terminal_serves_where_the_variable_says_so(self, app: App, monkeypatch) -> None:
+        monkeypatch.setenv("OTAKU_TERMINAL_SERVE", "on")
+        assert app.api.settings.terminal.get().serve is True
+
+    def test_the_variables_password_signs_in_and_stays_out_of_the_file(
+        self, app: App, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("OTAKU_WEB_PASSWORD", "under the stairs")
+        assert app.api.settings.web.get().config.password
+        app.api.settings.check_password("under the stairs")
+        with pytest.raises(Invalid):
+            app.api.settings.check_password("over the hills")
+        config = app.paths.root / "configs" / "config.toml"
+        assert "under the stairs" not in config.read_text(encoding="utf-8")
+
+    def test_a_value_a_variable_cannot_hold_is_passed_over_and_said(
+        self, app: App, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("OTAKU_WEB_PORT", "99999")
+        monkeypatch.setenv("OTAKU_WEB_HTTPS", "yes")
+        monkeypatch.setenv("OTAKU_TERMINAL_SERVE", "sometimes")
+        relaunched = launch(app.paths.root, app.server)
+        web = relaunched.api.settings.web.get().config
+        assert (web.port, web.https) == (9600, False)
+        assert relaunched.api.settings.terminal.get().serve is False
+        notices = " ".join(relaunched.api.app.get().launch_facts.notices)
+        for name in ("OTAKU_WEB_PORT", "OTAKU_WEB_HTTPS", "OTAKU_TERMINAL_SERVE"):
+            assert name in notices, name
+        relaunched.close()
+
+
+def _free_port(monkeypatch) -> int:
+    """A port nothing listens on, made the one the page is served at —
+    `OTAKU_WEB_PORT`, the override a development server moves by."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = int(probe.getsockname()[1])
+    monkeypatch.setenv("OTAKU_WEB_PORT", str(port))
+    return port
+
+
+def _answers(port: int) -> bool:
+    with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/app/status", timeout=5) as reply:
+        return bool(reply.status == 200)
+
+
+def _listening(port: int) -> bool:
+    with socket.socket() as probe:
+        probe.settimeout(0.2)
+        return probe.connect_ex(("127.0.0.1", port)) == 0
 
 
 def _record_rings(monkeypatch) -> list[str]:

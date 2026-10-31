@@ -2,6 +2,41 @@
 
 See also the tentative roadmap: [ROADMAP.md](https://github.com/enclavum/otaku/blob/main/ROADMAP.md)
 
+## [0.9.0] - 2026-10-31
+
+New features:
+
+- Split stories into chapters manually with the `/chapter TITLE` command in the prompt line.
+- Pin important messages in the messages list to have them always sent as is, even after their scene
+  is summarized.
+- Word counts in the stories list and the info window.
+
+Improvements:
+
+- The context preview displays the structure of what is sent to the model and where each piece comes
+  from: a message, a summary, a card and so on.
+- Revert accidental undos and regenerations, one after another back to the last new message, with
+  a button in the web interface or Ctrl+Y in the terminal.
+- See undone and regenerated messages in the messages list (`h` in the terminal, a switch in the web
+  interface) and resume or fork from any of them.
+- Web interface: thinking blocks, notes and tool calls can be opened and closed; thinking starts
+  closed.
+- Terminal: `/set show_thinking on|off` turns printing the model's thinking as it streams on or off.
+
+Renames and replacements:
+
+- The `otaku web` command is renamed to `otaku serve`, with the former command staying as an
+  alias.
+- The `/web` command is replaced with `/set serve on|off`, and the web interface can now run
+  alongside the terminal instead of blocking it.
+- The `/bye` command is renamed to `/quit`, with the former command staying as an alias.
+
+Installing and updating:
+
+- Otaku can now also run in Docker.
+- Daily check for updates on GitHub (can be turned off in `~/.otaku/configs/config.toml`).
+- Uninstall command `otaku uninstall` that can also purge data.
+
 ## [0.8.0] - 2026-10-17
 
 Characters library (in the web interface only for now; the terminal will follow in the next

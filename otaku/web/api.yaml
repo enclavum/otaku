@@ -23,7 +23,7 @@
 #   are the story's own typed language, part of the line being played
 #   and read at the far end; a line goes through verbatim. Commands are
 #   the terminal's: a button here calls a resource, and `/last`, `/clear`
-#   and `/bye` have no path and never will — they redraw, or they say
+#   and `/quit` have no path and never will — they redraw, or they say
 #   something about the tab.
 #
 # CONVENTIONS
@@ -98,17 +98,17 @@ openapi: 3.1.0
 
 info:
   title: otaku web API
-  version: 0.8.0
+  version: 0.9.0
   contact:
     name: otaku
     url: https://otaku.sh
   description: |
-    The API `otaku web` serves the app over, on loopback by default. One
+    The API `otaku serve` serves the app over, on loopback by default. One
     intended client — the packaged page — so it is small, unversioned,
     and free to change with the app.
 
-    **Lanes.** One thread owns the app — a sqlite connection answers only
-    the thread that opened it — and the METHOD is the lane. A `GET` only
+    **Lanes.** One thread owns the app — the backend's own, every request
+    handed to it — and the METHOD is the lane. A `GET` only
     reads, so it is answered in the gaps of a streaming reply: between
     two frames, and on a tick while the first token is still awaited,
     which is why a screen opens while the model talks. Every other method
@@ -492,6 +492,14 @@ paths:
           in: query
           schema: { type: integer, minimum: 1 }
           description: Its last messages alone, each joined to the one before it all the same.
+        - name: with_discarded
+          in: query
+          schema: { type: boolean, default: false }
+          description: |
+            Every message the story holds, as its list reads them: under
+            each message of the chain the discarded branches leaving from
+            it (an undo's, a regenerate's, a head move's), oldest first,
+            each read through before the next — `discarded` on each.
       responses:
         default: { $ref: "#/components/responses/Failed" }
         "200":
@@ -574,17 +582,18 @@ paths:
     patch:
       operationId: updateMessage
       tags: [Messages]
-      summary: Correct a message
-      description: The author's correction, on the story's current chain. The whitespace at its edges stays the stored one — a correction changes the words, never the join. An empty body is refused.
+      summary: Correct a message, or pin it
+      description: The author's correction, on the story's current chain, and its pin. The whitespace at its edges stays the stored one — a correction changes the words, never the join. A pinned message is sent whole even where its scene is summarized, quoted after the scene's summary. Nothing to change, an empty body and a pin on a card's or a tool's message are refused.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [body]
+              minProperties: 1
               properties:
                 body: { type: string }
+                pinned: { type: boolean, description: "Pin the message, or unpin it: a pin is refused where `can_pin` is false, an unpin never." }
       responses:
         default: { $ref: "#/components/responses/Failed" }
         "200":
@@ -668,8 +677,8 @@ paths:
       tags: [Messages]
       summary: Regenerate the standing reply
       description: |
-        The standing reply set aside as a sibling — with its tool chain, one
-        unit — and a fresh take streamed in its place: the stream of
+        The standing reply set aside as a sibling — whole, with its tool
+        chain — and a fresh take streamed in its place: the stream of
         playing a line, with no user message. A POST because it is not
         idempotent: two calls leave two takes. Without a model, or with
         nothing to regenerate, it refuses before anything is dropped.
@@ -685,6 +694,40 @@ paths:
         "412": { $ref: "#/components/responses/HeadMoved" }
         "428": { $ref: "#/components/responses/HeadRequired" }
 
+  /api/stories/{story}/reverts:
+    parameters:
+      - $ref: "#/components/parameters/Story"
+    post:
+      operationId: createRevert
+      tags: [Messages]
+      summary: Put back what the newest discard took
+      description: |
+        What `/revert` does in the terminal: the head returns to where the
+        story's newest discard left it — an undo's exchange back, or a
+        regenerate's earlier take — and what it had landed on stays in the
+        tree. The discards are the undos and regenerates since anything
+        else moved the story's head (a line played, a continue, a card
+        brought in, a rewind, a resume), held while the app runs;
+        `can_revert` on the story says whether one stands. An undo that
+        took an imported character with it empties them. Nothing to
+        revert is refused (409).
+      parameters:
+        - $ref: "#/components/parameters/IfMatch"
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: The story as it now stands.
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Changed"
+                  - properties: { value: { $ref: "#/components/schemas/Story" } }
+        "412": { $ref: "#/components/responses/HeadMoved" }
+        "428": { $ref: "#/components/responses/HeadRequired" }
+
   /api/stories/{story}/undos:
     parameters:
       - $ref: "#/components/parameters/Story"
@@ -694,9 +737,10 @@ paths:
       summary: Take back the trailing exchange
       description: |
         What `/undo` does in the terminal: the reader's line and the reply
-        unit it got, or a continue's reply alone. Nothing is deleted — the
-        head moves back and the messages stay in the tree; an imported
-        character whose card exchange was never played goes with it.
+        it got, its tool chain included, or a continue's reply alone.
+        Nothing is deleted — the head moves back and the messages stay in
+        the tree; an imported character whose card exchange was never
+        played goes with it.
         Nothing to take back is refused (409). A POST because each call
         takes a different exchange — the one before, the next time — which
         `If-Match` makes safe to repeat.
@@ -2131,7 +2175,7 @@ components:
     Story:
       { name: story, in: path, required: true, schema: { type: integer }, description: "The story's id." }
     Message:
-      { name: message, in: path, required: true, schema: { type: integer }, description: "A message's id, on the story's current chain." }
+      { name: message, in: path, required: true, schema: { type: integer }, description: "A message's id, on the story's chain or discarded." }
     Scene:
       { name: scene, in: path, required: true, schema: { type: integer } }
     Character:
@@ -2210,7 +2254,7 @@ components:
       type: object
       properties:
         version: { type: string }
-        launch: { $ref: "#/components/schemas/Launch" }
+        launch_facts: { $ref: "#/components/schemas/LaunchFacts" }
         model:
           description: The model in use; null with none.
           oneOf: [{ $ref: "#/components/schemas/ModelInUse" }, { type: "null" }]
@@ -2408,13 +2452,31 @@ components:
               tokens: { type: integer }
         parts:
           type: array
-          description: One part per message, exactly as the wire will carry it — or, over the text wire, ONE part, role "prompt", the text as sent.
+          description: The request's text in parts, in order, each with where it comes from, a separator between two that stand apart — a run reads as one — of messages, of the summary's history and scene summaries, of pinned messages — and a header, the summary's or the pinned messages', with what follows it; every other part stands apart. Over the text wire, the pieces of the one text it sends, the template's markers and framing among the system's.
           items:
-            type: object
-            properties:
-              role: { type: string }
-              body: { type: string }
-              pictures: { type: integer }
+            oneOf:
+              - type: object
+                properties:
+                  kind: { const: separator }
+              - type: object
+                properties:
+                  kind: { const: part }
+                  role: { type: string, description: 'The role it goes in: "system" in the system message, else a message''s own.' }
+                  body: { type: string }
+                  pictures: { type: integer }
+                  provenance:
+                    type: string
+                    enum: [system, message, card, pinned_message, pinned_header, header, history, scene, injection]
+                    description: "Where it comes from: the system message's own text; a stored message, sent as it is; a card's message, imported rather than played; a pinned message quoted in the summary, out of its place, or the header over the pinned messages quoted there; the summary standing in for the middle — the header over it, the story so far, or one scene's summary; or an injection."
+                  scene_num: { type: [integer, "null"], description: "A scene summary's scene, numbered as the dossier numbers it; null on every other part." }
+                  scene_title: { type: string, description: 'A scene summary''s scene title; "" on every other part.' }
+                  injection_label: { type: string, description: 'An injection''s name, as its setting names what it injects; "" on every other part.' }
+                  injection_position:
+                    description: An injection's place, as the request carries it; null on every other part.
+                    oneOf: [{ type: string, enum: [system] }, { type: integer, minimum: 1 }, { type: "null" }]
+                  injection_position_text: { type: string, description: 'An injection''s place as the depth ruler names it — "system", "2nd last" …; "" on every other part.' }
+                  card_name: { type: string, description: 'The character a card came in under; "" on every other part.' }
+                  caption: { type: string, description: 'What both frontends head the part with: where it comes from, and which — "pinned · header", "summary · scene 3 · The Weir", "injection · story reminder · 3rd last" …' }
 
     ContextFill:
       type: object
@@ -2501,7 +2563,7 @@ components:
         model: { type: [string, "null"] }
         updated_at: { type: string }
 
-    Launch:
+    LaunchFacts:
       type: object
       description: What the launch that opened the app had to say.
       properties:
@@ -2509,6 +2571,9 @@ components:
           type: array
           items: { type: string }
         hint: { type: string }
+        newer_version:
+          type: string
+          description: The version the last update check found announced, where later than this otaku; empty for none.
 
     ListedProvider:
       type: object
@@ -2565,7 +2630,7 @@ components:
         id: { type: integer }
         role: { type: string, enum: [user, assistant, tool], description: "A tool message is a tool's result: nobody's line, no reply." }
         body: { type: string }
-        kind: { type: string, enum: [dialogue, narration, ooc, card, tool] }
+        kind: { type: string, enum: [dialogue, narration, ooc, card, tool, chapter], description: "A chapter is the row a `/chapter TITLE` line opens one with." }
         template: { type: [string, "null"] }
         speaker: { type: [string, "null"], description: "The extractor's name for who spoke; null until its pass reads the message." }
         provider: { type: [string, "null"], description: "Who made the message: an engine, 'card' on a card greeting, a tool's name on a tool message." }
@@ -2574,9 +2639,11 @@ components:
           type: array
           items: { $ref: "#/components/schemas/Attachment" }
         mode: { type: string, enum: [story, chat], description: "The mode it was written in." }
+        pinned: { type: boolean, description: "Sent whole even where its scene is summarized, quoted after the scene's summary." }
+        can_pin: { type: boolean, description: "Whether it may be pinned: every message but a card's and a tool's." }
         segments:
           type: array
-          description: The body split in order — prose, and each tool call as its tool's facts; a user's line, its story and its words with the model — so a page draws a message without parsing it. The body stays whole above, for the editor.
+          description: The body split in order — prose, and each tool call as its tool's facts; a user's line, its story and its words with the model; a chapter, its number and its title with the join between (joined, "Chapter 2. The Flood") — so a page draws a message without parsing it. The body stays whole above, for the editor.
           items:
             oneOf:
               - type: object
@@ -2587,6 +2654,16 @@ components:
                 description: "A user's line's words with the model: all of a /you or /ooc line after its token, whatever follows a /ooc or /cue inliner."
                 properties:
                   kind: { const: ooc }
+                  text: { type: string }
+              - type: object
+                description: 'A chapter''s number, as its heading names it ("Chapter 2").'
+                properties:
+                  kind: { const: chapter_number }
+                  text: { type: string }
+              - type: object
+                description: "A chapter's title."
+                properties:
+                  kind: { const: chapter_title }
                   text: { type: string }
               - type: object
                 description: A tool call — a known tool's carries what it read; one of a name no tool owns, its tool and text alone.
@@ -2603,7 +2680,8 @@ components:
                     description: "A question's: the answers to pick from."
         join_type: { type: string, enum: [inline, paragraph], description: "How it joins the message before it — the wire's own rule: inline, one space; paragraph, a blank line." }
         tool_label: { type: [string, "null"], description: "A tool message's tool as a frontend names it for the result it holds; null on every other message." }
-        unit: { type: integer, description: "The first message of the reply unit it stands in — what undo and regenerate take as one." }
+        reply_start_id: { type: integer, description: "The id of the first message of the reply it stands in — a tool's call, its result and the reply going on after it are one reply, which undo and regenerate take whole; a user's line is its own." }
+        discarded: { type: boolean, description: "Off the story's current chain — left by an undo, a regenerate or a head move; its join and its reply's start read along its own branch. Only a list asked `with_discarded` holds one." }
 
     Model:
       type: object
@@ -2742,6 +2820,11 @@ components:
           properties:
             type: { const: failed }
             reason: { type: string }
+        - type: object
+          description: The reply brought no text — whitespace, or thinking alone; nothing is recorded.
+          properties:
+            type: { const: empty_reply }
+            note: { type: string }
         - type: object
           description: The stream's end. Every message landed before it.
           properties:
@@ -2906,6 +2989,7 @@ components:
         premise: { type: string, description: "The system prompt." }
         head: { type: [integer, "null"], description: "Its newest message's id — the ETag's — null while nothing is played." }
         message_count: { type: integer, description: "The messages on its current chain." }
+        word_count: { type: integer, description: "The words on its current chain; an encrypted story's from before 0.9.0 are not counted." }
         updated_at: { type: string, format: date-time }
         layout: { type: string, enum: [novel, canvas, manuscript, chat] }
         mode: { type: string, enum: [story, chat], description: "The look its layout draws." }
@@ -2919,10 +3003,7 @@ components:
           type: array
           items: { type: string }
           description: The tools whose calls a reader is shown — question while its tool is on, note while the notes are on and displayed.
-        folded_tools:
-          type: array
-          items: { type: string }
-          description: The tools whose calls a frontend that can fold draws by their label alone, the text its hover hint — note while the notes are on and not displayed.
+        can_revert: { type: boolean, description: "Whether a revert would put something back now: an undo or a regenerate since anything else moved the story's head, held while otaku runs." }
 
     StoryCardCheck:
       type: object
@@ -2987,6 +3068,7 @@ components:
         model: { type: string, description: "The model it was last played with." }
         updated_at: { type: string, format: date-time }
         message_count: { type: integer }
+        word_count: { type: integer }
 
     Language:
       type: object

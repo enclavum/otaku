@@ -1,7 +1,8 @@
 """The OS keychain item (macOS `security`, Linux `secret-tool`).
 
 Add-only by design: an existing item is never updated, so no caller can
-clobber key material.
+clobber key material. Items are removed only all at once, every one
+under a service (`purge_items`), when its state dir is purged.
 """
 
 import base64
@@ -10,6 +11,9 @@ import subprocess
 import sys
 
 from otaku.encryption._primitives.aead import EncryptionError
+
+# More than a service ever holds — a bound on the macOS purge's loop.
+_MOST_ITEMS = 16
 
 
 def available() -> bool:
@@ -49,6 +53,22 @@ def put(service: str, account: str, secret: bytes) -> None:
     if result.returncode != 0:
         reason = result.stderr.strip() or result.returncode
         raise EncryptionError(f"keychain store failed: {reason}")
+
+
+def purge_items(service: str) -> None:
+    """Remove every item under `service`, whatever its account; nothing
+    where there is none, or no keychain tool."""
+    if _tool() is None:
+        return
+    if sys.platform == "darwin":
+        # `security` deletes the first match per call: called until none is left
+        for _ in range(_MOST_ITEMS):
+            args = ["security", "delete-generic-password", "-s", service]
+            if subprocess.run(args, capture_output=True, text=True).returncode != 0:
+                break
+    else:
+        args = ["secret-tool", "clear", "service", service]
+        subprocess.run(args, capture_output=True, text=True)
 
 
 def _tool() -> str | None:

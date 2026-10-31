@@ -12,7 +12,7 @@ from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
 
 from otaku.terminal.api import Api, Locality, ModelRef, Refused
-from otaku.terminal.api.app.providers import ListedProvider, ProviderField
+from otaku.terminal.api.providers import ListedProvider, ProviderField
 from otaku.terminal.screens.base import ListScreen
 
 _ATTRS: tuple[ProviderField, ...] = ("url", "api_key")  # the panel's rows per provider, in order

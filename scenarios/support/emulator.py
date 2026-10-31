@@ -40,6 +40,7 @@ CTRL_D = b"\x04"
 CTRL_J = b"\n"
 CTRL_R = b"\x12"
 CTRL_U = b"\x15"
+CTRL_Y = b"\x19"
 DOWN = b"\x1b[B"
 RIGHT = b"\x1b[C"
 # Ctrl+Enter as a terminal honouring modifyOtherKeys reports it
@@ -96,6 +97,8 @@ class Emulated(Terminal):
     answers the app's cursor-position queries from where its cursor is.
     `recording` keeps every distinct frame the screen passed through."""
 
+    _can_answer_cursor = True
+
     def __init__(self, root: Path, *, rows: int = ROWS, cols: int = COLS) -> None:
         super().__init__(str(root), rows=rows, cols=cols)
         self.root = root
@@ -103,7 +106,7 @@ class Emulated(Terminal):
         self.screen = XtermScreen(cols, rows)
         self._stream = pyte.ByteStream(self.screen)
         self._frames: list[Frame] | None = None
-        self._last_byte = time.time()
+        self._last_byte: float | None = None  # nothing drawn yet
 
     def _drain(self, seconds: float) -> None:
         end = time.time() + seconds
@@ -137,12 +140,15 @@ class Emulated(Terminal):
                 self._frames.append((rows, cursor.y, time.monotonic(), shown))
 
     def quiet(self, still: float = 1.2, timeout: float = 60.0) -> None:
-        """Wait until nothing has been drawn for `still` seconds."""
+        """Wait until the app has drawn, and then drawn nothing for `still`
+        seconds. The silence before its first byte is a launch still
+        starting — the interpreter, the imports, slow on a busy machine —
+        never a screen done drawing."""
         start = time.time()
         self._drain(0.3)
         while time.time() - start < timeout:
             self._drain(0.2)
-            if time.time() - self._last_byte > still:
+            if self._last_byte is not None and time.time() - self._last_byte > still:
                 return
 
     @contextmanager
@@ -179,9 +185,21 @@ def model_server() -> ModelServer:
     server.template_reads = set()
     server.chunk_size = 6
     server.chunk_delay = 0.01
-    server.script = TM.reply
+    server.script = _short_thinking
     server.refuse = _refuse
     return server
+
+
+def _short_thinking(body: dict[str, Any]) -> str | tuple[str, str]:
+    """The test model's reply, its thinking cut to its first sentence. A
+    folded thinking prints nothing while it lasts, and a check waits for
+    the screen's silence (`Emulated.quiet`): a thought of seconds would be
+    judged halfway."""
+    result = TM.reply(body)
+    if isinstance(result, tuple):
+        thought, text = result
+        return thought.split(". ")[0] + ".", text
+    return result
 
 
 def _refuse(body: dict[str, Any]) -> int | None:
@@ -237,29 +255,32 @@ def fresh_root() -> Path:
     return Path(tempfile.mkdtemp()) / "state"
 
 
-def echo(root: Path, *, rows: int = ROWS, cols: int = COLS) -> tuple[list[str], tuple[int, int]]:
+def echo(
+    root: Path, *, rows: int = ROWS, cols: int = COLS, still: float = 1.5
+) -> tuple[list[str], tuple[int, int]]:
     """What a fresh launch shows of the story, on a screen of the size
-    given: its rows and its cursor."""
+    given, once it has drawn nothing for `still` seconds: its rows and
+    its cursor."""
     other = Emulated(root, rows=rows, cols=cols)
     try:
-        other.quiet(still=1.5)
+        other.quiet(still=still)
         return other.lines(), other.cursor
     finally:
         other.quit()
 
 
-def mismatch(live: Emulated, *, story_mode: bool) -> list[str]:
+def mismatch(live: Emulated, *, story_mode: bool, still: float = 1.5) -> list[str]:
     """Where the live screen and a fresh launch's echo of the same story
     disagree, read back from the cursor through the echoed turns: row by
     row in chat mode, the rows the store never holds left out of the live
     screen; word by word in story mode, whose one text wraps wherever its
-    echo began."""
-    rows, (ey, ex) = echo(live.root, rows=live.rows, cols=live.cols)
+    echo began. `still` is the echo's wait for silence (`echo`)."""
+    rows, (ey, ex) = echo(live.root, rows=live.rows, cols=live.cols, still=still)
     start = next((i for i, row in enumerate(rows) if "Resumed at message" in row), -1) + 2
     lines, (ly, lx) = live.lines(), live.cursor
     if story_mode:
-        theirs = _words([*rows[start:ey], rows[ey][:ex]], live.cols)
-        ours = _words([*lines[:ly], lines[ly][:lx]], live.cols)
+        theirs = _words(_to_cursor(rows[start:], ey - start, ex, live.cols), live.cols)
+        ours = _words(_to_cursor(lines, ly, lx, live.cols), live.cols)
         # their common tail: either screen may be cut at its top, the first
         # word of the shorter one maybe a word's end
         common = min(len(theirs), len(ours)) - 1
@@ -286,8 +307,9 @@ def mismatch(live: Emulated, *, story_mode: bool) -> list[str]:
 
 def _stored_rows(lines: list[str], cursor_row: int) -> tuple[list[str], int]:
     """`lines` without what the store never holds — the thinking's rows,
-    an error's line, the verbose stats line — and the blank a block of
-    them stood on; the cursor's row moved up with them."""
+    or its label where it is folded, an error's line, the verbose stats
+    line — and the blank a block of them stood on; the cursor's row moved
+    up with them."""
     kept: list[str] = []
     cut = 0
     dropping = False
@@ -296,7 +318,9 @@ def _stored_rows(lines: list[str], cursor_row: int) -> tuple[list[str], int]:
             kept.append(line)
             continue
         thinking = line.startswith("│") and (
-            dropping or (len(line) > 6 and any(line[2:32] in t for t in TM.THOUGHTS))
+            dropping
+            or line.startswith(("│ Thinking…", "│ Thought for "))
+            or (len(line) > 6 and any(line[2:32] in t for t in TM.THOUGHTS))
         )
         unstored = thinking or line.startswith(("[ error:", "[ total"))
         if unstored or (dropping and not line.strip()):
@@ -308,14 +332,27 @@ def _stored_rows(lines: list[str], cursor_row: int) -> tuple[list[str], int]:
     return kept, cursor_row - cut
 
 
+def _to_cursor(lines: list[str], y: int, x: int, cols: int) -> list[str]:
+    """The rows up to the cursor, its own cut at it. A row one column short
+    of full right above a cursor at a row's start was filled by the seam
+    the prompt stands after, a space the screen's rows are read without:
+    given back, so the row reads as wrapped, not as a paragraph's end."""
+    rows = [*lines[:y], lines[y][:x]]
+    if x == 0 and y > 0 and len(rows[-2]) == cols - 1:
+        rows[-2] += " "
+    return rows
+
+
 def _words(lines: list[str], cols: int) -> list[str]:
-    """The text the rows hold: a full row read as wrapped onto the next —
-    what follows it is the same line, even a row holding nothing yet but
-    the seam the prompt stands after — and a blank row as a paragraph mark."""
+    """The text the rows hold, the last the cursor's: a full row read as
+    wrapped onto the next — what follows it is the same line, even a
+    cursor's row holding nothing yet but the seam the prompt stands after
+    — and a blank row as a paragraph mark, after a full row too: a newline
+    there moves straight down, a row left blank only by an empty line."""
     text = ""
     wrapped = False
-    for line in lines:
-        if not line.strip() and not wrapped:
+    for at, line in enumerate(lines):
+        if not line.strip() and not (wrapped and at == len(lines) - 1):
             text += " ¶ "
         else:
             text += line + ("" if len(line) >= cols else " ")

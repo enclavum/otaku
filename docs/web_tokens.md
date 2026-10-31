@@ -51,7 +51,7 @@ stylesheet that reaches past the contract accepts the breakage itself.
 | Token | Used by |
 |---|---|
 | `--otk-accent` | title rules, selection marks, the caret |
-| `--otk-accent-ink` | accent used as text: links, rubrics, tokens |
+| `--otk-accent-ink` | accent used as text: links, rubrics, tokens, a chapter's number and its big initial |
 | `--otk-accent-tint` | the ground of a selected row |
 | `--otk-ok` | answering, resident, loaded |
 | `--otk-danger` | delete, stop, refusals and failures — nothing else |
@@ -64,6 +64,20 @@ The tab icon is the one accent a stylesheet cannot reach: a favicon is
 markup, so `index.html` carries the square as a hard-coded copy of the
 accent (and a grey one for a stopped otaku). Retheming the accent leaves
 it as it is, and the tab keeps its mark.
+
+## The request's bands
+
+The context panel draws the request in bands, each part where it comes
+from: a hue for each kind of text sent besides the story's own lines, and
+the summary in a grey fold.
+
+| Token | Used by |
+|---|---|
+| `--otk-system-bg` / `--otk-system-line` / `--otk-system-ink` | the system message's band: its ground, its dotted edges, its gutter word and rubrics |
+| `--otk-card-bg` / `--otk-card-line` / `--otk-card-ink` | a character card's band |
+| `--otk-inject-bg` / `--otk-inject-line` / `--otk-inject-ink` | an injection's band: a text sent besides the story |
+| `--otk-pinned-bg` / `--otk-pinned-line` / `--otk-pinned-ink` | the band of the pinned messages one header heads |
+| `--otk-summary-bg` | the ground of the summary's fold |
 
 ## Typefaces of your own
 
@@ -164,7 +178,7 @@ only that script.
 | `--otk-size-mono` | fields, filters, model names |
 | `--otk-size-mono-sm` | facts, urls, ids |
 | `--otk-size-small` | counts |
-| `--otk-size-label` | a section eyebrow |
+| `--otk-size-label` | a section eyebrow, a chapter's number |
 | `--otk-size-foot` | panel footers |
 | `--otk-size-tag` | kind tags, the turn rubric |
 
@@ -189,6 +203,7 @@ so a list of mixed scripts does not ripple. Raise both together.
 | `--otk-col-lamp` | the resident / answering lamp gutter |
 | `--otk-col-size` | a model's size column |
 | `--otk-col-count` | a count column |
+| `--otk-col-messages` | a story's message count, "1234 msg" |
 | `--otk-col-ago` | a "2h" column |
 | `--otk-reader-w` | the right pane, identical in every lens |
 | `--otk-measure` | a reading line, wherever prose is set |
@@ -207,6 +222,13 @@ so a list of mixed scripts does not ripple. Raise both together.
 | `--otk-dialog-w` | every dialog |
 | `--otk-docket-w` | a slip's width; `.otk-docket--narrow` and `--wide` re-set it |
 | `--otk-docket-h` | the height of the one slip that is torn to a set length |
+
+## Motion
+
+| Token | Used by |
+|---|---|
+| `--otk-revert-hold` | how long Revert, the first of the composer's verbs, waits before it fades (10s) |
+| `--otk-revert-fade` | how long it takes to fade (0.8s) |
 
 ## Scrollbars
 
@@ -254,6 +276,9 @@ in classes, so a stylesheet can name it the same way the scripts do.
 | `aria-disabled="true"` | `.otk-btn`, `.otk-mode`, `.otk-lightbox__arrow` | out of reach for now |
 | `aria-current="true"` | `.otk-spine__dot`, `.otk-pics__thumb` | the lit one of the spine's dots; the picture of a card shown large |
 | `hidden` | any pane or menu | not mounted |
+| `hidden` | `.otk-revert` | Revert is not offered: shown after an Undo or a Regen while there is something to take back, never while a reply is arriving; once shown it waits `--otk-revert-hold`, fades over `--otk-revert-fade`, and the app sets `hidden` on `animationend` — hover or focus holds it |
+| `data-discarded="shown"` / `"hidden"` | `.otk-col--messages` | the list also shows the discarded turns — undone, or replaced by a regen — as `.otk-row--discarded` rows, faint and unnumbered, after the turn they leave from |
+| `data-open="true"` | `.otk-call` | the notes, a tool turn or a reply's thinking shows its text under its label; its toggle (`.otk-call__toggle`) reads "hide" and carries `aria-expanded="true"` |
 | `data-popup="/model"` | a `<dialog>` | which command opens it |
 | `data-theme="dark"` / `"light"` | `<html>` | the token set pinned; absent, the OS decides |
 | `data-booting` | `<html>` | the shell unseen until the page knows whether a sign-in comes first |
@@ -271,6 +296,7 @@ in classes, so a stylesheet can name it the same way the scripts do.
 | `data-refused` | the composer's box | on the canvas, where the box stands disabled, it holds the refusal of the line typed in the story, in place of its placeholder |
 | `data-on="false"` | `.otk-feature`, `.otk-ruler__row` | the setting is off: its row on the Tools tab, and the depth ruler belonging to it |
 | `data-dragging` | `.otk-ruler__row` | the depth mark is being dragged |
+| `data-pinned="true"` / `"false"` | `.otk-row__id` in the messages list, `.otk-detail__pin` in its reader | the message is pinned: its number shows as a filled pin, as does the reader's pin; absent on a row that may not be pinned |
 | `.is-offline` | `.otk-app` | the server stopped answering |
 | `.is-loaded` / `.is-dim` | `.otk-row` | a model resident in memory, or not |
 | `.is-dragover` / `.is-filled` | `.otk-dropzone` | a file over the drop zone, and one dropped |

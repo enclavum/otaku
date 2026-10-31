@@ -5,13 +5,18 @@ only journeys that need the real REPL (keybindings, pickers on screen,
 process lifecycle) live here.
 """
 
+import signal
 import socket
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
-from otaku.backend.domain.app._paths import Paths
+from otaku.backend.api import Api
+from otaku.backend.app.paths import Paths
+from otaku.backend.launch import open_app
 from otaku.settings import state as state_mod
+from otaku.terminal.prompt.session import CHAT_PLACEHOLDER
 from otaku.terminal.tty import PROMPT_CONTINUATION
 from scenarios.support import server as scripted
 from scenarios.support.harness import SPEC, run_otaku, set_config, set_config_provider
@@ -23,6 +28,7 @@ pytestmark = pytest.mark.cli
 # The continuation prompt as the transcript shows it: its trailing space is
 # not printed, the caret moved past it, with no placeholder drawn after it.
 _CONTINUED = PROMPT_CONTINUATION.rstrip()
+_PLACEHOLDER = "".join(text for _, text in CHAT_PLACEHOLDER)
 
 
 class TestFirstRun:
@@ -55,8 +61,8 @@ class TestFirstRun:
         terminal.send(ENTER, 1.0)
         terminal.expect("No model selected")
         assert terminal.quit() == 0
-        assert "[providers." not in (state / "configs" / "config.toml").read_text()
-        providers = (state / "configs" / "providers.toml").read_text()
+        assert "[providers." not in (state / "configs" / "config.toml").read_text(encoding="utf-8")
+        providers = (state / "configs" / "providers.toml").read_text(encoding="utf-8")
         for section in ("[llamacpp]", "[koboldcpp]", "[ollama]", "[omlx]", "[lmstudio]"):
             assert section in providers
         assert (state / "configs" / "prompts.toml").exists()
@@ -96,42 +102,145 @@ class TestChat:
         assert terminal.quit() == 0
 
 
-class TestWeb:
+class TestServe:
     def test_ctrl_r_serves_again_and_ctrl_d_stops(
         self, server: ModelServer, tmp_path: Path
     ) -> None:
-        """`otaku web` answers the keys at the terminal it runs in: Ctrl+R
+        """`otaku serve` answers the keys at the terminal it runs in: Ctrl+R
         stops and comes back on fresh sources — a new process, the
         address said again — and Ctrl+D stops for good, as Ctrl+C does."""
         state = tmp_path / "state"
         set_config_provider(state, server)
-        terminal = Terminal(str(state), args=("web", "--port", str(_free_port())))
+        terminal = Terminal(str(state), args=("serve",), env={"OTAKU_WEB_PORT": str(_free_port())})
         terminal.expect("Running on", timeout=20.0)
         _pressed_until(terminal, CTRL_R, "Restarting", timeout=20.0)
         _expect_count(terminal, "Running on", 2, timeout=20.0)
         _pressed_until(terminal, CTRL_D, "Shutting down", timeout=20.0)
         assert terminal.wait() == 0
 
-    def test_from_the_chat_ctrl_d_ends_the_serving_and_the_prompt_returns(
+    def test_the_old_name_still_serves(self, server: ModelServer, tmp_path: Path) -> None:
+        """`otaku web`, the command's name before 0.9.0, still serves."""
+        state = tmp_path / "state"
+        set_config_provider(state, server)
+        port = _free_port()
+        terminal = Terminal(str(state), args=("web",), env={"OTAKU_WEB_PORT": str(port)})
+        _waited(terminal, lambda: _listening(port))
+        _pressed_until(terminal, CTRL_D, "Shutting down", timeout=20.0)
+        assert terminal.wait() == 0
+
+    def test_set_serve_serves_beside_the_chat_and_off_stops_it(
         self, server: ModelServer, tmp_path: Path
     ) -> None:
-        """`/web` hands the session to a browser and stands until the
-        reader stops it; Ctrl+D does what Ctrl+C does there, and the
-        chat carries on below. Ctrl+R is not a key here: the process is
-        the chat's."""
-        terminal = launch_remembered(
-            server, tmp_path / "state", env={"OTAKU_WEB_PORT": str(_free_port())}
-        )
-        play(terminal, "I enter the hall.", "stirred")
-        terminal.send("/web")
+        """`/set serve on` serves the page and the chat keeps its prompt —
+        a line plays while it serves; `/set serve off` stops it, and the
+        chat carries on."""
+        port = _free_port()
+        terminal = launch_remembered(server, tmp_path / "state", env={"OTAKU_WEB_PORT": str(port)})
+        terminal.send("/set serve on")
         terminal.send(ENTER, 1.0)
-        terminal.expect("Running on")
-        terminal.send(CTRL_R, 1.0)  # not a key here: the serving goes on
-        terminal.send(CTRL_D, 1.0)
-        terminal.expect("Shutting down")
-        assert "Restarting" not in terminal.transcript
+        _waited(terminal, lambda: _listening(port))
+        play(terminal, "I enter the hall.", "stirred")
+        terminal.send("/set serve off")
+        terminal.send(ENTER, 1.0)
+        _waited(terminal, lambda: not _listening(port))
         play(terminal, "I look around.", "stirred")
         assert terminal.quit() == 0
+
+    def test_a_launch_with_the_switch_on_serves_until_the_chat_ends(
+        self, server: ModelServer, tmp_path: Path
+    ) -> None:
+        state = tmp_path / "state"
+        set_config(state, serve=True)
+        port = _free_port()
+        terminal = launch_remembered(server, state, env={"OTAKU_WEB_PORT": str(port)})
+        _waited(terminal, lambda: _listening(port))
+        assert terminal.quit() == 0
+        assert not _listening(port)
+
+
+class TestSigterm:
+    """SIGTERM — a `docker stop`, a `kill` — is an orderly stop in both
+    frontends: the chat quits as /quit does, a reply streaming kept as far
+    as it came; `otaku serve` shuts down as at the first Ctrl+C."""
+
+    def test_at_the_prompt_the_chat_quits(self, server: ModelServer, tmp_path: Path) -> None:
+        terminal = launch_remembered(server, tmp_path / "state")
+        terminal.settle()
+        terminal.send_signal(signal.SIGTERM)
+        assert terminal.wait() == 0
+
+    def test_mid_reply_what_streamed_is_kept(self, server: ModelServer, tmp_path: Path) -> None:
+        state = tmp_path / "state"
+        terminal = launch_remembered(server, state)
+        server.chunk_delay = 0.4  # a slow model — the reply arrives in beats
+        server.script = lambda body: "The corridor stretches on, deeper into the dark."
+        terminal.send("I walk the corridor.")
+        terminal.send(ENTER, 0.2)
+        terminal.expect("The corridor")  # streaming has begun
+        terminal.send_signal(signal.SIGTERM)
+        assert terminal.wait() == 0
+        app = open_app(state)
+        try:
+            api = Api(app)
+            story = api.settings.get().last_story
+            assert story is not None
+            reply = api.stories.messages.list(story)[-1]
+            assert reply.role == "assistant"
+            assert reply.body.startswith("The corridor")
+        finally:
+            app.close()
+
+    def test_otaku_serve_shuts_down(self, server: ModelServer, tmp_path: Path) -> None:
+        state = tmp_path / "state"
+        set_config_provider(state, server)
+        port = _free_port()
+        terminal = Terminal(str(state), args=("serve",), env={"OTAKU_WEB_PORT": str(port)})
+        _waited(terminal, lambda: _listening(port))
+        terminal.send_signal(signal.SIGTERM)
+        assert terminal.wait() == 0
+        assert not _listening(port)
+
+
+class TestUninstall:
+    """`otaku uninstall` asks before it deletes anything, and never where no
+    one can answer; from a checkout, which the reader removes, it offers
+    the purge alone."""
+
+    def test_piped_it_refuses_and_touches_nothing(
+        self, server: ModelServer, tmp_path: Path
+    ) -> None:
+        state = tmp_path / "state"
+        set_config_provider(state, server)
+        result = run_otaku(state, "uninstall")
+        assert result.returncode == 1
+        assert (state / "configs").is_dir()
+
+    def test_from_a_checkout_the_purge_alone_is_offered_and_kept_by_default(
+        self, server: ModelServer, tmp_path: Path
+    ) -> None:
+        # The suite runs otaku from its own checkout, which the reader removes.
+        state = tmp_path / "state"
+        set_config_provider(state, server)
+        terminal = Terminal(str(state), args=("uninstall",))
+        terminal.expect("Purge all data?")
+        terminal.send(ENTER)
+        assert terminal.wait() == 0
+        assert (state / "configs").is_dir()
+
+    def test_a_purge_confirmed_deletes_the_state_dir(
+        self, server: ModelServer, tmp_path: Path
+    ) -> None:
+        state = tmp_path / "state"
+        set_config_provider(state, server)
+        terminal = Terminal(str(state), args=("uninstall",))
+        terminal.expect("Purge all data?")
+        terminal.send("y")
+        terminal.send(ENTER)
+        terminal.expect("Are you sure")
+        terminal.send("y")
+        terminal.send(ENTER)
+        assert terminal.wait() == 0
+        assert not state.exists()
 
 
 class TestHelpVersion:
@@ -139,6 +248,13 @@ class TestHelpVersion:
         result = run_otaku(tmp_path / "state", "--version")
         assert result.returncode == 0
         assert "otaku" in result.stdout
+
+    def test_help_names_serve_and_keeps_its_old_name_out(self, tmp_path: Path) -> None:
+        listing = run_otaku(tmp_path / "state", "--help").stdout.split("Commands:", 1)[1]
+        names = [row.split()[0] for row in listing.splitlines() if row.strip()]
+        assert "serve" in names
+        assert "web" not in names
+        assert run_otaku(tmp_path / "state", "web", "--help").returncode == 0
 
     def test_help_names_the_subcommands(self, tmp_path: Path) -> None:
         result = run_otaku(tmp_path / "state", "--help")
@@ -149,7 +265,7 @@ class TestHelpVersion:
         listing = run_otaku(tmp_path / "state", "logs", "--help").stdout
         commands_block = listing.split("Commands:", 1)[1]
         assert "..." not in commands_block
-        assert "Show every contained crash's traceback" in commands_block
+        assert "Show crash tracebacks" in commands_block
         order = [commands_block.index(name) for name in ("requests", "system", "error")]
         assert order == sorted(order)
 
@@ -193,7 +309,8 @@ class TestErasing:
         terminal.send(ENTER, 1.0)
         terminal.expect("It came up six.")
         erase = terminal.raw.index(b"\x1b[6n\x1b[3A\r\x1b[J")
-        assert not terminal.raw[:erase].endswith(b"\r\n")
+        # the bytes leading up to the erase, for a failure to show
+        assert not terminal.raw[:erase].endswith(b"\r\n"), terminal.raw[max(0, erase - 600) : erase]
 
 
 class TestBlocks:
@@ -302,6 +419,18 @@ def _pressed_until(terminal: Terminal, key: bytes, marker: str, *, timeout: floa
     assert marker in terminal.transcript, terminal.transcript[-2000:]
 
 
+def _waited(terminal: Terminal, holds: Callable[[], bool], timeout: float = 20.0) -> None:
+    """Wait until `holds` does — a port answering, or let go — reading the
+    terminal meanwhile, so the app never blocks on a full pty, and showing
+    its tail if it never comes."""
+    import time
+
+    deadline = time.time() + timeout
+    while not holds():
+        assert time.time() < deadline, f"never came; the terminal:\n{terminal.transcript[-1500:]}"
+        terminal.settle(0.1)
+
+
 def _listening(port: int) -> bool:
     with socket.socket() as probe:
         probe.settimeout(0.2)
@@ -328,7 +457,16 @@ def launch_remembered(
 
 
 def play(terminal: Terminal, line: str, marker: str) -> None:
-    """Send one prompt line and wait until `marker` shows on screen."""
+    """Send one prompt line and wait until `marker` shows on screen and
+    the prompt is back: what is typed while a reply still streams is
+    thrown away at its end, and its words show a moment before that."""
+    import time
+
+    prompts = terminal.transcript.count(_PLACEHOLDER)
     terminal.send(line)
     terminal.send(ENTER, 1.0)
     terminal.expect(marker)
+    deadline = time.time() + 10.0
+    while terminal.transcript.count(_PLACEHOLDER) <= prompts:
+        assert time.time() < deadline, "the prompt never came back"
+        terminal.settle(0.2)

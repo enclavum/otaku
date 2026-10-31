@@ -51,6 +51,7 @@ import * as held from "../play/held.js";
 import { thumbs } from "../kit/pictures.js";
 import { typeset } from "../kit/prose.js";
 import { facts, landed, resume, showContextUse } from "../play/shell.js";
+import { lineNodes } from "../play/transcript.js";
 import { cardFieldEditors, inviteCard, openCardWindow, pick } from "./characters.js";
 import { buildTools } from "./tools.js";
 
@@ -58,6 +59,15 @@ import { buildTools } from "./tools.js";
    in, and nothing else. A file picker offers anything, and a `.png` read
    as text is a screenful of noise where the premise was. */
 const _PREMISE_FILES = ".txt,.md,.markdown,text/plain,text/markdown";
+// What a pin does to the message it is on, said under it while pinned —
+// the terminal's preview says it too (`terminal/screens/dossier/messages.py`
+// `_PIN_NOTE`): change one, change both.
+const _PIN_NOTE =
+  "Pinned: this message is sent as is and in its place, even after its scene is summarized.";
+// The pin a message is pinned by, drawn on a 16-unit square: symmetric
+// about its diagonal, its stroke kept inside the square.
+const _PIN_PATH =
+  "M8.7 1.1 14.9 7.3 12.3 6.8 9.7 9.4 10.1 12.7 8.7 14.1 5.7 11.1 1.9 14.9 1.1 14.1 4.9 10.3 1.9 7.3 3.3 5.9 6.6 6.3 9.2 3.7Z";
 
 
 /** Open the dossier — on the open story by default, or on `story` (a
@@ -84,6 +94,7 @@ export async function openStory({ story = null, tab = "messages", allStories } =
     inside,
     facts: read,
     messages: opened?.messages ?? [],
+    tree: opened?.tree ?? [],
     premise: opened?.premise ?? "",
     memory: opened?.memory ?? null,
     refused: opened?.refused ?? "",
@@ -96,6 +107,7 @@ export async function openStory({ story = null, tab = "messages", allStories } =
     select: {},
     footnotes: {},
   };
+  showCount(view);
 
   for (const button of $$(".otk-tab", popup)) {
     button.onclick = () => show(view, button.dataset.tab);
@@ -149,17 +161,20 @@ export async function land(storyId, messageId, action) {
 
 /** One story as the dossier draws it: its facts, its messages and its
     memory, asked at once — three reads, each whole, so a tab never draws
-    half of one — and the sentence a refusal answered with. */
+    half of one — and the sentence a refusal answered with. The messages
+    come with the discarded among them (`tree`, as the list reads them);
+    `messages` is the chain alone, what every count and place reads. */
 async function opening(storyId) {
-  const [story, messages, lore] = await Promise.all([
+  const [story, tree, lore] = await Promise.all([
     api.stories.get(storyId),
-    api.stories.messages.list(storyId),
+    api.stories.messages.list(storyId, { withDiscarded: true }),
     api.stories.lore.get(storyId),
   ]);
   const refused = story.refused ? story.notice : lore.refused ? lore.notice : "";
   return {
     premise: story.refused ? "" : story.premise,
-    messages,
+    messages: tree.filter((message) => !message.discarded),
+    tree,
     memory: refused ? null : memoryOf(lore),
     refused,
   };
@@ -259,20 +274,30 @@ function buildMessages(view, pane) {
       view.select.messages(first);
     },
   });
-  const rows = view.messages.map((message, i) => ({
+  /* The chain's messages numbered, the discarded among them unnumbered
+     (`position` null) and drawn only while the switch shows them. */
+  let played = 0;
+  const rows = view.tree.map((message) => ({
     ...message,
-    position: i + 1,
-    last: i === view.messages.length - 1,
+    position: message.discarded ? null : ++played,
+    last: !message.discarded && message.id === view.messages.at(-1)?.id,
     haystack: `${message.body} ${message.speaker ?? ""}`.toLowerCase(),
   }));
-  tabNote(view, "messages", `${rows.length} ${rows.length === 1 ? "message" : "messages"}`);
+  const column = $(".otk-col--messages", pane);
+  const toggle = $("[data-discarded-switch]", pane);
+  // every opening starts with them hidden: the pane outlives the story
+  let discardedShown = false;
+  toggle?.setAttribute("aria-checked", "false");
+  if (column) column.dataset.discarded = "hidden";
+  const visible = () => rows.filter((message) => discardedShown || !message.discarded);
+  tabNote(view, "messages", `${played} ${played === 1 ? "message" : "messages"}`);
   padScrollbar($("[data-detail]", pane));
-  if (!rows.length) $("[data-actions]", pane).replaceChildren();
+  if (!played) $("[data-actions]", pane).replaceChildren();
   // `e` is the keyboard's way to the same verb the pointer takes.
   const edit = () => $("[data-detail] .otk-edit__verb--edit", pane)?.click();
   const list = browser(view.popup, {
     root: pane,
-    rows,
+    rows: visible(),
     drawRow: (message) => {
       // who the row is: a tool's result and a card's line by what they
       // are, the reader's own line, or the speaker the pass named
@@ -287,16 +312,19 @@ function buildMessages(view, pane) {
          count reads with the line, and stays in view when the line is
          cut. */
       const title = element("span", "otk-row__title otk-row__title--noted");
-      title.append(span("otk-row__text", excerpt(message.body, 300)));
+      const words = span("otk-row__text");
+      words.append(...rowWords(message));
+      title.append(words);
       const pictures = message.attachments?.length ?? 0;
       if (pictures) title.append(span("otk-tag", `${pictures} picture${pictures === 1 ? "" : "s"}`));
       const drawn = row(
-        span("otk-row__id", String(message.position)),
+        rowNumber(view, message),
         span(who === "you" ? "otk-row__who otk-row__who--you" : "otk-row__who", who),
         title,
       );
       // what a save finds its row by: the cursor may be elsewhere by then
       drawn.dataset.id = String(message.id);
+      drawn.classList.toggle("otk-row--discarded", message.discarded);
       return drawn;
     },
     drawPreview: (message) => drawReader(view, pane, message, edit),
@@ -308,6 +336,20 @@ function buildMessages(view, pane) {
         : { line: "Nothing played yet.", hint: "continue this story to play into it" },
   });
   view.select.messages = (id) => list.select((message) => message.id === id);
+  /* The switch beside the filter: the discarded shown among the chain's
+     messages, or hidden — the cursor kept on its message, or on the
+     nearest one shown above it, as the terminal's `h` keeps it. */
+  if (toggle) {
+    toggle.onclick = guard(async () => {
+      const at = list.current();
+      discardedShown = !discardedShown;
+      toggle.setAttribute("aria-checked", String(discardedShown));
+      if (column) column.dataset.discarded = discardedShown ? "shown" : "hidden";
+      const next = visible();
+      const keep = at ? next.findLast((message) => rows.indexOf(message) <= rows.indexOf(at)) : null;
+      await list.replace(next, (message) => message === keep);
+    });
+  }
 }
 
 function padScrollbar(scroll) {
@@ -331,17 +373,34 @@ function sceneStart(view, scene) {
   return Number.isNaN(first) ? null : (view.messages[first - 1]?.id ?? null);
 }
 
-function reader(text, save) {
+/** A message's words in its row of the list. A reader's line reads as
+    typed, as the terminal's list reads it — its commands picked out, its
+    words with the model faint — whole, the row's own ellipsis cutting it;
+    every other message cut plain. */
+function rowWords(message) {
+  if (message.role !== "user") return [excerpt(message.body, 300)];
+  const parts = message.segments ?? [];
+  // the backend's split while it spells the line as typed; the whole line
+  // as story where the language shows it otherwise (a chapter's heading)
+  const spelled = parts.map((part) => part.text).join("") === message.body;
+  return lineNodes(spelled ? parts : [{ kind: "prose", text: message.body }]);
+}
+
+function reader(text, save, line = null) {
   /* A played turn READS as it played — dialogue and `*emphasis*` set as
-     the transcript sets them — and is still the field that corrects it.
-     So the two are one box, sharing the editable's face and box, the
-     rendering keeping its newlines, so opening one moves nothing. Which
-     is shown is the stylesheet's, off `data-editing`, so nothing here
-     keeps state about it. */
+     the transcript sets them, a reader's line drawn by `line` — and is
+     still the field that corrects it. So the two are one box, sharing
+     the editable's face and box, the rendering keeping its newlines, so
+     opening one moves nothing. Which is shown is the stylesheet's, off
+     `data-editing`, so nothing here keeps state about it. */
   const box = element("div", "otk-editable otk-prose otk-prose--read otk-typeset");
   const field = editable("otk-prose otk-prose--read", { text, save });
 
   const paint = () => {
+    if (line) {
+      box.replaceChildren(...line(field.value));
+      return;
+    }
     const { spoken, nodes } = typeset(field.value);
     box.classList.toggle("otk-prose--dialogue", spoken);
     box.replaceChildren(...nodes);
@@ -358,14 +417,29 @@ function reader(text, save) {
 
 function drawReader(view, pane, message, edit) {
   const head = element("div", "otk-detail__head");
-  head.append(span("otk-label otk-label--ink", `Message ${message.position}`));
+  // a discarded message has no number along the chain
+  const name = message.discarded ? "Message" : `Message ${message.position}`;
+  head.append(span("otk-label otk-label--ink", name));
   if (message.kind) head.append(span("otk-tag", message.kind));
+  if (message.can_pin || message.pinned) head.append(readerPin(view, message));
+
+  // A reader's line reads as the transcript draws it, a chapter's heading
+  // numbered; a text not saved yet, as typed.
+  const line =
+    message.role === "user"
+      ? (text) =>
+          lineNodes(text === message.body.trim() ? (message.segments ?? []) : [{ kind: "prose", text }])
+      : null;
 
   // The message is corrected where it is read: the reader IS the field —
   // without the whitespace at its edges, the row's join, which the save
   // keeps (`stories.update_message`), as the transcript's field does.
   const body = element("div", "otk-detail__section");
-  body.append(edited(reader(message.body.trim(), (text) => saveMessage(view, message, text)), ""));
+  body.append(edited(reader(message.body.trim(), (text) => saveMessage(view, message, text), line), ""));
+  const pinNote = element("p", "otk-note", _PIN_NOTE);
+  pinNote.dataset.pinNote = String(message.id);
+  pinNote.hidden = !message.pinned;
+  body.append(pinNote);
 
   const out = [head, body];
 
@@ -419,40 +493,149 @@ async function saveMessage(view, message, text) {
   const answer = await saveField(
     view,
     () => api.stories.messages.update(view.subject.id, message.id, { body: text }),
-    () => {
-      message.body = text;
-      message.haystack = `${text} ${message.speaker ?? ""}`.toLowerCase();
+    (saved) => {
+      // as stored, its edges kept, with the split a reader's line is drawn from
+      message.body = saved.body;
+      message.segments = saved.segments;
+      message.haystack = `${saved.body} ${message.speaker ?? ""}`.toLowerCase();
       const line = $(`[data-pane="messages"] .otk-row[data-id="${message.id}"] .otk-row__text`, view.popup);
-      if (line) line.textContent = excerpt(text, 300);
+      line?.replaceChildren(...rowWords(message));
     },
   );
   /* The story's name falls back to its first line, so the runhead asks
-     again; and the open story's transcript reads the same turn. */
+     again; and the open story's transcript reads the same turn — not a
+     discarded one's, which no transcript draws. */
   if (!answer.refused) {
-    await landed("", { corrected: view.inside ? [message.position, text] : null });
+    const shown = view.inside && !message.discarded;
+    await landed("", { corrected: shown ? [message.position, text] : null });
   }
   return answer;
 }
 
+/** The story's messages counted at the end of the tab row, and how many
+    are pinned where any is — the same on every tab. */
+function showCount(view) {
+  const total = view.messages.length;
+  const pinned = view.messages.filter((message) => message.pinned).length;
+  const count = `${total} ${total === 1 ? "message" : "messages"}`;
+  $("[data-tabs-aside]", view.popup).textContent = pinned ? `${count} · ${pinned} pinned` : count;
+}
+
+/** A message's number in its row, which is also its pin (`markPin`).
+    Inside the row's own button, so a span whose clicks stop at it: a pin
+    is no pick, and two quick ones no resume. A row that may not be pinned
+    keeps its bare number — unless pinned already, as an unpin is never
+    refused. */
+function rowNumber(view, message) {
+  const number = span("otk-row__id");
+  // a discarded message has no number — "undone" stands in its place —
+  // and is pinned from its reader
+  if (message.discarded) {
+    number.append(span("otk-row__why", "undone"));
+    return number;
+  }
+  if (!message.can_pin && !message.pinned) {
+    number.textContent = String(message.position);
+    return number;
+  }
+  number.append(span("otk-row__ordinal", String(message.position)), pinGlyph(17));
+  markPin(number, message);
+  const toggle = guard(() => togglePin(view, message));
+  number.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggle();
+  });
+  number.addEventListener("dblclick", (event) => event.stopPropagation());
+  return number;
+}
+
+/** The open message's pin, at the end of the reader's header. */
+function readerPin(view, message) {
+  const pin = element("button", "otk-detail__pin");
+  pin.type = "button";
+  pin.append(pinGlyph(17));
+  markPin(pin, message);
+  pin.onclick = guard(() => togglePin(view, message));
+  return pin;
+}
+
+/** A pin as its message stands: `data-pinned`, and what pressing it does
+    — the reader's a button of its own, the list's inside its row's. */
+function markPin(pin, message) {
+  const which = message.discarded ? "message" : `message ${message.position}`;
+  const does = `${message.pinned ? "unpin" : "pin"} ${which}`;
+  pin.dataset.pin = String(message.id);
+  pin.dataset.pinned = String(message.pinned);
+  pin.title = does;
+  if (pin.matches("button")) {
+    pin.setAttribute("aria-pressed", String(message.pinned));
+    pin.setAttribute("aria-label", does);
+  }
+}
+
+function pinGlyph(size) {
+  const glyph = svgElement("svg", {
+    class: "otk-pin",
+    width: size,
+    height: size,
+    viewBox: "0 0 16 16",
+    "aria-hidden": "true",
+  });
+  glyph.append(svgElement("path", { d: _PIN_PATH }));
+  return glyph;
+}
+
+async function togglePin(view, message) {
+  /* Pinned or unpinned from the list or the reader, both kept in step,
+     and the count; what the next request costs changes with it. */
+  const answer = await api.stories.messages.update(view.subject.id, message.id, {
+    pinned: !message.pinned,
+  });
+  if (!answer.refused) {
+    message.pinned = answer.value.pinned;
+    // the story's own copy of the message, which the count reads
+    const kept = view.messages.find((m) => m.id === message.id);
+    if (kept) kept.pinned = message.pinned;
+    for (const pin of $$(`[data-pin="${message.id}"]`, view.popup)) markPin(pin, message);
+    for (const note of $$(`[data-pin-note="${message.id}"]`, view.popup)) {
+      note.hidden = !message.pinned;
+    }
+    showCount(view);
+    await showContextUse();
+  }
+  footnote(view.popup, answer.notice, answer.refused);
+}
+
 function resumeAt(view, message) {
   // The last turn resumes as it stands; an earlier one has to say what
-  // to do with everything after it.
+  // to do with everything after it, and a discarded one how to go on.
   if (message.last) return land(view.subject.id, message.id, "resume");
   return askLanding(view, message);
 }
 
 async function askLanding(view, message) {
   /* Picking an earlier turn has to say what becomes of everything after
-     it. The radios choose; the button applies — a click on "Set aside"
-     must not set anything aside. */
+     it; picking a discarded one, whether the story goes on from it or a
+     copy does. The radios choose; the button applies — a click on "Set
+     aside" must not set anything aside. */
   let chosen = "fork";
   const follow = view.messages.length - message.position;
   const choice = await ask("landing", (dialog) => {
-    $("[data-title]", dialog).textContent = `Resume from message ${message.position}?`;
-    $(".otk-dialog__body", dialog).textContent =
-      `${follow === 1 ? "One turn follows" : `${follow} turns follow`} this one. ` +
-      "Choose what happens to them.";
-    const options = $$("[data-select]", dialog);
+    const body = $(".otk-dialog__body", dialog);
+    if (message.discarded) {
+      $("[data-title]", dialog).textContent = "Resume from a discarded message?";
+      body.textContent = "";
+    } else {
+      $("[data-title]", dialog).textContent = `Resume from message ${message.position}?`;
+      body.textContent =
+        `${follow === 1 ? "One turn follows" : `${follow} turns follow`} this one. ` +
+        "Choose what happens to them.";
+    }
+    body.hidden = !body.textContent;
+    // on a discarded message Resume stands in for Set aside
+    $('[data-select="move"]', dialog).hidden = !message.discarded;
+    $('[data-select="truncate"]', dialog).hidden = message.discarded;
+    const options = $$("[data-select]", dialog).filter((option) => !option.hidden);
     const confirm = $('[data-choice="confirm"]', dialog);
     const select = (picked) => {
       chosen = picked.dataset.select;
@@ -463,9 +646,11 @@ async function askLanding(view, message) {
       if (confirm) confirm.textContent = $(".otk-choice__name", picked)?.textContent ?? chosen;
     };
     for (const option of options) option.onclick = () => select(option);
-    // fork is the default: the one choice that loses nothing
-    const fork = options.find((option) => option.dataset.select === "fork");
-    if (fork) select(fork);
+    // fork is the default on the chain: the one choice that loses nothing;
+    // on a discarded message, resuming loses nothing either, and comes first
+    const preferred = message.discarded ? "move" : "fork";
+    const first = options.find((option) => option.dataset.select === preferred);
+    if (first) select(first);
   });
   // Returned, so the guard on the door that opened this dialog catches
   // a landing that fails — fired bare, it would reject with nobody
@@ -914,9 +1099,11 @@ async function reread(view, selectId) {
      cast shown on `selectId`. */
   const opened = await opening(view.subject.id);
   view.messages = opened.messages;
+  view.tree = opened.tree;
   view.memory = opened.memory;
   view.refused = opened.refused;
   for (const tab of ["messages", "scenes", "cast"]) view.built.delete(tab);
+  showCount(view);
   show(view, "cast", selectId);
 }
 
@@ -1005,12 +1192,13 @@ function sceneCount(character) {
 
 async function saveField(view, write, shown) {
   /* Nothing is rebuilt: the field shows what it saved, `shown` carries
-     the text to the other places this dossier draws it, and a click away
-     that saved is not undone. A refusal travels back to `browser.editable`,
-     which keeps the field open with the words. */
+     what the write answered (`value`) to the other places this dossier
+     draws it, and a click away that saved is not undone. A refusal
+     travels back to `browser.editable`, which keeps the field open with
+     the words. */
   const answer = await write();
   if (!answer.refused) {
-    shown();
+    shown(answer.value);
     footnote(view.popup, answer.notice);
   }
   return answer;

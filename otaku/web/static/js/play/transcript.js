@@ -21,7 +21,8 @@
 
 import { api } from "../api/index.js";
 import { editable, edited } from "../kit/browser.js";
-import { $, $$, element, span } from "../kit/dom.js";
+import { $, $$, element, span, svgElement } from "../kit/dom.js";
+import { duration } from "../kit/format.js";
 import * as held from "./held.js";
 import { thumbs } from "../kit/pictures.js";
 import { typesetBody } from "../kit/prose.js";
@@ -29,7 +30,7 @@ import { complain, settle, tell, working } from "../kit/status.js";
 import { isToken } from "./language.js";
 
 /* What the backend says with nothing to take again — COPIED, as the page
-   has no story to ask (`backend.domain.story.stories.NOTHING_TO_REGENERATE`). */
+   has no story to ask (`backend.story.stories.services.NOTHING_TO_REGENERATE`). */
 const _NOTHING_TO_REGENERATE = "Nothing to regenerate.";
 
 const transcript = $(".otk-transcript");
@@ -40,12 +41,16 @@ const _SAY_MS = 250;
 // for the model's voice, the one its question panel uses.
 const _replyRubric = (position) => `${position} · narrator`;
 // The tools whose calls the reader is shown (`displayTools`); every
-// other call draws as nothing. Of those, the ones whose notes are shown
-// open — the rest fold to their label, the text its hover hint.
+// other call draws as nothing.
 let shownTools = new Set();
-let openNotes = new Set();
+// A reply's thinking, as an openable block: labelled as going on, then
+// once over with how long it took. The terminal's twin labels:
+// chat/stream.py.
+const _THINKING = "Thinking…";
+const _THOUGHT_FOR = "Thought for "; // and how long, after it
 const stop = $("[data-stop]");
 const send = $("[data-send]");
+const composerBox = $("#otk-msg");
 
 // The reply in flight, so Stop has something to stop, and a promise that
 // keeps until it is over, for whoever asked it to stop.
@@ -74,14 +79,12 @@ export function showPlayed({ messages, question = null }, options = {}) {
   if (question) showAsk(question);
 }
 
-/** Which tools' calls the reader is shown, as the story says: those it
-    shows (`Story.shown_tools`) open, those it folds (`Story.folded_tools`)
-    by their label alone, the text the hover hint — every other call is
-    drawn as nothing. None for a story not made yet. Whoever sets it draws
-    the transcript again: what it draws just changed. */
+/** Which tools' calls the reader is shown, as the story says
+    (`Story.shown_tools`) — every other call is drawn as nothing, as the
+    terminal draws it. None for a story not made yet. Whoever sets it
+    draws the transcript again: what it draws just changed. */
 export function displayTools(story) {
-  shownTools = new Set([...(story?.shown_tools ?? []), ...(story?.folded_tools ?? [])]);
-  openNotes = new Set(story?.shown_tools ?? []);
+  shownTools = new Set(story?.shown_tools ?? []);
 }
 
 /** The question the story held stands on (`Story.question`), as the
@@ -105,13 +108,17 @@ export function showTurns(turns, { keepPlace = false, posed = false } = {}) {
     drawTurn(turn, i + 1, { posed: posed && i === turns.length - 1 }),
   );
   if (keepPlace) {
-    holdSpace(() => transcript.replaceChildren(...drawn));
+    holdSpace(() => {
+      transcript.replaceChildren(...drawn);
+      capChapters();
+    });
     showTurnBar();
     showTail();
     return;
   }
   release();
   transcript.replaceChildren(...drawn);
+  capChapters();
   showTurnBar();
   showTail();
   toBottom();
@@ -126,11 +133,14 @@ export function takeBack(turns, question = null) {
   shelved = null;
   // the question the story stands on again once its answer is taken back
   // (`Story.question`, the undo's answer): posed anew, as the terminal
-  // poses it (`dispatch.story.stories._pose_again`)
+  // poses it (`dispatch.stories._pose_again`)
   const call = question;
   const drawn = storedTurns();
   const same = turns.every(
-    (turn, i) => drawn[i] && (turn.role === "user") === drawn[i].classList.contains("otk-turn"),
+    (turn, i) =>
+      drawn[i] &&
+      (turn.role === "user") ===
+        (drawn[i].classList.contains("otk-turn") || drawn[i].classList.contains("otk-chapter")),
   );
   if (!same) {
     showTurns(turns, { keepPlace: true, posed: Boolean(call) });
@@ -221,7 +231,7 @@ function askBox({ question, options }, { armed }) {
 
 // An answer to pick from, as the tool reads one: `1.` `1)` `a.` `a)` at the
 // head of a line, then the answer. The RULE is `ToolQuestion._OPTION`'s
-// (`backend.domain.story._tools`), copied for the page to read a question as
+// (`backend.story.tools`), copied for the page to read a question as
 // it streams — the language barrier being the one reason a rule exists twice.
 const _OPTION = /^\s*(?:\d{1,2}|[A-Za-z])[.)]\s+(\S.*)$/;
 // A line still arriving that may yet turn out an option: its head not
@@ -325,11 +335,14 @@ export function showTail() {
         event.preventDefault();
         return;
       }
-      // the turn's two verbs, as the composer answers them
-      const verb = { r: "regen", u: "undo" }[event.key];
+      // the turn's verbs, as the composer answers them: Revert by its
+      // button too, which says so when there is nothing to put back
+      const verb = { r: '[data-turn="regen"]', u: '[data-turn="undo"]', y: "[data-revert]" }[
+        event.key
+      ];
       if (verb && event.ctrlKey && !event.metaKey && !event.altKey) {
         event.preventDefault();
-        $(`[data-turn="${verb}"]`)?.click();
+        $(verb)?.click();
         return;
       }
       if ((event.key === "ArrowUp" || event.key === "ArrowDown") && !event.shiftKey && atEdge(event.key)) {
@@ -743,7 +756,9 @@ async function redrawTurn(position) {
   if (!stored || !drawn) return;
   const newest = position === messages.length;
   const call = newest && !facts.refused ? facts.question : null;
-  drawn.replaceWith(drawTurn(stored, position, { posed: Boolean(call) }));
+  const fresh = drawTurn(stored, position, { posed: Boolean(call) });
+  drawn.replaceWith(fresh);
+  dropCap(fresh);
   if (newest) {
     if (call) showAsk(call);
     else clearAsk();
@@ -755,16 +770,19 @@ async function redrawTurn(position) {
 function storedTurns() {
   // a tool's turn is a stored row like any other: counted, or every turn
   // after one would be addressed one place off the store's
-  return $$(".otk-turn, .otk-reply, .otk-tool", transcript).filter((a) => !a.dataset.unstored);
+  return $$(".otk-turn, .otk-chapter, .otk-reply, .otk-tool", transcript).filter(
+    (a) => !a.dataset.unstored,
+  );
 }
 
 /** Send while the box is the reader's, Stop while the model has it. */
 function turnOver(streaming) {
   /* Send gives way to Stop, and the root says a reply is arriving —
      what the stylesheet holds still meanwhile (the layout glyphs) reads
-     it there. */
+     it there. Revert is never offered while a reply is written. */
   if (send) send.hidden = streaming;
   if (stop) stop.hidden = !streaming;
+  if (streaming) for (const revert of $$("[data-revert]")) revert.hidden = true;
   $(".otk-app")?.toggleAttribute("data-playing", streaming);
 }
 
@@ -870,7 +888,11 @@ export function keepingPlace(change) {
     below it. */
 function topmost() {
   const top = transcript.getBoundingClientRect().top;
-  return $$(".otk-turn, .otk-reply", transcript).find((turn) => turn.getBoundingClientRect().bottom > top) ?? null;
+  return (
+    $$(".otk-turn, .otk-chapter, .otk-reply", transcript).find(
+      (turn) => turn.getBoundingClientRect().bottom > top,
+    ) ?? null
+  );
 }
 
 /* ---------- following a reply down ----------
@@ -926,6 +948,14 @@ function follow() {
     (`shell.showFacts`): where a reply arriving now joins the text. */
 const canvas = () => $(".otk-app")?.dataset.layout === "canvas";
 
+/** Whether the flow is drawn as one text — the canvas's look, which the
+    novel wears too (`data-transcript`). */
+const isOneText = () => transcript.dataset.transcript === "canvas";
+
+/** Whether the reader's turns are drawn as the replies are — in one text
+    and in the chat; the manuscript sets them apart. */
+const drawnAlike = () => isOneText() || transcript.dataset.transcript === "chat";
+
 function drawTurn(turn, position, { posed = false } = {}) {
   // How the turn joins the one before it — the backend's join rule
   // (`join_type`), drawn by the canvas: inline after one space, or a
@@ -934,6 +964,10 @@ function drawTurn(turn, position, { posed = false } = {}) {
     article.dataset.join = turn.join_type ?? "paragraph";
     return article;
   };
+  if (turn.kind === "chapter") {
+    const heading = chapterHeading(turn);
+    if (heading) return heading;
+  }
   if (turn.role === "user") {
     const article = joined(element("article", "otk-turn"));
     const rubric = element("span", "otk-turn__rubric", `${position} · you`);
@@ -957,14 +991,14 @@ function drawTurn(turn, position, { posed = false } = {}) {
   }
   if (turn.role === "tool") {
     /* A tool turn — a tool's result: nobody's line, no reply — drawn
-       as the notes block is, but the tool's label ALONE: the result is
+       as the notes block is, but the tool's label alone: the result is
        the model's to read, not the story's, so its text is the block's
-       hover hint and never in the flow. Never opened for editing. */
+       hover hint, under the label only when the reader opens it
+       (`openable`). Never opened for editing. */
     const article = joined(element("article", "otk-tool"));
     const label = turn.tool_label || "Tool";
-    const box = element("div", "otk-ask otk-ask--notes");
-    box.title = turn.body;
-    box.append(span("otk-ask__label", label));
+    const box = openable(element("div", "otk-ask otk-ask--notes"), label);
+    hint(box, turn.body);
     article.append(
       element("span", "otk-turn__rubric otk-reply__rubric", `${position} · tool`),
       box,
@@ -981,6 +1015,81 @@ function drawTurn(turn, position, { posed = false } = {}) {
     the layout's (`app.css`, the chat). */
 function replyRubric(position) {
   return element("span", "otk-turn__rubric otk-reply__rubric", _replyRubric(position));
+}
+
+/** A chapter's heading — its number and its title as the backend split
+    the row (`segments`), the same in every layout, with no rubric and no
+    join of its own; null for a row whose number is not known, which is
+    drawn as typed. */
+function chapterHeading(turn) {
+  const text = (kind) => turn.segments?.find((segment) => segment.kind === kind)?.text;
+  const number = text("chapter_number");
+  const title = text("chapter_title");
+  if (number === undefined || title === undefined) return null;
+  const article = element("article", "otk-chapter");
+  article.setAttribute("aria-label", `${number}: ${title}`);
+  article.append(span("otk-chapter__num", number), element("h2", "otk-chapter__title", title));
+  return article;
+}
+
+/** Every turn that opens its chapter, its initial set (`dropCap`). */
+function capChapters() {
+  for (const turn of $$(".otk-turn, .otk-reply", transcript)) dropCap(turn);
+}
+
+/** The initials set again for the look now in force: a switched layout
+    may move one between the reader's line and the reply (`opensChapter`). */
+export function recapChapters() {
+  for (const cap of $$(".otk-dropcap", transcript)) {
+    const prose = cap.parentElement;
+    cap.replaceWith(...cap.childNodes);
+    prose.normalize();
+  }
+  capChapters();
+}
+
+/** The big initial on a turn that opens its chapter (`opensChapter`); not
+    where the turn runs on inside a paragraph of one text. */
+function dropCap(article) {
+  if (!article.matches(".otk-turn, .otk-reply") || $(".otk-dropcap", article)) return;
+  if (isOneText() && article.dataset.join === "inline") return;
+  if (!opensChapter(article)) return;
+  // the text as read: a stored turn's box holds its editor's field too
+  const prose = $(".otk-typeset", article);
+  if (prose) capFirstLetter(prose);
+}
+
+/** The first letter of the prose, with an opening quote right before it,
+    in the initial's span (`.otk-dropcap`). */
+function capFirstLetter(prose) {
+  const walker = document.createTreeWalker(prose, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const letter = /[\p{L}\p{N}]/u.exec(node.data);
+    if (!letter) continue;
+    const lead = node.data.search(/\S/);
+    const from = /\s/.test(node.data.slice(lead, letter.index)) ? letter.index : lead;
+    const cap = node.splitText(from);
+    cap.splitText(letter.index - from + letter[0].length);
+    const box = span("otk-dropcap", "");
+    cap.replaceWith(box);
+    box.append(cap);
+    return;
+  }
+}
+
+/** Whether a turn opens its chapter: where every turn is drawn alike
+    (`drawnAlike`), the one right after the chapter's heading, whoever
+    wrote it; in the manuscript the first reply after it, whatever the
+    reader wrote between. */
+function opensChapter(article) {
+  const alike = drawnAlike();
+  if (!alike && !article.classList.contains("otk-reply")) return false;
+  for (let at = article.previousElementSibling; at; at = at.previousElementSibling) {
+    if (at.classList.contains("otk-chapter")) return true;
+    if (at.dataset.unstored) continue;
+    if (at.matches(alike ? ".otk-turn, .otk-reply" : ".otk-reply")) return false;
+  }
+  return false;
 }
 
 function replyReader(turn, { posed = false } = {}) {
@@ -1025,7 +1134,7 @@ function storedCall(segments, posed) {
     // story's: nothing drawn; its result follows as a turn of its own
     if (segment.actor === "system") return null;
     if (!shownTools.has(segment.tool)) return null;
-    return notesBlock(segment.text, { open: openNotes.has(segment.tool) });
+    return notesBlock(segment.text);
   };
 }
 
@@ -1084,24 +1193,83 @@ function replyNodes(segments, callNode, { inline = false } = {}) {
   return out;
 }
 
-function notesBlock(text, { open }) {
-  /* The model's notes, drawn as the question is drawn — the same shape,
-     a label over the text itself — and never as a tag; folded (`open`
-     false: their display switch off), the label alone with the text its
-     hover hint, as a tool turn is drawn. */
-  const box = element("div", "otk-ask otk-ask--notes");
-  box.append(span("otk-ask__label", "Notes"));
-  if (open) box.append(element("p", "otk-ask__body", text.trim()));
-  else box.title = text.trim();
+function notesBlock(text) {
+  /* The model's notes, drawn as a tool turn is and never as a tag: the
+     label, the text in its hover hint and, opened, under it (`openable`). */
+  const box = openable(element("div", "otk-ask otk-ask--notes"), "Notes");
+  hint(box, text.trim());
   return box;
 }
 
-function fillNotes(box, text) {
-  /* A streaming note's text, where its block keeps it: the body of an
-     open one, the hint of a folded one. */
-  const body = $(".otk-ask__body", box);
-  if (body) body.textContent = text.trim();
-  else box.title = text.trim();
+function thinkingBlock() {
+  /* A reply's thinking, drawn as a tool turn is, as it begins: the label,
+     the text streaming into its hover hint and into the block opened, so a
+     reader may watch it go — labelled with how long it took once over
+     (`settleThinking`). Open or closed as the last one on the page was
+     left, closed where there is none: the reader's choice carries on. */
+  const last = $$(".otk-ask--thinking", transcript).at(-1);
+  const box = openable(element("div", "otk-ask otk-ask--notes otk-ask--thinking"), _THINKING);
+  if (last?.dataset.open === "true") setOpen(box, true);
+  return box;
+}
+
+function openable(box, label) {
+  /* A block whose text is the model's, not the story's — the notes, a tool
+     turn, the thinking: its label with a toggle beside it, and opened
+     (`data-open`), the text of its hover hint under the label (`hint`).
+     Drawn closed, the transcript drawn again included. */
+  const toggle = element("button", "otk-call__toggle");
+  toggle.type = "button";
+  toggle.dataset.callToggle = "";
+  toggle.setAttribute("aria-expanded", "false");
+  const chevron = svgElement("svg", {
+    class: "otk-call__chev", width: "12", height: "12", viewBox: "0 0 24 24", "aria-hidden": "true",
+  });
+  chevron.append(svgElement("path", { d: "m6 9 6 6 6-6" }));
+  toggle.append(span("otk-call__verb", "show"), chevron);
+  const head = element("div", "otk-call__head");
+  head.append(span("otk-ask__label", label), toggle);
+  box.classList.add("otk-call");
+  box.append(head, element("p", "otk-call__body", ""));
+  return box;
+}
+
+function hint(box, text) {
+  /* An openable block's text: the hover hint of its label — the label
+     alone, not the toggle or the row — and the same text opened. */
+  $(".otk-ask__label", box).title = text;
+  $(".otk-call__body", box).textContent = text;
+}
+
+function setOpen(box, open) {
+  /* An openable block's text shown under its label, or not. */
+  const toggle = $(".otk-call__toggle", box);
+  box.dataset.open = String(open);
+  toggle.setAttribute("aria-expanded", String(open));
+  $(".otk-call__verb", toggle).textContent = open ? "hide" : "show";
+}
+
+transcript.addEventListener("click", (event) => {
+  const toggle = event.target.closest("[data-call-toggle]");
+  if (!toggle) return;
+  setOpen(toggle.closest(".otk-call"), toggle.getAttribute("aria-expanded") !== "true");
+  // the caret back where the next line is typed (`composer.focusComposer`'s
+  // rule) — not on a touch screen, where it would raise the keyboard over
+  // the block just opened
+  if (window.matchMedia("(pointer: coarse)").matches) return;
+  if (!focusTail() && !composerBox.disabled) composerBox.focus({ preventScroll: true });
+});
+
+function settleThinking(turn) {
+  /* A reply's thinking, over: labelled with how long it took. */
+  if (turn.thoughtAt === null) return;
+  const seconds = Math.max(1, (Date.now() - turn.thoughtAt) / 1000);
+  // the time kept out of the label's capitals: "4S" does not read as seconds
+  $(".otk-ask__label", turn.reasoning).replaceChildren(
+    _THOUGHT_FOR,
+    span("otk-ask__time", duration(seconds)),
+  );
+  turn.thoughtAt = null;
 }
 
 function pastAsk({ question, options }) {
@@ -1310,11 +1478,12 @@ function joinSpace() {
   return span("otk-seam", " ");
 }
 
-function lineNodes(segments) {
+export function lineNodes(segments) {
   /* The reader's line from the store's split (`segments`): its commands
      picked out, its words with the model faint — all of a /you or /ooc
      line after the token, whatever follows a /ooc or /cue to its end —
-     in every layout; the edges trimmed, as the line is (`drawTurn`). */
+     in every layout and in the dossier; the edges trimmed, as the line
+     is (`drawTurn`). */
   const last = segments.length - 1;
   return segments.flatMap((segment, i) => {
     let text = segment.text;
@@ -1349,7 +1518,7 @@ function showTurnBar() {
      in the terminal. They live under the PROMPT rather than the turn:
      they are what you do next, and next is where the cursor is. Drawn
      once in the markup, so this only decides what there is to act on. */
-  const turns = $$(".otk-turn, .otk-reply", transcript).length;
+  const turns = $$(".otk-turn, .otk-chapter, .otk-reply", transcript).length;
   /* Regenerate answers mid-reply too — it means "not this one" and takes
      the door Stop does; undo cannot, the turn having not landed yet. */
   const undo = $("[data-turn='undo']");
@@ -1481,6 +1650,12 @@ function beginTurn(regenerate, { continues = false } = {}) {
       seam?.remove();
     });
   }
+  // the refusals and failures standing in the transcript are past once a
+  // new attempt starts: their doors go, their rule quiets as an answered
+  // question's does, and the room the doors took is held
+  holdSpace(() => {
+    for (const box of $$(".otk-error", transcript)) box.classList.add("otk-error--past");
+  });
   arriving = new AbortController();
   let over;
   settled = new Promise((resolve) => (over = resolve));
@@ -1536,7 +1711,9 @@ function openArticle() {
   // Waiting and writing are ONE state: the caret holds the answer's
   // place from the first moment, with the status line under it.
   const block = element("div", "otk-editable otk-prose otk-typeset");
-  block.append(caret());
+  const waiting = caret();
+  waiting.classList.add("otk-caret--waiting"); // nothing before it yet
+  block.append(waiting);
   const state = element("span", "otk-generating__text", "waiting");
   const elapsed = element("span", "otk-generating__text otk-generating__elapsed", "0.0s");
   const status = element("div", "otk-generating__status");
@@ -1556,7 +1733,8 @@ function openArticle() {
   // segments a stored turn carries, kept as they stream so each call
   // draws in its place
   // `said`, `saidAt`: the status row's word and when it went up (`sayDoing`)
-  return { article, block, status, state, rubric, ticking, said: "waiting", saidAt: started, over: null, reasoning: null, ask: null, pieces: [] };
+  // `thoughtAt`: when the thinking began, until it is over (`settleThinking`)
+  return { article, block, status, state, rubric, ticking, said: "waiting", saidAt: started, over: null, reasoning: null, thoughtAt: null, ask: null, pieces: [] };
 }
 
 function sayDoing(turn, text, { call = false } = {}) {
@@ -1624,6 +1802,7 @@ function streamed(turn) {
     nodes.splice(lastProse + 1, 0, caret());
   }
   turn.block.replaceChildren(...nodes);
+  dropCap(turn.article);
 }
 
 function draw(turn, happened) {
@@ -1632,9 +1811,14 @@ function draw(turn, happened) {
   // (`beginTurn`). Ahead of the held space, which belongs last: behind
   // it, the block would sit between two turns.
   if (!turn.article.isConnected) transcript.insertBefore(turn.article, $(".otk-gap", transcript));
-  DRAW[happened.type]?.(turn, happened);
-  // what arrives goes into the space the old take was read in
-  reserve();
+  // Text once drawn never moves down: an event that shortens the flow — the
+  // caret taken off a row of its own as a call begins — holds the space it
+  // gave up, and what arrives grows into it, as into the space the old take
+  // was read in (`holdSpace`).
+  holdSpace(() => {
+    if (happened.type !== "assistant_reasoning") settleThinking(turn);
+    DRAW[happened.type]?.(turn, happened);
+  });
   follow();
 }
 
@@ -1656,14 +1840,16 @@ const DRAW = {
       $(".otk-generating__status", above)?.remove();
     }
     transcript.insertBefore(drawn, turn.article);
+    dropCap(drawn);
   },
   assistant_reasoning(turn, happened) {
     if (!turn.reasoning) {
-      turn.reasoning = element("p", "otk-reasoning");
+      turn.reasoning = thinkingBlock();
       turn.rubric.after(turn.reasoning);
+      turn.thoughtAt = Date.now();
     }
-    turn.reasoning.textContent += happened.text;
-    sayDoing(turn, "reasoning");
+    hint(turn.reasoning, $(".otk-call__body", turn.reasoning).textContent + happened.text);
+    sayDoing(turn, "thinking");
   },
   assistant_text(turn, happened) {
     sayDoing(turn, "writing");
@@ -1697,14 +1883,14 @@ const DRAW = {
       // a question never takes a notes box: it is the live panel's
       const box =
         happened.tool !== "question" && shownTools.has(happened.tool)
-          ? notesBlock("", { open: openNotes.has(happened.tool) })
+          ? notesBlock("")
           : null;
       call = { kind: "tool_call", tool: happened.tool, text: "", closed: false, box };
       turn.pieces.push(call);
     }
     call.text += happened.text;
     call.closed = happened.closed;
-    if (call.box) fillNotes(call.box, call.text);
+    if (call.box) hint(call.box, call.text.trim());
     if (happened.tool === "question" && shownTools.has("question")) streamAsk(turn, call);
     streamed(turn);
   },
@@ -1724,7 +1910,11 @@ const DRAW = {
     clearInterval(turn.ticking);
     ordinal += 1;
     const landed = drawTurn(turn.reply, ordinal);
+    // thinking is never stored, so the drawing from the store has none:
+    // the streamed one is kept, where it stood
+    if (turn.reasoning) $(".otk-reply__rubric", landed)?.after(turn.reasoning);
     turn.article.replaceWith(landed);
+    dropCap(landed);
     ordinal += 1;
     const result = drawTurn(happened.message, ordinal);
     landed.after(result);
@@ -1743,6 +1933,12 @@ const DRAW = {
   declined(turn, happened) {
     turn.article.insertBefore(
       failure("The model declined", happened.reason),
+      $(".otk-generating__status", turn.article),
+    );
+  },
+  empty_reply(turn, happened) {
+    turn.article.insertBefore(
+      failure("No reply", happened.note),
       $(".otk-generating__status", turn.article),
     );
   },
@@ -1798,6 +1994,7 @@ function endTurn(turn) {
   playing = false;
   arriving = null;
   clearInterval(turn.ticking);
+  settleThinking(turn); // a reply that ended inside its thinking
   // a word still waiting its turn has nothing left to say
   clearTimeout(turn.deferred);
   turn.waiting = [];
@@ -1841,16 +2038,18 @@ function endTurn(turn) {
             join_type: turn.article.dataset.join,
           }
         : null);
-    if (landed) turn.block.replaceWith(replyReader(landed, { posed: Boolean(turn.call) }));
-    else turn.block.remove();
+    if (landed) {
+      turn.block.replaceWith(replyReader(landed, { posed: Boolean(turn.call) }));
+      dropCap(turn.article);
+    } else turn.block.remove();
     // a reply that never arrived leaves no empty block behind
-    if (!landed && !$(".otk-error, .otk-verbose, .otk-reasoning", turn.article)) {
+    if (!landed && !turn.reasoning && !$(".otk-error, .otk-verbose", turn.article)) {
       turn.article.remove();
     } else if (turn.article.isConnected && landed) {
       /* The reply landed, so the story is one turn longer than the rubric
          counted. The STORED turn is the test, not the block: a declined or
          failed attempt keeps its block to say so but stores no message
-         (`backend.domain.story._play._land_reply` records a reply row only when
+         (`backend.story.play._land_reply` records a reply row only when
          some text arrived), and counting it would number every later turn
          one too high. */
       ordinal += 1;
@@ -1872,7 +2071,7 @@ function endTurn(turn) {
 /* the standing reply comes off, so the fresh take streams in its place
    rather than under it */
 function dropLastReply() {
-  const last = [...$$(".otk-turn, .otk-reply", transcript)].pop();
+  const last = [...$$(".otk-turn, .otk-chapter, .otk-reply", transcript)].pop();
   if (last && last.classList.contains("otk-reply")) {
     last.remove();
     // an article kept only to say a take failed was never counted, so

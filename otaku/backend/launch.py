@@ -7,22 +7,26 @@ shared by the store and the request log), providers (sealed keys opened,
 values injected into the registry), store, worker, the samples seeded
 (`backend.samples`) — and
 it never prints: what a frontend should say rides on the app, its
-`LaunchFacts`, read as `api.app.get().launch`.
+`LaunchFacts`, read as `api.app.get().launch_facts`.
 The module also carries the launch pieces cli needs alone (`otaku logs
-requests` unlocks the way the app does).
+requests` unlocks the way the app does; `otaku uninstall` purges).
 """
 
+import contextlib
+import shutil
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import TypeVar
 
-from otaku import encryption
+from otaku import __version__, encryption
 from otaku.agents import Worker
 from otaku.backend import samples
 from otaku.backend.api import Api
-from otaku.backend.domain.app import App, LaunchFacts, _passwords
-from otaku.backend.domain.app._paths import Paths
+from otaku.backend.app import passwords
+from otaku.backend.app.core.services import App, LaunchFacts
+from otaku.backend.app.paths import Paths
+from otaku.backend.app.settings import services as domain_settings
 from otaku.backend.errors import NO_MODEL_HINT
 from otaku.encryption import AskSecret, Cipher, SealedError
 
@@ -158,11 +162,17 @@ def open_app(root: str | Path | None = None, *, ask_secret: AskSecret | None = N
     if stale:
         app._update_state_config(best_effort=True, **stale)
     notices += app._make_current()
+    notices += domain_settings.unusable_variables()
     hint = ""
     if fresh and config.seed_sample:
         notices += samples.seed(app)
         hint = samples.HINT if Api(app).settings.get().last_story is not None else ""
-    app._launch_facts = LaunchFacts(tuple(notices), hint)
+    app._launch_facts = LaunchFacts(
+        tuple(notices), hint, _newer_version(state.update_latest_version)
+    )
+    # Everything above ran on the caller's thread; from here every call
+    # runs on the app's own (`backend.app.thread`).
+    app._thread.start()
     return app
 
 
@@ -187,6 +197,40 @@ def error_log(root: str | Path | None = None) -> ErrorLog:
 
 
 # ---------- launch internals ----------
+
+
+def purge(root: str | Path | None = None) -> Path:
+    """Delete the state dir — every story, picture, backup, setting and log
+    in it — and its keys in the OS keychain; the dir purged. Only otaku's
+    own folders go, and the dir itself only where they were all it held:
+    one OTAKU_CONFIG_DIR points at keeps whatever else is in it."""
+    paths = Paths.resolve(root)
+    encryption.purge_keychain_items(paths.keychain_service)
+    for folder in (
+        paths.configs_dir,
+        paths.database_dir,
+        paths.logs_dir,
+        paths.custom_web_dir,
+        paths.cert_dir,
+    ):
+        if folder.exists():
+            shutil.rmtree(folder)
+    with contextlib.suppress(OSError):  # something else is in it
+        paths.root.rmdir()
+    return paths.root
+
+
+def _newer_version(latest_version: str) -> str:
+    """`latest_version` where it is a later version than this otaku's,
+    compared number by number — 0.10.0 is later than 0.9.0; "" otherwise,
+    and where either is not plain numbers."""
+    theirs, ours = _version_numbers(latest_version), _version_numbers(__version__)
+    return latest_version if theirs and ours and theirs > ours else ""
+
+
+def _version_numbers(version: str) -> tuple[int, ...]:
+    parts = version.split(".")
+    return tuple(int(part) for part in parts) if all(part.isdigit() for part in parts) else ()
 
 
 def _load_config(
@@ -217,17 +261,17 @@ def _load_config(
     secrets = Secrets(
         seal=_sealer(paths),
         is_sealed=encryption.is_sealed,
-        hash=_passwords.hash,
-        is_hashed=_passwords.is_hashed,
+        hash=passwords.hash,
+        is_hashed=passwords.is_hashed,
     )
     migrations.migrate(paths.settings_files, secrets, autoconfigure(), default_sections())
     config = config_file.load(paths.config_file)
-    if config.web_password and not _passwords.is_hashed(config.web_password):
+    if config.web_password and not passwords.is_hashed(config.web_password):
         # The migration left it plain — the file could not be written, or
         # the value is not a string: hashed in memory for this run, and
         # in the file by the next launch that can. Nothing past this line
         # sees it typed.
-        config = replace(config, web_password=_passwords.hash(config.web_password))
+        config = replace(config, web_password=passwords.hash(config.web_password))
     providers, key_warnings = _resolve_api_keys(paths, providers_file.load(paths.providers_file))
     integration_settings = integrations_file.load(paths.integrations_file)
     integrations, more_warnings = _resolve_api_keys(paths, integration_settings.integrations)

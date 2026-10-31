@@ -28,9 +28,9 @@ from prompt_toolkit.layout.containers import AnyContainer, ConditionalContainer
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.dimension import D
 
-from otaku.formatting import flatten, human_age, truncate
+from otaku.formatting import LABEL_WIDTH, flatten, human_age, truncate, truncate_label
 from otaku.terminal.api import Api
-from otaku.terminal.api.story.stories import StorySummary
+from otaku.terminal.api.stories import StorySummary
 from otaku.terminal.screens.base import bordered_box, wrap_text
 from otaku.terminal.screens.dossier import Dossier
 from otaku.terminal.tty import latin_key
@@ -94,9 +94,19 @@ class StoryPicker(Dossier):
             return [("class:preview.muted", "nothing to preview")]
         width = max(10, self._preview_inner_width())
         row = self.filtered[self.cursor]
-        out: StyleAndTextTuples = [
-            ("class:preview.title", (row.model or "?") + "\n"),
-            ("class:preview.body", "\n"),
+        out: StyleAndTextTuples = []
+        # The story's name, then its measure and its dates; an unnamed
+        # story (nothing played, no title) opens on the measure.
+        label = truncate_label(flatten(row.label), LABEL_WIDTH)
+        if label:
+            for line in wrap_text(label, width):
+                out.append(("class:preview.title", line + "\n"))
+            out.append(("class:preview.body", "\n"))
+        messages = f"{row.message_count:,} message{'' if row.message_count == 1 else 's'}"
+        words = f"{row.word_count:,} word{'' if row.word_count == 1 else 's'}"
+        measure = " · ".join(part for part in (messages, words, row.model) if part)
+        out.append(("class:preview.muted", measure + "\n"))
+        out.append(
             (
                 "class:preview.muted",
                 row.updated_at.astimezone().strftime("%a %Y-%m-%d %H:%M")
@@ -104,14 +114,10 @@ class StoryPicker(Dossier):
                 + human_age(row.updated_at)
                 # the number a story's files are named by (`store.files`)
                 + f" · id {row.id}\n",
-            ),
-        ]
-        # Title (if any) before the arc, each block separated by a blank
-        # line; a story with neither simply shows nothing there.
-        if row.title:
-            out.append(("class:preview.body", "\n"))
-            for line in wrap_text(flatten(row.title), width):
-                out.append(("class:preview.title", line + "\n"))
+            )
+        )
+        # The arc and the first prompt, each block after a blank line; a
+        # story with neither simply shows nothing there.
         if row.story_so_far:
             out.append(("class:preview.body", "\n"))
             for line in wrap_text(row.story_so_far, width):

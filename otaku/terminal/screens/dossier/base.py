@@ -22,11 +22,8 @@ from prompt_toolkit.layout.containers import (
 )
 
 from otaku.formatting import flatten, truncate
-from otaku.terminal.api import Api
-from otaku.terminal.api.app.integrations import WebSearch
-from otaku.terminal.api.story.lore import Lore
-from otaku.terminal.api.story.messages import Message
-from otaku.terminal.api.story.settings import StorySetting
+from otaku.terminal.api import Api, Message, StorySetting, WebSearch
+from otaku.terminal.api.lore import Lore
 from otaku.terminal.screens.base import (
     ListScreen,
     ansi_fragments,
@@ -118,9 +115,14 @@ class DossierBase(ListScreen):
         self.tab: Tab = "messages"
         self.tabs: dict[Tab, _TabState] = {}
 
-        # The loaded story: its premise, its chain, its memory.
+        # The loaded story: its premise, its messages — the chain and the
+        # discarded, in the order the list reads them — and its memory;
+        # each message's number along the chain (None for a discarded
+        # one), and whether the messages tab shows the discarded (`h`).
         self.premise: str = ""
         self.msgs: list[Message] = []
+        self.numbers: list[int | None] = []
+        self.discarded_shown: bool = False
         self.view: Lore | None = None
 
         # Per-tab row indices (the filters narrow these); the open
@@ -151,8 +153,9 @@ class DossierBase(ListScreen):
         self.choosing: bool = False
         self.choice: int = 0
 
-        # The resume dialog (Enter on an earlier message): up or not, and
-        # which _RESUME_OPTIONS row is highlighted (fork is the default).
+        # The resume dialog (Enter on an earlier or a discarded message):
+        # up or not, and which of its rows is highlighted (the first is the
+        # default).
         self.confirming_resume: bool = False
         self.resume_choice: int = 0
         # The delete confirm (Del on a cast row): up or not.
@@ -179,16 +182,21 @@ class DossierBase(ListScreen):
         return self.result
 
     def _open_dossier(self, story_id: int, tab: Tab) -> None:
-        """Load the story whole — premise, chain, memory — and open on
+        """Load the story whole — premise, messages, memory — and open on
         `tab`, every tab's state fresh (messages starts on the tail)."""
         self.story_id = story_id
         self.premise = self.api.stories.get(story_id).premise
         try:
-            self.msgs = self.api.stories.messages.list(story_id)
+            self.msgs = self.api.stories.messages.list(story_id, with_discarded=True)
         except Exception:
             self.msgs = []
+        played = 0
+        self.numbers = []
+        for m in self.msgs:
+            played += not m.discarded
+            self.numbers.append(None if m.discarded else played)
         self.view = self.api.stories.lore.get(story_id)
-        self.turn_filtered = list(range(len(self.msgs)))
+        self.turn_filtered = self._turns()
         self.scenes_f = list(range(len(self.view.scenes)))
         self.cast_f = list(range(len(self.view.characters)))
         self.tabs = {name: _TabState() for name in _TABS}
@@ -201,6 +209,19 @@ class DossierBase(ListScreen):
         self.cursor, self.in_filter, self.query = state.cursor, False, ""
         self.notice = ""
         self.dossier_on = True
+
+    def _turns(self, query: str = "") -> list[int]:
+        """The messages tab's rows: the chain's, and the discarded while
+        they are shown, narrowed to those holding `query` (casefolded)."""
+        return [
+            i
+            for i, m in enumerate(self.msgs)
+            if (self.discarded_shown or not m.discarded) and query in m.body.casefold()
+        ]
+
+    def _head(self) -> int | None:
+        """The message the story's chain ends at, as loaded."""
+        return next((m.id for m in reversed(self.msgs) if not m.discarded), None)
 
     def _reload(self) -> None:
         """The whole memory again, after a save — cheap for one story, and

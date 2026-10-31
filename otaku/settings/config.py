@@ -33,6 +33,12 @@ class TerminalSettings:
     # the platform's own sound — so a caller that has no opinion about
     # sound (the theme's, every time) needs none.
     notification_sound: str = "default"
+    # Whether the chat prints a reply's thinking as it streams, or only
+    # how long it took (`/set show_thinking`).
+    show_thinking: bool = False
+    # Whether the chat serves the web interface beside it, at `[web]`'s
+    # address (`/set serve`).
+    serve: bool = False
 
 
 @dataclass(frozen=True)
@@ -47,7 +53,7 @@ class WebSettings:
     host: str = "localhost"
     port: int = 9600
     https: bool = False
-    # The hash of `[web] password` that `backend.domain.app._passwords` made, never
+    # The hash of `[web] password` that `backend.app.passwords` made, never
     # the password itself: the launch hashes a typed one before anything
     # reads it. "" is no password at all.
     password: str = ""
@@ -67,12 +73,15 @@ class Config:
     encryption: Encryption = field(default_factory=Encryption)
     # [settings]
     show_banner: bool = True
+    check_updates: bool = True
     smooth_streaming: bool = True
     notification_sound: str = "default"  # "default" = the platform's own; else a path
     # [terminal]
     theme: str = "auto"  # "auto" asks the terminal; else "light" or "dark"
     dialogue_color: str = "auto"
     dialogue_bold: bool = False
+    show_thinking: bool = False
+    serve: bool = False
     # [web]
     web_host: str = "localhost"
     web_port: int = 9600
@@ -102,6 +111,7 @@ class Config:
         lines = [
             "[settings]",
             row(f"show_banner = {toml_scalar(self.show_banner)}", "the session header shown when a chat opens"),
+            row(f"check_updates = {toml_scalar(self.check_updates)}", "once a day, check GitHub for a new release"),
             row(f"smooth_streaming = {toml_scalar(self.smooth_streaming)}", "re-time bursty model output into an even stream"),
             row(f"notification_sound = {toml_scalar(self.notification_sound)}", 'what /set notification plays: "default" is the platform\'s own, else a path'),
             "",
@@ -109,10 +119,12 @@ class Config:
             row(f"theme = {toml_scalar(self.theme)}", '"auto" asks the terminal and takes dark when it will not say; or "light"/"dark"'),
             row(f"dialogue_color = {toml_scalar(self.dialogue_color)}", 'spoken lines: "auto" fits the background; a color name ("cyan") or #rrggbb'),
             row(f"dialogue_bold = {toml_scalar(self.dialogue_bold)}", "also bold the spoken lines"),
+            row(f"show_thinking = {toml_scalar(self.show_thinking)}", "print the model's thinking as it streams (/set show_thinking)"),
+            row(f"serve = {toml_scalar(self.serve)}", "the terminal UI also serves the web interface while it runs (/set serve)"),
             "",
             "[web]",
             row(f"host = {toml_scalar(self.web_host)}", '"localhost": reachable from this machine only; "0.0.0.0": from the whole network — set https and a password first'),
-            row(f"port = {self.web_port}", "the port `otaku web` listens on"),
+            row(f"port = {self.web_port}", "the port `otaku serve` listens on"),
             row(f"https = {toml_scalar(self.web_https)}", "RECOMMENDED to turn on when the host is not local; the certificate lives in cert/: drop in your own, or one is generated"),
             row(f"password = {toml_scalar(self.web_password)}", "RECOMMENDED to set when the host is not local; typed in plain text, it is replaced by its hash at the next launch"),
             "",
@@ -168,6 +180,8 @@ class Config:
             dialogue_bold=self.dialogue_bold,
             show_banner=self.show_banner,
             notification_sound=self.notification_sound,
+            show_thinking=self.show_thinking,
+            serve=self.serve,
         )
 
 
@@ -203,13 +217,16 @@ def load(path: Path) -> Config:
         return Config(
             encryption=encryption,
             show_banner=bool(settings.get("show_banner", True)),
+            check_updates=bool(settings.get("check_updates", True)),
             smooth_streaming=bool(settings.get("smooth_streaming", True)),
             notification_sound=str(settings.get("notification_sound", "default")),
             dialogue_color=str(terminal.get("dialogue_color", "auto")),
             dialogue_bold=bool(terminal.get("dialogue_bold", False)),
+            show_thinking=bool(terminal.get("show_thinking", False)),
+            serve=bool(terminal.get("serve", False)),
             web_host=str(web.get("host", "localhost")),
             # Clamped to the range a socket accepts, 0 excluded: a port
-            # of 0 asks the OS to pick one, and `otaku web` says where
+            # of 0 asks the OS to pick one, and `otaku serve` says where
             # the page is BEFORE it binds — an address nobody can be
             # told is no use for a page somebody has to open. A second
             # otaku on one machine names its own port here.

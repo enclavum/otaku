@@ -13,11 +13,17 @@ does not, so a picker cancelled without a word leaves the screen exactly
 as it was.
 """
 
+import contextlib
 import functools
 import re
+import signal
 import sys
+import threading
+from typing import Any
 
 from prompt_toolkit import PromptSession
+from prompt_toolkit.application import Application
+from prompt_toolkit.application.current import get_app_or_none
 from prompt_toolkit.formatted_text import ANSI, StyleAndTextTuples, to_formatted_text
 
 from otaku.console import banner
@@ -45,20 +51,54 @@ from otaku.terminal.tty import (
 )
 from otaku.terminal.tty.cursor import measure, terminal_width
 from otaku.terminal.tty.render import last_turns
+from otaku.terminal.tty.statusline import StatusLine
 
 
 def run(app: App) -> None:
-    """The whole terminal life over the app, until /bye or EOF: settle
+    """The whole terminal life over the app (`_run`), SIGTERM — a
+    `docker stop`, a `kill` — quitting it as /quit does (`_terminate`)."""
+    terminated = threading.Event()
+    previous = signal.signal(signal.SIGTERM, functools.partial(_terminate, terminated))
+    try:
+        _run(app, terminated)
+    except KeyboardInterrupt:
+        if not terminated.is_set():
+            raise
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+
+def _terminate(terminated: threading.Event, *_: object) -> None:
+    """SIGTERM: the loop ends. A prompt or a screen up is closed as Ctrl+C
+    closes it; anything else — a reply streaming above all — is cut as
+    Ctrl+C cuts it, what streamed kept."""
+    terminated.set()
+    running = get_app_or_none()
+    if running is not None and running.is_running and running.loop is not None:
+        running.loop.call_soon_threadsafe(_interrupt, running)
+    else:
+        raise KeyboardInterrupt
+
+
+def _interrupt(running: Application[Any]) -> None:
+    with contextlib.suppress(Exception):  # already on its way out
+        running.exit(exception=KeyboardInterrupt())
+
+
+def _run(app: App, terminated: threading.Event) -> None:
+    """The whole terminal life over the app, until /quit, EOF or SIGTERM: settle
     the theme (before anything draws — the background ask reads stdin,
-    which belongs to prompt_toolkit from the first prompt on), print what
-    its launch had to say (`AppInfo.launch`: the notices, the bold hint
-    over the resumed scene), then the banner, open the model picker
+    which belongs to prompt_toolkit from the first prompt on), serve the
+    page beside the chat where the reader asked for it (`/set serve`),
+    print what its launch had to say (`AppInfo.launch_facts`: the notices, the
+    bold hint over the resumed scene), then the banner, open the model picker
     when the app arrived model-less (nothing remembered — the launch-time
     pick is THIS loop's, not the backend's), echo the resumed scene into
     the ledger, start the worker with the repaint hook, then prompt →
-    submit. `app.close()` stays the caller's (cli's)."""
+    submit; the serving stops with the chat. `app.close()` stays the
+    caller's (cli's)."""
     api = Api(app)
-    launch_facts = api.app.get().launch
+    launch_facts = api.app.get().launch_facts
     looks = api.settings.terminal.get()
     theme.use(looks)
     # Some terminals (Ghostty) need the explicit blink opt-in on top of
@@ -72,10 +112,15 @@ def run(app: App) -> None:
         chat.land(resumed)
     # The launch's reports — created files, stale settings, keys that
     # would not open — before anything else draws, one blank line after
-    # the lot.
-    for report in launch_facts.notices:
+    # the lot; the page served beside the chat where the reader asked for
+    # it (`/set serve`), one that cannot be served said among them, the
+    # setting standing.
+    reports = list(launch_facts.notices)
+    if looks.serve and (failure := chat.serve()) is not None:
+        reports.append(failure)
+    for report in reports:
         print(report)
-    if launch_facts.notices:
+    if reports:
         print()
     # The launch-time pick, before the banner names the model: the picker
     # runs only when nothing is remembered — Esc is not a cancel, the
@@ -93,6 +138,7 @@ def run(app: App) -> None:
                     model=model.name if model is not None else "(no model)",
                     provider=model.provider if model is not None else "",
                     context_window=model.context_window if model is not None else None,
+                    newer_version=launch_facts.newer_version,
                 )
             )
         )
@@ -105,8 +151,7 @@ def run(app: App) -> None:
         story=lambda: chat.story_id,
         can_attach=lambda: chat.can_attach,
         shortcuts=SHORTCUTS,
-        aside=lambda: chat.context_fill,
-        note=lambda: chat.status_note,
+        status_line=chat.status_line,
     )
 
     if launch_facts.hint:
@@ -152,10 +197,13 @@ def run(app: App) -> None:
     prompt_session.default_buffer.on_text_changed += lambda _buf: app.note_typing()
     app.start_worker(on_status=repaint)
 
-    while not chat.quit:
+    while not chat.quit and not terminated.is_set():
         # The story as it stands: played on, or deleted, elsewhere since
-        # this terminal last drew it — the page while /web served it.
-        landing.catch_up(chat)
+        # this terminal last drew it — the page served beside it above all.
+        # What it printed ends as a submission's output does, the blank
+        # before the prompt after it.
+        if landing.catch_up(chat):
+            answers.top_row = chat.ledger.gap(deferred=answers.posed)
         # How full the next request is, read again before every prompt —
         # so after a turn, a story switch, an undo, a switched model —
         # and drawn on the status row's right until the next one.
@@ -215,7 +263,11 @@ def run(app: App) -> None:
                 placeholder=placeholder,
                 default=carry.take_text(),
                 pre_run=functools.partial(
-                    _opening, answers, prompt_session, command=carry.command_paragraph
+                    _opening,
+                    answers,
+                    prompt_session,
+                    chat.status_line,
+                    command=carry.command_paragraph,
                 ),
             )
         except EOFError:
@@ -276,6 +328,7 @@ def run(app: App) -> None:
                 prompt_session.app.erase_when_done = False
             carry.command_paragraph = True
             # the slash typed, or the command a history walk recalled
+            carry.recalled = carry.recall is not None
             carry.text = carry.recall if carry.recall is not None else "/"
             carry.recall = None
             continue
@@ -288,6 +341,7 @@ def run(app: App) -> None:
             prompt_session.app.erase_when_done = False
             if carry.recall is not None:
                 # a history walk crossed back into the story's text
+                carry.recalled = True
                 carry.text, carry.recall = carry.recall, None
                 carry.draft = ""
             else:
@@ -325,7 +379,7 @@ def run(app: App) -> None:
             else:
                 chat.ledger.typed(prefix + line + "\n")
             # in the canvas the line plays as typed, the breaks at its edges
-            # its paragraphs (`domain.story._play.submit_line`); every other line is trimmed
+            # its paragraphs (`backend.story.play.submit_line`); every other line is trimmed
             result = assembler.feed(line, verbatim=is_story_mode)
             if result is None:
                 if in_text:
@@ -364,6 +418,7 @@ def run(app: App) -> None:
         # to draw when it opens on a question's answers, so the question's
         # block runs on into them.
         answers.top_row = chat.ledger.gap(deferred=answers.posed)
+    chat.stop_serving()
 
 
 def submit(chat: Chat, line: str) -> None:
@@ -382,33 +437,38 @@ def submit(chat: Chat, line: str) -> None:
     try:
         if dispatch(chat, line):
             return
-        # The terminal's own affordance, resolved on its side: an `@path`
-        # naming a picture leaves the line and rides the turn as bytes.
-        # Whether the model can see is the backend's to refuse.
-        line, files = pictures.extract_pictures(line)
-        try:
-            # A first line makes the story it lands in, and one refused
-            # leaves none behind (`Chat.writing`).
-            with chat.writing() as story_id:
-                events = chat.api.stories.messages.create(
-                    story_id, line=line, files=files, expected_head=chat.head
-                )
-        except Refused as e:
-            # Checked before it plays: invalid syntax leaves the story
-            # untouched rather than half-playing a line nobody can read.
-            chat.ledger.invalidate()
-            chat.say(str(e))
-            return
-        # in story mode the question this line answers leaves the text
-        # before the stream takes the terminal
-        stream.drop_past_question(chat)
-        while stream.show(chat, events):
-            # the take stopped for a fresh one is recorded as its stream
-            # closes, unseen here: the fresh one goes from the head as it stands
-            story_id = chat.ensure_story()
-            standing = chat.api.stories.get(story_id).head
-            events = chat.api.stories.regens.create(story_id, expected_head=standing)
-        chat.mark_drawn()
+        # The row pinned from the line's sending: the prompt's toolbar went
+        # with it, and the stream's own pin comes only once the reply runs.
+        with chat.status_line.pinned():
+            # The terminal's own affordance, resolved on its side: an `@path`
+            # naming a picture leaves the line and rides the turn as bytes.
+            # Whether the model can see is the backend's to refuse.
+            line, files = pictures.extract_pictures(line)
+            to_drop = stream.question_to_drop(chat)
+            try:
+                # A first line makes the story it lands in, and one refused
+                # leaves none behind (`Chat.writing`).
+                with stream.waiting(), chat.writing() as story_id:
+                    events = chat.api.stories.messages.create(
+                        story_id, line=line, files=files, expected_head=chat.head
+                    )
+            except Refused as e:
+                # Checked before it plays: invalid syntax leaves the story
+                # untouched rather than half-playing a line nobody can read.
+                chat.ledger.invalidate()
+                chat.refuse(e)
+                return
+            # in story mode the question this line answers leaves the text
+            # before the stream takes the terminal
+            stream.drop_question(chat, to_drop)
+            while stream.show(chat, events):
+                # the take stopped for a fresh one is recorded as its stream
+                # closes, unseen here: the fresh one goes from the head as it stands
+                story_id = chat.ensure_story()
+                standing = chat.api.stories.get(story_id).head
+                with stream.waiting():
+                    events = chat.api.stories.regens.create(story_id, expected_head=standing)
+            chat.mark_drawn()
     except KeyboardInterrupt:
         raise  # ^C is the user speaking, not a crash — the loop handles it
     except Exception as e:
@@ -442,9 +502,18 @@ def _plain(text: str) -> str:
     return _ESCAPE.sub("", text)
 
 
-def _opening(answers: AnswerMenu, prompt_session: PromptSession[str], *, command: bool) -> None:
-    """As each prompt opens: the question's answers read; and the command
-    paragraph's menu shown at once, its slash typed (PROTOTYPE)."""
+def _opening(
+    answers: AnswerMenu,
+    prompt_session: PromptSession[str],
+    status_line: StatusLine,
+    *,
+    command: bool,
+) -> None:
+    """As each prompt opens: the status row taken over from the reply or
+    the command that held it, before the prompt draws; the question's
+    answers read; and the command paragraph's menu shown at once, its
+    slash typed (PROTOTYPE)."""
+    status_line.hand_over()
     answers.open()
     if command:
         prompt_session.default_buffer.start_completion(select_first=False)

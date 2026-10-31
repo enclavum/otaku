@@ -52,7 +52,19 @@ from scenarios.support.server import ModelServer  # noqa: E402
 # require Python >= 3.14 and are out of scope. A release already on the
 # current schema is still rehearsed — the settings, the export and the
 # read-back all matter — it simply has no ladder to run.
-VERSIONS = ("0.2.1", "0.2.2", "0.3.0", "0.4.0", "0.4.1", "0.4.2", "0.4.3", "0.5.0", "0.6.0", "0.7.0")
+VERSIONS = (
+    "0.2.1",
+    "0.2.2",
+    "0.3.0",
+    "0.4.0",
+    "0.4.1",
+    "0.4.2",
+    "0.4.3",
+    "0.5.0",
+    "0.6.0",
+    "0.7.0",
+    "0.8.0",
+)
 PROVIDER, MODEL = "generic", "test-model"
 WORK = Path(os.environ.get("REHEARSAL_DIR", "/tmp/otaku-rehearsal"))
 
@@ -110,7 +122,7 @@ class Otaku:
         # typed into that window can be swallowed — settle before quitting.
         self._drain(1.5)
         try:
-            self.send("/bye", 0.3)
+            self.send("/quit", 0.3)
             self.send(ENTER, 0.5)
         except OSError:
             pass  # already gone
@@ -224,16 +236,19 @@ def seed_config(python: str, root: Path, server_url: str, *, version: str, encry
     """The old release writes its OWN default config (its shape, no network),
     then every provider url is dead-ended and the scripted one added. The
     snippet is the OLD release's api — never this build's: `otaku.app`
-    up to 0.3.0, the backend's launch module from 0.4.0 on."""
-    if tuple(int(n) for n in version.split(".")) < (0, 4, 0):
+    up to 0.3.0, the backend's launch module from 0.4.0 on, its paths in
+    the domain package from 0.8.0."""
+    released = tuple(int(n) for n in version.split("."))
+    if released < (0, 4, 0):
         code = (
             "from otaku.paths import Paths;"
             "from otaku.app import load_config;"
             f"load_config(Paths.resolve({str(root)!r}))"
         )
     else:
+        paths = "otaku.backend.domain.app._paths" if released >= (0, 8, 0) else "otaku.backend.paths"
         code = (
-            "from otaku.backend.paths import Paths;"
+            f"from {paths} import Paths;"
             "from otaku.backend.launch import _load_config;"
             f"_load_config(Paths.resolve({str(root)!r}))"
         )
@@ -291,7 +306,7 @@ def read_through_app(current: str, root: Path) -> dict:
     python = str(Path(current).parent / "python")
     code = (
         "import json;"
-        "from otaku.backend.domain.app._paths import Paths;"
+        "from otaku.backend.app.paths import Paths;"
         "from otaku.encryption import unlock;"
         "from otaku.settings import config as config_file;"
         "from otaku.store import Store;"

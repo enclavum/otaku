@@ -1,5 +1,5 @@
-"""A story's messages, as the page asks for them: the chain, one message
-and its correction — and a line played, a write whose answer is the
+"""A story's messages, as the page asks for them: the chain, one message,
+its correction and its pin — and a line played, a write whose answer is the
 reply's event stream (`STREAMS`), each event named on the wire by
 `event`, as a regenerated reply's is (`stories`)."""
 
@@ -8,20 +8,21 @@ from collections.abc import Iterator, Mapping
 from dataclasses import asdict
 from typing import Any
 
-from otaku.backend.api import Api
-from otaku.backend.api.story.messages import (
+from otaku.backend.api import UNCHANGED, Api
+from otaku.backend.story.messages.schemas import (
     AssistantMessage,
     AssistantReasoning,
     AssistantText,
     AssistantToolCall,
     Declined,
     Done,
+    EmptyReply,
     Failed,
     RawFile,
     ToolMessage,
     UserMessage,
 )
-from otaku.backend.api.story.messages import PlayEvent as PlayEvent
+from otaku.backend.story.messages.schemas import PlayEvent as PlayEvent
 from otaku.web.api._request import Ask, Route, Stream, changed, plain
 from otaku.web.api.story.stories import expected_head, tagged
 
@@ -104,6 +105,8 @@ def event(happened: PlayEvent) -> dict[str, Any]:
             return {"type": "declined", "reason": happened.reason}
         case Failed():
             return {"type": "failed", "reason": happened.reason}
+        case EmptyReply():
+            return {"type": "empty_reply", "note": happened.note}
         case Done():
             report = happened.report
             return {
@@ -126,12 +129,16 @@ def event(happened: PlayEvent) -> dict[str, Any]:
 
 def _list(api: Api, ask: Ask) -> dict[str, Any]:
     """The story's chain, root to head — its `last` messages alone where the
-    query asks for a count."""
+    query asks for a count; every message it holds, the discarded among
+    them, with `?with_discarded=true`."""
     raw = ask.query.get("last")
     if raw is not None and not (raw.isdigit() and int(raw) > 0):
         raise ValueError("last is not a count from 1")
     last = int(raw) if raw is not None else None
-    return {"items": plain(api.stories.messages.list(ask.id("story"), last=last))}
+    listed = api.stories.messages.list(
+        ask.id("story"), last=last, with_discarded=ask.query_flag("with_discarded", False)
+    )
+    return {"items": plain(listed)}
 
 
 # ---------- the rows ----------
@@ -144,7 +151,12 @@ ROUTES: dict[tuple[str, str], Route] = {
     ),
     ("PATCH", "/api/stories/{story}/messages/{message}"): tagged(
         lambda api, ask: changed(
-            api.stories.messages.update(ask.id("story"), ask.id("message"), body=ask.need("body"))
+            api.stories.messages.update(
+                ask.id("story"),
+                ask.id("message"),
+                body=ask.need("body") if "body" in ask.body else UNCHANGED,
+                pinned=ask.flag("pinned") if "pinned" in ask.body else UNCHANGED,
+            )
         )
     ),
 }

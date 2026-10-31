@@ -19,9 +19,9 @@ from typing import Any
 import pytest
 
 from otaku.backend.api import ModelRef, Refused
-from otaku.backend.api.story.lore import Extraction
-from otaku.backend.domain._formats import exports, imports
-from otaku.backend.domain.app._paths import Paths
+from otaku.backend.app.paths import Paths
+from otaku.backend.formats import exports, imports
+from otaku.backend.story.lore.schemas import Extraction
 from otaku.store.schema import Message
 from otaku.terminal.screens import dossier as screen_dossier
 from scenarios.api.story.test_pictures import _cat, _play, _seeing
@@ -168,6 +168,20 @@ class TestExtract:
         assert memory.history == "I saw the guest."
         assert len(lore_calls(app)) == 1  # the extraction; no rollup calls
 
+    def test_no_scene_crosses_a_chapter(self, app: App) -> None:
+        # A chapter's row opens a scene: the close cuts the story before
+        # it, whatever the sizes would have packed together.
+        for i in range(2):
+            app.play(f"Turn number {i}.")
+        app.play("/chapter The Flood")
+        for i in range(2, 4):
+            app.play(f"Turn number {i}.")
+        app.play("/extract")
+        story_id = app.story_id
+        ids = app.store.stories.get_messages_ids(story_id)
+        ends = app.store.scenes.get_current_ends(story_id, ids)
+        assert [ids.index(end) for end in ends] == [3, 8]  # the chapter's row is the 5th
+
     def test_a_pass_records_its_model_on_every_row_it_makes(self, app: App) -> None:
         # Who made the memory: the pass's engine and model, on the scene,
         # the journal and the character it named.
@@ -232,7 +246,9 @@ class TestExtract:
             "Messages:\n{chunk}\n"
             'Reply as {"scene": {"title": "...", "summary": "..."}} — {this} stays literal.'
         )
-        paths.prompts_file.write_text(f"extract_prompt = {json.dumps(template)}\n")
+        paths.prompts_file.write_text(
+            f"extract_prompt = {json.dumps(template)}\n", encoding="utf-8"
+        )
         app = launch(root, server)
         try:
             for i in range(3):
@@ -326,8 +342,10 @@ class TestIdleScheduling:
     def test_the_settle_margin_holds_the_newest_messages_out(self, server, tmp_path) -> None:
         # The live rule for the AUTOMATIC pass: no scene ends where the
         # story is still moving. With a settle margin of 2, the idle pass
-        # over six messages may close a scene only up to the fourth —
-        # /extract is the one thing that drops this margin.
+        # over six messages may close scenes only over the first four, and
+        # the story in play holds the newest of those open too: it closes
+        # the first exchange alone. /extract is the one thing that drops
+        # this margin.
         set_config(
             tmp_path / "state",
             settle_messages=2,
@@ -339,6 +357,9 @@ class TestIdleScheduling:
         try:
             for i in range(3):
                 app.play(f"Turn number {i}.")
+            # A slow machine may run a pass between turns too, but one over
+            # fewer messages holds its one span open: the first scene to
+            # close is the one the pass over all six closed.
             deadline = time.time() + 10
             ends: list[int] = []
             while time.time() < deadline and not ends:
@@ -346,19 +367,21 @@ class TestIdleScheduling:
                 ends = app.store.scenes.get_current_ends(app.story_id, ids)
                 time.sleep(0.1)
             assert ends, "the idle pass never closed a scene"
-            assert ids.index(ends[-1]) == 3  # the newest two messages stayed open
+            assert ids.index(ends[-1]) == 1  # the newest four stayed open
         finally:
             app.close()
 
     def test_tool_calls_do_not_count_toward_the_scene_gate(self, server, tmp_path) -> None:
         # The gate measures story text. Three exchanges whose replies are
-        # padded with a block far past scene_min_chars still hold too
-        # little play (19 characters an exchange), so the pass declines;
-        # three more carry the story itself over the line, and it closes.
+        # padded with a block far past scene_min_chars hold play for one
+        # scene alone (19 characters an exchange), held open while the
+        # story is in play, so nothing closes — counted with their blocks,
+        # they would close two; three more carry the story itself over the
+        # line, and a scene closes.
         set_config(
             tmp_path / "state",
             settle_messages=0,
-            scene_min_chars=100,
+            scene_min_chars=30,
             scene_min_messages=2,
             idle_seconds=0.1,
         )
@@ -591,7 +614,11 @@ class TestFailedPass:
         assert "failed" in out
         assert "ancelled" not in out
         logs = app.paths.root / "logs"
-        assert any("the reply was empty" in f.read_text() for f in logs.rglob("*") if f.is_file())
+        assert any(
+            "the reply was empty" in f.read_text(encoding="utf-8")
+            for f in logs.rglob("*")
+            if f.is_file()
+        )
 
     def test_a_scene_without_a_summary_is_refused(self, app: App, capsys) -> None:
         # A committed scene whose summary is empty would swallow its span:
@@ -629,11 +656,11 @@ class TestFailedPass:
         app.play("/extract")
         assert "failed" in capsys.readouterr().out
         logs = list((app.paths.root / "logs").rglob("*"))
-        assert any("RuntimeError" in f.read_text() for f in logs if f.is_file())
+        assert any("RuntimeError" in f.read_text(encoding="utf-8") for f in logs if f.is_file())
         # The error log holds the WHOLE traceback, not just the shape.
         errors = [f for f in logs if f.name.startswith("error-")]
-        assert errors and "Traceback" in errors[0].read_text()
-        assert "boom" in errors[0].read_text()
+        assert errors and "Traceback" in errors[0].read_text(encoding="utf-8")
+        assert "boom" in errors[0].read_text(encoding="utf-8")
 
 
 class TestHealing:
@@ -643,7 +670,7 @@ class TestHealing:
         # The chapel export, with one character's history blanked: the
         # next pass rebuilds exactly the missing rollup — from the one
         # entry, verbatim — and touches nothing that is already there.
-        export = imports.parse_story(CHAPEL.read_text())
+        export = imports.parse_story(CHAPEL.read_text(encoding="utf-8"))
         scene = export.scenes[-1]
         journals = tuple(
             replace(j, history="") if j.character == "Кассиан" else j for j in scene.journals
@@ -653,7 +680,8 @@ class TestHealing:
         path.write_text(
             exports.render_story(
                 holed, otaku_version="0", model="test/test-model", exported="2026-07-30 12:00"
-            )
+            ),
+            encoding="utf-8",
         )
 
         app.play(f"/import {path}")

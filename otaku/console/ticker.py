@@ -1,4 +1,4 @@
-"""The live tail under the `otaku web` banner.
+"""The live tail under the `otaku serve` banner.
 
 Once the browser has the app, the terminal that started it has one
 job left: showing that something is reaching the server at all. So the
@@ -147,7 +147,7 @@ def quiet_ctrl_c() -> "Iterator[Callable[[], None]]":
     Windows)."""
     fd = None
     saved = None
-    if termios is not None:
+    if sys.platform != "win32" and termios is not None:
         with contextlib.suppress(ValueError, OSError, termios.error):
             fd = sys.stdin.fileno()
             if os.isatty(fd):

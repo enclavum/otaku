@@ -2,7 +2,7 @@
 scene shows, in what order, and which of them a hand may correct — the
 author's primitives, never what the extractor derives."""
 
-from otaku.terminal.api.story.lore import Character, Journal, Lore, Scene
+from otaku.terminal.api.lore import Character, Journal, Lore, Scene
 from otaku.terminal.screens.dossier.scenes import scene_fields
 
 

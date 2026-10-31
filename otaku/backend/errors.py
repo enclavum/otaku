@@ -1,6 +1,7 @@
 """The backend's one refusal channel: `Refused`, and the kinds a caller
 tells apart — each a `Refused`, so catching the base still catches all —
-with the sentences more than one door refuses with, each spelled once."""
+with the sentences more than one door refuses with, each spelled once;
+and `StoppingError`, the answer of a call the closing app will not run."""
 
 # What every model-facing door says while no model is selected, and
 # every story-facing one while nothing has been played — each spelled
@@ -8,9 +9,9 @@ with the sentences more than one door refuses with, each spelled once."""
 NO_MODEL_HINT = "No model selected — pick one with /model."
 NO_STORY_HINT = "No story yet — send a message first."
 # What every door says for a story id the store does not hold, and for a
-# message id that is not on the story's current chain.
+# message id that is none of the story's, on its chain or discarded.
 NO_SUCH_STORY = "No such story."
-OFF_CHAIN = "That message is not on the story's current chain."
+NO_SUCH_MESSAGE = "No such message in this story."
 
 
 class Refused(Exception):  # noqa: N818 — a refusal is an expected answer, not an error
@@ -48,5 +49,11 @@ class HeadMoved(Conflict):
     story again from there."""
 
     def __init__(self, head: int | None) -> None:
-        super().__init__("The story moved on since you last saw it — nothing was changed.")
+        super().__init__("The story was continued on another device — nothing was changed.")
         self.head = head
+
+
+class StoppingError(Exception):
+    """The app is closing: the call will not be run. Neither a refusal
+    nor a crash — the one answer a call can get that nothing should be
+    recorded for."""

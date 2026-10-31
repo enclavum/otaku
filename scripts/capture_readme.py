@@ -2,8 +2,8 @@
 """The README's screenshot, taken the same way every release.
 
 `images/capture-web.png` is the web demo on a first launch: the river
-story open at its classic ending (its first `SHOWN_TURNS`), the attach
-button showing, the light theme, a 1400 by 865 viewport at twice the
+story open at its second chapter's start (its first `SHOWN_TURNS`), the
+attach button showing, the light theme, a 1400 by 865 viewport at twice the
 scale. The demo is the one deterministic source — built from this
 checkout alone (`demo/build_web.sh` over the committed fixtures), served
 here, and shot by headless Chrome — so a capture made today matches one
@@ -35,7 +35,18 @@ REPO = Path(__file__).resolve().parent.parent
 OUT = REPO / "images" / "capture-web.png"
 README = REPO / "README.md"
 WIDTH, HEIGHT, SCALE = 1400, 865, 2
-SHOWN_TURNS = 14  # the river up to its classic ending, before the pictured turn and the question
+SHOWN_TURNS = 14  # the river through its second chapter's first reply, the heading in view
+# The shown copy's edits, each `(text, replacement)` in the one shown
+# message holding the text, so the picture reads in whole lines: the
+# reader's line after the heading fits two lines instead of leaving a
+# word on a third, and the reply above the heading loses its lone last
+# line, so the paragraph before it fills the picture's top whole. Every
+# line and paragraph gap is one height: change what is shown and the
+# top edge may cut a line again.
+SHOWN_EDITS = (
+    ("\n\nMaps record. Maps do not move. Yours just did.", ""),
+    (", roll the map, and", " and"),
+)
 SETTLE_MS = 8_000  # how long the page's scripts may run before the shot
 SHOT_TIMEOUT = 60.0  # how long to wait for the picture, in seconds
 CHROME_CANDIDATES = (
@@ -83,8 +94,10 @@ def _dress(target: Path) -> None:
     """The built copy made the README's, in this copy alone: the demo's
     corner ribbon hidden (`demo/web/demo.js` adds it); the attach button
     shown — the demo's model cannot see (`store.js`), the README's may;
-    and the river cut to its first `SHOWN_TURNS`, the ending the picture
-    has always shown, before the pictured turn and the question."""
+    and the river cut to its first `SHOWN_TURNS`, so the page opens on
+    its second chapter's start: the heading, the line after it and the
+    reply on its big initial, edited to read in whole lines
+    (`SHOWN_EDITS`)."""
     with (target / "custom.css").open("a", encoding="utf-8") as css:
         css.write("\n.demo-ribbon { display: none; }\n")
     store = target / "store.js"
@@ -95,6 +108,16 @@ def _dress(target: Path) -> None:
     fixture = target / "fixtures" / "river.json"
     data = json.loads(fixture.read_text(encoding="utf-8"))
     data["messages"] = data["messages"][:SHOWN_TURNS]
+    for text, replacement in SHOWN_EDITS:
+        holding = [m for m in data["messages"] if text in m["body"]]
+        if len(holding) != 1:
+            raise SystemExit(
+                f"capture: no one shown message holds {text.strip()!r} — update this script"
+            )
+        # the body for the editor, the segments for the reading
+        holding[0]["body"] = holding[0]["body"].replace(text, replacement)
+        for segment in holding[0]["segments"]:
+            segment["text"] = segment["text"].replace(text, replacement)
     # the captured preview and fill were the whole river's: the demo works
     # them out again for the story it now holds
     data["context"] = data["fill"] = None

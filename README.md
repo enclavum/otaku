@@ -1,5 +1,6 @@
-# otaku — an LLM frontend for creative writing and roleplay
+# otaku — an LLM frontend for roleplay and creative writing
 
+[![CI](https://github.com/enclavum/otaku/actions/workflows/ci.yml/badge.svg)](https://github.com/enclavum/otaku/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/otaku.svg)](https://pypi.org/project/otaku/)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](https://github.com/enclavum/otaku/blob/main/LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://github.com/enclavum/otaku/blob/main/pyproject.toml)
@@ -15,7 +16,13 @@ The three pillars of otaku:
 - **keep the context small**, even for long stories, without losing the details that matter;
 - **high-quality interfaces**, in the browser and in the terminal.
 
-![otaku web](https://raw.githubusercontent.com/enclavum/otaku/main/images/capture-web.png?v=0.8.0)
+Web interface:
+
+![otaku web](https://raw.githubusercontent.com/enclavum/otaku/main/images/capture-web.png?v=0.9.0)
+
+Terminal interface:
+
+![otaku terminal](https://raw.githubusercontent.com/enclavum/otaku/main/images/capture-terminal.png?v=0.9.0)
 
 ## Demo
 
@@ -39,6 +46,9 @@ Writing:
 - **automatic summaries**: as the number of messages grows, intermediate messages are split into
   scenes and are automatically summarized; when the story no longer fits the context, its middle
   is replaced by scene summaries;
+- **pinned messages**: a message you pin is always sent to the model as it is, even after its
+  scene is summarized;
+- **chapters**: split a story into chapters with the `/chapter` command;
 - **custom context size limit**: you can cap the context size yourself;
 - **transparent context**: you can see what will be sent to the model with the `/context` command;
 - **attaching pictures**: if the model supports vision, you can attach pictures to your messages;
@@ -91,18 +101,14 @@ key.
 
 ## Installation
 
-The script first installs the `uv` package manager — if you don't have it yet — and then
-installs otaku with it.
-
-macOS and Linux:
+The recommended way is the installation script, which first installs the `uv` package manager — if
+you don't have it yet — and then installs otaku with it.
 
 ```bash
+# macOS and Linux
 curl -LsSf https://otaku.sh/install.sh | sh
-```
 
-Windows:
-
-```powershell
+# Windows
 irm https://otaku.sh/install.ps1 | iex
 ```
 
@@ -112,9 +118,15 @@ Other ways to install:
 # directly with uv
 uv tool install otaku
 
-# alternatively, via Homebrew
+# with Homebrew
 brew trust enclavum/tap
 brew install enclavum/tap/otaku
+
+# run in Docker (only the web interface accessible)
+docker compose -f https://github.com/enclavum/otaku.git up -d
+
+# run in Docker if you've checked out the repo
+docker compose up -d
 ```
 
 How to update:
@@ -123,13 +135,21 @@ How to update:
 otaku update
 ```
 
+How to uninstall:
+
+```bash
+otaku uninstall  # also purges data on request
+```
+
 ## Launch
 
 In the terminal, type one of the two commands:
 
 - `otaku` — opens the terminal UI;
-- `otaku web` — makes the web interface available at http://localhost:9600 (can be
+- `otaku serve` — makes the web interface available at http://localhost:9600 (can be
   [configured](#web-interface-settings)).
+
+The terminal UI can also serve the web interface while it runs: type `/set serve on`.
 
 On first start, you choose a provider and a model. Otaku automatically detects local LLM
 backends, while for cloud providers (OpenRouter, NanoGPT) you have to enter their API keys.
@@ -180,7 +200,12 @@ For D&D roleplay, there is the `/roll` command: `/roll 1d20+5 I search the alcov
 dice, shows you what fell, and sends the result together with your action; `/regen` re-tells the
 same roll rather than re-rolling it. Dice examples: `2d6+3`, `d20`, `2d20kh1`/`2d20kl1`.
 
-During play, you can `/undo` (Ctrl+U) the last exchange and `/regen` (Ctrl+R) the last reply.
+To start a new chapter, type `/chapter` with its title, e.g. `/chapter The Flood`. The chapter is
+numbered for you and gets a heading in the transcript; the model doesn't reply to it, but it's told
+that a new chapter starts there.
+
+During play, you can `/undo` (Ctrl+U) the last exchange, `/regen` (Ctrl+R) the last reply, and
+`/revert` (Ctrl+Y) either.
 
 ### Story mode
 
@@ -238,8 +263,8 @@ You can use the `/context` command to see what exactly will be sent to the model
 
 Everything lives in the state dir, `~/.otaku` by default:
 
-- `configs/config.toml` — context shape, extraction thresholds, encryption, backups, and web
-  settings.
+- `configs/config.toml` — context shape, extraction thresholds, encryption, backups, and terminal
+  and web settings.
 - `configs/providers.toml` — one section per provider (URL, API key). The model picker edits it
   for you, and API keys are stored sealed.
 - `configs/integrations.toml` — the web search key, stored sealed; the Tools tab edits it for you.

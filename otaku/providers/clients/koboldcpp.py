@@ -15,7 +15,7 @@ masks its answer for a key it does not accept.
 from collections.abc import Sequence
 from typing import ClassVar
 
-from otaku.providers.clients import launched_port
+from otaku.providers.clients import launched_port, local_engines_host
 from otaku.providers.errors import UnauthorizedError
 from otaku.providers.http import ASK_TIMEOUT, PROBE_TIMEOUT, Http, positive_int
 from otaku.providers.openai import reasoning
@@ -216,4 +216,4 @@ class KoboldCppClient(OpenAIClient):
         # Configured by launch flags, nothing on disk: a running server's
         # own port is read, else the standard default.
         port = launched_port("koboldcpp") or 5001
-        return ProviderConfig(name=cls.id, url=f"http://localhost:{port}/v1")
+        return ProviderConfig(name=cls.id, url=f"http://{local_engines_host()}:{port}/v1")

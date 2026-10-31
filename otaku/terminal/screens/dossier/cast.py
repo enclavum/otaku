@@ -6,7 +6,7 @@ from prompt_toolkit.formatted_text import StyleAndTextTuples
 
 from otaku.formatting import flatten, truncate
 from otaku.terminal.api import Refused
-from otaku.terminal.api.story.lore import Character, Lore
+from otaku.terminal.api.lore import Character, Lore
 from otaku.terminal.screens.base import (
     wrap_text,
 )

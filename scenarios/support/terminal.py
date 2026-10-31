@@ -13,6 +13,7 @@ line-kill there). `settle` before sending a control key rides that window
 out.
 """
 
+import contextlib
 import fcntl
 import os
 import pty
@@ -40,9 +41,19 @@ ESC = b"\x1b"
 TAB = b"\t"
 
 
+# Where the real binary's update check asks in a test: a port nothing
+# listens on, refused at once (`otaku.update.fetch_latest_version`).
+_NO_UPDATES = "http://127.0.0.1:9/"
+
+
 class Terminal:
     """One app run in a pty. `send` types, `expect` waits for markers in
     the transcript so far, `quit` ends the session."""
+
+    # Every cursor-position query answered, as a real terminal does. This
+    # one answers only those a test arms (`arm_cpr`), so prompt_toolkit is
+    # told it gets none: left to find out, it prints a warning 2 s on.
+    _can_answer_cursor = False
 
     def __init__(
         self,
@@ -64,7 +75,10 @@ class Terminal:
                 # Neutralized so the background is whatever a story ARMS
                 # (OSC 11), never the developer terminal's own answer.
                 "COLORFGBG": "",
+                # The update check asks a port nothing listens on, never GitHub.
+                "OTAKU_UPDATE_URL": _NO_UPDATES,
             }
+            | ({} if self._can_answer_cursor else {"PROMPT_TOOLKIT_NO_CPR": "1"})
             | (env or {})
         )
         self._proc = subprocess.Popen(
@@ -125,13 +139,27 @@ class Terminal:
         missing = [m for m in markers if m not in self.transcript]
         raise AssertionError(f"never saw {missing!r} in:\n{self.transcript[-2000:]}")
 
+    def send_signal(self, sig: int) -> None:
+        """Send `sig` to the app — a `docker stop`'s SIGTERM, say."""
+        self._proc.send_signal(sig)
+
     def quit(self, *, timeout: float = 10.0) -> int:
         """End the session (Ctrl+D past any open UI) and return the exit
-        code."""
+        code. The keys are pressed again every two seconds while the app
+        runs on, as a person would: one that lands while the app asks the
+        terminal something is read with the answer and dropped
+        (`otaku.terminal.tty.ask`). The screen is read meanwhile, so an app
+        still drawing never blocks on a full pty."""
         try:
-            self.send(ESC, 0.3)
-            self.send(CTRL_D, 0.3)
-            return self._proc.wait(timeout=timeout)
+            deadline = time.time() + timeout
+            while self._proc.poll() is None and time.time() < deadline:
+                with contextlib.suppress(OSError):  # it ended between the check and the key
+                    self.send(ESC, 0.3)
+                    self.send(CTRL_D, 0.3)
+                again = time.time() + 2.0
+                while self._proc.poll() is None and time.time() < min(again, deadline):
+                    self._drain(0.1)
+            return self._proc.wait(timeout=1)
         finally:
             self._proc.kill()
             os.close(self._master)

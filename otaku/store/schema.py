@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Self
 
-SCHEMA_VERSION = "13"
+SCHEMA_VERSION = "14"
 
 SCHEMA_DDL = """
 -- ---------- the codex: what every story may draw on ----------
@@ -62,7 +62,7 @@ CREATE TABLE messages (
     story_id    INTEGER NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
     parent_id   INTEGER,
     role        TEXT NOT NULL CHECK (role IN ('user','assistant','tool')),
-    kind        TEXT NOT NULL DEFAULT 'dialogue' CHECK (kind IN ('dialogue','narration','ooc','card','tool')),
+    kind        TEXT NOT NULL DEFAULT 'dialogue' CHECK (kind IN ('dialogue','narration','ooc','card','tool','chapter')),
     speaker_id  INTEGER REFERENCES characters(id) ON DELETE SET NULL,  -- extracted automatically
     speaker     BLOB,                    -- extracted automatically; name-at-the-time snapshot
     body        BLOB NOT NULL,           -- exactly what was typed/generated
@@ -73,6 +73,8 @@ CREATE TABLE messages (
     updated_at  TEXT NOT NULL,
     attachments TEXT,                    -- the turn's pictures as a JSON list, see Attachment; NULL when none
     mode        TEXT NOT NULL DEFAULT 'chat' CHECK (mode IN ('story','chat')),  -- the mode it was written in
+    pinned      BOOLEAN NOT NULL DEFAULT 0 CHECK (pinned IN (0,1)),  -- sent whole even where its scene is summarized
+    word_count  INTEGER,                 -- NULL where it could not be counted
     UNIQUE (story_id, id),               -- composite-FK target: same-story references only
     FOREIGN KEY (story_id, parent_id) REFERENCES messages(story_id, id),
     CHECK (parent_id IS NULL OR parent_id < id)
@@ -204,36 +206,39 @@ class Story:
     settings: tuple["StorySettingDB", ...] = ()  # what the story has stored, see StorySettingDB
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class Message:
-    """One turn of a story. `id` is 0 on a turn not yet stored; `append`
-    assigns the real one. `kind` is 'dialogue' | 'narration' | 'ooc' |
-    'card' | 'tool' — every kind is a STORED kind; what only exists on
-    the wire is `context.assembler.WireTurn`, a different type. A TOOL
-    turn (role and kind 'tool') is a tool's result, a tool otaku ran —
-    nobody's line, and no reply: it goes on the wire as the reader's
-    turn, framed out of character, and counts as neither; `provider`
-    names the tool."""
+    """One turn of a story. A chapter's row opens a chapter, its body the
+    `/chapter` line; a tool's row is the result of a tool otaku ran —
+    nobody's line, sent as the reader's turn, framed out of character."""
 
+    id: int = 0  # until stored
     role: str  # 'user' | 'assistant' | 'tool'
-    body: str
-    kind: str = "dialogue"
-    template: str | None = None  # filled at wire time, never mixed into the body
-    speaker: str | None = None
+    kind: str = "dialogue"  # 'dialogue' | 'narration' | 'ooc' | 'card' | 'tool' | 'chapter'
     speaker_id: int | None = None
-    # Who generated the row: a reply's engine, 'card' on a greeting, a tool's
-    # name on a tool turn; None on the reader's own.
+    speaker: str | None = None
+    body: str
+    template: str | None = None  # filled at wire time, never mixed into the body
+    # who made it: an engine, 'card', a tool's name; None on the reader's own
     provider: str | None = None
     model: str | None = None
-    attachments: tuple[
-        "Attachment", ...
-    ] = ()  # the turn's pictures; the files folder holds the bytes
-    # The mode it was written in, the layout's in force when it was
-    # recorded; CHAT on an imported row. `context.assembler.get_join_type`
-    # reads it.
-    # a factory: StoryMode is defined below, and a default is read at once
+    attachments: tuple["Attachment", ...] = ()  # the files folder holds the bytes
+    # the layout's mode it was recorded in, read by the join rule; a
+    # factory, as StoryMode is defined below
     mode: "StoryMode" = field(default_factory=lambda: StoryMode.CHAT)
-    id: int = 0
+    pinned: bool = False  # the reader's mark: sent whole even where its scene is summarized
+
+    # ---- derived: counted when the row is read, never stored ----
+
+    # the chapter it stands in along its chain, 0 before the first; None
+    # on a row read alone
+    chapter: int | None = None
+
+    @property
+    def is_scene_start(self) -> bool:
+        """Whether a scene of the lore must begin at this row: a chapter's,
+        which no scene crosses."""
+        return self.kind == "chapter"
 
 
 @dataclass(frozen=True)
@@ -288,7 +293,7 @@ class StorySettingDB:
     layout the story is read in — the last three each one setting's, the
     others every injecting setting's.
     WHICH settings there are, and what each may take, is no business of
-    the column's (`backend.domain.story.settings`)."""
+    the column's (`backend.story.settings.services`)."""
 
     name: str
     enabled: bool = False

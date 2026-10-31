@@ -2,18 +2,18 @@
 paths:
   - "otaku/settings/**/*"
   - "otaku/backend/launch.py"
-  - "otaku/backend/domain/app/__init__.py"
-  - "otaku/backend/domain/app/settings.py"
-  - "otaku/backend/domain/app/providers.py"
-  - "otaku/backend/domain/app/integrations.py"
-  - "otaku/backend/domain/story/prompts.py"
-  - "otaku/backend/api/app/__init__.py"
+  - "otaku/backend/app/core/*.py"
+  - "otaku/backend/app/paths.py"
+  - "otaku/backend/app/settings/*.py"
+  - "otaku/backend/app/providers/*.py"
+  - "otaku/backend/app/integrations/*.py"
+  - "otaku/backend/story/prompts/*.py"
   - "otaku/agents/__init__.py"
   - "otaku/terminal/screens/models/**/*"
   - "otaku/web/static/js/screens/models.js"
   - "otaku/store/migrations/**/*"
   - "otaku/store/schema.py"
-  - "otaku/backend/domain/_formats/**/*"
+  - "otaku/backend/formats/**/*"
   - "scripts/rehearse_migration.py"
 ---
 
@@ -51,7 +51,7 @@ release — a format change lands inside one of them, never beside them:
   every launch, self-healing.
 - **Database** (`otaku/store/migrations`) — the versioned ladder, its
   package docstring the whole of it.
-- **Export format** (`otaku/backend/domain/_formats`) — the import
+- **Export format** (`otaku/backend/formats`) — the import
   parser is the upward migration.
 
 Before a release, all three are exercised against REAL artifacts of the

@@ -157,6 +157,11 @@
             <!-- Send while the box is the reader's, Stop while the model has
                  it: one place, because they are one turn. Regen and Undo act
                  on the last exchange, which is why they live beside it. -->
+            <!-- revert: takes back the last Regen or Undo — shown after one,
+                 while there is something to take back, never while a reply
+                 is being written; it fades on its own. First of the verbs,
+                 so the ones it stands left of never move -->
+            <button type="button" class="otk-revert" data-revert title="Revert the last regen" aria-label="Revert the last regen" hidden><svg class="otk-revert__icon" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"/></svg></button>
             <!-- the pictures door, a clip at Send's left: shown only while the
                  model in use can see (the facts' `can_attach`) -->
             <button type="button" class="otk-attach-btn" data-attach aria-label="Attach pictures" title="Attach pictures" hidden><svg viewBox="0 0 16 16" width="22" height="22" aria-hidden="true"><path d="M13.6 7.2 8.1 12.7a3.4 3.4 0 0 1-4.8-4.8l6-6a2.2 2.2 0 0 1 3.1 3.1l-6 6a1 1 0 0 1-1.4-1.4l5.3-5.3" fill="none" stroke="currentColor" stroke-width="1.05" stroke-linecap="round" stroke-linejoin="round"></path></svg></button>
@@ -281,6 +286,7 @@
     <button type="button" class="otk-tab" role="tab" data-tab="scenes">Scenes</button>
     <button type="button" class="otk-tab" role="tab" data-tab="cast">Cast</button>
     <button type="button" class="otk-tab" role="tab" data-tab="tools">Tools</button>
+    <span class="otk-tabs__aside otk-tabs__aside--centered" data-tabs-aside></span>
   </div>
 
   <!-- messages: index rail, one line a turn, a reader at full measure -->
@@ -291,6 +297,7 @@
       <div class="otk-col__pinned">
         <label class="otk-label" for="otk-filter-messages" hidden>Filter</label>
         <input class="otk-filter" id="otk-filter-messages" type="search" placeholder="filter messages">
+        <label class="otk-discarded"><button type="button" class="otk-switch otk-switch--h" role="switch" aria-checked="false" data-discarded-switch aria-label="Show discarded turns"><span class="otk-switch__knob"></span></button><span class="otk-discarded__word">show discarded</span></label>
       </div>
     </div>
     <div class="otk-detail otk-detail--reader">
@@ -526,6 +533,11 @@
   <span class="otk-eyebrow" data-title id="otk-resume-title"></span>
   <p class="otk-dialog__body"></p>
   <div class="otk-choices" role="radiogroup">
+    <!-- on a discarded message alone, in place of Set aside -->
+    <button type="button" class="otk-choice" data-select="move" role="radio" aria-checked="false" hidden>
+      <span class="otk-choice__name">Resume</span>
+      <span class="otk-choice__desc">Continue the story from this message</span>
+    </button>
     <button type="button" class="otk-choice" data-select="fork" role="radio" aria-checked="true">
       <span class="otk-choice__name">Fork</span>
       <span class="otk-choice__desc">Continue in a new story from here</span>

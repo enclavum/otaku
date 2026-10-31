@@ -1,13 +1,25 @@
 """The app itself: the model it plays with — /model, switched and
 remembered, written down as its provider lists it — and the one lore
-extraction asks, pinned for it or following the model in use.
+extraction asks, pinned for it or following the model in use; and the
+update check, once a day, named on the next launch's banner.
 """
+
+import datetime
+import http.server
+import threading
+import time
+from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
+import otaku
+from otaku import __version__
+from otaku import update as updater
 from otaku.backend.api import ModelRef, Refused
-from otaku.backend.api.app import AppInfo, ModelInUse
-from otaku.backend.domain.app._paths import Paths
+from otaku.backend.app.core.schemas import AppInfo, ModelInUse
+from otaku.backend.app.paths import Paths
+from otaku.settings import state as state_file
 from otaku.terminal.screens import models as screen_models
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch, set_config, set_config_provider
@@ -47,7 +59,7 @@ class TestModel:
         # A hand-edited models.toml is the only way in. The launch says
         # such a thing before the banner; a switch has to say it where it
         # happens, or the session drops a parameter in silence.
-        app.paths.models_file.write_text("[other-model]\nbogus = 1\n")
+        app.paths.models_file.write_text("[other-model]\nbogus = 1\n", encoding="utf-8")
         capsys.readouterr()
         app.play("/model generic/other-model")
         assert "bogus" in capsys.readouterr().out
@@ -84,7 +96,9 @@ class TestModel:
         try:
             root = tmp_path / "state"
             set_config_provider(root, server, name="ollama")
-            Paths.resolve(root).state_file.write_text('model = "ollama/test-model"\n')
+            Paths.resolve(root).state_file.write_text(
+                'model = "ollama/test-model"\n', encoding="utf-8"
+            )
             app = launch(root, server, spec=None)
             try:
                 assert _spec(app) == "ollama/test-model"
@@ -194,6 +208,114 @@ class TestExtractionModel:
         assert _pinned(app) == "generic/test-model"
 
 
+class TestUpdateCheck:
+    """Once more than 24 hours have passed since the last ask, the moment
+    taken before asking; the answer named on the NEXT launch's banner,
+    where it is later than this otaku."""
+
+    def test_the_answer_is_named_on_the_next_launch_only(self, app: App) -> None:
+        asked = _Asker("99.0.0")
+        app.backend.check_for_update(asked)
+        _waited(lambda: _state(app).update_latest_version == "99.0.0")
+        assert app.api.app.get().launch_facts.newer_version == ""  # this launch's banner is out
+        relaunched = launch(app.paths.root, app.server)
+        assert relaunched.api.app.get().launch_facts.newer_version == "99.0.0"
+        relaunched.close()
+
+    def test_it_asks_again_only_after_24_hours(self, app: App) -> None:
+        now = datetime.datetime.now(datetime.UTC)
+        for hours_ago, times in ((23, 0), (25, 1)):
+            last = (now - datetime.timedelta(hours=hours_ago)).isoformat(timespec="seconds")
+            state_file.save(app.paths.state_file, replace(_state(app), update_checked_at=last))
+            asked = _Asker(None)
+            app.backend.check_for_update(asked)
+            time.sleep(0.2)
+            assert asked.times == times, hours_ago
+
+    def test_it_asks_once_within_the_24_hours(self, app: App) -> None:
+        asked = _Asker("99.0.0")
+        app.backend.check_for_update(asked)
+        _waited(lambda: _state(app).update_latest_version == "99.0.0")
+        app.backend.check_for_update(asked)
+        time.sleep(0.2)
+        assert asked.times == 1
+
+    def test_an_ask_that_fails_is_not_repeated_within_24_hours(self, app: App) -> None:
+        asked = _Asker(None)
+        app.backend.check_for_update(asked)
+        _waited(lambda: asked.times == 1)
+        app.backend.check_for_update(asked)
+        time.sleep(0.2)
+        assert asked.times == 1
+        assert _state(app).update_checked_at and _state(app).update_latest_version == ""
+
+    def test_turned_off_it_never_asks(self, app: App) -> None:
+        set_config(app.paths.root, check_updates=False)
+        asked = _Asker("99.0.0")
+        app.backend.check_for_update(asked)
+        time.sleep(0.2)
+        assert asked.times == 0
+        assert _state(app).update_checked_at == ""
+
+    def test_a_config_from_before_the_check_gets_its_switch_at_the_launch(self, app: App) -> None:
+        config = app.paths.config_file
+        config.write_text(
+            "".join(
+                row
+                for row in config.read_text(encoding="utf-8").splitlines(True)
+                if "check_updates" not in row
+            ),
+            encoding="utf-8",
+        )
+        relaunched = launch(app.paths.root, app.server)
+        assert "check_updates = true" in config.read_text(encoding="utf-8")
+        relaunched.close()
+
+    def test_this_version_announced_names_nothing(self, app: App) -> None:
+        state_file.save(
+            app.paths.state_file, replace(_state(app), update_latest_version=__version__)
+        )
+        relaunched = launch(app.paths.root, app.server)
+        assert relaunched.api.app.get().launch_facts.newer_version == ""
+        relaunched.close()
+
+    def test_otakus_own_init_reads_as_its_version(self, monkeypatch) -> None:
+        # The promise to every installed copy: the file keeps its place and
+        # its `__version__` line its shape, or old clients stop seeing updates.
+        init = Path(otaku.__file__).parent / "__init__.py"
+        with _Serving(init.read_text(encoding="utf-8")) as url:
+            monkeypatch.setenv("OTAKU_UPDATE_URL", url)
+            assert updater.fetch_latest_version() == __version__
+
+    def test_githubs_page_for_the_file_reads_by_either_copy_of_its_line(self, monkeypatch) -> None:
+        # The page carries the line among the file's lines as JSON, its
+        # quotes escaped, and in the drawn code, split by tags, its quotes
+        # entities: either alone is enough.
+        json_copy = (
+            '<script type="application/json">{"rawLines":["","__version__ = \\"1.2.3\\""]}</script>'
+        )
+        drawn_code = (
+            '<div data-line-number="9"><span class="pl-s1">__version__</span> '
+            '<span class="pl-c1">=</span> <span class="pl-s">&quot;1.2.3&quot;</span></div>'
+        )
+        for page in (json_copy + drawn_code, json_copy, drawn_code):
+            with _Serving(f"<html><body>{page}</body></html>") as url:
+                monkeypatch.setenv("OTAKU_UPDATE_URL", url)
+                assert updater.fetch_latest_version() == "1.2.3", page
+
+    def test_no_answer_where_the_file_is_not_in_shape_or_out_of_reach(self, monkeypatch) -> None:
+        for body in (
+            '__version__ = "0.9.0rc1"\n',
+            '{"rawLines":["__version__ = \\"0.9.0rc1\\""]}',
+            "<html>Not Found</html>",
+        ):
+            with _Serving(body) as url:
+                monkeypatch.setenv("OTAKU_UPDATE_URL", url)
+                assert updater.fetch_latest_version() is None, body
+        monkeypatch.setenv("OTAKU_UPDATE_URL", "http://127.0.0.1:9/")
+        assert updater.fetch_latest_version() is None
+
+
 def _info(app: App) -> AppInfo:
     return app.api.app.get()
 
@@ -243,3 +365,54 @@ def _params(app: App) -> dict[str, object]:
     """The parameters saved for the model in use, each its kind's own
     value."""
     return {p.name: p.value for p in app.model_settings().parameters if p.value is not None}
+
+
+class _Asker:
+    """A stand-in for the cli's ask: answers `version`, counting the asks."""
+
+    def __init__(self, version: str | None) -> None:
+        self.version = version
+        self.times = 0
+
+    def __call__(self) -> str | None:
+        self.times += 1
+        return self.version
+
+
+class _Serving:
+    """A file served on a free local port for the block — the announced
+    version's stand-in for GitHub."""
+
+    def __init__(self, body: str) -> None:
+        encoded = body.encode()
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(encoded)))
+                self.end_headers()
+                self.wfile.write(encoded)
+
+            def log_message(self, *_: object) -> None:
+                pass
+
+        self._server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+
+    def __enter__(self) -> str:
+        threading.Thread(target=self._server.serve_forever, daemon=True).start()
+        return f"http://127.0.0.1:{self._server.server_address[1]}/otaku/__init__.py"
+
+    def __exit__(self, *_: object) -> None:
+        self._server.shutdown()
+        self._server.server_close()
+
+
+def _state(app: App) -> state_file.StateConfig:
+    return state_file.load(app.paths.state_file)[0]
+
+
+def _waited(holds, timeout: float = 5.0) -> None:
+    deadline = time.monotonic() + timeout
+    while not holds():
+        assert time.monotonic() < deadline, "never came"
+        time.sleep(0.02)

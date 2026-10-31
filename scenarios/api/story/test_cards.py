@@ -19,8 +19,8 @@ from pathlib import Path
 import pytest
 
 from otaku.backend.api import HeadMoved, Refused
-from otaku.backend.api.codex.cards import RawFile
-from otaku.backend.domain.story import _request
+from otaku.backend.codex.cards.schemas import RawFile
+from otaku.backend.story import request
 from scenarios.support.harness import App
 
 SERAPHINA = Path(__file__).parents[2] / "fixtures" / "seraphina.png"
@@ -410,13 +410,13 @@ class TestWhatACardInjects:
             story, card_id=card.value.id, persona="Alex", expected_head=None
         )
         app.play("I knock.")
-        turn = _request.assemble(app.backend, story, None).injections
-        job = _request.build_job(app.backend, story).injections
+        turn = request.assemble(app.backend, story, None).injections
+        job = request.build_job(app.backend, story).injections
         assert [(i.owner, i.position) for i in turn] == [(i.owner, i.position) for i in job]
         assert {i.text for i in job} == {"Never lie.", "Riddles."}
         report = app.api.stories.context.get(story)
         assert len(report.injections) == 2
-        (sent,) = report.prompt.cards
+        (sent,) = report.cards
         assert sent.name == "Wren" and sent.tokens > 0
 
 

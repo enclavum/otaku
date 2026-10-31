@@ -25,3 +25,6 @@ class TestToToml:
         assert parsed["lore_extraction"]["scene_min_chars"] == 6000
         assert parsed["terminal"]["dialogue_color"] == "auto"
         assert parsed["terminal"]["dialogue_bold"] is False
+        assert parsed["terminal"]["serve"] is False  # the chat serves nothing unasked
+        assert parsed["terminal"]["show_thinking"] is False  # the thinking folded unasked
+        assert parsed["settings"]["check_updates"] is True  # on until turned off

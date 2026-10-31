@@ -4,7 +4,7 @@ opened as its field list (`scene_fields`) — the memory's first lens."""
 from prompt_toolkit.formatted_text import StyleAndTextTuples
 
 from otaku.formatting import flatten, truncate
-from otaku.terminal.api.story.lore import Lore, Scene
+from otaku.terminal.api.lore import Lore, Scene
 from otaku.terminal.screens.base import (
     wrap_text,
 )

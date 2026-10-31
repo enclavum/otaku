@@ -116,7 +116,7 @@ class RequestSink(Protocol):
 
 
 # The parameters every OpenAI endpoint reads, by the app's names — the
-# ones `/set` takes (`backend.domain.app.PARAMETERS`), which the body
+# ones `/set` takes (`backend.app.core.services.PARAMETERS`), which the body
 # carries as they are.
 PROTOCOL_PARAMS: frozenset[str] = frozenset(
     {"temperature", "top_p", "max_tokens", "presence_penalty", "frequency_penalty", "seed", "stop"}
@@ -131,7 +131,7 @@ SAMPLER_PARAMS: frozenset[str] = frozenset({"top_k", "min_p", "repetition_penalt
 _SAMPLER_WORDS: frozenset[str] = SAMPLER_PARAMS | {"repeat_penalty"}
 
 # A parameter's bounds as an engine holds them: (low, high), None for
-# no bound on that side. The app's own table (`backend.domain.app.PARAMETERS`)
+# no bound on that side. The app's own table (`backend.app.core.services.PARAMETERS`)
 # is the catalogs' — the protocol's 0 to 2 on temperature and the
 # penalties; an engine that takes more, or less, says so here.
 Bounds = tuple[float | None, float | None]
