@@ -38,7 +38,7 @@ from otaku.context.assembler import ContextOverflowError, context_in_force, get_
 from otaku.context.prompt import AssembledPrompt, JoinType
 from otaku.context.tools import FENCE, Prose, ReplyParser, ToolCall, parse_reply
 from otaku.providers import OpenAIClient, ProviderError, Reasoning, Reply, Stats, Text, templates
-from otaku.settings.state import ModelRef
+from otaku.settings.state import ModelRef, ModelRole
 from otaku.store.files import Owner
 from otaku.store.schema import Character, Layout, Message, StoryMode
 
@@ -252,7 +252,7 @@ def regenerate_reply(
     than `expected_head` — EAGERLY, before the iterator is returned and
     before anything is dropped (the same validate-then-return-generator
     shape as `submit_line`)."""
-    if app._client(app._model()) is None:
+    if app._client(app._model(ModelRole.WRITING)) is None:
         # Before anything is dropped: without a model there is no fresh
         # take, and the standing reply must survive untouched.
         raise Conflict(NO_MODEL_HINT)
@@ -397,7 +397,7 @@ def _reply_events(
     answer. `reply_speaker` is the cast member the reply is spoken by,
     when the prompt named one (/you): stored on the reply row, where
     extraction's own labeling is fill-only, so it stands."""
-    model = app._model()
+    model = app._model(ModelRole.WRITING)
     client = app._client(model)
     if model is None or client is None:
         # The turn is recorded — it is story — and plays on a regenerate

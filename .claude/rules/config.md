@@ -34,13 +34,22 @@ the app's own edits changing file and memory together, a hand edit seen
 at the next launch. A write that cannot land is refused (`Unavailable`)
 and changes nothing; the story to resume is the one best-effort write.
 
-The model in use is one value both frontends read and write
-(`api.app.update(model=…)`), as `last_story` is. Lore extraction asks
-the model played with unless one is PINNED for it, set by either picker
-(the page's "Use for extraction", the terminal's `x`) through
-`api.app.update(extraction_model=…)`. A pinned model the engine no
-longer serves fails the pass and holds the status — never a quiet fall
-back to the play model.
+Every model otaku remembers is PINNED for a role
+(`settings.state.ModelRole`), one key each under state.toml's
+`[models]`, through one write, `api.app.update(models={role: …})`, and
+read back as `/app`'s `models`. The `writing` role is the model in use,
+one value both frontends read and write, as `last_story` is: pinning it
+switches (its saved settings made current, a local engine loading it),
+it is never unpinned — the way off it is another — and `/app.model`
+carries its facts. Lore extraction asks the writing model unless another
+is pinned for it, set by either picker (the page's "Use for extraction",
+the terminal's `x`); one that is the writing model is not saved apart
+(`settings.state.save`), and `/app` carries no flag for it; a pinned
+model the engine no longer serves fails the pass and holds the status —
+never a quiet fall back to the writing model. Dictation has no model until one is pinned (the terminal
+picker's dictation view, `d`; the page's Dictation tab). A role asks a
+kind of model (`providers.ModelKind`): a pin of the wrong kind is
+refused. A new purpose is a new role, never a field of its own.
 
 ## Migrations
 

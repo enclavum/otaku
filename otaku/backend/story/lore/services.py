@@ -16,6 +16,7 @@ from otaku.backend.codex.cards import services as codex_cards
 from otaku.backend.errors import NO_MODEL_HINT, NO_SUCH_STORY, Conflict, Invalid, NotFound
 from otaku.backend.story import request
 from otaku.context.cards import read_toml
+from otaku.settings.state import ModelRole
 from otaku.store.schema import Attachment, Card, Character, Journal, Scene
 
 # A row of a story's memory, as `_theirs` finds it.
@@ -131,7 +132,7 @@ def create_extraction(app: App, story_id: int) -> tuple[ExtractionState, str]:
     running = app._extraction_runs.get(story_id)
     if running is not None and running.poll() is None:
         return _state_of(running), "A pass is already running."
-    if app._client(app._extraction_model()) is None:
+    if app._client(app._model(ModelRole.EXTRACTION)) is None:
         raise Conflict(NO_MODEL_HINT)
     run = WorkerRun(app._worker)
     job = replace(request.build_job(app, story_id, force=True), on_done=run._finish)

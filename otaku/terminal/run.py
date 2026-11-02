@@ -144,7 +144,7 @@ def _run(app: App, terminated: threading.Event) -> None:
         )
     carry = Carry()
     assembler = LineAssembler()
-    prompt_session, answers = build_prompt(
+    prompt_session, answers, dictation = build_prompt(
         api,
         carry,
         assembler,
@@ -260,7 +260,7 @@ def _run(app: App, terminated: threading.Event) -> None:
         try:
             line = prompt_session.prompt(
                 message,
-                placeholder=placeholder,
+                placeholder=dictation.placeholder(placeholder),
                 default=carry.take_text(),
                 pre_run=functools.partial(
                     _opening,

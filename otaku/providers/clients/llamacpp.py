@@ -33,6 +33,7 @@ from otaku.providers.openai.completion import (
     Bounds,
     OpenAICompletion,
 )
+from otaku.providers.openai.dictation import OpenAIDictation
 from otaku.providers.openai.models import (
     Listing,
     Locality,
@@ -68,6 +69,10 @@ class LlamaCppModels(OpenAIModels):
     listing swaps the instance to the mode's own class, so a server
     restarted the other way is followed; the cache and the lock stay.
     A fresh client is a single server until a listing says otherwise."""
+
+    # Its transcription endpoint is a chat with the model, so a model
+    # that takes audio takes dictation.
+    dictation_models_separated = False
 
     def __init__(self, config: ProviderConfig, auth: OpenAIAuth, http: Http) -> None:
         super().__init__(config, auth, http)
@@ -507,6 +512,11 @@ class LlamaCppCompletion(OpenAICompletion):
         return spelled
 
 
+class LlamaCppDictation(OpenAIDictation):
+    # The recordings mtmd decodes (`mtmd-helper.cpp`).
+    formats = frozenset({"wav", "mp3", "flac"})
+
+
 class LlamaCppClient(OpenAIClient):
     id = "llamacpp"
     label = "llama.cpp"
@@ -514,6 +524,7 @@ class LlamaCppClient(OpenAIClient):
     env_key = "LLAMACPP_API_KEY"
     models_class = LlamaCppSingleModels
     completion_class = LlamaCppCompletion
+    dictation_class = LlamaCppDictation
 
     @classmethod
     def autoconfigure(cls) -> ProviderConfig:

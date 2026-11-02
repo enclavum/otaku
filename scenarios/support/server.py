@@ -15,6 +15,8 @@ wire promise is checked against it — and its headers in
 """
 
 import contextlib
+import email.parser
+import email.policy
 import json
 import ssl
 import threading
@@ -134,6 +136,16 @@ class ModelServer:
         # as the site's Worker answers a request it mailed on; a test sets
         # a failure.
         self.support_status = 204
+        # A catalog's dictation models: OpenRouter's
+        # /models?output_modalities=transcription and NanoGPT's
+        # /audio-models; None → 404.
+        self.dictation_models: list[str] | None = None
+        # What /audio/transcriptions answers as its `text`; None → an
+        # answer without one. Each form it took lands in `uploads`: its
+        # fields, and its file's name, media type and bytes.
+        self.transcript: str | None = "the words heard"
+        self.transcribe_delay = 0.0  # seconds /audio/transcriptions waits before answering
+        self.uploads: list[dict[str, Any]] = []
         self.requests: list[dict[str, Any]] = []
         self.request_headers: list[dict[str, str]] = []  # one row per POST, same order
         self.posts: list[str] = []  # every POST path, same order
@@ -148,6 +160,13 @@ class ModelServer:
             def do_GET(self) -> None:
                 path = self.path.split("?", 1)[0].rstrip("/")
                 outer.gets.append(path)
+                if path.endswith("/audio-models") or "output_modalities=transcription" in self.path:
+                    if outer.dictation_models is None:
+                        self.send_response(404)
+                        self.end_headers()
+                        return
+                    self._json({"data": [{"id": name} for name in outer.dictation_models]})
+                    return
                 if outer.window is not None and path.endswith("/props"):
                     if not self._authorized():
                         return  # llama.cpp's key check covers /props, never /v1/models
@@ -394,6 +413,32 @@ class ModelServer:
                 self.end_headers()
                 return False
 
+            def _transcribe(self, raw: bytes) -> None:
+                """The transcription endpoint: the multipart form taken
+                apart and recorded, the scripted text answered."""
+                outer.posts.append(self.path.split("?", 1)[0].rstrip("/"))
+                head = f"Content-Type: {self.headers.get('Content-Type', '')}\r\n\r\n"
+                form = email.parser.BytesParser(policy=email.policy.HTTP).parsebytes(
+                    head.encode() + raw
+                )
+                fields: dict[str, str] = {}
+                file: dict[str, Any] | None = None
+                for part in form.iter_parts():
+                    data = part.get_payload(decode=True) or b""
+                    if part.get_filename():
+                        file = {
+                            "name": part.get_filename(),
+                            "type": part.get_content_type(),
+                            "data": data,
+                        }
+                    else:
+                        fields[str(part.get_param("name", header="content-disposition"))] = (
+                            data.decode()
+                        )
+                outer.uploads.append({"fields": fields, "file": file})
+                time.sleep(outer.transcribe_delay)
+                self._json({"text": outer.transcript} if outer.transcript is not None else {})
+
             def _json(self, payload: dict[str, Any]) -> None:
                 body = json.dumps(payload).encode()
                 self.send_response(200)
@@ -404,6 +449,9 @@ class ModelServer:
 
             def do_POST(self) -> None:
                 length = int(self.headers.get("Content-Length", "0"))
+                if self.path.split("?", 1)[0].rstrip("/").endswith("/audio/transcriptions"):
+                    self._transcribe(self.rfile.read(length))
+                    return
                 body = json.loads(self.rfile.read(length) or b"{}")
                 outer.requests.append(body)
                 outer.request_headers.append(dict(self.headers))
@@ -609,6 +657,7 @@ class ModelServer:
         self.retry_after = None
         self.finish = "stop"
         self.support_status = 204
+        self.uploads.clear()
         self.requests.clear()
         self.request_headers.clear()
         self.posts.clear()

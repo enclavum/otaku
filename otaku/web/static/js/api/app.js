@@ -8,16 +8,25 @@ import { get, items, patch, post, query, segment } from "./_http.js";
 // ---------- core ----------
 
 /* The app itself — its version, what its launch had to say, the model in
-   use and the one lore extraction asks — switched or pinned by an update
-   (`model`, `extraction_model`: each `{provider, name}`, the extraction's
-   null following the model in use again); and what the background worker
-   is doing (`status`), answered by the server itself. */
+   use and the one each role asks — switched or pinned by an update
+   (`models` keyed by role — `writing`, the model played with; `extraction`;
+   `dictation` — each `{provider, name}`, a role's null unpinning it,
+   extraction following the writing one again); what the background worker is doing
+   (`status`), answered by the server itself; and a recording written down
+   by the model saved for dictation (`{audio, audio_format}`, the bytes as
+   base64) — or, with `validateOnly`, what would write it down and the
+   recordings it takes. */
 export const app = {
   get: () => get("/api/app"),
   update: (fields) => patch("/api/app", fields),
 };
 
 export const status = { get: () => get("/api/app/status") };
+
+export const dictation = {
+  create: (fields = {}, { validateOnly = false } = {}) =>
+    post(validateOnly ? "/api/app/dictation?validate_only=true" : "/api/app/dictation", fields),
+};
 
 // ---------- machine ----------
 

@@ -35,13 +35,14 @@ from otaku.backend.app.models.services import SavedModelSettings
 from otaku.backend.app.paths import Paths
 from otaku.backend.app.runs import WorkerRun
 from otaku.backend.app.thread import AppThread
-from otaku.backend.errors import Refused, StoppingError, Unavailable
+from otaku.backend.errors import Conflict, Refused, StoppingError, Unavailable
 from otaku.formatting import pretty_path
 from otaku.integrations import Integrations
 from otaku.logging import ErrorLog
 from otaku.providers import (
     Locality,
     OpenAIClient,
+    ProviderError,
     Registry,
     reasoning,
     templates,
@@ -52,11 +53,13 @@ from otaku.settings import prompts as prompts_file
 from otaku.settings import state as state_file
 from otaku.settings.config import Config, ConfigError
 from otaku.settings.prompts import Prompts
-from otaku.settings.state import ModelRef, StateConfig
+from otaku.settings.state import ModelRef, ModelRole, StateConfig
 from otaku.store import Store
 
 # How long the update check leaves between two asks.
 _UPDATE_CHECK_INTERVAL = datetime.timedelta(hours=24)
+# What dictation answers while no model is saved for it.
+_NO_DICTATION_MODEL = "Choose a dictation model in /model first."
 
 T = TypeVar("T")
 E = TypeVar("E")
@@ -280,26 +283,17 @@ class App:
             config = replace(config, web_password=passwords.hash(config.web_password))
         return config
 
-    # ---------- primitives: the model in use ----------
+    # ---------- primitives: the models in use ----------
 
-    def _model(self) -> ModelRef | None:
-        """The model in use: the one state.toml remembers — None while
-        none is, and while it names a provider that is not configured
-        (the launch says so)."""
-        model = self._state_config().model_ref
-        return model if model is not None and model.provider in self._providers.list() else None
-
-    def _extraction_pin(self) -> ModelRef | None:
-        """The model saved for lore extraction — kept when the one played
-        with changes; None while extraction follows it, and while the
-        one saved names a provider that is not configured."""
-        pin = self._state_config().extraction_ref
-        return pin if pin is not None and pin.provider in self._providers.list() else None
-
-    def _extraction_model(self) -> ModelRef | None:
-        """The model lore extraction asks: the one saved for it, else the
-        model in use."""
-        return self._extraction_pin() or self._model()
+    def _model(self, role: ModelRole) -> ModelRef | None:
+        """The model `role` asks: the one saved for it — the writing one is
+        the model in use — extraction asking the writing one where none
+        is. None for none; a saved one naming a provider that is not
+        configured is passed over (the launch says so)."""
+        model = self._state_config().model(role)
+        if model is not None and model.provider in self._providers.list():
+            return model
+        return self._model(ModelRole.WRITING) if role is ModelRole.EXTRACTION else None
 
     def _client(self, model: ModelRef | None) -> OpenAIClient | None:
         """The client that serves `model`; None for none."""
@@ -308,13 +302,14 @@ class App:
     def _model_facts(self) -> "models.ModelFacts":
         """The model in use as it stands (`ModelFacts`) — read off what is
         cached, nothing asked of an engine. What leaves this machine:
-        the story when its model is on a hosted catalog, or lore
-        extraction, running on idle, when its own is; with idle
+        the story when its model is on a hosted catalog, lore
+        extraction, running on idle, when its own is — with idle
         extraction off the story leaves only when a pass is asked for,
-        so its model says nothing here. The generic provider is not a
+        so its model says nothing here — or what is said, when the
+        model saved for dictation is. The generic provider is not a
         catalog: its url could name one, but the marker says what is
         known, not what might be."""
-        model = self._model()
+        model = self._model(ModelRole.WRITING)
         client = self._client(model)
         row = client.models.cached(model.name) if client is not None and model is not None else None
         caps = row.capabilities if row is not None else None
@@ -333,12 +328,20 @@ class App:
             and client.locality_of(model.name) is Locality.REMOTE
         )
         if not on_cloud and self._config().lore_enabled:
-            extraction = self._extraction_model()
+            extraction = self._model(ModelRole.EXTRACTION)
             extracting = self._client(extraction)
             on_cloud = (
                 extracting is not None
                 and extraction is not None
                 and extracting.locality_of(extraction.name) is Locality.REMOTE
+            )
+        if not on_cloud:
+            dictation = self._model(ModelRole.DICTATION)
+            dictating = self._client(dictation)
+            on_cloud = (
+                dictating is not None
+                and dictation is not None
+                and dictating.locality_of(dictation.name) is Locality.REMOTE
             )
         return models.ModelFacts(
             model=model,
@@ -373,7 +376,7 @@ class App:
         every word means what it always did — and as nothing where the
         provider cannot describe the model or says it does not think: no
         row, unset until the provider can say."""
-        model = self._model()
+        model = self._model(ModelRole.WRITING)
         client = self._client(model)
         if model is None or client is None:
             return []
@@ -453,6 +456,36 @@ class Discard:
 def launch_facts(app: App) -> LaunchFacts:
     """What the launch that opened the app had to say."""
     return app._launch_facts
+
+
+def dictation_check(app: App) -> tuple[ModelRef, tuple[str, ...]]:
+    """The model saved for dictation, and the recordings its engine takes,
+    by extension, WAV first. Raises Conflict while none is saved. Safe
+    from any thread."""
+    model, client = _dictation_client(app)
+    return model, tuple(sorted(client.dictation.formats, key=lambda name: (name != "wav", name)))
+
+
+def dictate(app: App, audio: bytes, audio_format: str) -> str:
+    """What is said in `audio`, a recording in `audio_format`, written
+    down by the model saved for dictation. Raises Conflict while none
+    is, Unavailable for what the engine refuses. Safe from any thread:
+    it reads the files and asks the provider, never the store."""
+    model, client = _dictation_client(app)
+    try:
+        return client.dictation.transcribe(model.name, audio, audio_format)
+    except ProviderError as e:
+        raise Unavailable(str(e)) from e
+
+
+def _dictation_client(app: App) -> tuple[ModelRef, OpenAIClient]:
+    """The model saved for dictation and the client that serves it.
+    Raises Conflict while none is saved."""
+    model = app._model(ModelRole.DICTATION)
+    client = app._client(model)
+    if model is None or client is None:
+        raise Conflict(_NO_DICTATION_MODEL)
+    return model, client
 
 
 def get_status(app: App) -> str:

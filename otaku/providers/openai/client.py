@@ -1,11 +1,11 @@
 """The client: who the engine is and what it owns. The identity is
 class knowledge (its id, the panel's caption, where the server runs,
 the key's environment variable) plus the configuration. It owns the
-`auth` (the key in force), the one transport built on it, and the two
-halves, `models` and `completion`, each built from the class the engine
-names; the halves are unrelated, read only what they are handed, and
-the client is the one that knows both — and composes, from their
-facts, `ProviderCapabilities`: what the provider can do, as one object
+`auth` (the key in force), the one transport built on it, and the
+three halves, `models`, `completion` and `dictation`, each built from
+the class the engine names; the halves are unrelated, read only what
+they are handed, and the client is the one that knows them all — and
+composes, from their facts, `ProviderCapabilities`: what the provider can do, as one object
 for the rest of the app. A local engine's url names its
 server, and the surfaces hang off it: the native ones at the root, the
 OpenAI one at /v1 — whatever was typed. The account's balance, which
@@ -24,6 +24,7 @@ from otaku.providers.openai.completion import (
     PicturesRide,
     RequestSink,
 )
+from otaku.providers.openai.dictation import OpenAIDictation
 from otaku.providers.openai.models import Locality, OpenAIModels
 from otaku.settings.providers import ProviderConfig
 
@@ -54,6 +55,7 @@ class OpenAIClient:
     auth_class: ClassVar[type[OpenAIAuth]] = OpenAIAuth
     models_class: ClassVar[type[OpenAIModels]] = OpenAIModels
     completion_class: ClassVar[type[OpenAICompletion]] = OpenAICompletion
+    dictation_class: ClassVar[type[OpenAIDictation]] = OpenAIDictation
 
     def __init__(
         self,
@@ -75,6 +77,7 @@ class OpenAIClient:
         self.completion = self.completion_class(
             config, self._http, request_sink=request_sink, smooth=smooth, models=self.models
         )
+        self.dictation = self.dictation_class(config, self._http)
 
     def supported_params_of(self, model: str) -> frozenset[str]:
         """The app's parameters that reach `model`: the wire's set, and

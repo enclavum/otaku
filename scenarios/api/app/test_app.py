@@ -1,13 +1,15 @@
-"""The app itself: the model it plays with — /model, switched and
-remembered, written down as its provider lists it — and the one lore
-extraction asks, pinned for it or following the model in use; and the
-update check, once a day, named on the next launch's banner.
+"""The app itself: the model each role asks — the one it plays with,
+/model, switched and remembered, written down as its provider lists it;
+the one lore extraction asks, its own or the model in use; the one that
+writes down what is said, none until one is saved — and the update
+check, once a day, named on the next launch's banner.
 """
 
 import datetime
 import http.server
 import threading
 import time
+from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
 
@@ -16,7 +18,7 @@ import pytest
 import otaku
 from otaku import __version__
 from otaku import update as updater
-from otaku.backend.api import ModelRef, Refused
+from otaku.backend.api import ModelRef, ModelRole, Refused
 from otaku.backend.app.core.schemas import AppInfo, ModelInUse
 from otaku.backend.app.paths import Paths
 from otaku.settings import state as state_file
@@ -27,6 +29,8 @@ from scenarios.support.server import ModelServer
 
 # Key escape sequences, for pipe input.
 _DOWN = "\x1b[B"
+# A recording as the engine is sent one: the scripted server reads no audio.
+_RECORDING = b"RIFF\x00\x00\x00\x00WAVEfmt "
 
 
 class TestModel:
@@ -108,6 +112,12 @@ class TestModel:
         finally:
             server.close()
 
+    def test_the_model_in_use_is_never_unpinned(self, app: App) -> None:
+        # A story always has a model: the way off one is another.
+        with pytest.raises(Refused):
+            _set(app, ModelRole.WRITING, None)
+        assert _spec(app) == "generic/test-model"
+
     def test_a_model_ollama_serves_from_the_cloud_is_on_the_cloud(self, tmp_path) -> None:
         # The session reads where the MODEL runs: the prompt's cloud
         # marker says so, and the banner's context ask is not sent
@@ -132,42 +142,55 @@ class TestModel:
 
 
 class TestExtractionModel:
-    """Lore extraction asks the story's model unless one is saved for
+    """Lore extraction asks the story's model unless another is saved for
     it: saved from either picker, remembered, kept across a switch of
     the story's model, and unset back to it."""
 
     def test_a_saved_model_is_remembered_and_kept_across_a_switch(self, app: App) -> None:
-        app.api.app.update(extraction_model=ModelRef("generic", "extract-model"))
+        _set(app, ModelRole.EXTRACTION, ModelRef("generic", "extract-model"))
         app.play("/model generic/other-model")
-        assert _extraction(app) == "generic/extract-model"
+        assert _asks(app, ModelRole.EXTRACTION) == "generic/extract-model"
         relaunched = launch(app.paths.root, app.server)
         try:
-            assert _pinned(relaunched) == "generic/extract-model"
+            assert _saved(relaunched, ModelRole.EXTRACTION) == "generic/extract-model"
             assert _model(relaunched) == "other-model"
         finally:
             relaunched.close()
 
     def test_unset_returns_extraction_to_the_story_model(self, app: App) -> None:
-        app.api.app.update(extraction_model=ModelRef("generic", "extract-model"))
-        app.api.app.update(extraction_model=None)
-        assert _pinned(app) == ""
-        assert _extraction(app) == "generic/test-model"
+        _set(app, ModelRole.EXTRACTION, ModelRef("generic", "extract-model"))
+        _set(app, ModelRole.EXTRACTION, None)
+        assert _saved(app, ModelRole.EXTRACTION) == ""
+        assert _asks(app, ModelRole.EXTRACTION) == "generic/test-model"
         app.play("/model generic/other-model")
-        assert _extraction(app) == "generic/other-model"
+        assert _asks(app, ModelRole.EXTRACTION) == "generic/other-model"
 
     def test_the_saved_model_again_or_an_unset_of_none_changes_nothing(self, app: App) -> None:
         # Idempotent: what already stands answers success and writes
         # nothing; a provider that is not configured is refused.
-        app.api.app.update(extraction_model=None)
-        assert _pinned(app) == ""
-        app.api.app.update(extraction_model=ModelRef("generic", "extract-model"))
-        app.api.app.update(extraction_model=ModelRef("generic", "extract-model"))
+        _set(app, ModelRole.EXTRACTION, None)
+        assert _saved(app, ModelRole.EXTRACTION) == ""
+        _set(app, ModelRole.EXTRACTION, ModelRef("generic", "extract-model"))
+        _set(app, ModelRole.EXTRACTION, ModelRef("generic", "extract-model"))
         with pytest.raises(Refused):
-            app.api.app.update(extraction_model=ModelRef("nowhere", "extract-model"))
-        assert _extraction(app) == "generic/extract-model"
+            _set(app, ModelRole.EXTRACTION, ModelRef("nowhere", "extract-model"))
+        assert _asks(app, ModelRole.EXTRACTION) == "generic/extract-model"
+
+    def test_the_story_model_is_never_saved_for_extraction_apart(self, app: App) -> None:
+        # Extraction asks the story's model anyway, so naming it saves
+        # nothing of its own — and switching the story onto the model
+        # saved for extraction folds that one in: both follow the next
+        # switch.
+        _set(app, ModelRole.EXTRACTION, ModelRef("generic", "test-model"))
+        assert _saved(app, ModelRole.EXTRACTION) == ""
+        _set(app, ModelRole.EXTRACTION, ModelRef("generic", "extract-model"))
+        app.play("/model generic/extract-model")
+        assert _saved(app, ModelRole.EXTRACTION) == ""
+        app.play("/model generic/other-model")
+        assert _asks(app, ModelRole.EXTRACTION) == "generic/other-model"
 
     def test_the_pass_asks_the_saved_model_and_the_turns_the_story_model(self, app: App) -> None:
-        app.api.app.update(extraction_model=ModelRef("generic", "extract-model"))
+        _set(app, ModelRole.EXTRACTION, ModelRef("generic", "extract-model"))
         for i in range(3):
             app.play(f"Turn number {i}.")
         app.play("/extract")
@@ -197,15 +220,94 @@ class TestExtractionModel:
             app = launch(root, server, spec="llamacpp/test-model")
             try:
                 assert not _info(app).on_cloud
-                app.api.app.update(extraction_model=ModelRef("openrouter", "cloud-model"))
+                _set(app, ModelRole.EXTRACTION, ModelRef("openrouter", "cloud-model"))
                 assert _info(app).on_cloud is enabled
             finally:
                 app.close()
 
-    def test_the_picker_marks_only_a_saved_model(self, app: App) -> None:
-        assert _pinned(app) == ""
-        app.api.app.update(extraction_model=ModelRef("generic", "test-model"))
-        assert _pinned(app) == "generic/test-model"
+
+class TestDictationModel:
+    """Dictation has no model until one is saved for it — one of its
+    kind, here oMLX's speech-to-text — remembered and unset back to none;
+    what is said goes up to it and comes back written down."""
+
+    @pytest.fixture
+    def omlx(self, tmp_path) -> Iterator[App]:
+        """The app over an oMLX serving a chat model, played with, and a
+        speech-to-text one."""
+        server = scripted.ModelServer(models=("test-model", "stt"))
+        server.status = True
+        server.types = {"test-model": "llm", "stt": "audio_stt"}
+        set_config_provider(tmp_path / "state", server, name="omlx")
+        app = launch(tmp_path / "state", server, spec="omlx/test-model")
+        try:
+            yield app
+        finally:
+            app.close()
+            server.close()
+
+    def test_none_is_saved_until_one_is_chosen(self, omlx: App) -> None:
+        assert ModelRole.DICTATION not in _info(omlx).models
+        with pytest.raises(Refused):
+            omlx.api.app.dictation.create(validate_only=True)
+        with pytest.raises(Refused):
+            omlx.api.app.dictation.create(audio=_RECORDING, audio_format="wav")
+        assert omlx.server.uploads == []
+
+    def test_what_is_said_goes_to_the_saved_model_and_comes_back_written_down(
+        self, omlx: App
+    ) -> None:
+        _set(omlx, ModelRole.DICTATION, ModelRef("omlx", "stt"))
+        check = omlx.api.app.dictation.create(validate_only=True)
+        assert (check.model.provider, check.model.name) == ("omlx", "stt")
+        assert check.audio_formats[0] == "wav"
+        written = omlx.api.app.dictation.create(audio=_RECORDING, audio_format="wav")
+        assert written.value.text == omlx.server.transcript
+        (upload,) = omlx.server.uploads
+        assert upload["fields"]["model"] == "stt"
+        assert upload["file"]["data"] == _RECORDING
+
+    def test_what_the_engine_answers_without_text_is_refused(self, omlx: App) -> None:
+        _set(omlx, ModelRole.DICTATION, ModelRef("omlx", "stt"))
+        omlx.server.transcript = None
+        with pytest.raises(Refused):
+            omlx.api.app.dictation.create(audio=_RECORDING, audio_format="wav")
+
+    def test_a_saved_model_is_remembered_and_unset_back_to_none(self, omlx: App) -> None:
+        _set(omlx, ModelRole.DICTATION, ModelRef("omlx", "stt"))
+        relaunched = launch(omlx.paths.root, omlx.server, spec="omlx/test-model")
+        try:
+            assert _asks(relaunched, ModelRole.DICTATION) == "omlx/stt"
+            _set(relaunched, ModelRole.DICTATION, None)
+            assert ModelRole.DICTATION not in _info(relaunched).models
+            assert _saved(relaunched, ModelRole.DICTATION) == ""
+        finally:
+            relaunched.close()
+
+    def test_a_model_of_the_other_kind_is_refused_for_either_role(self, omlx: App) -> None:
+        with pytest.raises(Refused):
+            _set(omlx, ModelRole.DICTATION, ModelRef("omlx", "test-model"))
+        with pytest.raises(Refused):
+            _set(omlx, ModelRole.WRITING, ModelRef("omlx", "stt"))
+        assert ModelRole.DICTATION not in _info(omlx).models
+        assert _spec(omlx) == "omlx/test-model"
+
+    def test_a_hosted_dictation_model_lights_the_cloud_marker(
+        self, server: ModelServer, tmp_path
+    ) -> None:
+        # What is said leaves the machine at the next recording, whether
+        # or not idle extraction runs.
+        root = tmp_path / "state"
+        set_config(root, lore_enabled=False)
+        set_config_provider(root, server, name="llamacpp")
+        set_config_provider(root, server, name="openrouter")
+        app = launch(root, server, spec="llamacpp/test-model")
+        try:
+            assert not _info(app).on_cloud
+            _set(app, ModelRole.DICTATION, ModelRef("openrouter", "cloud-whisper"))
+            assert _info(app).on_cloud
+        finally:
+            app.close()
 
 
 class TestUpdateCheck:
@@ -336,17 +438,22 @@ def _listed(app: App) -> str:
     return f"{_in_use(app).provider}/{_in_use(app).listed_name}"
 
 
-def _extraction(app: App) -> str:
-    """The model lore extraction asks, "provider/name"; "" for none."""
-    model = _info(app).extraction_model
+def _set(app: App, role: ModelRole, model: ModelRef | None) -> None:
+    """`model` saved for `role`, None unsetting it — as either picker
+    saves it."""
+    app.api.app.update(models={role: model})
+
+
+def _asks(app: App, role: ModelRole) -> str:
+    """The model `role` asks, "provider/name"; "" for none."""
+    model = _info(app).models.get(role)
     return f"{model.provider}/{model.name}" if model is not None else ""
 
 
-def _pinned(app: App) -> str:
-    """The model pinned for lore extraction, "provider/name"; "" while
-    extraction follows the model in use."""
-    model = _info(app).extraction_model
-    return f"{model.provider}/{model.name}" if model is not None and model.pinned else ""
+def _saved(app: App, role: ModelRole) -> str:
+    """The model state.toml saves for `role`, "provider/name"; "" for
+    none."""
+    return _state(app).models.get(role, "")
 
 
 def _window(app: App) -> int | None:

@@ -5,7 +5,8 @@ slash menu from `completion`, the lexer, the toolbar), its keys
 `Carry`, what a shortcut hands across the prompt's exit, and
 `LineAssembler`, the `\"\"\"` multiline convention), the answers to a
 question the story stands on, drawn ABOVE the prompt line (`answers`),
-and the pictures a played line attaches (`pictures`). The run loop only
+the pictures a played line attaches (`pictures`), and what the reader
+says, written down at the cursor (`dictation`). The run loop only
 prompts, feeds and submits; and nothing here needs `Chat` — the prompt
 sits below the chat surface.
 

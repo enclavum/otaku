@@ -75,7 +75,7 @@ const state = {
   nextLore: 1, // scenes, characters and journals alike: a demo's ids need not be the store's
   defaults: [], // the settings a story made now starts with
   model: MODELS[0].name,
-  pinned: null, // the model lore extraction is pinned to; null follows the one above
+  pinned: null, // the model lore extraction is pinned to; null asks the one above
   loaded: new Set([MODELS[0].name]),
   launch_facts: { notices: [], hint: "", newer_version: "" },
   version: "",
@@ -310,25 +310,31 @@ export function app() {
       can_complete_text: false,
       can_attach: MODEL_CAPABILITIES.vision,
     },
-    extraction_model: {
-      provider: PROVIDER,
-      name: extracting,
-      listed_name: extracting,
-      pinned: state.pinned !== null,
+    // the demo serves no dictation model, so dictation has none
+    models: {
+      writing: { provider: PROVIDER, name: model.name, listed_name: model.name },
+      extraction: { provider: PROVIDER, name: extracting, listed_name: extracting },
     },
     on_cloud: false,
   };
 }
 
-/* The model in use and the one lore extraction is pinned to — the
-   product's sentences (`app.providers.services`), its refusals. */
-export function updateApp({ model, extraction_model: pin } = {}) {
+/* The model in use and the one each role is pinned to — the product's
+   sentences (`app.providers.services`), its refusals; an extraction model
+   that is the one played with is not kept apart (`settings.state.save`).
+   Every model here is a chat model, so a dictation pin is refused as the
+   product refuses one of the wrong kind. */
+export function updateApp({ models: pins = {} } = {}) {
+  const model = pins.writing;
+  const pin = pins.extraction;
   const said = [];
+  if (model === null) throw invalid("A story always has a model: choose another one instead.");
   if (model !== undefined) {
     const wanted = knownModel(model);
     if (wanted === state.model) said.push(`Already using ${PROVIDER}/${wanted}.`);
     else {
       state.model = wanted;
+      if (state.pinned === wanted) state.pinned = null;
       said.push(`Switched to ${PROVIDER}/${wanted}.`);
     }
   }
@@ -341,15 +347,26 @@ export function updateApp({ model, extraction_model: pin } = {}) {
       }
     } else {
       const wanted = knownModel(pin);
-      if (state.pinned === wanted) said.push(`Lore extraction already uses ${PROVIDER}/${wanted}.`);
-      else {
-        state.pinned = wanted;
+      if ((state.pinned ?? state.model) === wanted) {
+        said.push(`Lore extraction already uses ${PROVIDER}/${wanted}.`);
+      } else {
+        state.pinned = wanted === state.model ? null : wanted;
         said.push(`Lore extraction uses ${PROVIDER}/${wanted}.`);
       }
     }
   }
+  if (pins.dictation !== undefined) {
+    if (pins.dictation === null) said.push("No dictation model is set.");
+    else throw invalid(`${PROVIDER}/${knownModel(pins.dictation)} does not take dictation.`);
+  }
   if (!said.length) throw invalid("Nothing to change.");
   return { value: app(), notice: said.join(" ") };
+}
+
+/* A recording written down, or the check before one: the product's
+   answer with no model saved for dictation, which the demo never has. */
+export function dictate() {
+  throw conflict("Choose a dictation model in /model first.");
 }
 
 function knownModel({ provider, name }) {
@@ -583,6 +600,7 @@ export function models(providerName) {
     text_template: null,
     reasoning_words: "not supported",
     capability_words: "none",
+    kinds: ["completion"],
   }));
 }
 

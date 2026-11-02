@@ -78,6 +78,8 @@ function factsOf(app, story) {
     layout: story === null ? "manuscript" : story.mode === "story" ? "canvas" : story.layout,
     completion_type: story?.completion_type ?? "chat",
     can_attach: story?.can_attach ?? model?.can_attach ?? false,
+    // a model is saved for dictation: the composer's microphone is offered
+    can_dictate: Boolean(app.models?.dictation),
     can_complete_text: model?.can_complete_text ?? false,
     next_join: story?.next_join ?? null,
     // whether the newest undo or fresh take can still be taken back
@@ -126,6 +128,8 @@ export function showFacts(facts) {
   // (`facts.can_attach`: the model sees, and the mode's wire carries one),
   // gone otherwise. The backend refuses a picture regardless.
   for (const button of $$("[data-attach]")) button.hidden = !facts.can_attach;
+  // The microphone, while a model is saved for dictation (`facts.can_dictate`).
+  for (const button of $$("[data-dictate]")) button.hidden = !facts.can_dictate;
   // Revert is offered by an Undo or a Regen alone (`commands.offerRevert`)
   // and withdrawn here once anything else left nothing to take back, or
   // another story is drawn: it was offered for this one.

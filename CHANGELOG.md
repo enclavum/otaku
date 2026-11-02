@@ -2,6 +2,12 @@
 
 See also the tentative roadmap: [ROADMAP.md](https://github.com/enclavum/otaku/blob/main/ROADMAP.md)
 
+## [0.10.0] - ...
+
+- Dictation, in both the web interface and the terminal. Choose a speech-to-text model in the model
+  picker, then start dictation with the mic button in the web interface, or with Ctrl+G in the
+  terminal. What you say is written into the prompt line, to edit before sending.
+
 ## [0.9.0] - 2026-10-31
 
 New features:

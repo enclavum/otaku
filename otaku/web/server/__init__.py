@@ -28,7 +28,9 @@ reply as it arrives — and the METHOD is the lane. A GET only reads the
 app and is answered on the read queue — during a reply as well as
 between them, which is what keeps every screen answerable while the
 model talks. Every other method moves the story and takes the one
-thread in turn, in the order it arrived. An answer about one story says
+thread in turn, in the order it arrived — but a row marked unqueued,
+whose verb never takes the app's thread and is slow on purpose, which
+is answered on the request's own. An answer about one story says
 the head it stands at as the `ETag`, and a write that moves the head
 names the one it moves from in `If-Match` — 428 where it does not, 412
 where the head has moved.
@@ -277,7 +279,11 @@ class Handler(Guards, Streams):
             if streams:
                 self._stream(lambda interface: call(interface, ask))
             else:
-                self._answer(lambda: call(self.server.api, ask), reading=self.command == _READING)
+                self._answer(
+                    lambda: call(self.server.api, ask),
+                    reading=self.command == _READING,
+                    unqueued=api.is_unqueued(call),
+                )
             return
         allowed = self._allowed()
         if allowed:
@@ -347,18 +353,22 @@ class Handler(Guards, Streams):
 
     # ---------- answering ----------
 
-    def _answer(self, produce: Callable[[], object], *, reading: bool = False) -> None:
+    def _answer(
+        self, produce: Callable[[], object], *, reading: bool = False, unqueued: bool = False
+    ) -> None:
         """Run as one unit on the app's thread (`App.run`) and reply with
         what came back.
         `reading` declares that `produce` only READS the app — it is
         what lets the job run between the frames of a reply, and every
-        screen in the app is one of those. A Refused is an ANSWER — "No
+        screen in the app is one of those. `unqueued` runs it on this
+        request's own thread instead: a row whose verb never takes the
+        app's (`api.is_unqueued`), slow on purpose. A Refused is an ANSWER — "No
         such story." is the sentence to show — so it comes back as the
         status its kind says, the sentence its `detail` (`_outcome`);
         only a bug is a 500, and its traceback goes where the reader
         is."""
         try:
-            payload = self.server.app.run(produce, reading=reading)
+            payload = produce() if unqueued else self.server.app.run(produce, reading=reading)
         except StoppingError:
             # The reader stopped otaku while this was in the queue. An
             # ordinary end, not a fault: no traceback, nothing recorded.

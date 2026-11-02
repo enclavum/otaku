@@ -7,7 +7,8 @@ for an answer about one story told with the head it stands at, `Blob`
 for a read that answers with bytes. `plain` is the JSON of a
 representation and `changed` of a write's answer; `PreconditionRequired`
 is the fault a row may raise itself; `Route`
-and `Stream` are the two shapes a table's row takes. `web.server` takes
+and `Stream` are the two shapes a table's row takes, and `unqueued`
+marks a row the server answers off the app's thread. `web.server` takes
 a request apart into these and carries the result back."""
 
 import enum
@@ -216,3 +217,19 @@ def changed(answer: Changed[Any]) -> dict[str, Any]:
 # the reply's events, validated before the first one is asked for.
 Route = Callable[[Api, Ask], Any]
 Stream = Callable[[Api, Ask], Iterator[PlayEvent]]
+
+# The rows whose call never takes the app's thread (`unqueued`).
+_UNQUEUED: set[Route] = set()
+
+
+def unqueued(route: Route) -> Route:
+    """Marks a row whose call never takes the app's thread — a verb safe
+    from any thread (`backend.base.any_thread`), slow on purpose — so the
+    server answers it on the request's own and nothing waits behind it."""
+    _UNQUEUED.add(route)
+    return route
+
+
+def is_unqueued(route: Route) -> bool:
+    """Whether the server answers `route` off the app's thread."""
+    return route in _UNQUEUED

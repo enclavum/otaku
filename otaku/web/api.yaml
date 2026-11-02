@@ -98,7 +98,7 @@ openapi: 3.1.0
 
 info:
   title: otaku web API
-  version: 0.9.0
+  version: 0.10.0
   contact:
     name: otaku
     url: https://otaku.sh
@@ -1426,12 +1426,12 @@ paths:
     patch:
       operationId: updateApp
       tags: [App]
-      summary: Switch the model, or pin the one lore extraction asks
+      summary: Pin the model a role asks — the writing one switched
       description: |
-        Each field written in the order below — a refusal stops there, the
-        field before it written — and each write's sentence joined into the
-        notice. A field of the wrong type is a 400; a body naming neither is
-        refused (422).
+        Each role written in the order below — a refusal stops there, the
+        role before it written — and each write's sentence joined into the
+        notice. A field of the wrong type, or a role otaku has not, is a 400;
+        a body naming none is refused (422).
       requestBody:
         required: true
         content:
@@ -1439,12 +1439,13 @@ paths:
             schema:
               type: object
               properties:
-                model:
-                  description: The model played with from now on, its saved settings following it.
-                  allOf: [{ $ref: "#/components/schemas/ModelRef" }]
-                extraction_model:
-                  description: The model lore extraction asks; null follows the model in use again.
-                  oneOf: [{ $ref: "#/components/schemas/ModelRef" }, { type: "null" }]
+                models:
+                  type: object
+                  description: The model pinned for each role named. `writing` is the model played with from now on, its saved settings following it, and is never unpinned (its null is refused, 422); another role's null unpins it — extraction follows the writing one again, dictation has none.
+                  properties:
+                    writing: { $ref: "#/components/schemas/ModelRef" }
+                    extraction: { oneOf: [{ $ref: "#/components/schemas/ModelRef" }, { type: "null" }] }
+                    dictation: { oneOf: [{ $ref: "#/components/schemas/ModelRef" }, { type: "null" }] }
       responses:
         default: { $ref: "#/components/responses/Failed" }
         "200":
@@ -1455,6 +1456,42 @@ paths:
                 allOf:
                   - $ref: "#/components/schemas/Changed"
                   - properties: { value: { $ref: "#/components/schemas/AppInfo" } }
+
+  /api/app/dictation:
+    post:
+      operationId: dictate
+      tags: [App]
+      summary: Write a recording down
+      description: |
+        What is said in a recording, written down by the model saved for
+        dictation; with `validate_only`, what would write it down and the
+        recordings its engine takes. Answered off the app's thread: a
+        recording being written down holds no other request up. Refused
+        (409) while no dictation model is saved; what the engine refuses is
+        a 502.
+      parameters:
+        - $ref: "#/components/parameters/ValidateOnly"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [audio, audio_format]
+              properties:
+                audio: { type: string, description: "The recording's bytes, base64." }
+                audio_format: { type: string, description: "Its extension, one of the check's `audio_formats`: wav, webm, m4a …" }
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: The text — or, with `validate_only`, the check.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - allOf:
+                      - $ref: "#/components/schemas/Changed"
+                      - properties: { value: { $ref: "#/components/schemas/Dictation" } }
+                  - $ref: "#/components/schemas/DictationCheck"
 
   /api/app/machine:
     get:
@@ -2258,10 +2295,14 @@ components:
         model:
           description: The model in use; null with none.
           oneOf: [{ $ref: "#/components/schemas/ModelInUse" }, { type: "null" }]
-        extraction_model:
-          description: The model lore extraction asks; null with neither a pin nor a model in use.
-          oneOf: [{ $ref: "#/components/schemas/ExtractionModel" }, { type: "null" }]
-        on_cloud: { type: boolean, description: "A story played now leaves this machine — its model, or idle extraction's, is on a hosted catalog." }
+        models:
+          type: object
+          description: The model each role asks, a role with none absent — writing without a model in use, extraction the writing one where none is saved for it, dictation without one saved. `model` carries the writing one's facts.
+          properties:
+            writing: { $ref: "#/components/schemas/ListedModel" }
+            extraction: { $ref: "#/components/schemas/ListedModel" }
+            dictation: { $ref: "#/components/schemas/ListedModel" }
+        on_cloud: { type: boolean, description: "What is typed or said leaves this machine — the model in use, idle extraction's or dictation's is on a hosted catalog." }
 
     Attachment:
       type: object
@@ -2405,6 +2446,13 @@ components:
       properties:
         copies: { type: integer, description: "How many copies the write takes along with `with_copies`, in the stories forks join the character's own to." }
 
+    ContextFill:
+      type: object
+      properties:
+        percent: { type: integer, description: "Percent of the prompt's limit — over 100 where the story cannot fit even fully summarized." }
+        context_in_force: { type: integer, description: "What the request is cut to: the model's context window, under the context limit." }
+        text: { type: string, description: 'The figure in words — "41% of 32K".' }
+
     ContextReport:
       type: object
       properties:
@@ -2478,12 +2526,16 @@ components:
                   card_name: { type: string, description: 'The character a card came in under; "" on every other part.' }
                   caption: { type: string, description: 'What both frontends head the part with: where it comes from, and which — "pinned · header", "summary · scene 3 · The Weir", "injection · story reminder · 3rd last" …' }
 
-    ContextFill:
+    Dictation:
       type: object
       properties:
-        percent: { type: integer, description: "Percent of the prompt's limit — over 100 where the story cannot fit even fully summarized." }
-        context_in_force: { type: integer, description: "What the request is cut to: the model's context window, under the context limit." }
-        text: { type: string, description: 'The figure in words — "41% of 32K".' }
+        text: { type: string, description: "What was said, written down." }
+
+    DictationCheck:
+      type: object
+      properties:
+        model: { $ref: "#/components/schemas/ListedModel" }
+        audio_formats: { type: array, items: { type: string }, description: "The recordings the model's engine takes, by extension, wav first and always among them." }
 
     Export:
       type: object
@@ -2498,14 +2550,6 @@ components:
         story_id: { type: integer }
         status: { type: string, enum: [running, done, cancelled, failed] }
         report: { type: [string, "null"], description: "Once it is not running: scenes closed, journals written, too little new play yet, or what failed and why; null while it runs." }
-
-    ExtractionModel:
-      type: object
-      properties:
-        provider: { type: string, description: "The provider's id." }
-        name: { type: string, description: "The model's name as state.toml names it." }
-        listed_name: { type: string, description: "Its name as its provider lists it — where a picker rows it; the remembered spelling where the provider has not listed it." }
-        pinned: { type: boolean, description: "Pinned for extraction; false while extraction follows the model in use." }
 
     Import:
       type: object
@@ -2563,6 +2607,24 @@ components:
         model: { type: [string, "null"] }
         updated_at: { type: string }
 
+    Language:
+      type: object
+      description: The story's typed language, declared once in `context.syntax`.
+      properties:
+        prose: { type: string, description: "What a line with none of it does." }
+        openers:
+          type: array
+          items: { $ref: "#/components/schemas/LanguageRow" }
+        inliners:
+          type: array
+          items: { $ref: "#/components/schemas/LanguageRow" }
+
+    LanguageRow:
+      type: object
+      properties:
+        token: { type: string, example: "/you" }
+        args: { type: string, description: "The argument's shape, as help spells it.", example: "NAME[: HINT]" }
+
     LaunchFacts:
       type: object
       description: What the launch that opened the app had to say.
@@ -2574,6 +2636,13 @@ components:
         newer_version:
           type: string
           description: The version the last update check found announced, where later than this otaku; empty for none.
+
+    ListedModel:
+      type: object
+      properties:
+        provider: { type: string, description: "The provider's id." }
+        name: { type: string, description: "The model's name as state.toml names it — what its own settings are saved under." }
+        listed_name: { type: string, description: "Its name as its provider lists it — where a picker rows it; the remembered spelling where the provider has not listed it." }
 
     ListedProvider:
       type: object
@@ -2700,6 +2769,7 @@ components:
         text_template: { type: [string, "null"], description: "The template the text wire wraps the story in for this model, as otaku resolves it; null where none is known." }
         reasoning_words: { type: string, description: 'The info report''s Reasoning row for the model, verbatim: the rungs, "on / off", "token budget", "not supported" or "unknown".' }
         capability_words: { type: string, description: "The info report's Capabilities row for the model, verbatim." }
+        kinds: { type: array, items: { type: string, enum: [completion, dictation] }, description: "What the model is used as: a completion model writes text — plays and extracts lore, over either wire — a dictation model writes speech down; one may be both." }
 
     ModelCapabilities:
       type: object
@@ -2715,17 +2785,17 @@ components:
         structured_output: { type: [boolean, "null"] }
 
     ModelInUse:
-      type: object
-      properties:
-        provider: { type: string, description: "The provider's id." }
-        name: { type: string, description: "The model's name as state.toml names it — what its own settings are saved under." }
-        listed_name: { type: string, description: "Its name as its provider lists it — where a picker rows it; the remembered spelling where the provider has not listed it." }
-        context_window: { type: [integer, "null"], description: "What a request gets on the model, as last listed — the loaded instance's context, or the model's own where loading is not a thing; null while not known." }
-        capabilities:
-          description: What the model can do as its provider states it; null where it says nothing of the model. A flag that is null reads as no.
-          oneOf: [{ $ref: "#/components/schemas/ModelCapabilities" }, { type: "null" }]
-        can_complete_text: { type: boolean, description: "The novel may be offered: the engine completes raw text and the template in force is plain." }
-        can_attach: { type: boolean, description: "A picture may ride the first line of a story not made yet, in the layout a story starts in; a story's own is its can_attach." }
+      description: The model in use, named, with its facts.
+      allOf:
+        - $ref: "#/components/schemas/ListedModel"
+        - type: object
+          properties:
+            context_window: { type: [integer, "null"], description: "What a request gets on the model, as last listed — the loaded instance's context, or the model's own where loading is not a thing; null while not known." }
+            capabilities:
+              description: What the model can do as its provider states it; null where it says nothing of the model. A flag that is null reads as no.
+              oneOf: [{ $ref: "#/components/schemas/ModelCapabilities" }, { type: "null" }]
+            can_complete_text: { type: boolean, description: "The novel may be offered: the engine completes raw text and the template in force is plain." }
+            can_attach: { type: boolean, description: "A picture may ride the first line of a story not made yet, in the layout a story starts in; a story's own is its can_attach." }
 
     ModelRef:
       type: object
@@ -3069,24 +3139,6 @@ components:
         updated_at: { type: string, format: date-time }
         message_count: { type: integer }
         word_count: { type: integer }
-
-    Language:
-      type: object
-      description: The story's typed language, declared once in `context.syntax`.
-      properties:
-        prose: { type: string, description: "What a line with none of it does." }
-        openers:
-          type: array
-          items: { $ref: "#/components/schemas/LanguageRow" }
-        inliners:
-          type: array
-          items: { $ref: "#/components/schemas/LanguageRow" }
-
-    LanguageRow:
-      type: object
-      properties:
-        token: { type: string, example: "/you" }
-        args: { type: string, description: "The argument's shape, as help spells it.", example: "NAME[: HINT]" }
 
     ThinkChoices:
       type: object

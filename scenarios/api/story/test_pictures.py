@@ -10,6 +10,7 @@ import pytest
 
 from otaku.backend.api import (
     ModelRef,
+    ModelRole,
     Refused,
 )
 from otaku.backend.story.messages.schemas import RawFile
@@ -142,7 +143,7 @@ class TestPictures:
     def test_a_model_that_cannot_see_gets_none_of_the_storys_pictures(self, tmp_path) -> None:
         with _seeing(tmp_path) as app:
             _play(app, "What is this?", [_cat()])
-            app.api.app.update(model=ModelRef("generic", "test-model"))
+            app.api.app.update(models={ModelRole.WRITING: ModelRef("generic", "test-model")})
             app.play("And now?")
             messages = app.server.requests[-1]["messages"]
             assert all(isinstance(message["content"], str) for message in messages)

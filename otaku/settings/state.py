@@ -1,11 +1,14 @@
 """What the app remembers between sessions: state.toml — rewritten
 wholesale on every change; there are no user edits to preserve. A key
 an older file still carries and this one no longer does (the thinking
-level, the model's own since 0.5.0 — `migrations.state_file` moves it)
-is read past."""
+level, the model's own since 0.5.0; the model played with and the
+extraction model, each a role's in `[models]` since 0.10.0 —
+`migrations.state_file` moves them) is read past."""
 
+import enum
 import tomllib
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from otaku.formatting import toml_scalar
@@ -33,16 +36,27 @@ class ModelRef:
         return cls(provider, name) if provider and name else None
 
 
+class ModelRole(enum.Enum):
+    """What a model is saved for, each under its own key in `[models]`:
+    writing the story — the model in use, played with and resumed; lore
+    extraction, which asks the writing one while none is saved for it;
+    and dictation, which has none then."""
+
+    WRITING = "writing"
+    EXTRACTION = "extraction"
+    DICTATION = "dictation"
+
+
 @dataclass(frozen=True)
 class StateConfig:
     """What state.toml holds: the settings otaku writes itself as they
-    change — the model to resume and the one saved for lore extraction
-    (specs as the file spells them), the story to reattach, the /set
-    switches, and what the update check last learned. A config, not the
-    app's state: the app reads it from the file whenever it changed."""
+    change — the model saved for each role (specs as the file spells
+    them, a role without one absent; the writing one resumed, the picker
+    opening without it), the story to reattach, the /set switches, and
+    what the update check last learned. A config, not the app's state:
+    the app reads it from the file whenever it changed."""
 
-    model: str = ""  # "provider/model" to resume; "" = open the picker
-    extraction_model: str = ""  # "provider/model" lore extraction uses; "" = `model`
+    models: Mapping[ModelRole, str] = field(default_factory=dict)  # "provider/model" by role
     story: int = 0  # story id to reattach; 0 = start detached
     verbose: bool = False
     autocorrect: bool = True
@@ -52,13 +66,9 @@ class StateConfig:
         ""  # the version announced as current when it last answered; "" = unknown
     )
 
-    @property
-    def model_ref(self) -> ModelRef | None:
-        return ModelRef.parse(self.model)
-
-    @property
-    def extraction_ref(self) -> ModelRef | None:
-        return ModelRef.parse(self.extraction_model)
+    def model(self, role: ModelRole) -> ModelRef | None:
+        """The model saved for `role`; None for none."""
+        return ModelRef.parse(self.models.get(role, ""))
 
 
 def load(path: Path) -> tuple[StateConfig, list[str]]:
@@ -72,9 +82,10 @@ def load(path: Path) -> tuple[StateConfig, list[str]]:
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as e:
         return StateConfig(), [f"Ignoring {path.name} ({e})."]
     story = raw.get("story")
+    pinned = raw.get("models")
+    pinned = pinned if isinstance(pinned, dict) else {}
     return StateConfig(
-        model=str(raw.get("model", "")),
-        extraction_model=str(raw.get("extraction_model", "")),
+        models={role: str(pinned[role.value]) for role in ModelRole if pinned.get(role.value)},
         story=story if isinstance(story, int) and story > 0 else 0,
         verbose=bool(raw.get("verbose", False)),
         autocorrect=bool(raw.get("autocorrect", True)),
@@ -85,18 +96,25 @@ def load(path: Path) -> tuple[StateConfig, list[str]]:
 
 
 def save(path: Path, state: StateConfig) -> None:
+    """state.toml written whole. An extraction model that is the writing
+    one is not saved apart: extraction asks the writing one anyway."""
+    writing = state.models.get(ModelRole.WRITING, "")
+    extraction = state.models.get(ModelRole.EXTRACTION, "")
     # fmt: off
     body = "\n".join(
         [
             "# Written by otaku — what it remembers between sessions.",
-            row(f"model = {toml_scalar(state.model)}", "bare `otaku` resumes this model"),
-            row(f"extraction_model = {toml_scalar(state.extraction_model)}", 'lore extraction uses this model; "" = the one above'),
-            row(f"story = {state.story}", "and reattaches this story (0 = none)"),
+            row(f"story = {state.story}", "bare `otaku` reattaches this story (0 = none)"),
             row(f"verbose = {str(state.verbose).lower()}", "/set verbose"),
             row(f"autocorrect = {str(state.autocorrect).lower()}", "/set autocorrect"),
             row(f"notification = {str(state.notification).lower()}", "/set notification"),
             row(f"update_checked_at = {toml_scalar(state.update_checked_at)}", "when otaku last checked for a newer version (UTC)"),
             row(f"update_latest_version = {toml_scalar(state.update_latest_version)}", "the latest release that check found"),
+            "",
+            "[models]",
+            row(f"writing = {toml_scalar(writing)}", 'bare `otaku` resumes this model; "" = open the picker'),
+            row(f"extraction = {toml_scalar('' if extraction == writing else extraction)}", 'lore extraction uses this model; "" = the writing one'),
+            row(f"dictation = {toml_scalar(state.models.get(ModelRole.DICTATION, ''))}", 'dictation uses this model; "" = none'),
         ]
     )
     # fmt: on

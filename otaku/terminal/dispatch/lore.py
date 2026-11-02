@@ -6,7 +6,7 @@ extraction pass run now and waited on in the foreground (`/extract`);
 import sys
 import time
 
-from otaku.terminal.api import NO_STORY_HINT, Refused
+from otaku.terminal.api import NO_STORY_HINT, ModelRole, Refused
 from otaku.terminal.api.lore import Extraction
 from otaku.terminal.chat import landing
 from otaku.terminal.chat.chat import Chat
@@ -22,7 +22,7 @@ def wait_extraction(chat: Chat, story_id: int) -> Extraction | None:
     it; the pass as it ended, None when Ctrl+C cancelled it (the cancel
     notice said)."""
     shown = ""
-    model = chat.api.app.get().extraction_model
+    model = chat.api.app.get().models.get(ModelRole.EXTRACTION)
     spec = f"{model.provider}/{model.name}" if model is not None else ""
 
     def transient(line: str) -> None:

@@ -1,8 +1,9 @@
 """The picker's left side, the model list: every model of every provider
-that answered, grouped under the providers' captions, its marks — the
-model written with, the one extraction asks — its size and its window;
-a model loaded or unloaded after a confirm, picked, or pinned for lore
-extraction."""
+that answered, grouped under the providers' captions — the completion models,
+or the dictation ones (`d`) — its marks — the model written with, the
+ones extraction and dictation ask — its size and its window; a model
+loaded or unloaded after a confirm, picked, or pinned for lore
+extraction or dictation."""
 
 import contextlib
 import threading
@@ -11,7 +12,7 @@ import time
 from prompt_toolkit.formatted_text import StyleAndTextTuples
 
 from otaku.formatting import format_context, format_size, truncate
-from otaku.terminal.api import ModelRef, ModelState, Refused
+from otaku.terminal.api import ModelKind, ModelRef, ModelRole, ModelState, Refused
 from otaku.terminal.api import app as api_app
 from otaku.terminal.screens.models.base import ModelEntry, ModelPickerBase, cursor_line
 from otaku.terminal.tty.spinner import FRAMES as SPINNER_FRAMES
@@ -64,15 +65,17 @@ class ModelList(ModelPickerBase):
         tail = _COL_GAP + _SIZE_COL + _COL_GAP + _CONTEXT_COL
         return max(0, self._row_width() - _ROW_PREFIX - tail)
 
-    def _marks(self, entry: ModelEntry, story: str, pinned: str) -> str:
-        """What the model is to the app — "[ writing ]",
-        "[ extraction ]", or both — standing against the figures; "" for
-        neither."""
-        roles = [
-            role
-            for role, spec in (("writing", story), ("extraction", pinned))
-            if spec == entry.full_spec
-        ]
+    def _marks(self, entry: ModelEntry, story: str, pinned: dict[ModelRole, str]) -> str:
+        """What the model is to the app in the view shown — "[ writing ]",
+        "[ extraction ]", or both, among the completion models; "[ dictation ]"
+        among the dictation ones — standing against the figures; "" for
+        none."""
+        held = (
+            (("writing", story), ("extraction", pinned.get(ModelRole.EXTRACTION, "")))
+            if self.view is ModelKind.COMPLETION
+            else (("dictation", pinned.get(ModelRole.DICTATION, "")),)
+        )
+        roles = [role for role, spec in held if spec == entry.full_spec]
         return " ".join(f"[ {role} ]" for role in roles)
 
     def _items_text(self) -> StyleAndTextTuples:
@@ -187,10 +190,9 @@ class ModelList(ModelPickerBase):
 
     def _refilter(self) -> None:
         q = self.query.strip().lower()
-        if not q:
-            self.filtered = list(self.all)
-        else:
-            self.filtered = [e for e in self.all if q in e.full_spec.lower()]
+        self.filtered = [
+            e for e in self.all if self.view in e.kinds and (not q or q in e.full_spec.lower())
+        ]
         if self.cursor >= len(self.filtered):
             self.cursor = max(0, len(self.filtered) - 1)
 
@@ -295,20 +297,39 @@ class ModelList(ModelPickerBase):
         self.confirming_action = None
         self.confirming_entry = None
 
-    def _toggle_extraction(self) -> None:
-        """`x`: pin lore extraction to the highlighted model, or — on the
-        one pinned — back to the model played with, through `backend.api`
-        at once. The row's mark is the answer; a refusal is kept in
-        `notice`, drawn nowhere."""
+    def _toggle_pin(self, role: ModelRole) -> None:
+        """`x` among the completion models, Enter among the dictation ones: pin
+        `role` to the highlighted model, or — on the one pinned — unpin
+        it, extraction going back to the model played with, through
+        `backend.api` at once. The row's mark is the answer; a refusal is
+        kept in `notice`, drawn nowhere."""
         if self.side != "models" or self.in_filter or self.confirming_action or not self.filtered:
             return
         entry = self.filtered[self.cursor]
+        pinned = api_app.specs(self.api)[1].get(role)
         try:
-            if entry.full_spec == api_app.specs(self.api)[1]:
-                self.notice = self.api.app.update(extraction_model=None).notice
-            else:
-                self.notice = self.api.app.update(
-                    extraction_model=ModelRef(entry.provider_name, entry.model)
-                ).notice
+            self.notice = self.api.app.update(
+                models={
+                    role: None
+                    if entry.full_spec == pinned
+                    else ModelRef(entry.provider_name, entry.model)
+                }
+            ).notice
         except Refused as e:
             self.notice = str(e)
+
+    def _switch_view(self) -> None:
+        """`d`: the completion models for the dictation ones, or back — the
+        cursor on the model the view is about, the one in use or the one
+        dictation asks, where the list holds it."""
+        if self.side != "models" or self.in_filter or self.confirming_action:
+            return
+        self.view = (
+            ModelKind.DICTATION if self.view is ModelKind.COMPLETION else ModelKind.COMPLETION
+        )
+        self.notice = ""
+        self._refilter()
+        story, pinned = api_app.specs(self.api)
+        wanted = story if self.view is ModelKind.COMPLETION else pinned.get(ModelRole.DICTATION, "")
+        specs = [e.full_spec for e in self.filtered]
+        self.cursor = specs.index(wanted) if wanted in specs else 0

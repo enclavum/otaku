@@ -14,6 +14,7 @@ from otaku.context.assembler import ContextOverflowError, context_in_force
 from otaku.context.prompt import AssembledPrompt, PromptPiece, Provenance, estimate_tokens
 from otaku.formatting import printable
 from otaku.providers import Locality, ModelInfo, ModelState
+from otaku.settings.state import ModelRole
 
 
 @dataclass(frozen=True)
@@ -50,7 +51,7 @@ def get_context(app: App, story_id: int) -> Preview:
     Conflict for one that cannot fit."""
     if not app._store.stories.exists(story_id):
         raise NotFound(NO_SUCH_STORY)
-    model = app._model()
+    model = app._model(ModelRole.WRITING)
     client = app._client(model)
     found = client.models.get(model.name) if client is not None and model is not None else None
     try:
@@ -73,7 +74,7 @@ def get_context_fill(app: App, story_id: int | None) -> tuple[int, int] | None:
         return None
     if not app._store.stories.exists(story_id):
         raise NotFound(NO_SUCH_STORY)
-    model = app._model()
+    model = app._model(ModelRole.WRITING)
     client = app._client(model)
     if model is None or client is None:
         return None

@@ -19,6 +19,7 @@ from otaku.formatting import (
     truncate_label,
 )
 from otaku.providers import ALL_CLIENTS, Locality, ModelState
+from otaku.settings.state import ModelRole
 from otaku.store.ops.records import UsageTotal
 
 # A block of `info`: labelled facts, in order.
@@ -68,7 +69,7 @@ def get_info(app: App, story_id: int | None = None) -> tuple[Rows, Rows | None, 
     state dir, the story and the parameters are the app's own, and
     reporting them needs no provider."""
     state = (("State dir", pretty_path(app._paths.root)),)
-    model = _model_info(app) if app._client(app._model()) is not None else None
+    model = _model_info(app) if app._client(app._model(ModelRole.WRITING)) is not None else None
     return state, model, _app_rows(app, story_id)
 
 
@@ -128,7 +129,7 @@ def get_balance(app: App, *, probe: bool = True) -> tuple[list[Account], str]:
     # ever read as "can I afford to keep playing", and the answer depends
     # on what this story is PLAYING on — which a list of accounts does
     # not say.
-    model = app._model()
+    model = app._model(ModelRole.WRITING)
     client = app._client(model)
     playing = model.provider if model is not None else ""
     if client is None or model is None:
@@ -158,7 +159,7 @@ _STATE_WORDS = {
 def _model_info(app: App) -> tuple[tuple[str, str], ...]:
     """The active model's block of `info` — the caller checked a model
     is active."""
-    model = app._model()
+    model = app._model(ModelRole.WRITING)
     client = app._client(model)
     assert client is not None and model is not None
     # The registry's copy, not a snapshot: a URL or key edited in the
@@ -211,11 +212,11 @@ def _app_rows(app: App, story_id: int | None) -> tuple[tuple[str, str], ...]:
         out.append(("Story", truncate_label(label, LABEL_WIDTH)))
     out.append(("Messages", str(listing.message_count if listing is not None else 0)))
     out.append(("Words", f"{listing.word_count if listing is not None else 0:,}"))
-    # Where lore extraction reads the story: the model saved for it, or
-    # the one the model block above names.
-    model, pin = app._model(), app._extraction_pin()
-    if pin is not None:
-        out.append(("Extraction", pin.spec))
+    # Where lore extraction reads the story: a model of its own, or the
+    # one the model block above names.
+    model, extraction = app._model(ModelRole.WRITING), app._model(ModelRole.EXTRACTION)
+    if extraction is not None and extraction != model:
+        out.append(("Extraction", extraction.spec))
     elif model is not None:
         out.append(("Extraction", "the story model"))
     # No premise row: a premise is a DOCUMENT, not a fact about the

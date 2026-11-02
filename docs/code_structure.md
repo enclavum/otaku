@@ -218,7 +218,8 @@ machinery. The rest of the page reaches the server through the facade and nothin
     terminal/
       api/         the door
       commands.py  the table: every slash word, the shortcut keys, what makes a line a command
-      tty/         the medium itself: escapes, theme, typesetter, rendering, row math
+      tty/         the medium itself: escapes, theme, typesetter, rendering, row math, the
+                   microphone
       prompt/      one submission in
       chat/        the conversation as the terminal holds and draws it
       screens/     the full-screen surfaces
@@ -260,7 +261,7 @@ that knows both at work, and `run` the one that starts it.
       js/api/          the client, the page's door to `web.api`
       js/kit/          what every part is built from: elements, spellings, the status line, the
                        browser with its editors and dialogs, a paragraph typeset, a message's
-                       pictures
+                       pictures, the microphone
       js/play/         the story as the page plays it: the story it holds, the language, the frame
                        around the transcript, the transcript
       js/screens/      what opens over the page: the story browser, the dossier and its Tools tab,
@@ -268,11 +269,12 @@ that knows both at work, and `run` the one that starts it.
                        the reports, the transfers, help and support, the sign-in
       js/commands.js   what a row of the contents opens, and the doors the play goes through
       js/composer.js   one line in
+      js/dictation.js  what is said, written down into that line
 
-Imports point one way: `api` ← `kit` ← `play` ← `screens` ← {`commands`, `composer`} ← `app.js`.
-The composer stands above the screens because a line it sends goes through `commands`, whose table
-opens every screen. A module goes in the group of its role, and imports only what its row in the
-architecture test allows.
+Imports point one way: `api` ← `kit` ← `play` ← `screens` ← {`commands`, `composer`} ← `dictation` ←
+`app.js`. The composer stands above the screens because a line it sends goes through `commands`,
+whose table opens every screen; dictation stands above the composer, whose line it writes into. A
+module goes in the group of its role, and imports only what its row in the architecture test allows.
 
 ## The two frontends
 
@@ -289,14 +291,15 @@ a part's twin is found in the other frontend under the same role:
     js/commands.js    commands.py, dispatch/   what a reader's act does
     app.js            run.py                   the frontend's life
 
-Where the job is the same, the two modules are twins under one name: the story browser
-(`stories`), the dossier (`dossier`) and its Tools tab (`tools`), the model picker (`models`), help
-(`help`), the commands (`commands`). Where the medium shapes the job, each frontend names it in its
-own words and the role is the twin: the page's `prose.js` is the terminal's `typography.py`,
-`status.js` its `statusline.py`, `held.js` its `Chat`, `shell.js` its `landing.py`, and
-`transcript.js` its `stream.py` and `ledger.py` with `render.py` beside them. A part the other
-frontend has no use for stays its frontend's own: the page's sign-in, the terminal's simulation of
-where printed text leaves the cursor.
+Where the job is the same, the two modules are twins under one name: the story browser (`stories`),
+the dossier (`dossier`) and its Tools tab (`tools`), the model picker (`models`), help (`help`), the
+commands (`commands`), dictation (`dictation`: the page's `js/dictation.js`, the terminal's
+`prompt/dictation.py`) and the microphone (`microphone`, in each one's kit). Where the medium shapes
+the job, each frontend names it in its own words and the role is the twin: the page's `prose.js` is
+the terminal's `typography.py`, `status.js` its `statusline.py`, `held.js` its `Chat`, `shell.js`
+its `landing.py`, and `transcript.js` its `stream.py` and `ledger.py` with `render.py` beside them.
+A part the other frontend has no use for stays its frontend's own: the page's sign-in, the
+terminal's simulation of where printed text leaves the cursor.
 
 What corresponds is the role, never the drawing: what a part means matches across the two, and how
 it looks is each medium's own. A rule one frontend copies from the other names its twin's home in a

@@ -11,7 +11,7 @@ import tomllib
 
 import pytest
 
-from otaku.backend.api import NotFound, Refused
+from otaku.backend.api import ModelRole, NotFound, Refused
 from otaku.backend.app.models.schemas import ParameterSetting
 from otaku.backend.app.models.services import PARAMETERS, THINK_MENU
 from otaku.backend.app.paths import Paths
@@ -19,11 +19,11 @@ from otaku.terminal.api import models as api_models
 from otaku.terminal.screens import models as screen_models
 from scenarios.api.app.test_app import (
     _DOWN,
-    _extraction,
+    _asks,
     _in_use,
     _model,
     _params,
-    _pinned,
+    _saved,
     _window,
 )
 from scenarios.support import server as scripted
@@ -781,11 +781,31 @@ class TestManagedPicker:
         try:
             with contextlib.suppress(EOFError):
                 run_screen(_DOWN + "x" + ESC, lambda: self.settled_pick(app), patience=_SETTLING)
-            assert _extraction(app) == "ollama/beta"
+            assert _asks(app, ModelRole.EXTRACTION) == "ollama/beta"
             with contextlib.suppress(EOFError):
                 run_screen(_DOWN + "x" + ESC, lambda: self.settled_pick(app), patience=_SETTLING)
-            assert _pinned(app) == ""
+            assert _saved(app, ModelRole.EXTRACTION) == ""
             assert _model(app) == "alpha"  # the story's model never moved
+        finally:
+            app.close()
+            server.close()
+
+    def test_d_lists_the_dictation_models_where_enter_saves_one_and_again_unsets_it(
+        self, tmp_path
+    ) -> None:
+        # Only beta takes audio, so the dictation view lists it alone and
+        # Enter lands on it; the picker stays open, the story's model unmoved.
+        app, server = self.launch_managed(tmp_path)
+        server.capabilities["alpha"] = ["completion"]
+        server.capabilities["beta"] = ["completion", "audio"]
+        try:
+            with contextlib.suppress(EOFError):
+                run_screen("d" + ENTER + ESC, lambda: self.settled_pick(app), patience=_SETTLING)
+            assert _asks(app, ModelRole.DICTATION) == "ollama/beta"
+            with contextlib.suppress(EOFError):
+                run_screen("d" + ENTER + ESC, lambda: self.settled_pick(app), patience=_SETTLING)
+            assert _saved(app, ModelRole.DICTATION) == ""
+            assert _model(app) == "alpha"
         finally:
             app.close()
             server.close()

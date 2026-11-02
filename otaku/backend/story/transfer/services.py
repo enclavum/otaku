@@ -15,6 +15,7 @@ from otaku.backend.formats import EXPORT_FORMAT_VERSION, EXPORT_MARKER, exports,
 from otaku.backend.formats.plaintext import parse_plaintext
 from otaku.backend.formats.sillytavern import parse_sillytavern
 from otaku.backend.story.lore import services as lore
+from otaku.settings.state import ModelRole
 
 # What an export is: one Markdown document. A frontend that lets the user
 # name the file supplies this where the name carries no extension of its
@@ -104,7 +105,7 @@ def export_story(app: App, story_id: int) -> tuple[str, str]:
     text = exports.render_story(
         exports.read_story(app._store, story_id),
         otaku_version=__version__,
-        model=model.spec if (model := app._model()) is not None else "",
+        model=model.spec if (model := app._model(ModelRole.WRITING)) is not None else "",
         exported=datetime.now().astimezone().strftime("%Y-%m-%d %H:%M"),
     )
     stem = re.sub(r"[^\w\s-]", "", story.title.lower())

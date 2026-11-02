@@ -123,9 +123,34 @@ export function primeHistory(lines) {
   at = null;
 }
 
+/** What was said, added after what was typed — in the box, or at the
+    canvas's own end where the story is typed in — set off from it by a
+    space, and the caret after it. */
+export function insertDictated(text) {
+  const tail = tailHost();
+  if (tail) {
+    const before = tail.before();
+    tail.replace(0, before && !/\s$/.test(before) ? ` ${text}` : text);
+    return;
+  }
+  const typed = composer.value.replace(/\s*$/, "");
+  setValue(composer, typed ? `${typed} ${text}` : text);
+  focusComposer();
+  composer.setSelectionRange(composer.value.length, composer.value.length);
+}
+
+/* While what was said is still being written down, nothing is sent: the
+   line would leave without it (`dictation.js`). */
+let sendHeld = false;
+
+export function holdSend(held) {
+  sendHeld = held;
+}
+
 /** One submitted line, wherever it came from — with the pictures staged
     beside it, which is what lets a line be nothing but pictures. */
 export async function submit(line) {
+  if (sendHeld) return;
   const said = line.trim();
   // A line typed during a reply is refused the way every other door
   // refuses it — silence here trains the reader to press Enter twice.

@@ -1,9 +1,19 @@
 """The model half's pure facts: what a request gets for its context, the
-capability defaults, and what the base half answers before an engine."""
+capability defaults, what the base half answers before an engine, and
+the kinds an entry is filed under — the listing's word, completion where
+it says none, dictation besides for a model that takes audio where the
+engine's dictation runs one — kept across a read that states none."""
 
 import pytest
 
-from otaku.providers import ModelCapabilities, ModelInfo, ModelState, ProviderConfig, ProviderError
+from otaku.providers import (
+    ModelCapabilities,
+    ModelInfo,
+    ModelKind,
+    ModelState,
+    ProviderConfig,
+    ProviderError,
+)
 from otaku.providers.http import Http
 from otaku.providers.openai.auth import OpenAIAuth
 from otaku.providers.openai.models import OpenAIModels
@@ -11,8 +21,18 @@ from otaku.providers.openai.models import OpenAIModels
 CONFIG = ProviderConfig(name="engine", url="http://127.0.0.1:9/v1")
 
 
-def _half() -> OpenAIModels:
-    return OpenAIModels(CONFIG, OpenAIAuth(CONFIG, ""), Http("engine", {}))
+def _half(models_class: type[OpenAIModels] = OpenAIModels) -> OpenAIModels:
+    return models_class(CONFIG, OpenAIAuth(CONFIG, ""), Http("engine", {}))
+
+
+class _Hearing(OpenAIModels):
+    """An engine whose dictation runs a completion model that takes audio."""
+
+    dictation_models_separated = False
+
+
+BOTH = frozenset({ModelKind.COMPLETION, ModelKind.DICTATION})
+HEARS = ModelCapabilities(audio=True)
 
 
 class TestContextWindow:
@@ -74,4 +94,45 @@ class TestTheBaseHalf:
 
     def test_a_listing_is_public_by_default(self) -> None:
         assert OpenAIModels.listing_keyed is False
-        assert OpenAIModels.listing_query == ""
+        assert OpenAIModels.completion_query == ""
+
+    def test_lists_no_dictation_models_apart_and_keeps_them_apart(self) -> None:
+        assert OpenAIModels.dictation_query == ""
+        assert OpenAIModels.dictation_models_separated is True
+
+
+class TestKinds:
+    def test_a_row_states_no_kind_until_told(self) -> None:
+        assert ModelInfo("m").kinds == frozenset()
+
+    def test_a_row_that_states_none_is_a_completion_model(self) -> None:
+        assert _half()._settle_kinds(ModelInfo("m")).kinds == {ModelKind.COMPLETION}
+
+    def test_the_listings_word_stands(self) -> None:
+        stated = ModelInfo("m", kinds=frozenset({ModelKind.DICTATION}))
+        assert _half()._settle_kinds(stated).kinds == {ModelKind.DICTATION}
+
+    def test_a_model_that_takes_audio_dictates_where_the_engines_dictation_runs_one(
+        self,
+    ) -> None:
+        assert _half(_Hearing)._settle_kinds(ModelInfo("m", capabilities=HEARS)).kinds == BOTH
+
+    def test_where_dictation_models_stand_apart_taking_audio_is_not_enough(self) -> None:
+        settled = _half()._settle_kinds(ModelInfo("m", capabilities=HEARS))
+        assert settled.kinds == {ModelKind.COMPLETION}
+
+    @pytest.mark.parametrize("audio", [False, None])
+    def test_a_model_that_does_not_or_may_not_take_audio_does_not_dictate(
+        self, audio: bool | None
+    ) -> None:
+        row = ModelInfo("m", capabilities=ModelCapabilities(audio=audio))
+        assert _half(_Hearing)._settle_kinds(row).kinds == {ModelKind.COMPLETION}
+
+    def test_a_read_that_states_no_kind_keeps_the_listings(self) -> None:
+        cached = ModelInfo("m", kinds=BOTH)
+        assert _half()._merge(cached, ModelInfo("m")).kinds == BOTH
+
+    def test_a_read_that_states_kinds_replaces_them(self) -> None:
+        cached = ModelInfo("m", kinds=BOTH)
+        fresh = ModelInfo("m", kinds=frozenset({ModelKind.COMPLETION}))
+        assert _half()._merge(cached, fresh).kinds == {ModelKind.COMPLETION}

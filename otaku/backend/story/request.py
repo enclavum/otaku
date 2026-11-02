@@ -17,6 +17,7 @@ from otaku.context.cards import card_injections
 from otaku.context.injections import Injection
 from otaku.context.prompt import AssembledPrompt
 from otaku.providers import PicturesRide
+from otaku.settings.state import ModelRole
 from otaku.store.schema import CompletionType, Message
 
 
@@ -71,7 +72,7 @@ def build_job(app: App, story_id: int, *, force: bool = False) -> Job:
     config, prompts = app._config(), app._prompts()
     settings = settings_of(app, story_id)
     chain = app._store.stories.get_messages(story_id)
-    extraction, model = app._extraction_model(), app._model()
+    extraction, model = app._model(ModelRole.EXTRACTION), app._model(ModelRole.WRITING)
     return Job(
         extraction_provider=extraction.provider if extraction is not None else "",
         extraction_model=extraction.name if extraction is not None else "",

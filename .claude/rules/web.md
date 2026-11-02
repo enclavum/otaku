@@ -19,8 +19,11 @@ ONE THREAD owns the app, and it is the backend's (`backend.app.thread`):
 a handler runs each route as one unit on it (`App.run`) or calls a
 `Hooks` callable (`web.server.base`), each safe from any thread, and a
 reply's frames are written on the handler's own thread as the events are
-handed across. The METHOD is the lane (`web.server`): a route is a GET
-exactly when its call only reads, since a read is answered between a
+handed across. A row marked `unqueued` (`web.api._request`) is the one
+route run on the handler's own thread: its verb is `any_thread` and slow
+on purpose — a recording being written down — so nothing waits behind
+it. The METHOD is the lane (`web.server`): a route is a GET exactly when
+its call only reads, since a read is answered between a
 reply's frames and while the model is silent, and the page sends every
 read as a GET (`js/api/_http.js`) — a read filed as a POST would queue
 behind a reply and leave every screen dead while the model talks.

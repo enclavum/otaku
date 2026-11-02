@@ -70,6 +70,7 @@
   --otk-danger:      oklch(0.5 0.14 30);      /* delete, stop, and failures  */
   --otk-danger-tint:  oklch(0.5 0.14 30 / 0.07);   /* a foot that holds an error   */
   --otk-danger-flash: oklch(0.5 0.14 30 / 0.24);   /* the one flash as it arrives  */
+  --otk-transcribe:   oklch(0.75 0.007 150);  /* the bars while speech is being transcribed */
   --otk-chat-story:  var(--otk-ok);           /* the story's rule, chat layout */
   --otk-chat-you:    var(--otk-accent);       /* the reader's rule, chat layout */
 
@@ -189,6 +190,7 @@
   --otk-accent:      oklch(0.68 0.13 55);
   --otk-accent-ink:  oklch(0.74 0.12 55);
   --otk-accent-tint: oklch(0.68 0.13 55 / 0.14);
+  --otk-transcribe:   oklch(0.48 0.008 150);
   --otk-inject-bg:    oklch(0.31 0.03 85);
   --otk-inject-line:  oklch(0.52 0.07 85);
   --otk-inject-ink:   oklch(0.82 0.09 80);
@@ -228,6 +230,7 @@
     --otk-accent:      oklch(0.68 0.13 55);
     --otk-accent-ink:  oklch(0.74 0.12 55);
     --otk-accent-tint: oklch(0.68 0.13 55 / 0.14);
+    --otk-transcribe:   oklch(0.48 0.008 150);
     --otk-inject-bg:    oklch(0.31 0.03 85);
     --otk-inject-line:  oklch(0.52 0.07 85);
     --otk-inject-ink:   oklch(0.82 0.09 80);
@@ -440,7 +443,7 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 }
 .otk-btn--stop { font-weight: 600; color: var(--otk-paper); background: var(--otk-danger); border-color: var(--otk-danger); }
 .otk-btn__square { width: 9px; height: 9px; background: currentColor; flex: none; }
-.otk-btn[aria-disabled="true"], .otk-btn:disabled { color: var(--otk-faint); border-color: var(--otk-line-soft); background: var(--otk-paper); pointer-events: none; }
+.otk-btn[aria-disabled="true"], .otk-btn:disabled, .otk-btn[inert] { color: var(--otk-faint); border-color: var(--otk-line-soft); background: var(--otk-paper); pointer-events: none; }
 .otk-btn__key {                         /* the typed keyboard hint inside a button */
   font-family: var(--otk-font-mono); font-size: var(--otk-size-foot);
   letter-spacing: 0.1em; text-transform: uppercase; color: var(--otk-faint);
@@ -776,8 +779,8 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 }
 /* the box stands, disabled, its placeholder saying where the turn is typed
    (`shell.showFacts`) — looking as any placeholder does */
-.otk-composer__input textarea:disabled { opacity: 1; cursor: default; }
-.otk-composer__input textarea:disabled::placeholder { color: var(--otk-faint); opacity: 1; }
+.otk-composer__input textarea:disabled, .otk-composer__input textarea[inert] { opacity: 1; cursor: default; }
+.otk-composer__input textarea:disabled::placeholder, .otk-composer__input textarea[inert]::placeholder { color: var(--otk-faint); opacity: 1; }
 /* holding a refusal of the line typed on the canvas, it reads as the error
    line above the box does (`status.complain`) */
 .otk-composer__input textarea:disabled[data-refused]::placeholder { color: var(--otk-danger); }
@@ -1123,8 +1126,58 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 .otk-revert:not([hidden]) { flex: none; align-self: stretch; display: inline-flex; align-items: center; justify-content: center; width: 36px; padding: 0; color: var(--otk-ink); cursor: pointer; }
 .otk-attach-btn:hover, .otk-attach-btn:focus-visible,
 .otk-revert:hover, .otk-revert:focus-visible { color: var(--otk-accent); }
+/* out of reach while dictation listens (`dictation.js`): the faint ink a
+   disabled verb reads in */
+.otk-attach-btn[inert], .otk-revert[inert] { color: var(--otk-faint); }
 /* the two glyphs sit unevenly in their boxes: nudged onto one line */
 .otk-attach-btn svg { transform: translateY(1px); }
+/* The microphone: the clip's twin among the verbs, shown while a model is
+   saved for dictation; a click starts a recording and another stops it.
+   While one runs it takes the danger ink and its capsule fills in, so on
+   and off differ by shape, not only colour. */
+.otk-mic-btn:not([hidden]) { flex: none; align-self: stretch; display: inline-flex; align-items: center; justify-content: center; width: 36px; padding: 0; color: var(--otk-ink); cursor: pointer; }
+.otk-mic-btn:hover, .otk-mic-btn:focus-visible { color: var(--otk-accent); }
+.otk-mic-btn.is-recording { color: var(--otk-danger); }
+.otk-mic-btn.is-recording .otk-mic-btn__capsule { fill: currentColor; }
+/* tight against the glyph before it, as Revert stands against the clip */
+.otk-attach-btn:not([hidden]) + .otk-mic-btn,
+.otk-revert:not([hidden]) + .otk-attach-btn[hidden] + .otk-mic-btn { margin-left: -13px; }
+/* DICTATION. The composer carries data-dictating="true" while listening: a
+   small level and the elapsed time at the end of the writing line, which
+   keeps what was typed. The level is the voice's spectrum: nine bars, a
+   band of pitch each, low to high, each scaled about its middle by how loud
+   its band is (set by the script) up to its own height here, and all
+   resting alike at two pixels in silence, a flat row. TRANSCRIBING, data-dictating="transcribing", after
+   listening stops and until the model returns text: the same nine bars in
+   one quiet grey, flat, with a single peak travelling across them left to
+   right, the recording's length beside them. */
+@keyframes otk-scan { 0%, 24%, 100% { transform: scaleY(.12); } 12% { transform: scaleY(1); } }
+.otk-dictation { display: none; flex: none; align-self: center; align-items: center; gap: 12px; min-height: 30px; }
+.otk-composer[data-dictating="true"] .otk-dictation,
+.otk-composer[data-dictating="transcribing"] .otk-dictation { display: flex; }
+.otk-dictation__level { flex: none; width: 42px; height: 18px; display: flex; align-items: center; justify-content: space-between; }
+.otk-dictation__level > i { display: block; width: 2px; background: var(--otk-accent); transform-origin: center; transform: scaleY(.18); }
+.otk-dictation__level > i:nth-child(1) { height: 8px; }
+.otk-dictation__level > i:nth-child(2) { height: 13px; }
+.otk-dictation__level > i:nth-child(3) { height: 16px; }
+.otk-dictation__level > i:nth-child(4) { height: 18px; }
+.otk-dictation__level > i:nth-child(5) { height: 15px; }
+.otk-dictation__level > i:nth-child(6) { height: 17px; }
+.otk-dictation__level > i:nth-child(7) { height: 14px; }
+.otk-dictation__level > i:nth-child(8) { height: 10px; }
+.otk-dictation__level > i:nth-child(9) { height: 7px; }
+.otk-composer[data-dictating="transcribing"] .otk-dictation__level > i { height: 18px; background: var(--otk-transcribe); animation: otk-scan 1.4s ease-in-out infinite backwards; }
+.otk-composer[data-dictating="transcribing"] .otk-dictation__level > i:nth-child(1) { animation-delay: 0.00s; }
+.otk-composer[data-dictating="transcribing"] .otk-dictation__level > i:nth-child(2) { animation-delay: 0.11s; }
+.otk-composer[data-dictating="transcribing"] .otk-dictation__level > i:nth-child(3) { animation-delay: 0.22s; }
+.otk-composer[data-dictating="transcribing"] .otk-dictation__level > i:nth-child(4) { animation-delay: 0.33s; }
+.otk-composer[data-dictating="transcribing"] .otk-dictation__level > i:nth-child(5) { animation-delay: 0.44s; }
+.otk-composer[data-dictating="transcribing"] .otk-dictation__level > i:nth-child(6) { animation-delay: 0.55s; }
+.otk-composer[data-dictating="transcribing"] .otk-dictation__level > i:nth-child(7) { animation-delay: 0.66s; }
+.otk-composer[data-dictating="transcribing"] .otk-dictation__level > i:nth-child(8) { animation-delay: 0.77s; }
+.otk-composer[data-dictating="transcribing"] .otk-dictation__level > i:nth-child(9) { animation-delay: 0.88s; }
+.otk-dictation__time { flex: none; width: 4ch; text-align: right; font-family: var(--otk-font-mono); font-size: var(--otk-size-mono-sm); color: var(--otk-muted); font-variant-numeric: tabular-nums; }
+
 .otk-composer__verbs { flex: 0 1 auto; margin-left: auto; display: flex; align-items: center; gap: 7px; }
 /* Revert: the first of the verbs, shown after a Regen or an Undo while there
    is something to take back. It waits, then fades, and the app sets [hidden]
@@ -1362,6 +1415,11 @@ dialog::backdrop { background: var(--otk-scrim); backdrop-filter: blur(var(--otk
 .otk-row__why { font-size: var(--otk-size-tag); letter-spacing: var(--otk-track-foot); text-transform: uppercase; color: var(--otk-faint); }
 .otk-row__num { flex: none; text-align: right; font-family: var(--otk-font-mono); font-size: var(--otk-size-mono-sm); line-height: var(--otk-leading-row); color: var(--otk-muted); font-variant-numeric: tabular-nums; }
 .otk-row--mono .otk-row__title { font-family: var(--otk-font-mono); font-size: var(--otk-size-mono); }
+/* A model row's lamp and tags centred on the name's line, not hung from its
+   baseline, where a dot and a small tag sit below the letters' middle: the
+   lamp as tall as the line, the tag set down by half of what it leaves. */
+.otk-row--mono > .otk-row__lamp { align-self: flex-start; height: calc(var(--otk-size-mono) * var(--otk-leading-row)); }
+.otk-row--mono > .otk-tag { align-self: flex-start; line-height: 1; margin-top: calc((var(--otk-size-mono) * var(--otk-leading-row) - var(--otk-size-tag) - 2px - 2 * var(--otk-hair)) / 2); }
 .otk-row[aria-selected="true"] .otk-row__title { color: var(--otk-ink); }
 /* loaded is bold, unloaded is dim — only where loading is a thing that happens */
 .otk-row.is-loaded .otk-row__title { font-weight: 600; color: var(--otk-ink); }

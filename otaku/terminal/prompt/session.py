@@ -34,6 +34,7 @@ from otaku.terminal.api.models import ModelSettings
 from otaku.terminal.prompt.answers import AnswerMenu
 from otaku.terminal.prompt.caret import Caret, caret_painter
 from otaku.terminal.prompt.completion import SlashCompleter
+from otaku.terminal.prompt.dictation import Dictation, ListeningHint
 from otaku.terminal.prompt.keys import make_bindings
 from otaku.terminal.prompt.lines import Carry, LineAssembler
 from otaku.terminal.tty import HIDE_CURSOR
@@ -93,10 +94,11 @@ def build_prompt(
     can_attach: Callable[[], bool],
     shortcuts: Mapping[str, tuple[str, str]],
     status_line: StatusLine,
-) -> tuple[PromptSession[str], AnswerMenu]:
-    """The assembled prompt session and the answer menu it draws above
-    its line: history, menu, style, the status row as its toolbar
-    (`status_line`, which owns how it reads), and the shortcut
+) -> tuple[PromptSession[str], AnswerMenu, Dictation]:
+    """The assembled prompt session, the answer menu it draws above its
+    line, and its dictation, whose placeholder a prompt passes on
+    (`Dictation.placeholder`): history, menu, style, the status row as
+    its toolbar (`status_line`, which owns how it reads), and the shortcut
     keybindings — the story played read off `story()`, and
     whether a picture may ride the line off `can_attach()`, both the
     caller's to know;
@@ -128,18 +130,22 @@ def build_prompt(
         lambda: completer.partial(get_app().current_buffer.document.text_before_cursor) is not None
     )
     answers = AnswerMenu(lambda: _answers(api, story()))
+    dictation = Dictation(api)
     prompt_session: PromptSession[str] = PromptSession(
         history=_AppHistory(api),
         completer=completer,
         lexer=_CommandLexer(),
-        key_bindings=make_bindings(carry, menu_line, shortcuts, answers, api.history.list),
+        key_bindings=make_bindings(
+            carry, menu_line, shortcuts, answers, api.history.list, dictation
+        ),
         # The menu's rows are kept free under a command line being typed,
         # never under one the history recalled, which opens no menu.
         complete_while_typing=menu_line & ~Condition(lambda: carry.recalled),
         enable_history_search=False,
         style=_prompt_style(),
         cursor=Caret(carry),
-        bottom_toolbar=status_line.fragments,
+        bottom_toolbar=lambda: status_line.fragments(dictation.note),
+        input_processors=[ListeningHint(dictation)],
     )
 
     def typed(_buffer: Buffer) -> None:
@@ -179,7 +185,7 @@ def build_prompt(
         )
     # Pre-select the first row whenever the menu (re)populates.
     prompt_session.default_buffer.on_completions_changed += lambda buf: _preselect_first(buf)
-    return prompt_session, answers
+    return prompt_session, answers, dictation
 
 
 def _back_to_start(renderer: Renderer) -> None:

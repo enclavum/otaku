@@ -45,6 +45,7 @@ const ROUTES = {
   "GET /api/app": () => store.app(),
   "PATCH /api/app": (p, q, b) => changed(store.updateApp(appFields(b))),
   "GET /api/app/machine": () => store.machine(),
+  "POST /api/app/dictation": () => store.dictate(),
   "GET /api/settings": () => store.settings(),
   "PATCH /api/settings": (p, q, b) => changed(store.updateSettings(settingsFields(b))),
   "GET /api/language": () => store.language(),
@@ -326,8 +327,18 @@ function appFields(body) {
     return { provider: value.provider, name: value.name };
   };
   const fields = {};
-  if ("model" in body) fields.model = ref(body.model);
-  if ("extraction_model" in body) fields.extraction_model = body.extraction_model === null ? null : ref(body.extraction_model);
+  if ("models" in body) {
+    if (!body.models || typeof body.models !== "object") {
+      throw new Fault(400, "TypeError: models is not an object of roles");
+    }
+    fields.models = {};
+    for (const [role, value] of Object.entries(body.models)) {
+      if (role !== "writing" && role !== "extraction" && role !== "dictation") {
+        throw new Fault(400, `ValueError: '${role}' is not a valid ModelRole`);
+      }
+      fields.models[role] = value === null ? null : ref(value);
+    }
+  }
   return fields;
 }
 

@@ -56,8 +56,8 @@ from otaku.backend.story.prompts.resources import (
 from otaku.backend.story.stories.resources import StoriesResource
 from otaku.backend.story.transfer.resources import ImportsResource
 from otaku.context.prompt import JoinType
-from otaku.providers import KeySource, Locality, ModelState
-from otaku.settings.state import ModelRef
+from otaku.providers import KeySource, Locality, ModelKind, ModelState
+from otaku.settings.state import ModelRef, ModelRole
 from otaku.store.schema import (
     Attachment,
     CompletionType,
@@ -111,7 +111,9 @@ __all__ = [
     "KeySource",
     "Layout",
     "Locality",
+    "ModelKind",
     "ModelRef",
+    "ModelRole",
     "ModelState",
     "NotFound",
     "Refused",

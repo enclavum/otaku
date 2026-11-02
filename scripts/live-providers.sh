@@ -15,7 +15,10 @@
 # Q4_0 (~4.6 GB) with its projector (~560 MB) — is downloaded on first
 # use into $OTAKU_LIVE_MODELS_DIR (default ~/models/otaku-live) and
 # shared by llama-server and koboldcpp: the thinking smokes need a
-# model with a switch, the image smoke one that takes a photo.
+# model with a switch, the image smoke one that takes a photo. The
+# dictation smokes take one path each: llama-server writes down through
+# that model, whose projector hears; koboldcpp through Whisper —
+# whisper.cpp's base.en, q5_1 (~60 MB), downloaded beside it.
 # Ctrl+C stops everything this script started.
 
 set -euo pipefail
@@ -23,16 +26,23 @@ set -euo pipefail
 MODELS_DIR="${OTAKU_LIVE_MODELS_DIR:-$HOME/models/otaku-live}"
 GGUF="$MODELS_DIR/gemma-4-E4B-it-Q4_0.gguf"
 MMPROJ="$MODELS_DIR/mmproj-gemma-4-E4B-it-Q8_0.gguf"
+WHISPER="$MODELS_DIR/ggml-base.en-q5_1.bin"
 REPO_URL="https://huggingface.co/ggml-org/gemma-4-E4B-it-GGUF/resolve/main"
+WHISPER_URL="https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
+
+# fetch FILE URL: downloaded into place on first use
+fetch() {
+    if [ ! -f "$1" ]; then
+        echo "downloading $(basename "$1") into $MODELS_DIR ..."
+        curl -L --fail -o "$1.part" "$2"
+        mv "$1.part" "$1"
+    fi
+}
 
 mkdir -p "$MODELS_DIR"
-for file in "$GGUF" "$MMPROJ"; do
-    if [ ! -f "$file" ]; then
-        echo "downloading $(basename "$file") into $MODELS_DIR ..."
-        curl -L --fail -o "$file.part" "$REPO_URL/$(basename "$file")"
-        mv "$file.part" "$file"
-    fi
-done
+fetch "$GGUF" "$REPO_URL/$(basename "$GGUF")"
+fetch "$MMPROJ" "$REPO_URL/$(basename "$MMPROJ")"
+fetch "$WHISPER" "$WHISPER_URL/$(basename "$WHISPER")"
 
 pids=()
 started_lms=""
@@ -61,8 +71,8 @@ llama-server -m "$GGUF" --mmproj "$MMPROJ" -c 8192 --jinja --host 127.0.0.1 --po
 pids+=($!)
 
 echo "koboldcpp on :5001 (log: /tmp/otaku-live-koboldcpp.log)"
-koboldcpp --model "$GGUF" --mmproj "$MMPROJ" --host 127.0.0.1 --port 5001 --contextsize 8192 \
-    --quiet >/tmp/otaku-live-koboldcpp.log 2>&1 &
+koboldcpp --model "$GGUF" --mmproj "$MMPROJ" --whispermodel "$WHISPER" --host 127.0.0.1 \
+    --port 5001 --contextsize 8192 --quiet >/tmp/otaku-live-koboldcpp.log 2>&1 &
 pids+=($!)
 
 if command -v lms >/dev/null 2>&1; then

@@ -57,6 +57,7 @@ stylesheet that reaches past the contract accepts the breakage itself.
 | `--otk-danger` | delete, stop, refusals and failures — nothing else |
 | `--otk-danger-tint` | the ground of a window's foot holding an error |
 | `--otk-danger-flash` | the one flash of that ground as the error arrives |
+| `--otk-transcribe` | the dictation level's bars while speech is being transcribed |
 | `--otk-chat-story` | the rule on the story's side in the chat layout |
 | `--otk-chat-you` | the rule on the reader's side in the chat layout |
 
@@ -274,9 +275,11 @@ in classes, so a stylesheet can name it the same way the scripts do.
 | `aria-checked="true"` / `"false"` | `.otk-choice`, `.otk-switch`, `.otk-toggle`, `.otk-tick` | the one in force; a switch on or off; a card picked for a story |
 | `aria-pressed="true"` | `.otk-mode`, `.otk-ruler__cell`, `.otk-seg__btn` | the layout in force; the depth a tool's text goes in at; how All characters shows its cards |
 | `aria-disabled="true"` | `.otk-btn`, `.otk-mode`, `.otk-lightbox__arrow` | out of reach for now |
+| `inert` | the composer's box, its verbs but the microphone, `.otk-attach`, `.otk-prefixes`, `[data-prefixes]` | out of reach while dictation listens; the box and the verbs read as disabled |
 | `aria-current="true"` | `.otk-spine__dot`, `.otk-pics__thumb` | the lit one of the spine's dots; the picture of a card shown large |
 | `hidden` | any pane or menu | not mounted |
 | `hidden` | `.otk-revert` | Revert is not offered: shown after an Undo or a Regen while there is something to take back, never while a reply is arriving; once shown it waits `--otk-revert-hold`, fades over `--otk-revert-fade`, and the app sets `hidden` on `animationend` — hover or focus holds it |
+| `hidden` | `.otk-mic-btn` | the microphone is not offered: no model is saved for dictation |
 | `data-discarded="shown"` / `"hidden"` | `.otk-col--messages` | the list also shows the discarded turns — undone, or replaced by a regen — as `.otk-row--discarded` rows, faint and unnumbered, after the turn they leave from |
 | `data-open="true"` | `.otk-call` | the notes, a tool turn or a reply's thinking shows its text under its label; its toggle (`.otk-call__toggle`) reads "hide" and carries `aria-expanded="true"` |
 | `data-popup="/model"` | a `<dialog>` | which command opens it |
@@ -285,6 +288,8 @@ in classes, so a stylesheet can name it the same way the scripts do.
 | `data-transcript="canvas"` / `"manuscript"` / `"chat"` | `.otk-transcript` | which of the three layouts the same turns are read in |
 | `data-completion="chat"` / `"text"` | `.otk-app` | the wire the next request goes over; over the text wire the flow shows no picture tiles |
 | `data-layout="canvas"` / `"manuscript"` / `"chat"` | `.otk-app` | the look the open story is drawn in; on the canvas the story is typed in at its end, the composer standing below |
+| `data-dictating="true"` | `.otk-composer` | listening: `.otk-dictation` — a level of nine bars, a band of the voice's pitch each, low to high, scaled about its middle by how loud its band is, and the elapsed time — stands at the end of the writing line, which keeps what was typed; the microphone (`.otk-mic-btn`) is `.is-recording`, and the rest of the composer `inert` |
+| `data-dictating="transcribing"` | `.otk-composer` | after listening stops, until the text arrives: in the same place the level's nine bars turn `--otk-transcribe` grey, flat, with a single peak travelling across them left to right (`@keyframes otk-scan`), the recording's length beside them; then the attribute goes and the text is added after what was typed |
 | `data-playing` | `.otk-app` | a reply is arriving; the layout glyphs are inert meanwhile |
 | `data-open="true"` | `.otk-rail` | the contents, on a narrow window |
 | `data-view="list"` / `"small"` / `"mid"` / `"large"` | `.otk-chars` | All characters as rows, or as pictures at one of three tile sizes |
@@ -299,6 +304,7 @@ in classes, so a stylesheet can name it the same way the scripts do.
 | `data-pinned="true"` / `"false"` | `.otk-row__id` in the messages list, `.otk-detail__pin` in its reader | the message is pinned: its number shows as a filled pin, as does the reader's pin; absent on a row that may not be pinned |
 | `.is-offline` | `.otk-app` | the server stopped answering |
 | `.is-loaded` / `.is-dim` | `.otk-row` | a model resident in memory, or not |
+| `.is-recording` | `.otk-mic-btn` | listening, until the next click, Enter or Esc; its capsule (`.otk-mic-btn__capsule`) filled in |
 | `.is-dragover` / `.is-filled` | `.otk-dropzone` | a file over the drop zone, and one dropped |
 | `.is-dragover` | `.otk-tile`, `.otk-charrow`, `.otk-pics` | a story character over a card or over new card, a card file over new card; pictures over a card's |
 | `.is-dragging` | `.otk-pics__thumb`, `.otk-tile`, `.otk-charrow` | a card's picture, or a card, being moved to another place |

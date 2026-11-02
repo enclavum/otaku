@@ -1,7 +1,7 @@
 """The prompt's keys: the shortcut keys that submit a command, the
 canvas's paragraph and history walk, the slash menu's Enter, Tab, Esc
-and Backspace, ↑/↓ through the menu or the history, and the answers'
-keys while their rows are shown (`make_bindings`)."""
+and Backspace, ↑/↓ through the menu or the history, the answers' keys
+while their rows are shown, and dictation's (`make_bindings`)."""
 
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
@@ -15,6 +15,7 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
 
 from otaku.terminal.prompt.answers import AnswerMenu
+from otaku.terminal.prompt.dictation import Dictation
 from otaku.terminal.prompt.lines import Carry
 
 # PROTOTYPE: Ctrl+Enter told from Enter where the terminal reports it —
@@ -38,6 +39,7 @@ def make_bindings(
     shortcuts: Mapping[str, tuple[str, str]],
     answers: AnswerMenu,
     history: Callable[[], Sequence[str]],
+    dictation: Dictation,
 ) -> KeyBindings:
     kb = KeyBindings()
     # PROTOTYPE: in the canvas Enter sends, as everywhere, and Ctrl+Enter
@@ -256,6 +258,26 @@ def make_bindings(
     def _answer_abort(event: Any) -> None:
         event.app.erase_when_done = True
         event.app.exit(exception=KeyboardInterrupt(), style="class:aborting")
+
+    # Dictation: Ctrl+G starts a recording — and nothing more while one
+    # runs or its text is on its way — Enter and Esc stop it; while the
+    # text is on its way Enter waits, so the line never leaves without
+    # it. Last, so each wins its key.
+    recording = Condition(lambda: dictation.is_recording)
+    writing = Condition(lambda: dictation.is_busy and not dictation.is_recording)
+
+    @kb.add("c-g")
+    def _dictate(event: Any) -> None:
+        dictation.start(event.app)
+
+    @kb.add("enter", filter=recording)
+    @kb.add("escape", filter=recording, eager=True)
+    def _stop_dictating(event: Any) -> None:
+        dictation.stop(event.app)
+
+    @kb.add("enter", filter=writing)
+    def _wait_for_dictation(event: Any) -> None:
+        pass
 
     return kb
 

@@ -28,7 +28,7 @@ from typing import Any
 import pyte
 
 from otaku.backend import launch as backend_launch
-from otaku.backend.api import Api, Layout, ModelRef
+from otaku.backend.api import Api, Layout, ModelRef, ModelRole
 from scenarios.support.harness import set_config_provider
 from scenarios.support.server import ModelServer
 from scenarios.support.terminal import Terminal
@@ -226,7 +226,7 @@ def story(
     app = backend_launch.open_app(root)
     try:
         api = Api(app)
-        api.app.update(model=ModelRef("llamacpp", TM.CHAT_MODEL))
+        api.app.update(models={ModelRole.WRITING: ModelRef("llamacpp", TM.CHAT_MODEL)})
         story_id = api.stories.create().value.id
         api.stories.settings.update(story_id, "layout", layout=layout)
         api.settings.update(last_story=story_id)

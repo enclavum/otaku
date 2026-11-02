@@ -4,9 +4,10 @@ One secret per module: `http` is the one transport and the only home
 of httpx, `errors` what can go wrong, named, `openai/` the protocol
 as a client — `models` the half about models (the listing, the one
 model, its facts and state, load and unload), `completion` the half
-that is the wire (the streams, the counts), and `client` the identity
-every engine subclasses (the section name, the key and its account,
-the two halves it owns) — `registry` the lookup, the fan-out and the
+that is the wire (the streams, the counts), `dictation` the half that
+writes a recording down, and `client` the identity every engine
+subclasses (the section name, the key and its account, the three
+halves it owns) — `registry` the lookup, the fan-out and the
 probe, `smoothing` the jitter buffer, and `clients/` one engine per
 module.
 
@@ -37,10 +38,12 @@ from otaku.providers.openai.completion import (
     Stats,
     Text,
 )
+from otaku.providers.openai.dictation import OpenAIDictation
 from otaku.providers.openai.models import (
     Locality,
     ModelCapabilities,
     ModelInfo,
+    ModelKind,
     ModelState,
     OpenAIModels,
 )
@@ -67,10 +70,12 @@ __all__ = [
     "Locality",
     "ModelCapabilities",
     "ModelInfo",
+    "ModelKind",
     "ModelState",
     "OpenAIAuth",
     "OpenAIClient",
     "OpenAICompletion",
+    "OpenAIDictation",
     "OpenAIModels",
     "PicturesRide",
     "Probe",

@@ -226,21 +226,36 @@ class TestReading:
         # the bare model and the provider beside it — the banner's own split
         assert (model["provider"], model["name"]) == ("generic", "test-model")
 
-    def test_the_extraction_model_is_pinned_named_and_unpinned(self, page: Page) -> None:
-        # The app names the model extraction asks — the one in use until
-        # one is pinned — and whether it is pinned, which the picker marks.
-        def extraction() -> tuple[str, bool]:
-            found = page.get("/api/app")["extraction_model"]
-            return f"{found['provider']}/{found['name']}", found["pinned"]
+    def test_each_role_names_its_model_and_a_patch_sets_or_unsets_it(self, page: Page) -> None:
+        # The app names the model each role asks — extraction the one in
+        # use until another is set, dictation none — and a patch keyed by
+        # role sets one, its null unsetting it.
+        def models() -> dict[str, str]:
+            found = page.get("/api/app")["models"]
+            return {role: f"{model['provider']}/{model['name']}" for role, model in found.items()}
 
-        assert extraction() == ("generic/test-model", False)
-        pinned = page.patch("/api/app", {"extraction_model": {"provider": "generic", "name": "x"}})
-        assert pinned["notice"] and pinned["value"]["extraction_model"]["name"] == "x"
-        assert extraction() == ("generic/x", True)
-        assert page.patch("/api/app", {"extraction_model": None})["notice"]
-        assert extraction() == ("generic/test-model", False)
-        # unpinning none is a no-op, and says so
-        assert page.patch("/api/app", {"extraction_model": None})["notice"]
+        assert models() == {"writing": "generic/test-model", "extraction": "generic/test-model"}
+        answer = page.patch(
+            "/api/app", {"models": {"extraction": {"provider": "generic", "name": "x"}}}
+        )
+        assert answer["notice"] and answer["value"]["models"]["extraction"]["name"] == "x"
+        assert models()["extraction"] == "generic/x"
+        assert page.patch("/api/app", {"models": {"extraction": None}})["notice"]
+        assert models()["extraction"] == "generic/test-model"
+        # unsetting none is a no-op, and says so
+        assert page.patch("/api/app", {"models": {"extraction": None}})["notice"]
+
+    def test_a_role_otaku_has_not_or_a_model_not_named_by_its_parts_is_400(
+        self, page: Page
+    ) -> None:
+        # The page's fault; the model in use unset is the backend's refusal.
+        for body in (
+            b'{"models": {"reading": null}}',
+            b'{"models": ["writing"]}',
+            b'{"models": {"dictation": "generic/x"}}',
+        ):
+            assert page.status("/api/app", method="PATCH", data=body) == 400, body
+        page.refused("PATCH", "/api/app", {"models": {"writing": None}})
 
     def test_scenes_and_characters_say_who_made_them(self, page: Page) -> None:
         page.play("I listen at the culvert mouth.")
@@ -368,7 +383,9 @@ class TestReading:
             set_config_provider(root, server, name="lmstudio")
 
         with serving(server, tmp_path, prepare=studio) as page:
-            page.patch("/api/app", {"model": {"provider": "lmstudio", "name": "test-model"}})
+            page.patch(
+                "/api/app", {"models": {"writing": {"provider": "lmstudio", "name": "test-model"}}}
+            )
             rows = page.get("/api/providers/lmstudio/models/test-model/settings")["parameters"]
             assert [row["name"] for row in rows] == list(PARAMETERS)
             supported = {row["name"]: row["supported"] for row in rows}
@@ -457,6 +474,57 @@ class TestReading:
         assert page.refused("GET", "/api/providers/nobody")["status"] == 404
         # And a DELETE that removed nothing must not say it did.
         assert page.refused("DELETE", "/api/stories/9999")["status"] == 404
+
+
+class TestDictation:
+    """What is said goes up as base64 with its extension and comes back
+    written down by the model saved for dictation — on the handler's own
+    thread, so a slow one holds up nothing."""
+
+    def test_a_recording_comes_back_written_down(self, page: Page, server: ModelServer) -> None:
+        page.patch(
+            "/api/app", {"models": {"dictation": {"provider": "generic", "name": "whisper"}}}
+        )
+        check = page.post("/api/app/dictation?validate_only=true")
+        assert (check["model"]["name"], check["audio_formats"][0]) == ("whisper", "wav")
+        audio = b"RIFF\x00\x00\x00\x00WAVEfmt "
+        answer = page.post(
+            "/api/app/dictation",
+            {"audio": base64.b64encode(audio).decode(), "audio_format": "wav"},
+        )
+        assert answer["value"]["text"] == server.transcript
+        assert server.uploads[-1]["fields"]["model"] == "whisper"
+        assert server.uploads[-1]["file"]["data"] == audio
+
+    def test_without_a_dictation_model_a_recording_is_refused(self, page: Page) -> None:
+        page.refused("POST", "/api/app/dictation?validate_only=true")
+        page.refused("POST", "/api/app/dictation", {"audio": "UklGRg==", "audio_format": "wav"})
+
+    def test_audio_that_is_not_base64_is_the_page_s_fault(self, page: Page) -> None:
+        page.patch(
+            "/api/app", {"models": {"dictation": {"provider": "generic", "name": "whisper"}}}
+        )
+        body = b'{"audio": "not base64!", "audio_format": "wav"}'
+        assert page.status("/api/app/dictation", method="POST", data=body) == 400
+
+    def test_a_recording_being_written_down_holds_up_nothing(
+        self, page: Page, server: ModelServer
+    ) -> None:
+        page.patch(
+            "/api/app", {"models": {"dictation": {"provider": "generic", "name": "whisper"}}}
+        )
+        server.transcribe_delay = 2.0
+        body = {"audio": "UklGRg==", "audio_format": "wav"}
+        writing = threading.Thread(target=page.post, args=("/api/app/dictation", body))
+        writing.start()
+        try:
+            time.sleep(0.3)
+            started = time.monotonic()
+            assert page.patch("/api/app", {"models": {"extraction": None}})["notice"]
+            assert time.monotonic() - started < 1.0
+            assert writing.is_alive(), "the recording was written down — the story proves nothing"
+        finally:
+            writing.join(timeout=30)
 
 
 class TestPlaying:

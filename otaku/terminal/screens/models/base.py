@@ -11,7 +11,7 @@ from typing import Any
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
 
-from otaku.terminal.api import Api, Locality, ModelRef, Refused
+from otaku.terminal.api import Api, Locality, ModelKind, ModelRef, ModelRole, Refused
 from otaku.terminal.api.providers import ListedProvider, ProviderField
 from otaku.terminal.screens.base import ListScreen
 
@@ -31,6 +31,8 @@ class ModelEntry:
     # A row with no disk to weigh — a catalog's, or the generic
     # provider's: normal weight, no size.
     cloud: bool = False
+    # What the model is used as: the view it is listed in.
+    kinds: frozenset[ModelKind] = frozenset({ModelKind.COMPLETION})
 
 
 class ModelPickerBase(ListScreen):
@@ -56,8 +58,11 @@ class ModelPickerBase(ListScreen):
         # Names whose last listing succeeded — the panel's tick: the
         # provider answered, and with the right key where one is needed.
         self.connected: set[str] = set(connected or ())
+        # Which models the list shows, `d` switching: the completion models, or
+        # the dictation ones.
+        self.view: ModelKind = ModelKind.COMPLETION
         self.all: list[ModelEntry] = list(entries)
-        self.filtered: list[ModelEntry] = list(entries)
+        self.filtered: list[ModelEntry] = [e for e in entries if self.view in e.kinds]
         self._initial_spec = initial_spec
         self._drawn_cursor_line = 0
 
@@ -78,7 +83,7 @@ class ModelPickerBase(ListScreen):
         self.edit_buffer = Buffer(multiline=False)
 
         if initial_spec is not None:
-            for i, entry in enumerate(self.all):
+            for i, entry in enumerate(self.filtered):
                 if entry.full_spec == initial_spec:
                     self.cursor = i
                     break
@@ -123,7 +128,9 @@ class ModelPickerBase(ListScreen):
             # notice too: either way the app is on that model now.
             try:
                 self.result = self.api.app.update(
-                    model=ModelRef(self._picked.provider_name, self._picked.model)
+                    models={
+                        ModelRole.WRITING: ModelRef(self._picked.provider_name, self._picked.model)
+                    }
                 ).notice
             except Refused as e:
                 self.result = str(e)

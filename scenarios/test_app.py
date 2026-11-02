@@ -23,7 +23,7 @@ import pytest
 from otaku import encryption
 from otaku import logging as otaku_logging
 from otaku.backend import launch as backend_launch
-from otaku.backend.api import Api, ModelRef
+from otaku.backend.api import Api, ModelRef, ModelRole
 from otaku.backend.app.paths import Paths
 from otaku.backend.app.pictures import services as backend_files
 from otaku.backend.story.messages.schemas import RawFile
@@ -1191,6 +1191,49 @@ class TestConfigMigration:
         assert "[providers.mine]" not in paths.config_file.read_text(encoding="utf-8")
         assert providers["mine"].url == "http://localhost:9/v1"  # the new home won
 
+    def test_the_models_an_older_state_file_names_move_under_their_roles(self, tmp_path) -> None:
+        """0.10.0 keeps each model under its role in `[models]`: the old
+        `model` and `extraction_model` keys move there and go — beside a
+        level from before 0.5.0, which still lands in the model's entry —
+        and the next launch changes nothing."""
+        paths = Paths.resolve(tmp_path / "state")
+        paths.ensure_tree()
+        paths.config_key_file.write_bytes(secrets.token_bytes(32))
+        paths.config_file.write_text("[settings]\nshow_banner = false\n", encoding="utf-8")
+        paths.state_file.write_text(
+            'model = "generic/test-model"\nextraction_model = "generic/extract-model"\n'
+            'story = 3\nthink = "high"\n\n[models]\ndictation = "generic/whisper"\n',
+            encoding="utf-8",
+        )
+        load_config(paths)
+        raw = tomllib.loads(paths.state_file.read_text(encoding="utf-8"))
+        assert "model" not in raw and "extraction_model" not in raw
+        assert raw["models"] == {
+            "writing": "generic/test-model",
+            "extraction": "generic/extract-model",
+            "dictation": "generic/whisper",
+        }
+        assert raw["story"] == 3 and "think" not in raw
+        entries = tomllib.loads(paths.models_file.read_text(encoding="utf-8"))
+        assert entries["test-model"]["think"] == "high"
+        settled = paths.state_file.read_text(encoding="utf-8")
+        load_config(paths)
+        assert paths.state_file.read_text(encoding="utf-8") == settled
+
+    def test_a_role_the_state_file_already_sets_stands_over_its_old_key(self, tmp_path) -> None:
+        paths = Paths.resolve(tmp_path / "state")
+        paths.ensure_tree()
+        paths.config_key_file.write_bytes(secrets.token_bytes(32))
+        paths.config_file.write_text("[settings]\nshow_banner = false\n", encoding="utf-8")
+        paths.state_file.write_text(
+            'model = "generic/old-model"\n\n[models]\nwriting = "generic/hand-edit"\n',
+            encoding="utf-8",
+        )
+        load_config(paths)
+        raw = tomllib.loads(paths.state_file.read_text(encoding="utf-8"))
+        assert "model" not in raw
+        assert raw["models"]["writing"] == "generic/hand-edit"
+
     def test_a_hand_typed_plain_key_seals_at_the_next_launch(self, tmp_path) -> None:
         paths = Paths.resolve(tmp_path / "state")
         paths.ensure_tree()
@@ -1415,29 +1458,37 @@ class TestResume:
         finally:
             opened.close()
 
-    def test_a_saved_extraction_model_of_a_deleted_provider_reports_and_goes(
-        self, app: App
-    ) -> None:
-        # The same promise for the model saved for extraction: reported,
-        # dropped, and extraction asks the story's model again.
-        app.api.app.update(extraction_model=ModelRef("generic", "extract-model"))
+    def test_a_role_model_of_a_deleted_provider_reports_and_goes(self, app: App) -> None:
+        # The same promise for the model saved for another role: reported,
+        # dropped from state.toml — extraction asks the story's model
+        # again, dictation has none.
+        app.api.app.update(
+            models={
+                ModelRole.EXTRACTION: ModelRef("generic", "extract-model"),
+                ModelRole.DICTATION: ModelRef("generic", "whisper"),
+            }
+        )
         state_file = app.paths.state_file
         state_file.write_text(
-            state_file.read_text(encoding="utf-8").replace(
-                '"generic/extract-model"', '"ghost/extract-model"'
-            ),
+            state_file.read_text(encoding="utf-8")
+            .replace('"generic/extract-model"', '"ghost/extract-model"')
+            .replace('"generic/whisper"', '"ghost/whisper"'),
             encoding="utf-8",
         )
         opened = backend_launch.open_app(app.paths.root)
         try:
-            extraction = Api(opened).app.get().extraction_model
-            assert extraction is not None and not extraction.pinned
             facts = Api(opened).app.get()
-            assert facts.model is not None and facts.extraction_model is not None
-            followed = (facts.extraction_model.provider, facts.extraction_model.name)
-            assert followed == (facts.model.provider, facts.model.name)
-            notices = Api(opened).app.get().launch_facts.notices
-            assert any("ghost/extract-model" in notice for notice in notices)
+            assert facts.model is not None
+            extraction = facts.models[ModelRole.EXTRACTION]
+            assert (extraction.provider, extraction.name) == (
+                facts.model.provider,
+                facts.model.name,
+            )
+            assert ModelRole.DICTATION not in facts.models
+            for gone in ("ghost/extract-model", "ghost/whisper"):
+                assert any(gone in notice for notice in facts.launch_facts.notices), gone
+            saved = tomllib.loads(state_file.read_text(encoding="utf-8"))["models"]
+            assert (saved["extraction"], saved["dictation"]) == ("", "")
         finally:
             opened.close()
 

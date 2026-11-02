@@ -528,7 +528,12 @@ class TestInterface:
         marked = {
             f"{owner}.{verb.name}" for owner, verb, marks in _verbs() if "any_thread" in marks
         }
-        assert marked == {"StatusResource.get", "ProvidersResource.list", "ExtractionResource.get"}
+        assert marked == {
+            "StatusResource.get",
+            "ProvidersResource.list",
+            "ExtractionResource.get",
+            "DictationResource.create",
+        }
 
     def test_every_route_follows_its_call_path(self) -> None:
         # `api.stories.messages.create(5, …)` is POST /api/stories/5/messages:
@@ -767,6 +772,8 @@ _PAGE = {
     "status": {"dom"},
     "prose": {"dom"},
     "browser": {"dom", "status"},
+    # The microphone, opened and read: a recording and its level.
+    "microphone": set(),
     # A turn's pictures: the tiles and the lightbox, drawn by the
     # transcript and by the dossier's reader alike, so below both.
     "pictures": {"api", "dom"},
@@ -849,11 +856,14 @@ _PAGE = {
         "transfer",
     },
     "composer": {"api", "commands", "dom", "held", "language", "status", "transcript"},
+    # What is said, written down into the composer.
+    "dictation": {"api", "browser", "composer", "dom", "microphone", "status"},
     "app": {
         "api",
         "browser",
         "commands",
         "composer",
+        "dictation",
         "dom",
         "held",
         "language",

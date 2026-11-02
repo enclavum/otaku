@@ -741,7 +741,7 @@ def main() -> None:
     import otaku.terminal.dispatch.context as dispatch_context
     import otaku.terminal.tty as tty_mod
     from otaku.backend import launch as backend_launch
-    from otaku.backend.api import Api, ModelRef
+    from otaku.backend.api import Api, ModelRef, ModelRole
     from otaku.providers import registry as providers_registry
     from otaku.terminal import run as terminal_run
 
@@ -795,7 +795,7 @@ def main() -> None:
     app = backend_launch.open_app(root)
     api = Api(app)
     if api.app.get().model is None:
-        api.app.update(model=ModelRef(PROVIDER, MODEL))
+        api.app.update(models={ModelRole.WRITING: ModelRef(PROVIDER, MODEL)})
 
     term_input, term_output = _build_ptk_io()
     try:

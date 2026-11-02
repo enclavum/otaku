@@ -2,7 +2,7 @@
 unload. Chat rides the OpenAI protocol at /v1; the native surface adds
 KoboldAI's model endpoint (the active model, admin mode or not), the
 true max context length, the feature flags of `/api/extra/version`
-(vision and audio among them), and a token count that renders a chat
+(vision, audio and a Whisper model among them), and a token count that renders a chat
 request the way a turn would. A reasoning effort goes out on both
 knobs: `reasoning_effort` becomes a reasoning budget — none is none,
 minimal a tenth of the reply, low a quarter, medium half, high and
@@ -31,6 +31,7 @@ from otaku.providers.openai.models import (
     Locality,
     ModelCapabilities,
     ModelInfo,
+    ModelKind,
     ModelState,
     OpenAIModels,
 )
@@ -107,6 +108,15 @@ class KoboldCppModels(OpenAIModels):
             if isinstance(version, dict)
             else None
         )
+        # Its transcription endpoint is Whisper where one was loaded
+        # beside the model, else the model itself where it takes audio —
+        # the name a request gives is ignored either way, so the one
+        # model listed is the one dictation is asked of.
+        kinds: frozenset[ModelKind] = frozenset()
+        if isinstance(version, dict):
+            kinds = frozenset({ModelKind.COMPLETION})
+            if version.get("transcribe") or version.get("audio"):
+                kinds |= {ModelKind.DICTATION}
         models = []
         for name in names:
             loaded = active is None or name == active
@@ -116,6 +126,7 @@ class KoboldCppModels(OpenAIModels):
                     context_loaded=context_loaded if loaded else None,
                     capabilities=capabilities,
                     state=ModelState.LOADED if loaded else ModelState.UNLOADED,
+                    kinds=kinds,
                 )
             )
         return models

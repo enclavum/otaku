@@ -21,6 +21,7 @@ from otaku.providers.openai import reasoning
 from otaku.providers.openai.auth import OpenAIAuth
 from otaku.providers.openai.client import OpenAIClient
 from otaku.providers.openai.completion import PROTOCOL_PARAMS, SAMPLER_PARAMS, OpenAICompletion
+from otaku.providers.openai.dictation import OpenAIDictation
 from otaku.providers.openai.models import Locality, ModelCapabilities, ModelInfo, OpenAIModels
 from otaku.settings.providers import ProviderConfig
 
@@ -52,6 +53,7 @@ class OpenRouterAuth(OpenAIAuth):
 
 class OpenRouterModels(OpenAIModels):
     listing_keyed = True
+    dictation_query = "/models?output_modalities=transcription"
 
     def _decode(self, listed: dict[str, Any], model: ModelInfo) -> ModelInfo:
         architecture = listed.get("architecture")
@@ -157,6 +159,11 @@ class OpenRouterCompletion(OpenAICompletion):
         return {**params, "max_completion_tokens": params["max_tokens"]}
 
 
+class OpenRouterDictation(OpenAIDictation):
+    # The recordings its transcription endpoint takes, as documented.
+    formats = frozenset({"wav", "mp3", "flac", "m4a", "ogg", "webm", "aac"})
+
+
 class OpenRouterClient(OpenAIClient):
     id = "openrouter"
     label = "OpenRouter"
@@ -165,6 +172,7 @@ class OpenRouterClient(OpenAIClient):
     auth_class = OpenRouterAuth
     models_class = OpenRouterModels
     completion_class = OpenRouterCompletion
+    dictation_class = OpenRouterDictation
 
     @classmethod
     def autoconfigure(cls) -> ProviderConfig:

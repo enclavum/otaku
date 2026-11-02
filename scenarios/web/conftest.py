@@ -26,7 +26,7 @@ from typing import Any
 import pytest
 
 from otaku.backend import launch as backend_launch
-from otaku.backend.api import Api, ModelRef, Refused
+from otaku.backend.api import Api, ModelRef, ModelRole, Refused
 from otaku.backend.app.paths import Paths
 from otaku.store import Store
 from otaku.web import run_beside
@@ -319,7 +319,7 @@ def _serving(
         # A story that launches twice over one state dir finds the model
         # already remembered: an answer, never a fault.
         with contextlib.suppress(Refused):
-            Api(app).app.update(model=ModelRef(provider, MODEL))
+            Api(app).app.update(models={ModelRole.WRITING: ModelRef(provider, MODEL)})
         # The worker `otaku serve` starts as it serves.
         app.start_worker()
         server = run_beside(app)

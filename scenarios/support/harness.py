@@ -25,7 +25,7 @@ from pathlib import Path
 
 from otaku import encryption
 from otaku.backend import launch as backend_launch
-from otaku.backend.api import Api, Layout, ModelRef
+from otaku.backend.api import Api, Layout, ModelRef, ModelRole
 from otaku.backend.api import App as BackendApp
 from otaku.backend.app.models.schemas import ModelSettings
 from otaku.backend.app.paths import Paths
@@ -65,7 +65,7 @@ class App:
         # as in the real launcher.
         if spec and self.api.app.get().model is None:
             provider, _, model = spec.partition("/")
-            self.api.app.update(model=ModelRef(provider, model))
+            self.api.app.update(models={ModelRole.WRITING: ModelRef(provider, model)})
         self.chat = Chat(self.backend)
         # The story the last run landed in, resumed — as `run.run` does.
         if (resumed := self.api.settings.get().last_story) is not None:

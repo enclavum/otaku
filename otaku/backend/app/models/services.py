@@ -27,7 +27,7 @@ from otaku.providers import (
     templates,
 )
 from otaku.settings import models as models_file
-from otaku.settings.state import ModelRef
+from otaku.settings.state import ModelRef, ModelRole
 from otaku.store.schema import CompletionType, Layout
 
 if TYPE_CHECKING:
@@ -553,16 +553,10 @@ def model_facts(app: App) -> ModelFacts:
     return app._model_facts()
 
 
-def extraction_pin(app: App) -> ModelRef | None:
-    """The model pinned for lore extraction; None while extraction
-    follows the model in use. Safe from any thread."""
-    return app._extraction_pin()
-
-
-def extraction_model(app: App) -> ModelRef | None:
-    """The model lore extraction asks: the one pinned for it, else the
-    model in use."""
-    return app._extraction_model()
+def model_for(app: App, role: ModelRole) -> ModelRef | None:
+    """The model `role` asks — extraction the writing one where none is
+    saved for it; None for none. Safe from any thread."""
+    return app._model(role)
 
 
 def listed_name(app: App, model: ModelRef) -> str:

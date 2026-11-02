@@ -1768,7 +1768,7 @@ class Prompting:
     def drive(self, *strokes: str, top_row: bool = False) -> str:
         with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
             chat = self.app.chat
-            self.session, answers = build_prompt(
+            self.session, answers, _dictation = build_prompt(
                 self.app.api,
                 Carry(),
                 LineAssembler(),

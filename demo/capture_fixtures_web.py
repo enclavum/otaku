@@ -32,7 +32,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from otaku.backend import launch as backend_launch
-from otaku.backend.api import Api, ModelRef
+from otaku.backend.api import Api, ModelRef, ModelRole
 from otaku.web import run_beside
 from scenarios.support.harness import set_config, set_config_provider
 from scenarios.support.server import ModelServer
@@ -251,7 +251,7 @@ class _served:
             port = int(probe.getsockname()[1])
         set_config(self._root, web_host="127.0.0.1", web_port=port)
         self._app = backend_launch.open_app(self._root)
-        Api(self._app).app.update(model=ModelRef(ENGINE, MODEL))
+        Api(self._app).app.update(models={ModelRole.WRITING: ModelRef(ENGINE, MODEL)})
         self._app.start_worker()
         self._server = run_beside(self._app)
         url = f"http://127.0.0.1:{port}"

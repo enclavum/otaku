@@ -17,7 +17,7 @@ import shutil
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from otaku import __version__, encryption
 from otaku.agents import Worker
@@ -45,8 +45,23 @@ from otaku.settings import state as state_file
 from otaku.settings.config import Config
 from otaku.settings.config import ConfigError as ConfigError
 from otaku.settings.integrations import IntegrationConfig, IntegrationSettings
+from otaku.settings.state import ModelRole
 from otaku.store import DatabaseError as DatabaseError
 from otaku.store import Store, is_encrypted
+
+# What a launch says of a model pinned for a role whose provider is no
+# longer configured, the pin dropped.
+_STALE_MODEL_PIN = {
+    ModelRole.WRITING: "The remembered model ({spec}) names no configured provider.",
+    ModelRole.EXTRACTION: (
+        "The remembered extraction model ({spec}) names no configured provider; "
+        "lore extraction uses the model you play with."
+    ),
+    ModelRole.DICTATION: (
+        "The remembered dictation model ({spec}) names no configured provider; "
+        "dictation has no model."
+    ),
+}
 
 
 def open_app(root: str | Path | None = None, *, ask_secret: AskSecret | None = None) -> App:
@@ -97,26 +112,19 @@ def open_app(root: str | Path | None = None, *, ask_secret: AskSecret | None = N
         for name in registry.ignored
     ]
     integrations = Integrations.bind(integration_settings)
-    # A remembered model whose provider is still configured resumes; a
-    # stale one is reported and cleared — the app opens modelless and
-    # every model-facing door says so until a pick.
-    stale: dict[str, str] = {}
-    remembered = state.model_ref
-    if state.model and (remembered is None or remembered.provider not in providers):
-        notices += [
-            f"The remembered model ({state.model}) names no configured provider.",
-            NO_MODEL_HINT,
-        ]
-        stale["model"] = ""
-    # A pinned extraction model the same way — dropped with a notice, and
-    # extraction follows the model played with.
-    pinned = state.extraction_ref
-    if state.extraction_model and (pinned is None or pinned.provider not in providers):
-        notices.append(
-            f"The remembered extraction model ({state.extraction_model}) names no configured "
-            "provider; lore extraction uses the model you play with."
-        )
-        stale["extraction_model"] = ""
+    # A model remembered for a role whose provider is still configured
+    # stands; a stale one is reported and dropped — the writing one leaves the
+    # app modelless, every model-facing door saying so until a pick;
+    # extraction then follows the writing one, dictation has none.
+    stale: dict[str, Any] = {}
+    kept = dict(state.models)
+    for role, spec in state.models.items():
+        model = state.model(role)
+        if model is None or model.provider not in providers:
+            notices.append(_STALE_MODEL_PIN[role].format(spec=spec))
+            if role is ModelRole.WRITING:
+                notices.append(NO_MODEL_HINT)
+            del kept[role]
 
     fresh = not paths.database_file.exists()
     store = Store.open(
@@ -159,6 +167,8 @@ def open_app(root: str | Path | None = None, *, ask_secret: AskSecret | None = N
     except BaseException:
         store.close()
         raise
+    if kept != state.models:
+        stale["models"] = kept
     if stale:
         app._update_state_config(best_effort=True, **stale)
     notices += app._make_current()

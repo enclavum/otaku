@@ -24,6 +24,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, ClassVar
 
 from otaku.integrations import Astronomy, IntegrationError, SearchResult, WebSearch
+from otaku.settings.state import ModelRole
 
 if TYPE_CHECKING:
     # the app imports the stories' settings, which import these tools
@@ -143,7 +144,7 @@ class ToolSystemInfo(Tool):
     def run(self, app: "App") -> str:
         now = datetime.now().astimezone()
         sky = app._integrations.get(Astronomy)
-        model = app._model()
+        model = app._model(ModelRole.WRITING)
         return "\n".join(
             (
                 f"Time: {now:%Y-%m-%d %H:%M (%A)}",

@@ -223,6 +223,7 @@ class ProviderPanel(ModelPickerBase):
                     context_length=model.context_length,
                     context_loaded=model.context_loaded,
                     cloud=row.locality is not Locality.LOCAL,
+                    kinds=model.kinds,
                 )
                 for row in fetched
                 for model in row.models

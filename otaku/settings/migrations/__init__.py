@@ -3,8 +3,8 @@
 This module holds the shape-change tables themselves and `migrate`, the
 whole launch step; `surgery` is the toolkit every edit is built from,
 `providers_file` the moves over providers.toml, `prompt_texts` the
-refreshed templates for prompts.toml, and `state_file` the thinking
-level's move out of state.toml. Everything here is idempotent and
+refreshed templates for prompts.toml, and `state_file` the moves over
+state.toml. Everything here is idempotent and
 convergent: it all simply reruns at every launch — no version stamp to
 trust, no one-shot step whose half-state could stick — so a crash
 between writes, a hand edit, or a launch that could not finish heals on
@@ -35,7 +35,7 @@ from otaku.settings.migrations.providers_file import (
     move_providers,
     seal_api_keys,
 )
-from otaku.settings.migrations.state_file import move_think
+from otaku.settings.migrations.state_file import move_model_pins, move_think
 from otaku.settings.migrations.surgery import (
     Migration,
     apply_migrations,
@@ -326,4 +326,7 @@ def migrate(
         files.integrations, files.backups_dir, [seal_api_keys(secrets.seal, secrets.is_sealed)]
     )
     update_prompts(files.prompts, files.backups_dir, _PROMPT_MIGRATIONS)
+    # Each rewrites state.toml whole and carries the other's keys along
+    # (`state_file`), so the order is free.
+    move_model_pins(files.state)
     move_think(files.state, files.models)

@@ -342,7 +342,9 @@ export function showTail() {
       ];
       if (verb && event.ctrlKey && !event.metaKey && !event.altKey) {
         event.preventDefault();
-        $(verb)?.click();
+        // a verb shut while dictation listens (`dictation.js`) is not pressed
+        const button = $(verb);
+        if (button && !button.inert) button.click();
         return;
       }
       if ((event.key === "ArrowUp" || event.key === "ArrowDown") && !event.shiftKey && atEdge(event.key)) {
