@@ -22,6 +22,7 @@ import pytest
 
 from otaku import encryption
 from otaku import logging as otaku_logging
+from otaku import prompts as prompts_mod
 from otaku.backend import launch as backend_launch
 from otaku.backend.api import Api, ModelRef, ModelRole
 from otaku.backend.app.paths import Paths
@@ -29,11 +30,10 @@ from otaku.backend.app.pictures import services as backend_files
 from otaku.backend.story.messages.schemas import RawFile
 from otaku.encryption import Cipher, EncryptionError, PlainCipher
 from otaku.formatting import toml_string
+from otaku.prompts.migrations import PAST
 from otaku.settings import config as config_mod
-from otaku.settings import prompts as prompts_mod
 from otaku.settings import providers as providers_mod
 from otaku.settings.migrations import surgery
-from otaku.settings.migrations.prompt_texts import CARD_FRAMING_0_7_0, EXTRACT_0_2_2
 from otaku.store import DatabaseError, Store, is_encrypted
 from otaku.store import migrations as store_migrations
 from otaku.store.database import Database, check_value
@@ -1065,21 +1065,21 @@ class TestConfigMigration:
         follows the new built-in at the next launch — the user's own lines
         riding along untouched, the pre-migration file waiting in
         configs/backups/. An edited template would not match and never
-        moves (the pure cases in tests/settings/migrations)."""
+        moves (the pure cases in tests/prompts/migrations)."""
         app = launch(tmp_path / "state", server)
         app.close()
         prompts_file = app.paths.prompts_file
         stub = prompts_file.read_text(encoding="utf-8")
         stale = stub.replace(
-            toml_string(prompts_mod.EXTRACT_DEFAULT),
-            toml_string(EXTRACT_0_2_2),
+            toml_string(prompts_mod.DEFAULTS["extract_prompt"]),
+            toml_string(PAST[("extract_prompt", "0.2.2")]),
         )
         assert stale != stub  # the stub really held the current built-in
         prompts_file.write_text(stale + "# my note\n", encoding="utf-8")
 
         load_config(app.paths)
         migrated = prompts_file.read_text(encoding="utf-8")
-        assert tomllib.loads(migrated)["extract_prompt"] == prompts_mod.EXTRACT_DEFAULT
+        assert tomllib.loads(migrated)["extract_prompt"] == prompts_mod.DEFAULTS["extract_prompt"]
         assert "# my note" in migrated
         assert any(p.name.startswith("prompts-") for p in app.paths.config_backups_dir.iterdir())
 
@@ -1091,13 +1091,14 @@ class TestConfigMigration:
         prompts_file = app.paths.prompts_file
         stub = prompts_file.read_text(encoding="utf-8")
         stale = stub.replace(
-            toml_string(prompts_mod.CARD_FRAMING_DEFAULT), toml_string(CARD_FRAMING_0_7_0)
+            toml_string(prompts_mod.DEFAULTS["card_framing"]),
+            toml_string(PAST[("card_framing", "0.7.0")]),
         )
         assert stale != stub
         prompts_file.write_text(stale, encoding="utf-8")
         load_config(app.paths)
         migrated = tomllib.loads(prompts_file.read_text(encoding="utf-8"))
-        assert migrated["card_framing"] == prompts_mod.CARD_FRAMING_DEFAULT
+        assert migrated["card_framing"] == prompts_mod.DEFAULTS["card_framing"]
 
     def test_a_current_config_is_left_untouched(self, server: ModelServer, tmp_path) -> None:
         app = launch(tmp_path / "state", server)

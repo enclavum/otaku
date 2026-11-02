@@ -1,16 +1,47 @@
-"""The in-app edit of one prompt, its pure half: `with_prompt` is the
-file's text with the key's value replaced whatever it holds, appended
-where the file lacks the key, dropped when emptied; every other key
-rides along untouched, and a key spelled inside another value is not the
-key. Text in, text out — the promise is what the file parses back to,
-so the cases compare values, never the spelling."""
+"""The templates: each built-in filed under its key with the type first
+(`file_of`), read as its file holds it but for the one final newline an
+editor leaves (`read_template`), and every one a field of `Prompts`; and
+the in-app edit of one prompt, its pure half: `with_prompt` is the file's
+text with the key's value replaced whatever it holds, appended where the
+file lacks the key, dropped when emptied; every other key rides along
+untouched, and a key spelled inside another value is not the key. Text
+in, text out — the promise is what the file parses back to, so the cases
+compare values, never the spelling."""
 
 import tomllib
+from dataclasses import asdict
+from importlib.resources.abc import Traversable
+from typing import cast
 
 from otaku.formatting import toml_string
-from otaku.settings.prompts import with_prompt
+from otaku.prompts import DEFAULTS, Prompts, file_of, read_template, with_prompt
 
 QUESTIONS = "tool_questions_prompt"
+
+
+class TestFileOf:
+    def test_the_type_comes_first(self) -> None:
+        assert file_of("card_framing") == "framing_card"
+        assert file_of("extract_prompt") == "prompt_extract"
+        assert file_of("recap_header") == "header_recap"
+
+    def test_a_name_of_several_words_keeps_them(self) -> None:
+        assert file_of("tool_questions_prompt") == "prompt_tool_questions"
+
+
+class TestReadTemplate:
+    def test_the_final_newline_an_editor_leaves_is_not_the_template_s(self) -> None:
+        assert read_template(_file("Say it.\n")) == "Say it."
+        assert read_template(_file("Say it.")) == "Say it."
+
+    def test_a_newline_of_the_template_s_own_stays(self) -> None:
+        assert read_template(_file("Say it.\n\n")) == "Say it.\n"
+        assert read_template(_file("\nSay it.\n")) == "\nSay it."
+
+
+class TestDefaults:
+    def test_every_template_is_a_field_and_its_default(self) -> None:
+        assert asdict(Prompts()) == dict(DEFAULTS)
 
 
 class TestWithPrompt:
@@ -60,3 +91,17 @@ class TestWithPrompt:
 def stub(key: str, value: str) -> str:
     """A prompts.toml block the way `write_stub` writes one."""
     return f"{key} = {toml_string(value)}\n\n"
+
+
+class _File:
+    """A template file as `read_template` reads one."""
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    def read_text(self, encoding: str) -> str:
+        return self.text
+
+
+def _file(text: str) -> Traversable:
+    return cast(Traversable, _File(text))

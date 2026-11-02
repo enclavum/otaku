@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 from otaku import __version__, encryption
+from otaku import prompts as prompts_file
 from otaku.agents import Worker
 from otaku.backend import samples
 from otaku.backend.api import Api
@@ -35,11 +36,11 @@ from otaku.encryption import EncryptionError as EncryptionError
 from otaku.formatting import pretty_path
 from otaku.integrations import Integrations, default_sections
 from otaku.logging import ErrorLog, RequestLog, SystemLog
+from otaku.prompts import migrations as prompt_migrations
 from otaku.providers import ProviderConfig, Registry, autoconfigure
 from otaku.settings import Secrets, migrations, write_atomic
 from otaku.settings import config as config_file
 from otaku.settings import integrations as integrations_file
-from otaku.settings import prompts as prompts_file
 from otaku.settings import providers as providers_file
 from otaku.settings import state as state_file
 from otaku.settings.config import Config
@@ -275,6 +276,7 @@ def _load_config(
         is_hashed=passwords.is_hashed,
     )
     migrations.migrate(paths.settings_files, secrets, autoconfigure(), default_sections())
+    prompt_migrations.migrate(paths.prompts_file, paths.config_backups_dir)
     config = config_file.load(paths.config_file)
     if config.web_password and not passwords.is_hashed(config.web_password):
         # The migration left it plain — the file could not be written, or

@@ -145,7 +145,6 @@ class Paths:
             config=self.config_file,
             providers=self.providers_file,
             integrations=self.integrations_file,
-            prompts=self.prompts_file,
             state=self.state_file,
             models=self.models_file,
             backups_dir=self.config_backups_dir,

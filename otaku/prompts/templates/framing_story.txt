@@ -1,0 +1,3 @@
+Continue the story below exactly where the text ends, in its voice and tense. Write only the story.
+
+{premise}

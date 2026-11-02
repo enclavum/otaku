@@ -71,6 +71,7 @@ _ALLOWED = {
         "integrations",
         "store",
         "settings",
+        "prompts",
         "encryption",
         "logging",
         "formatting",
@@ -80,6 +81,9 @@ _ALLOWED = {
     "providers": {"settings", "formatting"},
     "integrations": {"settings", "formatting"},
     "store": {"encryption"},
+    # The templates, built-in and as prompts.toml overrides them; the
+    # settings package for its committed writes and its surgery.
+    "prompts": {"settings", "formatting"},
     "settings": {"formatting"},
     "logging": {"providers", "encryption", "formatting"},
     "encryption": {"formatting"},

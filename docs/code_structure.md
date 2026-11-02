@@ -13,12 +13,13 @@ declared dependencies:
     web          → console, backend.api, formatting
     console      → formatting
     agents       → context, providers, store, logging, formatting
-    backend      → agents, context, providers, integrations, store, settings, encryption,
-                   logging, formatting
+    backend      → agents, context, providers, integrations, store, settings, prompts,
+                   encryption, logging, formatting
     context      → store (reads only), providers
     providers    → settings, formatting
     integrations → settings, formatting
     store        → encryption
+    prompts      → settings, formatting
     settings     → formatting
     logging      → providers, encryption, formatting
     encryption   → formatting

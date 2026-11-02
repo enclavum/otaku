@@ -1,0 +1,9 @@
+Combine the scene summaries below into one running "story so far" summary —
+at most 200 words, chronological, no headings. Output the summary only.
+
+Write it in the SAME LANGUAGE the summaries below are written in — English
+summaries get an English summary, French ones a French one. Match the
+summaries, not these instructions.
+
+{summaries}
+

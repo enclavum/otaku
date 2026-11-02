@@ -1,0 +1,2 @@
+((OOC: Dice roll {dice}. The dice are already rolled and the result is final — say what was rolled and the total in your reply, then narrate the outcome of exactly this result; never reroll it, change it, or roll on your own.))
+{body}

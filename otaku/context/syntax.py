@@ -32,7 +32,7 @@ inliner's slash must follow whitespace, which keeps `and/or` and URLs
 prose); framing = a direction's template; command = a slash word that
 acts, and none of this module's business. A typed line is deliberately
 NOT called a prompt — that word is already spent three ways
-(`settings.prompts.Prompts` the templates, `AssembledPrompt` the full
+(`prompts.Prompts` the templates, `AssembledPrompt` the full
 request, the input prompt the terminal draws), and the most overloaded
 word must not name the most precise concept.
 """

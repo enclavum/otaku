@@ -32,8 +32,8 @@ from otaku.backend.story.tools import (
 from otaku.context.injections import Injection
 from otaku.context.syntax import OOC_FRAME
 from otaku.context.tools import ToolSet
-from otaku.settings.prompts import Prompts
-from otaku.settings.prompts import load as load_prompts
+from otaku.prompts import Prompts
+from otaku.prompts import load as load_prompts
 from otaku.store import Store
 from otaku.store.schema import (
     CompletionType,

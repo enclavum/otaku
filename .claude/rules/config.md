@@ -1,6 +1,7 @@
 ---
 paths:
   - "otaku/settings/**/*"
+  - "otaku/prompts/**/*"
   - "otaku/backend/launch.py"
   - "otaku/backend/app/core/*.py"
   - "otaku/backend/app/paths.py"
@@ -56,8 +57,16 @@ refused. A new purpose is a new role, never a field of its own.
 Three compatibility frameworks, one per artifact that outlives a
 release — a format change lands inside one of them, never beside them:
 
-- **Settings** (`otaku/settings/migrations`) — convergent, rerun at
-  every launch, self-healing.
+- **Settings** (`otaku/settings/migrations`, prompts.toml's in
+  `otaku/prompts/migrations`) — convergent, rerun at every launch,
+  self-healing. A change to a built-in template
+  (`otaku/prompts/templates/framing_card.txt`) lands with the text it
+  replaces, frozen from the last release tag beside the migrations under
+  the same name, the version appended
+  (`otaku/prompts/migrations/framing_card-0.7.0.txt`): the refresh that
+  carries it to the prompts.toml files still holding the old text is
+  built from that folder, and a template changed without it stays old in
+  every existing file — no test can tell.
 - **Database** (`otaku/store/migrations`) — the versioned ladder, its
   package docstring the whole of it.
 - **Export format** (`otaku/backend/formats`) — the import

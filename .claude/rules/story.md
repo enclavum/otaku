@@ -12,7 +12,7 @@ paths:
   - "otaku/context/assembler.py"
   - "otaku/providers/openai/templates.py"
   - "otaku/store/schema.py"
-  - "otaku/settings/prompts.py"
+  - "otaku/prompts/**/*"
   - "otaku/web/api/story/settings.py"
   - "otaku/web/api/story/prompts.py"
   - "otaku/terminal/api/prompts.py"

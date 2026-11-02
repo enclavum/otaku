@@ -1,0 +1,8 @@
+You may ask the time, the phase of the moon, the nearest solstice or
+equinox, and which model you are, when the story needs it: end your reply
+with an empty fenced code block marked otk-system-info, like this:
+
+```otk-system-info
+```
+
+The answer arrives as the next message, out of character.

@@ -28,6 +28,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Self, TypeVar, cast
 
+from otaku import prompts as prompts_file
 from otaku.agents import Worker
 from otaku.backend.app import passwords
 from otaku.backend.app.models import services as models
@@ -39,6 +40,7 @@ from otaku.backend.errors import Conflict, Refused, StoppingError, Unavailable
 from otaku.formatting import pretty_path
 from otaku.integrations import Integrations
 from otaku.logging import ErrorLog
+from otaku.prompts import Prompts
 from otaku.providers import (
     Locality,
     OpenAIClient,
@@ -49,10 +51,8 @@ from otaku.providers import (
 )
 from otaku.settings import config as config_file
 from otaku.settings import models as models_file
-from otaku.settings import prompts as prompts_file
 from otaku.settings import state as state_file
 from otaku.settings.config import Config, ConfigError
-from otaku.settings.prompts import Prompts
 from otaku.settings.state import ModelRef, ModelRole, StateConfig
 from otaku.store import Store
 

@@ -6,22 +6,31 @@ compare values, never the spelling."""
 import tomllib
 
 from otaku.formatting import toml_string
-from otaku.settings.migrations.prompt_texts import (
-    CARD_FRAMING_0_7_0,
-    EXTRACT_0_2_2,
-    EXTRACT_0_3_0,
-    HISTORY_0_3_0,
-    STORY_SO_FAR_0_3_0,
-    refresh_template,
-    rename_template,
-)
+from otaku.prompts import DEFAULTS
+from otaku.prompts.migrations import PAST, refresh_template, rename_template
 from otaku.settings.migrations.surgery import apply_migrations
-from otaku.settings.prompts import (
-    CARD_FRAMING_DEFAULT,
-    EXTRACT_DEFAULT,
-    JOURNAL_HISTORY_DEFAULT,
-    SCENE_HISTORY_DEFAULT,
-)
+
+# The superseded shipped texts the cases start from, and the built-ins
+# they follow.
+EXTRACT_0_2_2 = PAST[("extract_prompt", "0.2.2")]
+EXTRACT_0_3_0 = PAST[("extract_prompt", "0.3.0")]
+HISTORY_0_3_0 = PAST[("journal_history_prompt", "0.3.0")]
+STORY_SO_FAR_0_3_0 = PAST[("scene_history_prompt", "0.3.0")]
+CARD_FRAMING_0_7_0 = PAST[("card_framing", "0.7.0")]
+EXTRACT_DEFAULT = DEFAULTS["extract_prompt"]
+SCENE_HISTORY_DEFAULT = DEFAULTS["scene_history_prompt"]
+JOURNAL_HISTORY_DEFAULT = DEFAULTS["journal_history_prompt"]
+CARD_FRAMING_DEFAULT = DEFAULTS["card_framing"]
+
+
+class TestPast:
+    def test_every_frozen_text_belongs_to_a_current_template(self) -> None:
+        assert {key for key, _ in PAST} <= set(DEFAULTS)
+
+    def test_no_frozen_text_is_its_template_s_current_one(self) -> None:
+        # One would refresh nothing: frozen from the wrong tag, or never
+        # superseded at all.
+        assert [past for past, text in PAST.items() if text == DEFAULTS[past[0]]] == []
 
 
 class TestRefreshTemplate:

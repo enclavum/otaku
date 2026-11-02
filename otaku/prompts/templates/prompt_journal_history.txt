@@ -1,0 +1,19 @@
+Write {name}'s history: everything they know of the story so far, drawn from
+their own journal entries below.
+
+Rules:
+- {name}'s own voice, first person, exactly like the entries themselves:
+  "I", never "{name} did". This is their memory, not a report about them.
+- Chronological prose, past tense, at most 300 words. No headings, no bullets.
+- Compress the earliest entries hardest and keep the recent ones specific.
+  Names, promises, debts, injuries, betrayals, and secrets survive compression;
+  weather and scenery do not.
+- Only what {name} witnessed or was told. Add nothing that is not below.
+- Write in the SAME LANGUAGE the entries below are written in — English
+  entries get an English history, French ones a French one. Match the
+  entries, not these instructions.
+- Output the history only.
+
+{name}'s journal, oldest entry first:
+{entries}
+
