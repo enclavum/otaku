@@ -9,7 +9,7 @@ in, text out — the promise is what the file parses back to, so the cases
 compare values, never the spelling."""
 
 import tomllib
-from dataclasses import asdict
+from dataclasses import fields
 from importlib.resources.abc import Traversable
 from typing import cast
 
@@ -39,9 +39,22 @@ class TestReadTemplate:
         assert read_template(_file("\nSay it.\n")) == "\nSay it."
 
 
-class TestDefaults:
-    def test_every_template_is_a_field_and_its_default(self) -> None:
-        assert asdict(Prompts()) == dict(DEFAULTS)
+class TestPrompts:
+    def test_each_field_reads_its_own_template(self) -> None:
+        # the key a field's text is read by is the field's own name
+        assert [f.metadata["key"] for f in fields(Prompts)] == [f.name for f in fields(Prompts)]
+
+    def test_a_built_in_holds_every_placeholder_its_template_requires(self) -> None:
+        lacking = [
+            (f.name, placeholder)
+            for f in fields(Prompts)
+            for placeholder in f.metadata["required"]
+            if "{" + placeholder + "}" not in DEFAULTS[f.name]
+        ]
+        assert lacking == []
+
+    def test_the_defaults_are_the_fields_in_their_order(self) -> None:
+        assert list(DEFAULTS) == [f.name for f in fields(Prompts)]
 
 
 class TestWithPrompt:

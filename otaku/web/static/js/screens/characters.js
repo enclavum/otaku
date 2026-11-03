@@ -1,7 +1,10 @@
 /* All characters: the codex's cards — the characters the reader keeps
    across stories — as a gallery or a list, the stories' characters no
    card claims beside them, and a card opened as a sheet over both: its
-   pictures, its fields, the stories it is in and its journals there.
+   pictures, its fields, the stories it is in and its journals there —
+   and its text written by the model in use from its pictures, each run
+   kept as a version to step back and forth through while the card stays
+   open.
    And the asks the codex shares with a story's cast: the card picker
    (`pickCard`) — a card to link, to invite, to merge into — and a card
    invited into the story held (`inviteCard`).
@@ -17,12 +20,14 @@ import { api } from "../api/index.js";
 import {
   ask,
   askConfirm,
+  asksBeforeClosing,
   closeAll,
   edited,
   editable,
   footnote,
   guard,
   popups,
+  putDown,
   report,
   wiring,
 } from "../kit/browser.js";
@@ -95,6 +100,18 @@ const _FIELDS = [
   ["creator_notes", "creator notes"],
 ];
 const _ITEMS = /\n\s*---\s*\n/;
+// What a generation writes, and its history keeps (`backend.codex.cards.services`).
+const _GENERATED = ["name", "tagline", "description", "personality", "scenario", "greeting"];
+/* Why Generate from picture is off, as the backend refuses a generation —
+   `backend.codex.cards.services`' sentences, copied: nothing is asked
+   before the click. */
+const _CANNOT_SEE = "The model in use cannot see pictures.";
+const _NO_PICTURE = "The card has no picture.";
+// How often a generation's time is read again.
+const _CLOCK_MS = 250;
+// The versions' arrows, back and forth, as `svg` paths.
+const _PREVIOUS = ["M9 14 4 9l5-5", "M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"];
+const _NEXT = ["m15 14 5-5-5-5", "M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"];
 
 const state = {
   // the cards and unlinked characters as last read, and how many of each
@@ -113,6 +130,28 @@ const state = {
   view: "mid",
   query: "",
   unlinkedQuery: "",
+  // the card the card window shows, null while it is closed
+  shown: null,
+  // the card a generation is being written for, while one is, since when
+  // (`performance.now()`), and whether the reader gave it up
+  generating: null,
+  generatingSince: 0,
+  cancelled: false,
+  // whether the window is asking whether to keep generated text
+  asking: false,
+  // whether the model in use sees pictures, as the card window last read it
+  canSee: false,
+  /* the faces the library drew last, by view and card id, each with the
+     card it was drawn for and the tile size it was drawn at: a card whose
+     pictures stand as they did keeps its face, its text set in place, so
+     drawing the library again loads no picture again (`drawView`) */
+  faces: { gallery: new Map(), list: new Map() },
+  /* the shown card's versions, the page's alone and gone when the window
+     closes: its generated fields as they stood before the first
+     generation — the original — and as each generation left them, a hand
+     edit changing the version the card stands at; and which that is;
+     null before the first */
+  generations: null,
 };
 
 /** Open All characters — on the card `cardId` where one is asked. */
@@ -425,17 +464,50 @@ function drawView(popup, cards, view) {
      cards between are hidden, a place is not one the reader can see. */
   const gallery = view === "gallery";
   const box = $(gallery ? "[data-gallery]" : "[data-rows]", popup);
-  const items = cards.map((card) => (gallery ? tile(popup, card) : listRow(popup, card)));
+  const kept = state.faces[view];
+  const faces = new Map();
+  const items = cards.map((card) => {
+    const old = kept.get(card.id);
+    if (old && old.size === state.view && samePictures(old.card, card)) {
+      // the card object its handlers hold, brought up to date
+      Object.assign(old.card, card);
+      setFace(old.element, old.card);
+      faces.set(card.id, old);
+      return old.element;
+    }
+    const element = gallery ? tile(popup, card) : listRow(popup, card);
+    faces.set(card.id, { card, element, size: state.view });
+    return element;
+  });
+  state.faces[view] = faces;
   const none =
     !cards.length && state.query
       ? empty("No card matches that.", `clear the filter to see all ${state.total.cards}`)
       : null;
   const made = newCard(popup, gallery ? "otk-tile otk-tile--new" : "otk-charrow otk-charrow--new");
   box.replaceChildren(...(none ? [none] : []), ...items, made);
-  if (!state.query) {
-    for (const each of items) each.draggable = true;
-    reorderable(box, items, _CARD, (order, from) => moveCard(popup, cards, order, from));
-  }
+  for (const each of items) each.draggable = !state.query;
+  // a face kept from an unfiltered draw drops its drag wiring under a filter
+  if (state.query) wiring(box);
+  else reorderable(box, items, _CARD, (order, from) => moveCard(popup, cards, order, from));
+}
+
+function samePictures(was, card) {
+  // Whether a card's pictures stand as they did: the same files, in order.
+  return (
+    was.pictures.length === card.pictures.length &&
+    was.pictures.every((picture, at) => picture.file === card.pictures[at].file)
+  );
+}
+
+function setFace(face, card) {
+  /* A tile's or a row's text set where it stands — the name, the tagline,
+     the stories it is in, its tick — its picture left as it is. */
+  face.setAttribute("aria-label", card.name);
+  $(".otk-tile__name", face).textContent = card.name;
+  $(".otk-tile__tag", face).textContent = card.tagline;
+  $(".otk-tile__meta", face).textContent = meta(card);
+  $(".otk-tick", face)?.setAttribute("aria-checked", String(state.picked.includes(card.id)));
 }
 
 async function moveCard(popup, cards, order, from) {
@@ -574,7 +646,7 @@ function newCard(popup, className) {
   choose.type = "button";
   choose.onclick = guard(async (event) => {
     event.stopPropagation(); // the file, not a card by hand
-    await importCards(popup, await pickFiles(".png,.json"));
+    await importCards(popup, await pickFiles(".png,.json,image/*"));
   });
   box.append(
     span("otk-tile--new__plus", "+"),
@@ -626,7 +698,8 @@ function dropsOn(target, type, effect, onDrop) {
 async function importCards(popup, files) {
   /* Card files into the codex, each as it is — renamed, if at all, once it
      is there: one the codex holds already answers its card, any other is
-     made a card of its own, last in the order. One at a time, the first
+     made a card of its own, last in the order, and a picture that holds
+     no card a blank one, the picture its portrait. One at a time, the first
      refused stopping the rest and saying why; the panel says the last
      answer. */
   if (!files.length) return;
@@ -845,14 +918,39 @@ async function openCard(popup, cardId, { tab = "card", storyId = null, naming = 
      tab — pictures, fields, the stories it is in — and its Journals tab,
      a story's entries at a time. `naming`, its name open in its editor,
      selected whole: a card just made, to be named. */
-  const card = await api.cards.get(cardId);
+  const [card, app] = await Promise.all([api.cards.get(cardId), api.app.get()]);
   if (card.refused) {
     if (popup.open) report(card.notice);
     return card;
   }
   const sheet = sheetOf("card");
   const opening = !sheet.open;
+  /* Drawn again where it stands — the same card, still open — its
+     pictures are kept as they are where the card's stand as they did, so
+     none loads again, and the columns keep their scroll. */
+  const again = !opening && state.shown === card.id;
+  const shownPictures = again ? $(".otk-pics", sheet) : null;
+  const keptPictures =
+    shownPictures?._card && samePictures(shownPictures._card, card) ? shownPictures : null;
+  const scrolled = again ? $$(_SCROLLERS, sheet).map((scroller) => scroller.scrollTop) : [];
   closeSheets(sheet);
+  // A generation's history is the open window's, and one card's.
+  if (state.generations?.cardId !== card.id) state.generations = null;
+  state.shown = card.id;
+  state.canSee = app.model?.capabilities?.vision === true;
+  if (opening) {
+    asksBeforeClosing(sheet, () => mayCloseCard(popup));
+    sheet.addEventListener(
+      "close",
+      () => {
+        // a generation still running is given up with its window
+        if (state.generating !== null) api.cards.generation.delete(state.generating).catch(() => {});
+        state.shown = null;
+        state.generations = null;
+      },
+      { once: true },
+    );
+  }
   sheet.setAttribute("aria-label", card.name);
 
   const head = element("div", "otk-sheet__head");
@@ -874,7 +972,7 @@ async function openCard(popup, cardId, { tab = "card", storyId = null, naming = 
 
   const body = element("div", "otk-sheet__body");
   body.dataset.pane = "card";
-  body.append(pictures(popup, card), fields(popup, card));
+  body.append(keptPictures ?? pictures(popup, card), fields(popup, card));
 
   const journals = element("div", "otk-sheet__journals");
   journals.dataset.pane = "journals";
@@ -910,6 +1008,7 @@ async function openCard(popup, cardId, { tab = "card", storyId = null, naming = 
   // Opened at its top: the window is one element, and a browser keeps the
   // scroll a closed element had, and scrolls to what opening focused.
   if (opening) for (const scroller of [sheet, ...$$(_SCROLLERS, sheet)]) scroller.scrollTop = 0;
+  else if (again) $$(_SCROLLERS, sheet).forEach((scroller, at) => (scroller.scrollTop = scrolled[at] ?? 0));
   /* The name's verbs go under it, at its end — or after it, where under it
      they would reach over the tabs (16px kept clear of them). Measured
      against the name itself, which a row with the verbs after it widens
@@ -939,10 +1038,231 @@ async function saveCard(popup, card, fields) {
   const answer = await api.cards.update(card.id, fields);
   if (!answer.refused) {
     Object.assign(card, answer.value);
+    // a hand edit of a generated field changes the version it stands at
+    const versions = state.generations;
+    if (versions?.cardId === card.id && _GENERATED.some((field) => field in fields)) {
+      versions.states[versions.at] = generatedFields(card);
+    }
     await redraw(popup, answer);
     sheetOf("card").setAttribute("aria-label", card.name);
   }
   return answer;
+}
+
+// ---------- a card written from its pictures ----------
+
+function generationBar(popup, card) {
+  /* The fields' bar, over them: its label; once there is a first
+     generation, the versions — the original and each run, a hand edit
+     changing the one it is made on — the arrows stepping through them and
+     a label naming which the fields now show; and Generate from picture,
+     off while the model in use cannot see or the card has no picture —
+     why, over the bar, since an off button takes no pointer. While the
+     model writes the button is Cancel, its size kept — both captions in
+     it, the stylesheet showing one — and the time runs where the versions
+     stand. */
+  const bar = element("div", "otk-gen");
+  const busy = state.generating === card.id;
+  if (busy) bar.dataset.busy = "";
+  const reason = !state.canSee ? _CANNOT_SEE : card.pictures.length ? "" : _NO_PICTURE;
+  bar.title = reason;
+  const steps = element("span", "otk-gen__steps");
+  const versions = state.generations?.cardId === card.id ? state.generations : null;
+  steps.hidden = !versions || busy;
+  if (versions) {
+    steps.append(
+      versionStep("Previous version", _PREVIOUS, busy || versions.at === 0, () =>
+        stepGeneration(popup, card, -1),
+      ),
+      versionLabel(versions),
+      versionStep("Next version", _NEXT, busy || versions.at === versions.states.length - 1, () =>
+        stepGeneration(popup, card, 1),
+      ),
+    );
+  }
+  const go = actionButton("", {
+    kind: "otk-swap otk-gen__go",
+    off: !busy && Boolean(reason),
+    onclick: guard(() => (busy ? cancelGeneration(card) : generate(popup, card))),
+  });
+  go.replaceChildren(span("otk-swap__idle", "Generate from picture"), span("otk-swap__busy", "Cancel"));
+  bar.append(span("otk-gen__label", "fields"), steps);
+  if (busy) bar.append(span("otk-gen__elapsed", elapsed(state.generatingSince)));
+  bar.append(go);
+  return bar;
+}
+
+function elapsed(since) {
+  // A generation's time so far, as m:ss.
+  const seconds = Math.floor((performance.now() - since) / 1000);
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+async function cancelGeneration(card) {
+  /* The generation given up — nothing written — the sentence said in the
+     card's foot; the generation's own answer, its refusal, then said
+     nowhere. */
+  state.cancelled = true;
+  const answer = await api.cards.generation.delete(card.id);
+  footnote(sheetOf("card"), answer.notice, Boolean(answer.refused));
+}
+
+function versionStep(label, paths, off, onclick) {
+  // One of the versions' arrows: an icon named for a screen reader.
+  const button = element("button", "otk-gen__step");
+  button.type = "button";
+  button.disabled = off;
+  button.setAttribute("aria-label", label);
+  button.title = label;
+  const icon = svgElement("svg", { width: "16", height: "16", viewBox: "0 0 24 24", "aria-hidden": "true" });
+  icon.append(...paths.map((d) => svgElement("path", { d })));
+  button.append(icon);
+  button.onclick = guard(onclick);
+  return button;
+}
+
+function drawGenerationBar(popup, card) {
+  // The bar alone drawn again where it stands: the rest of the window, its
+  // scroll and an editor open in it, as they were.
+  $(".otk-gen", sheetOf("card"))?.replaceWith(generationBar(popup, card));
+}
+
+async function generate(popup, card) {
+  /* The card written by the model in use from its pictures, the bar busy
+     meanwhile, its time running: noted as a version — after the card as
+     it stood before, the first time — and the card drawn again, where the
+     window still shows it. */
+  const before = generatedFields(card);
+  state.generating = card.id;
+  state.generatingSince = performance.now();
+  state.cancelled = false;
+  drawGenerationBar(popup, card);
+  const clock = setInterval(() => {
+    const time = $(".otk-gen__elapsed", sheetOf("card"));
+    if (time) time.textContent = elapsed(state.generatingSince);
+  }, _CLOCK_MS);
+  let answer;
+  try {
+    answer = await api.cards.generation.create(card.id);
+  } finally {
+    clearInterval(clock);
+    state.generating = null;
+  }
+  if (state.shown !== card.id) return;
+  if (answer.refused) {
+    drawGenerationBar(popup, card);
+    if (state.cancelled) return; // the cancel said what happened
+  } else {
+    Object.assign(card, answer.value);
+    noteGeneration(card.id, before, generatedFields(card));
+    await openCard(popup, card.id);
+    showFace(popup, card);
+  }
+  footnote(sheetOf("card"), answer.notice, Boolean(answer.refused));
+}
+
+async function stepGeneration(popup, card, by) {
+  /* The previous version (-1) or the next (+1): the generated fields
+     written back as it holds them — those that differ alone, through the
+     card's own update — and the card drawn again, its foot quiet. */
+  const steps = state.generations;
+  const wanted = steps.states[steps.at + by];
+  const changes = Object.fromEntries(
+    Object.entries(wanted).filter(([field, value]) => card[field] !== value),
+  );
+  let answer = null;
+  if (Object.keys(changes).length) {
+    answer = await api.cards.update(card.id, changes);
+    if (answer.refused) {
+      report(answer.notice);
+      return;
+    }
+    Object.assign(card, answer.value);
+  }
+  steps.at += by;
+  await openCard(popup, card.id);
+  if (answer) showFace(popup, card);
+  // the bar names the version the card now stands at: the foot says nothing
+  footnote(sheetOf("card"), "");
+}
+
+function versionLabel(versions) {
+  /* The name of the version the fields show, as wide as the longest name
+     among the card's versions — fixed while the reader steps through
+     them, so the arrows on either side never move, and no wider, so they
+     stand close to it. */
+  const label = span("otk-gen__count", versionName(versions));
+  const names = versions.states.map((_, at) => versionName({ ...versions, at }));
+  label.style.minWidth = `${Math.max(...names.map((name) => name.length))}ch`;
+  return label;
+}
+
+function versionName(versions) {
+  // Which version the fields show: the original, or a generation —
+  // numbered where there are several.
+  if (versions.at === 0) return "original";
+  return versions.states.length > 2 ? `generated ${versions.at}` : "generated";
+}
+
+async function mayCloseCard(popup) {
+  /* Whether the card's window may be put down: at once, unless the card
+     stands at a generation — then the reader says whether to keep it
+     (Save), put the card back as it stood before the first generation
+     (Revert), or stay with it (Close, Esc), its versions still there. */
+  const versions = state.generations;
+  if (!versions || versions.cardId !== state.shown || versions.at === 0) return true;
+  if (state.asking) return false;
+  state.asking = true;
+  let choice;
+  try {
+    choice = await ask("keep-generated");
+  } finally {
+    state.asking = false;
+  }
+  if (choice === "save") return true;
+  if (choice !== "revert") return false;
+  const [original, standing] = [versions.states[0], versions.states[versions.at]];
+  const changes = Object.fromEntries(
+    Object.entries(original).filter(([field, value]) => standing[field] !== value),
+  );
+  if (!Object.keys(changes).length) return true;
+  const answer = await api.cards.update(versions.cardId, changes);
+  if (answer.refused) {
+    report(answer.notice);
+    return false;
+  }
+  showFace(popup, answer.value);
+  return true;
+}
+
+function noteGeneration(cardId, before, after) {
+  /* A generation, noted as a version at the end — every one kept,
+     whichever the card stood at — the versions opened with the card as
+     it stood `before`, the first time; the card stands at the new one. */
+  if (state.generations?.cardId !== cardId) {
+    state.generations = { cardId, states: [before], at: 0 };
+  }
+  const versions = state.generations;
+  versions.states = [...versions.states, after];
+  versions.at = versions.states.length - 1;
+}
+
+function showFace(popup, card) {
+  /* What the library behind the window shows of a card — its name and
+     tagline, on its tile and its row — set where they stand, without
+     asking for the list again: a generation and a step through the
+     versions change those alone. */
+  for (const view of ["gallery", "list"]) {
+    const face = state.faces[view].get(card.id);
+    if (!face) continue;
+    Object.assign(face.card, { name: card.name, aliases: card.aliases, tagline: card.tagline });
+    setFace(face.element, face.card);
+  }
+}
+
+function generatedFields(card) {
+  // The fields a generation writes, as the card holds them.
+  return Object.fromEntries(_GENERATED.map((field) => [field, card[field]]));
 }
 
 function pictures(popup, card) {
@@ -952,6 +1272,8 @@ function pictures(popup, card) {
      pictures the card holds — a write that changes them draws the card
      again — the one shown slid across for the next (`slideIn`). */
   const box = element("div", "otk-pics");
+  // what it was built for, so a redraw of the same card can keep it
+  box._card = card;
   const count = card.pictures.length;
   let at = 0;
   const main = element("div", "otk-pics__main");
@@ -1055,37 +1377,51 @@ function reorderable(container, items, type, reorder) {
     }
   };
   const carries = (event) => dragged && event.dataTransfer.types.includes(type);
+  // each item's listeners go with the container's wiring: an item kept
+  // across a redraw (`drawView`) is wired once, for the order it is in now
   for (const item of items) {
-    item.addEventListener("dragstart", (event) => {
-      event.dataTransfer.setData(type, String(items.indexOf(item)));
-      event.dataTransfer.effectAllowed = "move";
-      dragged = item;
-      item.classList.add("is-dragging");
-    });
-    item.addEventListener("dragend", () => {
-      item.classList.remove("is-dragging");
-      const order = [...container.children]
-        .filter((child) => items.includes(child))
-        .map((child) => items.indexOf(child));
-      const kept = dropped && order.some((index, at) => index !== settled[at]);
-      const from = items.indexOf(item);
-      dragged = null;
-      dropped = false;
-      if (kept) {
-        settled = order;
-        guard(() => reorder(order, from))();
-      } else container.prepend(...settled.map((index) => items[index]));
-    });
+    item.addEventListener(
+      "dragstart",
+      (event) => {
+        event.dataTransfer.setData(type, String(items.indexOf(item)));
+        event.dataTransfer.effectAllowed = "move";
+        dragged = item;
+        item.classList.add("is-dragging");
+      },
+      { signal },
+    );
+    item.addEventListener(
+      "dragend",
+      () => {
+        item.classList.remove("is-dragging");
+        const order = [...container.children]
+          .filter((child) => items.includes(child))
+          .map((child) => items.indexOf(child));
+        const kept = dropped && order.some((index, at) => index !== settled[at]);
+        const from = items.indexOf(item);
+        dragged = null;
+        dropped = false;
+        if (kept) {
+          settled = order;
+          guard(() => reorder(order, from))();
+        } else container.prepend(...settled.map((index) => items[index]));
+      },
+      { signal },
+    );
     // over another, it takes that one's place: after one that came after
     // it, before one that came before
-    item.addEventListener("dragover", (event) => {
-      if (!carries(event)) return;
-      event.preventDefault();
-      if (item === dragged || gliding.has(item)) return;
-      const places = [...container.children];
-      const later = places.indexOf(dragged) < places.indexOf(item);
-      making(() => (later ? item.after(dragged) : item.before(dragged)));
-    });
+    item.addEventListener(
+      "dragover",
+      (event) => {
+        if (!carries(event)) return;
+        event.preventDefault();
+        if (item === dragged || gliding.has(item)) return;
+        const places = [...container.children];
+        const later = places.indexOf(dragged) < places.indexOf(item);
+        making(() => (later ? item.after(dragged) : item.before(dragged)));
+      },
+      { signal },
+    );
   }
   // the container itself takes the drop, so a gap between items keeps it
   container.addEventListener(
@@ -1182,6 +1518,7 @@ function fields(popup, card) {
      row a door to its journals. */
   const box = element("div", "otk-sheet__fields");
   box.append(
+    generationBar(popup, card),
     fieldEditor("otk-reading__lede otk-sheet__tagline", "tagline", {
       text: card.tagline,
       line: true,
@@ -1541,7 +1878,7 @@ function navButton(className, name, way, onclick) {
 
 function closeButton(sheet) {
   // Esc puts a sheet down too, as it does every window: named as every close names it
-  const button = actionButton("Close ", { onclick: () => sheet.close() });
+  const button = actionButton("Close ", { onclick: () => putDown(sheet) });
   button.append(span("otk-btn__key", "esc"));
   return button;
 }

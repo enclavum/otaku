@@ -57,6 +57,14 @@ class TestImport:
         assert "name" not in data  # the row keeps it, and a rename changes the row
         assert data["file_name"] == "seraphina.png"
 
+    def test_a_bare_picture_is_refused_here_and_the_codex_left_alone(self, app: App) -> None:
+        # A picture alone makes a card in All characters only.
+        with pytest.raises(Refused):
+            app.api.stories.cards.create(
+                app.ensure_story(), data=CAT.read_bytes(), file_name="cat.jpg"
+            )
+        assert app.api.cards.list() == []
+
     def test_a_card_without_a_greeting_imports_the_block_alone(self, app: App) -> None:
         app.play(f"/card {MINIMAL}")
         rows = app.store.stories.get_messages(app.story_id)

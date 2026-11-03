@@ -1,21 +1,22 @@
 """The codex's character cards, as the page asks for them: the list and
-one card whole, a card made — by hand, from a card file the page uploads
-(vetted first with `validate_only`, nothing stored, then sent again to
-import: nothing waits on the server between the two), or from a story's
-character — corrected, deleted; a picture added, a card merged into
-another, and every story's character no card claims."""
+one card whole, a card made — by hand, from a card file or a picture the
+page uploads (vetted first with `validate_only`, nothing stored, then sent
+again to import: nothing waits on the server between the two), or from a
+story's character — corrected, deleted; a picture added, a card written by
+the model in use from its pictures, a card merged into another, and every
+story's character no card claims."""
 
 import base64
 from typing import Any
 
 from otaku.backend.api import UNCHANGED, Api, Unchanged
 from otaku.backend.codex.cards.schemas import RawFile
-from otaku.web.api._request import Ask, Created, Route, changed, plain
+from otaku.web.api._request import Ask, Created, Route, changed, plain, unqueued
 
 
 def _create(api: Api, ask: Ask) -> Any:
-    """A card made from what the body carries: `data` (a card file, as
-    base64) and the `file_name` it was picked as — vetted alone with
+    """A card made from what the body carries: `data` (a card file, or a
+    picture that holds none, as base64) and the `file_name` it was picked as — vetted alone with
     `?validate_only=true`, else imported, `reuse` naming the card the
     reader says it is; `story_id` and `character_id` — a story's
     character promoted, its copies in forked stories linked too where
@@ -111,6 +112,21 @@ def _add_picture(api: Api, ask: Ask) -> Any:
     return changed(api.cards.pictures.create(ask.id("card"), file=file))
 
 
+@unqueued
+def _generate(api: Api, ask: Ask) -> Any:
+    """The card written by the model in use from its pictures. Off the
+    app's thread: a model reading pictures for a minute holds nothing
+    else up."""
+    return changed(api.cards.generation.create(ask.id("card")))
+
+
+@unqueued
+def _cancel_generation(api: Api, ask: Ask) -> Any:
+    """The card's generation given up. Off the app's thread, so a reply
+    holding it never holds the cancel."""
+    return changed(api.cards.generation.delete(ask.id("card")))
+
+
 # ---------- the rows ----------
 
 
@@ -129,6 +145,8 @@ ROUTES: dict[tuple[str, str], Route] = {
     ("DELETE", "/api/cards/{card}/pictures/{name}"): lambda api, ask: changed(
         api.cards.pictures.delete(ask.id("card"), ask.params["name"])
     ),
+    ("POST", "/api/cards/{card}/generation"): _generate,
+    ("DELETE", "/api/cards/{card}/generation"): _cancel_generation,
     ("POST", "/api/cards/{card}/merges"): lambda api, ask: changed(
         api.cards.merges.create(ask.id("card"), into=ask.integer("into"))
     ),

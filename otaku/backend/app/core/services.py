@@ -83,6 +83,9 @@ class App:
     _launch_facts: "LaunchFacts"
     # The forced extraction passes asked for, the newest per story.
     _extraction_runs: dict[int, WorkerRun]
+    # The cards being written from their pictures, by card: what a cancel
+    # sets (`codex.cards.services.generate_card`).
+    _card_generations: dict[int, threading.Event]
     # Each story's discards since it last grew, newest last: what a revert
     # puts back (`backend.story.chain`). Memory only — a launch forgets them.
     _discards: dict[int, list["Discard"]]
@@ -121,6 +124,7 @@ class App:
         app._thread = AppThread()
         app._launch_facts = LaunchFacts()
         app._extraction_runs = {}
+        app._card_generations = {}
         app._discards = {}
         app._file_cache = {paths.config_file: (_file_key(paths.config_file), config)}
         app._search_index = None

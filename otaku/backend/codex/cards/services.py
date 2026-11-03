@@ -11,6 +11,12 @@ links. A card's fields are its `CharacterProfile`, kept as the TOML
 it shows of the stories it reads through the store, never through
 the story's services, which stand above it.
 
+A picture that holds no card comes into the codex as a blank card, the
+picture its portrait — the codex's door alone, never a story's — and a
+card's pictures are where the model in use writes it from: its tagline,
+description, personality, scenario and greeting, and its name while it
+is still `NEW_CARD_NAME` (`generate_card`).
+
 A card file is the codex's ALREADY when the digest of the card it holds —
 its fields as read, the file's name left out — is among a card's
 `digests`: the import makes nothing then and answers that card. A card
@@ -21,6 +27,7 @@ digest on it.
 
 import hashlib
 import json
+import threading
 import tomllib
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, fields, replace
@@ -28,9 +35,21 @@ from typing import Any
 
 from otaku.backend.app.core.services import App
 from otaku.backend.app.pictures.services import RawFile, read_picture, save
-from otaku.backend.errors import NO_SUCH_STORY, Conflict, Invalid, NotFound, Refused
-from otaku.backend.formats.cards import CardError, load_card
+from otaku.backend.errors import (
+    NO_MODEL_HINT,
+    NO_SUCH_STORY,
+    Conflict,
+    Invalid,
+    NotFound,
+    Refused,
+    Unavailable,
+)
+from otaku.backend.formats.cards import CardError, has_embedded_cards, load_card
 from otaku.context.cards import CharacterProfile
+from otaku.context.prompt import WirePicture, WireTurn
+from otaku.formatting import parse_json_object, render
+from otaku.providers import OpenAIClient, PicturesRide, ProviderError, Stats, Text
+from otaku.settings.state import ModelRef, ModelRole
 from otaku.store.files import Owner
 from otaku.store.ops.lore import CastListing
 from otaku.store.schema import Card, Character
@@ -48,6 +67,17 @@ NEW_CARD_NAME = "New card"
 
 _NO_SUCH_CARD = "No such card."
 _PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
+_UTF8_BOM = b"\xef\xbb\xbf"
+
+# What a generation writes, besides the name: the card's text as the
+# model reads a picture into it.
+_GENERATED = ("tagline", "description", "personality", "scenario", "greeting")
+# How a generation is asked: warm enough to invent what a picture leaves
+# open, and bounded, as the lore pass is, against a looping model.
+_GENERATION_PARAMS: dict[str, object] = {"temperature": 0.7, "max_tokens": 2000}
+_CANNOT_SEE = "The model in use cannot see pictures."
+_NO_PICTURE = "The card has no picture."
+_NO_GENERATION = "No generation is running."
 
 
 @dataclass(frozen=True)
@@ -299,11 +329,29 @@ def delete_card_picture(app: App, card_id: int, name: str) -> str:
 # ---------- a card file ----------
 
 
-def check_card_file(app: App, data: bytes, file_name: str, *, rename: str = "") -> CheckedCardFile:
+def check_card_file(
+    app: App,
+    data: bytes,
+    file_name: str,
+    *,
+    rename: str = "",
+    allow_bare_picture: bool = False,
+) -> CheckedCardFile:
     """A card file read for the codex, nothing stored: the card it holds
     and what reading it noted, whether it carries a picture, and the
-    cards the codex may already hold it as. Raises Refused for a file
-    that is no card."""
+    cards the codex may already hold it as — or, with
+    `allow_bare_picture`, a picture that holds no card as the blank card
+    it would make, the picture vetted by the one intake. Raises Refused
+    for a file that is no card, nor a picture where one is allowed."""
+    if allow_bare_picture and _is_bare_picture(data):
+        read_picture(RawFile(data, file_name))
+        return CheckedCardFile(
+            profile=CharacterProfile(name=_clean_name(rename) if rename.strip() else NEW_CARD_NAME),
+            notes=("no card in it: a blank card, the picture its portrait",),
+            has_picture=True,
+            same_card=None,
+            similar_cards=(),
+        )
     profile, notes = _read(data, file_name)
     same = app._store.cards.find_by_digest(_digest(profile))
     named = replace(profile, name=_clean_name(rename)) if rename.strip() else profile
@@ -324,16 +372,32 @@ def check_card_file(app: App, data: bytes, file_name: str, *, rename: str = "") 
 
 
 def import_card_file(
-    app: App, data: bytes, file_name: str, *, rename: str = "", reuse: int | None = None
+    app: App,
+    data: bytes,
+    file_name: str,
+    *,
+    rename: str = "",
+    reuse: int | None = None,
+    allow_bare_picture: bool = False,
 ) -> tuple[int, bool, str]:
     """A card file into the codex — the card it is there, whether it was
     made now, and the sentence. A file the codex holds already makes
     nothing; `reuse` names the card the reader says it is, which notes
     the file's digest. Otherwise a card is made — renamed where asked —
     and a PNG's picture kept as its portrait; a picture the intake
-    refuses leaves the card without one, and the sentence says so.
-    Raises Refused for a file that is no card, and a `reuse` the codex
-    does not hold."""
+    refuses leaves the card without one, and the sentence says so. With
+    `allow_bare_picture`, a picture that holds no card makes a blank card
+    — named as asked, else `NEW_CARD_NAME` — the picture its portrait.
+    Raises Refused for a file that is no card, nor a picture where one is
+    allowed, and a `reuse` the codex does not hold."""
+    if allow_bare_picture and _is_bare_picture(data):
+        picture = read_picture(RawFile(data, file_name))
+        name = _clean_name(rename) if rename.strip() else NEW_CARD_NAME
+        card_id, _ = create_card(app, profile=CharacterProfile(name=name))
+        app._store.cards.set_pictures(
+            card_id, [save(app._store.files, picture, Owner.CARD, card_id)]
+        )
+        return card_id, True, f"Added {name} to the codex, the picture its portrait."
     profile, notes = _read(data, file_name)
     digest = _digest(profile)
     same = app._store.cards.find_by_digest(digest)
@@ -356,6 +420,173 @@ def import_card_file(
                 card_id, [save(app._store.files, picture, Owner.CARD, card_id)]
             )
     return card_id, True, " · ".join(said) + "."
+
+
+def _is_bare_picture(data: bytes) -> bool:
+    """Whether a file is a picture that holds no card: a PNG without one,
+    or anything that is no JSON object, a byte-order mark before it or
+    not. What it is past that, the intake says."""
+    if data.startswith(_PNG_MAGIC):
+        return not has_embedded_cards(data)
+    return not data.removeprefix(_UTF8_BOM).lstrip().startswith(b"{")
+
+
+# ---------- a card written from its pictures ----------
+
+
+@dataclass(frozen=True)
+class _Generation:
+    """What a card's generation asks with, read on the app's thread: the
+    model in use and its client, the request — the prompt and every
+    picture of the card — how many pictures ride it, and what a cancel
+    sets."""
+
+    model: ModelRef
+    client: OpenAIClient
+    request: WireTurn
+    picture_count: int
+    cancel: threading.Event
+
+
+def generate_card(app: App, card_id: int) -> str:
+    """A card written by the model in use from its pictures — every one,
+    in order — and the prompt (`card_from_picture_prompt`): its tagline,
+    description, personality, scenario and greeting replaced, and its
+    name while it is still `NEW_CARD_NAME`; the sentence. Safe from any
+    thread, and slow on purpose: the card is read and written on the
+    app's thread (`App.run`), the model asked off it — until
+    `cancel_generation`, which cuts the ask and writes nothing. Raises
+    NotFound for a card the codex does not hold; Conflict while no model
+    is in use, the model cannot see pictures, the card has none or is
+    being written already, and for a generation cancelled; Unavailable
+    for what the engine refuses and an answer that is no card."""
+    asked = app.run(lambda: _generation(app, card_id))
+    try:
+        text, stats = _generated(asked)
+    finally:
+        app.run(lambda: app._card_generations.pop(card_id, None))
+    return app.run(lambda: _write_generated_card(app, card_id, asked, text, stats))
+
+
+def cancel_generation(app: App, card_id: int) -> str:
+    """A card's generation given up — the model's ask cut, nothing
+    written — and the sentence. Safe from any thread: it sets the run's
+    flag alone. Raises Conflict where none is running: one can finish
+    between the asking and this."""
+    cancel = app._card_generations.get(card_id)
+    if cancel is None:
+        raise Conflict(_NO_GENERATION)
+    cancel.set()
+    return "Generation cancelled."
+
+
+def _generation(app: App, card_id: int) -> _Generation:
+    """The generation's ask, read off the card and the model in use."""
+    card = get_card(app, card_id)
+    model = app._model(ModelRole.WRITING)
+    client = app._client(model)
+    if model is None or client is None:
+        raise Conflict(NO_MODEL_HINT)
+    if client.pictures_ride(model.name) is PicturesRide.NONE:
+        raise Conflict(_CANNOT_SEE)
+    found = (app._store.files.get(picture.file) for picture in card.pictures)
+    pictures = tuple(WirePicture(*file) for file in found if file is not None)
+    if not pictures:
+        raise Conflict(_NO_PICTURE)
+    if card_id in app._card_generations:
+        raise Conflict(f"{card.name} is being written already.")
+    # The name the reader gave stands, and the model writes the card
+    # around it; the placeholder is no name, so the model chooses one.
+    prompt = render(
+        app._prompts().card_from_picture_prompt,
+        name="" if card.name == NEW_CARD_NAME else card.name,
+    )
+    cancel = app._card_generations[card_id] = threading.Event()
+    return _Generation(
+        model,
+        client,
+        WireTurn(role="user", body=prompt, images=pictures),
+        len(pictures),
+        cancel,
+    )
+
+
+def _generated(asked: _Generation) -> tuple[str, Stats | None]:
+    """The model's answer, streamed and gathered, and what it cost —
+    without thinking, as the lore pass asks; cut where the run is
+    cancelled, a prefill in flight included."""
+    parts: list[str] = []
+    final: Stats | None = None
+    try:
+        stream = asked.client.completion.chat(
+            asked.model.name,
+            [asked.request],
+            dict(_GENERATION_PARAMS),
+            level="none",
+            purpose="card",
+            watched=False,
+            on_idle=lambda: not asked.cancel.is_set(),
+        )
+        try:
+            for chunk in stream:
+                if asked.cancel.is_set():
+                    break
+                if isinstance(chunk, Text):
+                    parts.append(chunk.text)
+                elif isinstance(chunk, Stats):
+                    final = chunk
+        finally:
+            close = getattr(stream, "close", None)
+            if callable(close):
+                close()
+    except ProviderError as e:
+        raise Unavailable(str(e)) from e
+    return "".join(parts), final
+
+
+def _write_generated_card(
+    app: App, card_id: int, asked: _Generation, text: str, stats: Stats | None
+) -> str:
+    """The answer written into the card, as it stands now — its name only
+    while it is still the placeholder, a tagline kept to one line — what
+    it cost recorded; the sentence. A cancelled run records what it cost
+    and writes nothing."""
+    if stats is not None:
+        app._store.usage.record(
+            asked.client.config.name,
+            asked.model.name,
+            "card",
+            prompt_tokens=stats.prompt_tokens,
+            completion_tokens=stats.completion_tokens,
+            cached_tokens=stats.cached_tokens,
+            duration_seconds=stats.total_seconds,
+        )
+    if asked.cancel.is_set():
+        raise Conflict("The generation was cancelled.")
+    try:
+        answer = parse_json_object(text)
+    except ValueError as e:
+        raise Unavailable(f"The model's answer was no card: {e}.") from e
+    written = {
+        field: value.strip()
+        for field in _GENERATED
+        if isinstance(value := answer.get(field), str) and value.strip()
+    }
+    card = get_card(app, card_id)
+    name = answer.get("name")
+    renamed = card.name == NEW_CARD_NAME and isinstance(name, str) and bool(name.strip())
+    if not written and not renamed:
+        raise Unavailable("The model's answer was no card.")
+    tagline = written.pop("tagline", None)
+    update_card(
+        app,
+        card_id,
+        name=name if renamed and isinstance(name, str) else None,
+        tagline=" ".join(tagline.split()) if tagline is not None else None,
+        changes=written or None,
+    )
+    count = asked.picture_count
+    return f"Generated from {'its picture' if count == 1 else f'its {count} pictures'}."
 
 
 # ---------- a story's characters ----------

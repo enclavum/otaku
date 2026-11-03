@@ -1186,7 +1186,9 @@ paths:
         name: a file the codex holds already makes nothing and answers that
         card, `reuse` names the card the reader says it is (both `200`),
         and otherwise a card is made, a PNG's picture its portrait (`201`);
-        with `validate_only` the file is read and vetted and nothing stored
+        a picture that holds no card makes a blank card, the picture its
+        portrait (`201`); with `validate_only` the file is read and vetted
+        and nothing stored
         — the cards the codex may hold it as already. A story's character —
         `story_id` and `character_id`: promoted, its name, aliases and
         fields, and linked to it, its copies in forked stories too with
@@ -1206,7 +1208,7 @@ paths:
                   type: object
                   required: [data, file_name]
                   properties:
-                    data: { type: string, format: byte, description: "The card file — PNG or JSON — base64." }
+                    data: { type: string, format: byte, description: "The card file — PNG or JSON — or a picture that holds no card, base64." }
                     file_name: { type: string }
                     rename: { type: string, description: 'The name the card is made under; "" its own.' }
                     reuse: { type: integer, description: "The card the reader says the file is: nothing is made, and the file is noted as that card's." }
@@ -1377,6 +1379,45 @@ paths:
                 allOf:
                   - $ref: "#/components/schemas/Changed"
                   - properties: { value: { $ref: "#/components/schemas/Card" } }
+
+  /api/cards/{card}/generation:
+    parameters:
+      - $ref: "#/components/parameters/Card"
+    post:
+      operationId: generateCard
+      tags: [Codex]
+      summary: Write a card from its pictures
+      description: |
+        The card written by the model in use from its pictures, every one
+        riding the request: its tagline, description, personality, scenario
+        and greeting replaced, and its name while it is still "New card".
+        Answered off the app's thread: a model reading pictures holds no
+        other request up. Refused (409) while no model is in use, the model
+        cannot see pictures, the card has none or is being written already,
+        and for a generation cancelled meanwhile; what the engine refuses,
+        and an answer that is no card, is a 502.
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: The card as it now stands.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Changed"
+                  - properties: { value: { $ref: "#/components/schemas/Card" } }
+    delete:
+      operationId: deleteCardGeneration
+      tags: [Codex]
+      summary: Give up a card's generation
+      description: The model's ask cut and nothing written; the generation's own request is refused (409). Answered off the app's thread. Refused (409) where none is running.
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: The sentence; no value.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Changed" }
 
   /api/cards/{card}/merges:
     parameters:

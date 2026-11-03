@@ -187,6 +187,8 @@ const ROUTES = {
     return changed(store.addCardPicture(num(p.card)));
   },
   "DELETE /api/cards/{card}/pictures/{name}": (p) => changed(store.removeCardPicture(num(p.card), p.name)),
+  "POST /api/cards/{card}/generation": (p) => changed(store.generateCard(num(p.card))),
+  "DELETE /api/cards/{card}/generation": (p) => changed(store.cancelGeneration(num(p.card))),
   "POST /api/cards/{card}/merges": (p, q, b) => changed(store.mergeCard(num(p.card), integer(b, "into"))),
   // a stored picture: a sample message's or a sample card's, shipped with
   // the fixtures and served as the product serves a stored file — a name
@@ -573,6 +575,16 @@ async function _loadCard(bytes, fileName) {
 
 /** A card FILE read: the card it holds, what reading it noted, and
     whether it carries a picture — or the product's refusal. */
+/* Whether a file is a picture that holds no card, as the codex tells
+   (`codex.cards.services._is_bare_picture`): a PNG embedding none, or
+   anything that is no JSON object, a byte-order mark before it or not. */
+async function _isBarePicture(bytes) {
+  if (_PNG_MAGIC.every((value, i) => bytes[i] === value)) return !(await _pngCandidates(bytes)).length;
+  let at = bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf ? 3 : 0;
+  while (at < bytes.length && [0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x20].includes(bytes[at])) at += 1;
+  return bytes[at] !== 0x7b;
+}
+
 async function readCardFile(data, fileName) {
   const bytes = _b64bytes(data);
   try {
@@ -586,10 +598,16 @@ async function readCardFile(data, fileName) {
 
 /* A card made three ways, as `web.api.codex.cards` makes it: a card file
    (vetted alone with `?validate_only=true`; held already, or `reuse`d,
-   it makes nothing and answers 200), a story's character promoted, or a
-   name and its fields. */
+   it makes nothing and answers 200) or a picture that holds none — vetted
+   as the product vets it, made nowhere: the demo keeps no picture — a
+   story's character promoted, or a name and its fields. */
 async function makeCard(query, body) {
   if ("data" in body) {
+    if (await _isBarePicture(_b64bytes(need(body, "data")))) {
+      need(body, "file_name");
+      if (query.get("validate_only") === "true") return store.checkPicture(text(body, "rename"));
+      return store.importPicture();
+    }
     const { found, notes, hasPicture } = await readCardFile(need(body, "data"), need(body, "file_name"));
     if (query.get("validate_only") === "true") return store.checkCardFile(found, notes, hasPicture, text(body, "rename"));
     const reuse = body.reuse == null ? null : integer(body, "reuse");

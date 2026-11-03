@@ -1134,9 +1134,11 @@ textarea.otk-editable { margin: 0; padding: 0; border: 0; }
 /* The microphone: the clip's twin among the verbs, shown while a model is
    saved for dictation; a click starts a recording and another stops it.
    While one runs it takes the danger ink and its capsule fills in, so on
-   and off differ by shape, not only colour. */
+   and off differ by shape, not only colour; just stopped (`.is-resting`)
+   it keeps its ink under the pointer or the focus, until either leaves. */
 .otk-mic-btn:not([hidden]) { flex: none; align-self: stretch; display: inline-flex; align-items: center; justify-content: center; width: 36px; padding: 0; color: var(--otk-ink); cursor: pointer; }
 .otk-mic-btn:hover, .otk-mic-btn:focus-visible { color: var(--otk-accent); }
+.otk-mic-btn.is-resting { color: var(--otk-ink); }
 .otk-mic-btn.is-recording { color: var(--otk-danger); }
 .otk-mic-btn.is-recording .otk-mic-btn__capsule { fill: currentColor; }
 /* tight against the glyph before it, as Revert stands against the clip */
@@ -2130,6 +2132,50 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 .otk-sheet__body > .otk-pics { min-height: 0; overflow-y: auto; padding-bottom: 20px; }
 .otk-sheet__body > .otk-sheet__fields { min-height: 0; overflow-y: auto; padding: 0 24px 20px 0; scrollbar-gutter: stable; }
 .otk-sheet__fields { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+/* A card's text written from its pictures: the fields' bar over the
+   fields (`.otk-gen`) — a label, the versions with their counter once
+   there is a first, and Generate from picture at its end — 12px above it
+   too, so it stays centred between the tab rule and its own. */
+.otk-sheet--card .otk-sheet__body { padding-top: 12px; }
+.otk-gen { display: flex; align-items: center; gap: 14px; padding-bottom: 12px; border-bottom: var(--otk-hair) solid var(--otk-line-soft); }
+.otk-gen__steps[hidden] { display: none; }
+.otk-gen__steps[hidden] + .otk-gen__go { margin-left: auto; }
+/* nudged 1px so the caps share a baseline with the counter and button text */
+.otk-gen__label { position: relative; top: 1px; line-height: 1; font-family: var(--otk-font-mono); font-size: var(--otk-size-label); letter-spacing: 0.1em; text-transform: uppercase; color: var(--otk-faint); }
+.otk-gen__steps { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+.otk-gen__step { width: 22px; height: 28px; display: flex; align-items: center; justify-content: center; padding: 0; line-height: 0; color: var(--otk-muted); }
+.otk-gen__step svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.otk-gen__step:hover { color: var(--otk-danger); }
+.otk-gen__step:disabled, .otk-gen__step[aria-disabled="true"] { color: var(--otk-line); pointer-events: none; }
+.otk-gen__count { text-align: center; font-family: var(--otk-font-mono); font-size: var(--otk-size-mono-sm); color: var(--otk-muted); font-variant-numeric: tabular-nums; }
+/* A button that reads otherwise while a run is going keeps its width:
+   both captions stand in one cell, the one not in force hidden — Cancel
+   where an ancestor is `data-busy`. */
+.otk-swap { display: inline-grid; grid-template-columns: minmax(0, max-content); justify-items: stretch; text-align: center; }
+.otk-swap > span { grid-area: 1 / 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.otk-swap__busy { visibility: hidden; }
+[data-busy] .otk-swap__idle { visibility: hidden; }
+[data-busy] .otk-swap__busy { visibility: visible; }
+/* On a narrow window the bar keeps to one line: Generate from picture
+   gives way, its caption cut short with an ellipsis, while the label, the
+   versions and the time keep their width. */
+.otk-gen > * { flex: none; }
+.otk-gen > .otk-gen__go { flex: 0 1 auto; min-width: 0; }
+/* While a run is going the run's time stands where the versions do, and a
+   bright segment runs along the bar's rule: the line is exactly as wide
+   as the bar and the segment its background, swept from just off one end
+   to just off the other — a background never overflows its box, so the
+   fields' column never scrolls sideways for it. (A 30% segment sits at
+   70% × the position: -42.86% starts it a segment's width out on the
+   left, 142.86% ends it out on the right.) */
+@keyframes otk-sweep { from { background-position: -42.86% 0; } to { background-position: 142.86% 0; } }
+.otk-gen { position: relative; }
+.otk-gen__elapsed { margin-left: auto; min-width: 4ch; padding-right: 8px; text-align: right; font-family: var(--otk-font-mono); font-size: var(--otk-size-mono-sm); color: var(--otk-accent-ink); font-variant-numeric: tabular-nums; }
+.otk-gen[data-busy]::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px;
+  background: linear-gradient(var(--otk-accent), var(--otk-accent)) no-repeat 0 0 / 30% 100%;
+  animation: otk-sweep 1.5s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
 .otk-sheet__tagline { font-style: italic; color: var(--otk-muted); }
 .otk-sheet__section { padding-bottom: 5px; border-bottom: var(--otk-hair) solid var(--otk-line-soft); }
 .otk-sheet__foot { flex: none; display: flex; align-items: center; gap: 8px; padding: 12px 24px; border-top: var(--otk-hair) solid var(--otk-line-soft); background: var(--otk-band); }

@@ -1817,6 +1817,39 @@ export function checkCardFile(found, notes, hasPicture, rename = "") {
   };
 }
 
+/** A picture that holds no card, read for the codex (`CardCheck`): the
+    blank card it would make, as `codex.cards.services.check_card_file`
+    answers. */
+export function checkPicture(rename = "") {
+  return {
+    name: rename.trim() ? cleanName(rename) : NEW_CARD_NAME,
+    notes: ["no card in it: a blank card, the picture its portrait"],
+    has_picture: true,
+    same_card: null,
+    similar_cards: [],
+  };
+}
+
+/** A picture that holds no card into the codex: the demo keeps no
+    picture, so it makes no card of one. */
+export function importPicture() {
+  throw conflict(NOT_IN_DEMO("A card made from a picture"));
+}
+
+/** A card written from its pictures (`generate_card`): the demo's model
+    sees none, so it is refused as the product refuses such a model. */
+export function generateCard(id) {
+  cardRow(id);
+  throw conflict("The model in use cannot see pictures.");
+}
+
+/** A card's generation given up (`cancel_generation`): none ever runs
+    in the demo. */
+export function cancelGeneration(id) {
+  cardRow(id);
+  throw conflict("No generation is running.");
+}
+
 /** A card file into the codex (`CardImport`): one the codex holds already
     makes nothing, `reuse` names the card the reader says it is; else a
     card is made — its picture, where the file has one, not in the demo. */

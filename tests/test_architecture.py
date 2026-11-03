@@ -537,6 +537,8 @@ class TestInterface:
             "ProvidersResource.list",
             "ExtractionResource.get",
             "DictationResource.create",
+            "CardGenerationResource.create",
+            "CardGenerationResource.delete",
         }
 
     def test_every_route_follows_its_call_path(self) -> None:

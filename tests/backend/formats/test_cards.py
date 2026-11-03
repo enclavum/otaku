@@ -15,7 +15,7 @@ import zlib
 
 import pytest
 
-from otaku.backend.formats.cards import CardError, load_card
+from otaku.backend.formats.cards import CardError, has_embedded_cards, load_card
 
 
 class TestLoadCard:
@@ -125,6 +125,18 @@ class TestLoadCard:
         payload = _v2(name="Elara", system_prompt="{{original}} Stay in {{char}}'s voice.")
         _, notes = load_card(_json(payload))
         assert notes == []
+
+
+class TestHasEmbeddedCards:
+    """Whether a PNG carries a card at all — one a chunk could be read
+    from, under either keyword — or is a picture alone."""
+
+    def test_a_png_with_a_card_has_one(self) -> None:
+        assert has_embedded_cards(_png(_text_chunk(b"chara", _v2(name="Elara"))))
+        assert has_embedded_cards(_png(_itxt_chunk(b"ccv3", _v2(name="Elara"))))
+
+    def test_a_png_without_one_is_a_picture_alone(self) -> None:
+        assert not has_embedded_cards(_png())
 
 
 class TestNormalization:

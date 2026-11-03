@@ -15,7 +15,7 @@
    - Bodies arrive verbatim. Nothing on this side rewrites the text. */
 
 import { api, login, whenUnauthorized } from "./js/api/index.js";
-import { closeAll, topmost } from "./js/kit/browser.js";
+import { closeAll, putDown, topmost } from "./js/kit/browser.js";
 import { editTurn, keepsScreen, openCodex, openTab, run as runCommand } from "./js/commands.js";
 import { showSignOut, signIn, signOut } from "./js/screens/login.js";
 import { draft, focusComposer, primeHistory, submit, wire as wireComposer } from "./js/composer.js";
@@ -190,7 +190,7 @@ function start() {
 
   for (const dialog of $$("dialog")) {
     dialog.addEventListener("cancel", (event) => event.preventDefault());
-    $(".otk-close", dialog)?.addEventListener("click", () => dialog.close());
+    $(".otk-close", dialog)?.addEventListener("click", () => putDown(dialog));
     /* Leaving a screen puts the reader back where the story is written.
        Only when nothing else is up: closing a dialog that was opened
        over a panel returns to the panel, not past it to the page. */
@@ -212,7 +212,7 @@ function start() {
       pressedOutside = false;
       // A fixed dialog has nothing behind it to fall back to.
       if (!outside || dialog.hasAttribute("data-fixed")) return;
-      if (!$(".otk-edit[data-editing]", dialog)) dialog.close();
+      if (!$(".otk-edit[data-editing]", dialog)) putDown(dialog);
     });
   }
 
@@ -286,7 +286,7 @@ function onKey(event) {
     /* The depths inside a popup — a filter, a field editor, a confirm —
        claim Esc before it reaches here. What is left is
        the outermost level: the popup itself. */
-    dialog.close();
+    putDown(dialog);
     return;
   }
 }

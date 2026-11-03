@@ -1,13 +1,15 @@
 """The codex's character cards as a frontend reaches them
 (`CardsResource`): listed, in the reader's order, and read; made by
-hand, from a card file — or, asked to validate only, the file read and
-vetted and nothing stored, with the cards the codex may already hold it
-as — or from a story's character, promoted and linked to it, its copies
-in forked stories with it where asked (and vetted first, to count them),
-each going last; corrected, moved in the order, its pictures ordered and removed;
-deleted. A picture added to a card (`CardPicturesResource`),
-a card folded into another (`CardMergesResource`), and every story's
-character no card claims (`UnlinkedResource`). The work is the domain's
+hand, from a card file or a picture that holds none — or, asked to
+validate only, the file read and vetted and nothing stored, with the
+cards the codex may already hold it as — or from a story's character,
+promoted and linked to it, its copies in forked stories with it where
+asked (and vetted first, to count them), each going last; corrected,
+moved in the order, its pictures ordered and removed; deleted. A picture
+added to a card (`CardPicturesResource`), a card written by the model in
+use from its pictures (`CardGenerationResource`), a card folded into
+another (`CardMergesResource`), and every story's character no card
+claims (`UnlinkedResource`). The work is the domain's
 (`codex.cards.services`); this answers what stands after it.
 """
 
@@ -17,7 +19,7 @@ from typing import Literal, overload
 
 from otaku.backend.app.core.services import App
 from otaku.backend.app.pictures.services import RawFile
-from otaku.backend.base import UNCHANGED, Changed, Resource, Unchanged
+from otaku.backend.base import UNCHANGED, Changed, Resource, Unchanged, any_thread
 from otaku.backend.codex.cards import services as domain_cards
 from otaku.backend.codex.cards.schemas import (
     Card,
@@ -39,6 +41,7 @@ class CardsResource(Resource):
     def __init__(self, app: App) -> None:
         super().__init__(app)
         self.pictures = CardPicturesResource(app)
+        self.generation = CardGenerationResource(app)
         self.merges = CardMergesResource(app)
         self.unlinked = UnlinkedResource(app)
 
@@ -134,9 +137,10 @@ class CardsResource(Resource):
         as; `rename` overrides its own name): a file the codex holds
         already makes nothing and answers that card, `reuse` names the
         card the reader says it is, and otherwise a card is made, a PNG's
-        picture its portrait (`CardImport.made` says which) — or, with
-        `validate_only`, the file read and vetted and nothing stored
-        (`CardCheck`). From a story's character (`story_id`,
+        picture its portrait (`CardImport.made` says which); a picture
+        that holds no card makes a blank card, the picture its portrait —
+        or, with `validate_only`, the file read and vetted and nothing
+        stored (`CardCheck`). From a story's character (`story_id`,
         `character_id`): promoted — its name, aliases and fields — and
         linked to it, and with `with_copies` to its copies in the stories forks
         join its own to — or, with `validate_only`, vetted and nothing
@@ -154,7 +158,9 @@ class CardsResource(Resource):
             return Changed(self.get(card_id), said)
         if data is not None:
             if validate_only:
-                checked = domain_cards.check_card_file(app, data, file_name, rename=rename)
+                checked = domain_cards.check_card_file(
+                    app, data, file_name, rename=rename, allow_bare_picture=True
+                )
                 story_counts = domain_cards.get_story_counts(app)
                 return CardCheck(
                     name=checked.profile.name,
@@ -170,7 +176,7 @@ class CardsResource(Resource):
                     ),
                 )
             card_id, made, said = domain_cards.import_card_file(
-                app, data, file_name, rename=rename, reuse=reuse
+                app, data, file_name, rename=rename, reuse=reuse, allow_bare_picture=True
             )
             return Changed(CardImport(card=self.get(card_id), made=made), said)
         if validate_only:
@@ -290,6 +296,35 @@ class CardPicturesResource(Resource):
         picture that is not the card's."""
         said = domain_cards.delete_card_picture(self._app, card_id, name)
         return Changed(CardsResource(self._app).get(card_id), said)
+
+
+class CardGenerationResource(Resource):
+    """/cards/{card}/generation — a card written by the model in use from
+    its pictures, and that writing given up."""
+
+    @any_thread
+    def create(self, card_id: int) -> Changed[Card]:
+        """The card written from its pictures — every one — its tagline,
+        description, personality, scenario and greeting replaced, its name
+        while it is still `NEW_CARD_NAME`. Safe from any thread, and slow
+        on purpose: the model is asked off the app's thread, the card read
+        and written on it. Raises NotFound for a card the codex does not
+        hold; Conflict while no model is in use, the model cannot see
+        pictures, or the card has none; Unavailable for what the engine
+        refuses and an answer that is no card."""
+        app = self._app
+        said = domain_cards.generate_card(app, card_id)
+        return Changed(
+            app.run(lambda: _card(app, domain_cards.get_card(app, card_id)), reading=True), said
+        )
+
+    @any_thread
+    def delete(self, card_id: int) -> Changed[None]:
+        """The card's generation given up — the model's ask cut, nothing
+        written. Safe from any thread: it sets the run's flag alone, so a
+        reply holding the app's thread never holds it. Raises Conflict
+        where none is running."""
+        return Changed(None, domain_cards.cancel_generation(self._app, card_id))
 
 
 class CardMergesResource(Resource):

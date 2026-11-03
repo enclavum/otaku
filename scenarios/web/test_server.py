@@ -17,6 +17,7 @@ import urllib.error
 import urllib.request
 from http.client import HTTPConnection
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
 import pytest
@@ -1539,6 +1540,61 @@ class TestTheCodexOverTheWire:
         assert page.status(path, method="PATCH", data=bad) == 400
 
 
+class TestCardGenerationOverTheWire:
+    """A bare picture made a blank card over the wire, and a card written
+    from its pictures and given up — both off the app's thread, so a
+    model writing a card holds no other request up."""
+
+    def test_a_bare_picture_is_made_a_blank_card(self, page: Page) -> None:
+        status, _, answer = page.answer(
+            "POST",
+            "/api/cards",
+            {"data": base64.b64encode(CAT.read_bytes()).decode(), "file_name": "cat.jpg"},
+        )
+        assert status == 201
+        made = answer["value"]
+        assert made["made"]
+        assert (made["card"]["name"], len(made["card"]["pictures"])) == ("New card", 1)
+
+    def test_a_model_that_cannot_see_and_a_cancel_of_nothing_are_refused(self, page: Page) -> None:
+        # The generic provider says nothing of what its model sees.
+        card = _bare_card(page)
+        page.refused("POST", f"/api/cards/{card}/generation")
+        page.refused("DELETE", f"/api/cards/{card}/generation")
+
+    def test_a_card_being_written_holds_up_nothing_and_its_cancel_cuts_it(
+        self, server: ModelServer, tmp_path: Path
+    ) -> None:
+        server.window = 8192
+        server.props = {"modalities": {"vision": True, "audio": False}}
+        server.script = lambda body: (
+            '{"description": "A grey cat."}'
+            if _has_pictures(body)
+            else scripted.default_script(body)
+        )
+        server.chunk_delay = 0.5
+        with serving(server, tmp_path, provider="llamacpp") as page:
+            card = _bare_card(page)
+            answered: dict[str, Any] = {}
+            writing = threading.Thread(
+                target=lambda: answered.update(
+                    generation=page.answer("POST", f"/api/cards/{card}/generation")
+                )
+            )
+            writing.start()
+            try:
+                time.sleep(0.3)
+                assert writing.is_alive(), "the card was written — the story proves nothing"
+                started = time.monotonic()
+                assert page.patch("/api/app", {"models": {"extraction": None}})["notice"]
+                assert page.delete(f"/api/cards/{card}/generation")["notice"]
+                assert time.monotonic() - started < 1.0
+            finally:
+                writing.join(timeout=30)
+            assert answered["generation"][0] == 409
+            assert page.get(f"/api/cards/{card}")["description"] == ""
+
+
 class TestTheNovelOverTheWire:
     """The page's half of the novel, over a served omlx whose model is
     named a plain-text model by hand: the facts that show the novel
@@ -1736,6 +1792,20 @@ def _hang_up_in_the_wait(page: Page, server: ModelServer) -> None:
     page.patch("/api/settings", {"verbose": False})  # a write: the thread in turn
     assert time.monotonic() - started < 1.5  # never the server's three seconds
     server.headers_delay = 0.0
+
+
+def _bare_card(page: Page) -> int:
+    """A card made of a bare picture over the wire, by its id."""
+    body = {"data": base64.b64encode(CAT.read_bytes()).decode(), "file_name": "cat.jpg"}
+    return int(page.post("/api/cards", body)["value"]["card"]["id"])
+
+
+def _has_pictures(body: dict[str, Any]) -> bool:
+    """Whether a chat request's last message carries a picture."""
+    content = body["messages"][-1]["content"]
+    return isinstance(content, list) and any(
+        isinstance(part, dict) and part.get("type") == "image_url" for part in content
+    )
 
 
 def _watchers() -> int:

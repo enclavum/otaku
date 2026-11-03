@@ -7,6 +7,9 @@ See also the tentative roadmap: [ROADMAP.md](https://github.com/enclavum/otaku/b
 - Dictation, in both the web interface and the terminal. Choose a speech-to-text model in the model
   picker, then start dictation with the mic button in the web interface, or with Ctrl+G in the
   terminal. What you say is written into the prompt line, to edit before sending.
+- Character cards generated from pictures. Add a bare picture to the characters library, then
+  press "Generate from picture" in its card; the model writes the card from all of the card's
+  pictures. It needs a model that can see pictures.
 
 ## [0.9.0] - 2026-10-31
 

@@ -27,6 +27,19 @@ export function closeAll() {
   for (const dialog of $$("dialog[open]")) dialog.close();
 }
 
+/** What the reader's putting `dialog` down asks first — Esc, its scrim,
+    its Close (`putDown`): `asking` answers, the reader asked or not,
+    whether it may close. A close the page makes itself asks nothing. */
+export function asksBeforeClosing(dialog, asking) {
+  dialog._asking = asking;
+}
+
+/** `dialog` put down by the reader, where what it asks first lets it. */
+export async function putDown(dialog) {
+  if (dialog._asking && !(await dialog._asking())) return;
+  dialog.close();
+}
+
 export function footnote(popup, text, refused = false) {
   /* The footer's fact slot: the panel's standing fact, and what a WRITE
      answered with — carried into the redraw the write triggers, or the

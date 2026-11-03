@@ -62,7 +62,7 @@ from typing import Self
 from otaku.context import tools
 from otaku.context.prompt import WirePicture, WireTurn
 from otaku.context.syntax import OOC_FRAME, to_wire
-from otaku.formatting import format_duration, render
+from otaku.formatting import format_duration, parse_json_object, render
 from otaku.providers import (
     OpenAIClient,
     PicturesRide,
@@ -473,7 +473,7 @@ class Extractor:
             if self._cancel.is_set():
                 return False  # cancelled mid-stream
             raise ValueError("the reply was empty")
-        data = _parse_json(raw)
+        data = parse_json_object(raw)
         self._apply_scene(cast, data, span, current, report)
         report.scenes += 1
         return True
@@ -876,26 +876,6 @@ def numbered_chat(span: Sequence[Message]) -> str:
             text = f"{item.speaker}: {text}"
         lines.append(f"[{n}] {text}")
     return "\n".join(lines)
-
-
-def _parse_json(text: str) -> dict[str, object]:
-    """Parse the extraction reply: tolerate code fences and surrounding
-    prose by slicing from the first '{' to the last '}' — and JSON whose
-    syntax was typed with typographic double quotes (a small model
-    mirrors the story's own punctuation into `“summary”: “…”`) by
-    retrying with them straightened. Only the retry touches them: a reply
-    that parses keeps every curly quote INSIDE its values verbatim."""
-    start, end = text.find("{"), text.rfind("}")
-    if start < 0 or end <= start:
-        raise ValueError("no JSON object in reply")
-    sliced = text[start : end + 1]
-    try:
-        obj = json.loads(sliced)
-    except json.JSONDecodeError:
-        obj = json.loads(sliced.replace("“", '"').replace("”", '"'))
-    if not isinstance(obj, dict):
-        raise ValueError("extraction reply is not a JSON object")
-    return obj
 
 
 def _journals_block(current: dict[int, CharacterMemory], cast: _Cast) -> str:

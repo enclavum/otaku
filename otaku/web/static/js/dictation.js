@@ -191,6 +191,9 @@ function show(dictating) {
   if (dictating) footer.dataset.dictating = dictating;
   else delete footer.dataset.dictating;
   for (const button of document.querySelectorAll("[data-dictate]")) {
+    // just stopped, it rests in its ink under the pointer or the focus
+    // that stopped it, until either leaves
+    if (!listening && button.classList.contains("is-recording")) keepInk(button);
     button.classList.toggle("is-recording", listening);
   }
   if (listening) boxFocused = document.activeElement === $("#otk-msg");
@@ -199,6 +202,20 @@ function show(dictating) {
     boxFocused = false;
     focusComposer();
   }
+}
+
+/** A microphone just stopped, kept in its ink — `.is-resting` — until the
+    pointer leaves it or the focus does: the hover's accent there at once
+    would read as still on. */
+function keepInk(button) {
+  button.classList.add("is-resting");
+  const wake = () => {
+    button.classList.remove("is-resting");
+    button.removeEventListener("pointerleave", wake);
+    button.removeEventListener("blur", wake);
+  };
+  button.addEventListener("pointerleave", wake);
+  button.addEventListener("blur", wake);
 }
 
 /** The level, a frame at a time while it listens: each bar its band's

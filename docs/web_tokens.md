@@ -290,6 +290,7 @@ in classes, so a stylesheet can name it the same way the scripts do.
 | `data-layout="canvas"` / `"manuscript"` / `"chat"` | `.otk-app` | the look the open story is drawn in; on the canvas the story is typed in at its end, the composer standing below |
 | `data-dictating="true"` | `.otk-composer` | listening: `.otk-dictation` — a level of nine bars, a band of the voice's pitch each, low to high, scaled about its middle by how loud its band is, and the elapsed time — stands at the end of the writing line, which keeps what was typed; the microphone (`.otk-mic-btn`) is `.is-recording`, and the rest of the composer `inert` |
 | `data-dictating="transcribing"` | `.otk-composer` | after listening stops, until the text arrives: in the same place the level's nine bars turn `--otk-transcribe` grey, flat, with a single peak travelling across them left to right (`@keyframes otk-scan`), the recording's length beside them; then the attribute goes and the text is added after what was typed |
+| `data-busy` | `.otk-gen` | a card's text is being written from its pictures: Generate from picture reads Cancel at the same width (`.otk-swap`, its `__idle` and `__busy` captions), the run's time (`.otk-gen__elapsed`) stands where the versions do, and a segment sweeps along the bar's rule (`otk-sweep`) |
 | `data-playing` | `.otk-app` | a reply is arriving; the layout glyphs are inert meanwhile |
 | `data-open="true"` | `.otk-rail` | the contents, on a narrow window |
 | `data-view="list"` / `"small"` / `"mid"` / `"large"` | `.otk-chars` | All characters as rows, or as pictures at one of three tile sizes |
@@ -305,6 +306,7 @@ in classes, so a stylesheet can name it the same way the scripts do.
 | `.is-offline` | `.otk-app` | the server stopped answering |
 | `.is-loaded` / `.is-dim` | `.otk-row` | a model resident in memory, or not |
 | `.is-recording` | `.otk-mic-btn` | listening, until the next click, Enter or Esc; its capsule (`.otk-mic-btn__capsule`) filled in |
+| `.is-resting` | `.otk-mic-btn` | just stopped: it keeps its ink under the pointer or the focus that stopped it, until either leaves |
 | `.is-dragover` / `.is-filled` | `.otk-dropzone` | a file over the drop zone, and one dropped |
 | `.is-dragover` | `.otk-tile`, `.otk-charrow`, `.otk-pics` | a story character over a card or over new card, a card file over new card; pictures over a card's |
 | `.is-dragging` | `.otk-pics__thumb`, `.otk-tile`, `.otk-charrow` | a card's picture, or a card, being moved to another place |

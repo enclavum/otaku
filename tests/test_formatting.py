@@ -1,7 +1,10 @@
-"""Display formatting: paths, one-line previews, sizes, context windows."""
+"""Display formatting: paths, one-line previews, sizes, context windows —
+and a model's JSON answer read leniently."""
 
 import tomllib
 from pathlib import Path
+
+import pytest
 
 from otaku.formatting import (
     decode_text,
@@ -10,6 +13,7 @@ from otaku.formatting import (
     format_megabytes,
     format_seconds,
     format_size,
+    parse_json_object,
     pretty_path,
     printable,
     render,
@@ -239,6 +243,35 @@ class TestRender:
 
     def test_no_substitutions_return_the_template(self) -> None:
         assert render("{anything} stays") == "{anything} stays"
+
+
+class TestParseJsonObject:
+    """A model's answer read for its object: fences and prose around it,
+    and JSON syntax typed with typographic double quotes — a small model
+    mirrors a story's own punctuation — straightened only on retry, so a
+    parsable answer keeps every curly quote inside its values."""
+
+    def test_reads_the_object_out_of_fences_and_prose(self) -> None:
+        assert parse_json_object('Sure!\n```json\n{"scene": 1}\n```') == {"scene": 1}
+
+    def test_typographic_quotes_as_syntax_parse_on_retry(self) -> None:
+        assert parse_json_object("{“title”: “Quayside”}") == {"title": "Quayside"}
+
+    def test_a_parsable_answer_keeps_curly_quotes_in_values(self) -> None:
+        answer = '{"line": "She said “hi” — twice"}'
+        assert parse_json_object(answer) == {"line": "She said “hi” — twice"}
+
+    def test_an_answer_without_an_object_refuses(self) -> None:
+        with pytest.raises(ValueError):
+            parse_json_object("no json here")
+
+    def test_a_broken_object_still_refuses(self) -> None:
+        with pytest.raises(ValueError):
+            parse_json_object('{"scene": }')
+
+    def test_an_answer_that_is_no_object_refuses(self) -> None:
+        with pytest.raises(ValueError):
+            parse_json_object('["{", "}"]')
 
 
 def roundtrip(value: object) -> object:

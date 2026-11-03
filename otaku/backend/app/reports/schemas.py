@@ -16,6 +16,7 @@ USAGE_PURPOSES: dict[str, str] = {
     "chat": "Played turns",
     "lore": "Extraction",
     "rollup": "History rollup",
+    "card": "Card generation",
 }
 
 

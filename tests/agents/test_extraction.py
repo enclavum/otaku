@@ -25,9 +25,7 @@ import random
 from collections.abc import Sequence
 from itertools import combinations, pairwise
 
-import pytest
-
-from otaku.agents.extraction import _parse_json, numbered_chat, pack, plan_scenes
+from otaku.agents.extraction import numbered_chat, pack, plan_scenes
 from otaku.store.schema import Attachment, Message
 
 # The extraction pass's minimums over rows of one size: twenty rows make a scene.
@@ -363,30 +361,6 @@ class TestNumberedChat:
     def test_a_picture_with_no_words_is_the_mark_alone(self) -> None:
         line = Message(role="user", body="", attachments=(picture("a"),))
         assert numbered_chat([line]) == "[1] (picture 1)"
-
-
-class TestParseJson:
-    """The reply parser's tolerances: fences and prose around the object,
-    and JSON syntax typed with typographic double quotes — a small model
-    mirrors the story's own punctuation — straightened only on retry, so
-    a parsable reply keeps every curly quote inside its values."""
-
-    def test_reads_the_object_out_of_fences_and_prose(self) -> None:
-        assert _parse_json('Sure!\n```json\n{"scene": 1}\n```') == {"scene": 1}
-
-    def test_typographic_quotes_as_syntax_parse_on_retry(self) -> None:
-        assert _parse_json("{“title”: “Quayside”}") == {"title": "Quayside"}
-
-    def test_a_parsable_reply_keeps_curly_quotes_in_values(self) -> None:
-        assert _parse_json('{"line": "She said “hi” — twice"}') == {"line": "She said “hi” — twice"}
-
-    def test_a_reply_without_an_object_refuses(self) -> None:
-        with pytest.raises(ValueError):
-            _parse_json("no json here")
-
-    def test_a_broken_object_still_refuses(self) -> None:
-        with pytest.raises(ValueError):
-            _parse_json('{"scene": }')
 
 
 def picture(name: str) -> Attachment:

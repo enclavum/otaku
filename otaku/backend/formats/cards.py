@@ -56,7 +56,7 @@ def load_card(data: bytes, *, file_name: str = "") -> tuple[CharacterProfile, li
     copies, macros nothing will bind. `file_name` (no path) rides the card
     as reference. Raises `CardError` when there is no card to have."""
     if data[: len(_PNG_MAGIC)] == _PNG_MAGIC:
-        candidates = _png_candidates(data)
+        candidates = _embedded_cards(data)
         if not candidates:
             raise CardError("no character card embedded in this PNG")
     else:
@@ -89,10 +89,16 @@ def load_card(data: bytes, *, file_name: str = "") -> tuple[CharacterProfile, li
     return card, notes
 
 
+def has_embedded_cards(data: bytes) -> bool:
+    """Whether a PNG's bytes carry a card at all — a chunk one could be
+    read from. A PNG without one is a picture alone."""
+    return bool(_embedded_cards(data))
+
+
 # ---------- reading the containers ----------
 
 
-def _png_candidates(data: bytes) -> list[tuple[str, dict[str, object]]]:
+def _embedded_cards(data: bytes) -> list[tuple[str, dict[str, object]]]:
     """Every embedded card, in file order, keyword-tagged — a list, never
     a dict: real PNGs carry duplicate keywords with differing payloads,
     and a dict would silently keep whichever assignment came last."""

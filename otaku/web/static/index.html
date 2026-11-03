@@ -682,6 +682,20 @@
   </div>
 </dialog>
 
+<!-- a card's generated text, asked about as its window is put down: kept
+     (Save), the card put back as it stood before the first generation
+     (Revert), or the window kept open on it (Close, Esc). Driven by
+     characters.js. -->
+<dialog class="otk-dialog" data-dialog="keep-generated" aria-labelledby="otk-keep-generated-title">
+  <span class="otk-eyebrow" data-title id="otk-keep-generated-title">Keep the generated card?</span>
+  <p class="otk-dialog__body">The previous version will be discarded.</p>
+  <div class="otk-dialog__foot">
+    <button type="button" class="otk-btn" data-choice="cancel">Close</button>
+    <button type="button" class="otk-btn" data-choice="revert">Revert</button>
+    <button type="button" class="otk-btn otk-btn--primary" data-choice="save" autofocus>Save</button>
+  </div>
+</dialog>
+
 <!-- an answer the reader asked for and cannot act on: one door out -->
 <dialog class="otk-dialog" data-dialog="told" aria-labelledby="otk-told-title">
   <span class="otk-eyebrow" data-title id="otk-told-title"></span>
