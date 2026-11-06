@@ -95,6 +95,13 @@ class TestChatMode:
         )
         assert not problems, "\n".join(problems)
 
+    def test_an_empty_line_does_nothing(self, played: "Played") -> None:
+        # Enter on an empty prompt leaves no row behind and draws no prompt
+        # under it: the screen stays the fresh launch's
+        term = played(Layout.MANUSCRIPT)
+        problems = run(term, [key("an empty line", ENTER), line("We wait on the quay.")])
+        assert not problems, "\n".join(problems)
+
     def test_a_failure_regenerated_and_undone(self, played: "Played") -> None:
         term = played(Layout.MANUSCRIPT)
         problems = run(

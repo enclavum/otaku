@@ -51,7 +51,6 @@ Each tab's own rows, preview and actions are its module's (`premise`,
 (`base`); the `Dossier` assembled here routes the panes, the keys and
 the editing by tab, and wires the application."""
 
-from dataclasses import replace
 from typing import Any
 
 from prompt_toolkit.application import Application
@@ -485,8 +484,11 @@ class Dossier(PremiseTab, MessagesTab, ScenesTab, CastTab, ToolsTab):
             if self.tab == "messages":
                 orig = self.turn_filtered[self.cursor]
                 m = self.msgs[orig]
-                self.api.stories.messages.update(self.story_id, m.id, body=new)
-                self.msgs[orig] = replace(m, body=new)
+                # the message as stored: its segments, which the preview
+                # draws, rebuilt from the new body
+                self.msgs[orig] = self.api.stories.messages.update(
+                    self.story_id, m.id, body=new
+                ).value
                 self.notice = "saved"
                 return
             if self.tab == "tools":

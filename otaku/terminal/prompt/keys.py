@@ -1,7 +1,8 @@
-"""The prompt's keys: the shortcut keys that submit a command, the
-canvas's paragraph and history walk, the slash menu's Enter, Tab, Esc
-and Backspace, ↑/↓ through the menu or the history, the answers' keys
-while their rows are shown, and dictation's (`make_bindings`)."""
+"""The prompt's keys: the shortcut keys that submit a command, Enter on
+an empty line, the canvas's paragraph and history walk, the slash menu's
+Enter, Tab, Esc and Backspace, ↑/↓ through the menu or the history, the
+answers' keys while their rows are shown, and dictation's
+(`make_bindings`)."""
 
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
@@ -31,6 +32,8 @@ for _sequence in _CONTROL_ENTER:
 # With a draft on the line it falls through to delete-forward, so readline
 # muscle memory can never quit the app over a draft.
 _EMPTY_LINE = Condition(lambda: not get_app().current_buffer.text)
+# Nothing on the line but whitespace: Enter sends nothing there.
+_LINE_BLANK = Condition(lambda: not get_app().current_buffer.text.strip())
 
 
 def make_bindings(
@@ -112,6 +115,12 @@ def make_bindings(
         # with a draft it falls through to delete-forward, so readline
         # muscle memory can never quit the app over a draft.
         kb.add(key, filter=_EMPTY_LINE if key == "c-d" else True)(_submit_shortcut(command, carry))
+
+    # Enter on an empty line does nothing, except in the canvas, where it
+    # is the continue.
+    @kb.add("enter", filter=_LINE_BLANK & ~canvas_keys)
+    def _ignore_empty(event: Any) -> None:
+        pass
 
     # Tab always FILLS a pre-selected row. Enter fills it too when
     # anything can follow the row — a parameter, required or optional, or

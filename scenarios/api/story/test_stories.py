@@ -12,6 +12,7 @@ fork, truncate — and about the story commands' effects on the store, the
 story the chat plays, and the remembered state.
 """
 
+import contextlib
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -154,6 +155,24 @@ class TestStoryBrowser:
         self.pick(app, ENTER + "e" + "!" + CTRL_S + ESC + ESC)
         chain = app.store.stories.get_messages(second)
         assert chain[-1].body == "!" + scripted.CHAT_REPLY
+
+    def test_an_edited_message_is_held_as_saved(self, app: App) -> None:
+        # The browser holds the message the save answered: the preview
+        # draws its segments, which a copy given the new body alone would
+        # keep from before the edit.
+        _first, second = two_stories(app)
+        opened: list[screen_stories.StoryPicker] = []
+
+        def browse() -> tuple[int, str] | None:
+            # built inside the screen's session, so it reads the keys
+            opened.append(screen_stories.StoryPicker(app.api, second))
+            return opened[0].run()
+
+        with contextlib.suppress(EOFError):
+            run_screen(ENTER + "e" + "!" + CTRL_S + ESC + ESC, browse)
+        held = opened[0].msgs[-1]
+        assert held.body == "!" + scripted.CHAT_REPLY
+        assert held == app.api.stories.messages.get(second, held.id)
 
     def test_the_dossier_edits_another_story_s_premise(self, app: App) -> None:
         # Any story opens whole and any story EDITS: drilled into the

@@ -359,6 +359,20 @@ class TestUpdateCheck:
         assert asked.times == 0
         assert _state(app).update_checked_at == ""
 
+    def test_turned_off_by_the_environment_it_never_asks(self, app: App, monkeypatch) -> None:
+        monkeypatch.setenv("OTAKU_DISABLE_UPDATE_CHECK", "1")  # over config.toml's true
+        asked = _Asker("99.0.0")
+        app.backend.check_for_update(asked)
+        time.sleep(0.2)
+        assert asked.times == 0
+        assert _state(app).update_checked_at == ""
+
+    def test_the_variable_set_blank_leaves_it_on(self, app: App, monkeypatch) -> None:
+        monkeypatch.setenv("OTAKU_DISABLE_UPDATE_CHECK", " ")
+        asked = _Asker(None)
+        app.backend.check_for_update(asked)
+        _waited(lambda: asked.times == 1)
+
     def test_a_config_from_before_the_check_gets_its_switch_at_the_launch(self, app: App) -> None:
         config = app.paths.config_file
         config.write_text(

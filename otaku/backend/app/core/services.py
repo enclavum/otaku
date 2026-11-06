@@ -22,6 +22,7 @@ only the run's own event.
 
 import contextlib
 import datetime
+import os
 import threading
 from collections.abc import Callable, Collection, Iterator, Mapping
 from dataclasses import dataclass, replace
@@ -58,6 +59,8 @@ from otaku.store import Store
 
 # How long the update check leaves between two asks.
 _UPDATE_CHECK_INTERVAL = datetime.timedelta(hours=24)
+# Any value turns the update check off, as `check_updates = false` does — unadvertised.
+_DISABLE_UPDATE_CHECK_VAR = "OTAKU_DISABLE_UPDATE_CHECK"
 # What dictation answers while no model is saved for it.
 _NO_DICTATION_MODEL = "Choose a dictation model in /model first."
 
@@ -179,13 +182,17 @@ class App:
         """Ask for the version announced as current — `fetch_latest_version`,
         the cli's, as the backend reaches no network of its own — on a thread
         of its own, once more than 24 hours have passed since the last ask,
-        unless config.toml turns it off. The time is written before asking,
-        so a failed ask waits its 24 hours too; the answer is kept for the
-        next launch's banner (`LaunchFacts.newer_version`). Any thread."""
+        unless config.toml or `OTAKU_DISABLE_UPDATE_CHECK` turns it off. The
+        time is written before asking, so a failed ask waits its 24 hours too;
+        the answer is kept for the next launch's banner
+        (`LaunchFacts.newer_version`). Any thread."""
         now = datetime.datetime.now(datetime.UTC)
 
         def claim_check() -> bool:
-            if not self._config().check_updates:
+            if (
+                not self._config().check_updates
+                or os.environ.get(_DISABLE_UPDATE_CHECK_VAR, "").strip()
+            ):
                 return False
             try:
                 last = datetime.datetime.fromisoformat(self._state_config().update_checked_at)
