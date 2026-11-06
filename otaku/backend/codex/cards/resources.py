@@ -5,16 +5,18 @@ validate only, the file read and vetted and nothing stored, with the
 cards the codex may already hold it as — or from a story's character,
 promoted and linked to it, its copies in forked stories with it where
 asked (and vetted first, to count them), each going last; corrected,
-moved in the order, its pictures ordered and removed; deleted. A picture
-added to a card (`CardPicturesResource`), a card written by the model in
-use from its pictures (`CardGenerationResource`), a card folded into
-another (`CardMergesResource`), and every story's character no card
-claims (`UnlinkedResource`). The work is the domain's
+moved in the order, its pictures ordered and removed; deleted. A card
+fetched from a link (`CardFetchesResource`), a picture added to a
+card (`CardPicturesResource`), a card written by the model in use from
+its pictures (`CardGenerationResource`), a card folded into another
+(`CardMergesResource`), and every story's character no card claims
+(`UnlinkedResource`). The work is the domain's
 (`codex.cards.services`); this answers what stands after it.
 """
 
 from __future__ import annotations
 
+from dataclasses import fields
 from typing import Literal, overload
 
 from otaku.backend.app.core.services import App
@@ -24,6 +26,7 @@ from otaku.backend.codex.cards import services as domain_cards
 from otaku.backend.codex.cards.schemas import (
     Card,
     CardCheck,
+    CardFetchCheck,
     CardImport,
     CardSummary,
     CharacterLinkCheck,
@@ -40,6 +43,7 @@ class CardsResource(Resource):
 
     def __init__(self, app: App) -> None:
         super().__init__(app)
+        self.fetches = CardFetchesResource(app)
         self.pictures = CardPicturesResource(app)
         self.generation = CardGenerationResource(app)
         self.merges = CardMergesResource(app)
@@ -81,7 +85,12 @@ class CardsResource(Resource):
 
     @overload
     def create(
-        self, *, data: bytes, file_name: str, rename: str = "", validate_only: Literal[True]
+        self,
+        *,
+        data: bytes,
+        file_name: str,
+        name: str | None = None,
+        validate_only: Literal[True],
     ) -> CardCheck: ...
 
     @overload
@@ -90,8 +99,9 @@ class CardsResource(Resource):
         *,
         data: bytes,
         file_name: str,
-        rename: str = "",
+        name: str,
         reuse: int | None = None,
+        tagline: str = "",
         validate_only: Literal[False] = False,
     ) -> Changed[CardImport]: ...
 
@@ -124,7 +134,6 @@ class CardsResource(Resource):
         creator_notes: str = "",
         data: bytes | None = None,
         file_name: str = "",
-        rename: str = "",
         reuse: int | None = None,
         story_id: int | None = None,
         character_id: int | None = None,
@@ -133,11 +142,15 @@ class CardsResource(Resource):
     ) -> Changed[Card] | Changed[CardImport] | CardCheck | CharacterLinkCheck:
         """A card made three ways. By hand, from `name` — none given, the
         card is called `NEW_CARD_NAME` for the reader to replace — and its
-        fields. From a card FILE's bytes (`data`, the `file_name` it was picked
-        as; `rename` overrides its own name): a file the codex holds
-        already makes nothing and answers that card, `reuse` names the
-        card the reader says it is, and otherwise a card is made, a PNG's
-        picture its portrait (`CardImport.made` says which); a picture
+        fields. From a card FILE's bytes (`data`, the `file_name` it was
+        picked as, `name` the one it is made under — asked of an import,
+        and on a check vetted where given, the file's own answered where
+        not): a file the codex holds already makes nothing and answers
+        that card, `reuse` names the
+        card the reader says it is, and otherwise a card is made, the
+        picture the file carries its portrait — a PNG's own, a CHARX's
+        main icon (`CardImport.made` says which) — and `tagline` its own,
+        a site's where the file came from a link; a picture
         that holds no card makes a blank card, the picture its portrait —
         or, with `validate_only`, the file read and vetted and nothing
         stored (`CardCheck`). From a story's character (`story_id`,
@@ -159,13 +172,14 @@ class CardsResource(Resource):
         if data is not None:
             if validate_only:
                 checked = domain_cards.check_card_file(
-                    app, data, file_name, rename=rename, allow_bare_picture=True
+                    app, data, file_name, name=name, allow_bare_picture=True
                 )
                 story_counts = domain_cards.get_story_counts(app)
                 return CardCheck(
                     name=checked.profile.name,
                     notes=checked.notes,
                     has_picture=checked.has_picture,
+                    thumbnail=checked.thumbnail,
                     same_card=(
                         as_card_summary(checked.same_card, story_counts)
                         if checked.same_card is not None
@@ -174,9 +188,16 @@ class CardsResource(Resource):
                     similar_cards=tuple(
                         as_card_summary(row, story_counts) for row in checked.similar_cards
                     ),
+                    similar_note=domain_cards.similar_note(checked),
                 )
             card_id, made, said = domain_cards.import_card_file(
-                app, data, file_name, rename=rename, reuse=reuse, allow_bare_picture=True
+                app,
+                data,
+                file_name,
+                name=name,
+                reuse=reuse,
+                tagline=tagline,
+                allow_bare_picture=True,
             )
             return Changed(CardImport(card=self.get(card_id), made=made), said)
         if validate_only:
@@ -279,6 +300,47 @@ class CardsResource(Resource):
         return Changed(None, domain_cards.delete_card(self._app, card_id))
 
 
+class CardFetchesResource(Resource):
+    """/cards/fetches — a card fetched from a link into the codex."""
+
+    @overload
+    def create(self, *, url: str, validate_only: Literal[False] = False) -> Changed[CardImport]: ...
+
+    @overload
+    def create(self, *, url: str, validate_only: Literal[True]) -> CardFetchCheck: ...
+
+    @any_thread
+    def create(
+        self, *, url: str, validate_only: bool = False
+    ) -> Changed[CardImport] | CardFetchCheck:
+        """The card a link gives — a card site's character page, or the
+        file's own link, a picture alone included — fetched and
+        imported as a card file is (`CardsResource.create`): a card the
+        codex holds already makes nothing and answers that card. With
+        `validate_only`, fetched and vetted, nothing stored, and
+        answered with the file and the site's tagline too
+        (`CardFetchCheck`), for the import to send as a card file — so
+        a link read before it is imported is fetched once. A card made
+        takes the line its site shows it under, where the site has one.
+        Safe from any thread, and slow on purpose: the site is asked off
+        the app's thread, the card read and written on it. Raises Refused
+        as a file's import does, and for a link no card is fetched from
+        or a site that could not be reached."""
+        file = domain_cards.fetch_card(self._app, url)
+        cards = CardsResource(self._app)
+        check = cards.create(data=file.data, file_name=file.name, validate_only=True)
+        if not validate_only:
+            return cards.create(
+                data=file.data, file_name=file.name, name=check.name, tagline=file.tagline
+            )
+        return CardFetchCheck(
+            **{each.name: getattr(check, each.name) for each in fields(check)},
+            file_name=file.name,
+            data=file.data,
+            tagline=file.tagline,
+        )
+
+
 class CardPicturesResource(Resource):
     """/cards/{card}/pictures — a card's pictures, added and removed one
     at a time; ordered through the card itself."""
@@ -303,17 +365,21 @@ class CardGenerationResource(Resource):
     its pictures, and that writing given up."""
 
     @any_thread
-    def create(self, card_id: int) -> Changed[Card]:
-        """The card written from its pictures — every one — its tagline,
-        description, personality, scenario and greeting replaced, its name
-        while it is still `NEW_CARD_NAME`. Safe from any thread, and slow
+    def create(
+        self, card_id: int, *, language: str = domain_cards.DEFAULT_LANGUAGE
+    ) -> Changed[Card]:
+        """The card written from its pictures — every one — in `language`,
+        its English name: its tagline, description, personality, scenario
+        and greeting replaced, its name while it is still `NEW_CARD_NAME`.
+        Safe from any thread, and slow
         on purpose: the model is asked off the app's thread, the card read
         and written on it. Raises NotFound for a card the codex does not
-        hold; Conflict while no model is in use, the model cannot see
-        pictures, or the card has none; Unavailable for what the engine
-        refuses and an answer that is no card."""
+        hold; Invalid for a language that is no short line; Conflict while
+        no model is in use, the model cannot see pictures, or the card has
+        none; Unavailable for what the engine refuses and an answer that
+        is no card."""
         app = self._app
-        said = domain_cards.generate_card(app, card_id)
+        said = domain_cards.generate_card(app, card_id, language=language)
         return Changed(
             app.run(lambda: _card(app, domain_cards.get_card(app, card_id)), reading=True), said
         )
@@ -360,6 +426,7 @@ def _card(app: App, row: schema.Card) -> Card:
         file_name=profile.file_name,
         pictures=row.pictures,
         stories=tuple(_story_character(r) for r in domain_cards.list_linked(app, row.id)),
+        is_blank=domain_cards.is_blank(profile),
         updated_at=row.updated_at,
     )
 

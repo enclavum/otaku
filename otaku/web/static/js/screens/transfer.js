@@ -1,21 +1,24 @@
 /* The transfer screens: a card in, a story in, a story out.
 
-   The drop-zone dialog carries the whole card import into the story —
-   a file, which goes into All characters too, or a codex card invited
-   where a file would be — the persona included: who the card's {{user}} is, asked on
-   the same face the card is chosen on, prefilled from the story's own
-   memory of it, so a story is asked once and later imports follow it.
+   The Import card dialog carries the whole card import into the story —
+   a file or a link, which goes into Characters too unless the reader
+   keeps it to the story — the persona included: who the card's {{user}} is, asked on the same
+   face the card is chosen on, prefilled from the story's own memory of
+   it, so a story is asked once and later imports follow it.
 
    A path over HTTP would name a file on the SERVER, so nothing here
    sends one: an import sends what the browser read, a card sends its
    bytes, and an export is saved by the browser where the reader says. */
 
 import { api } from "../api/index.js";
-import { $, $$, element, pickFile, span } from "../kit/dom.js";
+import { $, element, pickFile, span } from "../kit/dom.js";
 import { ask, closeAll, footnote, guard, report, wiring } from "../kit/browser.js";
 import * as held from "../play/held.js";
 import { landed, watchExtraction } from "../play/shell.js";
 import { tell } from "../kit/status.js";
+
+// How long the link field waits after the last keystroke before it reads the link.
+const _LINK_SETTLE_MS = 800;
 
 export async function importDocument() {
   const file = await pickFile(".md,.jsonl,.txt");
@@ -35,29 +38,25 @@ export async function importDocument() {
   if (answer.value?.extraction?.status === "running") watchExtraction(answer.value.story_id);
 }
 
-export async function importCard({ cardId = null } = {}) {
-  /* The card dialog: choose a file — or bring in the codex card
-     `cardId`, shown where the file would be — read what the import WILL
-     do, say who it speaks to, and only then commit, into the story (a
-     file into All characters too; a card file into All characters alone
-     is dropped on its new card tile). The outcomes are the backend's own
-     sentences about this card beside the page's lines about what an
-     import does — the dialog decides where they appear, never what the
-     backend's say. A refusal is said in the dialog's foot (`report`). */
-  const inviting = cardId !== null;
-  const invited = inviting ? await api.cards.get(cardId) : null;
-  if (invited?.refused) {
-    report(invited.notice);
-    return;
-  }
-  let data = "";
-  let chosen = null;
+export async function importCard() {
+  /* Import card, as the design draws it: a card file dropped or chosen,
+     or a link pasted, read as soon as it is given, and the fields filled from
+     what the backend read: the character's name in this story, the
+     persona it speaks to (the story's own memory of it), the cards
+     Characters has like it with the switch that saves this one beside
+     them or keeps it in this story alone, the picture's switch, and
+     what the import will do — the backend's notes under it. A link is
+     fetched once: its reading brings the file back, which the import
+     sends as a file. A refusal is said in the dialog's foot (`report`). */
+  // what the card is read from: the file dropped or chosen, or the link
+  // pasted — the last given — and the file the import sends
+  let source = null;
+  let file = null;
   let prepared = null;
   let renamed = "";
-  // the codex card the reader says the file is ("" for a new one), and
-  // whether the card's picture goes into the context
-  let reuse = null;
   let sending = false;
+  let saving = true;
+  let similar = false;
   /* A card is read FOR a story: the one held, or — a reader with none —
      one made for it, taken back where the dialog ends without an import
      (`held.makeFor`). */
@@ -68,166 +67,156 @@ export async function importCard({ cardId = null } = {}) {
     if (!answer.refused) made = answer.id;
     return answer;
   };
-  /* The card read and vetted, nothing stored: `{card}` — its name, the
-     backend's notes, whether it carries a picture, the codex card it is
-     already and those of its name, its size in tokens, whether that is
-     worth a warning, and the persona the story remembers
-     — or the refusal. */
-  const prepare = async (fileName, bytes, rename) => {
+  /* The card read and vetted, nothing stored — under `rename`, the name
+     it would take in the story, the card's own where it is empty — or the
+     refusal. A link is read through the server, which brings its file
+     back; read again under a new name, that file is sent, so the link is
+     not fetched twice. */
+  const prepare = async (rename) => {
     const story = await storyFor();
     if (story.refused) return story;
-    const fields = inviting ? { card_id: cardId, rename } : { data: bytes, file_name: fileName, rename };
-    const check = await api.stories.cards.create(story.id, fields, { validateOnly: true });
-    // the story held, deleted elsewhere: read again for one made for it
-    if (check.refused && check.status === 404 && (await held.lost(story.id))) {
-      return prepare(fileName, bytes, rename);
+    const asked = rename ? { name: rename } : {};
+    let check;
+    if (file) {
+      check = await api.stories.cards.create(story.id, { ...file, ...asked }, { validateOnly: true });
+    } else {
+      check = await api.stories.cards.fetches.create(
+        story.id,
+        { url: source.url, ...asked },
+        { validateOnly: true },
+      );
+      // a link's file, and the line its site shows the card under
+      if (!check.refused) file = { data: check.data, file_name: check.file_name, tagline: check.tagline };
     }
+    // the story held, deleted elsewhere: read again for one made for it
+    if (check.refused && check.status === 404 && (await held.lost(story.id))) return prepare(rename);
     return check.refused ? check : { card: { ...check, tokens: check.block_tokens } };
   };
 
   const choice = await ask("card", (dialog) => {
     const zone = $(".otk-dropzone", dialog);
     const picker = $("input[type=file]", dialog);
-    const card = $("[data-chosen]", dialog);
+    const filename = $("[data-file]", dialog);
+    const link = $("[data-link]", dialog);
     const name = $("#otk-card-name", dialog);
     const persona = $("#otk-card-persona", dialog);
-    const personaNote = $("[data-persona-note]", dialog);
-    const filename = $("[data-file]", dialog);
-    const similarLabel = $("[data-similar-label]", dialog);
-    const similar = $("[data-similar]", dialog);
+    const similarBox = $("[data-similar]", dialog);
+    const similarCards = $("[data-similar-cards]", dialog);
+    const saveSwitch = $("[data-save-switch]", dialog);
     const picsend = $("[data-picsend]", dialog);
     const picsendThumb = $("[data-picsend-thumb]", dialog);
     const picsendSwitch = $("[data-picsend-switch]", dialog);
     const outcomes = $("[data-outcomes]", dialog);
-    const heading = $("[data-outcomes-label]", dialog);
+    const will = $("[data-will]", dialog);
     const note = $("[data-card-note]", dialog);
-    const escape = $("[data-card-escape]", dialog);
     const importButton = $('[data-choice="import"]', dialog);
-    $("[data-title]", dialog).textContent = inviting ? "Invite" : "Import";
-    importButton.textContent = inviting ? "Invite" : "Import";
-    name.value = "";
-    name.placeholder = "optional rename";
-    persona.value = "";
-    // Emptied so the SAME file chosen again fires `change`: a card
-    // refused as a duplicate is picked again with a rename beside it.
+    name.value = persona.value = link.value = "";
+    // emptied, so the same file chosen again is another change
     picker.value = "";
-    zone.hidden = inviting;
-    card.hidden = !inviting;
-    if (inviting) card.replaceChildren(...chosenCard(invited));
-    personaNote.hidden = true;
     filename.hidden = true;
-    similar.hidden = similarLabel.hidden = true;
-    picsend.hidden = true;
-    outcomes.hidden = true;
-    heading.hidden = true;
-    note.hidden = true;
     zone.classList.remove("is-filled", "is-dragover");
-
+    similarBox.hidden = picsend.hidden = outcomes.hidden = true;
     sending = false;
+    saving = true;
     picsendSwitch.setAttribute("aria-checked", "false");
+    saveSwitch.setAttribute("aria-checked", "true");
     picsendSwitch.onclick = () => {
       sending = !sending;
       picsendSwitch.setAttribute("aria-checked", String(sending));
     };
+    saveSwitch.onclick = () => {
+      saving = !saving;
+      saveSwitch.setAttribute("aria-checked", String(saving));
+      drawWill();
+    };
+
+    /* What the import will do (the product's own rule, in the page's
+       words), and under it what the backend said of this card — its own
+       sentences, unchanged. */
+    const drawWill = () => {
+      const read = prepared?.card;
+      if (!read) return;
+      const library = read.same_card
+        ? `use ${read.same_card.name} from Characters, linked`
+        : similar && !saving
+          ? "keep the card in this story only"
+          : "save the card to Characters, linked";
+      will.replaceChildren(
+        ...[
+          "send the card's text as the next message",
+          `add ${name.value.trim() || read.name} to this story's cast`,
+          "play the card's greeting as their first message",
+          library,
+        ].map((line) => element("li", "", line)),
+      );
+    };
 
     let taking = 0;
-    const take = async (file) => {
-      if (!file && !inviting) return;
-      /* Drops can overlap — a second card while the first still encodes
-         or prepares — and only the LAST one dropped may become the
-         dialog's card: each take carries its turn, and a stale one
+    const take = async (given) => {
+      /* A card given — a file, a link, or null to read the one in hand
+         again — read,
+         and the fields filled from it. Gifts can overlap — a second card
+         while the first still reads — and only the LAST given may become
+         the dialog's card: each take carries its turn, and a stale one
          stops before writing anything. */
       const mine = ++taking;
-      const bytes = file ? await encode(file) : "";
-      if (mine !== taking) return;
-      if (file) {
-        chosen = file;
-        data = bytes;
-        filename.textContent = file.name;
+      if (given?.kind === "file") {
+        const bytes = await encode(given.file);
+        if (mine !== taking) return;
+        file = { data: bytes, file_name: given.file.name };
+        link.value = "";
+        filename.textContent = given.file.name;
         filename.hidden = false;
         zone.classList.add("is-filled");
-        zone.classList.remove("is-dragover");
+      } else if (given?.kind === "link") {
+        file = null;
+        filename.hidden = true;
+        zone.classList.remove("is-filled");
       }
-      const answer = await prepare(file?.name ?? "", bytes, (renamed = name.value.trim()));
+      if (given) source = given;
+      zone.classList.remove("is-dragover");
+      prepared = null;
+      arm();
+      const answer = await prepare((renamed = name.value.trim()));
       if (mine !== taking) return;
       prepared = answer;
       if (!prepared.card) {
         // the refusal is the dialog's error, said in its foot
         report(prepared.notice);
-        note.hidden = true;
-        similar.hidden = similarLabel.hidden = picsend.hidden = true;
-        outcomes.hidden = heading.hidden = true;
-        // A rename is the way out of a refusal, so the hint stops
-        // calling it optional. (Every refusal: the page reads the flag,
-        // never the sentence, so a duplicate and a non-card look alike.)
-        name.placeholder = "rename";
+        similarBox.hidden = picsend.hidden = outcomes.hidden = true;
         arm();
         return;
       }
-      name.placeholder = "optional rename";
       footnote(dialog, ""); // a refusal standing goes with the card read
       const read = prepared.card;
-      // Who the card speaks to: the story's memory of it when there is
-      // one, the plain default when there is not — and the note says what
-      // the field DOES either way. The ask's default — never over a name
-      // the reader already typed.
-      if (!persona.value.trim()) persona.value = read.persona || "you";
-      personaNote.hidden = false;
-      /* A card of its name the codex holds — not this file: the reader
-         says whether it is that card, or a new one beside it. */
-      reuse = null;
-      const offered = !inviting && !read.same_card && read.similar_cards.length ? read.similar_cards : [];
-      similar.replaceChildren(
-        ...offered.map((one) =>
-          choiceRow(`same:${one.id}`, `Same as ${one.name}`, one.tagline || "already in All characters"),
-        ),
-        ...(offered.length ? [choiceRow("new", "A new card", "Saved beside it")] : []),
+      // the character's name: the card's own, until the reader types one
+      if (!name.value.trim()) name.value = renamed = read.name;
+      // who the card speaks to: the story's memory of it, else the reader's to type
+      if (!persona.value.trim()) persona.value = read.persona;
+      // the cards Characters has like this one, by name or picture
+      similar = !read.same_card && read.similar_cards.length > 0;
+      similarCards.replaceChildren(
+        ...(similar ? read.similar_cards.map((one) => element("div", "otk-imp__src")) : []),
       );
-      const pick = (option) => {
-        reuse = option.dataset.select === "new" ? null : Number(option.dataset.select.slice(5));
-        for (const each of $$("[data-select]", similar)) {
-          each.setAttribute("aria-checked", String(each === option));
-        }
-      };
-      for (const option of $$("[data-select]", similar)) option.onclick = () => pick(option);
-      const fresh = $('[data-select="new"]', similar);
-      if (fresh) pick(fresh);
-      similar.hidden = similarLabel.hidden = !offered.length;
-      // The picture switch, only for a card with a picture.
+      if (similar) {
+        [...similarCards.children].forEach((row, at) => row.append(...cardRow(read.similar_cards[at])));
+      }
+      similarBox.hidden = !similar;
+      // the picture's switch, only for a card with a picture
       picsend.hidden = !read.has_picture;
-      picsendThumb.replaceChildren(...pictureOf(inviting ? invited : read.same_card, chosen));
-      escape.textContent = !picsend.hidden ? "the picture is saved either way" : "joins the current story";
-      // What an import always does (the three halves of the product's
-      // own rule), and under them what the BACKEND said about this
-      // particular card — its own sentences, unchanged.
-      outcomes.replaceChildren(
-        outcome("send the card's text as your next message, so it is a normal prompt"),
-        outcome(`add ${read.name} to the cast of this story`),
-        outcome("play the card's greeting as their first message"),
-        ...(inviting
-          ? []
-          : [
-              outcome(
-                read.same_card
-                  ? `use ${read.same_card.name} from All characters, linked`
-                  : "save the card to All characters, linked",
-              ),
-            ]),
-      );
-      outcomes.hidden = false;
-      heading.hidden = false;
+      picsendThumb.replaceChildren(...thumbOf(read.thumbnail, read.same_card));
+      drawWill();
       const caveats = [...read.notes];
       // A card that rides every request is worth saying out loud before
       // it is imported, not after.
-      if (read.large) {
-        caveats.push(`This card is about ${read.tokens} tokens, and rides every request.`);
-      }
+      if (read.large) caveats.push(`This card is about ${read.tokens} tokens, and rides every request.`);
       note.textContent = caveats.join(" ");
       note.hidden = !caveats.length;
+      outcomes.hidden = false;
       arm();
     };
 
-    picker.onchange = guard(() => take(picker.files[0]));
+    picker.onchange = guard(() => picker.files[0] && take({ kind: "file", file: picker.files[0] }));
     zone.ondragover = (event) => {
       event.preventDefault();
       zone.classList.add("is-dragover");
@@ -235,59 +224,81 @@ export async function importCard({ cardId = null } = {}) {
     zone.ondragleave = () => zone.classList.remove("is-dragover");
     zone.ondrop = guard((event) => {
       event.preventDefault();
-      return take(event.dataTransfer.files[0]);
+      const dropped = event.dataTransfer.files[0];
+      zone.classList.remove("is-dragover");
+      return dropped && take({ kind: "file", file: dropped });
     });
 
-    /* The dialog's MANDATORY fields, enforced: a card — a file, or the
-       codex card — and a user name: without them, the
-       button does nothing but say what is missing (a dialog button is no
-       form submit, so the field's `required` needs this hand-wiring). No
-       file: the note asks for one. A name emptied: the field says so —
-       it binds `{{user}}` everywhere, and a silent default would decide
-       it for the reader. A card that refused to read: the refusal
-       already on screen is the answer, and the rename is the way out.
-       Wired before `ask` adds its own listeners, so the stop is the
-       whole veto — the button and the dialog's Enter alike; `wiring`
-       drops the last opening's veto with its stale closures. */
+    /* The dialog's MANDATORY fields, enforced: a card read, a character
+       name and a persona name — without them the button stays off, and a
+       press says what is missing (a dialog button is no form submit, so
+       a field's `required` needs this hand-wiring). Wired before `ask`
+       adds its own listeners, so the stop is the whole veto — the button
+       and the dialog's Enter alike; `wiring` drops the last opening's
+       veto with its stale closures. */
     const signal = wiring(dialog);
-    const named = () => persona.value.trim();
-    /* The button SAYS it: disabled until a card is in hand — read, or
-       refused with a NEW rename typed, which is another read waiting to
-       happen — and a user name is typed. */
+    const named = () => name.value.trim() && persona.value.trim();
     const arm = () => {
-      const another = name.value.trim() !== renamed;
-      importButton.disabled = !((chosen || inviting) && named() && (prepared?.card || another));
+      importButton.disabled = !(prepared?.card && named());
     };
     arm();
     persona.addEventListener("input", arm, { signal });
-    name.addEventListener("input", arm, { signal });
+    name.addEventListener(
+      "input",
+      () => {
+        arm();
+        drawWill();
+      },
+      { signal },
+    );
+    // a link is read once a paste lands, an edit once the typing stops, or on Enter
+    let settling = null;
+    const readLink = () => {
+      clearTimeout(settling);
+      const url = link.value.trim();
+      if (url && url !== (source?.kind === "link" ? source.url : "")) {
+        guard(() => take({ kind: "link", url }))();
+      }
+    };
+    link.addEventListener(
+      "input",
+      () => {
+        clearTimeout(settling);
+        settling = setTimeout(readLink, _LINK_SETTLE_MS);
+      },
+      { signal },
+    );
+    link.addEventListener("paste", () => setTimeout(readLink), { signal });
+    link.addEventListener(
+      "keydown",
+      (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        event.stopPropagation();
+        readLink();
+      },
+      { signal },
+    );
+    dialog.addEventListener("close", () => clearTimeout(settling), { signal });
     const veto = (event) => {
-      // Settle only with a read card, a user name, and
-      // a rename that IS the read one: every other press stays in the
-      // dialog. A changed rename re-prepares HERE for both a refused and
-      // a read card, so a refusal always answers into the open dialog,
-      // never past it.
+      // Settle only with a read card, both names, and a character name
+      // that IS the one it was read under: a changed name is read again
+      // here, so a refusal of it answers into the open dialog.
       if (prepared?.card && named() && name.value.trim() === renamed) return;
       event.preventDefault();
       event.stopImmediatePropagation();
-      if (!chosen && !inviting) {
-        note.textContent = "Choose a card file first.";
-        note.hidden = false;
-      } else if (!named()) {
-        // Asked BEFORE any re-read: the read's prefill must never
-        // answer for a reader who left the field empty.
+      if (!source) {
+        report("Choose a card file first.");
+      } else if (!name.value.trim()) {
+        name.reportValidity();
+      } else if (!persona.value.trim()) {
         persona.reportValidity();
-      } else if (name.value.trim() !== renamed) {
-        /* The door out of a refusal the terminal always had
-           (`/card FILE NAME`): the new name is another read.
-           Re-prepare under it and press again when it takes — a name
-           refused again keeps the dialog open with its fresh answer. */
+      } else if (prepared?.card && name.value.trim() !== renamed) {
         guard(async () => {
-          await take(chosen);
+          await take(null);
           if (prepared?.card && named()) importButton.click();
         })();
       }
-      // a refused read under an unchanged name stays refused
     };
     importButton.addEventListener("click", veto, { signal });
     dialog.addEventListener(
@@ -299,33 +310,22 @@ export async function importCard({ cardId = null } = {}) {
       },
       { signal },
     );
-    // A codex card is in hand from the start: read it now.
-    if (inviting) guard(() => take(null))();
   });
 
-  if (choice !== "import" || (!chosen && !inviting)) {
+  if (choice !== "import" || !prepared?.card) {
     if (made !== null) await held.takeBack(made);
     return;
   }
-  const wanted = $("#otk-card-name")?.value.trim() ?? "";
-  // The name may have been typed after the card was read: the prepared
-  // one is bound to the name it was prepared with, so a changed name
-  // means preparing again.
-  if (!prepared?.card || wanted !== renamed) {
-    prepared = await prepare(chosen?.name ?? "", data, wanted);
-  }
-  if (!prepared.card) {
-    if (made !== null) await held.takeBack(made);
-    report(prepared.notice);
-    return;
-  }
-  // Never empty here: Import settles only through the veto above, and
-  // no default stands in for a name — the prefill IS the default.
-  const persona = $("#otk-card-persona").value.trim();
   const story = held.story();
-  const fields = inviting
-    ? { card_id: cardId, rename: wanted, persona, with_pictures: sending }
-    : { data, file_name: chosen.name, rename: wanted, persona, reuse, with_pictures: sending };
+  const wanted = $("#otk-card-name")?.value.trim() ?? "";
+  const persona = $("#otk-card-persona").value.trim();
+  const fields = {
+    ...file,
+    name: wanted,
+    persona,
+    with_pictures: sending,
+    story_only: similar && !saving,
+  };
   let answer;
   try {
     answer = await api.stories.cards.create(story, fields);
@@ -342,39 +342,25 @@ export async function importCard({ cardId = null } = {}) {
   await landed(answer.notice, { redraw: "always", refused: answer.refused });
 }
 
-function chosenCard(card) {
-  /* A codex card where a file would be dropped: its portrait, its name
-     and its tagline. */
-  const frame = span("otk-charrow__pic");
-  frame.append(...pictureOf(card, null));
-  const text = element("span", "otk-charrow__text");
-  text.append(span("otk-tile__name", card.name), span("otk-tile__tag", card.tagline));
+function cardRow(card) {
+  /* A library card as a row of the dialog: its portrait, its name and its
+     tagline. */
+  const frame = span("otk-imp__thumb");
+  frame.append(...thumbOf(null, card));
+  const text = element("span", "otk-imp__text");
+  text.append(span("otk-imp__name", card.name), span("otk-imp__tag", card.tagline));
   return [frame, text];
 }
 
-function pictureOf(card, file) {
-  /* The picture a card would send: a codex card's portrait, else the PNG
-     file in hand, read in this browser. */
+function thumbOf(thumbnail, card) {
+  /* The picture a card would send: the one the backend read from a file
+     or a link, else a library card's portrait. */
   const image = element("img");
   image.alt = "";
-  if (card?.pictures?.length) image.src = api.pictures.thumbnail.url(card.pictures[0].file);
-  else if (file) image.src = URL.createObjectURL(file);
+  if (thumbnail) image.src = `data:image/jpeg;base64,${thumbnail}`;
+  else if (card?.pictures?.length) image.src = api.pictures.thumbnail.url(card.pictures[0].file);
   else return [];
   return [image];
-}
-
-function choiceRow(value, name, description) {
-  const option = element("button", "otk-choice");
-  option.type = "button";
-  option.setAttribute("role", "radio");
-  option.setAttribute("aria-checked", "false");
-  option.dataset.select = value;
-  option.append(span("otk-choice__name", name), span("otk-choice__desc", description));
-  return option;
-}
-
-function outcome(sentence) {
-  return element("p", "otk-outcome", sentence);
 }
 
 async function encode(file) {

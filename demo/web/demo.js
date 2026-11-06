@@ -143,6 +143,7 @@ const ROUTES = {
   "GET /api/stories/{story}/context": (p) => store.context(num(p.story)),
   "GET /api/stories/{story}/context/fill": (p) => store.fill(num(p.story)),
   "POST /api/stories/{story}/cards": (p, q, b, ask) => card(num(p.story), q, b, ask),
+  "POST /api/stories/{story}/cards/fetches": (p, q, b) => store.fetchCard(need(b, "url")),
   // lore
   "GET /api/stories/{story}/lore": (p) => store.lore(num(p.story)),
   "GET /api/stories/{story}/scenes": (p) => items(store.scenes(num(p.story))),
@@ -175,9 +176,10 @@ const ROUTES = {
   },
   "GET /api/stories/{story}/extraction": (p) => store.extraction(num(p.story)),
   "DELETE /api/stories/{story}/extraction": (p) => changed(store.stopExtraction(num(p.story))),
-  // the codex: All characters
+  // the codex: Characters
   "GET /api/cards": (p, q) => items(store.cards(q.get("query") ?? "")),
   "POST /api/cards": (p, q, b) => makeCard(q, b),
+  "POST /api/cards/fetches": (p, q, b) => store.fetchCard(need(b, "url")),
   "GET /api/cards/unlinked": (p, q) => items(store.unlinked(q.get("query") ?? "")),
   "GET /api/cards/{card}": (p) => store.card(num(p.card)),
   "PATCH /api/cards/{card}": (p, q, b) => changed(store.updateCard(num(p.card), cardFields(b, true))),
@@ -560,15 +562,15 @@ async function _loadCard(bytes, fileName) {
   const notes = [];
   const same = JSON.stringify(card);
   if (valid.some(([, , other]) => JSON.stringify(other) !== same)) {
-    notes.push(`the file embeds ${valid.length} cards that disagree; imported the ${keyword} one`);
+    notes.push(`The file holds ${valid.length} versions of the card that disagree; the ${keyword} one is imported.`);
   }
   const book = _cardDict(payload).character_book;
   const entries = book && typeof book === "object" ? book.entries : null;
   if (Array.isArray(entries) && entries.length) {
-    notes.push(`dropped the card's lorebook (${entries.length} entries) — not supported`);
+    notes.push("The card's lorebook isn't imported.");
   }
   const unbound = _unknownMacros(card);
-  if (unbound.length) notes.push("left as written (nothing binds them): " + unbound.join(", "));
+  if (unbound.length) notes.push(`${unbound.join(", ")} ${unbound.length === 1 ? "stays" : "stay"} as written.`);
   card.file_name = fileName;
   return { card, notes };
 }
@@ -592,7 +594,7 @@ async function readCardFile(data, fileName) {
     return { found: loaded.card, notes: loaded.notes, hasPicture: _PNG_MAGIC.every((value, i) => bytes[i] === value) };
   } catch (e) {
     if (!(e instanceof _NotACard)) throw e;
-    throw new store.Refused(422, `Not a character card: ${e.message}`);
+    throw new store.Refused(422, "Not a card.");
   }
 }
 
@@ -605,13 +607,22 @@ async function makeCard(query, body) {
   if ("data" in body) {
     if (await _isBarePicture(_b64bytes(need(body, "data")))) {
       need(body, "file_name");
-      if (query.get("validate_only") === "true") return store.checkPicture(text(body, "rename"));
+      if (query.get("validate_only") === "true") return store.checkPicture(text(body, "name"));
+      need(body, "name");
       return store.importPicture();
     }
     const { found, notes, hasPicture } = await readCardFile(need(body, "data"), need(body, "file_name"));
-    if (query.get("validate_only") === "true") return store.checkCardFile(found, notes, hasPicture, text(body, "rename"));
+    if (query.get("validate_only") === "true") {
+      // the codex's door says which cards alike it is made beside (`similar_note`)
+      const checked = store.checkCardFile(found, notes, hasPicture, text(body, "name"));
+      return { ...checked, similar_note: store.similarNote(checked) };
+    }
     const reuse = body.reuse == null ? null : integer(body, "reuse");
-    const answer = store.importCardFile(found, notes, hasPicture, { rename: text(body, "rename"), reuse });
+    const answer = store.importCardFile(found, notes, hasPicture, {
+      name: need(body, "name"),
+      reuse,
+      tagline: text(body, "tagline"),
+    });
     return answer.value.made ? created(answer, `/api/cards/${answer.value.card.id}`) : changed(answer);
   }
   if ("story_id" in body) {
@@ -637,7 +648,10 @@ async function makeCard(query, body) {
    the codex is written. No picture rides in the demo. */
 async function card(story, query, body, ask) {
   store.story(story);
-  const rename = text(body, "rename").trim();
+  // the name asked: an import must carry one, a check may
+  const checking = query.get("validate_only") === "true";
+  const asked = checking ? text(body, "name").trim() : need(body, "name").trim();
+  if (!checking && !asked) throw new store.Refused(422, "A character needs a name.");
   const fromFile = "data" in body;
   let found;
   let notes = [];
@@ -655,10 +669,12 @@ async function card(story, query, body, ask) {
   }
   const reuse = fromFile && !held && body.reuse != null ? store.card(integer(body, "reuse")) : null;
   const target = held ?? reuse;
-  const name = rename || (target ? target.name : found.name);
+  const own = target ? target.name : found.name;
+  const name = asked || own;
   const fields = { ...(target ?? found), name };
   const persona = store.personaOf(story);
   const tokens = Math.ceil(store.profileToml(fields, persona || "you").length / 4);
+  store.ensureWritten(target ?? found);
   if (query.get("validate_only") === "true") {
     store.ensureFree(story, name, held?.id ?? null);
     return {
@@ -668,6 +684,8 @@ async function card(story, query, body, ask) {
       large: tokens > _LARGE_CARD_TOKENS,
       persona,
       has_picture: hasPicture || Boolean(held?.pictures.length),
+      // the demo keeps no picture, so it draws no thumbnail of one
+      thumbnail: null,
       same_card: held ? store.cardSummary(held) : null,
       similar_cards: fromFile && !held ? store.checkCardFile(found, notes, hasPicture).similar_cards : [],
     };
@@ -678,17 +696,24 @@ async function card(story, query, body, ask) {
   store.ensureFree(story, name, target?.id ?? null);
   let cardId = held?.id ?? null;
   let made = false;
-  if (fromFile) {
-    const answer = store.importCardFile(found, notes, hasPicture, { rename, reuse: reuse?.id ?? null });
+  // a file the codex holds not, into the story alone where asked (`story_only`)
+  const storyOnly = fromFile && !target && "story_only" in body && flag(body, "story_only");
+  if (fromFile && !storyOnly) {
+    // the codex keeps the card as it came: another name is this story's
+    const answer = store.importCardFile(found, notes, hasPicture, {
+      reuse: reuse?.id ?? null,
+      tagline: text(body, "tagline"),
+    });
     cardId = answer.value.card.id;
     made = answer.value.made;
   }
-  const brought = store.card(cardId);
+  const brought = storyOnly ? { ...found, aliases: [] } : store.card(cardId);
   const storyCard = { ...brought, name };
   const report = [
     `${fromFile ? "imported" : "invited"} ${name} (card ≈ ${tokens} tokens)`,
-    ...notes,
-    ...(fromFile ? [made ? "added to the codex" : "the codex's card"] : []),
+    // each note as the report's lowercase line carries it (`story.cards.services._fragment`)
+    ...notes.map((note) => note.slice(0, 1).toLowerCase() + note.slice(1).replace(/\.$/, "")),
+    ...(fromFile ? [storyOnly ? "kept in this story only" : made ? "added to Characters" : "the card in Characters"] : []),
   ];
   if (tokens > _LARGE_CARD_TOKENS) report.push("a large card — it rides every request and never leaves the context");
   const imported = store.importCard(story, expected, {
@@ -697,7 +722,7 @@ async function card(story, query, body, ask) {
     aliases: [brought.name, ...brought.aliases],
     copy: storyCard,
     greeting: _bind(storyCard.greeting, name, speaking),
-    line: fromFile ? `/card ${fileName}` + (rename ? ` ${rename}` : "") : `/card ${name}`,
+    line: fromFile ? `/card ${fileName}` + (name !== own ? ` ${name}` : "") : `/card ${name}`,
     persona: speaking,
     withPictures: "with_pictures" in body ? flag(body, "with_pictures") : false,
     report: report.join(" · "),
@@ -854,9 +879,10 @@ function picture(name, thumbnail) {
 }
 
 /* A message's or a card's picture is loaded by the browser itself, as an
-   <img>, never through fetch — so the fake reaches it on the image
-   element's `src` and `srcset` (a gallery tile offers the thumbnail and
-   the picture whole): a stored file's address, as the page spells it
+   <img> or a link opened in a tab of its own, never through fetch — so
+   the fake reaches it on the image element's `src` and `srcset` (a
+   gallery tile offers the thumbnail and the picture whole) and the
+   link's `href`: a stored file's address, as the page spells it
    (`api.pictures.url`, its `thumbnail.url`), becomes the fixture's copy
    of it. */
 function fixtureAddress(address) {
@@ -891,6 +917,17 @@ for (const [property, rewrite] of Object.entries(_IMAGE_ADDRESSES)) {
     },
   });
 }
+// …and a picture opened alone in a tab of its own, by a link's `href`
+const _REAL_HREF = Object.getOwnPropertyDescriptor(HTMLAnchorElement.prototype, "href");
+Object.defineProperty(HTMLAnchorElement.prototype, "href", {
+  configurable: true,
+  get() {
+    return _REAL_HREF.get.call(this);
+  },
+  set(value) {
+    _REAL_HREF.set.call(this, fixtureAddress(String(value)));
+  },
+});
 
 // ---------- the patch ----------
 

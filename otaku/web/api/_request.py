@@ -11,6 +11,7 @@ and `Stream` are the two shapes a table's row takes, and `unqueued`
 marks a row the server answers off the app's thread. `web.server` takes
 a request apart into these and carries the result back."""
 
+import base64
 import enum
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field, fields, is_dataclass
@@ -179,7 +180,8 @@ def plain(value: object) -> Any:
     """A representation as JSON writes it: a dataclass as an object of
     its fields, an enum by its value, a sequence as an array (a set's
     members sorted), a mapping as an object keyed by its keys' plain
-    form, a datetime in ISO 8601 — and two values whose JSON says more
+    form, a datetime in ISO 8601, bytes as base64 — as the page sends a
+    file's — and two values whose JSON says more
     than their fields: a position by its value and the text every
     frontend names it by, an amount of money by its figure (a string: a
     decimal must not become a float), its currency and its text."""
@@ -189,6 +191,8 @@ def plain(value: object) -> Any:
         return plain(value.value)
     if isinstance(value, datetime):
         return value.isoformat()
+    if isinstance(value, bytes):
+        return base64.b64encode(value).decode("ascii")
     if isinstance(value, InjectionPosition):
         return {"value": value.value, "text": value.text}
     if isinstance(value, Money):

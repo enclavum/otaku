@@ -130,6 +130,11 @@ class TestPlain:
         assert (found["amount"], found["currency"]) == ("12.50", "USD")
         assert found["text"] == str(Money(Decimal("12.50"), "USD"))
 
+    def test_bytes_are_base64_text(self) -> None:
+        # a file a check answers — a card's, its picture's thumbnail
+        assert plain(b"\x89PNG") == "iVBORw=="
+        assert plain({"data": b""}) == {"data": ""}
+
     def test_a_value_json_cannot_say_is_refused(self) -> None:
         with pytest.raises(TypeError):
             plain(object())

@@ -50,8 +50,12 @@ export function openPicture(attachments, at) {
     image.width = picture.width;
     image.height = picture.height;
     image.src = api.pictures.url(picture.file);
+    $(".otk-lightbox__open", dialog).href = api.pictures.url(picture.file);
     $(".otk-lightbox__meta", dialog).textContent = `${picture.width} × ${picture.height} · ${sized(picture.size)}`;
-    $(".otk-lightbox__count", dialog).textContent = several ? `${at + 1} of ${attachments.length}` : "";
+    // one picture alone has no count, and its measure takes the count's place
+    const count = $(".otk-lightbox__count", dialog);
+    count.textContent = several ? `${at + 1} of ${attachments.length}` : "";
+    count.hidden = !several;
     prev.hidden = next.hidden = !several;
     prev.setAttribute("aria-disabled", String(at === 0));
     next.setAttribute("aria-disabled", String(at === attachments.length - 1));

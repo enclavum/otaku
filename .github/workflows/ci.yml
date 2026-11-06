@@ -3,7 +3,8 @@
 # The pseudo-terminal scenarios, the screen tests among them, may fail in a
 # job that still passes (continue-on-error): read the run for failed tests.
 # Live tests need real engines and keys, so they stay on the maintainer's
-# machine.
+# machine; the integrations against the real services run on a schedule of
+# their own (integrations.yml).
 name: CI
 
 on:

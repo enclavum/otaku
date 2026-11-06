@@ -1115,7 +1115,9 @@ class TestAnswerMenu:
 
     def test_escape_dismisses_the_rows_for_this_prompt(self, app: App) -> None:
         self.ask(app)
-        assert typed(app, ESC, ENTER) == ""
+        # the rows gone, Enter on the empty line sends nothing — no answer —
+        # and the line is the reader's own
+        assert typed(app, ESC, ENTER, "x", ENTER) == "x"
 
     def test_the_rows_are_drawn_behind_the_bar_with_the_blank_before_the_prompt(
         self, app: App
@@ -1148,7 +1150,9 @@ class TestAnswerMenu:
         self.ask(app)
         app.server.script = lambda body: "You step in."
         app.play("Yes")
-        assert typed(app, ENTER) == ""
+        # no rows, so Enter on the empty line sends nothing — no answer —
+        # and the line is the reader's own
+        assert typed(app, ENTER, "x", ENTER) == "x"
 
     def ask(self, app: App) -> None:
         app.api.stories.settings.update(app.ensure_story(), "allow_questions", enabled=True)

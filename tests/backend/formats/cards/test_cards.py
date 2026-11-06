@@ -102,10 +102,11 @@ class TestLoadCard:
         with pytest.raises(CardError, match="no card object"):
             load_card(b"[1, 2]")
 
-    def test_a_dropped_lorebook_is_said_out_loud(self) -> None:
-        payload = _v2(name="Elara", character_book={"entries": [{}, {}, {}]})
-        _, notes = load_card(_json(payload))
-        assert any("lorebook (3 entries)" in note for note in notes)
+    def test_a_lorebook_left_behind_is_said_out_loud(self) -> None:
+        _, bare = load_card(_json(_v2(name="Elara")))
+        _, with_book = load_card(_json(_v2(name="Elara", character_book={"entries": [{}, {}]})))
+        _, empty_book = load_card(_json(_v2(name="Elara", character_book={"entries": []})))
+        assert (len(bare), len(with_book), len(empty_book)) == (0, 1, 0)
 
     def test_the_file_name_rides_as_reference(self) -> None:
         card, _ = load_card(_json(_v2(name="E")), file_name="seraphina.png")

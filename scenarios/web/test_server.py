@@ -963,7 +963,8 @@ class TestStorySettings:
         assert page.get(f"/api/stories/{story}/context")["cards"] == []
         wren = {"name": "Wren", "system_prompt": "Never lie.", "reminder": "Riddles."}
         card = page.post("/api/cards", {**wren, "reminder_depth": 1})["value"]["id"]
-        page.post(f"/api/stories/{story}/cards", {"card_id": card, "persona": "Alex"}, if_match="*")
+        brought = {"card_id": card, "name": "Wren", "persona": "Alex"}
+        page.post(f"/api/stories/{story}/cards", brought, if_match="*")
         preview = page.get(f"/api/stories/{story}/context")
         (sent,) = preview["cards"]
         assert sent["name"] == "Wren" and sent["tokens"] > 0
@@ -1028,7 +1029,10 @@ class TestTheFlows:
         assert checked["name"] == "Seraphina" and checked["block_tokens"] > 0
         assert page.store.characters.list(story) == []  # read, nothing stored
         status, headers, imported = page.answer(
-            "POST", f"/api/stories/{story}/cards", {**card, "persona": "Maren"}, if_match="*"
+            "POST",
+            f"/api/stories/{story}/cards",
+            {**card, "name": checked["name"], "persona": "Maren"},
+            if_match="*",
         )
         assert status == 201 and "Seraphina" in imported["notice"]
         character = imported["value"]["character_id"]
@@ -1429,6 +1433,7 @@ class TestTheCodexOverTheWire:
             True,
             None,
         )
+        body["name"] = check["name"]  # the import names the card the check read
         status, headers, made = page.answer("POST", "/api/cards", body)
         assert status == 201 and made["value"]["made"] is True
         assert headers["location"] == f"/api/cards/{made['value']['card']['id']}"
@@ -1549,7 +1554,11 @@ class TestCardGenerationOverTheWire:
         status, _, answer = page.answer(
             "POST",
             "/api/cards",
-            {"data": base64.b64encode(CAT.read_bytes()).decode(), "file_name": "cat.jpg"},
+            {
+                "data": base64.b64encode(CAT.read_bytes()).decode(),
+                "file_name": "cat.jpg",
+                "name": "New card",
+            },
         )
         assert status == 201
         made = answer["value"]
@@ -1796,7 +1805,11 @@ def _hang_up_in_the_wait(page: Page, server: ModelServer) -> None:
 
 def _bare_card(page: Page) -> int:
     """A card made of a bare picture over the wire, by its id."""
-    body = {"data": base64.b64encode(CAT.read_bytes()).decode(), "file_name": "cat.jpg"}
+    body = {
+        "data": base64.b64encode(CAT.read_bytes()).decode(),
+        "file_name": "cat.jpg",
+        "name": "New card",
+    }
     return int(page.post("/api/cards", body)["value"]["card"]["id"])
 
 

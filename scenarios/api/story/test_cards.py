@@ -14,14 +14,17 @@ Seraphina (a real PNG card) and a minimal JSON one.
 """
 
 import tomllib
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
 from otaku.backend.api import HeadMoved, Refused
 from otaku.backend.codex.cards.schemas import RawFile
+from otaku.backend.codex.cards.services import NEW_CARD_NAME
 from otaku.backend.story import request
 from scenarios.support.harness import App
+from scenarios.support.site import Site, serving
 
 SERAPHINA = Path(__file__).parents[2] / "fixtures" / "seraphina.png"
 
@@ -163,6 +166,7 @@ class TestThroughTheCodex:
             other,
             data=SERAPHINA.read_bytes(),
             file_name="seraphina.png",
+            name="Seraphina",
             persona="you",
             expected_head=None,
         ).value
@@ -176,6 +180,7 @@ class TestThroughTheCodex:
                 story,
                 data=SERAPHINA.read_bytes(),
                 file_name="s.png",
+                name="Seraphina",
                 persona="you",
                 expected_head=7,
             )
@@ -198,12 +203,130 @@ class TestThroughTheCodex:
             data=MINIMAL.read_bytes(),
             file_name="echo.json",
             reuse=echo.id,
+            name="Echo",
             persona="you",
             expected_head=None,
         ).value
         assert brought.card_id == echo.id
         (character,) = app.store.characters.list(story)
         assert tomllib.loads(character.profile)["description"] == "the codex's own"
+
+    def test_the_check_shows_the_files_picture_small(self, app: App) -> None:
+        check = app.api.stories.cards.create(
+            app.ensure_story(), data=SERAPHINA.read_bytes(), file_name="s.png", validate_only=True
+        )
+        assert check.thumbnail is not None and check.thumbnail.startswith(b"\xff\xd8")  # a JPEG
+
+    def test_a_card_made_on_the_way_takes_the_tagline_sent(self, app: App) -> None:
+        app.api.stories.cards.create(
+            app.ensure_story(),
+            data=MINIMAL.read_bytes(),
+            file_name="echo.json",
+            name="Echo",
+            tagline="A voice in the hills.",
+            persona="you",
+            expected_head=None,
+        )
+        (card,) = app.api.cards.list()
+        assert card.tagline == "A voice in the hills."
+
+    def test_a_file_kept_in_the_story_alone_leaves_the_codex_untouched(self, app: App) -> None:
+        story = app.ensure_story()
+        brought = app.api.stories.cards.create(
+            story,
+            data=SERAPHINA.read_bytes(),
+            file_name="s.png",
+            name="Seraphina",
+            persona="you",
+            with_pictures=True,
+            story_only=True,
+            expected_head=None,
+        ).value
+        assert brought.card_id is None
+        assert app.api.cards.list() == []
+        (character,) = app.store.characters.list(story)
+        assert character.card_id is None
+        (portrait,) = app.store.stories.get_messages(story)[0].attachments
+        assert portrait.file.startswith("pic-")  # a picture of the story's own
+
+
+class TestTheName:
+    """The name a card's character is brought in under: the one the
+    import carries, which a check vets where it is given and answers as
+    the card's own where it is not; a blank one is refused, nothing
+    written. The row names the file, and the name where it is not the
+    card's own."""
+
+    def test_a_check_answers_the_cards_own_name_or_vets_the_one_given(self, app: App) -> None:
+        story = app.ensure_story()
+        file = {"data": SERAPHINA.read_bytes(), "file_name": "s.png"}
+        assert app.api.stories.cards.create(story, **file, validate_only=True).name == "Seraphina"
+        named = app.api.stories.cards.create(story, **file, name="Sera", validate_only=True)
+        assert named.name == "Sera"
+        with pytest.raises(Refused):
+            app.api.stories.cards.create(story, **file, name="  ", validate_only=True)
+
+    def test_a_blank_name_is_refused_and_nothing_written(self, app: App) -> None:
+        story = app.ensure_story()
+        with pytest.raises(Refused):
+            app.api.stories.cards.create(
+                story,
+                data=SERAPHINA.read_bytes(),
+                file_name="s.png",
+                name=" ",
+                persona="you",
+                expected_head=None,
+            )
+        assert (app.store.characters.list(story), app.api.cards.list()) == ([], [])
+        assert app.store.stories.get_messages(story) == []
+
+    def test_the_row_names_the_character_where_it_is_not_the_cards_own(self, app: App) -> None:
+        own, other = app.ensure_story(), app.api.stories.create(title="Another").value.id
+        for story, name in ((own, "Seraphina"), (other, "Sera")):
+            app.api.stories.cards.create(
+                story,
+                data=SERAPHINA.read_bytes(),
+                file_name="s.png",
+                name=name,
+                persona="you",
+                expected_head=None,
+            )
+        assert app.store.stories.get_messages(own)[0].body == "/card s.png"
+        assert app.store.stories.get_messages(other)[0].body == "/card s.png Sera"
+        (card,) = app.api.cards.list()
+        assert card.name == "Seraphina"  # the codex keeps the card's own
+
+
+class TestFromALink:
+    """A card fetched from a link — a file's own, on a site of the
+    test's — read for the story and brought in as a file is, the row
+    recording the link."""
+
+    @pytest.fixture
+    def site(self) -> Iterator[Site]:
+        with serving() as site:
+            yield site
+
+    def test_a_links_card_is_read_then_brought_in(self, app: App, site: Site) -> None:
+        url = site.serve("/seraphina.png", SERAPHINA.read_bytes(), "image/png")
+        story = app.ensure_story()
+        check = app.api.stories.cards.fetches.create(story, url=url, validate_only=True)
+        assert (check.name, check.data) == ("Seraphina", SERAPHINA.read_bytes())
+        assert app.store.characters.list(story) == []
+        brought = app.api.stories.cards.fetches.create(
+            story, url=url, name="Sera", persona="you", expected_head=None
+        ).value
+        assert brought.line.body == f"/card {url} Sera"
+        (character,) = app.store.characters.list(story)
+        assert (character.name, character.card_id) == ("Sera", brought.card_id)
+
+    def test_a_link_to_nothing_is_refused_and_nothing_written(self, app: App, site: Site) -> None:
+        story = app.ensure_story()
+        with pytest.raises(Refused):
+            app.api.stories.cards.fetches.create(
+                story, url=site.url("/gone"), name="X", persona="you", expected_head=None
+            )
+        assert app.store.stories.get_messages(story) == []
 
 
 class TestInvite:
@@ -214,7 +337,7 @@ class TestInvite:
         card = app.api.cards.create(data=SERAPHINA.read_bytes(), file_name="s.png").value.card
         story = app.ensure_story()
         brought = app.api.stories.cards.create(
-            story, card_id=card.id, persona="Alex", expected_head=None
+            story, card_id=card.id, name=card.name, persona="Alex", expected_head=None
         ).value
         rows = app.store.stories.get_messages(story)
         assert [(m.role, m.kind) for m in rows] == [("user", "card"), ("assistant", "dialogue")]
@@ -228,18 +351,22 @@ class TestInvite:
     def test_the_copy_is_the_storys_own(self, app: App) -> None:
         card = app.api.cards.create(name="Mira", description="before").value
         story = app.ensure_story()
-        app.api.stories.cards.create(story, card_id=card.id, persona="you", expected_head=None)
+        app.api.stories.cards.create(
+            story, card_id=card.id, name=card.name, persona="you", expected_head=None
+        )
         app.api.cards.update(card.id, description="after")
         (character,) = app.store.characters.list(story)
         assert tomllib.loads(character.profile)["description"] == "before"
 
     def test_a_card_in_the_story_already_is_refused(self, app: App) -> None:
-        card = app.api.cards.create(name="Mira").value
+        card = app.api.cards.create(name="Mira", description="A thief.").value
         story = app.ensure_story()
-        app.api.stories.cards.create(story, card_id=card.id, persona="you", expected_head=None)
+        app.api.stories.cards.create(
+            story, card_id=card.id, name=card.name, persona="you", expected_head=None
+        )
         with pytest.raises(Refused):
             app.api.stories.cards.create(
-                story, card_id=card.id, rename="Mira Two", persona="you", expected_head=app.head()
+                story, card_id=card.id, name="Mira Two", persona="you", expected_head=app.head()
             )
         assert len(app.store.characters.list(story)) == 1
 
@@ -247,7 +374,12 @@ class TestInvite:
         card = app.api.cards.create(data=SERAPHINA.read_bytes(), file_name="s.png").value.card
         story = app.ensure_story()
         app.api.stories.cards.create(
-            story, card_id=card.id, persona="you", with_pictures=True, expected_head=None
+            story,
+            card_id=card.id,
+            name=card.name,
+            persona="you",
+            with_pictures=True,
+            expected_head=None,
         )
         row = app.store.stories.get_messages(story)[0]
         assert row.attachments == card.pictures[:1]
@@ -255,13 +387,28 @@ class TestInvite:
     def test_no_portrait_rides_unasked(self, app: App) -> None:
         card = app.api.cards.create(data=SERAPHINA.read_bytes(), file_name="s.png").value.card
         story = app.ensure_story()
-        app.api.stories.cards.create(story, card_id=card.id, persona="you", expected_head=None)
+        app.api.stories.cards.create(
+            story, card_id=card.id, name=card.name, persona="you", expected_head=None
+        )
         assert app.store.stories.get_messages(story)[0].attachments == ()
+
+    def test_a_card_with_no_text_yet_is_refused_and_nothing_written(self, app: App) -> None:
+        bare = app.api.cards.create(data=CAT.read_bytes(), file_name="cat.jpg").value.card
+        story = app.ensure_story()
+        with pytest.raises(Refused):
+            app.api.stories.cards.create(
+                story, card_id=bare.id, name=NEW_CARD_NAME, persona="you", expected_head=None
+            )
+        assert app.store.stories.get_messages(story) == []
+        with pytest.raises(Refused):
+            app.api.stories.create(card_ids=(bare.id,), persona="you")
 
     def test_undo_takes_the_character_and_leaves_the_card(self, app: App) -> None:
         card = app.api.cards.create(name="Mira", greeting="Hello.").value
         story = app.ensure_story()
-        app.api.stories.cards.create(story, card_id=card.id, persona="you", expected_head=None)
+        app.api.stories.cards.create(
+            story, card_id=card.id, name=card.name, persona="you", expected_head=None
+        )
         app.api.stories.undos.create(story, expected_head=app.head())
         assert app.store.characters.list(story) == []
         assert [row.id for row in app.api.cards.list()] == [card.id]
@@ -329,11 +476,13 @@ class TestThePortrait:
     in: switched on, the row carries the card's portrait; off, nothing."""
 
     def test_the_portrait_rides_the_card_row_when_asked(self, app: App) -> None:
-        card = app.api.cards.create(name="Mira").value.id
+        card = app.api.cards.create(name="Mira", description="A thief.").value.id
         app.api.cards.pictures.create(card, file=RawFile(CAT.read_bytes(), "cat.jpg"))
         portrait = app.api.cards.get(card).pictures[0]
         story = app.ensure_story()
-        app.api.stories.cards.create(story, card_id=card, persona="you", expected_head=None)
+        app.api.stories.cards.create(
+            story, card_id=card, name="Mira", persona="you", expected_head=None
+        )
         (character,) = app.api.stories.characters.list(story)
         assert (character.portrait_sent, character.card_portrait) == (False, portrait)
         on = app.api.stories.characters.update(story, character.id, portrait_sent=True).value
@@ -361,7 +510,7 @@ class TestWhatACardInjects:
         card = app.api.cards.create(name="Wren", system_prompt="{{char}} never lies to {{user}}.")
         story = app.ensure_story()
         app.api.stories.cards.create(
-            story, card_id=card.value.id, persona="Alex", expected_head=None
+            story, card_id=card.value.id, name=card.value.name, persona="Alex", expected_head=None
         )
         app.play("I knock.")
         (system, *_) = app.server.requests[-1]["messages"]
@@ -374,7 +523,7 @@ class TestWhatACardInjects:
         )
         story = app.ensure_story()
         app.api.stories.cards.create(
-            story, card_id=card.value.id, persona="Alex", expected_head=None
+            story, card_id=card.value.id, name=card.value.name, persona="Alex", expected_head=None
         )
         app.play("I knock.")
         app.play("I knock again.")
@@ -388,7 +537,7 @@ class TestWhatACardInjects:
         card = app.api.cards.create(name="Wren", reminder="Riddles.", reminder_depth=1)
         story = app.ensure_story()
         app.api.stories.cards.create(
-            story, card_id=card.value.id, persona="Alex", expected_head=None
+            story, card_id=card.value.id, name=card.value.name, persona="Alex", expected_head=None
         )
         app.api.cards.update(card.value.id, reminder="Songs.")  # the codex's, not the story's
         (character,) = app.store.characters.list(story)
@@ -404,7 +553,7 @@ class TestWhatACardInjects:
         card = app.api.cards.create(name="Wren", system_prompt="Never lie.", reminder="Riddles.")
         story = app.ensure_story()
         app.api.stories.cards.create(
-            story, card_id=card.value.id, persona="Alex", expected_head=None
+            story, card_id=card.value.id, name=card.value.name, persona="Alex", expected_head=None
         )
         app.api.stories.undos.create(story, expected_head=app.head())
         app.play("I knock.")
@@ -415,7 +564,7 @@ class TestWhatACardInjects:
         card = app.api.cards.create(name="Wren", system_prompt="Never lie.", reminder="Riddles.")
         story = app.ensure_story()
         app.api.stories.cards.create(
-            story, card_id=card.value.id, persona="Alex", expected_head=None
+            story, card_id=card.value.id, name=card.value.name, persona="Alex", expected_head=None
         )
         app.play("I knock.")
         turn = request.assemble(app.backend, story, None).injections
@@ -466,10 +615,10 @@ class TestExtraction:
 def _invited(app: App, **fields: str) -> tuple[int, int]:
     """A codex card with `fields`, invited into a new story for Alex; the
     story and the character it became."""
-    card = app.api.cards.create(name="Mira", **fields).value.id
+    card = app.api.cards.create(name="Mira", **{"description": "A thief.", **fields}).value.id
     story = app.ensure_story()
     brought = app.api.stories.cards.create(
-        story, card_id=card, persona="Alex", expected_head=None
+        story, card_id=card, name="Mira", persona="Alex", expected_head=None
     ).value
     return story, brought.character_id
 

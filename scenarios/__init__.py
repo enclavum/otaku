@@ -20,6 +20,8 @@ The layout follows the app's own seams:
   connection. `test_beside.py` is the page served beside the chat.
 - `live/` — the smokes that talk to real providers, one module per
   provider, each skipping itself when its server or api key is absent.
+- `integrations/` — the integrations against the real services they ask,
+  one module per integration, marked `integration` and `live`.
 - `providers/` — the providers' transport against a real socket on this
   machine: what a unit test could not hold without binding one.
 - `test_app.py` — getting an app at all: encryption, backups, resume.

@@ -796,6 +796,7 @@ export function createStory({ title = "", premise = "", cards = [], persona = ""
   if (new Set(cards.map((card) => card.id)).size !== cards.length) throw invalid("A card is picked twice.");
   const seen = new Set();
   for (const card of cards) {
+    ensureWritten(card);
     if (seen.has(card.name.toLowerCase())) {
       throw conflict(`Two of the cards are called ${card.name} — rename one first.`);
     }
@@ -1508,7 +1509,7 @@ export function profileToml(card, user) {
 
 // ---------- the codex ----------
 
-/* All characters, as `backend.codex.cards.services` keeps them: the cards,
+/* Characters, as `backend.codex.cards.services` keeps them: the cards,
    the stories each is in read off the casts as the store reads them, the
    digest of each card file a card was made from, and the stories'
    characters no card claims. A picture added to a card is not kept: the
@@ -1549,7 +1550,20 @@ function storyCharacter(story, row) {
   };
 }
 
-const cardOf = (card) => ({ ...structuredClone(card), stories: linkedTo(card.id) });
+const cardOf = (card) => ({ ...structuredClone(card), stories: linkedTo(card.id), is_blank: isBlank(card) });
+
+/** Whether a card holds no text a story could take
+    (`codex.cards.services.is_blank`): every field the reader writes empty,
+    the reminder's depth aside. */
+export function isBlank(card) {
+  return CARD_FIELDS.filter((key) => key !== "reminder_depth").every((key) => !card[key]?.length);
+}
+
+/** Refused where the card holds no text yet, as a story's doors refuse it
+    (`story.cards.services._ensure_written`). */
+export function ensureWritten(card) {
+  if (isBlank(card)) throw conflict(`${card.name} has no text yet.`);
+}
 
 export function cardSummary(card) {
   return {
@@ -1559,6 +1573,7 @@ export function cardSummary(card) {
     tagline: card.tagline,
     pictures: structuredClone(card.pictures),
     story_count: linkedTo(card.id).length,
+    is_blank: isBlank(card),
   };
 }
 
@@ -1626,7 +1641,7 @@ const NEW_CARD_NAME = "New card";
 export function createCard({ name = NEW_CARD_NAME, aliases = [], tagline = "", fields = {} }) {
   checkDepth(fields);
   const made = makeCard({ name: cleanName(name), aliases, tagline: cleanTagline(tagline), fields });
-  return { value: cardOf(made), notice: `Added ${made.name} to the codex.` };
+  return { value: cardOf(made), notice: `Added ${made.name} to Characters.` };
 }
 
 /* The interface's correction: the parts given, then a move where one is
@@ -1694,7 +1709,7 @@ export function deleteCard(id) {
   }
   state.cards.delete(id);
   state.cardDigests.delete(id);
-  let said = `Deleted ${card.name} from the codex.`;
+  let said = `Deleted ${card.name} from Characters.`;
   if (stories) said += ` Its characters in ${stories} ${stories === 1 ? "story" : "stories"} stay, unlinked.`;
   return { value: null, notice: said };
 }
@@ -1771,7 +1786,7 @@ export function promote(storyId, characterId, { withCopies = false } = {}) {
   linkRows([row, ...found.map(copyRow)], made);
   return {
     value: cardOf(made),
-    notice: `Added ${row.name} to the codex, linked to this story's character.${linkedCopies(found.length)}`,
+    notice: `Added ${row.name} to Characters, linked to this story's character.${linkedCopies(found.length)}`,
   };
 }
 
@@ -1784,7 +1799,7 @@ function promotable(storyId, characterId) {
   const row = held(storyId).lore.characters.find((each) => each.id === characterId);
   if (!row) throw notFound("That character is not in this story's memory.");
   if (row.card_id != null) {
-    throw conflict(`This character is linked to ${cardRow(row.card_id).name} in the codex already.`);
+    throw conflict(`This character is linked to ${cardRow(row.card_id).name} in Characters already.`);
   }
   return row;
 }
@@ -1812,9 +1827,23 @@ export function checkCardFile(found, notes, hasPicture, rename = "") {
     name: named,
     notes,
     has_picture: hasPicture,
+    // the demo keeps no picture, so it draws no thumbnail of one
+    thumbnail: null,
     same_card: same ? cardSummary(same) : null,
     similar_cards: similar.map(cardSummary),
+    similar_note: "",
   };
+}
+
+/** What a card file the codex imports says of the cards alike, as
+    `codex.cards.services.similar_note` says it — the demo's alike by name
+    alone, keeping no picture to match; "" for none. */
+export function similarNote(checked) {
+  const cards = checked.similar_cards;
+  if (!cards.length) return "";
+  const many = cards.length > 1;
+  const named = cards.map((card) => `${card.name} (same name)`).join(", ");
+  return `Characters has ${many ? "cards" : "a card"} like this: ${named}. It will be added beside ${many ? "them" : "it"}.`;
 }
 
 /** A picture that holds no card, read for the codex (`CardCheck`): the
@@ -1823,9 +1852,11 @@ export function checkCardFile(found, notes, hasPicture, rename = "") {
 export function checkPicture(rename = "") {
   return {
     name: rename.trim() ? cleanName(rename) : NEW_CARD_NAME,
-    notes: ["no card in it: a blank card, the picture its portrait"],
+    notes: ["Picture only, without a card."],
     has_picture: true,
+    thumbnail: null,
     same_card: null,
+    similar_note: "",
     similar_cards: [],
   };
 }
@@ -1834,6 +1865,12 @@ export function checkPicture(rename = "") {
     picture, so it makes no card of one. */
 export function importPicture() {
   throw conflict(NOT_IN_DEMO("A card made from a picture"));
+}
+
+/** A card fetched from a link (`fetch_card`): the demo asks no
+    site. */
+export function fetchCard() {
+  throw conflict(NOT_IN_DEMO("A card from a link"));
 }
 
 /** A card written from its pictures (`generate_card`): the demo's model
@@ -1853,22 +1890,22 @@ export function cancelGeneration(id) {
 /** A card file into the codex (`CardImport`): one the codex holds already
     makes nothing, `reuse` names the card the reader says it is; else a
     card is made — its picture, where the file has one, not in the demo. */
-export function importCardFile(found, notes, hasPicture, { rename = "", reuse = null } = {}) {
+export function importCardFile(found, notes, hasPicture, { name = null, reuse = null, tagline = "" } = {}) {
   const digest = digestOf(found);
   const same = sameCard(found);
-  if (same) return { value: { card: cardOf(same), made: false }, notice: `${same.name} is in the codex already.` };
+  if (same) return { value: { card: cardOf(same), made: false }, notice: `${same.name} is in Characters already.` };
   if (reuse !== null) {
     const kept = cardRow(reuse);
     state.cardDigests.set(kept.id, [...(state.cardDigests.get(kept.id) ?? []), digest]);
-    return { value: { card: cardOf(kept), made: false }, notice: `Kept ${kept.name}: the codex holds it already.` };
+    return { value: { card: cardOf(kept), made: false }, notice: `Kept ${kept.name}: Characters has it already.` };
   }
-  const name = rename.trim() ? cleanName(rename) : found.name;
-  const made = makeCard({ name, fields: found, fileName: found.file_name ?? "" });
+  // under the name asked, the file's own where none is (a story's import)
+  const named = name === null ? found.name : cleanName(name);
+  const made = makeCard({ name: named, tagline: cleanTagline(tagline), fields: found, fileName: found.file_name ?? "" });
   state.cardDigests.set(made.id, [digest]);
-  const said = [`Added ${name} to the codex`, ...notes];
-  if (hasPicture) said.push(`its picture was not kept: ${NOT_IN_DEMO("A card's picture")}`);
-  const sentence = said.join(" · ");
-  return { value: { card: cardOf(made), made: true }, notice: sentence.endsWith(".") ? sentence : `${sentence}.` };
+  const said = [`Added ${named} to Characters.`, ...notes];
+  if (hasPicture) said.push(`The picture isn't kept. ${NOT_IN_DEMO("A card's picture")}`);
+  return { value: { card: cardOf(made), made: true }, notice: said.join(" ") };
 }
 
 /** The stories' casts show the cards they are linked to (`showCard`): a

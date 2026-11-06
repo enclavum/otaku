@@ -615,11 +615,12 @@ paths:
       tags: [Messages]
       summary: Bring a character card into the story — a card file, or a codex card
       description: |
-        Always through the codex. A card's FILE, as bytes — a path over
-        HTTP would name a file on the server — goes into the codex first:
-        a file it holds already brings its card in, and `reuse` names the
-        codex card the reader says it is. A codex card (`card_id`) is
-        invited as it stands. With `validate_only`, the card is read and
+        Through the codex. A card's FILE, as bytes — a path over HTTP would
+        name a file on the server — goes into the codex first: a file it
+        holds already brings its card in, and `reuse` names the codex card
+        the reader says it is; with `story_only`, a file the codex holds
+        not goes into the story alone, its character linked to no card. A
+        codex card (`card_id`) is invited as it stands. With `validate_only`, the card is read and
         vetted and nothing is stored — what the persona ask is drawn from,
         the story's remembered persona its default. Without it, the card is
         brought in — played on from the head `If-Match` names: the typed
@@ -639,13 +640,15 @@ paths:
               type: object
               description: A card file (`data` and `file_name`), or a codex card (`card_id`).
               properties:
-                data: { type: string, format: byte, description: "The card file — PNG or JSON — base64." }
+                data: { type: string, format: byte, description: "The card file — PNG, JSON or CHARX — base64." }
                 file_name: { type: string }
                 reuse: { type: integer, description: "The codex card the reader says the file is." }
+                tagline: { type: string, description: "A card made in the codex takes it — a site's, for a file a link gave." }
                 card_id: { type: integer, description: "A codex card, invited." }
-                rename: { type: string, description: 'The name the card is brought in under; "" its own.' }
+                name: { type: string, description: "The name the story's character is brought in under. Required to import; on a check, vetted where given, the card's own answered where not. The codex keeps the card under its own name." }
                 persona: { type: string, description: "The reader's name the card's {{user}} binds to. Required to import." }
                 with_pictures: { type: boolean, default: false, description: "Whether the card's portrait rides its row." }
+                story_only: { type: boolean, default: false, description: "A file the codex holds not, into the story alone — nothing saved to the codex, the character linked to no card." }
       responses:
         default: { $ref: "#/components/responses/Failed" }
         "200":
@@ -655,6 +658,61 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/StoryCardCheck" }
+        "201":
+          description: Imported; `Location` names the character the card became.
+          headers:
+            Location: { $ref: "#/components/headers/Location" }
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Changed"
+                  - properties: { value: { $ref: "#/components/schemas/ImportedCard" } }
+        "412": { $ref: "#/components/responses/HeadMoved" }
+        "428": { $ref: "#/components/responses/HeadRequired" }
+
+  /api/stories/{story}/cards/fetches:
+    parameters:
+      - $ref: "#/components/parameters/Story"
+    post:
+      operationId: fetchStoryCard
+      tags: [Messages]
+      summary: Bring a character card into the story from a link
+      description: |
+        The card a link gives — a card site's character page, or the card
+        file's own link — fetched and brought in as a card file is
+        (`createStoryCard`). With `validate_only`, fetched and vetted,
+        nothing stored, and answered with the file the link gave
+        (`StoryCardFetchCheck`), for the page to bring in as a file —
+        the link fetched once. Answered off the app's thread: a site
+        taking its time holds no other request up. Refused (422) for a link
+        no card is fetched from, and as a file's import is; a site that
+        could not be reached or refused is a 502.
+      parameters:
+        - $ref: "#/components/parameters/ValidateOnly"
+        - $ref: "#/components/parameters/IfMatch"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, description: "The link: a character's page on a card site, or a card file's own address, http or https." }
+                name: { type: string, description: "The name the story's character is brought in under. Required to import; on a check, vetted where given, the card's own answered where not." }
+                persona: { type: string, description: "The reader's name the card's {{user}} binds to. Required to import." }
+                with_pictures: { type: boolean, default: false, description: "Whether the card's portrait rides its row." }
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: Vetted, nothing stored (`validate_only`), with the file the link gave.
+          headers:
+            ETag: { $ref: "#/components/headers/ETag" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StoryCardFetchCheck" }
         "201":
           description: Imported; `Location` names the character the card became.
           headers:
@@ -1182,10 +1240,11 @@ paths:
       summary: Make a card — from a card file, a story's character, or by hand
       description: |
         Three ways, by what the body carries. A card FILE — `data`, base64,
-        and the `file_name` it was picked as, `rename` overriding its own
-        name: a file the codex holds already makes nothing and answers that
+        and the `file_name` it was picked as, `name` the one it is made
+        under: a file the codex holds already makes nothing and answers that
         card, `reuse` names the card the reader says it is (both `200`),
-        and otherwise a card is made, a PNG's picture its portrait (`201`);
+        and otherwise a card is made, the picture it carries its portrait —
+        a PNG's own, a CHARX's main icon (`201`);
         a picture that holds no card makes a blank card, the picture its
         portrait (`201`); with `validate_only` the file is read and vetted
         and nothing stored
@@ -1208,10 +1267,11 @@ paths:
                   type: object
                   required: [data, file_name]
                   properties:
-                    data: { type: string, format: byte, description: "The card file — PNG or JSON — or a picture that holds no card, base64." }
+                    data: { type: string, format: byte, description: "The card file — PNG, JSON or CHARX — or a picture that holds no card, base64." }
                     file_name: { type: string }
-                    rename: { type: string, description: 'The name the card is made under; "" its own.' }
+                    name: { type: string, description: "The name the card is made under. Required to import; on a check, vetted where given, the file's own answered where not." }
                     reuse: { type: integer, description: "The card the reader says the file is: nothing is made, and the file is noted as that card's." }
+                    tagline: { type: string, description: "The made card's — a site's, for a file a link gave." }
                 - title: A story's character
                   type: object
                   required: [story_id, character_id]
@@ -1248,6 +1308,58 @@ paths:
                   - properties:
                       value:
                         oneOf: [{ $ref: "#/components/schemas/CardImport" }, { $ref: "#/components/schemas/Card" }]
+
+  /api/cards/fetches:
+    post:
+      operationId: fetchCard
+      tags: [Codex]
+      summary: Make a card from a link
+      description: |
+        The card a link gives — a card site's character page, or the card
+        file's own link, a picture alone included — fetched and imported
+        as a card file is (`createCard`): a card the codex holds already
+        makes nothing and answers that card (`200`), any other is made
+        (`201`); with `validate_only` fetched and vetted, nothing stored,
+        and answered with the file the link gave (`CardFetchCheck`), for
+        the page to import as a card file (`createCard`) — the link
+        fetched once. Answered off the app's thread: a site taking its
+        time holds no other request up. Refused (422) for a link no card is
+        fetched from — no web address, a site's page that is no
+        character's, nothing there, a web page — and for a file that is no
+        card; a site that could not be reached or refused is a 502.
+      parameters:
+        - $ref: "#/components/parameters/ValidateOnly"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, description: "The link: a character's page on a card site, or a card file's own address, http or https." }
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: Vetted, nothing stored (`validate_only`); or a card the codex holds already.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/CardFetchCheck"
+                  - allOf:
+                      - $ref: "#/components/schemas/Changed"
+                      - properties: { value: { $ref: "#/components/schemas/CardImport" } }
+        "201":
+          description: Made; `Location` names the card.
+          headers:
+            Location: { $ref: "#/components/headers/Location" }
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Changed"
+                  - properties: { value: { $ref: "#/components/schemas/CardImport" } }
 
   /api/cards/unlinked:
     get:
@@ -1389,13 +1501,23 @@ paths:
       summary: Write a card from its pictures
       description: |
         The card written by the model in use from its pictures, every one
-        riding the request: its tagline, description, personality, scenario
-        and greeting replaced, and its name while it is still "New card".
+        riding the request, in the body's `language` (English where none is
+        named): its tagline, description, personality, scenario and greeting
+        replaced, and its name while it is still "New card".
         Answered off the app's thread: a model reading pictures holds no
         other request up. Refused (409) while no model is in use, the model
         cannot see pictures, the card has none or is being written already,
-        and for a generation cancelled meanwhile; what the engine refuses,
-        and an answer that is no card, is a 502.
+        and for a generation cancelled meanwhile; a language that is no short
+        line is a 422; what the engine refuses, and an answer that is no card,
+        is a 502.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                language: { type: string, maxLength: 40, description: "The language the card is written in, by its English name: `Russian`, `Japanese`." }
       responses:
         default: { $ref: "#/components/responses/Failed" }
         "200":
@@ -2396,25 +2518,39 @@ components:
         file_name: { type: string }
         pictures: { type: array, items: { $ref: "#/components/schemas/Attachment" } }
         stories: { type: array, items: { $ref: "#/components/schemas/StoryCharacter" } }
+        is_blank: { type: boolean, description: "Whether it holds no text yet — a card made from a picture, before it is written — which no story takes." }
         updated_at: { type: string, description: "For display alone." }
 
     CardCheck:
       type: object
       description: A card file read and vetted for the codex, nothing stored.
       properties:
-        name: { type: string, description: "The name the card would take — its own, or the rename." }
+        name: { type: string, description: "The name the card would take — its own, or the one asked." }
         notes:
           type: array
           items: { type: string }
-          description: What the import should say out loud.
+          description: What the import should say out loud, each a sentence.
         has_picture: { type: boolean, description: "Whether the file carries a picture." }
+        thumbnail:
+          description: The picture's thumbnail, a JPEG, base64; null where the file carries none, or one the intake refuses.
+          oneOf: [{ type: string, format: byte }, { type: "null" }]
         same_card:
           description: The card the codex holds the file as already — importing it makes nothing; null where none.
           oneOf: [{ $ref: "#/components/schemas/CardSummary" }, { type: "null" }]
         similar_cards:
           type: array
           items: { $ref: "#/components/schemas/CardSummary" }
-          description: The cards of the same name the reader may say it is (`reuse`).
+          description: The cards alike — the same name, or the same picture — the reader may say it is (`reuse`).
+        similar_note: { type: string, description: "What the import says of the cards alike — that it is made beside them — a sentence; empty for none." }
+    CardFetchCheck:
+      description: A card read from a link and vetted as a file is, nothing stored, and the file the link gave with the line its site shows it under — for the import to send as a card file, so the link is fetched once.
+      allOf:
+        - $ref: "#/components/schemas/CardCheck"
+        - type: object
+          properties:
+            file_name: { type: string }
+            data: { type: string, format: byte, description: "The file, base64." }
+            tagline: { type: string, description: "The line the site shows the card under, for the import to send; empty for none." }
 
     CardFields:
       description: A card's parts as a reader writes them — its name, aliases and tagline, and its profile's fields.
@@ -2443,6 +2579,7 @@ components:
         tagline: { type: string }
         pictures: { type: array, items: { $ref: "#/components/schemas/Attachment" }, description: "In order, the first the portrait." }
         story_count: { type: integer, description: "How many stories it is in, one linked character in each." }
+        is_blank: { type: boolean, description: "Whether it holds no text yet, which no story takes." }
 
     Changed:
       type: object
@@ -2607,7 +2744,9 @@ components:
       type: object
       properties:
         character_id: { type: integer, description: "The character the card became." }
-        card_id: { type: integer, description: "The codex card it is linked to." }
+        card_id:
+          description: The codex card it is linked to; null for a card the story alone holds.
+          oneOf: [{ type: integer }, { type: "null" }]
         line: { $ref: "#/components/schemas/Message" }
         greeting:
           description: The card's greeting message; null where the card has none.
@@ -3120,7 +3259,7 @@ components:
       type: object
       description: A card read and vetted for a story, nothing stored.
       properties:
-        name: { type: string, description: "The name it goes by — its own, or the rename." }
+        name: { type: string, description: "The name it goes by — its own, or the one asked." }
         notes:
           type: array
           items: { type: string }
@@ -3129,13 +3268,25 @@ components:
         large: { type: boolean, description: "Worth warning about." }
         persona: { type: string, description: 'The persona the story remembers — the ask''s default; "" for none.' }
         has_picture: { type: boolean, description: "Whether the card has a portrait its row could carry." }
+        thumbnail:
+          description: For a file, its picture's thumbnail, a JPEG, base64; null for none.
+          oneOf: [{ type: string, format: byte }, { type: "null" }]
         same_card:
           description: For a file, the codex card it is already; null for none.
           oneOf: [{ $ref: "#/components/schemas/CardSummary" }, { type: "null" }]
         similar_cards:
           type: array
           items: { $ref: "#/components/schemas/CardSummary" }
-          description: For a file, the codex cards of the same name the reader may say it is (`reuse`).
+          description: For a file, the codex cards alike — of the same name or picture — the reader may say it is (`reuse`).
+    StoryCardFetchCheck:
+      description: A card read from a link and vetted for a story as a file is, nothing stored, and the file the link gave with the line its site shows it under — for the page to bring in as a card file.
+      allOf:
+        - $ref: "#/components/schemas/StoryCardCheck"
+        - type: object
+          properties:
+            file_name: { type: string }
+            data: { type: string, format: byte, description: "The file, base64." }
+            tagline: { type: string, description: "The line the site shows the card under, for the import to send; empty for none." }
 
     StoryCharacter:
       type: object

@@ -23,10 +23,12 @@ from PIL import Image
 from otaku.backend.api import Refused
 from otaku.backend.codex.cards.schemas import RawFile
 from otaku.backend.codex.cards.services import NEW_CARD_NAME
+from otaku.backend.formats.cards import pack_charx
 from otaku.store.schema import Message
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch, set_config_provider
 from scenarios.support.server import ModelServer
+from scenarios.support.site import Site, serving
 
 FIXTURES = Path(__file__).parents[2] / "fixtures"
 SERAPHINA = FIXTURES / "seraphina.png"
@@ -197,7 +199,7 @@ class TestCardFiles:
         assert after.same_card is not None and after.same_card.id == card.id
         # another file under the same name: offered, never taken unasked
         other = app.api.cards.create(
-            data=ECHO.read_bytes(), file_name="echo.json", rename="Seraphina", validate_only=True
+            data=ECHO.read_bytes(), file_name="echo.json", name="Seraphina", validate_only=True
         )
         assert other.same_card is None
         assert [row.id for row in other.similar_cards] == [card.id]
@@ -247,6 +249,76 @@ class TestCardFiles:
         data = b"\xef\xbb\xbf" + ECHO.read_bytes()
         card = app.api.cards.create(data=data, file_name="echo.json").value.card
         assert (card.name, card.pictures) == ("Echo", ())
+
+    def test_a_bare_picture_imported_again_is_the_card_it_made(self, app: App) -> None:
+        first = app.api.cards.create(data=CAT.read_bytes(), file_name="cat.jpg", name=NEW_CARD_NAME)
+        check = app.api.cards.create(
+            data=CAT.read_bytes(), file_name="again.jpg", validate_only=True
+        )
+        assert check.same_card is not None and check.same_card.id == first.value.card.id
+        again = app.api.cards.create(data=CAT.read_bytes(), file_name="again.jpg", name="Tom").value
+        assert (again.made, again.card.id, again.card.name) == (
+            False,
+            first.value.card.id,
+            NEW_CARD_NAME,
+        )
+
+    def test_a_file_whose_picture_a_card_holds_is_offered_beside_it(self, app: App) -> None:
+        mira = app.api.cards.create(name="Mira").value
+        app.api.cards.pictures.create(mira.id, file=RawFile(SERAPHINA.read_bytes(), "s.png"))
+        check = app.api.cards.create(
+            data=SERAPHINA.read_bytes(), file_name="s.png", validate_only=True
+        )
+        assert check.same_card is None
+        assert [row.id for row in check.similar_cards] == [mira.id]
+        assert check.similar_note  # what the import says of them
+
+    def test_a_file_like_no_card_says_nothing_of_any(self, app: App) -> None:
+        check = app.api.cards.create(
+            data=ECHO.read_bytes(), file_name="echo.json", validate_only=True
+        )
+        assert (check.similar_cards, check.similar_note) == ((), "")
+
+    def test_a_check_shows_the_files_picture_small(self, app: App) -> None:
+        png = app.api.cards.create(
+            data=SERAPHINA.read_bytes(), file_name="s.png", validate_only=True
+        )
+        assert png.thumbnail is not None and png.thumbnail.startswith(b"\xff\xd8")  # a JPEG
+        json_card = app.api.cards.create(
+            data=ECHO.read_bytes(), file_name="echo.json", validate_only=True
+        )
+        assert json_card.thumbnail is None
+
+    def test_a_file_is_made_under_the_name_its_import_carries(self, app: App) -> None:
+        check = app.api.cards.create(
+            data=ECHO.read_bytes(), file_name="echo.json", name="Echo Two", validate_only=True
+        )
+        assert check.name == "Echo Two"
+        with pytest.raises(Refused):
+            app.api.cards.create(data=ECHO.read_bytes(), file_name="echo.json", name="  ")
+        assert app.api.cards.list() == []
+        made = app.api.cards.create(data=ECHO.read_bytes(), file_name="echo.json", name="Echo Two")
+        assert made.value.card.name == "Echo Two"
+
+    def test_a_card_made_takes_the_tagline_sent_and_one_held_keeps_its_own(self, app: App) -> None:
+        body = {"data": ECHO.read_bytes(), "file_name": "echo.json", "name": "Echo"}
+        made = app.api.cards.create(**body, tagline="A voice in the hills.").value.card
+        assert made.tagline == "A voice in the hills."
+        app.api.cards.update(made.id, tagline="Mine.")
+        again = app.api.cards.create(**body, tagline="Another.").value
+        assert (again.made, again.card.tagline) == (False, "Mine.")
+
+    def test_a_charx_card_brings_its_main_icon_as_its_portrait(self, app: App) -> None:
+        packed = pack_charx(ECHO.read_bytes(), CAT.read_bytes())
+        card = app.api.cards.create(data=packed, file_name="echo.charx", name="Echo").value.card
+        assert (card.name, len(card.pictures)) == ("Echo", 1)
+
+    def test_a_card_with_no_text_yet_says_so_until_written(self, app: App) -> None:
+        bare = app.api.cards.create(data=CAT.read_bytes(), file_name="cat.jpg", name=NEW_CARD_NAME)
+        card = bare.value.card
+        assert card.is_blank and app.api.cards.list()[0].is_blank
+        written = app.api.cards.update(card.id, description="A grey cat.").value
+        assert not written.is_blank and not app.api.cards.list()[0].is_blank
 
 
 class TestPictures:
@@ -340,6 +412,23 @@ class TestGeneration:
         assert (written.name, written.description) == ("Tom", "A grey cat.")
         assert "Tom" in scripted.content_text(seeing.server.requests[-1]["messages"][-1])
 
+    def test_the_card_is_written_in_the_language_asked(self, seeing: App) -> None:
+        card = seeing.api.cards.create(data=CAT.read_bytes(), file_name="cat.jpg").value.card
+        seeing.api.cards.generation.create(card.id, language="German")
+        assert "German" in _said(seeing.server.requests[-1])
+        seeing.api.cards.generation.create(card.id)
+        assert "English" in _said(seeing.server.requests[-1])
+
+    def test_a_language_that_is_no_short_line_is_refused_and_nothing_asked(
+        self, seeing: App
+    ) -> None:
+        card = seeing.api.cards.create(data=CAT.read_bytes(), file_name="cat.jpg").value.card
+        asked = len(seeing.server.requests)
+        for language in ("", "two\nlines", "x" * 41):
+            with pytest.raises(Refused):
+                seeing.api.cards.generation.create(card.id, language=language)
+        assert len(seeing.server.requests) == asked
+
     def test_a_card_with_no_picture_is_refused_and_nothing_asked(self, seeing: App) -> None:
         card = seeing.api.cards.create(name="Nobody").value
         asked = len(seeing.server.requests)
@@ -387,6 +476,42 @@ class TestGeneration:
             running.join(timeout=30)
         assert "refused" in outcome
         assert seeing.api.cards.get(card.id).name == NEW_CARD_NAME
+
+
+class TestFetches:
+    """A card fetched from a link — here a file's own, on a site of the
+    test's — read and vetted as a dropped file is, nothing stored, the
+    file answered for the import to send; or imported in one go. A web
+    page, and a link to nothing, are refused."""
+
+    @pytest.fixture
+    def site(self) -> Iterator[Site]:
+        with serving() as site:
+            yield site
+
+    def test_a_links_card_is_read_and_its_file_answered(self, app: App, site: Site) -> None:
+        url = site.serve("/seraphina.png", SERAPHINA.read_bytes(), "image/png")
+        check = app.api.cards.fetches.create(url=url, validate_only=True)
+        assert (check.name, check.file_name, check.tagline) == ("Seraphina", "seraphina.png", "")
+        assert check.data == SERAPHINA.read_bytes()
+        assert app.api.cards.list() == []
+
+    def test_a_link_imported_in_one_go_is_its_card(self, app: App, site: Site) -> None:
+        url = site.serve("/echo.json", ECHO.read_bytes(), "application/json")
+        made = app.api.cards.fetches.create(url=url).value
+        assert (made.made, made.card.name, made.card.file_name) == (True, "Echo", "echo.json")
+
+    def test_a_link_to_a_bare_picture_is_a_blank_card(self, app: App, site: Site) -> None:
+        url = site.serve("/cat.jpg", CAT.read_bytes(), "image/jpeg")
+        card = app.api.cards.fetches.create(url=url).value.card
+        assert (card.name, card.is_blank, len(card.pictures)) == (NEW_CARD_NAME, True, 1)
+
+    def test_a_web_page_and_a_link_to_nothing_are_refused(self, app: App, site: Site) -> None:
+        page = site.serve("/page", b"<html><body>A card's page</body></html>", "text/html")
+        for url in (page, site.url("/gone"), "not a link"):
+            with pytest.raises(Refused):
+                app.api.cards.fetches.create(url=url, validate_only=True)
+        assert app.api.cards.list() == []
 
 
 class TestMerges:
@@ -475,7 +600,9 @@ class TestPromote:
     def test_a_promotion_keeps_the_storys_persona_out_of_the_codex(self, app: App) -> None:
         card = app.api.cards.create(name="Mira", description="the codex's").value
         story = app.ensure_story()
-        app.api.stories.cards.create(story, card_id=card.id, persona="Alex", expected_head=None)
+        app.api.stories.cards.create(
+            story, card_id=card.id, name=card.name, persona="Alex", expected_head=None
+        )
         (character,) = app.store.characters.list(story)
         app.api.stories.characters.update(story, character.id, card_id=None)
         made = app.api.cards.create(story_id=story, character_id=character.id).value
@@ -522,6 +649,11 @@ def _plain_png() -> bytes:
     out = io.BytesIO()
     Image.new("RGB", (8, 8), (200, 120, 40)).save(out, "PNG")
     return out.getvalue()
+
+
+def _said(body: dict[str, Any]) -> str:
+    """Every message of a chat request, as text."""
+    return "\n".join(scripted.content_text(message) for message in body["messages"])
 
 
 def _images(body: dict[str, Any]) -> int:

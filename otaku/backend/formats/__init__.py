@@ -24,7 +24,8 @@ they hold.
 
 This module holds the data model every reader and writer shares and the
 two facts that recognize a file; the parsers are the sibling modules
-(`exports`, `imports`, `sillytavern`, `plaintext`, `cards`)."""
+(`exports`, `imports`, `sillytavern`, `plaintext`) and the `cards`
+package, a module per card file beside the card's text."""
 
 from __future__ import annotations
 

@@ -98,7 +98,7 @@ export async function openTab(tab) {
   }
 }
 
-/** The contents row that is a screen of the page's own: All characters,
+/** The contents row that is a screen of the page's own: Characters,
     the codex's cards — no command yet, the terminal's screen to come. */
 export async function openCodex() {
   try {

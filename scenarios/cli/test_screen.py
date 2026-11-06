@@ -8,7 +8,7 @@ the rows the store never holds (the thinking, an error, the verbose
 stats) are left out of the comparison.
 
 Minutes, not seconds: every check launches a second app for its echo. So
-the module is `slow` besides `cli`: `make regression` runs it, and any
+the module is `slow` besides `cli`: `make regressions` runs it, and any
 other run leaves it out with `-m "not slow"`. A check that fails says
 what tracing it takes: the seed of the fake model's picks
 (`OTAKU_SCREEN_SEED` replays it), the live screen and a fresh launch's,
@@ -36,9 +36,9 @@ from scenarios.support.emulator import (
     CTRL_Y,
     DOWN,
     ENTER,
+    MOCK,
     RIGHT,
     ROWS,
-    TM,
     Emulated,
     echo,
     jumps,
@@ -234,13 +234,13 @@ class TestStoryMode:
 
         def script(body: dict[str, Any]) -> str | tuple[str, str]:
             messages = body.get("messages") or []
-            if len(messages) >= 2 and sentence in TM.content_text(messages[-2]):
+            if len(messages) >= 2 and sentence in MOCK.content_text(messages[-2]):
                 # the round after the call, a paragraph after it: the prompt
                 # draws the text's last line again, which would mend that row
                 return "The rest of it came slowly.\n\nThen the bells stopped."
-            if messages and said in TM.content_text(messages[-1]):
+            if messages and said in MOCK.content_text(messages[-1]):
                 return f"{sentence}\n\n{call}"
-            return TM.reply(body)  # the lore pass, and anything else
+            return MOCK.reply(body)  # the lore pass, and anything else
 
         played.server.script = script
         problems = run(term, [line(said)], story_mode=True)

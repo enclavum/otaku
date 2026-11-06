@@ -36,7 +36,7 @@ _SAMPLE_PICTURE = re.compile(r"^(?P<stem>.+)\.(?P<message>\d+)\.(?P<order>\d+)\.
 # The river sample ends on a question, and a tool that is off has its
 # calls neither drawn nor sent: it lands with the questions tool on.
 _ASKING_SAMPLE = "river.md"
-# Which of the samples' characters are kept in All characters, beside them.
+# Which of the samples' characters are kept in Characters, beside them.
 _SAMPLE_CARDS = "cards.toml"
 # The text fields a manifest row may set on its card, beside `examples`.
 _CARD_TEXTS = ("tagline", "description", "personality", "scenario", "greeting")
@@ -108,7 +108,7 @@ def _seed_pictures(app: App, story_id: int, document: Path) -> list[str]:
 
 
 def _seed_cards(api: Api, story_id: int, document: Path) -> list[str]:
-    """The sample's characters into All characters, as the samples' own
+    """The sample's characters into Characters, as the samples' own
     manifest names them (`_SAMPLE_CARDS`): each made from its story's
     character and linked to it, the fields the row gives laid over what
     the character brought (`_card_fields`), and its portrait — a picture

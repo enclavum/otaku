@@ -539,6 +539,8 @@ class TestInterface:
             "DictationResource.create",
             "CardGenerationResource.create",
             "CardGenerationResource.delete",
+            "CardFetchesResource.create",
+            "StoryCardFetchesResource.create",
         }
 
     def test_every_route_follows_its_call_path(self) -> None:
@@ -777,6 +779,8 @@ _PAGE = {
     # to say can reach it without reaching for a screen.
     "status": {"dom"},
     "prose": {"dom"},
+    # A card's text read as Markdown, its inline marks a reply's.
+    "markdown": {"dom", "prose"},
     "browser": {"dom", "status"},
     # The microphone, opened and read: a recording and its level.
     "microphone": set(),
@@ -824,10 +828,21 @@ _PAGE = {
         "shell",
         "tools",
         "transcript",
+        "transfer",
     },
     # All characters, and the card picker every "which card" goes through;
     # `transfer` for the card dialog an invite and an import open.
-    "characters": {"api", "browser", "dom", "format", "held", "pictures", "shell", "transfer"},
+    "characters": {
+        "api",
+        "browser",
+        "dom",
+        "format",
+        "held",
+        "markdown",
+        "pictures",
+        "shell",
+        "transfer",
+    },
     # The dossier's fifth tab in a module of its own. `models` for the
     # mask a set key reads behind, as a provider's does.
     "tools": {"api", "browser", "dom", "models", "shell"},

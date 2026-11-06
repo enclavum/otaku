@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""A fake llama.cpp for looking at the transcript by hand: `make test-model`.
+"""A mock llama.cpp for looking at the transcript by hand: `make mock-model`.
 
 It answers as llama.cpp does, on llama.cpp's default port, so the
 `[llamacpp]` section a first run writes points here with nothing changed:
@@ -34,7 +34,7 @@ and so a retry may, it gets a paragraph of prose. A line whose number is
 `-2` gets an empty reply: a newline alone, as some engines send.
 
 On the text wire a line runs on in the paragraph before it, so the line
-read there is what the story gained after the fake's own last reply. The
+read there is what the story gained after the mock's own last reply. The
 lore pass's prompts are told by their fixed openings and choose nothing:
 their scenes are numbered.
 
@@ -113,7 +113,7 @@ SEARCHES = ("tide tables for a tidal river", "how an old ferry rope is coiled")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="A fake llama.cpp for looking at the transcript.")
+    parser = argparse.ArgumentParser(description="A mock llama.cpp for looking at the transcript.")
     parser.add_argument("--port", type=int, default=8080, help="llama.cpp's default: 8080")
     parser.add_argument(
         "--pace", type=float, default=0.03, help="seconds between streamed pieces (0.03)"
@@ -122,7 +122,7 @@ def main() -> None:
     try:
         server = ModelServer(models=(CHAT_MODEL, TEXT_MODEL), port=args.port)
     except OSError as e:
-        sys.exit(f"test_model: cannot listen on port {args.port} ({e.strerror or e})")
+        sys.exit(f"mock_model: cannot listen on port {args.port} ({e.strerror or e})")
     # Several models are llama.cpp's router: listed with their state, and
     # both loaded, so each one's window is known from the start.
     server.router = True
@@ -144,7 +144,7 @@ def main() -> None:
     server.refuse = refuse
     server.refusal = "the test model failed, as -1 asks"
     print(
-        f"A fake llama.cpp at {server.url}, serving {CHAT_MODEL} and {TEXT_MODEL}."
+        f"A mock llama.cpp at {server.url}, serving {CHAT_MODEL} and {TEXT_MODEL}."
         " Ctrl+C stops it.",
         flush=True,
     )
@@ -187,7 +187,7 @@ def _quiet_interrupt() -> Callable[[], None]:
 
 
 def reply(body: dict[str, Any]) -> str | tuple[str, str]:
-    """What the fake answers one request with: the blocks the line's
+    """What the mock answers one request with: the blocks the line's
     numbers ask for, the reply going on after each tool's turn until the
     tools the line asked for have run; a paragraph for anything else —
     the lore prompts included, which get prose they cannot parse."""
@@ -236,13 +236,13 @@ def refuse(body: dict[str, Any]) -> int | None:
     return 500 if failing and random.random() < 0.5 else None
 
 
-# The fake's last reply over the text wire: the newest line is what follows it.
+# The mock's last reply over the text wire: the newest line is what follows it.
 _answered = ""
 
 
 def _text_line(prompt: str) -> str:
     """The reader's newest line on the text wire, where it runs on in the
-    paragraph before it: what the story gained after the fake's own last
+    paragraph before it: what the story gained after the mock's own last
     reply — the edges of a stored reply may differ, its inside does not —
     else the text's last paragraph."""
     said = _answered.strip()

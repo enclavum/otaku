@@ -126,7 +126,7 @@ function start() {
       signOut();
       return;
     }
-    // The contents row of a screen with no command yet: All characters.
+    // The contents row of a screen with no command yet: Characters.
     if (event.target.closest("[data-characters]")) {
       openCodex();
       foldRail();

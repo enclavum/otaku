@@ -633,7 +633,7 @@ class ModelServer:
                 self.wfile.write(b"data: " + json.dumps(payload).encode() + b"\n\n")
 
         # A free port unless one is asked for — an engine's own, where the
-        # server stands in for it by hand (`scripts/test_model.py`).
+        # server stands in for it by hand (`scripts/mock_model.py`).
         self._httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
         scheme = "http"
         if tls is not None:

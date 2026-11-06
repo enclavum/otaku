@@ -1,0 +1,31 @@
+# The integrations against the real services they ask
+# (scenarios/integrations, marked `integration`): every card site, each web
+# search engine whose key is a repository secret, the support desk. A service changes on its own
+# schedule, never on a push, so this runs twice a week and by hand, apart
+# from CI: a red run here means a service changed, and nothing else waits
+# on it.
+name: Integrations
+
+on:
+  schedule:
+    - cron: "0 7 * * 2,5" # Tuesdays and Fridays, 07:00 UTC
+  workflow_dispatch:
+  # TEMPORARY, to see it run before it reaches main: every push, as CI's.
+  # Taken out again once a run has passed, back to the schedule alone.
+  push:
+    branches: [main, "release/**"]
+
+jobs:
+  integrations:
+    name: integrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: "3.11"
+      - run: uv run pytest scenarios/ -m integration
+        env:
+          TAVILY_API_KEY: ${{ secrets.TAVILY_API_KEY }}
+          EXA_API_KEY: ${{ secrets.EXA_API_KEY }}

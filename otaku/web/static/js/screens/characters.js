@@ -1,4 +1,4 @@
-/* All characters: the codex's cards — the characters the reader keeps
+/* Characters: the codex's cards — the characters the reader keeps
    across stories — as a gallery or a list, the stories' characters no
    card claims beside them, and a card opened as a sheet over both: its
    pictures, its fields, the stories it is in and its journals there —
@@ -6,8 +6,8 @@
    kept as a version to step back and forth through while the card stays
    open.
    And the asks the codex shares with a story's cast: the card picker
-   (`pickCard`) — a card to link, to invite, to merge into — and a card
-   invited into the story held (`inviteCard`).
+   (`pickCard`) — a card to link, to merge into — and a card added to the
+   story held (`addCharacter`).
 
    Every write goes out through its endpoint (`api.cards`, a story's
    characters) and what stands after it is read again; the sentence a
@@ -44,10 +44,10 @@ import {
   switchButton,
 } from "../kit/dom.js";
 import { label } from "../kit/format.js";
+import { markdown } from "../kit/markdown.js";
 import { openPicture } from "../kit/pictures.js";
 import * as held from "../play/held.js";
 import { landed } from "../play/shell.js";
-import { importCard } from "./transfer.js";
 
 /* Where the view is kept — the list, or the gallery at a tile size —
    this browser's storage, as the theme's pin is; the unlinked column's
@@ -102,16 +102,59 @@ const _FIELDS = [
 const _ITEMS = /\n\s*---\s*\n/;
 // What a generation writes, and its history keeps (`backend.codex.cards.services`).
 const _GENERATED = ["name", "tagline", "description", "personality", "scenario", "greeting"];
-/* Why Generate from picture is off, as the backend refuses a generation —
+/* Why Generate card from picture is off, as the backend refuses a generation —
    `backend.codex.cards.services`' sentences, copied: nothing is asked
    before the click. */
 const _CANNOT_SEE = "The model in use cannot see pictures.";
 const _NO_PICTURE = "The card has no picture.";
 // How often a generation's time is read again.
 const _CLOCK_MS = 250;
+// How long the links box waits after the last keystroke before it reads them.
+const _LINKS_SETTLE_MS = 800;
 // The versions' arrows, back and forth, as `svg` paths.
-const _PREVIOUS = ["M9 14 4 9l5-5", "M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"];
-const _NEXT = ["m15 14 5-5-5-5", "M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"];
+const _PREVIOUS = ["m15 5-7 7 7 7"];
+const _NEXT = ["m9 5 7 7-7 7"];
+/* The languages a card is generated in, the menu's own: each by its code,
+   its own name — what a reader finds theirs by — and the English name the
+   model is asked in. */
+const _LANGUAGES = [
+  ["en", "English", "English"],
+  ["de", "Deutsch", "German"],
+  ["es", "Español", "Spanish"],
+  ["pt", "Português", "Portuguese"],
+  ["ru", "Русский", "Russian"],
+  ["ja", "日本語", "Japanese"],
+  ["zh", "中文", "Simplified Chinese"],
+];
+/* The browser's languages beyond them the menu can name, which join it
+   at the top where the browser speaks one: by code, as `_LANGUAGES`. */
+const _BROWSER_LANGUAGES = {
+  fr: ["Français", "French"],
+  it: ["Italiano", "Italian"],
+  nl: ["Nederlands", "Dutch"],
+  pl: ["Polski", "Polish"],
+  uk: ["Українська", "Ukrainian"],
+  cs: ["Čeština", "Czech"],
+  sv: ["Svenska", "Swedish"],
+  tr: ["Türkçe", "Turkish"],
+  ko: ["한국어", "Korean"],
+  id: ["Bahasa Indonesia", "Indonesian"],
+  vi: ["Tiếng Việt", "Vietnamese"],
+  th: ["ไทย", "Thai"],
+  ar: ["العربية", "Arabic"],
+  hi: ["हिन्दी", "Hindi"],
+};
+// Where the language last picked is kept, as the view is.
+const _LANGUAGE_KEY = "otaku-card-language";
+/* The formats a card is exported in, by the code its button shows: the
+   design's examples, standing until export is built. */
+const _EXPORT_FORMATS = [
+  ["png", "Character card, with the picture"],
+  ["json", "Character card, text only"],
+  ["md", "Plain text, for reading"],
+];
+// Where the export format last picked is kept, as the language is.
+const _EXPORT_KEY = "otaku-card-export";
 
 const state = {
   // the cards and unlinked characters as last read, and how many of each
@@ -154,7 +197,7 @@ const state = {
   generations: null,
 };
 
-/** Open All characters — on the card `cardId` where one is asked. */
+/** Open Characters — on the card `cardId` where one is asked. */
 export async function openCharacters({ cardId = null } = {}) {
   const popup = popups.get("/characters");
   if (!popup.open) popup.showModal();
@@ -184,24 +227,195 @@ export async function openCardWindow(cardId) {
   return "";
 }
 
-/** A codex card into the story held: picked, then brought in through
-    the card dialog, the codex card where a file would be — or, by the
-    picker's Import…, a card file into the story. */
-export async function inviteCard() {
-  const picked = await pickCard({ importing: true });
-  if (!picked) return;
-  if (picked.import) return importCard();
-  return importCard({ cardId: picked.card.id });
+/** Add a character: a card from Characters into the story held, in one
+    step. The cards are named in a list — each with the stories it is in,
+    or why it can't be picked: in this story already, or an empty card —
+    the filter under it; the card picked is previewed beside it (its
+    portrait, name, tagline and description) and vetted for the
+    story, which fills the character's name and the persona it speaks to
+    (the story's memory of it, else the reader's to type); its picture's switch where it
+    has one. Invite brings it in, the dialog staying, its refusal said in
+    its foot, where the story refuses. */
+export async function addCharacter() {
+  const story = held.story();
+  if (story === null) return;
+  const [cards, cast] = await Promise.all([api.cards.list(), api.stories.characters.list(story)]);
+  // the cards the story's cast is linked to: listed, not to be picked again
+  const inStory = new Set((cast.refused ? [] : cast).map((one) => one.card_id).filter((id) => id != null));
+  let picked = null;
+  let sending = false;
+  let vetted = null;
+  const answer = { value: null };
+  await ask("add-character", (dialog) => {
+    const list = $("[data-add-list]", dialog);
+    const filter = $("[data-add-filter]", dialog);
+    const preview = $("[data-add-preview]", dialog);
+    const name = $("#otk-add-name", dialog);
+    const persona = $("#otk-add-persona", dialog);
+    const picsend = $("[data-add-picsend]", dialog);
+    const picsendSwitch = $("[data-add-picsend-switch]", dialog);
+    const invite = $('[data-choice="invite"]', dialog);
+    filter.value = name.value = persona.value = "";
+    filter.placeholder = `filter ${cards.length} ${cards.length === 1 ? "card" : "cards"}`;
+    sending = false;
+    picsendSwitch.setAttribute("aria-checked", "false");
+    picsendSwitch.onclick = () => {
+      sending = !sending;
+      picsendSwitch.setAttribute("aria-checked", String(sending));
+    };
+    // why a card can't be picked, in the list's own words; "" for none
+    const barred = (card) => (inStory.has(card.id) ? "already in" : card.is_blank ? "empty card" : "");
+    const stories = (card) =>
+      card.story_count ? `${card.story_count} ${card.story_count === 1 ? "story" : "stories"}` : "not in a story";
+    const arm = () => {
+      invite.disabled = !(picked && vetted && name.value.trim() && persona.value.trim());
+    };
+    let turn = 0;
+    const choose = guard(async (card, row) => {
+      /* The card picked: read whole, its picture decoded, and vetted for
+         the story — what fills the names — and only then drawn, the card
+         before it standing meanwhile, so the preview changes once; a
+         refusal said in the foot, Invite off. */
+      const mine = ++turn;
+      picked = card;
+      vetted = null;
+      for (const each of $$(".otk-pick__row", list)) {
+        each.setAttribute("aria-selected", String(each === row));
+      }
+      arm();
+      const [whole, check, portrait] = await Promise.all([
+        api.cards.get(card.id),
+        api.stories.cards.create(story, { card_id: card.id }, { validateOnly: true }),
+        card.pictures.length ? decoded(api.pictures.thumbnail.url(card.pictures[0].file)) : null,
+      ]);
+      if (mine !== turn) return;
+      drawPreview(preview, card, whole.refused ? "" : whole.description, portrait);
+      name.value = card.name;
+      picsend.hidden = !card.pictures.length;
+      if (check.refused) {
+        report(check.notice);
+        return;
+      }
+      footnote(dialog, "");
+      vetted = check;
+      if (!persona.value.trim()) persona.value = check.persona;
+      arm();
+    });
+    const draw = (query) => {
+      // the cards whose name, an alias or the tagline holds the filter's words
+      const needle = query.trim().toLowerCase();
+      const shown = cards.filter(
+        (card) => !needle || [card.name, ...card.aliases, card.tagline].join(" ").toLowerCase().includes(needle),
+      );
+      if (!shown.length) {
+        list.replaceChildren(empty(needle ? "No card matches that." : "No cards yet."));
+        return;
+      }
+      list.replaceChildren(
+        ...shown.map((card) => {
+          const row = element("button", "otk-row otk-pick__row");
+          row.type = "button";
+          row.setAttribute("role", "option");
+          row.setAttribute("aria-selected", String(picked?.id === card.id));
+          const why = barred(card);
+          if (why) row.setAttribute("aria-disabled", "true");
+          row.append(span("otk-pick__name", card.name), span("otk-pick__meta", why || stories(card)));
+          row.onclick = () => choose(card, row);
+          return row;
+        }),
+      );
+    };
+    const signal = wiring(dialog);
+    filter.addEventListener("input", () => draw(filter.value), { signal });
+    name.addEventListener("input", arm, { signal });
+    persona.addEventListener("input", arm, { signal });
+    /* Invite settles nothing on its own: the card is brought in here, and
+       a refusal answers into the open dialog. Wired before `ask` adds its
+       own listeners, so the stop is the whole veto — the button and the
+       dialog's Enter alike. */
+    const veto = guard(async (event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (invite.disabled) return;
+      if (!name.value.trim()) return name.reportValidity();
+      if (!persona.value.trim()) return persona.reportValidity();
+      invite.disabled = true;
+      const brought = await api.stories.cards.create(story, {
+        card_id: picked.id,
+        name: name.value.trim(),
+        persona: persona.value.trim(),
+        with_pictures: sending && !picsend.hidden,
+      });
+      if (brought.refused) {
+        report(brought.notice);
+        arm();
+        return;
+      }
+      answer.value = brought;
+      dialog.close();
+    });
+    invite.addEventListener("click", veto, { signal });
+    dialog.addEventListener(
+      "keydown",
+      (event) => {
+        if (event.key === "Enter" && !event.shiftKey && !event.target.matches(".otk-filter")) veto(event);
+      },
+      { signal },
+    );
+    draw("");
+    /* The preview stands from the start, its picture's placeholder in the
+       frame, so the first card read fills it rather than popping it in. */
+    preview.hidden = false;
+    preview.removeAttribute("data-nopic");
+    $("[data-add-portrait]", preview).replaceChildren();
+    for (const part of $$("[data-add-title], [data-add-tag], [data-add-desc]", preview)) {
+      part.replaceChildren();
+    }
+    arm();
+    // the first card that can be picked, picked
+    const first = $('.otk-pick__row:not([aria-disabled="true"])', list);
+    if (first) first.click();
+  });
+  if (!answer.value) return;
+  held.hold(story);
+  // The card is in: the screen it was asked from goes, and the landing is
+  // read in the flow, as an import's is.
+  closeAll();
+  await landed(answer.value.notice, { redraw: "always" });
 }
 
-/** Which card: a card to link, to invite, to merge into, through the
-    one picker (`pick`). `{card}` for the one chosen, `{import: true}` for
-    the picker's Import…, null for none. `exclude` leaves a card out (the
-    one being merged); `importing` shows Import…. */
-export async function pickCard({ title = "Choose a card", exclude = null, importing = false } = {}) {
+async function decoded(url) {
+  // a picture loaded and decoded, ready to be shown without a blank frame
+  const image = element("img");
+  image.alt = "";
+  image.src = url;
+  try {
+    await image.decode();
+  } catch {
+    // one that will not decode is shown as it is: the frame says so
+  }
+  return image;
+}
+
+function drawPreview(preview, card, description, portrait) {
+  // the card picked, as the preview shows it, all of it at once
+  preview.hidden = false;
+  preview.toggleAttribute("data-nopic", !portrait);
+  $("[data-add-portrait]", preview).replaceChildren(...(portrait ? [portrait] : []));
+  $("[data-add-title]", preview).textContent = card.name;
+  $("[data-add-tag]", preview).textContent = card.tagline;
+  const text = $("[data-add-desc]", preview);
+  text.replaceChildren(...markdown(description));
+  // a card read from its top, wherever the last one was left
+  text.scrollTop = 0;
+}
+
+/** Which card: a card to link, to merge into, through the one picker
+    (`pick`). `{card}` for the one chosen, null for none. `exclude` leaves
+    a card out (the one being merged). */
+export async function pickCard({ title = "Choose a card", exclude = null } = {}) {
   const picked = await pick({
     title,
-    importing,
     read: async (query) => (await api.cards.list({ query })).filter((card) => card.id !== exclude),
     none: (query) => (query ? ["No card matches that."] : ["No cards yet.", "import one"]),
   });
@@ -213,21 +427,12 @@ export async function pickCard({ title = "Choose a card", exclude = null, import
     `read(query)` answers the rows, each with an id, a name, a tagline and
     its pictures, the first shown; `none(query)` what an empty list says;
     `filtering` the filter's placeholder and `rows` the list's name for a
-    screen reader. `{chosen}` for the row chosen,
-    `{import: true}` for Import… (shown with `importing`), null for none. */
-export async function pick({
-  title,
-  read,
-  none,
-  filtering = "filter cards",
-  rows: named = "Cards",
-  importing = false,
-}) {
+    screen reader. `{chosen}` for the row chosen, null for none. */
+export async function pick({ title, read, none, filtering = "filter cards", rows: named = "Cards" }) {
   const dialog = $('dialog[data-dialog="pick-card"]');
   let chosen = null;
   const choice = await ask("pick-card", () => {
     $("[data-title]", dialog).textContent = title;
-    $('[data-choice="import"]', dialog).hidden = !importing;
     const list = $("[data-pick]", dialog);
     const filter = $("[data-filter-pick]", dialog);
     const confirm = $('[data-choice="choose"]', dialog);
@@ -283,7 +488,6 @@ export async function pick({
     );
     guard(() => draw(""))();
   });
-  if (choice === "import") return { import: true };
   if (choice === "choose" && chosen) return { chosen };
   return null;
 }
@@ -353,6 +557,9 @@ function wireChrome(popup) {
     { signal },
   );
   $("[data-start]", popup).addEventListener("click", guard(() => startStory(popup)), { signal });
+  $("[data-import-cards]", popup).addEventListener("click", guard(() => importDialog(popup)), {
+    signal,
+  });
   // the panel closing takes an open sheet with it
   popup.addEventListener("close", () => closeSheets(), { signal });
 }
@@ -718,6 +925,392 @@ async function sendEach(files, send) {
   return answer;
 }
 
+async function importDialog(popup) {
+  /* Import cards, as the design draws it: card files and pictures dropped
+     or chosen, links pasted one per line — each READ as it arrives, a row
+     of the list: a file vetted as it is (`validateOnly`), a link
+     fetched and vetted, the file it gave kept in the row, so a link is
+     fetched once. A row says what it is — its picture, its name, its
+     state — and the backend's notes on it, in three lines that never
+     wrap; a card still to be imported renamed in place, and read again
+     under its name; a row skipped stays, faint, to be brought back — one
+     similar to a card Characters has skipped from the start. Import adds
+     the rows not skipped, ready or similar, each sent as a card file in
+     turn, and the foot then holds Close alone, the rows left to be read. Files and links
+     are read in two queues, each one at a time, so no site is asked twice
+     at once; put down, the dialog reads and sends nothing more. */
+  const rows = [];
+  let importing = false;
+  let done = false;
+  let last = null;
+  await ask("cards", (dialog) => {
+    const zone = $(".otk-dropzone", dialog);
+    const picker = $("input[type=file]", dialog);
+    const links = $("[data-links]", dialog);
+    const list = $("[data-rows]", dialog);
+    const count = $("[data-count]", dialog);
+    const countAfter = $("[data-count-after]", dialog);
+    const importButton = $("[data-import]", dialog);
+    const cancel = $('[data-choice="cancel"]', $("[data-before]", dialog));
+    const before = $("[data-before]", dialog);
+    const after = $("[data-after]", dialog);
+    picker.value = "";
+    links.value = "";
+    list.replaceChildren();
+    before.hidden = false;
+    after.hidden = true;
+    zone.inert = links.disabled = false;
+    zone.classList.remove("is-dragover");
+
+    const adding = (row) => !row.skipped && (row.state === "ready" || row.state === "similar");
+    const recount = () => {
+      list.hidden = !rows.length;
+      const ready = rows.filter(adding).length;
+      const many = rows.length === 1 ? "character" : "characters";
+      count.textContent = importing
+        ? "Importing\u2026"
+        : rows.length
+          ? `${rows.length} ${many} · ${ready} to import`
+          : "";
+      importButton.setAttribute("aria-disabled", String(importing || !ready));
+    };
+    const drawRow = (row) => {
+      /* A row as its state stands: the source while it is read or where it
+         was refused, the card's name over the source once read. */
+      const read = row.check && row.state !== "refused";
+      const thumb = span(read ? "otk-imp__thumb" : "otk-imp__thumb otk-imp__thumb--empty");
+      if (read && row.check.thumbnail) {
+        const image = element("img");
+        image.alt = "";
+        image.src = `data:image/jpeg;base64,${row.check.thumbnail}`;
+        thumb.append(image);
+      }
+      // three lines, each cut short where it runs long, whole in its tooltip
+      const line = (className, words) => {
+        const each = span(className, words);
+        each.title = words;
+        return each;
+      };
+      const text = span("otk-imp__text");
+      if (read) {
+        const name = line("otk-imp__name", row.check.name);
+        const nameLine = span("otk-imp__nameline");
+        nameLine.append(name);
+        // a card still to be imported is named here, as it will be kept
+        if (!done && (row.state === "ready" || row.state === "similar")) {
+          nameLine.append(renameButton(name, (typed) => renamed(row, typed)));
+        }
+        text.append(nameLine, line("otk-imp__sub", row.label));
+      } else {
+        text.append(line("otk-imp__name otk-imp__name--src", row.label));
+      }
+      const notes = read ? row.check.notes : [];
+      if (notes.length) text.append(line("otk-imp__notes", notes.join(" ")));
+      const state = span("otk-imp__state", stateOf(row));
+      // why a row is similar to a card Characters has, the backend's sentence
+      if (row.state === "similar") state.title = row.check.similar_note;
+      /* Skipping a row keeps it, faint, its cross turned a plus that
+         brings it back; only a link's row leaves the list, its line taken
+         out of the links. */
+      const toggle = element("button", "otk-imp__remove");
+      toggle.type = "button";
+      toggle.title = row.skipped ? "Import this row" : "Skip this row";
+      toggle.setAttribute("aria-label", row.skipped ? "Import" : "Skip");
+      toggle.hidden = done;
+      toggle.append(row.skipped ? plusGlyph() : crossGlyph());
+      toggle.onclick = () => {
+        row.skipped = !row.skipped;
+        row.chosen = true;
+        drawRow(row);
+      };
+      row.box.dataset.state = row.state;
+      row.box.toggleAttribute("data-skipped", Boolean(row.skipped));
+      row.box.replaceChildren(thumb, text, state, toggle);
+      recount();
+    };
+    const vetted = (row, answer) => {
+      // what a read answered — the first, or one under a new name — drawn
+      if (row.gone || !dialog.open) return;
+      if (answer.refused) {
+        row.state = "refused";
+        row.reason = answer.notice;
+      } else {
+        row.check = answer;
+        row.state = answer.same_card ? "duplicate" : answer.similar_cards.length ? "similar" : "ready";
+        // similar to a card Characters has, likely the same: left out until the
+        // reader brings it back — the reader's own choice standing
+        if (!row.chosen) row.skipped = row.state === "similar";
+      }
+      drawRow(row);
+    };
+    const landed = (row, answer) => {
+      // what an import answered, drawn
+      if (row.gone || !dialog.open) return;
+      if (answer.refused) {
+        row.state = "refused";
+        row.reason = answer.notice;
+      } else {
+        // a card another row brought in meanwhile is the codex's already
+        row.state = answer.value.made ? "added" : "duplicate";
+        last = answer;
+      }
+      drawRow(row);
+    };
+    const renamed = guard(async (row, name) => {
+      /* A row under the name the reader typed: read again with it —
+         the file in hand, so a link is not fetched again — for what
+         Characters may hold of that name; the import makes it so. */
+      row.rename = name;
+      vetted(row, await api.cards.create({ ...row.file, name }, { validateOnly: true }));
+    });
+    const queues = { file: [], link: [] };
+    const running = { file: false, link: false };
+    const read = guard(async (kind) => {
+      // one queue's rows, one at a time, while the dialog stands
+      if (running[kind]) return;
+      running[kind] = true;
+      try {
+        while (queues[kind].length && dialog.open) {
+          const row = queues[kind].shift();
+          if (row.gone) continue;
+          if (kind === "file") {
+            const { name, data } = await encodeFile(row.source);
+            row.file = { file_name: name, data };
+            vetted(row, await api.cards.create(row.file, { validateOnly: true }));
+          } else {
+            const answer = await api.cards.fetches.create({ url: row.source }, { validateOnly: true });
+            // a link's file, and the line its site shows the card under
+            if (!answer.refused) {
+              row.file = { file_name: answer.file_name, data: answer.data, tagline: answer.tagline };
+            }
+            vetted(row, answer);
+          }
+        }
+      } finally {
+        running[kind] = false;
+      }
+    });
+    const add = (kind, source, label) => {
+      const row = { kind, source, label, state: "reading", check: null, box: element("li", "otk-imp__row") };
+      rows.push(row);
+      list.append(row.box);
+      drawRow(row);
+      queues[kind].push(row);
+      read(kind);
+    };
+    const drop = (row) => {
+      // a link's row, gone with its line from the links
+      row.gone = true;
+      rows.splice(rows.indexOf(row), 1);
+      row.box.remove();
+      recount();
+    };
+    const addFiles = (picked) => {
+      zone.classList.remove("is-dragover");
+      if (importing || done) return;
+      // a file dropped again is the row it has already
+      const same = (a, b) =>
+        a.name === b.name && a.size === b.size && a.lastModified === b.lastModified;
+      for (const file of picked) {
+        if (!rows.some((row) => row.kind === "file" && same(row.source, file))) {
+          add("file", file, file.name);
+        }
+      }
+    };
+    const readLinks = () => {
+      /* The box's links as rows: a link new to it read, one gone from it
+         dropped, each link once. */
+      if (importing || done) return;
+      const wanted = linksIn(links.value);
+      for (const row of rows.filter((each) => each.kind === "link")) {
+        if (!wanted.includes(row.source)) drop(row);
+      }
+      for (const link of wanted) {
+        if (!rows.some((row) => row.kind === "link" && row.source === link)) add("link", link, link);
+      }
+    };
+
+    picker.onchange = () => {
+      addFiles([...picker.files]);
+      // emptied, so the same file chosen again is another change
+      picker.value = "";
+    };
+    zone.ondragover = (event) => {
+      event.preventDefault();
+      zone.classList.add("is-dragover");
+    };
+    zone.ondragleave = () => zone.classList.remove("is-dragover");
+    zone.ondrop = (event) => {
+      event.preventDefault();
+      addFiles([...event.dataTransfer.files]);
+    };
+
+    const run = guard(async () => {
+      /* The rows not skipped, ready or similar, each sent as the
+         card file it was read as; then the foot holds Close alone. */
+      // both buttons off while the cards go in: nothing to press but Esc
+      importing = true;
+      zone.inert = links.disabled = cancel.disabled = true;
+      recount();
+      try {
+        for (const row of rows.filter(adding)) {
+          if (!dialog.open) break;
+          landed(row, await api.cards.create({ ...row.file, name: row.rename ?? row.check.name }));
+        }
+      } finally {
+        importing = false;
+        cancel.disabled = false;
+      }
+      if (!dialog.open) {
+        // put down midway: the library shows what landed meanwhile
+        await redraw(popup);
+        return;
+      }
+      done = true;
+      for (const row of rows) drawRow(row);
+      const added = rows.filter((row) => row.state === "added").length;
+      countAfter.textContent = `Imported ${added} ${added === 1 ? "card" : "cards"}`;
+      before.hidden = true;
+      after.hidden = false;
+      $("[data-done]", dialog).focus();
+      await redraw(popup);
+    });
+
+    /* Import settles nothing on its own: the dialog stays to show what
+       each row came to. Wired before `ask` adds its own listeners, so the
+       stop is the whole veto — the button and the dialog's Enter alike;
+       `wiring` drops the last opening's veto with its stale closures. */
+    const signal = wiring(dialog);
+    let settling = null;
+    links.addEventListener(
+      "input",
+      () => {
+        clearTimeout(settling);
+        settling = setTimeout(readLinks, _LINKS_SETTLE_MS);
+      },
+      { signal },
+    );
+    // a paste is read once it lands, an edit once the typing stops
+    links.addEventListener("paste", () => setTimeout(readLinks), { signal });
+    const veto = (event) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (done) dialog.close();
+      else if (importButton.getAttribute("aria-disabled") !== "true") run();
+    };
+    importButton.addEventListener("click", veto, { signal });
+    dialog.addEventListener(
+      "keydown",
+      (event) => {
+        if (event.key === "Enter" && !event.shiftKey && !event.target.matches("textarea")) {
+          veto(event);
+        }
+      },
+      { signal },
+    );
+    dialog.addEventListener("close", () => clearTimeout(settling), { signal });
+    recount();
+  });
+  // what the last import answered, below the library read again
+  await redraw(popup, last);
+}
+
+function stateOf(row) {
+  /* A row's state in its own words: the page's, but a refusal's reason,
+     which is the backend's sentence, set lowercase in the row. */
+  switch (row.state) {
+    case "reading":
+      return "reading…";
+    case "duplicate":
+      return "already in Characters · skipped";
+    case "similar":
+      return `similar to ${row.check.similar_cards[0].name}`;
+    case "refused":
+      return `refused · ${row.reason.slice(0, 1).toLowerCase()}${row.reason.slice(1).replace(/\.$/, "")}`;
+    default:
+      return row.state;
+  }
+}
+
+function crossGlyph() {
+  // a row's skip, a cross
+  return rowGlyph("M6 6l12 12M18 6 6 18");
+}
+
+function plusGlyph() {
+  // a skipped row's way back, a plus
+  return rowGlyph("M12 5v14M5 12h14");
+}
+
+function renameButton(name, onrename) {
+  /* The pen after a row's name: it opens the name for typing, the caret
+     at its end; Enter or leaving it keeps what was typed — none, the name
+     it had — and Esc puts it back, the dialog's own keys untouched. */
+  const pen = element("button", "otk-imp__rename");
+  pen.type = "button";
+  pen.title = "Rename";
+  pen.setAttribute("aria-label", "Rename");
+  const glyph = svgElement("svg", { width: "11", height: "11", viewBox: "0 0 24 24", "aria-hidden": "true" });
+  glyph.append(
+    svgElement("path", {
+      d: "M21.17 6.81a2.82 2.82 0 0 0-3.99-3.99L3.84 16.17a2 2 0 0 0-.5.83l-1.32 4.35a.5.5 0 0 0 .62.62l4.35-1.32a2 2 0 0 0 .83-.5Z",
+    }),
+    svgElement("path", { d: "m15 5 4 4" }),
+  );
+  pen.append(glyph);
+  const was = name.textContent;
+  // the press would blur the name first, which saves: the pen then opens it again
+  pen.addEventListener("mousedown", (event) => {
+    if (name.isContentEditable) event.preventDefault();
+  });
+  pen.onclick = () => {
+    if (name.isContentEditable) {
+      name.blur();
+      return;
+    }
+    name.contentEditable = "true";
+    name.focus();
+    const range = document.createRange();
+    range.selectNodeContents(name);
+    range.collapse(false);
+    getSelection().removeAllRanges();
+    getSelection().addRange(range);
+  };
+  name.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.key === "Escape") name.textContent = was;
+    name.blur();
+  });
+  name.addEventListener("blur", () => {
+    name.contentEditable = "false";
+    const typed = name.textContent.replace(/\s+/g, " ").trim();
+    name.textContent = typed || was;
+    if (typed && typed !== was) onrename(typed);
+  });
+  return pen;
+}
+
+function rowGlyph(d) {
+  const svg = svgElement("svg", { width: "14", height: "14", viewBox: "0 0 24 24", "aria-hidden": "true" });
+  svg.append(
+    svgElement("path", {
+      d,
+      fill: "none",
+      stroke: "currentColor",
+      "stroke-width": "1.8",
+      "stroke-linecap": "round",
+    }),
+  );
+  return svg;
+}
+
+function linksIn(text) {
+  // the pasted links, each once, in the order pasted
+  return [...new Set(text.split(/\s+/).filter(Boolean))];
+}
+
 function tick(popup, card, { inline = false } = {}) {
   const box = element("button", inline ? "otk-tick otk-tick--inline" : "otk-tick");
   box.type = "button";
@@ -953,7 +1546,7 @@ async function openCard(popup, cardId, { tab = "card", storyId = null, naming = 
   }
   sheet.setAttribute("aria-label", card.name);
 
-  const head = element("div", "otk-sheet__head");
+  const head = element("div", "otk-sheet__head otk-sheet__head--card");
   const name = editable("otk-detail__title", {
     text: card.name,
     line: true,
@@ -962,7 +1555,7 @@ async function openCard(popup, cardId, { tab = "card", storyId = null, naming = 
   name.rows = 1;
   // the name needs no label: it is the sheet's title
   const titled = edited(name, "", "otk-edit--title");
-  head.append(titled, closeButton(sheet));
+  head.append(titled, ...headLines(popup, card), closeButton(sheet));
 
   const tabs = element("div", "otk-tabs otk-tabs--sheet");
   tabs.setAttribute("role", "tablist");
@@ -984,6 +1577,7 @@ async function openCard(popup, cardId, { tab = "card", storyId = null, naming = 
   const note = $("[data-note]", foot) ?? span("otk-sheet__note");
   note.dataset.note = "";
   foot.replaceChildren(
+    exportButton(),
     note,
     actionButton("Merge into…", { onclick: guard(() => mergeCard(popup, card)) }),
     actionButton("Delete", { kind: "otk-btn--danger", onclick: guard(() => deleteCard(popup, card)) }),
@@ -1009,25 +1603,61 @@ async function openCard(popup, cardId, { tab = "card", storyId = null, naming = 
   // scroll a closed element had, and scrolls to what opening focused.
   if (opening) for (const scroller of [sheet, ...$$(_SCROLLERS, sheet)]) scroller.scrollTop = 0;
   else if (again) $$(_SCROLLERS, sheet).forEach((scroller, at) => (scroller.scrollTop = scrolled[at] ?? 0));
-  /* The name's verbs go under it, at its end — or after it, where under it
-     they would reach over the tabs (16px kept clear of them). Measured
-     against the name itself, which a row with the verbs after it widens
-     the box past, and again as the name or the verbs change width. */
-  const hint = $(".otk-edit__hint", titled);
-  const placeVerbs = () => {
-    const under = titled.firstElementChild.getBoundingClientRect().right - hint.offsetWidth;
-    const clear = journalsTab.getBoundingClientRect().right + 16;
-    titled.dataset.verbs = under >= clear ? "under" : "after";
-  };
-  sheet._verbs?.disconnect();
-  sheet._verbs = new ResizeObserver(placeVerbs);
-  sheet._verbs.observe(titled);
-  sheet._verbs.observe(hint);
-  placeVerbs();
   if (naming) {
     $(".otk-edit__verb--edit", titled).click();
     name.select();
   }
+}
+
+function headLines(popup, card) {
+  /* The head's lines after the name, each edited where it is read: the
+     tagline, and the aliases at the end with "aka" before them, which
+     stays as they open — typed as one line, a comma between two. Either,
+     cut short, says the whole of it under the pointer. An empty one stands
+     last among the fields instead (`fields`). */
+  const oneLine = (text, save) => {
+    const field = editable("", { text, line: true, save });
+    field.rows = 1;
+    field._absent = "(empty)";
+    return field;
+  };
+  const whole = (read) =>
+    read.addEventListener("pointerenter", () => {
+      if (read.scrollWidth > read.clientWidth) read.title = read.textContent;
+      else read.removeAttribute("title");
+    });
+  const lines = [];
+  if (card.tagline.trim()) {
+    const tagline = oneLine(card.tagline, (value) => saveCard(popup, card, { tagline: value }));
+    const tag = edited(tagline, "", "otk-sheet__tag");
+    whole($(".otk-typeset", tag));
+    lines.push(tag);
+  }
+  lines.push(span("otk-push"));
+  if (card.aliases.length) {
+    const aliases = oneLine(card.aliases.join(", "), (value) =>
+      saveCard(popup, card, { aliases: aliasesIn(value) }),
+    );
+    const read = element("p", `${aliases.className} otk-typeset`);
+    whole(read);
+    const reader = element("div", "otk-reader");
+    reader._repaint = () => {
+      const bare = !aliases.value.trim();
+      read.textContent = bare ? aliases._absent : aliases.value;
+      read.classList.toggle("otk-absent", bare);
+    };
+    reader.append(span("", "aka"), read, aliases);
+    lines.push(edited(reader, "", "otk-sheet__aka"));
+  }
+  return lines;
+}
+
+function aliasesIn(value) {
+  // the aliases as typed in one line, a comma between two
+  return value
+    .split(/[·,\n]/)
+    .map((alias) => alias.trim())
+    .filter(Boolean);
 }
 
 async function saveCard(popup, card, fields) {
@@ -1052,10 +1682,10 @@ async function saveCard(popup, card, fields) {
 // ---------- a card written from its pictures ----------
 
 function generationBar(popup, card) {
-  /* The fields' bar, over them: its label; once there is a first
-     generation, the versions — the original and each run, a hand edit
-     changing the one it is made on — the arrows stepping through them and
-     a label naming which the fields now show; and Generate from picture,
+  /* The fields' bar, under them: once there is a first generation, the
+     versions — the original and each run, a hand edit changing the one it
+     is made on — the arrows stepping through them and a label naming
+     which the fields now show; and Generate card from picture,
      off while the model in use cannot see or the card has no picture —
      why, over the bar, since an off button takes no pointer. While the
      model writes the button is Cancel, its size kept — both captions in
@@ -1080,16 +1710,206 @@ function generationBar(popup, card) {
       ),
     );
   }
-  const go = actionButton("", {
-    kind: "otk-swap otk-gen__go",
-    off: !busy && Boolean(reason),
-    onclick: guard(() => (busy ? cancelGeneration(card) : generate(popup, card))),
-  });
-  go.replaceChildren(span("otk-swap__idle", "Generate from picture"), span("otk-swap__busy", "Cancel"));
-  bar.append(span("otk-gen__label", "fields"), steps);
+  bar.append(steps);
   if (busy) bar.append(span("otk-gen__elapsed", elapsed(state.generatingSince)));
-  bar.append(go);
+  bar.append(generateButton(popup, card, { busy, off: !busy && Boolean(reason) }));
   return bar;
+}
+
+function generateButton(popup, card, { busy, off }) {
+  /* Generate card from picture, split — "pictures" where the card has
+     several, all of them sent: its main part generates in the language
+     in force, its code beside the caption; its arrow opens the menu of
+     languages — the browser's own at the top where it is none of the
+     menu's — and a pick generates at once and is the language from then
+     on. While the model writes, the main part is Cancel and the arrow
+     takes nothing. */
+  const language = languageOf(readLanguage());
+  const go = actionButton("", {
+    kind: "otk-swap",
+    off,
+    onclick: guard(() => (busy ? cancelGeneration(card) : generate(popup, card, language))),
+  });
+  const idle = span(
+    "otk-swap__idle",
+    card.pictures.length > 1 ? "Generate card from pictures" : "Generate card from picture",
+  );
+  idle.append(span("otk-split__code", language.code.toUpperCase()));
+  go.replaceChildren(idle, span("otk-swap__busy", "Cancel"));
+  const menu = choiceMenu("Generate in", (picked) => {
+    keep(_LANGUAGE_KEY, picked);
+    split._closeMenu();
+    guard(() => generate(popup, card, languageOf(picked)))();
+  });
+  const browser = browserLanguage();
+  if (browser && !_LANGUAGES.some(([code]) => code === browser.code)) {
+    menu._add(browser.code, browser.own, browser.code === language.code, "browser");
+    menu.append(span("otk-langs__sep"));
+  }
+  for (const each of menuLanguages()) menu._add(each.code, each.own, each.code === language.code);
+  const split = splitButton(go, menu, { label: "Language", off });
+  split.dataset.lang = language.code;
+  return split;
+}
+
+function exportButton() {
+  /* Export, split: the main part exports in the format last picked, its
+     code beside the caption; the arrow opens the formats, and a pick
+     exports at once and is the format from then on. Export itself is
+     not built yet: a click keeps the pick and does nothing more. */
+  const format = readFormat();
+  const go = actionButton("Export");
+  go.append(span("otk-split__code", format.toUpperCase()));
+  const menu = choiceMenu("Export as", (picked) => {
+    keep(_EXPORT_KEY, picked);
+    split._closeMenu();
+    const shown = $(".otk-split__code", go);
+    shown.textContent = picked.toUpperCase();
+    split.dataset.format = picked;
+    for (const row of $$(".otk-langs__opt", menu)) {
+      row.setAttribute("aria-checked", String(row.dataset.code === picked));
+    }
+  });
+  menu.classList.add("otk-langs--wide");
+  for (const [code, name] of _EXPORT_FORMATS) menu._add(code, name, code === format);
+  const split = splitButton(go, menu, { label: "Format" });
+  split.classList.add("otk-split--export");
+  split.dataset.format = format;
+  return split;
+}
+
+function readFormat() {
+  // the export format last picked, kept in this browser; else the first
+  try {
+    const kept = localStorage.getItem(_EXPORT_KEY);
+    if (_EXPORT_FORMATS.some(([code]) => code === kept)) return kept;
+  } catch {
+    // nothing kept: the first format
+  }
+  return _EXPORT_FORMATS[0][0];
+}
+
+function splitButton(go, menu, { label, off = false }) {
+  /* A split button: `go` acts with the choice in force, the arrow beside
+     it — named `label` — opens `menu` under the button, or over it where
+     there is no room below (`openMenu`); a click elsewhere or Esc puts
+     the menu down, and only the menu, the window staying. A pick puts it
+     down through the split's `_closeMenu`. */
+  const split = span("otk-split");
+  go.classList.add("otk-split__go");
+  const arrow = element("button", "otk-btn otk-split__menu");
+  arrow.type = "button";
+  arrow.disabled = off;
+  arrow.setAttribute("aria-label", label);
+  arrow.setAttribute("aria-haspopup", "menu");
+  arrow.setAttribute("aria-expanded", "false");
+  const glyph = svgElement("svg", { width: "10", height: "10", viewBox: "0 0 10 10", "aria-hidden": "true" });
+  glyph.append(svgElement("path", { d: "M1.5 3.5 5 7 8.5 3.5" }));
+  arrow.append(glyph);
+  const outside = (event) => {
+    if (!split.contains(event.target)) closeMenu();
+  };
+  const closeMenu = () => {
+    menu.hidden = true;
+    arrow.setAttribute("aria-expanded", "false");
+    document.removeEventListener("pointerdown", outside, true);
+  };
+  split._closeMenu = closeMenu;
+  arrow.onclick = () => {
+    if (!menu.hidden) {
+      closeMenu();
+      return;
+    }
+    openMenu(split, menu);
+    arrow.setAttribute("aria-expanded", "true");
+    document.addEventListener("pointerdown", outside, true);
+    $('[aria-checked="true"]', menu)?.focus();
+  };
+  menu.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    closeMenu();
+    arrow.focus();
+  });
+  split.append(go, arrow, menu);
+  return split;
+}
+
+function choiceMenu(head, onpick) {
+  /* A split button's menu under its `head`, the choice in force ticked;
+     its `_add` puts a row in — a code, a name, a note after it — and a
+     row taken hands its code to `onpick`. */
+  const menu = span("otk-langs");
+  menu.hidden = true;
+  menu.setAttribute("role", "menu");
+  menu.setAttribute("aria-label", head);
+  menu.append(span("otk-langs__head", head));
+  menu._add = (code, name, checked, note = "") => {
+    const row = element("button", "otk-langs__opt");
+    row.type = "button";
+    row.setAttribute("role", "menuitemradio");
+    row.setAttribute("aria-checked", String(checked));
+    row.dataset.code = code;
+    row.append(
+      span("otk-langs__code", code.toUpperCase()),
+      span("otk-langs__name", name),
+      ...(note ? [span("otk-langs__note", note)] : []),
+      span("otk-langs__check", "\u2713"),
+    );
+    row.onclick = () => onpick(code);
+    menu.append(row);
+  };
+  return menu;
+}
+
+function openMenu(split, menu) {
+  /* The menu shown under the button — or over it, where the column it
+     scrolls in has no room below and has some above (`data-up`). */
+  delete menu.dataset.up;
+  menu.hidden = false;
+  let clip = split.parentElement;
+  while (clip && clip !== document.body && !/(auto|scroll|hidden)/.test(getComputedStyle(clip).overflowY)) {
+    clip = clip.parentElement;
+  }
+  const box = clip && clip !== document.body ? clip.getBoundingClientRect() : null;
+  const bottom = box ? Math.min(box.bottom, innerHeight) : innerHeight;
+  const top = box ? Math.max(box.top, 0) : 0;
+  const at = split.getBoundingClientRect();
+  const room = menu.offsetHeight + 6;
+  if (at.bottom + room > bottom && at.top - room >= top) menu.dataset.up = "";
+}
+
+function menuLanguages() {
+  return _LANGUAGES.map(([code, own, english]) => ({ code, own, english }));
+}
+
+function browserLanguage() {
+  // the browser's own language, where the menu can name it; null where not
+  const code = (navigator.language || "").split("-")[0].toLowerCase();
+  const listed = _LANGUAGES.find(([each]) => each === code);
+  if (listed) return { code, own: listed[1], english: listed[2] };
+  const more = _BROWSER_LANGUAGES[code];
+  return more ? { code, own: more[0], english: more[1] } : null;
+}
+
+function readLanguage() {
+  /* The language in force: the last picked, kept in this browser; the
+     first time, the browser's own where the menu has it, else English. */
+  try {
+    const kept = localStorage.getItem(_LANGUAGE_KEY);
+    if (kept) return kept;
+  } catch {
+    // nothing kept: the browser decides
+  }
+  return browserLanguage()?.code ?? "en";
+}
+
+function languageOf(code) {
+  // a language by its code, among the menu's and the browser's own
+  const browser = browserLanguage();
+  if (browser?.code === code) return browser;
+  return menuLanguages().find((language) => language.code === code) ?? menuLanguages()[0];
 }
 
 function elapsed(since) {
@@ -1127,11 +1947,11 @@ function drawGenerationBar(popup, card) {
   $(".otk-gen", sheetOf("card"))?.replaceWith(generationBar(popup, card));
 }
 
-async function generate(popup, card) {
-  /* The card written by the model in use from its pictures, the bar busy
-     meanwhile, its time running: noted as a version — after the card as
-     it stood before, the first time — and the card drawn again, where the
-     window still shows it. */
+async function generate(popup, card, language) {
+  /* The card written by the model in use from its pictures, in
+     `language`, the bar busy meanwhile, its time running: noted as a
+     version — after the card as it stood before, the first time — and the
+     card drawn again, where the window still shows it. */
   const before = generatedFields(card);
   state.generating = card.id;
   state.generatingSince = performance.now();
@@ -1143,7 +1963,7 @@ async function generate(popup, card) {
   }, _CLOCK_MS);
   let answer;
   try {
-    answer = await api.cards.generation.create(card.id);
+    answer = await api.cards.generation.create(card.id, { language: language.english });
   } finally {
     clearInterval(clock);
     state.generating = null;
@@ -1472,9 +2292,10 @@ async function reopenAfter(popup, card, write) {
 }
 
 /** A card's own fields — a codex card's, or a story character's copy of
-    one — each edited where it is read, in the card's order: an empty one
-    reads as a dash, a list is edited as one text, its items between lines
-    of three dashes, and the reminder's depth as a whole number.
+    one — each edited where it is read, in the card's order: a text read as
+    the Markdown it is written in, an empty one as "(empty)", a list edited as
+    one text, its items between lines of three dashes, and the reminder's
+    depth as a whole number.
     `save(changes)` writes one field and answers what the backend did. */
 export function cardFieldEditors(values, save, className = "otk-passage__body") {
   return _FIELDS.map(([key, name, kind]) => {
@@ -1495,48 +2316,62 @@ export function cardFieldEditors(values, save, className = "otk-passage__body") 
         : kind === "number"
           ? String(values[key])
           : values[key];
-    return fieldEditor(className, name, {
-      text,
-      line: kind === "number",
-      save: (value) => save({ [key]: write(value) }),
-    });
+    return fieldEditor(
+      className,
+      name,
+      { text, line: kind === "number", save: (value) => save({ [key]: write(value) }) },
+      { rich: kind !== "number" },
+    );
   });
 }
 
-function fieldEditor(className, name, options) {
+function fieldEditor(className, name, options, { rich = false } = {}) {
   /* One field edited where it is read (`editable`, `options` its own),
-     its name over it and an empty one reading as a dash. */
+     its name over it and an empty one reading "(empty)" — `rich`, read as
+     Markdown (`kit/markdown.js`) and edited as the text it is. */
   const input = editable(className, options);
-  input.placeholder = "\u2014";
-  return edited(input, name, "", { headed: true });
+  // said while closed alone: opened, the field stands empty
+  input._absent = "(empty)";
+  if (!rich) return edited(input, name, "", { headed: true });
+  const read = element("div", `${input.className} otk-typeset otk-md`);
+  const both = element("div", "otk-reader");
+  // what is read once the field closes, saved or discarded (`edited`)
+  both._repaint = () => {
+    const bare = !input.value.trim();
+    read.classList.toggle("otk-absent", bare);
+    read.replaceChildren(...(bare ? [input._absent] : markdown(input.value)));
+  };
+  both.append(read, input);
+  return edited(both, name, "", { headed: true });
 }
 
 function fields(popup, card) {
-  /* The card's text, each part edited where it is read: the tagline the
-     gallery shows, the aliases, then the card's own fields in order — an
-     empty one reads as a dash. The stories it is in close the column, each
-     row a door to its journals. */
+  /* The card's own fields in order, each edited where it is read — an
+     empty one reads "(empty)" — then the tagline and the aliases while
+     they are empty, the head holding them once they are not
+     (`headLines`), and the bar that generates them under them. The
+     stories it is in close the column, each row a door to its journals. */
   const box = element("div", "otk-sheet__fields");
-  box.append(
-    generationBar(popup, card),
-    fieldEditor("otk-reading__lede otk-sheet__tagline", "tagline", {
-      text: card.tagline,
-      line: true,
-      save: (value) => saveCard(popup, card, { tagline: value }),
-    }),
-    fieldEditor("otk-passage__body", "aliases", {
-      text: card.aliases.join(" · "),
-      line: true,
-      save: (value) =>
-        saveCard(popup, card, {
-          aliases: value
-            .split(/[·,\n]/)
-            .map((alias) => alias.trim())
-            .filter(Boolean),
-        }),
-    }),
-    ...cardFieldEditors(card, (changes) => saveCard(popup, card, changes)),
-  );
+  box.append(...cardFieldEditors(card, (changes) => saveCard(popup, card, changes)));
+  if (!card.tagline.trim()) {
+    box.append(
+      fieldEditor("otk-passage__body", "tagline", {
+        text: "",
+        line: true,
+        save: (value) => saveCard(popup, card, { tagline: value }),
+      }),
+    );
+  }
+  if (!card.aliases.length) {
+    box.append(
+      fieldEditor("otk-passage__body", "aliases", {
+        text: "",
+        line: true,
+        save: (value) => saveCard(popup, card, { aliases: aliasesIn(value) }),
+      }),
+    );
+  }
+  box.append(generationBar(popup, card));
   const stories = element("div", "otk-v");
   const n = card.stories.length;
   stories.append(span("otk-label otk-sheet__section", n ? `in ${n} ${n === 1 ? "story" : "stories"}` : "not in a story"));
@@ -1656,7 +2491,7 @@ async function mergeCard(popup, card) {
 async function deleteCard(popup, card) {
   const choice = await askConfirm({
     title: `Delete ${card.name}?`,
-    body: "The card and its pictures go from All characters. Its characters in stories stay, unlinked.",
+    body: "The card and its pictures go from Characters. Its characters in stories stay, unlinked.",
     action: "Delete",
   });
   if (choice !== "confirm") return;
@@ -1723,7 +2558,6 @@ async function startStory(popup) {
   const sending = new Set();
   const choice = await ask("start", () => {
     title.value = "";
-    if (!persona.value.trim()) persona.value = "you";
     const picturedCards = cards.filter((card) => card.pictures.length);
     // the switches' caption, where there are switches
     const caption = $("[data-start-caption]", dialog);

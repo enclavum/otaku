@@ -588,7 +588,9 @@ export function edited(
   const cancel = verb("cancel", "cancel");
 
   /* The reading half. An empty value says what is absent in words, the
-     way every other unset value does, rather than collapsing the box. */
+     way every other unset value does, rather than collapsing the box: the
+     field's `_absent`, where the words are the reading's alone and the
+     opened field stands empty, else its placeholder. */
   let shown = field;
   if (field === input) {
     const read = element("p", `${input.className} otk-typeset`);
@@ -596,7 +598,7 @@ export function edited(
     shown.append(read, input);
     shown._repaint = () => {
       const bare = !input.value.trim();
-      read.textContent = bare ? input.placeholder : input.value;
+      read.textContent = bare ? (input._absent ?? input.placeholder) : input.value;
       read.classList.toggle("otk-absent", bare);
     };
   }

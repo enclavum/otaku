@@ -1,8 +1,9 @@
 """The codex's character cards, as the page asks for them: the list and
 one card whole, a card made — by hand, from a card file or a picture the
 page uploads (vetted first with `validate_only`, nothing stored, then sent
-again to import: nothing waits on the server between the two), or from a
-story's character — corrected, deleted; a picture added, a card written by
+again to import: nothing waits on the server between the two), from a
+link, fetched by the server, or from a story's character — corrected,
+deleted; a picture added, a card written by
 the model in use from its pictures, a card merged into another, and every
 story's character no card claims."""
 
@@ -16,9 +17,11 @@ from otaku.web.api._request import Ask, Created, Route, changed, plain, unqueued
 
 def _create(api: Api, ask: Ask) -> Any:
     """A card made from what the body carries: `data` (a card file, or a
-    picture that holds none, as base64) and the `file_name` it was picked as — vetted alone with
-    `?validate_only=true`, else imported, `reuse` naming the card the
-    reader says it is; `story_id` and `character_id` — a story's
+    picture that holds none, as base64) and the `file_name` it was picked
+    as — vetted alone with `?validate_only=true`, under `name` where the
+    body carries one, else imported under the `name` it must carry,
+    `reuse` naming the card the reader says it is, `tagline` the made
+    card's (a site's, the file came from a link to); `story_id` and `character_id` — a story's
     character promoted, its copies in forked stories linked too where
     `with_copies` is true, vetted alone with `?validate_only=true` and
     answered with how many copies; or a `name` and the card's fields.
@@ -26,13 +29,20 @@ def _create(api: Api, ask: Ask) -> Any:
     (200)."""
     if "data" in ask.body:
         data = base64.b64decode(ask.need("data"), validate=True)
-        file_name, rename = ask.need("file_name"), ask.text("rename")
+        file_name = ask.need("file_name")
         if ask.query_flag("validate_only", False):
+            name = ask.text("name") if "name" in ask.body else None
             return plain(
-                api.cards.create(data=data, file_name=file_name, rename=rename, validate_only=True)
+                api.cards.create(data=data, file_name=file_name, name=name, validate_only=True)
             )
         reuse = ask.integer("reuse") if ask.body.get("reuse") is not None else None
-        imported = api.cards.create(data=data, file_name=file_name, rename=rename, reuse=reuse)
+        imported = api.cards.create(
+            data=data,
+            file_name=file_name,
+            name=ask.need("name"),
+            reuse=reuse,
+            tagline=ask.text("tagline"),
+        )
         if not imported.value.made:
             return changed(imported)
         return Created(changed(imported), f"/api/cards/{imported.value.card.id}")
@@ -113,10 +123,28 @@ def _add_picture(api: Api, ask: Ask) -> Any:
 
 
 @unqueued
+def _fetch(api: Api, ask: Ask) -> Any:
+    """The card a link gives — a card site's character page, or the file's
+    own link — fetched and imported as a card file is: made now (201)
+    or held already (200); with `?validate_only=true` fetched and
+    vetted, nothing stored, and answered with the file it gave, for the
+    page to import as a file. Off the app's thread: a site taking its
+    time holds nothing else up."""
+    if ask.query_flag("validate_only", False):
+        return plain(api.cards.fetches.create(url=ask.need("url"), validate_only=True))
+    imported = api.cards.fetches.create(url=ask.need("url"))
+    if not imported.value.made:
+        return changed(imported)
+    return Created(changed(imported), f"/api/cards/{imported.value.card.id}")
+
+
+@unqueued
 def _generate(api: Api, ask: Ask) -> Any:
-    """The card written by the model in use from its pictures. Off the
-    app's thread: a model reading pictures for a minute holds nothing
-    else up."""
+    """The card written by the model in use from its pictures, in the
+    body's `language` where it names one. Off the app's thread: a model
+    reading pictures for a minute holds nothing else up."""
+    if "language" in ask.body:
+        return changed(api.cards.generation.create(ask.id("card"), language=ask.need("language")))
     return changed(api.cards.generation.create(ask.id("card")))
 
 
@@ -135,6 +163,7 @@ ROUTES: dict[tuple[str, str], Route] = {
         "items": plain(api.cards.list(query=ask.query.get("query", "")))
     },
     ("POST", "/api/cards"): _create,
+    ("POST", "/api/cards/fetches"): _fetch,
     ("GET", "/api/cards/unlinked"): lambda api, ask: {
         "items": plain(api.cards.unlinked.list(query=ask.query.get("query", "")))
     },

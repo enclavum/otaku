@@ -72,10 +72,9 @@ class FileStore:
         there is the same bytes and is left as it is. The thumbnail is
         stored beside it when given."""
         day = datetime.now().astimezone().strftime("%Y%m%d")
-        digest = hashlib.blake2b(data, digest_size=_DIGEST_BYTES).hexdigest()
         subtype = media_type.partition("/")[2] or media_type
         extension = _EXTENSIONS.get(media_type, subtype)
-        name = f"{owner.value}-{number:04d}-{day}-{digest}.{extension}"
+        name = f"{owner.value}-{number:04d}-{day}-{digest(data)}.{extension}"
         if not (self._dir / name).exists():
             self._write(self._dir / name, data)
         if thumb is not None:
@@ -132,6 +131,17 @@ class FileStore:
         tmp = self._dir / f".{secrets.token_hex(8)}.tmp"
         tmp.write_bytes(self._cipher.seal(data))
         os.replace(tmp, path)
+
+
+def digest(data: bytes) -> str:
+    """The digest a file of these bytes is named by."""
+    return hashlib.blake2b(data, digest_size=_DIGEST_BYTES).hexdigest()
+
+
+def digest_of(name: str) -> str:
+    """The digest a stored file's name carries: the same bytes, the same
+    digest, whoever owns the file."""
+    return _stem(name).rsplit("-", 1)[-1]
 
 
 def _stem(name: str) -> str:

@@ -21,7 +21,8 @@ a handler runs each route as one unit on it (`App.run`) or calls a
 reply's frames are written on the handler's own thread as the events are
 handed across. A row marked `unqueued` (`web.api._request`) runs on the
 handler's own thread: its verb is `any_thread` and slow on purpose — a
-recording being written down, a card written from its pictures, whose
+recording being written down, a card written from its pictures or
+fetched from a link, whose
 store steps hop onto the app's thread themselves (`App.run`) — so
 nothing waits behind it. The METHOD is the lane (`web.server`): a route
 is a GET exactly when its call only reads, since a read is answered
@@ -49,8 +50,10 @@ through it too.
 
 - **No request leans on another**: the server keeps nothing between
   two. A two-step exchange sends everything again — a card vetted with
-  `?validate_only=true`, then imported by the same request — and work
-  that outlives its request is the backend's, polled by a read.
+  `?validate_only=true`, then imported by the same request; a card link
+  vetted answers the file it fetched, which the import sends as a
+  card file, so no site is asked twice — and work that outlives its
+  request is the backend's, polled by a read.
 - **A picture rides the play body** as `files: [{name, data}]`, base64
   with no type: the backend sniffs it from the bytes.
 - **A row id in a path is digits** (`server._NUMERIC`), so a page that

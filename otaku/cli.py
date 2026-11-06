@@ -53,7 +53,7 @@ def resolve_root() -> Path | None:
 @click.version_option(__version__, "-v", "--version", prog_name="otaku")
 @click.pass_context
 def main(ctx: click.Context) -> None:
-    """A roleplay client."""
+    """A roleplay app."""
     if sys.platform == "win32":
         # A pipe or a file there takes the ANSI codepage, which has no `→`
         # or `…`; a console is UTF-8 already. Python 3.15 does this itself.

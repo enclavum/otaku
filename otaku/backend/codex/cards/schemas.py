@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from otaku.backend.app.pictures.services import RawFile as RawFile
 from otaku.backend.base import Schema
+from otaku.backend.codex.cards import services as domain_cards
 from otaku.store import schema
 from otaku.store.schema import Attachment
 
@@ -16,13 +17,15 @@ def as_card_summary(row: schema.Card, story_counts: dict[int, int]) -> CardSumma
         tagline=row.tagline,
         pictures=row.pictures,
         story_count=story_counts.get(row.id, 0),
+        is_blank=domain_cards.is_blank(domain_cards.card_profile(row)),
     )
 
 
 class CardSummary(Schema):
     """A card as the codex lists it: its name, aliases and tagline, its
-    pictures in order — the first the portrait — and how many stories it
-    is in, one linked character in each."""
+    pictures in order — the first the portrait — how many stories it is
+    in, one linked character in each, and whether it holds no text yet,
+    which no story takes (`is_blank`)."""
 
     id: int
     name: str
@@ -30,6 +33,7 @@ class CardSummary(Schema):
     tagline: str
     pictures: tuple[Attachment, ...]
     story_count: int
+    is_blank: bool
 
 
 class Card(Schema):
@@ -37,7 +41,8 @@ class Card(Schema):
     reader, never sent to the model); the card's fields, macros as
     written, and the file it came from ("" for none); its pictures in
     order, the first the portrait; the story characters it is linked to;
-    and when it was last written (for display alone)."""
+    whether it holds no text yet, which no story takes (`is_blank`); and
+    when it was last written (for display alone)."""
 
     id: int
     name: str
@@ -57,6 +62,7 @@ class Card(Schema):
     file_name: str
     pictures: tuple[Attachment, ...]
     stories: tuple[StoryCharacter, ...]
+    is_blank: bool
     updated_at: str
 
 
@@ -76,16 +82,31 @@ class StoryCharacter(Schema):
 
 class CardCheck(Schema):
     """A card file read and vetted for the codex, nothing stored: the name
-    the card would take, what the import should say out loud, whether
-    the file carries a picture, the card the codex holds it as already
-    (None for none: an import makes a card), and the cards of the same
-    name the reader may say it is."""
+    the card would take, what the import should say out loud, each a
+    sentence, whether the file carries a picture and that picture's
+    thumbnail, a JPEG (None for none), the card the codex holds it as
+    already (None for none: an import makes a card), the cards alike —
+    the same name, or the same picture — the reader may say it is, and
+    what the import says of them, a sentence ("" for none)."""
 
     name: str
     notes: tuple[str, ...]
     has_picture: bool
+    thumbnail: bytes | None
     same_card: CardSummary | None
     similar_cards: tuple[CardSummary, ...]
+    similar_note: str
+
+
+class CardFetchCheck(CardCheck):
+    """A card read from a link and vetted as a file is (`CardCheck`),
+    nothing stored, and the file the link gave — its name and bytes —
+    with the line its site shows it under ("" for none), for the import
+    to send as a file, so the link is fetched once."""
+
+    file_name: str
+    data: bytes
+    tagline: str
 
 
 class CharacterLinkCheck(Schema):

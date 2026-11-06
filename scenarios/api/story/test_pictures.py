@@ -156,11 +156,16 @@ class TestCardPortrait:
 
     def test_the_portrait_reaches_a_model_that_sees(self, tmp_path) -> None:
         with _seeing(tmp_path) as app:
-            card = app.api.cards.create(name="Mira").value
+            card = app.api.cards.create(name="Mira", description="A thief.").value
             app.api.cards.pictures.create(card.id, file=_cat())
             story = app.ensure_story()
             app.api.stories.cards.create(
-                story, card_id=card.id, persona="you", with_pictures=True, expected_head=None
+                story,
+                card_id=card.id,
+                name=card.name,
+                persona="you",
+                with_pictures=True,
+                expected_head=None,
             )
             app.play("Who is she?")
             sent = [

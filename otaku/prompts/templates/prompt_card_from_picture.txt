@@ -1,9 +1,9 @@
 The pictures show a character for an interactive story. Write their character card.
 
 Name: {name}
-Keep the name as given. Where it is empty, choose one that suits them.
+Keep the name as given. Where it is empty, choose one that suits them and is natural in {language}.
 
-Take what the pictures show — their looks, their clothes, their bearing, where they are — and invent the rest so that it fits: who they are, how they behave and speak, and how a story would meet them. Write plain prose, without markdown.
+Take what the pictures show — their looks, their clothes, their bearing, where they are — and invent the rest so that it fits: who they are, how they behave and speak, and how a story would meet them. Write every field in {language}, as plain prose, without markdown.
 
 Reply with ONLY a JSON object, no prose around it, in this shape:
 {

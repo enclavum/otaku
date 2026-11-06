@@ -141,7 +141,7 @@ def _capture(url: str) -> dict[str, Any]:
 
 
 def _codex(url: str) -> dict[str, Any]:
-    """All characters as the page reads it — the cards as listed, each one
+    """Characters as the page reads it — the cards as listed, each one
     whole, and the stories' characters no card claims."""
     cards = _get(f"{url}/api/cards")[1]["items"]
     return {

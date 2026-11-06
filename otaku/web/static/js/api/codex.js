@@ -9,14 +9,16 @@ import { get, items, patch, post, query, remove } from "./_http.js";
 
 /* The codex's character cards: the list (`query` finds a name, an alias or
    a tagline) and one card whole; a card made — `{name, …its fields}` by
-   hand, `{data, file_name, rename, reuse}` from a card file or a picture
+   hand, `{data, file_name, name, reuse}` from a card file or a picture
    that holds none (the bytes as base64; vetted alone with `validateOnly`,
    nothing stored), `{story_id,
-   character_id}` from a story's character — its parts corrected
-   (`pictures` each of its own by name, in their new order), a card
-   deleted; a picture added (`{data, name}`) or removed by its file name,
-   the card written by the model in use from its pictures, or that given
-   up (`generation`),
+   character_id}` from a story's character — or `{url}` from a link
+   (`fetches`; vetted alone with `validateOnly`, which answers the file
+   too); its parts corrected (`pictures` each of its own by name,
+   in their new order), a card deleted; a picture added (`{data, name}`) or removed by its file name,
+   the card written by the model in use from its pictures — in
+   `language`, its English name, English where none is named — or that
+   given up (`generation`),
    a card folded `into` another, and every story's character no card
    claims (`unlinked`). */
 export const cards = {
@@ -26,12 +28,17 @@ export const cards = {
     post(validateOnly ? "/api/cards?validate_only=true" : "/api/cards", fields),
   update: (card, fields) => patch(`/api/cards/${card}`, fields),
   delete: (card) => remove(`/api/cards/${card}`),
+  fetches: {
+    create: (fields, { validateOnly = false } = {}) =>
+      post(validateOnly ? "/api/cards/fetches?validate_only=true" : "/api/cards/fetches", fields),
+  },
   pictures: {
     create: (card, fields) => post(`/api/cards/${card}/pictures`, fields),
     delete: (card, name) => remove(`/api/cards/${card}/pictures/${encodeURIComponent(name)}`),
   },
   generation: {
-    create: (card) => post(`/api/cards/${card}/generation`, {}),
+    create: (card, { language = "" } = {}) =>
+      post(`/api/cards/${card}/generation`, language ? { language } : {}),
     delete: (card) => remove(`/api/cards/${card}/generation`),
   },
   merges: { create: (card, fields) => post(`/api/cards/${card}/merges`, fields) },
