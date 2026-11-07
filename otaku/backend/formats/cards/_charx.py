@@ -3,9 +3,10 @@ On import, its main icon is the card's picture, its other pictures each
 come with the type and name the card gives them, and what is no picture
 is left behind; every member is read through one guard (`read_member`),
 which refuses one that would inflate past any card's size before it is
-read. On export, a CHARX is the one it came as with its text replaced
-(`replace_text`), or a card's text and its pictures, each listed as an
-asset of its type (`write_charx`); and, for an import, a JSON card
+read; a picture with the zip appended after it, as RisuRealm serves
+some, is one too. On export, a CHARX is the one it came as with its text
+replaced (`replace_text`), or a card's text and its pictures, each listed
+as an asset of its type (`write_charx`); and, for an import, a JSON card
 packed with its picture into one (`pack_charx`), so a card a site keeps
 beside its picture reads as one file."""
 
@@ -13,10 +14,9 @@ import io
 import json
 import zipfile
 import zlib
-from dataclasses import dataclass
 
 from otaku.backend.formats.cards import _json
-from otaku.backend.formats.cards._json import CardError, list_assets
+from otaku.backend.formats.cards._json import Asset, CardError, list_assets
 
 _MAGIC = b"PK\x03\x04"
 # The card's file and the folder its icons stand in; an asset's uri names
@@ -32,24 +32,23 @@ _PICTURE_EXTENSIONS = ((b"\x89PNG", "png"), (b"\xff\xd8\xff", "jpeg"), (b"GIF8",
 _PICTURES = {"png", "jpg", "jpeg", "webp", "gif", "avif", "heic", "heif"}
 
 
-@dataclass(frozen=True)
-class Asset:
-    """One of a card's pictures beside its main icon: the type the card
-    gives it (`icon`, `emotion`, `background`, … as the card wrote it),
-    its name there ("" for none), and its bytes."""
-
-    type: str
-    name: str
-    data: bytes
-
-
 # ---------- import ----------
 
 
 def is_charx(data: bytes) -> bool:
     """Whether a file is a CHARX — a zip, which only its `card.json`
-    makes a card."""
-    return data.startswith(_MAGIC)
+    makes a card — or a picture with one appended, as RisuRealm serves
+    some: that counts where a zip opens past the picture and holds
+    `card.json`, so a picture with any other zip stays a picture."""
+    if data.startswith(_MAGIC):
+        return True
+    if _MAGIC not in data:
+        return False
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            return _CARD in archive.namelist()
+    except (zipfile.BadZipFile, ValueError):
+        return False
 
 
 def open_archive(data: bytes) -> zipfile.ZipFile:

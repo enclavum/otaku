@@ -1,6 +1,7 @@
-"""The integrations, as the page asks for them: web search — whether it
-holds a key, and its key saved, one box on the Tools tab — and a support
-request sent from the Support docket."""
+"""The integrations, as the page asks for them: the sites a card is
+fetched from by a link, listed beside each link field; web search —
+whether it holds a key, and its key saved, one box on the Tools tab —
+and a support request sent from the Support docket."""
 
 from typing import Any
 
@@ -23,6 +24,9 @@ def _send_support_request(api: Api, ask: Ask) -> dict[str, Any]:
 
 
 ROUTES: dict[tuple[str, str], Route] = {
+    ("GET", "/api/integrations/cards"): lambda api, ask: {
+        "items": plain(api.integrations.cards.list())
+    },
     # Whether a key is held — the key's value never crosses.
     ("GET", "/api/integrations/web-search"): lambda api, ask: plain(
         api.integrations.web_search.get()

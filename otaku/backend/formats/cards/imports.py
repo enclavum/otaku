@@ -8,19 +8,23 @@ carries, and `read_assets` the others a CHARX does, each with its
 type."""
 
 from dataclasses import replace
+from typing import TypeVar
 
 from otaku.backend.formats.cards import _charx, _json, _png
-from otaku.backend.formats.cards._charx import Asset, is_charx
-from otaku.backend.formats.cards._json import CardError
+from otaku.backend.formats.cards._charx import is_charx
+from otaku.backend.formats.cards._json import Asset, CardError
 from otaku.context.cards import CharacterProfile
+
+# A copy of a card a file holds, its keyword first.
+_Copy = TypeVar("_Copy", bound=tuple[object, ...])
 
 
 def read_card(data: bytes, *, file_name: str = "") -> tuple[CharacterProfile, list[str]]:
     """The card in `data` (a PNG, JSON or CHARX file's bytes) and the
     notes the import should say out loud, each a sentence — a lorebook or
-    assets left behind, disagreeing embedded copies, macros nothing will
-    bind. `file_name` (no path) rides the card as reference. Raises
-    `CardError` when there is no card to have."""
+    assets left behind, disagreeing embedded copies. `file_name` (no
+    path) rides the card as reference. Raises `CardError` when there is
+    no card to have."""
     archive = None
     if _png.is_png(data):
         candidates = _png.read_cards(data)
@@ -35,9 +39,7 @@ def read_card(data: bytes, *, file_name: str = "") -> tuple[CharacterProfile, li
     valid = [(kw, payload, card) for kw, payload, card in normalized if card is not None]
     if not valid:
         raise CardError("the card carries no character name")
-    chosen = next(
-        (entry for entry in valid if entry[0] == "ccv3"), valid[0]
-    )  # the V3 spec: prefer ccv3; else the FIRST chara — never a dict's accident
+    chosen = _preferred(valid)
     _, payload, card = chosen
     notes = []
     # Compared BEFORE the file name is stamped on: every candidate came
@@ -52,14 +54,14 @@ def read_card(data: bytes, *, file_name: str = "") -> tuple[CharacterProfile, li
         card = replace(card, file_name=file_name)
     if _json.has_lorebook(payload):
         notes.append("The card's lorebook isn't imported.")
+    left = 0
     if archive is not None:
         left = _charx.count_left_behind(archive, payload)
-        if left:
-            files = "file isn't" if left == 1 else "files aren't"
-            notes.append(f"The card's {left} other {files} imported.")
-    unknown = _json.unknown_macros(card)
-    if unknown:
-        notes.append(f"{', '.join(unknown)} {'stays' if len(unknown) == 1 else 'stay'} as written.")
+    elif _png.is_png(data):
+        left = _png.count_left_behind(data, payload)
+    if left:
+        files = "file isn't" if left == 1 else "files aren't"
+        notes.append(f"The card's {left} other {files} imported.")
     return card, notes
 
 
@@ -88,8 +90,12 @@ def read_main_picture(data: bytes) -> bytes | None:
 
 def read_assets(data: bytes) -> list[Asset]:
     """The pictures a card file carries beside its main one, each with the
-    type and name the card gives it: a CHARX's, in the card's order; none
-    for a PNG or JSON, and for a CHARX that will not read."""
+    type and name the card gives it, in the card's order: a CHARX's, and
+    those RisuAI keeps in a PNG's chunks, as the copy `read_card` reads
+    names them; none for JSON, and for a file that will not read."""
+    if _png.is_png(data):
+        named = [entry for entry in _png.read_cards(data) if _json.read_profile(entry[1])]
+        return _png.read_pictures(data, _preferred(named)[1]) if named else []
     if not is_charx(data):
         return []
     try:
@@ -97,3 +103,9 @@ def read_assets(data: bytes) -> list[Asset]:
         return _charx.read_pictures(archive, _charx.read_text(archive))
     except CardError:
         return []
+
+
+def _preferred(entries: list[_Copy]) -> _Copy:
+    """The copy of a card a file's copies are read as: the V3 spec's own
+    rule, `ccv3` first, else the FIRST — never a dict's accident."""
+    return next((entry for entry in entries if entry[0] == "ccv3"), entries[0])

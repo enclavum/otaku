@@ -142,8 +142,7 @@ def import_card(
     app: App,
     story_id: int,
     *,
-    data: bytes | None = None,
-    file_name: str = "",
+    prepared: codex_cards.PreparedCardFile | None = None,
     card_id: int | None = None,
     name: str,
     reuse: int | None = None,
@@ -156,11 +155,13 @@ def import_card(
 ) -> tuple[BroughtIn, str]:
     """A card brought into the story, played on from `expected_head`, the
     head the caller read (HeadMoved where the head stands elsewhere,
-    nothing written — the codex included): a card FILE goes into the
-    codex first, under its own name whatever `name` says (`reuse` the
-    codex card the reader says it is, `tagline` a card made there's), a
-    codex card `card_id` as it
-    stands; `name` is the story's character's alone. With
+    nothing written — the codex included): a card FILE, read and its
+    pictures passed through the intake beforehand
+    (`codex.prepare_card_file`, off the app's thread where the caller is),
+    goes into the codex first, under its own name whatever `name` says
+    (`reuse` the codex card the reader says it is, `tagline` a card made
+    there's), a codex card `card_id` as it stands; `name` is the story's
+    character's alone. With
     `story_only`, a file the codex holds not — nor `reuse` names — goes
     into the story alone: nothing written to the codex, its character
     linked to no card, its portrait a picture of the story's. Then the
@@ -172,7 +173,8 @@ def import_card(
     stays. `line` is what the story RECORDS; the default names the file,
     or the codex card."""
     _check_head(app, story_id, expected_head)
-    if data is not None:
+    if prepared is not None:
+        data, file_name = prepared.data, prepared.file_name
         checked = codex_cards.check_card_file(app, data, file_name)
         target = checked.same_card or (
             codex_cards.get_card(app, reuse) if reuse is not None else None
@@ -183,14 +185,12 @@ def import_card(
         _ensure_free(app, story_id, name, target)
         default_line = f"/card {file_name}" + (f" {name}" if name != own else "")
         if story_only and target is None:
-            incoming = _incoming_story_only(
-                app, story_id, checked.profile, data, file_name, with_pictures
-            )
+            incoming = _incoming_story_only(app, story_id, checked.profile, prepared, with_pictures)
             notes = [*map(_fragment, checked.notes), "kept in this story only"]
         else:
             # The codex keeps the card as it came: another name is this story's.
-            card_id, made, _ = codex_cards.import_card_file(
-                app, data, file_name, reuse=reuse, tagline=tagline
+            card_id, made, _ = codex_cards.store_card_file(
+                app, prepared, reuse=reuse, tagline=tagline
             )
             incoming = _incoming_from_codex(codex_cards.get_card(app, card_id))
             notes = [
@@ -224,7 +224,7 @@ def import_card(
         app, story_id, brought.character_id, profile, persona, mode, after=brought.line.id
     )
     tokens = _block_tokens(app, profile, persona)
-    verb = "imported" if data is not None else "invited"
+    verb = "imported" if prepared is not None else "invited"
     report = [f"{verb} {name} (card ≈ {tokens} tokens)", *notes]
     if tokens > _LARGE_CARD_TOKENS:
         report.append("a large card — it rides every request and never leaves the context")
@@ -356,18 +356,15 @@ def _incoming_story_only(
     app: App,
     story_id: int,
     profile: CharacterProfile,
-    data: bytes,
-    file_name: str,
+    prepared: codex_cards.PreparedCardFile,
     with_pictures: bool,
 ) -> _IncomingCard:
     """A card file's card on its way into a story that alone will hold
     it: its profile, no codex card, and its picture — stored as the
     story's, where its row is to carry it — its portrait."""
     portrait = None
-    if with_pictures:
-        picture = codex_cards.carried_picture(data, file_name)
-        if picture is not None:
-            portrait = save(app._store.files, picture, story_id, Attachment)
+    if with_pictures and prepared.main is not None:
+        portrait = save(app._store.files, prepared.main, story_id, Attachment)
     return _IncomingCard(profile, None, profile.name, (), portrait)
 
 

@@ -121,13 +121,6 @@ def bind(text: str, *, char: str, user: str) -> str:
     return _USER_MACRO.sub(user.replace("\\", r"\\"), named)
 
 
-def binds(macro: str) -> bool:
-    """Whether `bind` would resolve this exact `{{…}}` (or TavernAI-era)
-    token — the vocabulary question `backend.formats.cards` asks to
-    report macros nothing will bind."""
-    return any(pattern.fullmatch(macro) for pattern in (_CHAR_MACRO, _USER_MACRO, _ORIGINAL_MACRO))
-
-
 def card_injections(toml_text: str, *, char: str) -> tuple[Injection, Injection]:
     """What a card asks of the request besides its own row, read from a
     story character's profile: its system prompt, joined to the story's

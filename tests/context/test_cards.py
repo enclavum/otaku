@@ -1,8 +1,8 @@
 """Cards as context material: a character's profile written as TOML and
 read back (`CharacterProfile.to_toml`, `from_toml`) — any card text,
 field for field — the wire block composed from a story character's
-profile (`card_to_wire`), bound at wire time (`bind`, the vocabulary
-`binds` answers for), and what a card injects beside it
+profile (`card_to_wire`), bound at wire time (`bind`), and what a card
+injects beside it
 (`card_injections`) — each reading a profile an older version wrote
 (`read_toml`)."""
 
@@ -13,7 +13,6 @@ import pytest
 from otaku.context.cards import (
     CharacterProfile,
     bind,
-    binds,
     card_injections,
     card_to_wire,
     read_toml,
@@ -112,25 +111,6 @@ class TestBind:
     def test_a_backslash_in_a_name_survives(self) -> None:
         assert bind("{{char}}!", char=r"El\ara", user="U") == r"El\ara!"
         assert bind("{{user}}!", char="E", user=r"Al\1ex") == r"Al\1ex!"
-
-
-class TestBinds:
-    """Whether `bind` resolves an exact token: the vocabulary question."""
-
-    KNOWN = ("{{char}}", "{{ USER }}", "<BOT>", "<user>", "{{original}}")
-    UNKNOWN = ("{{roll:d20}}", "{{random}}")
-
-    def test_the_vocabulary_binds(self) -> None:
-        for macro in self.KNOWN:
-            assert binds(macro), macro
-
-    def test_anything_else_or_inexact_does_not(self) -> None:
-        for macro in (*self.UNKNOWN, "{{char}} x", "{{char}}{{user}}"):
-            assert not binds(macro), macro
-
-    def test_it_answers_what_bind_does_to_the_token(self) -> None:
-        for macro in (*self.KNOWN, *self.UNKNOWN):
-            assert binds(macro) == (bind(macro, char="C", user="U") != macro), macro
 
 
 class TestProfileToml:

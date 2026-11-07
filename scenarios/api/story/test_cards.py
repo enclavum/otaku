@@ -13,11 +13,15 @@ pass summarizes around it). The fixtures are SillyTavern's own bundled
 Seraphina (a real PNG card) and a minimal JSON one.
 """
 
+import io
+import json
 import tomllib
+import zipfile
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from otaku.backend.api import HeadMoved, Refused
 from otaku.backend.codex.cards.schemas import RawFile
@@ -159,6 +163,24 @@ class TestThroughTheCodex:
         assert (card.name, card.story_count) == ("Seraphina", 1)
         assert character.card_id == card.id
         assert len(card.pictures) == 1  # the PNG's picture, kept by the codex
+
+    def test_a_charx_brings_every_picture_into_the_codex_each_of_its_kind(self, app: App) -> None:
+        story = app.ensure_story()
+        brought = app.api.stories.cards.create(
+            story,
+            data=_charx(),
+            file_name="ann.charx",
+            name="Ann",
+            persona="you",
+            expected_head=None,
+        ).value
+        assert brought.card_id is not None
+        stored = app.store.cards.get(brought.card_id)
+        assert stored is not None and stored.original_file is not None
+        assert [(picture.kind.value, picture.name) for picture in stored.pictures] == [
+            ("portrait", ""),
+            ("expression", "joy"),
+        ]
 
     def test_the_same_file_in_two_stories_is_one_card(self, app: App) -> None:
         app.play(f"/card {SERAPHINA}")
@@ -628,3 +650,27 @@ def _invited(app: App, **fields: str) -> tuple[int, int]:
 def _card_row(app: App, story: int):
     """The story's card row."""
     return next(m for m in app.store.stories.get_messages(story) if m.kind == "card")
+
+
+def _charx() -> bytes:
+    """A V3 card in a CHARX, written: its main icon and an expression."""
+    assets = [
+        {"type": "icon", "name": "main", "uri": "embeded://assets/icon/main.png", "ext": "png"},
+        {"type": "emotion", "name": "joy", "uri": "embeded://assets/emotion/joy.png", "ext": "png"},
+    ]
+    text = {
+        "spec": "chara_card_v3",
+        "spec_version": "3.0",
+        "data": {"name": "Ann", "description": "A cook.", "assets": assets},
+    }
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w") as archive:
+        archive.writestr("card.json", json.dumps(text))
+        for path, color in (
+            ("assets/icon/main.png", (200, 0, 0)),
+            ("assets/emotion/joy.png", (0, 200, 0)),
+        ):
+            picture = io.BytesIO()
+            Image.new("RGB", (16, 16), color).save(picture, "PNG")
+            archive.writestr(path, picture.getvalue())
+    return out.getvalue()

@@ -118,6 +118,7 @@ class CardsResource(Resource):
         self, *, story_id: int, character_id: int, validate_only: Literal[True]
     ) -> CharacterLinkCheck: ...
 
+    @any_thread
     def create(
         self,
         *,
@@ -162,18 +163,34 @@ class CardsResource(Resource):
         join its own to — or, with `validate_only`, vetted and nothing
         stored, answered with how many copies (`CharacterLinkCheck`). Raises Refused —
         an empty name, a tagline of more than one line, a reminder's depth
-        below 1, a file that is no card, a character linked already."""
+        below 1, a file that is no card, a character linked already. Safe
+        from any thread: a card file's pictures pass the intake off the
+        app's thread, the card stored on it as one unit; every other way
+        runs on it whole."""
         app = self._app
-        if story_id is not None and character_id is not None:
-            if validate_only:
-                found = domain_cards.check_promotion(app, story_id, character_id)
-                return CharacterLinkCheck(copies=len(found))
-            card_id, said = domain_cards.promote_character(
-                app, story_id, character_id, with_copies=with_copies
-            )
-            return Changed(self.get(card_id), said)
-        if data is not None:
-            if validate_only:
+        promoting = story_id is not None and character_id is not None
+        if data is not None and not validate_only and not promoting:
+            # the slow half off the app's thread; the store's as one unit on it
+            prepared = domain_cards.prepare_card_file(data, file_name, allow_bare_picture=True)
+
+            def store() -> Changed[CardImport]:
+                card_id, made, said = domain_cards.store_card_file(
+                    app, prepared, name=name, reuse=reuse, tagline=tagline
+                )
+                return Changed(CardImport(card=self.get(card_id), made=made), said)
+
+            return app.run(store)
+
+        def on_the_thread() -> Changed[Card] | CardCheck | CharacterLinkCheck:
+            if story_id is not None and character_id is not None:
+                if validate_only:
+                    found = domain_cards.check_promotion(app, story_id, character_id)
+                    return CharacterLinkCheck(copies=len(found))
+                card_id, said = domain_cards.promote_character(
+                    app, story_id, character_id, with_copies=with_copies
+                )
+                return Changed(self.get(card_id), said)
+            if data is not None and validate_only:
                 checked = domain_cards.check_card_file(
                     app, data, file_name, name=name, allow_bare_picture=True
                 )
@@ -193,36 +210,28 @@ class CardsResource(Resource):
                     ),
                     similar_note=domain_cards.similar_note(checked),
                 )
-            card_id, made, said = domain_cards.import_card_file(
-                app,
-                data,
-                file_name,
-                name=name,
-                reuse=reuse,
-                tagline=tagline,
-                allow_bare_picture=True,
+            if validate_only:
+                raise Invalid("Only a card file or a promotion is vetted before it is made.")
+            profile = CharacterProfile(
+                name=domain_cards.NEW_CARD_NAME if name is None else name,
+                description=description,
+                personality=personality,
+                scenario=scenario,
+                greeting=greeting,
+                alternate_greetings=alternate_greetings,
+                examples=examples,
+                reminder=reminder,
+                reminder_depth=reminder_depth,
+                system_prompt=system_prompt,
+                post_history_instructions=post_history_instructions,
+                creator_notes=creator_notes,
             )
-            return Changed(CardImport(card=self.get(card_id), made=made), said)
-        if validate_only:
-            raise Invalid("Only a card file or a promotion is vetted before it is made.")
-        profile = CharacterProfile(
-            name=domain_cards.NEW_CARD_NAME if name is None else name,
-            description=description,
-            personality=personality,
-            scenario=scenario,
-            greeting=greeting,
-            alternate_greetings=alternate_greetings,
-            examples=examples,
-            reminder=reminder,
-            reminder_depth=reminder_depth,
-            system_prompt=system_prompt,
-            post_history_instructions=post_history_instructions,
-            creator_notes=creator_notes,
-        )
-        card_id, said = domain_cards.create_card(
-            app, profile=profile, aliases=aliases, tagline=tagline
-        )
-        return Changed(self.get(card_id), said)
+            card_id, said = domain_cards.create_card(
+                app, profile=profile, aliases=aliases, tagline=tagline
+            )
+            return Changed(self.get(card_id), said)
+
+        return app.run(on_the_thread)
 
     def update(
         self,

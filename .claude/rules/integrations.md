@@ -44,8 +44,9 @@ a JSON card with its picture beside it packed into one CHARX,
 it, the line the site shows the card under where it has one, which a
 card made of the file takes as its tagline (the page sends it back with
 the file, as `tagline`). The fetch
-runs off the app's thread (`any_thread`), and a new site is a function
-and its hosts in the module's table.
+runs off the app's thread (`any_thread`), and a new site is a function,
+and its name and hosts in the module's table (`_SITES`), which both
+dialogs list as the supported sites (`api.integrations.cards`).
 
 ## Locality
 

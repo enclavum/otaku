@@ -506,6 +506,19 @@ function savePrompt(prompt, text, shipped) {
 
 // ---------- integrations ----------
 
+/* The sites a card is fetched from by a link, as the product answers them
+   (`integrations.cards.Cards.sites`), copied: the demo fetches none. */
+export function cardSites() {
+  return [
+    { name: "Character Tavern", hosts: ["character-tavern.com"] },
+    { name: "Chub", hosts: ["chub.ai", "characterhub.org", "venus.chub.ai"] },
+    { name: "Civitai", hosts: ["civitai.com", "civitai.red"] },
+    { name: "Pygmalion", hosts: ["pygmalion.chat"] },
+    { name: "RisuRealm", hosts: ["realm.risuai.net"] },
+    { name: "Wyvern", hosts: ["wyvern.chat", "app.wyvern.chat"] },
+  ];
+}
+
 export function webSearch() {
   return { has_key: false };
 }

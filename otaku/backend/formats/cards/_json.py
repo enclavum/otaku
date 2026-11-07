@@ -23,9 +23,9 @@ Everything else the text holds passes through as it came."""
 import copy
 import json
 import re
-from dataclasses import fields
+from dataclasses import dataclass, fields
 
-from otaku.context.cards import CharacterProfile, binds
+from otaku.context.cards import CharacterProfile
 
 # SillyTavern's depth for a depth prompt that names none.
 _ST_DEPTH = 4
@@ -46,12 +46,24 @@ _TEXTS = {
     "post_history_instructions": "post_history_instructions",
     "creator_notes": "creator_notes",
 }
-_ANY_MACRO = re.compile(r"\{\{[^{}]{1,40}\}\}")
 _START = re.compile(r"<START>", re.IGNORECASE)
 
 
 class CardError(ValueError):
     """A file `read_card` refuses, with the reason readable as printed."""
+
+
+@dataclass(frozen=True)
+class Asset:
+    """One of a card's pictures as the V3 spec lists a card's files: the
+    type the card gives it (`icon`, `emotion`, `background`, … as the
+    card wrote it), its name there ("" for none), and its bytes. Read,
+    one beside the main picture — a CHARX's member, or a chunk RisuAI
+    keeps in a PNG; written, any of a card's, the main one first."""
+
+    type: str
+    name: str
+    data: bytes
 
 
 # ---------- import ----------
@@ -121,26 +133,21 @@ def list_assets(payload: dict[str, object]) -> list[object]:
     return _list(_card_dict(payload), "assets")
 
 
-def unknown_macros(card: CharacterProfile) -> list[str]:
-    """Every `{{…}}` nothing will bind, deduplicated in reading order —
-    reported at import rather than stripped or silently shipped."""
-    text = "\n".join(
-        [
-            card.description,
-            card.personality,
-            card.scenario,
-            card.greeting,
-            card.reminder,
-            card.system_prompt,
-            *card.alternate_greetings,
-            *card.examples,
-        ]
-    )
-    seen: dict[str, None] = {}
-    for macro in _ANY_MACRO.findall(text):
-        if not binds(macro):
-            seen.setdefault(macro)
-    return list(seen)
+def list_risu_assets(payload: dict[str, object]) -> list[dict[str, str]]:
+    """The files RisuAI lists in a V2 card's own extension, as a V3 card
+    lists its assets — its emotions (`emotion`), then its additional
+    assets (`x-risu-asset`), each its name and the uri it is kept under;
+    none for a card without them."""
+    extensions = _card_dict(payload).get("extensions")
+    risu = extensions.get("risuai") if isinstance(extensions, dict) else None
+    if not isinstance(risu, dict):
+        return []
+    out = []
+    for key, kind in (("emotions", "emotion"), ("additionalAssets", "x-risu-asset")):
+        for entry in _list(risu, key):
+            if isinstance(entry, list) and len(entry) >= 2 and isinstance(entry[1], str):
+                out.append({"type": kind, "name": str(entry[0]), "uri": entry[1]})
+    return out
 
 
 def _card_dict(payload: dict[str, object]) -> dict[str, object]:

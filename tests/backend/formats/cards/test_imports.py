@@ -3,7 +3,7 @@ normalized `Card` plus the notes an import should say out loud. A PNG
 holds a LIST of embedded cards; selection is explicit — `ccv3` first
 (the V3 spec's own instruction), else the FIRST `chara` — and copies
 that genuinely disagree are reported. Normalization is an allowlist;
-macros stay unbound; line endings normalize; `mes_example` splits on
+macros stay unbound and unreported; line endings normalize; `mes_example` splits on
 `<START>`. Every test builds its bytes in memory — no fixtures, no
 disk."""
 
@@ -117,15 +117,15 @@ class TestReadCard:
         bare, _ = read_card(_json(_v2(name="E")))
         assert "file_name" not in bare.to_toml()
 
-    def test_macros_nothing_binds_are_reported(self) -> None:
-        payload = _v2(name="Elara", description="roll {{roll:d20}} for {{char}}")
-        _, notes = read_card(_json(payload))
-        assert any("{{roll:d20}}" in note for note in notes)
-
-    def test_original_is_bound_so_never_reported(self) -> None:
-        payload = _v2(name="Elara", system_prompt="{{original}} Stay in {{char}}'s voice.")
-        _, notes = read_card(_json(payload))
+    def test_a_macro_is_kept_as_written_and_never_reported(self) -> None:
+        payload = _v2(
+            name="Elara",
+            description="roll {{roll:d20}} for {{char}} {{getvar::lang}}",
+            system_prompt="{{original}} Stay in {{char}}'s voice.",
+        )
+        card, notes = read_card(_json(payload))
         assert notes == []
+        assert card.description == "roll {{roll:d20}} for {{char}} {{getvar::lang}}"
 
 
 class TestHasEmbeddedCards:

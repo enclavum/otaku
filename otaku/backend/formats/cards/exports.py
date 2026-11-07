@@ -7,7 +7,8 @@ import json
 from typing import Literal
 
 from otaku.backend.formats.cards import _charx, _json, _png
-from otaku.backend.formats.cards._charx import Asset, is_charx
+from otaku.backend.formats.cards._charx import is_charx
+from otaku.backend.formats.cards._json import Asset
 from otaku.context.cards import CharacterProfile
 
 # What a card file is: a card is read from and written as each of them.

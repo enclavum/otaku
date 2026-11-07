@@ -21,8 +21,8 @@ a handler runs each route as one unit on it (`App.run`) or calls a
 reply's frames are written on the handler's own thread as the events are
 handed across. A row marked `unqueued` (`web.api._request`) runs on the
 handler's own thread: its verb is `any_thread` and slow on purpose — a
-recording being written down, a card written from its pictures or
-fetched from a link, whose
+recording being written down, a card written from its pictures, read
+from its file or fetched from a link, whose
 store steps hop onto the app's thread themselves (`App.run`) — so
 nothing waits behind it. The METHOD is the lane (`web.server`): a route
 is a GET exactly when its call only reads, since a read is answered

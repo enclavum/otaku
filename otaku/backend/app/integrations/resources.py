@@ -1,14 +1,15 @@
 """The integrations as a frontend reaches them (`IntegrationsResource`):
-web search, its ONE key in either frontend — sealed into its section of
-integrations.toml and live in the app at once, never read back out — and
-otaku's own support desk, a reader's request sent through the site. The
-work is the domain's (`app.integrations.services`)."""
+the sites a card is fetched from by a link, which a frontend lists as
+it takes one; web search, its ONE key in either frontend — sealed into
+its section of integrations.toml and live in the app at once, never
+read back out — and otaku's own support desk, a reader's request sent
+through the site. The work is the domain's (`app.integrations.services`)."""
 
 from __future__ import annotations
 
 from otaku.backend.app.core.services import App
 from otaku.backend.app.integrations import services as domain_integrations
-from otaku.backend.app.integrations.schemas import WebSearch
+from otaku.backend.app.integrations.schemas import CardSite, WebSearch
 from otaku.backend.base import Changed, Resource
 
 
@@ -17,8 +18,19 @@ class IntegrationsResource(Resource):
 
     def __init__(self, app: App) -> None:
         super().__init__(app)
+        self.cards = CardSitesResource(app)
         self.web_search = WebSearchResource(app)
         self.support_requests = SupportRequestsResource(app)
+
+
+class CardSitesResource(Resource):
+    """/integrations/cards — the sites a card is fetched from by a link."""
+
+    def list(self) -> tuple[CardSite, ...]:
+        """The sites a card's page is fetched from, by name,
+        alphabetically: each its hosts, the main one first."""
+        sites = domain_integrations.get_card_sites(self._app)
+        return tuple(CardSite(name, hosts) for name, hosts in sites.items())
 
 
 class WebSearchResource(Resource):

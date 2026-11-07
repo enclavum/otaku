@@ -1977,6 +1977,25 @@ paths:
 
   # ---------- Integrations ----------
 
+  /api/integrations/cards:
+    get:
+      operationId: listCardSites
+      tags: [Integrations]
+      summary: The sites a card is fetched from by a link
+      description: The sites a card's page is fetched from, by name, alphabetically, each with its hosts — what a link may name beside a card file's own link.
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: The card sites.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/CardSite" }
+
   /api/integrations/web-search:
     get:
       operationId: getWebSearch
@@ -2624,6 +2643,13 @@ components:
         size: { type: integer, description: "Bytes, as stored." }
         kind: { type: string, enum: [portrait, expression, background, other], description: "What it shows: the character itself, one of its expressions, a background, or anything else its card file carried." }
         name: { type: string, description: 'The name its card file gave it; "" for none.' }
+
+    CardSite:
+      type: object
+      required: [name, hosts]
+      properties:
+        name: { type: string }
+        hosts: { type: array, items: { type: string }, description: "The hosts its links name, the main one first." }
 
     CardSummary:
       type: object

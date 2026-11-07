@@ -19,6 +19,8 @@ import { tell } from "../kit/status.js";
 
 // How long the link field waits after the last keystroke before it reads the link.
 const _LINK_SETTLE_MS = 800;
+// px between the supported sites' toggle and their list, and the list and the window's edge
+const _SITES_GAP = 6;
 
 export async function importDocument() {
   const file = await pickFile(".md,.jsonl,.txt");
@@ -237,6 +239,7 @@ export async function importCard() {
        and the dialog's Enter alike; `wiring` drops the last opening's
        veto with its stale closures. */
     const signal = wiring(dialog);
+    wireSupportedSites(dialog, signal);
     const named = () => name.value.trim() && persona.value.trim();
     const arm = () => {
       importButton.disabled = !(prepared?.card && named());
@@ -393,6 +396,90 @@ export async function exportStory({ storyId = null } = {}) {
   const filename = answer.name;
   saveFile(filename, new Blob([answer.text], { type: "text/markdown" }));
   tell(`Exported ${filename}.`);
+}
+
+/* The sites a card's page is fetched from, each with its hosts, the
+   backend's (`api.integrations.cards`), read once for every dialog. */
+let cardSites = null;
+
+export function wireSupportedSites(dialog, signal) {
+  /* A link field's supported sites: a popover, in the top layer over the
+     dialog, so the dialog never clips it — opened and closed by its
+     toggle (`popovertarget`), and closed too by a click outside it, by
+     Esc (going no further, so the dialog stays open), by the dialog
+     scrolling or closing and the window resizing. It opens under its
+     toggle, its right edge on the toggle's, and above it where the
+     window has no room below. */
+  const toggle = $("[data-sites]", dialog);
+  const list = $(`#${toggle.getAttribute("popovertarget")}`, dialog);
+  const hide = () => {
+    if (list.matches(":popover-open")) list.hidePopover();
+  };
+  guard(() => drawSupportedSites(list))();
+  list.addEventListener(
+    "beforetoggle",
+    (event) => {
+      if (event.newState !== "open") return;
+      const at = toggle.getBoundingClientRect();
+      list.style.top = `${at.bottom + _SITES_GAP}px`;
+      list.style.right = `${document.documentElement.clientWidth - at.right}px`;
+    },
+    { signal },
+  );
+  list.addEventListener(
+    "toggle",
+    (event) => {
+      const open = event.newState === "open";
+      toggle.setAttribute("aria-expanded", String(open));
+      const at = toggle.getBoundingClientRect();
+      if (open && at.bottom + _SITES_GAP + list.offsetHeight > window.innerHeight) {
+        list.style.top = `${Math.max(_SITES_GAP, at.top - _SITES_GAP - list.offsetHeight)}px`;
+      }
+    },
+    { signal },
+  );
+  // a scroll of the dialog's or a field's moves the toggle; the list's own does not
+  dialog.addEventListener(
+    "scroll",
+    (event) => {
+      if (!list.contains(event.target)) hide();
+    },
+    { signal, capture: true },
+  );
+  dialog.addEventListener("close", hide, { signal });
+  window.addEventListener("resize", hide, { signal });
+  dialog.addEventListener(
+    "keydown",
+    (event) => {
+      // Enter on the toggle is the toggle's, never the dialog's action
+      if (event.key === "Enter" && event.target === toggle) {
+        event.stopImmediatePropagation();
+        return;
+      }
+      // before the page's own Esc, which would put the dialog down
+      if (event.key !== "Escape" || !list.matches(":popover-open")) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      hide();
+    },
+    { signal, capture: true },
+  );
+}
+
+async function drawSupportedSites(list) {
+  /* The sites drawn before the list's note, once per dialog: a row each,
+     its name and its hosts, the main one first. */
+  if ($(".otk-sites__row", list)) return;
+  cardSites ??= await api.integrations.cards.list();
+  $(".otk-sites__note", list).before(
+    ...cardSites.map((site) => {
+      const hosts = span("otk-sites__hosts");
+      hosts.append(...site.hosts.map((host) => span("otk-sites__domain", host)));
+      const row = element("span", "otk-sites__row");
+      row.append(span("otk-sites__name", site.name), hosts);
+      return row;
+    }),
+  );
 }
 
 export function saveFile(filename, blob) {

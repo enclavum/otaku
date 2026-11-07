@@ -25,6 +25,7 @@ from otaku.backend.formats.cards import (
 _ICON = b"\x89PNG icon"
 _OTHER = b"\x89PNG other"
 _JOY = b"\x89PNG joy"
+_JPEG = b"\xff\xd8\xff\xe0 a cover picture"
 _SONG = {"type": "x-risu-asset", "name": "song", "uri": "embeded://s.mp3", "ext": "mp3"}
 
 
@@ -35,6 +36,23 @@ class TestPackCharx:
         card, notes = read_card(packed)
         assert (card.name, notes) == ("Ann", [])
         assert read_main_picture(packed) == _ICON
+
+
+class TestAPictureWithACharxAppended:
+    """A CHARX after a picture, as RisuRealm serves some: a zip that opens
+    past the picture and holds `card.json` is the card; any other zip
+    leaves the picture a picture."""
+
+    def test_reads_as_its_card_and_its_main_icon(self) -> None:
+        archive = _charx(_v3(name="Ann"), {"assets/icon/main.png": _ICON})
+        appended = _JPEG + archive
+        assert is_charx(appended)
+        assert read_card(appended)[0].name == "Ann"
+        assert read_main_picture(appended) == _ICON
+
+    def test_a_picture_with_another_zip_is_no_card(self) -> None:
+        assert not is_charx(_JPEG + _zip({"notes.txt": b"hi"}))
+        assert not is_charx(_JPEG)
 
 
 class TestTheMainIcon:

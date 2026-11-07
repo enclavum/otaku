@@ -1,7 +1,9 @@
-"""The integrations as the app holds them. Web search: its one key,
-sealed into the web search section of integrations.toml and bound in the
-app at once; which engine it belongs to is the integration's own
-business (`integrations.WebSearch`). The support desk: a reader's message
+"""The integrations as the app holds them. The card sites: each by its
+name with the hosts its pages are fetched from, the card integration's
+own (`integrations.Cards`). Web search: its one key, sealed into the web
+search section of integrations.toml and bound in the app at once; which
+engine it belongs to is the integration's own business
+(`integrations.WebSearch`). The support desk: a reader's message
 to otaku's author, and the address to answer at where one is given, sent
 through the site (`integrations.SupportDesk`) — checked here before
 anything leaves, so a refusal is a sentence and never a mail the
@@ -15,7 +17,7 @@ from otaku.backend.app.core.services import App
 from otaku.backend.errors import Invalid, Unavailable
 from otaku.encryption import SealedError, seal
 from otaku.formatting import toml_scalar
-from otaku.integrations import IntegrationConfig, IntegrationError, SupportDesk, WebSearch
+from otaku.integrations import Cards, IntegrationConfig, IntegrationError, SupportDesk, WebSearch
 from otaku.settings.integrations import section_block
 from otaku.settings.migrations import surgery
 
@@ -25,6 +27,15 @@ from otaku.settings.migrations import surgery
 # is why it was given.
 _EMAIL = re.compile(r"[^@\s]+@[^@\s.]+\.[^@\s]+")
 _MAX_EMAIL = 200  # the endpoint's cut
+
+
+# ---------- the card sites ----------
+
+
+def get_card_sites(app: App) -> dict[str, tuple[str, ...]]:
+    """The sites a card's page is fetched from, by name, alphabetically:
+    each its hosts, the main one first."""
+    return app._integrations.get(Cards).sites()
 
 
 # ---------- web search ----------

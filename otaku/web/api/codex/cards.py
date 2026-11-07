@@ -15,6 +15,7 @@ from otaku.backend.codex.cards.schemas import RawFile
 from otaku.web.api._request import Ask, Created, Route, changed, plain, unqueued
 
 
+@unqueued
 def _create(api: Api, ask: Ask) -> Any:
     """A card made from what the body carries: `data` (a card file, or a
     picture that holds none, as base64) and the `file_name` it was picked
@@ -26,7 +27,8 @@ def _create(api: Api, ask: Ask) -> Any:
     `with_copies` is true, vetted alone with `?validate_only=true` and
     answered with how many copies; or a `name` and the card's fields.
     Answered with where the card lives, made now (201) or held already
-    (200)."""
+    (200). Off the app's thread, so a card of many pictures holds it only
+    for its writes (`api.cards.create`)."""
     if "data" in ask.body:
         data = base64.b64decode(ask.need("data"), validate=True)
         file_name = ask.need("file_name")

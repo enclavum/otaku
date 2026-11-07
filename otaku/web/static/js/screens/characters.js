@@ -48,7 +48,7 @@ import { markdown } from "../kit/markdown.js";
 import { openPicture } from "../kit/pictures.js";
 import * as held from "../play/held.js";
 import { landed } from "../play/shell.js";
-import { saveFile } from "./transfer.js";
+import { saveFile, wireSupportedSites } from "./transfer.js";
 
 /* Where the view is kept — the list, or the gallery at a tile size —
    this browser's storage, as the theme's pin is; the unlinked column's
@@ -152,7 +152,7 @@ const _EXPORT_LABELS = {
   png: "PNG image · V2 + V3",
   json: "JSON file",
   charx: "CHARX archive · V3",
-  original: "Original file",
+  original: "Original card",
 };
 
 const state = {
@@ -1180,6 +1180,7 @@ async function importDialog(popup) {
        stop is the whole veto — the button and the dialog's Enter alike;
        `wiring` drops the last opening's veto with its stale closures. */
     const signal = wiring(dialog);
+    wireSupportedSites(dialog, signal);
     let settling = null;
     links.addEventListener(
       "input",
@@ -1773,7 +1774,11 @@ function exportButton(card) {
     guard(() => exportCard(card, picked))();
   });
   menu.classList.add("otk-langs--wide");
-  for (const each of card.available_export_formats) menu._add(each, _EXPORT_LABELS[each], each === format);
+  for (const each of card.available_export_formats) {
+    // the file it came as apart from the formats it is written in
+    if (each === "original") menu.append(span("otk-langs__sep"));
+    menu._add(each, _EXPORT_LABELS[each], each === format);
+  }
   // the file it came as says its own kind in the code column
   for (const row of $$(".otk-langs__opt", menu)) {
     $(".otk-langs__code", row).textContent = code(row.dataset.code);

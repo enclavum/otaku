@@ -19,6 +19,7 @@ from otaku.backend.codex.cards.services import (
     check_card_file,
     fetch_card,
     get_story_counts,
+    prepare_card_file,
 )
 from otaku.backend.errors import Invalid
 from otaku.backend.story.cards import services as domain_cards
@@ -68,6 +69,7 @@ class StoryCardsResource(Resource):
         validate_only: Literal[False] = False,
     ) -> Changed[StoryCardImport]: ...
 
+    @any_thread
     def create(
         self,
         story_id: int,
@@ -109,57 +111,70 @@ class StoryCardsResource(Resource):
         codex card staying. `line` is what the story RECORDS; the default
         names the file, or the codex card. Raises Refused — not a card,
         no such codex card, a blank name, a cast name already taken, the
-        card in the story already, a head standing elsewhere."""
+        card in the story already, a head standing elsewhere. Safe from
+        any thread: a card file's pictures pass the intake off the app's
+        thread, the story's write made on it as one unit; a check runs
+        on it whole."""
         app = self._app
         if validate_only:
-            checked = domain_cards.check_card(
-                app, story_id, data=data, file_name=file_name, card_id=card_id, name=name
-            )
-            story_counts = get_story_counts(app)
-            return StoryCardCheck(
-                name=checked.profile.name,
-                notes=checked.notes,
-                block_tokens=checked.block_tokens,
-                large=checked.large,
-                persona=checked.persona,
-                has_picture=checked.has_picture,
-                thumbnail=checked.thumbnail,
-                same_card=(
-                    as_card_summary(checked.same_card, story_counts)
-                    if checked.same_card is not None
-                    else None
-                ),
-                similar_cards=tuple(
-                    as_card_summary(row, story_counts) for row in checked.similar_cards
-                ),
-            )
+
+            def check() -> StoryCardCheck:
+                checked = domain_cards.check_card(
+                    app, story_id, data=data, file_name=file_name, card_id=card_id, name=name
+                )
+                story_counts = get_story_counts(app)
+                return StoryCardCheck(
+                    name=checked.profile.name,
+                    notes=checked.notes,
+                    block_tokens=checked.block_tokens,
+                    large=checked.large,
+                    persona=checked.persona,
+                    has_picture=checked.has_picture,
+                    thumbnail=checked.thumbnail,
+                    same_card=(
+                        as_card_summary(checked.same_card, story_counts)
+                        if checked.same_card is not None
+                        else None
+                    ),
+                    similar_cards=tuple(
+                        as_card_summary(row, story_counts) for row in checked.similar_cards
+                    ),
+                )
+
+            return app.run(check)
         if isinstance(expected_head, Unchanged):
             raise Invalid("A card import names the head it plays on from.")
-        brought, report = domain_cards.import_card(
-            app,
-            story_id,
-            data=data,
-            file_name=file_name,
-            card_id=card_id,
-            name=name if name is not None else "",
-            reuse=reuse,
-            tagline=tagline,
-            persona=persona,
-            with_pictures=with_pictures,
-            story_only=story_only,
-            line=line,
-            expected_head=expected_head,
-        )
-        # Both rows as a client draws them, each joined to the one before it.
-        drawn = {message.id: message for message in MessagesResource(app).list(story_id)}
-        imported = StoryCardImport(
-            character_id=brought.character_id,
-            card_id=brought.card_id,
-            line=drawn[brought.line.id],
-            greeting=drawn[brought.greeting.id] if brought.greeting is not None else None,
-            report=report,
-        )
-        return Changed(imported, report)
+        # the slow half off the app's thread; the story's write as one unit on it
+        prepared = prepare_card_file(data, file_name) if data is not None else None
+        head = expected_head
+
+        def bring_in() -> Changed[StoryCardImport]:
+            brought, report = domain_cards.import_card(
+                app,
+                story_id,
+                prepared=prepared,
+                card_id=card_id,
+                name=name if name is not None else "",
+                reuse=reuse,
+                tagline=tagline,
+                persona=persona,
+                with_pictures=with_pictures,
+                story_only=story_only,
+                line=line,
+                expected_head=head,
+            )
+            # Both rows as a client draws them, each joined to the one before it.
+            drawn = {message.id: message for message in MessagesResource(app).list(story_id)}
+            imported = StoryCardImport(
+                character_id=brought.character_id,
+                card_id=brought.card_id,
+                line=drawn[brought.line.id],
+                greeting=drawn[brought.greeting.id] if brought.greeting is not None else None,
+                report=report,
+            )
+            return Changed(imported, report)
+
+        return app.run(bring_in)
 
 
 class StoryCardFetchesResource(Resource):
@@ -225,8 +240,8 @@ class StoryCardFetchesResource(Resource):
         if isinstance(expected_head, Unchanged):
             raise Invalid("A card import names the head it plays on from.")
         file = fetch_card(self._app, url)
-        # the name the card brings, the codex's where it holds the card
-        read = check_card_file(self._app, file.data, file.name)
+        # the name the card brings, the codex's where it holds the card — read on the app's thread
+        read = self._app.run(lambda: check_card_file(self._app, file.data, file.name))
         own = read.same_card.name if read.same_card is not None else read.profile.name
         asked = (name or "").strip()
         typed = f"/card {url.strip()}" + (f" {asked}" if asked and asked != own else "")

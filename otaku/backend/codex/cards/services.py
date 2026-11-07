@@ -483,6 +483,27 @@ def carried_picture(data: bytes, file_name: str) -> IntakePicture | None:
         return None
 
 
+@dataclass(frozen=True)
+class PreparedCardFile:
+    """A card file read and every picture it carries passed through the
+    intake, nothing stored — an import's slow half, which needs no store.
+    A picture that holds no card is `bare`, the blank card it makes;
+    otherwise the card's `profile`, what reading it noted, its main
+    picture (None for none, `main_refused` the intake's sentence where
+    it refused it), and its other pictures, each with the asset it came
+    as, and how many of those the intake refused."""
+
+    data: bytes
+    file_name: str
+    bare: IntakePicture | None = None
+    profile: CharacterProfile | None = None
+    notes: tuple[str, ...] = ()
+    main: IntakePicture | None = None
+    main_refused: str = ""
+    others: tuple[tuple[Asset, IntakePicture], ...] = ()
+    refused: int = 0
+
+
 def import_card_file(
     app: App,
     data: bytes,
@@ -494,21 +515,74 @@ def import_card_file(
     allow_bare_picture: bool = False,
 ) -> tuple[int, bool, str]:
     """A card file into the codex — the card it is there, whether it was
-    made now, and the sentence. A file the codex holds already makes
-    nothing; `reuse` names the card the reader says it is, which notes
-    the file's digest. Otherwise a card is made — under `name`, its own
-    where none is asked, `tagline` its own (a site's, the file came from
-    a link to) — and the
-    picture the file carries kept as its portrait (a PNG's own, a
-    CHARX's main icon); a picture the intake refuses leaves the card
-    without one, and the sentence says so. With
-    `allow_bare_picture`, a picture that holds no card makes a blank card
-    — under `name`, else `NEW_CARD_NAME` — the picture its portrait.
-    Raises Refused for a file that is no card, nor a picture where one is
-    allowed, and a `reuse` the codex does not hold."""
+    made now, and the sentence: prepared on the caller's thread
+    (`prepare_card_file`), then stored as one unit on the app's
+    (`store_card_file`), so a card of many pictures holds the app's
+    thread only for its writes."""
+    prepared = prepare_card_file(data, file_name, allow_bare_picture=allow_bare_picture)
+    return app.run(lambda: store_card_file(app, prepared, name=name, reuse=reuse, tagline=tagline))
+
+
+def prepare_card_file(
+    data: bytes, file_name: str, *, allow_bare_picture: bool = False
+) -> PreparedCardFile:
+    """A card file read, and every picture it carries passed through the
+    intake — its main one (a PNG's own, a CHARX's main icon) and a
+    CHARX's others — nothing stored, so it runs on any thread. With
+    `allow_bare_picture`, a picture that holds no card is read as the
+    blank card it makes. Raises Refused for a file that is no card, nor
+    a picture where one is allowed."""
     if allow_bare_picture and _is_bare_picture(data):
-        picture = read_picture(RawFile(data, file_name))
-        known = _PICTURE_DIGEST + _whole_digest(picture.data)
+        return PreparedCardFile(data, file_name, bare=read_picture(RawFile(data, file_name)))
+    profile, notes = _read(data, file_name)
+    main, main_refused = None, ""
+    carried = read_main_picture(data)
+    if carried is not None:
+        try:
+            main = read_picture(RawFile(carried, file_name))
+        except Refused as e:
+            main_refused = str(e)
+    others: list[tuple[Asset, IntakePicture]] = []
+    refused = 0
+    for asset in read_assets(data):
+        try:
+            others.append((asset, read_picture(RawFile(asset.data, asset.name or file_name))))
+        except Refused:
+            refused += 1
+    return PreparedCardFile(
+        data,
+        file_name,
+        profile=profile,
+        notes=tuple(notes),
+        main=main,
+        main_refused=main_refused,
+        others=tuple(others),
+        refused=refused,
+    )
+
+
+def store_card_file(
+    app: App,
+    prepared: PreparedCardFile,
+    *,
+    name: str | None = None,
+    reuse: int | None = None,
+    tagline: str = "",
+) -> tuple[int, bool, str]:
+    """A prepared card file into the codex — the card it is there, whether
+    it was made now, and the sentence; on the app's thread. A file the
+    codex holds already makes nothing; `reuse` names the card the reader
+    says it is, which notes the file's digest. Otherwise a card is made —
+    under `name`, its own where none is asked, `tagline` its own (a
+    site's, the file came from a link to) — the file kept as it came,
+    its main picture its portrait and a CHARX's others beside it, each of
+    its kind; a picture the intake refused is left out, and the sentence
+    says so. A picture alone makes a blank card — under `name`, else
+    `NEW_CARD_NAME` — the picture its portrait. Raises Refused for a
+    `reuse` the codex does not hold."""
+    data = prepared.data
+    if prepared.bare is not None:
+        known = _PICTURE_DIGEST + _whole_digest(prepared.bare.data)
         same = app._store.cards.find_by_digest(known)
         if same is not None:
             return same.id, False, f"{same.name} is in Characters already."
@@ -520,10 +594,11 @@ def import_card_file(
             digests=(known,),
         )
         app._store.cards.set_pictures(
-            card_id, [save(app._store.files, picture, card_id, CardPicture)]
+            card_id, [save(app._store.files, prepared.bare, card_id, CardPicture)]
         )
         return card_id, True, f"Added {named} to Characters, the picture its portrait."
-    profile, notes = _read(data, file_name)
+    profile = prepared.profile
+    assert profile is not None  # a card file prepared holds its card
     digest = _digest(profile)
     same = app._store.cards.find_by_digest(digest)
     if same is not None:
@@ -536,32 +611,22 @@ def import_card_file(
     card_id = app._store.cards.add(
         named, tagline=_clean_tagline(tagline), profile=profile.to_toml(), digests=(digest,)
     )
-    said = [f"Added {named} to Characters.", *notes]
+    said = [f"Added {named} to Characters.", *prepared.notes]
     app._store.cards.set_original_file(
         card_id, app._store.files.add_file(Owner.CARD, card_id, data, _original_extension(data))
     )
     pictures: list[CardPicture] = []
-    carried = read_main_picture(data)
-    if carried is not None:
-        try:
-            picture = read_picture(RawFile(carried, file_name))
-        except Refused as e:
-            said.append(f"The picture isn't kept. {e}")
-        else:
-            pictures.append(save(app._store.files, picture, card_id, CardPicture))
-    refused = 0
-    for asset in read_assets(data):
-        try:
-            picture = read_picture(RawFile(asset.data, asset.name or file_name))
-        except Refused:
-            refused += 1
-            continue
+    if prepared.main is not None:
+        pictures.append(save(app._store.files, prepared.main, card_id, CardPicture))
+    elif prepared.main_refused:
+        said.append(f"The picture isn't kept. {prepared.main_refused}")
+    for asset, picture in prepared.others:
         saved = save(app._store.files, picture, card_id, CardPicture)
         if all(kept.file != saved.file for kept in pictures):
             kind = _KINDS.get(asset.type, CardPictureKind.OTHER)
             pictures.append(replace(saved, kind=kind, name=asset.name))
-    if refused:
-        said.append(f"{refused} of the card's other pictures aren't kept.")
+    if prepared.refused:
+        said.append(f"{prepared.refused} of the card's other pictures aren't kept.")
     if pictures:
         portraits, others = _split(pictures)
         app._store.cards.set_pictures(card_id, [*portraits, *others])

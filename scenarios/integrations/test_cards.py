@@ -1,7 +1,8 @@
 """The card sites (`integrations.cards`): a link to a card pinned on each
 gives a file that reads as a card and carries its picture — and on the
 sites that list one, Chub and Wyvern, the line it is listed under — a
-picture's link a picture alone the intake takes, and a link to a card
+picture's link a picture alone the intake takes, a CHARX RisuRealm
+serves after a picture a card with every picture, and a link to a card
 that is not there is nothing there. A pinned card its creator
 deletes fails as "nothing is at …" — pin another of that site's, as
 popular and as old as can be found."""
@@ -14,6 +15,7 @@ from otaku.backend.formats.cards import (
     CardError,
     is_charx,
     pack_charx,
+    read_assets,
     read_card,
     read_main_picture,
 )
@@ -43,6 +45,8 @@ PICTURES = {
 TAGLINES = ("chub", "wyvern")
 # A RisuRealm card whose creator allows no PNG: it comes as a CHARX.
 CHARX_ONLY = "https://realm.risuai.net/character/2012ab3a-0da1-41e5-8969-305996173e67"
+# A RisuRealm card served as a picture with its CHARX appended after it.
+CHARX_AFTER_A_PICTURE = "https://realm.risuai.net/character/51fa0c02-eb16-418f-9687-2052c9e68ade"
 # A page of each site's own shape that names no card.
 MISSING = {
     "chub": "https://chub.ai/characters/nobody-zz/no-such-card-zz",
@@ -72,6 +76,14 @@ class TestCards:
         card, _ = read_card(data)
         assert card.name
         assert read_main_picture(data) is not None
+
+    def test_a_charx_served_after_a_picture_is_a_card_with_its_pictures(self) -> None:
+        data = _card_file(CHARX_AFTER_A_PICTURE)
+        assert not data.startswith(b"PK") and is_charx(data)
+        card, _ = read_card(data)
+        assert card.name
+        assert read_main_picture(data) is not None
+        assert read_assets(data)
 
     @pytest.mark.parametrize("link", PICTURES.values(), ids=PICTURES.keys())
     def test_a_picture_link_gives_a_picture_alone(self, link: str) -> None:

@@ -1,5 +1,8 @@
 """The integrations as a frontend reaches them.
 
+The card sites: the sites a card's link is fetched from, by name,
+alphabetically, each with its hosts — what both card dialogs list.
+
 The web search key: ONE box in either frontend, and ONE key — Tavily's
 or Exa's, which engine it belongs to told from its shape only when a
 search is asked (`integrations.WebSearch`). It goes sealed into the web
@@ -34,6 +37,15 @@ from scenarios.support.server import ModelServer
 DESK = "/api/support"
 
 SEARCH = "/search"
+
+
+class TestCardSites:
+    def test_the_sites_a_cards_link_is_fetched_from_are_listed_by_name(self, app: App) -> None:
+        sites = app.api.integrations.cards.list()
+        assert [site.name for site in sites] == sorted(
+            (site.name for site in sites), key=str.casefold
+        )
+        assert all(site.hosts for site in sites)
 
 
 class TestWebSearchKey:

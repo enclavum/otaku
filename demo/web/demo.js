@@ -59,6 +59,7 @@ const ROUTES = {
   "GET /api/prompts/{prompt}": (p) => store.prompt(p.prompt),
   "PATCH /api/prompts/{prompt}": (p, q, b) => changed(store.updatePrompt(p.prompt, need(b, "text"))),
   "DELETE /api/prompts/{prompt}": (p) => changed(store.updatePrompt(p.prompt, "")),
+  "GET /api/integrations/cards": () => items(store.cardSites()),
   "GET /api/integrations/web-search": () => store.webSearch(),
   "PATCH /api/integrations/web-search": (p, q, b) => changed(store.updateWebSearch(need(b, "api_key"))),
   "POST /api/integrations/support-requests": (p, q, b) => changed(store.supportRequest(need(b, "body"))),

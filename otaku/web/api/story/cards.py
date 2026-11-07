@@ -94,6 +94,6 @@ def _fetch(api: Api, ask: Ask) -> Any:
 
 
 ROUTES: dict[tuple[str, str], Route] = {
-    ("POST", "/api/stories/{story}/cards"): tagged(_create),
+    ("POST", "/api/stories/{story}/cards"): unqueued(tagged(_create)),
     ("POST", "/api/stories/{story}/cards/fetches"): unqueued(tagged(_fetch)),
 }

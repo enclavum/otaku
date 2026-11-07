@@ -1,5 +1,6 @@
 """The card sites, as far as a source is told without asking any site:
-an address that is no web address, and a known site's page that is no
+the sites listed by name, alphabetically, each host one site's; an
+address that is no web address, and a known site's page that is no
 character's — or, on Civitai, no picture's — refused before a request
 goes out (`CardSourceError`). What the sites answer is the integrations
 suite's (`scenarios/integrations/test_cards.py`)."""
@@ -10,6 +11,23 @@ from otaku.integrations import Cards, CardSourceError
 from otaku.settings.integrations import IntegrationConfig
 
 _AGENT = "otaku/test"
+
+
+class TestSites:
+    def test_the_sites_are_listed_by_name_alphabetically(self) -> None:
+        names = list(Cards.sites())
+        assert names and names == sorted(names, key=str.casefold)
+
+    def test_each_host_is_one_sites(self) -> None:
+        hosts = [host for hosts in Cards.sites().values() for host in hosts]
+        assert all(Cards.sites().values()) and len(hosts) == len(set(hosts))
+
+    def test_every_host_listed_is_one_a_page_is_fetched_from(self) -> None:
+        # its home page is no character's: refused for the site, never fetched as a file
+        for hosts in Cards.sites().values():
+            for host in hosts:
+                with pytest.raises(CardSourceError):
+                    _cards().fetch(f"https://{host}/", user_agent=_AGENT)
 
 
 class TestSources:

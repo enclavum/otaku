@@ -542,7 +542,9 @@ class TestInterface:
             "DictationResource.create",
             "CardGenerationResource.create",
             "CardGenerationResource.delete",
+            "CardsResource.create",
             "CardFetchesResource.create",
+            "StoryCardsResource.create",
             "StoryCardFetchesResource.create",
         }
 

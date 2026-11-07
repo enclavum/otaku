@@ -74,9 +74,13 @@ export const models = {
 
 // ---------- integrations ----------
 
-/* The integrations: web search — whether it holds a key, and its key
-   saved ("" forgets it) — and a support request sent to otaku's author. */
+/* The integrations: the sites a card is fetched from by a link; web
+   search — whether it holds a key, and its key saved ("" forgets it) — and
+   a support request sent to otaku's author. */
 export const integrations = {
+  cards: {
+    list: () => get("/api/integrations/cards").then(items),
+  },
   webSearch: {
     get: () => get("/api/integrations/web-search"),
     update: (fields) => patch("/api/integrations/web-search", fields),

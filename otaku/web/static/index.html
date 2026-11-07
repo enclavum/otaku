@@ -797,10 +797,15 @@
       <span class="otk-label otk-label--accent">or choose a file</span>
       <input id="otk-card-file" type="file" accept=".png,.json,.charx" hidden>
     </label>
-    <label class="otk-imp__group">
-      <span class="otk-label">or paste a link</span>
-      <input class="otk-field otk-field--mono" type="text" spellcheck="false" placeholder="a card page, or a link to a card file" data-link>
-    </label>
+    <div class="otk-imp__group">
+      <span class="otk-imp__labelrow"><span class="otk-label">or paste a link</span><button class="otk-sites__toggle" type="button" aria-expanded="false" popovertarget="otk-sites-card" data-sites>supported sites</button></span>
+      <!-- a popover, over the dialog: the hosts a card's page is fetched from, drawn as rows before the note (`transfer.wireSupportedSites`) -->
+      <div class="otk-sites" id="otk-sites-card" role="dialog" aria-label="Supported sites" popover>
+        <span class="otk-label otk-sites__head">supported sites</span>
+        <p class="otk-sites__note">Or any direct link to a .png or .json card file.</p>
+      </div>
+      <input class="otk-field otk-field--mono" type="text" spellcheck="false" aria-label="Card link" placeholder="a card page, or a link to a card file" data-link>
+    </div>
   </div>
 
   <div class="otk-field-row otk-field-row--card">
@@ -848,7 +853,15 @@
     <span class="otk-label otk-label--accent">or choose files</span>
     <input id="otk-cards-files" type="file" accept=".png,.json,.charx,image/*" multiple hidden>
   </label>
-  <label class="otk-imp__group"><span class="otk-label">or paste links · one per line</span><textarea class="otk-field otk-field--mono otk-imp__textarea" rows="4" wrap="off" spellcheck="false" placeholder="a card page, or a link to a card file" data-links></textarea></label>
+  <div class="otk-imp__group">
+    <span class="otk-imp__labelrow"><span class="otk-label">or paste links · one per line</span><button class="otk-sites__toggle" type="button" aria-expanded="false" popovertarget="otk-sites-cards" data-sites>supported sites</button></span>
+    <!-- a popover, over the dialog: the hosts a card's page is fetched from, drawn as rows before the note (`transfer.wireSupportedSites`) -->
+    <div class="otk-sites" id="otk-sites-cards" role="dialog" aria-label="Supported sites" popover>
+      <span class="otk-label otk-sites__head">supported sites</span>
+      <p class="otk-sites__note">Or any direct link to a .png or .json card file.</p>
+    </div>
+    <textarea class="otk-field otk-field--mono otk-imp__textarea" rows="4" wrap="off" spellcheck="false" aria-label="Links, one per line" placeholder="a card page, or a link to a card file" data-links></textarea>
+  </div>
   <ul class="otk-imp__list" aria-live="polite" data-rows hidden></ul>
   <div class="otk-dialog__foot" data-before>
     <span class="otk-imp__count" data-count></span>

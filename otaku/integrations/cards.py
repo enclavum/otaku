@@ -72,6 +72,14 @@ class Cards(Integration):
     configurable = False
     max_bytes: ClassVar[int] = 256_000_000  # of one file; a CHARX holds every picture of its card
 
+    @classmethod
+    def sites(cls) -> dict[str, tuple[str, ...]]:
+        """Every site a card's page is fetched from, by its name,
+        alphabetically: its hosts, the main one first — what a link may
+        name beside a card file's own link."""
+        named = sorted(_SITES, key=lambda site: site[0].casefold())
+        return {name: hosts for name, hosts, _ in named}
+
     def fetch(self, url: str, *, user_agent: str) -> FetchedCard:
         """The card at `url` — a site's character page, or a file's own
         link. Raises CardSourceError for a link no card is fetched from,
@@ -303,20 +311,19 @@ def _fetch_direct(fetch: _Fetch) -> FetchedCard:
     return FetchedCard(reply.data, unquote(final.path.rpartition("/")[2]) or final.hostname or "")
 
 
-# A site's fetch, by the host its links name; any other host's link is
-# the file's own (`_fetch_direct`).
-_FETCH_BY_HOST: dict[str, Callable[[_Fetch, SplitResult], FetchedCard]] = {
-    "chub.ai": _fetch_chub,
-    "venus.chub.ai": _fetch_chub,
-    "characterhub.org": _fetch_chub,
-    "character-tavern.com": _fetch_character_tavern,
-    "realm.risuai.net": _fetch_risu,
-    "pygmalion.chat": _fetch_pygmalion,
-    "app.wyvern.chat": _fetch_wyvern,
-    "wyvern.chat": _fetch_wyvern,
-    "civitai.com": _fetch_civitai,
-    "civitai.red": _fetch_civitai,
-}
+# The sites a card's page is fetched from: each its name, its hosts — the
+# main one first — and its fetch. Any other host's link is the file's own
+# (`_fetch_direct`).
+_SITES: tuple[tuple[str, tuple[str, ...], Callable[[_Fetch, SplitResult], FetchedCard]], ...] = (
+    ("Character Tavern", ("character-tavern.com",), _fetch_character_tavern),
+    ("Chub", ("chub.ai", "characterhub.org", "venus.chub.ai"), _fetch_chub),
+    ("Civitai", ("civitai.com", "civitai.red"), _fetch_civitai),
+    ("Pygmalion", ("pygmalion.chat",), _fetch_pygmalion),
+    ("RisuRealm", ("realm.risuai.net",), _fetch_risu),
+    ("Wyvern", ("wyvern.chat", "app.wyvern.chat"), _fetch_wyvern),
+)
+# A site's fetch, by the host its links name.
+_FETCH_BY_HOST = {host: fetch for _, hosts, fetch in _SITES for host in hosts}
 
 
 # ---------- helpers ----------
