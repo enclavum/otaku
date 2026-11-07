@@ -29,7 +29,7 @@ from otaku.backend.api import (
 )
 from otaku.backend.app.core.schemas import ModelInUse
 from otaku.backend.app.paths import Paths
-from otaku.backend.formats import EXPORT_MARKER
+from otaku.backend.formats.stories import EXPORT_MARKER
 from otaku.backend.story import request as story_request
 from otaku.backend.story.messages.schemas import (
     AssistantMessage,

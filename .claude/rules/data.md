@@ -10,9 +10,11 @@ paths:
 
 ## The data model
 
-`store/schema.py` is the data model, always the current shape, and
-`store/migrations` the ladder that brings an old database to it; each
-module's docstring says how.
+`store/schema.py` is the data model's tables, always the current shape —
+what a row carries beyond its scalars beside it, a turn's and a card's
+pictures in `store/pictures.py`, a story's settings and the modes its
+layout derives in `store/story.py` — and `store/migrations` the ladder
+that brings an old database to it; each module's docstring says how.
 
 `created_at` / `updated_at` columns are audit fields: no business logic
 may ever rely on them. UI display use (e.g. ordering the story list by
@@ -26,7 +28,13 @@ the page's margin (`dossier.js` `madeBy`), the terminal's preview
 A message's pictures and a codex card's are files beside the database
 (`store/files.py`, named by their `Owner`), coming in through one reader
 below both frontends (`backend.app.pictures.services`), and swept
-against what both tables name (`Store.sweep_files`). The daily snapshot
+against what both tables name (`Store.sweep_files`). A card's pictures
+carry their kind (`pictures.CardPicture`): its portraits first, the first
+the main one — what every story and both frontends show of it
+(`Card.portraits`) — then the expressions, backgrounds and others its
+card file brought. The card file a card was imported from is kept there
+too, as it came (`cards.original_file`): a raw file, its name marked so
+it is never served as a picture. The daily snapshot
 is of the database file alone: the folder is not backed up.
 
 ## Store conventions

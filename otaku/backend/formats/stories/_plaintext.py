@@ -11,7 +11,7 @@ extraction pass builds the memory afterwards, exactly as for live play.
 
 import re
 
-from otaku.backend.formats import ExportedMessage, ExportedStory
+from otaku.backend.formats.stories import ExportedMessage, ExportedStory
 
 # Prose splitting: quotes and dashes mark speech; the rest is narration.
 _QUOTE_SPAN = re.compile(r'"[^"\n]*"|“[^”\n]*”|«[^»\n]*»|„[^“\n]*“')

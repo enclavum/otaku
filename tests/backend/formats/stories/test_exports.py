@@ -5,8 +5,8 @@ Rendering is exercised end to end by the round-trip in
 story gets no heading, and a pin is written after the kind.
 """
 
-from otaku.backend.formats import ExportedMessage, ExportedStory
-from otaku.backend.formats.exports import render_story
+from otaku.backend.formats.stories import ExportedMessage, ExportedStory
+from otaku.backend.formats.stories.exports import render_story
 
 
 class TestRenderStory:

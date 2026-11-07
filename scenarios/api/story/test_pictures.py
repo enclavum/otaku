@@ -39,7 +39,7 @@ class TestPictures:
             assert turn.body == "What is this?"
             assert picture.file.endswith(".jpg")
             assert max(picture.width, picture.height) <= 1568
-            assert app.store.files.get(picture.file) is not None
+            assert app.store.files.get_picture(picture.file) is not None
             assert app.store.files.get_thumb(picture.file) is not None
 
     def test_every_verbatim_turn_keeps_its_picture_on_the_wire(self, tmp_path) -> None:

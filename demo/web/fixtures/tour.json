@@ -8421,7 +8421,9 @@
      "file": "crd-0004-20260101-7ef6e873.jpg",
      "width": 768,
      "height": 1024,
-     "size": 32761
+     "size": 32761,
+     "kind": "portrait",
+     "name": ""
     },
     "portrait_sent": false,
     "provider": null,
@@ -8457,7 +8459,9 @@
      "file": "crd-0005-20260101-65648033.jpg",
      "width": 768,
      "height": 1024,
-     "size": 63581
+     "size": 63581,
+     "kind": "portrait",
+     "name": ""
     },
     "portrait_sent": false,
     "provider": null,
@@ -8493,7 +8497,9 @@
      "file": "crd-0006-20260101-7e5d102d.jpg",
      "width": 768,
      "height": 1024,
-     "size": 50200
+     "size": 50200,
+     "kind": "portrait",
+     "name": ""
     },
     "portrait_sent": false,
     "provider": null,
@@ -8529,7 +8535,9 @@
      "file": "crd-0007-20260101-721daf50.jpg",
      "width": 768,
      "height": 1024,
-     "size": 122703
+     "size": 122703,
+     "kind": "portrait",
+     "name": ""
     },
     "portrait_sent": false,
     "provider": null,
@@ -8555,7 +8563,9 @@
      "file": "crd-0003-20260101-19ab7992.jpg",
      "width": 768,
      "height": 1024,
-     "size": 55892
+     "size": 55892,
+     "kind": "portrait",
+     "name": ""
     },
     "portrait_sent": null,
     "provider": null,

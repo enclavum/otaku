@@ -18,7 +18,7 @@ from dataclasses import dataclass, fields
 from typing import Any, Self
 
 from otaku.context.injections import Injection
-from otaku.store.schema import InjectionPosition
+from otaku.store.story import InjectionPosition
 
 # The macro spellings the corpus actually uses: `{{char}}`/`{{user}}` in
 # any case, and the TavernAI-era `<BOT>`/`<USER>`.

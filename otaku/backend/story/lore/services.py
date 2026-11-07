@@ -17,7 +17,8 @@ from otaku.backend.errors import NO_MODEL_HINT, NO_SUCH_STORY, Conflict, Invalid
 from otaku.backend.story import request
 from otaku.context.cards import read_toml
 from otaku.settings.state import ModelRole
-from otaku.store.schema import Attachment, Card, Character, Journal, Scene
+from otaku.store.pictures import Attachment
+from otaku.store.schema import Card, Character, Journal, Scene
 
 # A row of a story's memory, as `_theirs` finds it.
 R = TypeVar("R", Scene, Character, Journal)
@@ -338,9 +339,9 @@ def set_portrait_sent(app: App, story_id: int, character_id: int, sent: bool) ->
         card = (
             codex_cards.get_card(app, character.card_id) if character.card_id is not None else None
         )
-        if card is None or not card.pictures:
+        if card is None or not card.portraits:
             raise Invalid(f"{character.name}'s card has no picture to send.")
-        pictures = card.pictures[:1]
+        pictures = tuple(Attachment.of(picture) for picture in card.portraits[:1])
     for row_id in rows:
         app._store.messages.set_attachments(row_id, pictures)
     return "Saved."

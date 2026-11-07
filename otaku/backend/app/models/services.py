@@ -28,7 +28,7 @@ from otaku.providers import (
 )
 from otaku.settings import models as models_file
 from otaku.settings.state import ModelRef, ModelRole
-from otaku.store.schema import CompletionType, Layout
+from otaku.store.story import CompletionType, Layout
 
 if TYPE_CHECKING:
     # The App imports this module; a model's settings are operated on it.

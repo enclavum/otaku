@@ -5,7 +5,7 @@ reproducing the text verbatim; `parse_plaintext` wraps them as narration
 turns and returns None only when there is nothing to import.
 """
 
-from otaku.backend.formats.plaintext import parse_plaintext, split_segments
+from otaku.backend.formats.stories._plaintext import parse_plaintext, split_segments
 
 
 class TestParsePlaintext:

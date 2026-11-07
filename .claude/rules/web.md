@@ -82,7 +82,8 @@ through it too.
   `STREAMS` or a path the server holds, in the same commit, its
   `info.version` set to the app version the surface last changed in;
   `tests/test_architecture.py` holds the spec against the tables, path
-  and method.
+  and method. Its schemas (`components.schemas`) stay in alphabetical
+  order, a new one placed where its name falls.
 
 ## The demos
 

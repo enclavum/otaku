@@ -19,7 +19,7 @@ from otaku.providers.openai.completion import PROTOCOL_PARAMS
 from otaku.providers.openai.templates import PLAIN, TEXT_TEMPLATES, TextTemplate
 from otaku.providers.registry import ALL_CLIENTS
 from otaku.settings.models import THINK_UNSET
-from otaku.store.schema import Layout
+from otaku.store.story import Layout
 
 
 class TestThinkVocabulary:

@@ -176,6 +176,10 @@ ROUTES: dict[tuple[str, str], Route] = {
     ),
     ("POST", "/api/cards/{card}/generation"): _generate,
     ("DELETE", "/api/cards/{card}/generation"): _cancel_generation,
+    # the file as JSON, its bytes base64, for the page to save
+    ("GET", "/api/cards/{card}/export"): lambda api, ask: plain(
+        api.cards.export.get(ask.id("card"), format=ask.query.get("format", ""))
+    ),
     ("POST", "/api/cards/{card}/merges"): lambda api, ask: changed(
         api.cards.merges.create(ask.id("card"), into=ask.integer("into"))
     ),

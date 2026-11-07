@@ -1197,7 +1197,8 @@ function sendPortrait(story, row, sent) {
   if (sent && !row.card_portrait) throw invalid(`${row.name}'s card has no picture to send.`);
   for (const typed of story.messages) {
     if (typed.kind === "card" && typed.speaker === row.name) {
-      typed.attachments = sent ? [structuredClone(row.card_portrait)] : [];
+      // the portrait as a turn's picture: its file and measure (`Attachment.of`)
+      typed.attachments = sent ? [attachmentOf(row.card_portrait)] : [];
     }
   }
   row.portrait_sent = sent;
@@ -1268,6 +1269,10 @@ function showCard(row, card) {
 
 function portraitOf(card) {
   return card?.pictures.length ? structuredClone(card.pictures[0]) : null;
+}
+
+function attachmentOf({ file, width, height, size }) {
+  return { file, width, height, size };
 }
 
 /* The card a link joins, refused as `story.lore.services._linkable` says. */
@@ -1550,7 +1555,16 @@ function storyCharacter(story, row) {
   };
 }
 
-const cardOf = (card) => ({ ...structuredClone(card), stories: linkedTo(card.id), is_blank: isBlank(card) });
+const cardOf = (card) => ({
+  ...structuredClone(card),
+  stories: linkedTo(card.id),
+  is_blank: isBlank(card),
+  // the demo keeps no card's file: a card is PNG with a portrait, else
+  // JSON (`codex.cards.services.default_export_format`)
+  default_export_format: card.pictures.length ? "png" : "json",
+  available_export_formats: [...(card.pictures.length ? ["png"] : []), "json", "charx"],
+  original_format: null,
+});
 
 /** Whether a card holds no text a story could take
     (`codex.cards.services.is_blank`): every field the reader writes empty,
@@ -1869,6 +1883,12 @@ export function importPicture() {
 
 /** A card fetched from a link (`fetch_card`): the demo asks no
     site. */
+/** A card as a file (`export_card`): the demo writes no card file. */
+export function exportCard(id) {
+  cardRow(id);
+  throw conflict(NOT_IN_DEMO("Exporting a card"));
+}
+
 export function fetchCard() {
   throw conflict(NOT_IN_DEMO("A card from a link"));
 }

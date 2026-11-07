@@ -668,7 +668,7 @@ paths:
               schema:
                 allOf:
                   - $ref: "#/components/schemas/Changed"
-                  - properties: { value: { $ref: "#/components/schemas/ImportedCard" } }
+                  - properties: { value: { $ref: "#/components/schemas/StoryCardImport" } }
         "412": { $ref: "#/components/responses/HeadMoved" }
         "428": { $ref: "#/components/responses/HeadRequired" }
 
@@ -723,7 +723,7 @@ paths:
               schema:
                 allOf:
                   - $ref: "#/components/schemas/Changed"
-                  - properties: { value: { $ref: "#/components/schemas/ImportedCard" } }
+                  - properties: { value: { $ref: "#/components/schemas/StoryCardImport" } }
         "412": { $ref: "#/components/responses/HeadMoved" }
         "428": { $ref: "#/components/responses/HeadRequired" }
 
@@ -1540,6 +1540,38 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Changed" }
+
+  /api/cards/{card}/export:
+    parameters:
+      - $ref: "#/components/parameters/Card"
+    get:
+      operationId: exportCard
+      tags: [Codex]
+      summary: A card as a file
+      description: |
+        The card as a file of `format`: the file it came as, with the fields
+        otaku changed laid over it — every other part of it as it came, the
+        tagline under `extensions.otaku` — or that file as it came
+        (`original`); a card that keeps none is written whole. A PNG carries
+        the main portrait, the card in both its V2 and V3 chunk; a CHARX
+        every picture, each listed with its type. Which formats a card can be
+        exported as, and the one it is unless asked, are the card's
+        (`available_export_formats`, `default_export_format`). Saving it is
+        the page's.
+        Refused (409) for a PNG of a card with no portrait and the original of
+        one that keeps none; a format that is none of them is a 422.
+      parameters:
+        - name: format
+          in: query
+          required: true
+          schema: { type: string, enum: [png, json, charx, original] }
+      responses:
+        default: { $ref: "#/components/responses/Failed" }
+        "200":
+          description: The file.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CardExport" }
 
   /api/cards/{card}/merges:
     parameters:
@@ -2469,9 +2501,9 @@ components:
 
     Attachment:
       type: object
-      description: One picture on a message or a card — the file name the picture paths take, whose extension says the type, and its measure as the model sees it. The reader's file name is not kept.
+      description: One picture on a message — the file name the picture paths take, whose extension says the type, and its measure as the model sees it. The reader's file name is not kept.
       properties:
-        file: { type: string, description: "pic-<story>-<day>-<8 hex> for a message's, crd-<card>-<day>-<8 hex> for a card's; .jpg or .png." }
+        file: { type: string, description: "pic-<story>-<day>-<8 hex>, or a card's portrait it carries, crd-<card>-<day>-<8 hex>; .jpg or .png." }
         width: { type: integer }
         height: { type: integer }
         size: { type: integer, description: "Bytes, as stored." }
@@ -2516,9 +2548,12 @@ components:
         post_history_instructions: { type: string, description: "Kept, sent nowhere." }
         creator_notes: { type: string }
         file_name: { type: string }
-        pictures: { type: array, items: { $ref: "#/components/schemas/Attachment" } }
+        pictures: { type: array, items: { $ref: "#/components/schemas/CardPicture" }, description: "Its portraits, in order, the first the main one." }
         stories: { type: array, items: { $ref: "#/components/schemas/StoryCharacter" } }
         is_blank: { type: boolean, description: "Whether it holds no text yet — a card made from a picture, before it is written — which no story takes." }
+        default_export_format: { type: string, enum: [png, json, charx, original], description: "What the card is exported as unless another is asked: the kind of file it came as, else PNG where it has a portrait, else JSON." }
+        available_export_formats: { type: array, items: { type: string, enum: [png, json, charx, original] }, description: "What the card can be exported as: PNG where it has a portrait, JSON and CHARX always, `original` where it keeps the file it came as." }
+        original_format: { type: [string, "null"], enum: [png, json, charx, null], description: "The kind of file the card came as and keeps; null for none." }
         updated_at: { type: string, description: "For display alone." }
 
     CardCheck:
@@ -2542,6 +2577,16 @@ components:
           items: { $ref: "#/components/schemas/CardSummary" }
           description: The cards alike — the same name, or the same picture — the reader may say it is (`reuse`).
         similar_note: { type: string, description: "What the import says of the cards alike — that it is made beside them — a sentence; empty for none." }
+
+    CardExport:
+      type: object
+      description: A card as a file, for the page to save.
+      required: [name, data, media_type]
+      properties:
+        name: { type: string, description: "The name it is saved under: the card's, and the format's extension." }
+        data: { type: string, format: byte, description: "The file, base64." }
+        media_type: { type: string }
+
     CardFetchCheck:
       description: A card read from a link and vetted as a file is, nothing stored, and the file the link gave with the line its site shows it under — for the import to send as a card file, so the link is fetched once.
       allOf:
@@ -2569,6 +2614,17 @@ components:
         card: { $ref: "#/components/schemas/Card" }
         made: { type: boolean }
 
+    CardPicture:
+      type: object
+      description: One of a card's pictures — the file name the picture paths take, whose extension says the type, its measure as the model sees it, what it shows and the name its card file gave it.
+      properties:
+        file: { type: string, description: "crd-<card>-<day>-<8 hex>; .jpg or .png." }
+        width: { type: integer }
+        height: { type: integer }
+        size: { type: integer, description: "Bytes, as stored." }
+        kind: { type: string, enum: [portrait, expression, background, other], description: "What it shows: the character itself, one of its expressions, a background, or anything else its card file carried." }
+        name: { type: string, description: 'The name its card file gave it; "" for none.' }
+
     CardSummary:
       type: object
       description: A card as the codex lists it.
@@ -2577,7 +2633,7 @@ components:
         name: { type: string }
         aliases: { type: array, items: { type: string } }
         tagline: { type: string }
-        pictures: { type: array, items: { $ref: "#/components/schemas/Attachment" }, description: "In order, the first the portrait." }
+        pictures: { type: array, items: { $ref: "#/components/schemas/CardPicture" }, description: "Its portraits, in order, the first the main one." }
         story_count: { type: integer, description: "How many stories it is in, one linked character in each." }
         is_blank: { type: boolean, description: "Whether it holds no text yet, which no story takes." }
 
@@ -2611,7 +2667,7 @@ components:
         card_portrait:
           description: That card's portrait, its first picture; null for none.
           oneOf:
-            - $ref: "#/components/schemas/Attachment"
+            - $ref: "#/components/schemas/CardPicture"
             - type: "null"
         portrait_sent: { type: [boolean, "null"], description: "Whether the card row that brought the character in, on the current timeline, carries the card's picture to the model; null where none did." }
         provider: { type: [string, "null"], description: "Who made the character: the engine of the pass that named them, or 'card'; null for an imported story's. An edit never changes it." }
@@ -2739,19 +2795,6 @@ components:
         extraction:
           description: The pass started on the story, for a format that carries no memory; null for one that does.
           oneOf: [{ $ref: "#/components/schemas/Extraction" }, { type: "null" }]
-
-    ImportedCard:
-      type: object
-      properties:
-        character_id: { type: integer, description: "The character the card became." }
-        card_id:
-          description: The codex card it is linked to; null for a card the story alone holds.
-          oneOf: [{ type: integer }, { type: "null" }]
-        line: { $ref: "#/components/schemas/Message" }
-        greeting:
-          description: The card's greeting message; null where the card has none.
-          oneOf: [{ $ref: "#/components/schemas/Message" }, { type: "null" }]
-        report: { type: string }
 
     Info:
       type: object
@@ -3278,6 +3321,7 @@ components:
           type: array
           items: { $ref: "#/components/schemas/CardSummary" }
           description: For a file, the codex cards alike — of the same name or picture — the reader may say it is (`reuse`).
+
     StoryCardFetchCheck:
       description: A card read from a link and vetted for a story as a file is, nothing stored, and the file the link gave with the line its site shows it under — for the page to bring in as a card file.
       allOf:
@@ -3287,6 +3331,19 @@ components:
             file_name: { type: string }
             data: { type: string, format: byte, description: "The file, base64." }
             tagline: { type: string, description: "The line the site shows the card under, for the import to send; empty for none." }
+
+    StoryCardImport:
+      type: object
+      properties:
+        character_id: { type: integer, description: "The character the card became." }
+        card_id:
+          description: The codex card it is linked to; null for a card the story alone holds.
+          oneOf: [{ type: integer }, { type: "null" }]
+        line: { $ref: "#/components/schemas/Message" }
+        greeting:
+          description: The card's greeting message; null where the card has none.
+          oneOf: [{ $ref: "#/components/schemas/Message" }, { type: "null" }]
+        report: { type: string }
 
     StoryCharacter:
       type: object

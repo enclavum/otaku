@@ -694,7 +694,7 @@ class Extractor:
         if self._client.pictures_ride(self._model) is PicturesRide.NONE:
             return ()
         named = [a for item in span for a in item.attachments]
-        found = (self._store.files.get(a.file) for a in named)
+        found = (self._store.files.get_picture(a.file) for a in named)
         return tuple(WirePicture(*f) for f in found if f is not None)
 
     def _stream_once(

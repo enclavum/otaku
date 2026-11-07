@@ -24,7 +24,7 @@ from otaku.context.prompt import (
     join,
 )
 from otaku.providers.openai.templates import PLAIN, TEXT_TEMPLATES
-from otaku.store.schema import InjectionPosition
+from otaku.store.story import InjectionPosition
 
 CAT = WirePicture(b"cat", "image/jpeg")
 DOG = WirePicture(b"dog", "image/png")

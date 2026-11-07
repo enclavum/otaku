@@ -38,7 +38,8 @@ from otaku.backend.story.tools import ToolQuestion
 from otaku.formatting import LABEL_WIDTH, flatten, truncate_label
 from otaku.store.ops.stories import StaleHeadError
 from otaku.store.ops.stories import StoryListing as StoryListing  # what the interface lists
-from otaku.store.schema import Layout, Message, Story
+from otaku.store.schema import Message, Story
+from otaku.store.story import Layout
 
 # An undo with no exchange to take back — no story at all included.
 NOTHING_TO_UNDO = "Nothing to undo."

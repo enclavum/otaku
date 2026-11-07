@@ -15,8 +15,7 @@ from otaku.backend.app.core.services import App
 from otaku.backend.app.pictures.services import RawFile, read_picture, save
 from otaku.backend.errors import NotFound, Refused
 from otaku.backend.story.settings.services import StorySettingQuestions
-from otaku.store.files import Owner
-from otaku.store.schema import Attachment
+from otaku.store.pictures import Attachment
 
 # What the launch says once a sample landed (`LaunchFacts.hint`).
 HINT = (
@@ -100,7 +99,7 @@ def _seed_pictures(app: App, story_id: int, document: Path) -> list[str]:
             notices.append(f"The sample picture {name} could not be added ({e}).")
             continue
         by_message.setdefault(number, []).append(
-            save(app._store.files, picture, Owner.STORY, story_id)
+            save(app._store.files, picture, story_id, Attachment)
         )
     for number, attachments in by_message.items():
         app._store.messages.set_attachments(ids[number - 1], attachments)

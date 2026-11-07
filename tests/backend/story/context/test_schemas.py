@@ -19,7 +19,7 @@ from otaku.context.prompt import (
     Provenance,
     WirePicture,
 )
-from otaku.store.schema import InjectionPosition
+from otaku.store.story import InjectionPosition
 
 CAT = WirePicture(b"cat", "image/jpeg")
 AT_SYSTEM = InjectionPosition()

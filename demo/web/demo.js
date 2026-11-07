@@ -191,6 +191,7 @@ const ROUTES = {
   "DELETE /api/cards/{card}/pictures/{name}": (p) => changed(store.removeCardPicture(num(p.card), p.name)),
   "POST /api/cards/{card}/generation": (p) => changed(store.generateCard(num(p.card))),
   "DELETE /api/cards/{card}/generation": (p) => changed(store.cancelGeneration(num(p.card))),
+  "GET /api/cards/{card}/export": (p) => store.exportCard(num(p.card)),
   "POST /api/cards/{card}/merges": (p, q, b) => changed(store.mergeCard(num(p.card), integer(b, "into"))),
   // a stored picture: a sample message's or a sample card's, shipped with
   // the fixtures and served as the product serves a stored file — a name

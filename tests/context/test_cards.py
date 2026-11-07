@@ -18,7 +18,7 @@ from otaku.context.cards import (
     card_to_wire,
     read_toml,
 )
-from otaku.store.schema import InjectionPosition
+from otaku.store.story import InjectionPosition
 
 
 class TestCardToWire:

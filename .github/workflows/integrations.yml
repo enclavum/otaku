@@ -10,10 +10,6 @@ on:
   schedule:
     - cron: "0 7 * * 2,5" # Tuesdays and Fridays, 07:00 UTC
   workflow_dispatch:
-  # TEMPORARY, to see it run before it reaches main: every push, as CI's.
-  # Taken out again once a run has passed, back to the schedule alone.
-  push:
-    branches: [main, "release/**"]
 
 jobs:
   integrations:

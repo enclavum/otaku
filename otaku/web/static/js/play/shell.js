@@ -443,7 +443,7 @@ export function disconnected(gone = true) {
    manuscript, chat: the same turns, drawn three ways by the stylesheet
    off ONE attribute, `data-transcript` on the flow, the novel drawn as
    the canvas. Nothing here moves a node; the looks are `app.css`'s, and
-   the names are the backend's (`schema.Layout`).
+   the names are the backend's (`store.story.Layout`).
 
    The choice is the STORY's: its `layout` setting, read with the rest
    where the transcript lands (`drawPlayed`) and written where every

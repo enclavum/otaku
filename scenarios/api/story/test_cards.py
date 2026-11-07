@@ -23,6 +23,7 @@ from otaku.backend.api import HeadMoved, Refused
 from otaku.backend.codex.cards.schemas import RawFile
 from otaku.backend.codex.cards.services import NEW_CARD_NAME
 from otaku.backend.story import request
+from otaku.store.pictures import Attachment
 from scenarios.support.harness import App
 from scenarios.support.site import Site, serving
 
@@ -382,7 +383,8 @@ class TestInvite:
             expected_head=None,
         )
         row = app.store.stories.get_messages(story)[0]
-        assert row.attachments == card.pictures[:1]
+        # the portrait as a turn's picture: its file and measure
+        assert row.attachments == tuple(Attachment.of(p) for p in card.pictures[:1])
 
     def test_no_portrait_rides_unasked(self, app: App) -> None:
         card = app.api.cards.create(data=SERAPHINA.read_bytes(), file_name="s.png").value.card
@@ -487,7 +489,7 @@ class TestThePortrait:
         assert (character.portrait_sent, character.card_portrait) == (False, portrait)
         on = app.api.stories.characters.update(story, character.id, portrait_sent=True).value
         assert on.portrait_sent is True
-        assert _card_row(app, story).attachments == (portrait,)
+        assert _card_row(app, story).attachments == (Attachment.of(portrait),)
         off = app.api.stories.characters.update(story, character.id, portrait_sent=False).value
         assert off.portrait_sent is False
         assert _card_row(app, story).attachments == ()

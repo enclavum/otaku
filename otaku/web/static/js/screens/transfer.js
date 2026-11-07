@@ -391,7 +391,13 @@ export async function exportStory({ storyId = null } = {}) {
   // name a file on the SERVER, and the browser saves where the reader
   // says anyway.
   const filename = answer.name;
-  const url = URL.createObjectURL(new Blob([answer.text], { type: "text/markdown" }));
+  saveFile(filename, new Blob([answer.text], { type: "text/markdown" }));
+  tell(`Exported ${filename}.`);
+}
+
+export function saveFile(filename, blob) {
+  /* A file saved where the browser saves, under `filename`. */
+  const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
   link.download = filename;
@@ -402,5 +408,4 @@ export async function exportStory({ storyId = null } = {}) {
   link.click();
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 0);
-  tell(`Exported ${filename}.`);
 }

@@ -23,9 +23,9 @@ from otaku.backend.codex.cards.services import (
 from otaku.backend.errors import Invalid
 from otaku.backend.story.cards import services as domain_cards
 from otaku.backend.story.cards.schemas import (
-    ImportedCard,
     StoryCardCheck,
     StoryCardFetchCheck,
+    StoryCardImport,
 )
 from otaku.backend.story.messages.resources import MessagesResource
 
@@ -66,7 +66,7 @@ class StoryCardsResource(Resource):
         line: str = "",
         expected_head: int | None,
         validate_only: Literal[False] = False,
-    ) -> Changed[ImportedCard]: ...
+    ) -> Changed[StoryCardImport]: ...
 
     def create(
         self,
@@ -84,7 +84,7 @@ class StoryCardsResource(Resource):
         line: str = "",
         expected_head: int | Unchanged | None = UNCHANGED,
         validate_only: bool = False,
-    ) -> StoryCardCheck | Changed[ImportedCard]:
+    ) -> StoryCardCheck | Changed[StoryCardImport]:
         """A character card brought into a story — from a card FILE's bytes
         (`data`, the `file_name` it was picked as), which goes into the
         codex first: a file the codex holds already brings its card in,
@@ -152,7 +152,7 @@ class StoryCardsResource(Resource):
         )
         # Both rows as a client draws them, each joined to the one before it.
         drawn = {message.id: message for message in MessagesResource(app).list(story_id)}
-        imported = ImportedCard(
+        imported = StoryCardImport(
             character_id=brought.character_id,
             card_id=brought.card_id,
             line=drawn[brought.line.id],
@@ -183,7 +183,7 @@ class StoryCardFetchesResource(Resource):
         line: str = "",
         expected_head: int | None,
         validate_only: Literal[False] = False,
-    ) -> Changed[ImportedCard]: ...
+    ) -> Changed[StoryCardImport]: ...
 
     @any_thread
     def create(
@@ -197,7 +197,7 @@ class StoryCardFetchesResource(Resource):
         line: str = "",
         expected_head: int | Unchanged | None = UNCHANGED,
         validate_only: bool = False,
-    ) -> StoryCardFetchCheck | Changed[ImportedCard]:
+    ) -> StoryCardFetchCheck | Changed[StoryCardImport]:
         """The card a link gives — a card site's character page, or the
         file's own link — fetched and brought in as a card file is
         (`StoryCardsResource.create`) under `name`, the story recording

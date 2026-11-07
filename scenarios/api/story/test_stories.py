@@ -22,6 +22,7 @@ import pytest
 from otaku.backend.api import Api, Layout, Refused
 from otaku.backend.app.paths import Paths
 from otaku.backend.codex.cards.schemas import RawFile
+from otaku.store.pictures import Attachment
 from otaku.store.schema import Message
 from otaku.terminal.api.prompts import read_prompt
 from otaku.terminal.screens import stories as screen_stories
@@ -756,7 +757,9 @@ class TestStartWithCards:
         ).value
         first, second = app.store.stories.get_messages(made.id)
         assert first.attachments == ()
-        assert second.attachments == app.api.cards.get(wren.id).pictures
+        assert second.attachments == tuple(
+            Attachment.of(p) for p in app.api.cards.get(wren.id).pictures
+        )
 
     def test_a_pick_one_story_cannot_hold_is_refused_and_nothing_is_made(self, app: App) -> None:
         mira = app.api.cards.create(name="Mira", description="A face in the crowd.").value

@@ -74,7 +74,8 @@ from otaku.context.prompt import (
 from otaku.providers import PicturesRide
 from otaku.store import Store
 from otaku.store.files import FileStore
-from otaku.store.schema import Message, Scene, StoryMode
+from otaku.store.schema import Message, Scene
+from otaku.store.story import StoryMode
 
 _DEFAULT_CONTEXT = 8_192  # when the provider states no max context
 # The reply reserve is sized from the story itself: the longest of the
@@ -430,7 +431,7 @@ class _Assembly:
             pictured = pictured[-1:]
         pictures_of: dict[Message, tuple[WirePicture, ...]] = {}
         for message in pictured:
-            found = (self.files.get(a.file) for a in message.attachments)
+            found = (self.files.get_picture(a.file) for a in message.attachments)
             pictures = tuple(WirePicture(*f) for f in found if f is not None)
             if pictures:
                 pictures_of[message] = pictures

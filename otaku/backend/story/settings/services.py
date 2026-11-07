@@ -1,6 +1,6 @@
 """A story's settings: one class per switch, and the set a story has.
 
-What a story STORES is the store's (`schema.StorySettingDB`: a name,
+What a story STORES is the store's (`store.story.StorySettingDB`: a name,
 a flag, a position, a reminder, a display flag, a layout). What a
 setting IS is declared here, one class each: a tool's, which lets the
 model use it and injects its prompt; a reminder's, which injects
@@ -35,13 +35,7 @@ from otaku.context.tools import ToolSet
 from otaku.prompts import Prompts
 from otaku.prompts import load as load_prompts
 from otaku.store import Store
-from otaku.store.schema import (
-    CompletionType,
-    InjectionPosition,
-    Layout,
-    StoryMode,
-    StorySettingDB,
-)
+from otaku.store.story import CompletionType, InjectionPosition, Layout, StoryMode, StorySettingDB
 
 # The deepest a story may place what a setting injects — before which of
 # the reader's messages, counted from the end: deep enough for a reminder
@@ -380,7 +374,7 @@ class StorySettingEmulateTextCompletion(InjectingSetting):
 class StorySettingLayout(StorySetting):
     """The layout the story is read in, and written — a value, not a
     switch: a story is always laid out one way, MANUSCRIPT until it says
-    otherwise (`schema.Layout`), and each frontend draws its look in its
+    otherwise (`store.story.Layout`), and each frontend draws its look in its
     own medium (the page's `shell.js`, the terminal's flow for the
     canvas). Off the Tools tabs: no caption there names it."""
 

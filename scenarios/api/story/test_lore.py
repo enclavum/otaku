@@ -20,7 +20,7 @@ import pytest
 
 from otaku.backend.api import ModelRef, ModelRole, Refused
 from otaku.backend.app.paths import Paths
-from otaku.backend.formats import exports, imports
+from otaku.backend.formats.stories import exports, imports
 from otaku.backend.story.lore.schemas import Extraction
 from otaku.store.schema import Message
 from otaku.terminal.screens import dossier as screen_dossier

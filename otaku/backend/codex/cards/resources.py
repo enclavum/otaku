@@ -8,7 +8,8 @@ asked (and vetted first, to count them), each going last; corrected,
 moved in the order, its pictures ordered and removed; deleted. A card
 fetched from a link (`CardFetchesResource`), a picture added to a
 card (`CardPicturesResource`), a card written by the model in use from
-its pictures (`CardGenerationResource`), a card folded into another
+its pictures (`CardGenerationResource`), a card as a file
+(`CardExportResource`), a card folded into another
 (`CardMergesResource`), and every story's character no card claims
 (`UnlinkedResource`). The work is the domain's
 (`codex.cards.services`); this answers what stands after it.
@@ -26,6 +27,7 @@ from otaku.backend.codex.cards import services as domain_cards
 from otaku.backend.codex.cards.schemas import (
     Card,
     CardCheck,
+    CardExport,
     CardFetchCheck,
     CardImport,
     CardSummary,
@@ -46,6 +48,7 @@ class CardsResource(Resource):
         self.fetches = CardFetchesResource(app)
         self.pictures = CardPicturesResource(app)
         self.generation = CardGenerationResource(app)
+        self.export = CardExportResource(app)
         self.merges = CardMergesResource(app)
         self.unlinked = UnlinkedResource(app)
 
@@ -393,6 +396,21 @@ class CardGenerationResource(Resource):
         return Changed(None, domain_cards.cancel_generation(self._app, card_id))
 
 
+class CardExportResource(Resource):
+    """/cards/{card}/export — a card as a file."""
+
+    def get(self, card_id: int, *, format: str) -> CardExport:
+        """A card as a file of `format` (`domain_cards.EXPORT_FORMATS`):
+        the file it came as, with the fields otaku changed laid over it,
+        or as it came (`original`), or the card written whole where it
+        keeps none — named after the card. Saving it is the frontend's.
+        Raises NotFound for a card the codex does not hold, Invalid for a
+        format that is none of them, Conflict for a PNG of a card with no
+        portrait, and the file it came as of one that keeps none."""
+        exported = domain_cards.export_card(self._app, card_id, format)
+        return CardExport(name=exported.name, data=exported.data, media_type=exported.media_type)
+
+
 class CardMergesResource(Resource):
     """/cards/{card}/merges — a card folded into another."""
 
@@ -424,9 +442,12 @@ def _card(app: App, row: schema.Card) -> Card:
         tagline=row.tagline,
         **{name: getattr(profile, name) for name in domain_cards.FIELDS},
         file_name=profile.file_name,
-        pictures=row.pictures,
+        pictures=row.portraits,
         stories=tuple(_story_character(r) for r in domain_cards.list_linked(app, row.id)),
         is_blank=domain_cards.is_blank(profile),
+        default_export_format=domain_cards.default_export_format(row),
+        available_export_formats=domain_cards.available_export_formats(row),
+        original_format=domain_cards.original_format(row),
         updated_at=row.updated_at,
     )
 

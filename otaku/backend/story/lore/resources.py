@@ -304,7 +304,7 @@ def _character(held: Memory, row: schema.Character) -> Character:
         history_journal_id=holder.id if holder is not None else None,
         card_id=row.card_id,
         card_name=linked.name if linked is not None else None,
-        card_portrait=linked.pictures[0] if linked is not None and linked.pictures else None,
+        card_portrait=linked.portraits[0] if linked is not None and linked.portraits else None,
         portrait_sent=held.portraits_sent.get(row.id),
         provider=row.provider,
         # a card made it, not a model: the file it came from is no model's

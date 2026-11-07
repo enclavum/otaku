@@ -30,8 +30,9 @@ from otaku.backend.story import chain
 from otaku.backend.story.settings.services import settings_of
 from otaku.context.cards import CARD_PROVIDER, CharacterProfile, bind, card_to_wire
 from otaku.context.prompt import estimate_tokens
-from otaku.store.files import Owner
-from otaku.store.schema import Attachment, Card, Message, StoryMode
+from otaku.store.pictures import Attachment
+from otaku.store.schema import Card, Message
+from otaku.store.story import StoryMode
 
 # A card block above roughly this many tokens gets a warning: it rides
 # every request verbatim and never leaves the context, so on a small
@@ -113,7 +114,7 @@ def check_card(
         profile, notes, has_picture, similar = (
             codex_cards.card_profile(same),
             (),
-            bool(same.pictures),
+            bool(same.portraits),
             (),
         )
     else:
@@ -130,7 +131,7 @@ def check_card(
         block_tokens=tokens,
         large=tokens > _LARGE_CARD_TOKENS,
         persona=remembered,
-        has_picture=has_picture or (same is not None and bool(same.pictures)),
+        has_picture=has_picture or (same is not None and bool(same.portraits)),
         thumbnail=thumbnail,
         same_card=same,
         similar_cards=similar,
@@ -346,7 +347,8 @@ def _incoming_from_codex(card: Card) -> _IncomingCard:
         card.id,
         card.name,
         card.aliases,
-        card.pictures[0] if card.pictures else None,
+        # the portrait rides the card's row as a turn's picture does
+        Attachment.of(card.portraits[0]) if card.portraits else None,
     )
 
 
@@ -365,7 +367,7 @@ def _incoming_story_only(
     if with_pictures:
         picture = codex_cards.carried_picture(data, file_name)
         if picture is not None:
-            portrait = save(app._store.files, picture, Owner.STORY, story_id)
+            portrait = save(app._store.files, picture, story_id, Attachment)
     return _IncomingCard(profile, None, profile.name, (), portrait)
 
 

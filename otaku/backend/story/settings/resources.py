@@ -10,7 +10,7 @@ from otaku.backend.story.settings import services as domain_settings
 from otaku.backend.story.settings.schemas import StorySetting
 from otaku.backend.story.settings.services import InjectingSetting
 from otaku.backend.story.settings.services import StorySetting as DomainStorySetting
-from otaku.store.schema import InjectionPosition, Layout
+from otaku.store.story import InjectionPosition, Layout
 
 
 class StorySettingsResource(Resource):

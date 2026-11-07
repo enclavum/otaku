@@ -18,7 +18,8 @@ from otaku.context.injections import Injection
 from otaku.context.prompt import AssembledPrompt
 from otaku.providers import PicturesRide
 from otaku.settings.state import ModelRole
-from otaku.store.schema import CompletionType, Message
+from otaku.store.schema import Message
+from otaku.store.story import CompletionType
 
 
 def assemble(

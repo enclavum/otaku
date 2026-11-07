@@ -9,6 +9,7 @@ missing keystore refused BEFORE the ceremony could mint over it."""
 
 import base64
 import itertools
+import json
 import re
 import secrets
 import sqlite3
@@ -48,14 +49,10 @@ from otaku.store.migrations import v11 as store_v11
 from otaku.store.migrations import v12 as store_v12
 from otaku.store.migrations import v13 as store_v13
 from otaku.store.migrations import v14 as store_v14
-from otaku.store.schema import (
-    SCHEMA_DDL,
-    SCHEMA_VERSION,
-    Attachment,
-    Message,
-    StoryMode,
-    StorySettingDB,
-)
+from otaku.store.migrations import v15 as store_v15
+from otaku.store.pictures import Attachment, CardPicture, CardPictureKind
+from otaku.store.schema import SCHEMA_DDL, SCHEMA_VERSION, Message
+from otaku.store.story import StoryMode, StorySettingDB
 from otaku.terminal.tty import BOLD, RESET
 from scenarios.support import server as scripted
 from scenarios.support.harness import App, launch, run_otaku, set_config, set_config_provider
@@ -488,6 +485,22 @@ class TestSchemaMigration:
         end = shipped.index(");", start) + 1
         assert shipped[start:end] == store_v10._V9_CHARACTERS
 
+    def test_the_frozen_v14_is_what_the_release_shipped(self) -> None:
+        """Step 15's precondition against the schema the v0.9.0 tag shipped
+        (version 14): the cards the original file is appended to."""
+        proc = subprocess.run(
+            ["git", "show", "v0.9.0:otaku/store/schema.py"],
+            capture_output=True,
+            encoding="utf-8",
+            check=False,
+        )
+        if proc.returncode != 0:
+            pytest.skip("the v0.9.0 tag is not reachable here")
+        shipped = proc.stdout
+        start = shipped.index("CREATE TABLE cards")
+        end = shipped.index(");", start) + 1
+        assert shipped[start:end] == store_v15._V14_CARDS
+
     def test_the_ladder_resumes_from_where_it_stamped(self, tmp_path, monkeypatch) -> None:
         paths = _v1_database(tmp_path / "state")
         monkeypatch.setitem(store_migrations._STEPS, 3, _raise)
@@ -631,7 +644,7 @@ class TestFilesFolder:
             paths.database_file, Cipher(FILES_KEY), backups_dir=paths.backups_dir, keep=0
         )
         try:
-            name = store.files.add(Owner.STORY, 24, CAT, "image/jpeg", thumb=THUMB)
+            name = store.files.add_picture(Owner.STORY, 24, CAT, "image/jpeg", thumb=THUMB)
             # Readable in a listing: the kind, the story, the day, a short
             # digest of the bytes, the picture's own extension — and the
             # thumbnail beside it.
@@ -640,7 +653,7 @@ class TestFilesFolder:
             assert names == {name, name.removesuffix(".jpg") + "-thumb.jpg"}
             sealed = (paths.database_dir / "files" / name).read_bytes()
             assert CAT not in sealed
-            assert store.files.get(name) == (CAT, "image/jpeg")
+            assert store.files.get_picture(name) == (CAT, "image/jpeg")
             assert store.files.get_thumb(name) == THUMB
         finally:
             store.close()
@@ -649,7 +662,7 @@ class TestFilesFolder:
         paths = _state(tmp_path)
         store = _open(paths)
         try:
-            name = store.files.add(Owner.STORY, 1, CAT, "image/jpeg")
+            name = store.files.add_picture(Owner.STORY, 1, CAT, "image/jpeg")
             assert (paths.database_dir / "files" / name).read_bytes() == CAT
             assert store.files.get_thumb(name) is None  # none was given
         finally:
@@ -661,21 +674,21 @@ class TestFilesFolder:
             paths.database_file, Cipher(FILES_KEY), backups_dir=paths.backups_dir, keep=0
         )
         try:
-            name = store.files.add(Owner.STORY, 1, CAT, "image/jpeg")
+            name = store.files.add_picture(Owner.STORY, 1, CAT, "image/jpeg")
         finally:
             store.close()
         other = FileStore(paths.database_dir / "files", Cipher(FILES_OTHER_KEY))
-        assert other.get(name) is None
+        assert other.get_picture(name) is None
 
     def test_the_same_picture_twice_in_a_story_is_one_file(self, tmp_path) -> None:
         paths = _state(tmp_path)
         store = _open(paths)
         try:
-            first = store.files.add(Owner.STORY, 1, CAT, "image/jpeg")
-            assert store.files.add(Owner.STORY, 1, CAT, "image/jpeg") == first
+            first = store.files.add_picture(Owner.STORY, 1, CAT, "image/jpeg")
+            assert store.files.add_picture(Owner.STORY, 1, CAT, "image/jpeg") == first
             assert len(_files(paths)) == 1
             # Another story's copy is its own file, under its own number.
-            assert store.files.add(Owner.STORY, 2, CAT, "image/jpeg") != first
+            assert store.files.add_picture(Owner.STORY, 2, CAT, "image/jpeg") != first
             assert len(_files(paths)) == 2
         finally:
             store.close()
@@ -722,10 +735,10 @@ class TestFilesFolder:
         paths = _state(tmp_path)
         store = _open(paths)
         try:
-            name = store.files.add(Owner.CARD, 12, CAT, "image/jpeg")
+            name = store.files.add_picture(Owner.CARD, 12, CAT, "image/jpeg")
             assert re.fullmatch(r"crd-0012-\d{8}-[0-9a-f]{8}\.jpg", name)
             # the same bytes for a story are a file of their own
-            assert store.files.add(Owner.STORY, 12, CAT, "image/jpeg") != name
+            assert store.files.add_picture(Owner.STORY, 12, CAT, "image/jpeg") != name
         finally:
             store.close()
 
@@ -734,13 +747,37 @@ class TestFilesFolder:
         store = _open(paths)
         try:
             card = store.cards.add("Mira")
-            name = store.files.add(Owner.CARD, card, CAT, "image/jpeg", thumb=THUMB)
+            name = store.files.add_picture(Owner.CARD, card, CAT, "image/jpeg", thumb=THUMB)
             store.cards.set_pictures(
-                card, [Attachment(file=name, width=2, height=2, size=len(CAT))]
+                card, [CardPicture(file=name, width=2, height=2, size=len(CAT))]
             )
             assert store.sweep_files() == 0
             store.cards.delete(card)
             assert store.sweep_files() == 2  # the picture and its thumbnail
+            assert _files(paths) == []
+        finally:
+            store.close()
+
+    def test_a_card_file_kept_as_it_came_is_marked_and_never_served_as_a_picture(
+        self, tmp_path
+    ) -> None:
+        paths = _state(tmp_path)
+        store = _open(paths)
+        try:
+            card = store.cards.add("Mira")
+            # a PNG card file: the extension a picture's would take, marked
+            name = store.files.add_file(Owner.CARD, card, CAT, "png")
+            assert re.fullmatch(rf"crd-{card:04d}-\d{{8}}-[0-9a-f]{{8}}-orig\.png", name)
+            assert store.files.get_file(name) == CAT
+            assert store.files.get_picture(name) is None
+            # the same bytes as a picture of the card are a file of their own
+            picture = store.files.add_picture(Owner.CARD, card, CAT, "image/png")
+            assert picture != name
+            store.cards.set_original_file(card, name)
+            assert store.sweep_files() == 1  # the picture no row names
+            assert store.files.get_file(name) == CAT
+            store.cards.delete(card)
+            assert store.sweep_files() == 1
             assert _files(paths) == []
         finally:
             store.close()
@@ -752,18 +789,23 @@ class TestFilesFolder:
         store = _open(paths)
         try:
             card = store.cards.add("Mira")
-            name = store.files.add(Owner.CARD, card, CAT, "image/jpeg")
-            portrait = Attachment(file=name, width=2, height=2, size=len(CAT))
+            name = store.files.add_picture(Owner.CARD, card, CAT, "image/jpeg")
+            portrait = CardPicture(file=name, width=2, height=2, size=len(CAT))
             store.cards.set_pictures(card, [portrait])
             story = store.stories.add("Cats")
             store.stories.append(
                 story,
-                Message(role="user", body="/card Mira", kind="card", attachments=(portrait,)),
+                Message(
+                    role="user",
+                    body="/card Mira",
+                    kind="card",
+                    attachments=(Attachment.of(portrait),),
+                ),
                 after=None,
             )
             store.cards.delete(card)
             assert store.sweep_files() == 0
-            assert store.files.get(name) == (CAT, "image/jpeg")
+            assert store.files.get_picture(name) == (CAT, "image/jpeg")
         finally:
             store.close()
 
@@ -832,10 +874,10 @@ class TestFilesFolder:
         store = _open(paths)
         try:
             read = backend_files.read_picture(RawFile(CAT_PHOTO.read_bytes(), "cat.jpg"))
-            picture = backend_files.save(store.files, read, Owner.STORY, 1)
-            assert picture.file.endswith(".jpg")
+            picture = backend_files.save(store.files, read, 1, Attachment)
+            assert picture.file.startswith("pic-0001-") and picture.file.endswith(".jpg")
             assert max(picture.width, picture.height) <= backend_files.WIRE_EDGE
-            stored = store.files.get(picture.file)
+            stored = store.files.get_picture(picture.file)
             assert stored is not None and len(stored[0]) == picture.size
             assert store.files.get_thumb(picture.file) is not None
             names = {path.name for path in _files(paths)}
@@ -1275,7 +1317,7 @@ class TestFirstLaunch:
             pictured = app.messages[16]
             assert pictured.role == "user" and len(pictured.attachments) == 2
             for picture in pictured.attachments:
-                assert app.store.files.get(picture.file) is not None
+                assert app.store.files.get_picture(picture.file) is not None
                 assert app.store.files.get_thumb(picture.file) is not None
                 assert picture.width <= 1568 and picture.height <= 1568
             assert all(not m.attachments for i, m in enumerate(app.messages) if i != 16)
@@ -1342,7 +1384,7 @@ class TestFirstLaunch:
                 # its portrait, where the row names one, through the intake
                 assert len(whole.pictures) == (1 if "picture" in row else 0)
                 for picture in whole.pictures:
-                    assert app.store.files.get(picture.file) is not None
+                    assert app.store.files.get_picture(picture.file) is not None
             unlinked = app.api.cards.unlinked.list()
             assert unlinked and not {row.name for row in unlinked} & set(named)
             assert app.server.requests == []  # still no model called
@@ -1610,7 +1652,7 @@ def _files(paths: Paths) -> list:
 def _attach(store: Store, story_id: int, data: bytes) -> Attachment:
     """A picture into the folder under the story's number, and the row
     that names it."""
-    name = store.files.add(Owner.STORY, story_id, data, "image/jpeg")
+    name = store.files.add_picture(Owner.STORY, story_id, data, "image/jpeg")
     return Attachment(file=name, width=2, height=2, size=len(data))
 
 
@@ -1665,14 +1707,46 @@ def _ticking(monkeypatch) -> None:
 
     monkeypatch.setattr(Database, "now", staticmethod(now))
 
+    def test_step_15_keeps_no_card_file_and_reads_every_picture_as_a_portrait(
+        self, tmp_path
+    ) -> None:
+        # A version-14 card kept no file it came from, and recorded its
+        # pictures without a kind: after the step it keeps none, and each
+        # picture reads as the portrait every one was.
+        paths = _state(tmp_path)
+        store = _open(paths)
+        try:
+            card = store.cards.add("Maren")
+        finally:
+            store.close()
+        _taken_back(paths, 14)
+        recorded = {"file": "crd-0001-20261011-0b7e44d1.png", "width": 4, "height": 4, "size": 9}
+        conn = sqlite3.connect(paths.database_file)
+        conn.execute("UPDATE cards SET pictures = ? WHERE id = ?", (json.dumps([recorded]), card))
+        conn.commit()
+        conn.close()
+        store = _open(paths)
+        try:
+            found = store.cards.get(card)
+            assert found is not None and found.original_file is None
+            (picture,) = found.pictures
+            assert (picture.file, picture.kind, picture.name) == (
+                recorded["file"],
+                CardPictureKind.PORTRAIT,
+                "",
+            )
+        finally:
+            store.close()
+
 
 def _taken_back(paths: Paths, version: int) -> None:
     """A database this build wrote, put back to what `version` shipped:
     each later step's tables as the step found them — the record format is
     positional, so the rows read as that version's — the fork points step
-    12 works out and the columns step 14 adds emptied, and the stamp set:
-    what the ladder takes up."""
+    12 works out and the columns steps 14 and 15 add emptied, and the
+    stamp set: what the ladder takes up."""
     undo = {
+        15: (("cards", store_v15._V14_CARDS),),
         14: (("messages", store_v14._V13_MESSAGES),),
         13: (("cards", store_v13._V12_CARDS), ("characters", store_v13._V12_CHARACTERS)),
         12: (("stories", store_v12._V11_STORIES),),
@@ -1683,6 +1757,8 @@ def _taken_back(paths: Paths, version: int) -> None:
         conn.execute("UPDATE stories SET forked_from_message_id = NULL")
     if version < 14:
         conn.execute("UPDATE messages SET pinned = 0, word_count = NULL")
+    if version < 15:
+        conn.execute("UPDATE cards SET original_file = NULL")
     conn.execute("PRAGMA writable_schema = ON")
     for step in range(int(SCHEMA_VERSION), version, -1):
         for table, ddl in undo[step]:

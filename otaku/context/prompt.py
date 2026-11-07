@@ -14,7 +14,7 @@ from dataclasses import dataclass, replace
 from enum import Enum
 
 from otaku.providers.openai.templates import TextTemplate
-from otaku.store.schema import InjectionPosition
+from otaku.store.story import InjectionPosition
 
 # What one picture costs on the wire, as the budget counts it. Engines
 # differ widely (Gemma 3 spends 256 a picture, Qwen2.5-VL about 3,000 at

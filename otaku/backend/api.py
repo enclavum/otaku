@@ -58,13 +58,8 @@ from otaku.backend.story.transfer.resources import ImportsResource
 from otaku.context.prompt import JoinType
 from otaku.providers import KeySource, Locality, ModelKind, ModelState
 from otaku.settings.state import ModelRef, ModelRole
-from otaku.store.schema import (
-    Attachment,
-    CompletionType,
-    InjectionPosition,
-    Layout,
-    StoryMode,
-)
+from otaku.store.pictures import Attachment
+from otaku.store.story import CompletionType, InjectionPosition, Layout, StoryMode
 
 
 class Api:

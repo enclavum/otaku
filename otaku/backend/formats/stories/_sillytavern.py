@@ -3,7 +3,7 @@ parses to."""
 
 import json
 
-from otaku.backend.formats import ExportedMessage, ExportedStory
+from otaku.backend.formats.stories import ExportedMessage, ExportedStory
 
 # ST's own .jsonl acceptance test is just "the header parses and has one of
 # these keys" — match that tolerance.

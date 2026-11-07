@@ -17,7 +17,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Protocol, TypeVar
 
-from otaku.store.schema import InjectionPosition
+from otaku.store.story import InjectionPosition
 
 
 @dataclass(frozen=True)

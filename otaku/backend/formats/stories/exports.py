@@ -2,7 +2,7 @@
 
 import json
 
-from otaku.backend.formats import (
+from otaku.backend.formats.stories import (
     EXPORT_FORMAT_VERSION,
     EXPORT_MARKER,
     ExportedCharacter,
@@ -11,7 +11,7 @@ from otaku.backend.formats import (
     ExportedScene,
     ExportedStory,
 )
-from otaku.backend.formats.imports import STRUCTURE_LINE
+from otaku.backend.formats.stories.imports import STRUCTURE_LINE
 from otaku.store import Store
 
 

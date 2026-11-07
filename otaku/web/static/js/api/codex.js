@@ -18,8 +18,8 @@ import { get, items, patch, post, query, remove } from "./_http.js";
    in their new order), a card deleted; a picture added (`{data, name}`) or removed by its file name,
    the card written by the model in use from its pictures — in
    `language`, its English name, English where none is named — or that
-   given up (`generation`),
-   a card folded `into` another, and every story's character no card
+   given up (`generation`), a card as a file of a `format`, its bytes
+   base64 (`export`), a card folded `into` another, and every story's character no card
    claims (`unlinked`). */
 export const cards = {
   list: ({ query: needle = "" } = {}) => get(`/api/cards${query({ query: needle })}`).then(items),
@@ -41,6 +41,7 @@ export const cards = {
       post(`/api/cards/${card}/generation`, language ? { language } : {}),
     delete: (card) => remove(`/api/cards/${card}/generation`),
   },
+  export: { get: (card, { format }) => get(`/api/cards/${card}/export${query({ format })}`) },
   merges: { create: (card, fields) => post(`/api/cards/${card}/merges`, fields) },
   unlinked: {
     list: ({ query: needle = "" } = {}) =>

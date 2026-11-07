@@ -19,7 +19,8 @@ from prompt_toolkit.utils import get_cwidth
 from otaku.backend.story.messages.schemas import _as_message
 from otaku.backend.story.messages.services import _listed, segments
 from otaku.backend.story.tools import ToolQuestion
-from otaku.store.schema import Message, StoryMode
+from otaku.store.schema import Message
+from otaku.store.story import StoryMode
 from otaku.terminal.api import Message as Drawn
 from otaku.terminal.tty import DIM
 from otaku.terminal.tty.render import (

@@ -6,7 +6,8 @@ character links to one (`characters.card_id`) and holds a copy of its
 fields, so nothing written here reaches a story, and deleting a card
 leaves its story characters unlinked (`ON DELETE SET NULL`). Its
 pictures are files in the folder beside the database, named in a plain
-column as a message's are (`schema.Attachment`).
+column as a message's are, each with its kind (`store.pictures.CardPicture`),
+and so is the card file it was imported from (`original_file`).
 """
 
 # Deferred annotations: the ops classes define `list` methods, which
@@ -19,7 +20,8 @@ from collections.abc import Sequence
 from typing import Any
 
 from otaku.store.database import Database
-from otaku.store.schema import Attachment, Card
+from otaku.store.pictures import CardPicture, CardPictureKind
+from otaku.store.schema import Card
 
 
 class CardOps:
@@ -33,7 +35,7 @@ class CardOps:
         aliases: Sequence[str] = (),
         tagline: str = "",
         profile: str = "",
-        pictures: Sequence[Attachment] = (),
+        pictures: Sequence[CardPicture] = (),
         digests: Sequence[str] = (),
     ) -> int:
         """A card made, last in the reader's order."""
@@ -42,7 +44,7 @@ class CardOps:
             # fmt: off
             cur = conn.execute(
                 "INSERT INTO cards (name, aliases, tagline, profile, pictures, digests, created_at, updated_at, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(position), -1) + 1 FROM cards))",
-                (self._db.seal(name), self._seal_aliases(aliases), self._db.seal_opt(tagline or None), self._db.seal_opt(profile or None), Attachment.to_json(pictures), _digests_json(digests), now, now),
+                (self._db.seal(name), self._seal_aliases(aliases), self._db.seal_opt(tagline or None), self._db.seal_opt(profile or None), CardPicture.to_json(pictures), _digests_json(digests), now, now),
             )
             # fmt: on
         return int(cur.lastrowid or 0)
@@ -50,7 +52,7 @@ class CardOps:
     def get(self, card_id: int) -> Card | None:
         # fmt: off
         row = self._db.conn.execute(
-            "SELECT id, name, aliases, tagline, profile, pictures, digests, updated_at FROM cards WHERE id = ?",
+            "SELECT id, name, aliases, tagline, profile, pictures, digests, original_file, updated_at FROM cards WHERE id = ?",
             (card_id,),
         ).fetchone()
         # fmt: on
@@ -60,7 +62,7 @@ class CardOps:
         """Every card, in the reader's order."""
         # fmt: off
         rows = self._db.conn.execute(
-            "SELECT id, name, aliases, tagline, profile, pictures, digests, updated_at FROM cards ORDER BY position, id",
+            "SELECT id, name, aliases, tagline, profile, pictures, digests, original_file, updated_at FROM cards ORDER BY position, id",
         ).fetchall()
         # fmt: on
         return [self._card(row) for row in rows]
@@ -114,22 +116,34 @@ class CardOps:
     # ---------- getters and setters ----------
 
     def get_file_names(self) -> set[str]:
-        """Every file name some card's pictures carry."""
+        """Every file name some card carries: its pictures', and the card
+        file it was imported from."""
         # fmt: off
         rows = self._db.conn.execute(
-            "SELECT DISTINCT json_extract(p.value, '$.file') FROM cards c, json_each(c.pictures) p WHERE c.pictures IS NOT NULL",
+            "SELECT DISTINCT json_extract(p.value, '$.file') FROM cards c, json_each(c.pictures) p WHERE c.pictures IS NOT NULL "
+            "UNION SELECT original_file FROM cards WHERE original_file IS NOT NULL",
         ).fetchall()
         # fmt: on
         return {str(row[0]) for row in rows if row[0] is not None}
 
-    def set_pictures(self, card_id: int, pictures: Sequence[Attachment]) -> None:
-        """A card's pictures, replaced — in their order, the first the
-        portrait."""
+    def set_original_file(self, card_id: int, name: str | None) -> None:
+        """The card file a card was imported from — its name in the files
+        folder — recorded; None for none."""
+        with self._db.conn as conn:
+            # fmt: off
+            conn.execute(
+                "UPDATE cards SET original_file = ? WHERE id = ?", (name, card_id)
+            )
+            # fmt: on
+
+    def set_pictures(self, card_id: int, pictures: Sequence[CardPicture]) -> None:
+        """A card's pictures, replaced — in their order, its portraits
+        first, the first the main one."""
         with self._db.conn as conn:
             # fmt: off
             conn.execute(
                 "UPDATE cards SET pictures = ?, updated_at = ? WHERE id = ?",
-                (Attachment.to_json(pictures), self._db.now(), card_id),
+                (CardPicture.to_json(pictures), self._db.now(), card_id),
             )
             # fmt: on
 
@@ -175,8 +189,11 @@ class CardOps:
     def merge(self, source_id: int, target_id: int) -> None:
         """Fold a card into another: every story character linked to the
         source links to the target, the source's name and aliases join the
-        target's aliases, its pictures follow the target's, the digests
-        union, and the source is deleted; the target's own fields stand.
+        target's aliases, its pictures follow the target's — its portraits
+        after the target's, its other pictures after the target's others —
+        the digests union, the target keeps the card file it was imported
+        from where it has one and takes the source's where not, and the
+        source is deleted; the target's own fields stand.
         A story holding characters linked to both cannot take it (one
         link per card in a story) and raises `sqlite3.IntegrityError`
         with nothing written — the caller refuses first."""
@@ -191,8 +208,13 @@ class CardOps:
             if alias != target.name
         ]
         kept = {picture.file for picture in target.pictures}
-        pictures = [*target.pictures, *(p for p in source.pictures if p.file not in kept)]
+        both = [*target.pictures, *(p for p in source.pictures if p.file not in kept)]
+        portrait = CardPictureKind.PORTRAIT
+        pictures = [p for p in both if p.kind is portrait] + [
+            p for p in both if p.kind is not portrait
+        ]
         digests = list(dict.fromkeys([*target.digests, *source.digests]))
+        original_file = target.original_file or source.original_file
         with self._db.conn as conn:
             # fmt: off
             conn.execute(
@@ -200,8 +222,8 @@ class CardOps:
                 (target_id, self._db.now(), source_id),
             )
             conn.execute(
-                "UPDATE cards SET aliases = ?, pictures = ?, digests = ?, updated_at = ? WHERE id = ?",
-                (self._seal_aliases(aliases), Attachment.to_json(pictures), _digests_json(digests), self._db.now(), target_id),
+                "UPDATE cards SET aliases = ?, pictures = ?, digests = ?, original_file = ?, updated_at = ? WHERE id = ?",
+                (self._seal_aliases(aliases), CardPicture.to_json(pictures), _digests_json(digests), original_file, self._db.now(), target_id),
             )
             conn.execute(
                 "DELETE FROM cards WHERE id = ?", (source_id,)
@@ -211,15 +233,16 @@ class CardOps:
     # ---------- shaping ----------
 
     def _card(self, row: Any) -> Card:
-        card_id, name, aliases, tagline, profile, pictures, digests, updated = row
+        card_id, name, aliases, tagline, profile, pictures, digests, original_file, updated = row
         return Card(
             id=int(card_id),
             name=self._db.unseal(name),
             aliases=self._unseal_aliases(aliases),
             tagline=self._db.unseal(tagline),
             profile=self._db.unseal(profile),
-            pictures=Attachment.from_json(pictures),
+            pictures=CardPicture.from_json(pictures),
             digests=tuple(json.loads(digests)) if digests else (),
+            original_file=str(original_file) if original_file is not None else None,
             updated_at=str(updated),
         )
 

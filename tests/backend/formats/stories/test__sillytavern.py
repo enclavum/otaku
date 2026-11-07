@@ -2,7 +2,7 @@
 
 import json
 
-from otaku.backend.formats.sillytavern import parse_sillytavern
+from otaku.backend.formats.stories._sillytavern import parse_sillytavern
 
 
 class TestParseSillytavern:

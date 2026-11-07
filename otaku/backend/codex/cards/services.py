@@ -33,17 +33,21 @@ the import makes a card beside it.
 """
 
 import hashlib
+import io
 import json
+import re
 import threading
 import tomllib
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, fields, replace
 from pathlib import PurePosixPath
-from typing import Any
+from typing import Any, cast
+
+from PIL import Image
 
 from otaku import __version__
 from otaku.backend.app.core.services import App
-from otaku.backend.app.pictures.services import Picture, RawFile, read_picture, save
+from otaku.backend.app.pictures.services import IntakePicture, RawFile, read_picture, save
 from otaku.backend.errors import (
     NO_MODEL_HINT,
     NO_SUCH_STORY,
@@ -54,12 +58,16 @@ from otaku.backend.errors import (
     Unavailable,
 )
 from otaku.backend.formats.cards import (
+    Asset,
     CardError,
-    card_picture,
+    CardFileKind,
     has_embedded_cards,
     is_charx,
-    load_card,
     pack_charx,
+    read_assets,
+    read_card,
+    read_main_picture,
+    write_card,
 )
 from otaku.context.cards import CharacterProfile
 from otaku.context.prompt import WirePicture, WireTurn
@@ -69,6 +77,7 @@ from otaku.providers import OpenAIClient, PicturesRide, ProviderError, Stats, Te
 from otaku.settings.state import ModelRef, ModelRole
 from otaku.store.files import Owner, digest, digest_of
 from otaku.store.ops.lore import CastListing
+from otaku.store.pictures import CardPicture, CardPictureKind
 from otaku.store.schema import Card, Character
 
 # The fields a reader writes; the name has a column of its own, the
@@ -91,6 +100,28 @@ _UTF8_BOM = b"\xef\xbb\xbf"
 # text's — its whole digest, the stored file's name carrying a short one.
 _PICTURE_DIGEST = "picture:"
 # Why a card is alike, by what matches: its name, its picture, or both.
+# What a card file's picture shows, by the type the card gives it (the
+# V3 spec's asset types); any other type is another kind of picture.
+_KINDS = {
+    "icon": CardPictureKind.PORTRAIT,
+    "emotion": CardPictureKind.EXPRESSION,
+    "background": CardPictureKind.BACKGROUND,
+}
+# A card file kept as it came: its extension, by what it is.
+_ORIGINAL_PNG, _ORIGINAL_CHARX, _ORIGINAL_JSON = "png", "charx", "json"
+# What a card is exported as — the kinds of card file, and the one it came
+# as — and each one's media type.
+EXPORT_FORMATS = ("png", "json", "charx", "original")
+_MEDIA = {"png": "image/png", "json": "application/json", "charx": "application/zip"}
+# A picture's kind as a card file names it, an asset's type.
+_ASSET_TYPES = {
+    CardPictureKind.PORTRAIT: "icon",
+    CardPictureKind.EXPRESSION: "emotion",
+    CardPictureKind.BACKGROUND: "background",
+    CardPictureKind.OTHER: "other",
+}
+# What no file name may hold, on any system a card is saved to.
+_UNSAFE_NAME = re.compile(r'[\\/:*?"<>|\x00-\x1f]+')
 _ALIKE = {
     (True, False): "Same name",
     (False, True): "Same picture",
@@ -203,11 +234,12 @@ def update_card(
 ) -> str:
     """The reader's correction of a card — None leaves a part as it is.
     `changes` are fields by name (`FIELDS`); `pictures` each of the
-    card's own pictures by name, in the order they now stand, the first
-    the portrait (`delete_card_picture` removes one). Raises Refused for
-    nothing to change, an emptied name, a tagline of more than one line,
-    a field the card has not, a reminder's depth below 1, and an order
-    that is not the card's pictures each once."""
+    card's portraits by name, in the order they now stand, the first the
+    main one, its other pictures keeping theirs after them
+    (`delete_card_picture` removes one). Raises Refused for nothing to
+    change, an emptied name, a tagline of more than one line, a field the
+    card has not, a reminder's depth below 1, and an order that is not
+    the card's portraits each once."""
     card = get_card(app, card_id)
     if all(part is None for part in (name, aliases, tagline, changes, pictures)):
         raise Invalid("Nothing to change.")
@@ -217,10 +249,11 @@ def update_card(
         new_profile = corrected_profile(card_profile(card), changes).to_toml()
     ordered = None
     if pictures is not None:
-        by_name = {picture.file: picture for picture in card.pictures}
+        portraits, others = _split(card.pictures)
+        by_name = {picture.file: picture for picture in portraits}
         if sorted(pictures) != sorted(by_name):
             raise Invalid("A new order names each of the card's pictures once.")
-        ordered = [by_name[file] for file in pictures]
+        ordered = [*(by_name[file] for file in pictures), *others]
     if aliases is None and name is not None:
         aliases = card.aliases  # a new name never stays among the aliases
     app._store.cards.update(
@@ -344,15 +377,16 @@ def _checked_profile(profile: CharacterProfile) -> CharacterProfile:
 
 
 def create_card_picture(app: App, card_id: int, file: RawFile) -> str:
-    """A picture added to a card, after its others — read through the one
+    """A portrait added to a card, after its others — read through the one
     intake, stored under the card's number — and the sentence. Raises
     Refused for a picture the intake refuses, and one the card already
     has."""
     card = get_card(app, card_id)
-    attachment = save(app._store.files, read_picture(file), Owner.CARD, card_id)
-    if any(picture.file == attachment.file for picture in card.pictures):
+    saved = save(app._store.files, read_picture(file), card_id, CardPicture)
+    if any(picture.file == saved.file for picture in card.pictures):
         raise Conflict(f"{card.name} has this picture already.")
-    app._store.cards.set_pictures(card_id, [*card.pictures, attachment])
+    portraits, others = _split(card.pictures)
+    app._store.cards.set_pictures(card_id, [*portraits, saved, *others])
     return "Picture added."
 
 
@@ -413,7 +447,7 @@ def check_card_file(
     return CheckedCardFile(
         profile=named,
         notes=tuple(notes),
-        has_picture=card_picture(data) is not None,
+        has_picture=read_main_picture(data) is not None,
         thumbnail=carried.thumb if carried is not None else None,
         same_card=same,
         similar_cards=tuple(card for card, _ in alike),
@@ -436,11 +470,11 @@ def similar_note(checked: CheckedCardFile) -> str:
     )
 
 
-def carried_picture(data: bytes, file_name: str) -> Picture | None:
+def carried_picture(data: bytes, file_name: str) -> IntakePicture | None:
     """The picture a card file carries, as the intake stores it — what a
     story keeps of a card it alone holds; None for none, and for one the
     intake refuses."""
-    carried = card_picture(data)
+    carried = read_main_picture(data)
     if carried is None:
         return None
     try:
@@ -486,7 +520,7 @@ def import_card_file(
             digests=(known,),
         )
         app._store.cards.set_pictures(
-            card_id, [save(app._store.files, picture, Owner.CARD, card_id)]
+            card_id, [save(app._store.files, picture, card_id, CardPicture)]
         )
         return card_id, True, f"Added {named} to Characters, the picture its portrait."
     profile, notes = _read(data, file_name)
@@ -503,17 +537,49 @@ def import_card_file(
         named, tagline=_clean_tagline(tagline), profile=profile.to_toml(), digests=(digest,)
     )
     said = [f"Added {named} to Characters.", *notes]
-    carried = card_picture(data)
+    app._store.cards.set_original_file(
+        card_id, app._store.files.add_file(Owner.CARD, card_id, data, _original_extension(data))
+    )
+    pictures: list[CardPicture] = []
+    carried = read_main_picture(data)
     if carried is not None:
         try:
             picture = read_picture(RawFile(carried, file_name))
         except Refused as e:
             said.append(f"The picture isn't kept. {e}")
         else:
-            app._store.cards.set_pictures(
-                card_id, [save(app._store.files, picture, Owner.CARD, card_id)]
-            )
+            pictures.append(save(app._store.files, picture, card_id, CardPicture))
+    refused = 0
+    for asset in read_assets(data):
+        try:
+            picture = read_picture(RawFile(asset.data, asset.name or file_name))
+        except Refused:
+            refused += 1
+            continue
+        saved = save(app._store.files, picture, card_id, CardPicture)
+        if all(kept.file != saved.file for kept in pictures):
+            kind = _KINDS.get(asset.type, CardPictureKind.OTHER)
+            pictures.append(replace(saved, kind=kind, name=asset.name))
+    if refused:
+        said.append(f"{refused} of the card's other pictures aren't kept.")
+    if pictures:
+        portraits, others = _split(pictures)
+        app._store.cards.set_pictures(card_id, [*portraits, *others])
     return card_id, True, " ".join(said)
+
+
+def _split(pictures: Sequence[CardPicture]) -> tuple[list[CardPicture], list[CardPicture]]:
+    """A card's portraits and its other pictures, each in their order."""
+    portraits = [picture for picture in pictures if picture.kind is CardPictureKind.PORTRAIT]
+    others = [picture for picture in pictures if picture.kind is not CardPictureKind.PORTRAIT]
+    return portraits, others
+
+
+def _original_extension(data: bytes) -> str:
+    """The extension a card file is kept under, by what it is."""
+    if data.startswith(_PNG_MAGIC):
+        return _ORIGINAL_PNG
+    return _ORIGINAL_CHARX if is_charx(data) else _ORIGINAL_JSON
 
 
 def _is_bare_picture(data: bytes) -> bool:
@@ -523,6 +589,133 @@ def _is_bare_picture(data: bytes) -> bool:
     if data.startswith(_PNG_MAGIC):
         return not has_embedded_cards(data)
     return not is_charx(data) and not data.removeprefix(_UTF8_BOM).lstrip().startswith(b"{")
+
+
+# ---------- a card exported ----------
+
+
+@dataclass(frozen=True)
+class ExportedFile:
+    """A card as a file: the name it is saved under, its bytes, and their
+    media type."""
+
+    name: str
+    data: bytes
+    media_type: str
+
+
+def available_export_formats(card: Card) -> tuple[str, ...]:
+    """What a card can be exported as, in `EXPORT_FORMATS`' order: PNG
+    where it has a portrait to carry, JSON and CHARX always, the file it
+    came as where it keeps one."""
+    return tuple(
+        written
+        for written in EXPORT_FORMATS
+        if (written != "png" or card.portraits) and (written != "original" or card.original_file)
+    )
+
+
+def original_format(card: Card) -> str | None:
+    """The kind of file a card came as and keeps — `png`, `json` or
+    `charx` — None for one that keeps none."""
+    return _original_kind(card.original_file) if card.original_file else None
+
+
+def default_export_format(card: Card) -> str:
+    """What a card is exported as unless another is asked: the kind of
+    file it came as, with otaku's edits; else PNG where it has a
+    portrait, and JSON where it has none."""
+    own = _original_kind(card.original_file) if card.original_file else None
+    if own is not None and own in available_export_formats(card):
+        return own
+    return "png" if card.portraits else "json"
+
+
+def export_card(app: App, card_id: int, written: str) -> ExportedFile:
+    """A card as a file of the `written` kind (`EXPORT_FORMATS`): the file
+    it came as, with the fields otaku changed laid over it — or that file
+    as it came, `original` — or, with no file kept, the card written
+    whole (`formats.cards.write_card`). Its name is the card's. Raises
+    NotFound for a card the codex does not hold, Invalid for a kind that
+    is none of the formats, Conflict for a PNG of a card with no portrait
+    and an original it keeps none of."""
+    card = get_card(app, card_id)
+    if written not in EXPORT_FORMATS:
+        raise Invalid("A card is exported as PNG, JSON, CHARX or the file it came as.")
+    if written == "png" and not card.portraits:
+        raise Conflict(_NO_PICTURE)
+    original = app._store.files.get_file(card.original_file) if card.original_file else None
+    if written == "original":
+        if original is None or card.original_file is None:
+            raise Conflict(f"{card.name} keeps no file it came as.")
+        kind = _original_kind(card.original_file)
+        return ExportedFile(
+            _export_name(card.name, kind), original, _MEDIA.get(kind, "application/octet-stream")
+        )
+    standing = original is not None and _main_stands(card, original)
+    pictures = _export_pictures(app, card)
+    if written == "png":
+        if not pictures:
+            raise Conflict(_NO_PICTURE)
+        # the file's own picture where it still is the card's, at its size
+        own = original if standing and original and original.startswith(_PNG_MAGIC) else None
+        pictures[0] = Asset("icon", pictures[0].name, own or _as_png(pictures[0].data))
+    every = (
+        standing and original is not None and len(card.pictures) == 1 + len(read_assets(original))
+    )
+    data = write_card(
+        cast(CardFileKind, written),
+        card_profile(card),
+        card.tagline,
+        original=original,
+        pictures=pictures,
+        keep_pictures=every,
+    )
+    return ExportedFile(_export_name(card.name, written), data, _MEDIA[written])
+
+
+def _export_pictures(app: App, card: Card) -> list[Asset]:
+    """A card's pictures as a card file carries them, in order — its
+    portraits first — each of its asset type, a file the folder no longer
+    opens left out."""
+    out = []
+    for picture in card.pictures:
+        found = app._store.files.get_picture(picture.file)
+        if found is not None:
+            out.append(Asset(_ASSET_TYPES[picture.kind], picture.name, found[0]))
+    return out
+
+
+def _main_stands(card: Card, original: bytes) -> bool:
+    """Whether a card's main portrait is still the picture its file
+    brought, as the intake keeps it."""
+    carried = carried_picture(original, "")
+    if carried is None or not card.portraits:
+        return False
+    return digest_of(card.portraits[0].file) == digest(carried.data)
+
+
+def _as_png(data: bytes) -> bytes:
+    """A stored picture as a PNG — which it is already where the intake
+    kept it so."""
+    if data.startswith(_PNG_MAGIC):
+        return data
+    out = io.BytesIO()
+    with Image.open(io.BytesIO(data)) as picture:
+        picture.save(out, "PNG")
+    return out.getvalue()
+
+
+def _original_kind(name: str) -> str:
+    """The kind of file a kept card file is, by its extension."""
+    return PurePosixPath(name).suffix.lstrip(".").lower()
+
+
+def _export_name(card_name: str, kind: str) -> str:
+    """The name a card's file is saved under: the card's own, what no file
+    name may hold taken out, and the kind's extension."""
+    safe = _UNSAFE_NAME.sub(" ", card_name).strip() or "card"
+    return f"{safe}.{kind}"
 
 
 # ---------- a card from a link ----------
@@ -622,7 +815,7 @@ def _generation(app: App, card_id: int, language: str) -> _Generation:
         raise Conflict(NO_MODEL_HINT)
     if client.pictures_ride(model.name) is PicturesRide.NONE:
         raise Conflict(_CANNOT_SEE)
-    found = (app._store.files.get(picture.file) for picture in card.pictures)
+    found = (app._store.files.get_picture(picture.file) for picture in card.portraits)
     pictures = tuple(WirePicture(*file) for file in found if file is not None)
     if not pictures:
         raise Conflict(_NO_PICTURE)
@@ -826,7 +1019,7 @@ def _read(data: bytes, file_name: str) -> tuple[CharacterProfile, list[str]]:
     """The profile a card file holds and what reading it noted; Refused
     for a file that is no card."""
     try:
-        return load_card(data, file_name=file_name)
+        return read_card(data, file_name=file_name)
     except CardError as e:
         raise Invalid(_NOT_A_CARD) from e
 
@@ -860,7 +1053,7 @@ def _alike(
         if same is not None and card.id == same.id:
             continue
         named = bool(names & {card.name.casefold(), *(a.casefold() for a in card.aliases)})
-        pictured = wanted is not None and any(digest_of(p.file) == wanted for p in card.pictures)
+        pictured = wanted is not None and any(digest_of(p.file) == wanted for p in card.portraits)
         if named or pictured:
             found.append((card, _ALIKE[(named, pictured)]))
     return found

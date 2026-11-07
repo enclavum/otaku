@@ -10,7 +10,13 @@ import pytest
 
 from otaku import __version__
 from otaku.backend.app.pictures.services import RawFile, read_picture
-from otaku.backend.formats.cards import CardError, card_picture, is_charx, load_card, pack_charx
+from otaku.backend.formats.cards import (
+    CardError,
+    is_charx,
+    pack_charx,
+    read_card,
+    read_main_picture,
+)
 from otaku.integrations import Cards, CardSourceError
 
 pytestmark = [pytest.mark.live, pytest.mark.integration]
@@ -52,9 +58,9 @@ class TestCards:
     @pytest.mark.parametrize("link", CARDS.values(), ids=CARDS.keys())
     def test_a_link_gives_a_card_and_its_picture(self, link: str) -> None:
         data = _card_file(link)
-        card, _ = load_card(data)
+        card, _ = read_card(data)
         assert card.name
-        assert card_picture(data) is not None
+        assert read_main_picture(data) is not None
 
     @pytest.mark.parametrize("site", TAGLINES)
     def test_a_site_that_lists_a_card_under_a_line_gives_it(self, site: str) -> None:
@@ -63,16 +69,16 @@ class TestCards:
     def test_a_card_that_allows_no_png_comes_as_a_charx(self) -> None:
         data = _card_file(CHARX_ONLY)
         assert is_charx(data)
-        card, _ = load_card(data)
+        card, _ = read_card(data)
         assert card.name
-        assert card_picture(data) is not None
+        assert read_main_picture(data) is not None
 
     @pytest.mark.parametrize("link", PICTURES.values(), ids=PICTURES.keys())
     def test_a_picture_link_gives_a_picture_alone(self, link: str) -> None:
         got = _cards().fetch(link, user_agent=USER_AGENT)
         assert got.picture is None
         with pytest.raises(CardError):
-            load_card(got.data)
+            read_card(got.data)
         assert read_picture(RawFile(got.data, got.file_name)).width
 
     @pytest.mark.parametrize("link", MISSING.values(), ids=MISSING.keys())

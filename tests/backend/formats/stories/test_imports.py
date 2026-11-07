@@ -1,16 +1,23 @@
-"""The import side of the story document.
+"""The import side of a story file.
 
-Its contract is the round-trip: `parse_story(render_story(x))` returns
-`x` exactly — titles, system, story-so-far, cast with aliases and
+The document's contract is the round-trip: `parse_story(render_story(x))`
+returns `x` exactly — titles, system, story-so-far, cast with aliases and
 descriptions, scenes with spans, summaries and journals, and messages
 with their kind, pin, speaker, and verbatim template and bodies. A file without
 the export marker parses as None; a declared format above the reader's
 raises, while any older or absent one is read.
+
+A story file is read by the format its name and its contents agree on
+(`read_story_file`): the document, a SillyTavern chat, or plain text; a
+file no format claims is unknown, and one a format claims but whose
+reader finds no story is refused as that format, never read as another.
 """
+
+import json
 
 import pytest
 
-from otaku.backend.formats import (
+from otaku.backend.formats.stories import (
     EXPORT_FORMAT_VERSION,
     ExportedCharacter,
     ExportedJournal,
@@ -18,8 +25,14 @@ from otaku.backend.formats import (
     ExportedScene,
     ExportedStory,
 )
-from otaku.backend.formats.exports import render_story
-from otaku.backend.formats.imports import NewerFormatError, parse_story
+from otaku.backend.formats.stories.exports import render_story
+from otaku.backend.formats.stories.imports import (
+    NewerFormatError,
+    UnknownFormatError,
+    UnreadableFileError,
+    parse_story,
+    read_story_file,
+)
 
 FULL = ExportedStory(
     title="Болотная часовня",
@@ -186,6 +199,52 @@ class TestFormatVersion:
         parsed = parse_story(doc)
         assert parsed is not None
         assert parsed.scenes[-1].history == "A guest arrived."
+
+
+class TestReadStoryFile:
+    def test_the_document_reads_back_whole(self) -> None:
+        assert read_story_file(render(FULL), "chapel.md") == (FULL, "document")
+
+    def test_a_sillytavern_chat_reads_as_one(self) -> None:
+        lines = (
+            {"user_name": "You", "character_name": "Elara"},
+            {"name": "You", "is_user": True, "mes": "Hello."},
+        )
+        story, kind = read_story_file("\n".join(map(json.dumps, lines)), "elara.jsonl")
+        assert (kind, [message.body for message in story.messages]) == ("sillytavern", ["Hello."])
+
+    def test_plain_text_reads_as_one(self) -> None:
+        story, kind = read_story_file("The rain came down.", "rain.txt")
+        assert (kind, [message.body for message in story.messages]) == (
+            "plaintext",
+            ["The rain came down."],
+        )
+
+    def test_a_name_is_matched_whatever_its_case(self) -> None:
+        assert read_story_file("The rain came down.", "RAIN.TXT")[1] == "plaintext"
+
+    def test_a_file_whose_name_and_contents_agree_on_no_format_is_unknown(self) -> None:
+        for text, name in (
+            ("# Just notes", "notes.md"),  # no export marker
+            ("plain words", "chat.jsonl"),  # no object
+            (render(FULL), "chapel.docx"),  # no format's name
+        ):
+            with pytest.raises(UnknownFormatError):
+                read_story_file(text, name)
+
+    def test_a_file_its_format_cannot_read_is_refused_as_that_format(self) -> None:
+        for text, name, kind in (
+            ('{"hello": 1}', "x.jsonl", "sillytavern"),
+            ("  \n ", "empty.txt", "plaintext"),
+        ):
+            with pytest.raises(UnreadableFileError) as refused:
+                read_story_file(text, name)
+            assert refused.value.kind == kind
+
+    def test_a_document_a_newer_otaku_wrote_is_refused(self) -> None:
+        newer = _with_version(render(FULL), f"format-version: {EXPORT_FORMAT_VERSION + 1}")
+        with pytest.raises(NewerFormatError):
+            read_story_file(newer, "chapel.md")
 
 
 class TestMessageHeaders:

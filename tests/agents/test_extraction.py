@@ -26,7 +26,8 @@ from collections.abc import Sequence
 from itertools import combinations, pairwise
 
 from otaku.agents.extraction import numbered_chat, pack, plan_scenes
-from otaku.store.schema import Attachment, Message
+from otaku.store.pictures import Attachment
+from otaku.store.schema import Message
 
 # The extraction pass's minimums over rows of one size: twenty rows make a scene.
 _MIN_CHARS = 6000

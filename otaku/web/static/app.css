@@ -2426,7 +2426,7 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 .otk-sheet__foot--hint { font-family: var(--otk-font-mono); font-size: var(--otk-size-label); color: var(--otk-faint); }
 /* the card's notices at the left, set as the panel's footer sets them, its
    verbs at the right */
-.otk-sheet__note { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--otk-font-mono); font-size: var(--otk-size-foot); letter-spacing: var(--otk-track-foot); text-transform: uppercase; color: var(--otk-faint); }
+.otk-sheet__note { flex: 1; min-width: 0; padding-left: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--otk-font-mono); font-size: var(--otk-size-foot); letter-spacing: var(--otk-track-foot); text-transform: uppercase; color: var(--otk-faint); }
 .otk-sheet__foot--hint b { font-weight: 500; color: var(--otk-muted); }
 .otk-sheet__foot--hint > span { margin-left: auto; }
 

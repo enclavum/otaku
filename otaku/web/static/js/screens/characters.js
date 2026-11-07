@@ -48,6 +48,7 @@ import { markdown } from "../kit/markdown.js";
 import { openPicture } from "../kit/pictures.js";
 import * as held from "../play/held.js";
 import { landed } from "../play/shell.js";
+import { saveFile } from "./transfer.js";
 
 /* Where the view is kept — the list, or the gallery at a tile size —
    this browser's storage, as the theme's pin is; the unlinked column's
@@ -146,15 +147,13 @@ const _BROWSER_LANGUAGES = {
 };
 // Where the language last picked is kept, as the view is.
 const _LANGUAGE_KEY = "otaku-card-language";
-/* The formats a card is exported in, by the code its button shows: the
-   design's examples, standing until export is built. */
-const _EXPORT_FORMATS = [
-  ["png", "Character card, with the picture"],
-  ["json", "Character card, text only"],
-  ["md", "Plain text, for reading"],
-];
-// Where the export format last picked is kept, as the language is.
-const _EXPORT_KEY = "otaku-card-export";
+// What each format a card is exported as is, as the menu says it.
+const _EXPORT_LABELS = {
+  png: "PNG image · V2 + V3",
+  json: "JSON file",
+  charx: "CHARX archive · V3",
+  original: "Original file",
+};
 
 const state = {
   // the cards and unlinked characters as last read, and how many of each
@@ -1577,7 +1576,7 @@ async function openCard(popup, cardId, { tab = "card", storyId = null, naming = 
   const note = $("[data-note]", foot) ?? span("otk-sheet__note");
   note.dataset.note = "";
   foot.replaceChildren(
-    exportButton(),
+    exportButton(card),
     note,
     actionButton("Merge into…", { onclick: guard(() => mergeCard(popup, card)) }),
     actionButton("Delete", { kind: "otk-btn--danger", onclick: guard(() => deleteCard(popup, card)) }),
@@ -1752,41 +1751,52 @@ function generateButton(popup, card, { busy, off }) {
   return split;
 }
 
-function exportButton() {
-  /* Export, split: the main part exports in the format last picked, its
-     code beside the caption; the arrow opens the formats, and a pick
-     exports at once and is the format from then on. Export itself is
-     not built yet: a click keeps the pick and does nothing more. */
-  const format = readFormat();
-  const go = actionButton("Export");
-  go.append(span("otk-split__code", format.toUpperCase()));
+function exportButton(card) {
+  /* Export, split: the main part exports the card as it is unless asked
+     otherwise (`default_export_format`) — the kind of file it came as,
+     with its edits — its code beside the caption; the arrow opens the
+     formats it can be exported as, and a pick exports at once and is the
+     button's from then on, while the window stands. The file it came as,
+     kept, says its own kind. */
+  let format = card.default_export_format;
+  const code = (each) => (each === "original" ? card.original_format : each).toUpperCase();
+  const go = actionButton("Export", { onclick: guard(() => exportCard(card, format)) });
+  go.append(span("otk-split__code", code(format)));
   const menu = choiceMenu("Export as", (picked) => {
-    keep(_EXPORT_KEY, picked);
     split._closeMenu();
-    const shown = $(".otk-split__code", go);
-    shown.textContent = picked.toUpperCase();
+    format = picked;
+    $(".otk-split__code", go).textContent = code(picked);
     split.dataset.format = picked;
     for (const row of $$(".otk-langs__opt", menu)) {
       row.setAttribute("aria-checked", String(row.dataset.code === picked));
     }
+    guard(() => exportCard(card, picked))();
   });
   menu.classList.add("otk-langs--wide");
-  for (const [code, name] of _EXPORT_FORMATS) menu._add(code, name, code === format);
+  for (const each of card.available_export_formats) menu._add(each, _EXPORT_LABELS[each], each === format);
+  // the file it came as says its own kind in the code column
+  for (const row of $$(".otk-langs__opt", menu)) {
+    $(".otk-langs__code", row).textContent = code(row.dataset.code);
+  }
   const split = splitButton(go, menu, { label: "Format" });
   split.classList.add("otk-split--export");
   split.dataset.format = format;
   return split;
 }
 
-function readFormat() {
-  // the export format last picked, kept in this browser; else the first
-  try {
-    const kept = localStorage.getItem(_EXPORT_KEY);
-    if (_EXPORT_FORMATS.some(([code]) => code === kept)) return kept;
-  } catch {
-    // nothing kept: the first format
+async function exportCard(card, format) {
+  /* The card as a file of `format`, saved where the browser saves; the
+     window's foot says which, or why not. */
+  const answer = await api.cards.export.get(card.id, { format });
+  const sheet = sheetOf("card");
+  if (answer.refused) {
+    footnote(sheet, answer.notice, true);
+    return;
   }
-  return _EXPORT_FORMATS[0][0];
+  const bytes = Uint8Array.from(atob(answer.data), (each) => each.charCodeAt(0));
+  saveFile(answer.name, new Blob([bytes], { type: answer.media_type }));
+  // the page's own sentence, as a story's export says it (`transfer.exportStory`)
+  footnote(sheet, `Exported ${answer.name}.`);
 }
 
 function splitButton(go, menu, { label, off = false }) {

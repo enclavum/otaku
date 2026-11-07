@@ -1,17 +1,21 @@
-"""The import side: the document back into its parts, and any
-`ExportedStory` into the store.
+"""The import side: a story file read, and any `ExportedStory` into the
+store.
 
-`parse_story` reads the export document; `write_story` puts a
-`ExportedStory` — whichever reader produced it — into the store as a new
-story: the messages, and, when it carries scenes, the memory verbatim
-with no model calls.
+`read_story_file` tells a file by its name and its contents and reads it
+by its format's reader: the export document (`parse_story`), a
+SillyTavern chat (`_sillytavern`), or plain text (`_plaintext`).
+`write_story` puts an `ExportedStory` — whichever reader produced it —
+into the store as a new story: the messages, and, when it carries
+scenes, the memory verbatim with no model calls.
 """
 
 import json
 import re
 from dataclasses import replace
+from pathlib import PurePath
+from typing import Literal
 
-from otaku.backend.formats import (
+from otaku.backend.formats.stories import (
     EXPORT_FORMAT_VERSION,
     EXPORT_MARKER,
     ExportedCharacter,
@@ -20,6 +24,8 @@ from otaku.backend.formats import (
     ExportedScene,
     ExportedStory,
 )
+from otaku.backend.formats.stories._plaintext import parse_plaintext
+from otaku.backend.formats.stories._sillytavern import parse_sillytavern
 from otaku.store import Store
 from otaku.store.schema import Message
 
@@ -45,6 +51,10 @@ STRUCTURE_LINE = re.compile(r"^(\\*)(#{1,4} )")
 # reader dispatches on (see `NewerFormatError`).
 _FORMAT_VERSION = re.compile(r"^format-version:\s*(\d+)$")
 
+# What a story file is: otaku's export document, a SillyTavern chat, or
+# plain text.
+StoryFileKind = Literal["document", "sillytavern", "plaintext"]
+
 
 class NewerFormatError(Exception):
     """The document declares a format version above this reader's — a
@@ -55,6 +65,44 @@ class NewerFormatError(Exception):
     def __init__(self, declared: int) -> None:
         super().__init__(f"format {declared}, reads up to {EXPORT_FORMAT_VERSION}")
         self.declared = declared
+
+
+class UnknownFormatError(Exception):
+    """A story file no format claims: its name and its contents agree on
+    none."""
+
+
+class UnreadableFileError(Exception):
+    """A story file a format claims, by its name and its contents, whose
+    reader finds no story in it — refused, never read as another format."""
+
+    def __init__(self, kind: StoryFileKind) -> None:
+        super().__init__(f"no story in this {kind} file")
+        self.kind = kind
+
+
+def read_story_file(text: str, file_name: str) -> tuple[ExportedStory, StoryFileKind]:
+    """A story file's TEXT read by the format its NAME and its contents
+    agree on — the format detected, never declared — and which it was:
+    the document (`.md` holding the export marker), a SillyTavern chat
+    (`.jsonl` opening with an object), or plain text (`.txt`), dismantled
+    into verbatim messages. Raises `UnknownFormatError` for a file no
+    format claims, `UnreadableFileError` for one whose format's reader
+    finds no story, and `NewerFormatError` for a document a newer otaku
+    wrote."""
+    suffix = PurePath(file_name).suffix.lower()
+    kind: StoryFileKind
+    if suffix == ".md" and EXPORT_MARKER in text:
+        kind, export = "document", parse_story(text)
+    elif suffix == ".jsonl" and text.lstrip().startswith("{"):
+        kind, export = "sillytavern", parse_sillytavern(text)
+    elif suffix == ".txt":
+        kind, export = "plaintext", parse_plaintext(text)
+    else:
+        raise UnknownFormatError(file_name)
+    if export is None:
+        raise UnreadableFileError(kind)
+    return export, kind
 
 
 def parse_story(text: str) -> ExportedStory | None:

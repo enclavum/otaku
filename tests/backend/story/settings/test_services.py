@@ -37,7 +37,7 @@ from otaku.backend.story.settings.services import (
     StorySettingSharedReminder,
 )
 from otaku.prompts import Prompts
-from otaku.store.schema import CompletionType, InjectionPosition, Layout, StorySettingDB
+from otaku.store.story import CompletionType, InjectionPosition, Layout, StorySettingDB
 
 PROMPTS = replace(
     Prompts(),

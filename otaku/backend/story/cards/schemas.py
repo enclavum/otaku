@@ -39,7 +39,7 @@ class StoryCardFetchCheck(StoryCardCheck):
     tagline: str
 
 
-class ImportedCard(Schema):
+class StoryCardImport(Schema):
     """What landed: the character the card became and the codex card it
     is linked to (None for a card the story alone holds), the recorded
     /card row, the greeting message (None when the card had none), and

@@ -12,7 +12,8 @@ with no rows at all sends one on its own.
 """
 
 from otaku.context.injections import Injection, inject_into_tail, system_injections
-from otaku.store.schema import InjectionPosition, Message
+from otaku.store.schema import Message
+from otaku.store.story import InjectionPosition
 
 ONE = Injection("one", "One.", InjectionPosition(1))
 TWO = Injection("two", "Two.", InjectionPosition(2))

@@ -12,9 +12,9 @@ the colours honest), and re-encoded: PNG stays PNG, so a screenshot
 keeps its text sharp; everything else becomes JPEG, the one format every
 engine takes. A thumbnail of `THUMB_EDGE` is cut from the same decoded
 image for the page. `read_picture` is that pipeline over bytes; `save`
-stores what it made under its owner's number and returns the row's side
-(`store.schema.Attachment`), apart so a turn reads every picture before
-it saves any.
+stores what it made under its owner's number and returns it as the kind
+its owner's row records (`store.pictures`), apart so a turn reads every
+picture before it saves any.
 
 What is refused, each with its own sentence (`Refused`): bytes over
 `MAX_BYTES`, a type not taken, a picture over `MAX_PIXELS` (judged on
@@ -27,6 +27,7 @@ carry is the play's (`backend.story.play`).
 import io
 import warnings
 from dataclasses import dataclass
+from typing import TypeVar
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
@@ -34,7 +35,7 @@ from otaku.backend.app.core.services import App
 from otaku.backend.errors import Invalid, NotFound
 from otaku.formatting import format_megabytes
 from otaku.store.files import FileStore, Owner
-from otaku.store.schema import Attachment
+from otaku.store.pictures import Attachment, CardPicture
 
 try:  # HEIC needs libheif, which pillow-heif bundles — except on Pyodide.
     from pillow_heif.as_plugin import register_heif_opener
@@ -61,6 +62,13 @@ _TAKEN_SENTENCE = "only JPEG, PNG, WebP or HEIC"
 _HEIF_BRANDS = (b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis", b"mif1", b"msf1")
 # A picture name the files folder does not hold.
 _NO_SUCH_PICTURE = "No such picture."
+# What a stored picture is saved as: one of the kinds an owner's row records.
+_Stored = TypeVar("_Stored", Attachment, CardPicture)
+# Whose number a new picture is filed under: a turn's its story's, a card's its card's.
+_OWNERS: dict[type[Attachment | CardPicture], Owner] = {
+    Attachment: Owner.STORY,
+    CardPicture: Owner.CARD,
+}
 
 
 @dataclass(frozen=True)
@@ -73,7 +81,7 @@ class RawFile:
 
 
 @dataclass(frozen=True)
-class Picture:
+class IntakePicture:
     """A picture as the wire gets it, before it is stored: the bytes and
     their facts, and the thumbnail cut from the same image."""
 
@@ -88,7 +96,7 @@ def get_picture(app: App, name: str) -> tuple[bytes, str]:
     """A stored picture as the model saw it, and its media type, under
     the name its row carries. Raises NotFound when the folder has no
     such file."""
-    found = app._store.files.get(name)
+    found = app._store.files.get_picture(name)
     if found is None:
         raise NotFound(_NO_SUCH_PICTURE)
     return found
@@ -102,13 +110,16 @@ def get_thumbnail(app: App, name: str) -> bytes:
     return found
 
 
-def save(files: FileStore, picture: Picture, owner: Owner, number: int) -> Attachment:
-    """A picture into the folder under its owner's number — a story's or
-    a card's — and the row that names it. Apart from `read_picture` so a
-    turn can read every picture first and save none until all of them
-    are: a refusal then leaves the folder as it was."""
-    name = files.add(owner, number, picture.data, picture.media_type, thumb=picture.thumb)
-    return Attachment(
+def save(files: FileStore, picture: IntakePicture, number: int, made: type[_Stored]) -> _Stored:
+    """A picture into the folder and the picture stored as `made`, the
+    kind its owner's row records (`store.pictures`), `number` its owner's
+    — a turn's story's, a card's own. Apart from `read_picture` so a turn
+    can read every picture first and save none until all of them are: a
+    refusal then leaves the folder as it was."""
+    name = files.add_picture(
+        _OWNERS[made], number, picture.data, picture.media_type, thumb=picture.thumb
+    )
+    return made(
         file=name,
         width=picture.width,
         height=picture.height,
@@ -116,7 +127,7 @@ def save(files: FileStore, picture: Picture, owner: Owner, number: int) -> Attac
     )
 
 
-def read_picture(file: RawFile) -> Picture:
+def read_picture(file: RawFile) -> IntakePicture:
     """The module docstring's pipeline over a file in memory: the wire
     copy and the thumbnail, or a `Refused` naming what was wrong with
     it — by the name the reader gave it, which is used for the sentences
@@ -155,7 +166,7 @@ def read_picture(file: RawFile) -> Picture:
         raise _picture_refused(name) from None
     thumb = image.copy()
     thumb.thumbnail((THUMB_EDGE, THUMB_EDGE), Image.Resampling.LANCZOS)
-    return Picture(
+    return IntakePicture(
         data=_encode(image, png=png, icc=icc, quality=_JPEG_QUALITY),
         media_type="image/png" if png else "image/jpeg",
         width=image.width,

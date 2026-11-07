@@ -1390,7 +1390,9 @@ class TestPictures:
     ) -> None:
         # A file never changes once written, so the browser keeps it — but
         # it sits behind the sign-in, so no cache between may.
-        name = page.store.files.add(Owner.STORY, 1, CAT.read_bytes(), "image/jpeg", thumb=b"thumb")
+        name = page.store.files.add_picture(
+            Owner.STORY, 1, CAT.read_bytes(), "image/jpeg", thumb=b"thumb"
+        )
         status, headers, body = _fetch(page, f"/api/pictures/{name}")
         assert (status, body) == (200, CAT.read_bytes())
         assert headers["Content-Type"] == "image/jpeg"

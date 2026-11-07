@@ -214,6 +214,8 @@ class TestTerminal:
 # folders and, beside them, the machinery they share — a module, its place
 # its mark.
 _TWINS = ("app", "codex", "story")
+# The layer each group's machinery is, the domain's alone to import.
+_GROUP_LAYERS = {f"{PACKAGE}.backend.{twin}" for twin in _TWINS}
 _RESOURCE_FILES = {"__init__.py", "resources.py", "schemas.py", "services.py"}
 # The app's own resources: `core` in the three places, `app` in the
 # terminal's flat ones.
@@ -345,7 +347,8 @@ class TestMachinery:
         # the layer above never does, but for the launch, which composes
         # the app out of the domain's parts. The backend's machinery, a
         # module beside a group's folders, is the domain's: its services and
-        # its machinery import it, the interface never does
+        # its machinery import it, the interface never does. A protected
+        # module of `formats`, which has no folders, is its own package's
         violations = []
         for path in _python_files():
             importer = _module_of(path)
@@ -353,7 +356,7 @@ class TestMachinery:
                 layer = _layer_of(found.target)
                 if layer is None:
                     continue
-                if layer.startswith(f"{PACKAGE}.backend."):
+                if layer in _GROUP_LAYERS:
                     if _is_domain(importer) or importer == f"{PACKAGE}.backend.launch":
                         continue
                 elif importer == layer or importer.startswith(f"{layer}."):

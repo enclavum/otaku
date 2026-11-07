@@ -23,7 +23,7 @@ from otaku.backend.app.integrations.schemas import WebSearch
 from otaku.backend.app.paths import Paths
 from otaku.backend.story.settings.schemas import LAYOUT_SETTING, StorySetting
 from otaku.settings import models as models_file
-from otaku.store.schema import StorySettingDB
+from otaku.store.story import StorySettingDB
 from otaku.terminal.screens import dossier as screen_dossier
 from scenarios.api.app.test_app import _in_use
 from scenarios.api.story.test_stories import (

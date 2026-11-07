@@ -14,7 +14,7 @@ per table:
     store.usage       token accounting
     store.history     the terminal's Up/Down input history
     store.settings    the settings stories share (the texts that may need sealing)
-    store.files       the files folder beside the database: a turn's and a card's pictures (`FileStore`)
+    store.files       the files folder beside the database: a turn's and a card's pictures, a card's raw file (`FileStore`)
 
 and the one operation that spans the tables and the folder: the sweep.
 """
