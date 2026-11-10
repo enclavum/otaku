@@ -809,7 +809,7 @@ export function createStory({ title = "", premise = "", cards = [], persona = ""
   if (new Set(cards.map((card) => card.id)).size !== cards.length) throw invalid("A card is picked twice.");
   const seen = new Set();
   for (const card of cards) {
-    ensureWritten(card);
+    if (isEmpty(card)) throw conflict(`${card.name} card is empty, cannot start a story with it.`);
     if (seen.has(card.name.toLowerCase())) {
       throw conflict(`Two of the cards are called ${card.name} — rename one first.`);
     }
@@ -1586,10 +1586,17 @@ export function isBlank(card) {
   return CARD_FIELDS.filter((key) => key !== "reminder_depth").every((key) => !card[key]?.length);
 }
 
-/** Refused where the card holds no text yet, as a story's doors refuse it
-    (`story.cards.services._ensure_written`). */
-export function ensureWritten(card) {
-  if (isBlank(card)) throw conflict(`${card.name} has no text yet.`);
+/** Whether a card gives a story nothing but its name: no text yet and no
+    picture (`story.cards.services._is_playable`). */
+function isEmpty(card, hasPicture = card.pictures.length > 0) {
+  return isBlank(card) && !hasPicture;
+}
+
+/** Refused where the card gives a story nothing but its name, as a story's
+    doors refuse it (`story.cards.services._ensure_written`); `hasPicture`
+    for a card read from a file, which keeps its picture apart. */
+export function ensureWritten(card, hasPicture = card.pictures.length > 0) {
+  if (isEmpty(card, hasPicture)) throw conflict(`${card.name} has no text yet.`);
 }
 
 export function cardSummary(card) {

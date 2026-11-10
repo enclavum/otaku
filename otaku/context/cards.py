@@ -34,6 +34,9 @@ _ORIGINAL_MACRO = re.compile(r"\{\{\s*original\s*\}\}", re.IGNORECASE)
 _RETIRED_REMINDER = "depth_note"
 # The card template's `{field}` holes (`card_to_wire`).
 _PLACEHOLDER = re.compile(r"\{(\w+)\}")
+# What a card block fills that is not the card's own text: its name, the
+# player's, and the reminder's depth, a number always set.
+_NOT_FIELDS = ("name", "user", "reminder_depth", _RETIRED_REMINDER)
 # A character past U+FFFF as 0.7.0 and 0.8.0 wrote it in a basic string: a
 # JSON surrogate pair, which TOML refuses — re-paired as it is read.
 _SURROGATE_PAIR = re.compile(r"(?<!\\)\\u(d[89ab][0-9a-f]{2})\\u(d[c-f][0-9a-f]{2})", re.I)
@@ -145,7 +148,7 @@ def card_injections(toml_text: str, *, char: str) -> tuple[Injection, Injection]
     )
 
 
-def card_to_wire(toml_text: str, template: str, *, char: str) -> str:
+def card_to_wire(toml_text: str, template: str, template_empty: str, *, char: str) -> str:
     """What a card row sends: the template's `{field}` placeholders
     filled from the story character's profile, `{name}` with `char` — its
     name — and every text bound to it and to the profile's `user` on the
@@ -153,7 +156,10 @@ def card_to_wire(toml_text: str, template: str, *, char: str) -> str:
     future request. One pass, so braces inside
     card text are never re-read as placeholders; a template line whose
     placeholders ALL came up empty is dropped — a card without a
-    scenario ships no dangling `Scenario:` label."""
+    scenario ships no dangling `Scenario:` label. Where the template
+    names the card's fields and none of them came up, the block is
+    `template_empty` instead: its name, and no label introducing
+    nothing."""
     data = read_toml(toml_text)
     user = str(data.get("user", ""))
     # Every card field answers, empty when the profile omitted it — an
@@ -174,14 +180,23 @@ def card_to_wire(toml_text: str, template: str, *, char: str) -> str:
             values[key] = str(value)
     values["name"] = char
     values[_RETIRED_REMINDER] = ""
+
+    def fill(text: str) -> str:
+        return _PLACEHOLDER.sub(lambda m: values.get(m.group(1), m.group(0)), text)
+
     out = []
+    # the card's own fields the template names, and whether one came up
+    fielded = shown = False
     for line in template.split("\n"):
         holes = _PLACEHOLDER.findall(line)
         known = [name for name in holes if name in values]
+        own = [name for name in known if name not in _NOT_FIELDS]
+        fielded = fielded or bool(own)
         if known and all(not values[name].strip() for name in known):
             continue
-        out.append(_PLACEHOLDER.sub(lambda m: values.get(m.group(1), m.group(0)), line))
-    return "\n".join(out)
+        shown = shown or any(values[name].strip() for name in own)
+        out.append(fill(line))
+    return fill(template_empty) if fielded and not shown else "\n".join(out)
 
 
 def read_toml(toml_text: str) -> dict[str, Any]:

@@ -106,7 +106,6 @@ export async function importCard() {
     const similarCards = $("[data-similar-cards]", dialog);
     const saveSwitch = $("[data-save-switch]", dialog);
     const picsend = $("[data-picsend]", dialog);
-    const picsendThumb = $("[data-picsend-thumb]", dialog);
     const picsendSwitch = $("[data-picsend-switch]", dialog);
     const outcomes = $("[data-outcomes]", dialog);
     const will = $("[data-will]", dialog);
@@ -206,7 +205,6 @@ export async function importCard() {
       similarBox.hidden = !similar;
       // the picture's switch, only for a card with a picture
       picsend.hidden = !read.has_picture;
-      picsendThumb.replaceChildren(...thumbOf(read.thumbnail, read.same_card));
       drawWill();
       const caveats = [...read.notes];
       // A card that rides every request is worth saying out loud before
@@ -349,20 +347,18 @@ function cardRow(card) {
   /* A library card as a row of the dialog: its portrait, its name and its
      tagline. */
   const frame = span("otk-imp__thumb");
-  frame.append(...thumbOf(null, card));
+  frame.append(...portraitOf(card));
   const text = element("span", "otk-imp__text");
   text.append(span("otk-imp__name", card.name), span("otk-imp__tag", card.tagline));
   return [frame, text];
 }
 
-function thumbOf(thumbnail, card) {
-  /* The picture a card would send: the one the backend read from a file
-     or a link, else a library card's portrait. */
+function portraitOf(card) {
+  /* A library card's portrait, as its thumbnail; none for a card without one. */
+  if (!card.pictures?.length) return [];
   const image = element("img");
   image.alt = "";
-  if (thumbnail) image.src = `data:image/jpeg;base64,${thumbnail}`;
-  else if (card?.pictures?.length) image.src = api.pictures.thumbnail.url(card.pictures[0].file);
-  else return [];
+  image.src = api.pictures.thumbnail.url(card.pictures[0].file);
   return [image];
 }
 

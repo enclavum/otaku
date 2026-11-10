@@ -240,6 +240,18 @@ class TestCharacterCards:
         )
         assert prompt.pieces[0].text == "<<Elara: A smuggler.>>"
 
+    def test_a_card_row_whose_character_has_no_text_sends_the_empty_framing(self) -> None:
+        elara = Character(id=7, name="Elara", profile='user = "Alex"')
+        row = replace(card(1, "Elara joins."), speaker_id=7)
+        prompt = assemble(
+            "",
+            [row, user("I wave.")],
+            8192,
+            characters=(elara,),
+            card_framing="<<{name}: {description}>>",
+        )
+        assert prompt.pieces[0].text == "<<Elara alone>>"
+
     def test_a_card_row_whose_character_is_gone_sends_its_body(self) -> None:
         elara = Character(id=7, name="Elara", profile='description = "A smuggler."')
         row = replace(card(1, "Elara joins."), speaker_id=99)
@@ -1297,11 +1309,13 @@ class _Characters:
 @dataclass(frozen=True)
 class _Prompts:
     """What the door reads of the prompts: the recap header, the card
-    template, the header over the pinned rows the recap quotes, and the
-    two wires' framings."""
+    template, the header over the pinned rows the recap quotes, the
+    template of a card none of whose fields came up, and the two wires'
+    framings."""
 
     recap_header: str
     card_framing: str = ""
     pinned_header: str = "[[pinned]]"
+    card_empty_framing: str = "<<{name} alone>>"
     story_framing: str = "<<frame {premise}>>"
     tool_framing: str = "<<{tool}: {body}>>"

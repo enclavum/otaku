@@ -676,7 +676,7 @@ async function card(story, query, body, ask) {
   const fields = { ...(target ?? found), name };
   const persona = store.personaOf(story);
   const tokens = Math.ceil(store.profileToml(fields, persona || "you").length / 4);
-  store.ensureWritten(target ?? found);
+  store.ensureWritten(target ?? found, target ? target.pictures.length > 0 : hasPicture);
   if (query.get("validate_only") === "true") {
     store.ensureFree(story, name, held?.id ?? null);
     return {

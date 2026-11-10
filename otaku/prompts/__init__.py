@@ -94,6 +94,9 @@ class Prompts:
     # placeholders are absent is a choice — omitting {examples} is how a
     # reader keeps examples off the wire.
     card_framing: str = template("card_framing", "name")
+    # The block of a card none of whose fields above came up — a card made
+    # from a picture, say: its name alone, no label introducing nothing.
+    card_empty_framing: str = template("card_empty_framing", "name")
     # The text wire's standing instruction, before the premise in the turn
     # that precedes the story: the model turn must follow SOME turn — alone
     # it degenerates — and a premise may be empty; without {premise} the

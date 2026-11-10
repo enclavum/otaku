@@ -24,8 +24,8 @@ def as_card_summary(row: schema.Card, story_counts: dict[int, int]) -> CardSumma
 class CardSummary(Schema):
     """A card as the codex lists it: its name, aliases and tagline, its
     pictures in order — the first the portrait — how many stories it is
-    in, one linked character in each, and whether it holds no text yet,
-    which no story takes (`is_blank`)."""
+    in, one linked character in each, and whether it holds no text yet
+    (`is_blank`) — with no picture either, no story takes it."""
 
     id: int
     name: str
@@ -41,7 +41,8 @@ class Card(Schema):
     reader, never sent to the model); the card's fields, macros as
     written, and the file it came from ("" for none); its pictures in
     order, the first the portrait; the story characters it is linked to;
-    whether it holds no text yet, which no story takes (`is_blank`); what
+    whether it holds no text yet (`is_blank`) — with no picture either, no
+    story takes it; what
     it can be exported as (`available_export_formats`, of
     `EXPORT_FORMATS`), what it is unless another is asked
     (`default_export_format`), and the kind of file it came as where it

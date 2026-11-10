@@ -119,7 +119,7 @@ def check_card(
         )
     else:
         raise Invalid("A card is brought in from a file or from Characters.")
-    _ensure_written(profile)
+    _ensure_written(profile, has_picture=has_picture)
     if name is not None:
         profile = replace(profile, name=_character_name(name))
     _ensure_free(app, story_id, profile.name, same)
@@ -181,7 +181,10 @@ def import_card(
         )
         name = _character_name(name)
         own = target.name if target is not None else checked.profile.name
-        _ensure_written(codex_cards.card_profile(target) if target is not None else checked.profile)
+        if target is not None:
+            _ensure_written(codex_cards.card_profile(target), has_picture=bool(target.portraits))
+        else:
+            _ensure_written(checked.profile, has_picture=checked.has_picture)
         _ensure_free(app, story_id, name, target)
         default_line = f"/card {file_name}" + (f" {name}" if name != own else "")
         if story_only and target is None:
@@ -200,7 +203,7 @@ def import_card(
     elif card_id is not None:
         target = codex_cards.get_card(app, card_id)
         name = _character_name(name)
-        _ensure_written(codex_cards.card_profile(target))
+        _ensure_written(codex_cards.card_profile(target), has_picture=bool(target.portraits))
         _ensure_free(app, story_id, name, target)
         incoming = _incoming_from_codex(target)
         notes, default_line = [], f"/card {name}"
@@ -233,14 +236,16 @@ def import_card(
 
 def check_cards(app: App, card_ids: Sequence[int]) -> tuple[Card, ...]:
     """The codex cards a story is started with, in pick order — refused
-    for a card the codex does not hold, one picked twice, and two of one
-    name, which one story's cast cannot hold."""
+    for a card the codex does not hold, one picked twice, one with
+    neither text nor a picture (`_is_playable`), and two of one name, which
+    one story's cast cannot hold."""
     if len(set(card_ids)) != len(card_ids):
         raise Invalid("A card is picked twice.")
     picked = tuple(codex_cards.get_card(app, card_id) for card_id in card_ids)
     seen: set[str] = set()
     for card in picked:
-        _ensure_written(codex_cards.card_profile(card))
+        if not _is_playable(codex_cards.card_profile(card), has_picture=bool(card.portraits)):
+            raise Conflict(f"{card.name} card is empty, cannot start a story with it.")
         if card.name.casefold() in seen:
             raise Conflict(f"Two of the cards are called {card.name} — rename one first.")
         seen.add(card.name.casefold())
@@ -427,11 +432,18 @@ def _character_name(name: str) -> str:
     return cleaned
 
 
-def _ensure_written(profile: CharacterProfile) -> None:
-    """Refused where the card holds no text yet (`codex_cards.is_blank`):
-    a story would take a name and nothing else."""
-    if codex_cards.is_blank(profile):
+def _ensure_written(profile: CharacterProfile, *, has_picture: bool) -> None:
+    """Refused where the card gives a story nothing but its name
+    (`_is_playable`)."""
+    if not _is_playable(profile, has_picture=has_picture):
         raise Conflict(f"{profile.name} has no text yet.")
+
+
+def _is_playable(profile: CharacterProfile, *, has_picture: bool) -> bool:
+    """Whether a card gives a story more than its name: text
+    (`codex_cards.is_blank` says it has none yet), or a picture — a name
+    and a picture are enough."""
+    return has_picture or not codex_cards.is_blank(profile)
 
 
 def _ensure_free(app: App, story_id: int, name: str, card: Card | None) -> None:
@@ -460,6 +472,7 @@ def _block_tokens(app: App, profile: CharacterProfile, persona: str) -> int:
         card_to_wire(
             replace(profile, user=persona or "you").to_toml(),
             app._prompts().card_framing,
+            app._prompts().card_empty_framing,
             char=profile.name,
         )
     )

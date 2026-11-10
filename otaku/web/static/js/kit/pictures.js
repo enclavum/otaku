@@ -33,8 +33,8 @@ export function openPicture(attachments, at) {
      under it is the row's — width by height, and the bytes stored. A
      turn with several pictures is walked from here, by the arrows on
      the picture's sides or the arrow keys, clamped at the ends — in a
-     window as tall as the tallest of them needs, so a flip never changes
-     its size. */
+     window as wide as the widest of them and as tall as the tallest
+     needs, so a flip never changes its size. */
   const dialog = $('dialog[data-dialog="picture"]');
   const frame = $(".otk-lightbox__frame", dialog);
   const image = $("img", frame);
@@ -51,7 +51,7 @@ export function openPicture(attachments, at) {
     image.height = picture.height;
     image.src = api.pictures.url(picture.file);
     $(".otk-lightbox__open", dialog).href = api.pictures.url(picture.file);
-    $(".otk-lightbox__meta", dialog).textContent = `${picture.width} × ${picture.height} · ${sized(picture.size)}`;
+    $(".otk-lightbox__meta", dialog).textContent = measure(picture);
     // one picture alone has no count, and its measure takes the count's place
     const count = $(".otk-lightbox__count", dialog);
     count.textContent = several ? `${at + 1} of ${attachments.length}` : "";
@@ -87,18 +87,40 @@ export function openPicture(attachments, at) {
   dialog.addEventListener("close", down, { signal: wired.signal });
   show(at);
   dialog.showModal();
-  frame.style.minHeight = `${tallest(attachments, frame, image)}px`;
+  fit(attachments, dialog, frame, image);
 }
 
-/** The height `frame` needs for the tallest of `attachments`: each at its
-    own size, downsized to the frame's width where it is wider, and held
-    to the window as the stylesheet holds `image`, the one shown (its
-    `max-height`, `.otk-lightbox img`). Measured with the dialog open. */
-function tallest(attachments, frame, image) {
-  const width = frame.clientWidth;
+function fit(attachments, dialog, frame, image) {
+  /* `frame` as wide as the widest of `attachments` and as tall as the
+     tallest, each shown at its own size, never enlarged, and held as the
+     stylesheet holds `image`, the one shown: to the frame's widest (its
+     `max-width`) and to the window (`max-height`, `.otk-lightbox img`).
+     Never narrower than the foot needs for the longest measure among
+     them, which would leave the dialog wider than its frame. Measured
+     with the dialog open. */
+  frame.style.width = frame.style.minHeight = "";
+  const room = frame.clientWidth;
   const held = parseFloat(getComputedStyle(image).maxHeight) || Infinity;
-  const heights = attachments.map((each) => each.height * Math.min(1, width / each.width));
-  return Math.ceil(Math.min(held, Math.max(...heights)));
+  const shown = attachments.map((each) => Math.min(1, room / each.width, held / each.height));
+  const foot = $(".otk-lightbox__foot", dialog);
+  const meta = $(".otk-lightbox__meta", dialog);
+  const said = meta.textContent;
+  foot.style.width = "max-content";
+  let least = 0;
+  for (const each of attachments) {
+    meta.textContent = measure(each);
+    least = Math.max(least, foot.offsetWidth);
+  }
+  meta.textContent = said;
+  foot.style.width = "";
+  const widest = Math.max(...attachments.map((each, at) => each.width * shown[at]));
+  frame.style.width = `${Math.ceil(Math.min(room, Math.max(least, widest)))}px`;
+  frame.style.minHeight = `${Math.ceil(Math.max(...attachments.map((each, at) => each.height * shown[at])))}px`;
+}
+
+function measure(picture) {
+  // The foot's measure of a picture: width by height, and the bytes stored.
+  return `${picture.width} × ${picture.height} · ${sized(picture.size)}`;
 }
 
 function sized(bytes) {

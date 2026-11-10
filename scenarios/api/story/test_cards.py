@@ -25,7 +25,6 @@ from PIL import Image
 
 from otaku.backend.api import HeadMoved, Refused
 from otaku.backend.codex.cards.schemas import RawFile
-from otaku.backend.codex.cards.services import NEW_CARD_NAME
 from otaku.backend.story import request
 from otaku.store.pictures import Attachment
 from scenarios.support.harness import App
@@ -371,6 +370,32 @@ class TestInvite:
         assert (character.name, data["user"]) == ("Seraphina", "Alex")
         assert "{{" not in rows[1].body  # the greeting bound
 
+    def test_a_card_with_no_text_but_a_picture_comes_in_as_its_name(self, app: App) -> None:
+        # A name and a picture are enough; the model reads the template of a
+        # card none of whose fields came up, as prompts.toml holds it.
+        app.paths.prompts_file.write_text(
+            'card_empty_framing = "<<{name} stands here>>"\n', encoding="utf-8", newline="\n"
+        )
+        card = app.api.cards.create(data=CAT.read_bytes(), file_name="cat.jpg", name="Whiskers")
+        whiskers = card.value.card
+        story = app.ensure_story()
+        app.api.stories.cards.create(
+            story, card_id=whiskers.id, name=whiskers.name, persona="you", expected_head=None
+        )
+        app.play("I look up.")
+        wire = "\n".join(str(m["content"]) for m in app.server.requests[-1]["messages"])
+        assert "<<Whiskers stands here>>" in wire
+
+    def test_a_card_with_neither_text_nor_a_picture_is_refused(self, app: App) -> None:
+        card = app.api.cards.create(name="Nobody").value
+        story = app.ensure_story()
+        with pytest.raises(Refused):
+            app.api.stories.cards.create(
+                story, card_id=card.id, name=card.name, persona="you", expected_head=None
+            )
+        assert app.store.stories.get_messages(story) == []
+        assert app.store.characters.list(story) == []
+
     def test_the_copy_is_the_storys_own(self, app: App) -> None:
         card = app.api.cards.create(name="Mira", description="before").value
         story = app.ensure_story()
@@ -415,17 +440,6 @@ class TestInvite:
             story, card_id=card.id, name=card.name, persona="you", expected_head=None
         )
         assert app.store.stories.get_messages(story)[0].attachments == ()
-
-    def test_a_card_with_no_text_yet_is_refused_and_nothing_written(self, app: App) -> None:
-        bare = app.api.cards.create(data=CAT.read_bytes(), file_name="cat.jpg").value.card
-        story = app.ensure_story()
-        with pytest.raises(Refused):
-            app.api.stories.cards.create(
-                story, card_id=bare.id, name=NEW_CARD_NAME, persona="you", expected_head=None
-            )
-        assert app.store.stories.get_messages(story) == []
-        with pytest.raises(Refused):
-            app.api.stories.create(card_ids=(bare.id,), persona="you")
 
     def test_undo_takes_the_character_and_leaves_the_card(self, app: App) -> None:
         card = app.api.cards.create(name="Mira", greeting="Hello.").value

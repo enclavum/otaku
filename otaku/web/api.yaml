@@ -2569,7 +2569,7 @@ components:
         file_name: { type: string }
         pictures: { type: array, items: { $ref: "#/components/schemas/CardPicture" }, description: "Its portraits, in order, the first the main one." }
         stories: { type: array, items: { $ref: "#/components/schemas/StoryCharacter" } }
-        is_blank: { type: boolean, description: "Whether it holds no text yet — a card made from a picture, before it is written — which no story takes." }
+        is_blank: { type: boolean, description: "Whether it holds no text yet — a card made from a picture, before it is written; with no picture either, no story takes it." }
         default_export_format: { type: string, enum: [png, json, charx, original], description: "What the card is exported as unless another is asked: the kind of file it came as, else PNG where it has a portrait, else JSON." }
         available_export_formats: { type: array, items: { type: string, enum: [png, json, charx, original] }, description: "What the card can be exported as: PNG where it has a portrait, JSON and CHARX always, `original` where it keeps the file it came as." }
         original_format: { type: [string, "null"], enum: [png, json, charx, null], description: "The kind of file the card came as and keeps; null for none." }
@@ -2661,7 +2661,7 @@ components:
         tagline: { type: string }
         pictures: { type: array, items: { $ref: "#/components/schemas/CardPicture" }, description: "Its portraits, in order, the first the main one." }
         story_count: { type: integer, description: "How many stories it is in, one linked character in each." }
-        is_blank: { type: boolean, description: "Whether it holds no text yet, which no story takes." }
+        is_blank: { type: boolean, description: "Whether it holds no text yet; with no picture either, no story takes it." }
 
     Changed:
       type: object

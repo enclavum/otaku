@@ -113,6 +113,8 @@ class PromptTexts(Protocol):
     @property
     def card_framing(self) -> str: ...  # the card block template, for composing card rows
     @property
+    def card_empty_framing(self) -> str: ...  # a card's block where none of its fields came up
+    @property
     def pinned_header(self) -> str: ...  # opens the pinned rows the recap quotes
     @property
     def story_framing(self) -> str: ...  # the text wire's instruction around the premise
@@ -190,7 +192,7 @@ def assemble_story(
         scenes = store.scenes.get_current(story_id, [m.id for m in messages])
     assembly = _Assembly(
         premise=system,
-        messages=_composed_cards(store, story_id, messages, prompts.card_framing),
+        messages=_composed_cards(store, story_id, messages, prompts),
         scenes=scenes,
         injections=injections,
         tool_set=tool_set,
@@ -654,7 +656,7 @@ def _drop_blank(pieces: list[PromptPiece]) -> list[PromptPiece]:
 
 
 def _composed_cards(
-    store: Store, story_id: int | None, messages: list[Message], card_framing: str
+    store: Store, story_id: int | None, messages: list[Message], prompts: PromptTexts
 ) -> list[Message]:
     """The transcript with each card row's wire text composed from its
     character's profile (`cards.card_to_wire`), found through the row's
@@ -667,6 +669,9 @@ def _composed_cards(
     for m in messages:
         who = carded.get(m.speaker_id) if m.kind == "card" and m.speaker_id else None
         if who is not None and who.profile:
-            m = replace(m, body=card_to_wire(who.profile, card_framing, char=who.name))
+            body = card_to_wire(
+                who.profile, prompts.card_framing, prompts.card_empty_framing, char=who.name
+            )
+            m = replace(m, body=body)
         out.append(m)
     return out

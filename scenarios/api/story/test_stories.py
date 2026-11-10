@@ -761,6 +761,22 @@ class TestStartWithCards:
             Attachment.of(p) for p in app.api.cards.get(wren.id).pictures
         )
 
+    def test_a_card_with_no_text_but_a_picture_starts_one(self, app: App) -> None:
+        made = app.api.cards.create(data=CAT.read_bytes(), file_name="cat.jpg", name="Whiskers")
+        whiskers = made.value.card
+        story = app.api.stories.create(
+            card_ids=(whiskers.id,), card_pictures=(whiskers.id,), persona="you"
+        ).value
+        (character,) = app.store.characters.list(story.id)
+        assert character.card_id == whiskers.id
+
+    def test_a_card_with_neither_text_nor_a_picture_is_refused(self, app: App) -> None:
+        nobody = app.api.cards.create(name="Nobody").value
+        before = len(app.api.stories.list())
+        with pytest.raises(Refused):
+            app.api.stories.create(card_ids=(nobody.id,), persona="you")
+        assert len(app.api.stories.list()) == before
+
     def test_a_pick_one_story_cannot_hold_is_refused_and_nothing_is_made(self, app: App) -> None:
         mira = app.api.cards.create(name="Mira", description="A face in the crowd.").value
         twin = app.api.cards.create(name="Mira", description="A face in the crowd.").value

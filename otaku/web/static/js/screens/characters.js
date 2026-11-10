@@ -263,7 +263,7 @@ export async function addCharacter() {
       picsendSwitch.setAttribute("aria-checked", String(sending));
     };
     // why a card can't be picked, in the list's own words; "" for none
-    const barred = (card) => (inStory.has(card.id) ? "already in" : card.is_blank ? "empty card" : "");
+    const barred = (card) => (inStory.has(card.id) ? "already in" : isEmpty(card) ? "empty card" : "");
     const stories = (card) =>
       card.story_count ? `${card.story_count} ${card.story_count === 1 ? "story" : "stories"}` : "not in a story";
     const arm = () => {
@@ -291,6 +291,9 @@ export async function addCharacter() {
       drawPreview(preview, card, whole.refused ? "" : whole.description, portrait);
       name.value = card.name;
       picsend.hidden = !card.pictures.length;
+      // a card with no text gives the story its picture alone: on, unless switched off
+      sending = card.is_blank && card.pictures.length > 0;
+      picsendSwitch.setAttribute("aria-checked", String(sending));
       if (check.refused) {
         report(check.notice);
         return;
@@ -646,8 +649,10 @@ async function redraw(popup, answer = null) {
   if (!state.query) state.total.cards = cards.length;
   if (!state.unlinkedQuery) state.total.unlinked = unlinked.length;
   for (const card of cards) state.known.set(card.id, card);
-  // a picked card deleted, or merged away, is no longer picked
-  if (!state.query) state.picked = state.picked.filter((id) => cards.some((card) => card.id === id));
+  // a picked card deleted, merged away or emptied is no longer picked
+  if (!state.query) {
+    state.picked = state.picked.filter((id) => cards.some((card) => card.id === id && !isEmpty(card)));
+  }
   drawCards(popup);
   drawUnlinked(popup);
   const { cards: n, unlinked: m } = state.total;
@@ -745,9 +750,9 @@ function drawPicked(popup) {
 
 function tile(popup, card) {
   /* A card in the gallery: its picture — flipped through where it has
-     several, its tick for a story in the corner — its name, tagline and
-     the stories it is in. A card with no picture takes one from its
-     frame. */
+     several, its tick for a story in one corner and its cross in another
+     — its name, tagline and the stories it is in. A card with no picture
+     takes one from its frame. */
   const box = element("div", "otk-tile");
   box.tabIndex = 0;
   box.setAttribute("role", "button");
@@ -785,7 +790,17 @@ function tile(popup, card) {
     });
     pic.append(add);
   }
-  pic.append(tick(popup, card));
+  // the card's cross, shown over the picture as the pointer rests on it
+  const remove = element("button", "otk-tile__remove", "\u2715");
+  remove.type = "button";
+  remove.setAttribute("aria-label", `Delete ${card.name}`);
+  remove.onclick = guard(async (event) => {
+    event.stopPropagation();
+    await deleteCard(popup, card);
+  });
+  const ticked = tick(popup, card);
+  if (ticked) pic.append(ticked);
+  pic.append(remove);
   box.append(
     pic,
     span("otk-tile__name", card.name),
@@ -1312,6 +1327,9 @@ function linksIn(text) {
 }
 
 function tick(popup, card, { inline = false } = {}) {
+  /* The card's tick, picking it for a story — none for a card no story
+     takes (`isEmpty`): in a row, the room it would take, kept. */
+  if (isEmpty(card)) return inline ? span("otk-tick otk-tick--inline otk-tick--none") : null;
   const box = element("button", inline ? "otk-tick otk-tick--inline" : "otk-tick");
   box.type = "button";
   box.setAttribute("role", "checkbox");
@@ -1330,6 +1348,12 @@ function tick(popup, card, { inline = false } = {}) {
     drawPicked(popup);
   };
   return box;
+}
+
+function isEmpty(card) {
+  /* A card that gives a story nothing but its name — no text yet and no
+     picture — which no story takes (`story.cards.services._is_playable`). */
+  return card.is_blank && !card.pictures.length;
 }
 
 function meta(card) {
@@ -1572,16 +1596,21 @@ async function openCard(popup, cardId, { tab = "card", storyId = null, naming = 
 
   /* What the card's actions answer is said in its own foot, the panel's
      being under the scrim; a card drawn again where it stands keeps the
-     foot it had, and the sentence or the error standing in it. */
+     foot it had, and the sentence or the error standing in it. Start a
+     story, in the middle, starts one with the card alone. */
   const foot = (sheet.open && $(".otk-sheet__foot", sheet)) || element("div", "otk-sheet__foot");
+  foot.classList.add("otk-sheet__foot--card");
   const note = $("[data-note]", foot) ?? span("otk-sheet__note");
   note.dataset.note = "";
-  foot.replaceChildren(
-    exportButton(card),
-    note,
+  const start = element("div", "otk-sheet__side");
+  start.append(exportButton(card), note);
+  const end = element("div", "otk-sheet__side otk-sheet__side--end");
+  end.append(
     actionButton("Merge into…", { onclick: guard(() => mergeCard(popup, card)) }),
     actionButton("Delete", { kind: "otk-btn--danger", onclick: guard(() => deleteCard(popup, card)) }),
   );
+  const begin = actionButton("Start a story", { off: isEmpty(card), onclick: guard(() => startStory(popup, card)) });
+  foot.replaceChildren(start, begin, end);
 
   const select = (which, story = null) => {
     cardTab.setAttribute("aria-selected", String(which === "card"));
@@ -2561,16 +2590,19 @@ async function openUnlinked(popup, row) {
 
 // ---------- a story started with cards ----------
 
-async function startStory(popup) {
-  /* The picked cards, in pick order, into a story made for them: its
-     title (optional), who the reader plays, and per card with a picture
-     whether its portrait goes into the context — off until switched on. */
-  const cards = state.picked.map((id) => state.known.get(id)).filter(Boolean);
+async function startStory(popup, alone = null) {
+  /* The picked cards, in pick order — or `alone`, the card a card window
+     starts a story with, the picks left as they are — into a story made
+     for them: its title (optional), who the reader plays, and per card
+     with a picture whether its portrait goes into the context — off until
+     switched on. */
+  const cards = alone ? [alone] : state.picked.map((id) => state.known.get(id)).filter(Boolean);
   if (!cards.length) return;
   const dialog = $('dialog[data-dialog="start"]');
   const title = $("#otk-start-name", dialog);
   const persona = $("#otk-start-persona", dialog);
-  const sending = new Set();
+  // a card with no text gives the story its picture alone: on, unless switched off
+  const sending = new Set(cards.filter((card) => card.is_blank && card.pictures.length).map((card) => card.id));
   const choice = await ask("start", () => {
     title.value = "";
     const picturedCards = cards.filter((card) => card.pictures.length);
@@ -2583,7 +2615,7 @@ async function startStory(popup) {
       box.firstElementChild,
       ...picturedCards.map((card) => {
         const line = element("div", "otk-picsend");
-        const toggle = switchButton(`Send ${card.name}'s picture to the model`, false);
+        const toggle = switchButton(`Send ${card.name}'s picture to the model`, sending.has(card.id));
         toggle.onclick = () => {
           const on = !sending.has(card.id);
           if (on) sending.add(card.id);
@@ -2623,7 +2655,7 @@ async function startStory(popup) {
     return;
   }
   held.hold(made.value.id);
-  state.picked = [];
+  if (!alone) state.picked = [];
   closeAll();
   await landed(made.notice, { redraw: "always" });
 }
