@@ -11,7 +11,7 @@ import os
 import sys
 from dataclasses import dataclass
 
-from otaku import __version__
+from otaku import __version__, envvars
 from otaku.console import BOLD, DIM, RESET
 from otaku.formatting import format_context
 
@@ -198,4 +198,4 @@ def _style() -> _Style:
 def _colour() -> bool:
     if os.environ.get("NO_COLOR"):
         return False
-    return sys.stdout.isatty() or os.environ.get("OTAKU_COLOR") == "1"
+    return sys.stdout.isatty() or os.environ.get(envvars.COLOR) == "1"

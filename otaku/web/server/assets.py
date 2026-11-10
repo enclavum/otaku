@@ -6,7 +6,7 @@ typefaces, are listed from the package at import, so adding one is one
 file and no row. Every packaged byte is read per request, which is what
 makes an edit visible without a restart. The reader's own files — their
 stylesheet, their typefaces — are looked up the same way against their
-directory in the state dir."""
+directory in the home folder."""
 
 from importlib.resources import files
 from pathlib import Path

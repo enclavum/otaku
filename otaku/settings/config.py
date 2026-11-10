@@ -100,6 +100,8 @@ class Config:
     # [database]
     backups: int = 7
     seed_sample: bool = True
+    # [logs]
+    log_days: int = 7
 
     def to_toml(self) -> str:
         """This configuration rendered as config.toml text: every key
@@ -141,8 +143,11 @@ class Config:
             row(f"settle_messages = {self.settle_messages}", "newest messages a scene never closes over"),
             "",
             "[database]",
-            row(f"backups = {self.backups}", "daily snapshots kept in database/backups/ (0 disables)"),
+            row(f"backups = {self.backups}", "daily snapshots kept in database/backups/ (0 disables backups)"),
             row(f"seed_sample = {toml_scalar(self.seed_sample)}", "import the sample story into a freshly created database"),
+            "",
+            "[logs]",
+            row(f"days = {self.log_days}", "days of logs kept in logs/ (0 disables logging except for error logs)"),
             "",
             "[encryption]",
             row(f"provider = {toml_scalar(self.encryption.provider)}", "none — content stored as readable plain text"),
@@ -213,6 +218,7 @@ def load(path: Path) -> Config:
     context = _table(raw, "context", path)
     lore = _table(raw, "lore_extraction", path)
     database = _table(raw, "database", path)
+    logs = _table(raw, "logs", path)
     try:
         return Config(
             encryption=encryption,
@@ -243,6 +249,7 @@ def load(path: Path) -> Config:
             settle_messages=max(0, _int(lore, "settle_messages", 20)),
             backups=max(0, _int(database, "backups", 7)),
             seed_sample=bool(database.get("seed_sample", True)),
+            log_days=max(0, _int(logs, "days", 7)),
         )
     except ValueError as e:
         raise ConfigError(f"{path}: {e}") from e

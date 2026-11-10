@@ -684,10 +684,10 @@ def _patch_threads() -> None:
     )
 
 
-# ---------- the state dir ----------
+# ---------- the home folder ----------
 
 
-def _seed_state_dir(root: Path) -> None:
+def _seed_home_folder(root: Path) -> None:
     """What scenarios/support/harness.py seeds, minus the HTTP server:
     one scripted provider, smoothing off (the pacing is the script's),
     idle extraction off (a browser tab has no worker thread to run it —
@@ -784,8 +784,8 @@ def main() -> None:
     )
 
     root = Path("/state/otaku")
-    _seed_state_dir(root)
-    # The visitor's "own" file, outside the state dir: the card /card
+    _seed_home_folder(root)
+    # The visitor's "own" file, outside the home folder: the card /card
     # imports — a real file the real parser reads.
     import demo_script
 

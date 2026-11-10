@@ -2,7 +2,7 @@
 
 Add-only by design: an existing item is never updated, so no caller can
 clobber key material. Items are removed only all at once, every one
-under a service (`purge_items`), when its state dir is purged.
+under a service (`purge_items`), when its home folder is purged.
 """
 
 import base64

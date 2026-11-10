@@ -9,6 +9,9 @@ migration/
 notes/
 *.egg-info/
 
+# a checkout's own state dir (`backend.app.paths`)
+/data/
+
 .DS_Store
 *.py[cod]
 

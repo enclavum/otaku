@@ -192,7 +192,7 @@ class TestInfo:
             app.play("/info")
             out = capsys.readouterr().out
             assert "No model selected" in out
-            assert "State dir:" in out
+            assert "Home folder:" in out
             assert "Messages:" in out  # the loaded story is still counted
             assert "You are the narrator." not in out
         finally:
@@ -211,7 +211,7 @@ def _rows(report: InfoReport) -> dict[str, str]:
 def _llamacpp_rows(root, *, trained: int, window: int) -> dict[str, str]:
     """`/info`'s rows on a llama.cpp whose model was trained to `trained`
     tokens and loaded with a slot of `window` — one server and one
-    state dir each, since a client keeps the window it first read."""
+    home folder each, since a client keeps the window it first read."""
     server = scripted.ModelServer()
     server.contexts["test-model"] = trained
     server.window = window

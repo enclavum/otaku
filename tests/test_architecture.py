@@ -54,7 +54,7 @@ _STATIC = _SRC / "web" / "static"
 _ALLOWED = {
     # `python -m otaku`: the module entry, which only calls the real one.
     "__main__": {"cli"},
-    "cli": {"terminal", "web", "backend.launch", "logging", "update", "formatting"},
+    "cli": {"terminal", "web", "backend.launch", "logging", "update", "envvars", "formatting"},
     # `web` because `/set serve` serves this app to a browser beside the
     # chat: the arrow only points this way, so `web` knows nothing of
     # `terminal`.
@@ -62,8 +62,10 @@ _ALLOWED = {
     "web": {"console", "backend.api", "formatting"},
     # What a frontend draws in the terminal it was LAUNCHED from — a leaf,
     # handed what it draws.
-    "console": {"formatting"},
+    "console": {"envvars", "formatting"},
     "agents": {"context", "providers", "store", "logging", "formatting"},
+    # `update` for the checkout otaku runs from, which the home folder's
+    # default goes by (`backend.app.paths`)
     "backend": {
         "agents",
         "context",
@@ -74,13 +76,16 @@ _ALLOWED = {
         "prompts",
         "encryption",
         "logging",
+        "update",
+        "envvars",
         "formatting",
     },
     "context": {"store", "providers"},
     # `formatting` for `Money`: a value type, in the leaf everyone may reach.
-    "providers": {"settings", "formatting"},
+    "providers": {"settings", "envvars", "formatting"},
     "integrations": {"settings", "formatting"},
-    "store": {"encryption"},
+    # `formatting` for the size a vacuum freed, in the sentence it returns.
+    "store": {"encryption", "formatting"},
     # The templates, built-in and as prompts.toml overrides them; the
     # settings package for its committed writes and its surgery.
     "prompts": {"settings", "formatting"},
@@ -88,6 +93,9 @@ _ALLOWED = {
     "logging": {"providers", "encryption", "formatting"},
     "encryption": {"formatting"},
     "update": set(),
+    # The names of the environment variables otaku reads: a leaf, like
+    # `formatting`, for every layer that reads one.
+    "envvars": set(),
     "formatting": set(),
 }
 

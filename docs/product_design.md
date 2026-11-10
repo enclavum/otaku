@@ -80,8 +80,8 @@ encryption by setting a parameter in config.toml.
 
 ## Environment separation
 
-You can create a completely separate environment by setting OTAKU_CONFIG_DIR and running the app
-this way: `OTAKU_CONFIG_DIR=~/.otaku-alt otaku`.
+You can create a completely separate environment by setting OTAKU_HOME and running the app
+this way: `OTAKU_HOME=~/.otaku-alt otaku`.
 
 ## Reserved for future versions
 

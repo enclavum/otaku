@@ -5,8 +5,8 @@ Every colour and every typeface the interface uses is a custom property on
 does not list — title cuts, the tabs, tracking, one-off lengths — is the
 design's own, hard-coded on purpose, and no theme's business.
 
-**A theme is a list of token overrides and nothing else.** Put them in the
-state dir's `web/custom.css`, which loads last and wins. Override
+**A theme is a list of token overrides and nothing else.** Put them in
+`web/custom.css` in otaku's home folder, which loads last and wins. Override
 `--otk-paper` and the page, every panel, every docket, every dialog and every
 field change together — there is no second place where paper is defined.
 
@@ -83,7 +83,7 @@ the summary in a grey fold.
 ## Typefaces of your own
 
 Put a `.woff2` (or `.woff`, `.ttf`, `.otf`) in `web/fonts/` beside your
-`custom.css` in the state dir, and ask for it under `/web-fonts/`:
+`custom.css` in otaku's home folder, and ask for it under `/web-fonts/`:
 
 ```css
 @font-face {

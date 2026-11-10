@@ -93,16 +93,14 @@ Planned (a release every one to two weeks):
 ## Requirements
 
 - Platform: Windows / macOS / Linux.
+- Python 3.11+ **or** Docker.
 - Local LLM provider(s) **or** an API key for cloud provider(s).
-
-Providers supported: llama.cpp, KoboldCpp, Ollama, oMLX, LM Studio; OpenRouter and
-NanoGPT; and any other OpenAI-compatible server through the Generic OpenAI provider, by URL and
-key.
 
 ## Installation
 
 The recommended way is the installation script, which first installs the `uv` package manager — if
-you don't have it yet — and then installs otaku with it.
+you don't have it yet — and then installs otaku with it. To run it from a git checkout without
+installing, see [Launch without installation](#launch-without-installation).
 
 ```bash
 # macOS and Linux
@@ -124,9 +122,6 @@ brew install enclavum/tap/otaku
 
 # run in Docker (only the web interface accessible)
 docker compose -f https://github.com/enclavum/otaku.git up -d
-
-# run in Docker if you've checked out the repo
-docker compose up -d
 ```
 
 How to update:
@@ -146,10 +141,36 @@ otaku uninstall  # also purges data on request
 In the terminal, type one of the two commands:
 
 - `otaku` — opens the terminal UI;
-- `otaku serve` — makes the web interface available at http://localhost:9600 (can be
-  [configured](#web-interface-settings)).
+- `otaku serve` — serves the web interface at http://localhost:9600.
 
-The terminal UI can also serve the web interface while it runs: type `/set serve on`.
+### Launch without installation
+
+You can run the app without installing it, from the checked-out repo.
+
+With Python 3.11+, `venv` and `pip`:
+
+```bash
+git clone https://github.com/enclavum/otaku.git
+cd otaku
+
+# macOS and Linux
+python3 -m venv .venv
+.venv/bin/pip install -e .
+.venv/bin/otaku          # or: .venv/bin/otaku serve
+
+# Windows
+py -m venv .venv
+.venv\Scripts\pip install -e .
+.venv\Scripts\otaku      # or: .venv\Scripts\otaku serve
+```
+
+With Docker (only the web interface accessible):
+
+```bash
+docker compose up -d
+```
+
+## First start
 
 On first start, you choose a provider and a model. Otaku automatically detects local LLM
 backends, while for cloud providers (OpenRouter, NanoGPT) you have to enter their API keys.
@@ -261,7 +282,8 @@ You can use the `/context` command to see what exactly will be sent to the model
 
 ### Configuration files
 
-Everything lives in the state dir, `~/.otaku` by default:
+Everything lives in otaku's home folder — `~/.otaku` by default, or `data/` when run from a
+checkout:
 
 - `configs/config.toml` — context shape, extraction thresholds, encryption, backups, and terminal
   and web settings.
@@ -279,8 +301,8 @@ keeping the pre-edit file in `configs/backups/`. `prompts.toml` migrates the sam
 template you left unedited follows a new release's built-in, and one you've edited is never
 touched.
 
-Set `OTAKU_CONFIG_DIR` to run a completely separate environment:
-`OTAKU_CONFIG_DIR=~/.otaku-alt otaku`.
+Set `OTAKU_HOME` to run a completely separate environment:
+`OTAKU_HOME=~/.otaku-alt otaku`.
 
 ### Web interface settings
 
@@ -313,8 +335,8 @@ design. The custom properties it can set are listed in
 
 ## Storage and privacy
 
-Stories live in a local SQLite database; the database is snapshotted daily into the state dir,
-the last seven kept (configurable).
+Stories live in a local SQLite database; the database is snapshotted daily into otaku's home
+folder, the last seven kept (configurable).
 
 Pictures attached to a turn and cards' pictures are kept beside the database, downsized and
 stripped of their metadata; they are not part of the daily snapshot.

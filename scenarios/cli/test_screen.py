@@ -411,7 +411,7 @@ class TestStoryModeKeys:
 
 class Played:
     """Launches the app in a pty over a story seeded through the backend,
-    one state dir each; ends every terminal and the server with the test."""
+    one home folder each; ends every terminal and the server with the test."""
 
     def __init__(self, tmp_path: Path) -> None:
         # the fake model's picks from a seed a failure names, to replay them

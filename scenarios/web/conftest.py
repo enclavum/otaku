@@ -52,7 +52,7 @@ class Page:
         # certificate is otaku's own, so nothing can verify it. None for
         # a plain address, where urlopen ignores it anyway.
         self.context = context
-        # The state dir, for the half of a story that is files on disk —
+        # The home folder, for the half of a story that is files on disk —
         # the reader's own stylesheet and typefaces above all.
         self.root = root
         self._stop = stop
@@ -241,7 +241,7 @@ class Page:
 
 @pytest.fixture
 def page(server: ModelServer, tmp_path: Path) -> Iterator[Page]:
-    """`otaku web` over a fresh state dir, on a port nothing else holds.
+    """`otaku web` over a fresh home folder, on a port nothing else holds.
     The address is the configuration's, exactly as the terminal reads
     it, and the fixture stops the server the way Ctrl+C would."""
     yield from _serving(server, tmp_path, host="127.0.0.1")
@@ -250,7 +250,7 @@ def page(server: ModelServer, tmp_path: Path) -> Iterator[Page]:
 @pytest.fixture
 def secure(server: ModelServer, tmp_path: Path) -> Iterator[Page]:
     """The same over TLS — `[web] https = true`, the pair generated into
-    the state dir's `cert/` because there is nothing there yet."""
+    the home folder's `cert/` because there is nothing there yet."""
     yield from _serving(server, tmp_path, host="127.0.0.1", https=True)
 
 
@@ -274,7 +274,7 @@ def serving(
     provider: str = PROVIDER,
 ) -> Iterator[Page]:
     """A served session a story opens for itself, for the ones the
-    fixtures cannot cover: what is in the state dir BEFORE the launch is
+    fixtures cannot cover: what is in the home folder BEFORE the launch is
     what the story is about, the server asks for a password, or the
     model must be served by a named engine (`provider` picks the client
     the registry builds, as the harness's `set_config_provider` does)."""
@@ -316,7 +316,7 @@ def _serving(
     context = ssl._create_unverified_context() if https else None
     app = backend_launch.open_app(root)
     try:
-        # A story that launches twice over one state dir finds the model
+        # A story that launches twice over one home folder finds the model
         # already remembered: an answer, never a fault.
         with contextlib.suppress(Refused):
             Api(app).app.update(models={ModelRole.WRITING: ModelRef(provider, MODEL)})

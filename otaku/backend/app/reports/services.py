@@ -63,12 +63,12 @@ def get_usage(app: App, story_id: int | None = None) -> list[UsageTotal]:
 
 def get_info(app: App, story_id: int | None = None) -> tuple[Rows, Rows | None, Rows]:
     """Everything otaku knows about the active model and this run, in
-    three blocks of labelled facts — the state dir, the model (None
+    three blocks of labelled facts — the home folder, the model (None
     without one), the app — best-effort: network-backed fields are
     silently skipped. Without a model only that block is missing — the
-    state dir, the story and the parameters are the app's own, and
+    home folder, the story and the parameters are the app's own, and
     reporting them needs no provider."""
-    state = (("State dir", pretty_path(app._paths.root)),)
+    state = (("Home folder", pretty_path(app._paths.root)),)
     model = _model_info(app) if app._client(app._model(ModelRole.WRITING)) is not None else None
     return state, model, _app_rows(app, story_id)
 

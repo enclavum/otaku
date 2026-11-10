@@ -445,7 +445,7 @@ function providerDetail(state, pane, provider) {
     element(
       "p",
       "otk-note",
-      "The key is kept in the state dir on this machine and sent only to this provider.",
+      "The key is kept in otaku's home folder on this machine and sent only to this provider.",
     ),
   );
 

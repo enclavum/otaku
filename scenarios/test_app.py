@@ -1,6 +1,7 @@
-"""The launch itself (`otaku.app`): the key ceremony and what it seals,
-the daily backup snapshot, resuming over a story that is gone, and the
-purge that `otaku uninstall` asks for.
+"""The launch itself (`otaku.app`): the home folder it opens, the key
+ceremony and what it seals, the backup snapshots and the logs it prunes,
+what a delete leaves in the database, resuming over a story that is
+gone, and the purge that `otaku uninstall` asks for.
 
 Encryption runs the real path end to end — the "command" KEK provider
 with a scripted retrieve_command — so these stories prove the core
@@ -10,25 +11,29 @@ missing keystore refused BEFORE the ceremony could mint over it."""
 import base64
 import itertools
 import json
+import os
 import re
 import secrets
 import sqlite3
 import subprocess
 import sys
+import time
 import tomllib
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
 
-from otaku import encryption
+from otaku import encryption, envvars
 from otaku import logging as otaku_logging
 from otaku import prompts as prompts_mod
 from otaku.backend import launch as backend_launch
 from otaku.backend.api import Api, ModelRef, ModelRole
+from otaku.backend.app import paths as paths_mod
 from otaku.backend.app.paths import Paths
 from otaku.backend.app.pictures import services as backend_files
 from otaku.backend.story.messages.schemas import RawFile
+from otaku.cli import resolve_root
 from otaku.encryption import Cipher, EncryptionError, PlainCipher
 from otaku.formatting import toml_string
 from otaku.prompts.migrations import PAST
@@ -78,6 +83,66 @@ def load_config(paths: Paths):
 
 KEY = base64.b64encode(b"k" * 32).decode()
 OTHER_KEY = base64.b64encode(b"x" * 32).decode()
+
+
+class TestHomeFolder:
+    """Where otaku keeps everything: the folder the environment names,
+    the first of `OTAKU_HOME`, `OTAKU_DATA_DIR` and `OTAKU_CONFIG_DIR`
+    set; else a git checkout's own `data/` once it has one, `~/.otaku`
+    where it exists, a checkout's `data/`, and `~/.otaku`."""
+
+    def test_otaku_home_comes_before_the_older_names(self, monkeypatch, tmp_path) -> None:
+        _names_home(
+            monkeypatch,
+            OTAKU_HOME=str(tmp_path / "home"),
+            OTAKU_DATA_DIR=str(tmp_path / "data"),
+            OTAKU_CONFIG_DIR=str(tmp_path / "config"),
+        )
+        assert resolve_root() == tmp_path / "home"
+
+    def test_the_older_names_follow_in_their_order(self, monkeypatch, tmp_path) -> None:
+        _names_home(
+            monkeypatch,
+            OTAKU_HOME="",
+            OTAKU_DATA_DIR=str(tmp_path / "data"),
+            OTAKU_CONFIG_DIR=str(tmp_path / "config"),
+        )
+        assert resolve_root() == tmp_path / "data"
+        _names_home(monkeypatch, OTAKU_CONFIG_DIR=str(tmp_path / "config"))
+        assert resolve_root() == tmp_path / "config"
+
+    def test_none_set_leaves_the_folder_to_the_defaults(self, monkeypatch) -> None:
+        _names_home(monkeypatch)
+        assert resolve_root() is None
+
+    def test_a_named_folder_comes_before_both_defaults(self, monkeypatch, tmp_path) -> None:
+        _machine(monkeypatch, tmp_path, is_checkout=True, own_made=True, default_made=True)
+        assert Paths.resolve(tmp_path / "mine").root == tmp_path / "mine"
+
+    def test_a_checkouts_own_folder_once_it_has_one(self, monkeypatch, tmp_path) -> None:
+        _, own = _machine(monkeypatch, tmp_path, is_checkout=True, own_made=True, default_made=True)
+        assert Paths.resolve().root == own
+
+    def test_an_existing_default_before_a_checkout_without_its_own(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        # A checkout from before checkouts kept their own keeps its data.
+        default, _ = _machine(
+            monkeypatch, tmp_path, is_checkout=True, own_made=False, default_made=True
+        )
+        assert Paths.resolve().root == default
+
+    def test_a_checkout_with_neither_makes_its_own(self, monkeypatch, tmp_path) -> None:
+        _, own = _machine(
+            monkeypatch, tmp_path, is_checkout=True, own_made=False, default_made=False
+        )
+        assert Paths.resolve().root == own
+
+    def test_an_install_takes_the_default(self, monkeypatch, tmp_path) -> None:
+        default, _ = _machine(
+            monkeypatch, tmp_path, is_checkout=False, own_made=False, default_made=False
+        )
+        assert Paths.resolve().root == default
 
 
 class TestEncryption:
@@ -191,6 +256,69 @@ class TestBackups:
         finally:
             relaunched.close()
 
+    def test_the_newest_snapshots_are_kept_the_ladders_among_them(
+        self, server: ModelServer, tmp_path
+    ) -> None:
+        # One count for both kinds, by when each was written: today's,
+        # then yesterday's, then a migration's from a day and a half ago.
+        root = tmp_path / "state"
+        launch(root, server).close()
+        backups_dir = Paths.resolve(root).backups_dir
+        planted = _plant_snapshots(backups_dir)
+        set_config(root, backups=4)
+        launch(root, server).close()
+        kept = {_snapshot_name(0), _snapshot_name(1), "history-schema-v14.db", _snapshot_name(2)}
+        assert {path.name for path in backups_dir.iterdir()} == kept | {planted}
+
+    def test_zero_takes_none_and_keeps_none(self, server: ModelServer, tmp_path) -> None:
+        root = tmp_path / "state"
+        launch(root, server).close()
+        backups_dir = Paths.resolve(root).backups_dir
+        planted = _plant_snapshots(backups_dir)
+        set_config(root, backups=0)
+        launch(root, server).close()
+        assert [path.name for path in backups_dir.iterdir()] == [planted]
+
+    def test_an_open_beside_the_launchs_takes_and_prunes_nothing(self, tmp_path) -> None:
+        # The worker's own connection: the snapshots are the launch's.
+        paths = _state(tmp_path)
+        _plant_snapshots(paths.backups_dir)
+        before = sorted(path.name for path in paths.backups_dir.iterdir())
+        _open(paths).close()
+        assert sorted(path.name for path in paths.backups_dir.iterdir()) == before
+
+
+class TestLogs:
+    """The logs keep `[logs] days` of files, today the first, pruned at
+    launch; 0 turns the request and system logs off, and the error log
+    keeps a week of its own."""
+
+    def test_the_days_past_the_kept_are_pruned_at_launch(
+        self, server: ModelServer, tmp_path
+    ) -> None:
+        root = tmp_path / "state"
+        launch(root, server).close()
+        set_config(root, log_days=3)
+        logs_dir = Paths.resolve(root).logs_dir
+        _plant_logs(logs_dir, ages=(0, 2, 3, 30))
+        launch(root, server).close()
+        kept = {_day(0), _day(2)}
+        assert _log_days(logs_dir) == {"requests": kept, "system": kept, "error": kept}
+
+    def test_zero_turns_the_request_and_system_logs_off(
+        self, server: ModelServer, tmp_path
+    ) -> None:
+        root = tmp_path / "state"
+        launch(root, server).close()
+        set_config(root, log_days=0)
+        logs_dir = Paths.resolve(root).logs_dir
+        _plant_logs(logs_dir, ages=(0, 6, 7))
+        app = launch(root, server)
+        app.play("I enter the hall.")
+        backend_launch.system_log(root).record("app update finished")  # what `otaku update` writes
+        app.close()
+        assert _log_days(logs_dir) == {"error": {_day(0), _day(6)}}
+
 
 class TestRequestLog:
     """The request log pairs every request with its answer: what came
@@ -255,6 +383,87 @@ class TestDatabaseGuard:
         conn.commit()
         conn.close()
         launch(tmp_path / "state", server).close()  # launching IS the assertion
+
+
+class TestDeletedContent:
+    """A delete leaves no trace of what it removed in the database file;
+    a launch rewrites a file a quarter free — what deletes left there
+    before, gone — unless another otaku is writing to it, and says so."""
+
+    def test_a_deleted_storys_text_leaves_the_file(self, app: App) -> None:
+        marker = f"Vermilion-{secrets.token_hex(8)}"
+        app.server.script = lambda body: f"The {marker} " + "lantern light " * 600
+        app.play("I enter the hall.")
+        story_id = app.story_id
+        assert story_id is not None
+        app.api.stories.delete(story_id)
+        app.close()
+        assert marker.encode() not in app.paths.database_file.read_bytes()
+        # SQLite builds differ in what a delete leaves by default: every
+        # connection otaku opens says it itself.
+        conn = Database.connect(app.paths.database_file)
+        try:
+            assert conn.execute("PRAGMA secure_delete").fetchone()[0] == 1
+        finally:
+            conn.close()
+
+    def test_a_launch_rewrites_a_file_a_quarter_free(self, server: ModelServer, tmp_path) -> None:
+        root = tmp_path / "state"
+        launch(root, server).close()
+        database = Paths.resolve(root).database_file
+        marker = _left_by_old_deletes(database, rows=1500)
+        size = database.stat().st_size
+        launch(root, server).close()
+        assert _free_pages(database) == 0
+        assert database.stat().st_size < size
+        assert marker not in database.read_bytes()
+
+    def test_the_rewrite_is_said(self, tmp_path) -> None:
+        paths = _state(tmp_path)
+        Database.open(paths.database_file, PlainCipher(), backups_dir=paths.backups_dir).close()
+        _left_by_old_deletes(paths.database_file, rows=1500)
+        db = Database.open(paths.database_file, PlainCipher(), backups_dir=paths.backups_dir)
+        try:
+            note = db.vacuum()
+        finally:
+            db.close()
+        assert note is not None and note.show
+
+    def test_under_a_quarter_free_nothing_is_rewritten(self, tmp_path) -> None:
+        paths = _state(tmp_path)
+        Database.open(paths.database_file, PlainCipher(), backups_dir=paths.backups_dir).close()
+        _left_by_old_deletes(paths.database_file, rows=1500, share=0.1)
+        free = _free_pages(paths.database_file)
+        db = Database.open(paths.database_file, PlainCipher(), backups_dir=paths.backups_dir)
+        try:
+            assert db.vacuum() is None
+        finally:
+            db.close()
+        assert _free_pages(paths.database_file) == free > 0
+
+    def test_another_otaku_writing_puts_it_off_to_the_next_launch(self, tmp_path) -> None:
+        paths = _state(tmp_path)
+        Database.open(paths.database_file, PlainCipher(), backups_dir=paths.backups_dir).close()
+        _left_by_old_deletes(paths.database_file, rows=1500)
+        free = _free_pages(paths.database_file)
+        other = sqlite3.connect(paths.database_file, isolation_level=None)
+        db = Database.open(paths.database_file, PlainCipher(), backups_dir=paths.backups_dir)
+        try:
+            other.execute("BEGIN IMMEDIATE")
+            started = time.monotonic()
+            skipped = db.vacuum()
+            assert time.monotonic() - started < 1  # never waits for the writer
+            assert skipped is not None and not skipped.show  # the log's alone
+            # Later writes still wait for another otaku, as before.
+            assert db.conn.execute("PRAGMA busy_timeout").fetchone()[0] > 0
+            other.execute("COMMIT")
+            assert _free_pages(paths.database_file) == free
+            vacuumed = db.vacuum()
+        finally:
+            db.close()
+            other.close()
+        assert vacuumed is not None and vacuumed.show
+        assert _free_pages(paths.database_file) == 0
 
 
 class TestSchemaMigration:
@@ -640,9 +849,7 @@ class TestFilesFolder:
 
     def test_a_picture_lands_sealed_beside_the_database(self, tmp_path) -> None:
         paths = _state(tmp_path)
-        store = Store.open(
-            paths.database_file, Cipher(FILES_KEY), backups_dir=paths.backups_dir, keep=0
-        )
+        store = Store.open(paths.database_file, Cipher(FILES_KEY), backups_dir=paths.backups_dir)
         try:
             name = store.files.add_picture(Owner.STORY, 24, CAT, "image/jpeg", thumb=THUMB)
             # Readable in a listing: the kind, the story, the day, a short
@@ -670,9 +877,7 @@ class TestFilesFolder:
 
     def test_another_key_reads_the_folder_as_absent(self, tmp_path) -> None:
         paths = _state(tmp_path)
-        store = Store.open(
-            paths.database_file, Cipher(FILES_KEY), backups_dir=paths.backups_dir, keep=0
-        )
+        store = Store.open(paths.database_file, Cipher(FILES_KEY), backups_dir=paths.backups_dir)
         try:
             name = store.files.add_picture(Owner.STORY, 1, CAT, "image/jpeg")
         finally:
@@ -1004,6 +1209,25 @@ class TestConfigMigration:
         backups = list(app.paths.config_backups_dir.iterdir())
         assert len(backups) == 1
         assert "[terminal]" not in backups[0].read_text(encoding="utf-8")
+
+    def test_an_old_config_gains_the_logs_section_below_database(
+        self, server: ModelServer, tmp_path
+    ) -> None:
+        app = launch(tmp_path / "state", server)
+        app.close()
+        config_file = app.paths.config_file
+        old = "\n".join(
+            line
+            for line in config_file.read_text(encoding="utf-8").splitlines()
+            if not line.startswith(("[logs]", "days ="))
+        )
+        config_file.write_text(old + "\n", encoding="utf-8")
+
+        cfg, _providers = load_config(app.paths)
+        migrated = config_file.read_text(encoding="utf-8")
+        index = migrated.index
+        assert index("[database]") < index("[logs]") < index("[encryption]")
+        assert cfg.log_days == 7
 
     def test_an_old_context_section_gains_the_max_context_row(
         self, server: ModelServer, tmp_path
@@ -1448,24 +1672,24 @@ class TestFirstLaunch:
 
 
 class TestPurge:
-    """The state dir deleted — otaku's own folders, and the dir itself
-    where they were all it held — with its keys in the OS keychain."""
+    """The home folder deleted — otaku's own folders, and the folder
+    itself where they were all it held — with its keys in the OS keychain."""
 
-    def test_a_used_state_dir_is_gone(self, app: App) -> None:
+    def test_a_used_home_folder_is_gone(self, app: App) -> None:
         app.play("I enter the hall.")
         root = app.paths.root
         app.close()
         assert backend_launch.purge(root) == root
         assert not root.exists()
 
-    def test_what_else_the_dir_holds_stays_and_the_dir_with_it(self, app: App) -> None:
+    def test_what_else_the_folder_holds_stays_and_the_folder_with_it(self, app: App) -> None:
         root = app.paths.root
         (root / "notes.txt").write_text("mine", encoding="utf-8")
         app.close()
         backend_launch.purge(root)
         assert sorted(entry.name for entry in root.iterdir()) == ["notes.txt"]
 
-    def test_a_dir_never_made_is_purged_without_a_fault(self, tmp_path: Path) -> None:
+    def test_a_folder_never_made_is_purged_without_a_fault(self, tmp_path: Path) -> None:
         # nothing there, nothing under its keychain service: nothing fails
         backend_launch.purge(tmp_path / "state")
 
@@ -1629,13 +1853,126 @@ def _v1_database(root) -> Paths:
     return paths
 
 
+def _names_home(monkeypatch, **named: str) -> None:
+    """The environment naming the home folder by `named` alone."""
+    for name in envvars.HOME:
+        monkeypatch.delenv(name, raising=False)
+    for name, value in named.items():
+        monkeypatch.setenv(name, value)
+
+
+def _machine(
+    monkeypatch, tmp_path, *, is_checkout: bool, own_made: bool, default_made: bool
+) -> tuple:
+    """A machine whose user folder holds `~/.otaku` where `default_made`,
+    with otaku run from a git checkout where `is_checkout` — holding its
+    own `data/` where `own_made` — or from an install; returns the two
+    folders."""
+    user = tmp_path / "user"
+    monkeypatch.setenv("HOME", str(user))
+    monkeypatch.setenv("USERPROFILE", str(user))
+    default_folder = user / ".otaku"
+    if default_made:
+        default_folder.mkdir(parents=True)
+    checkout_folder = tmp_path / "checkout"
+    own_folder = checkout_folder / "data"
+    if own_made:
+        own_folder.mkdir(parents=True)
+    monkeypatch.setattr(
+        paths_mod, "checkout_folder", lambda: checkout_folder if is_checkout else None
+    )
+    return default_folder, own_folder
+
+
+def _day(age: int) -> str:
+    return (datetime.now().astimezone() - timedelta(days=age)).strftime("%Y%m%d")
+
+
+def _snapshot_name(age: int) -> str:
+    return f"history-{_day(age)}.db"
+
+
+def _plant_snapshots(backups_dir: Path) -> str:
+    """Daily snapshots from 1 to 5 days ago and two migrations' — 10 days
+    and a day and a half — each dated by its modification time, beside a
+    file of the reader's own; returns that file's name."""
+    backups_dir.mkdir(parents=True, exist_ok=True)
+    now = time.time()
+    aged = {_snapshot_name(age): age for age in range(1, 6)}
+    aged |= {"history-schema-v13.db": 10, "history-schema-v14.db": 1.5}
+    for name, age in aged.items():
+        path = backups_dir / name
+        path.write_bytes(b"snapshot")
+        os.utime(path, (now - age * 86400, now - age * 86400))
+    (backups_dir / "notes.txt").write_text("mine", encoding="utf-8")
+    return "notes.txt"
+
+
+def _plant_logs(logs_dir: Path, *, ages: tuple[int, ...]) -> None:
+    """A file of each log for each of `ages` days ago, where none is yet."""
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    for age in ages:
+        for name in (
+            f"requests-{_day(age)}.jsonl",
+            f"system-{_day(age)}.log",
+            f"error-{_day(age)}.log",
+        ):
+            path = logs_dir / name
+            if not path.exists():
+                path.write_text("planted\n", encoding="utf-8")
+
+
+def _log_days(logs_dir: Path) -> dict[str, set[str]]:
+    """The days each log has a file for."""
+    days: dict[str, set[str]] = {}
+    for path in logs_dir.iterdir():
+        found = re.fullmatch(r"(requests|system|error)-(\d{8})\.(jsonl|log)", path.name)
+        if found:
+            days.setdefault(found[1], set()).add(found[2])
+    return days
+
+
+def _left_by_old_deletes(database: Path, *, rows: int, share: float = 0.5) -> bytes:
+    """Rows written and the first `share` of them deleted the way a build
+    without `secure_delete` deleted them, their text left in the free
+    pages; returns the marker only the deleted rows carry."""
+    marker = f"deleted-{secrets.token_hex(6)}".encode()
+    deleted = int(rows * share)
+    conn = sqlite3.connect(database)
+    try:
+        conn.execute("PRAGMA secure_delete = OFF")
+        conn.executemany(
+            "INSERT INTO history (body, created_at) VALUES (?, ?)",
+            (
+                ((marker if n < deleted else b"kept") + b"x" * 2000, "2026-11-10")
+                for n in range(rows)
+            ),
+        )
+        conn.commit()
+        (first,) = conn.execute("SELECT min(id) FROM history").fetchone()
+        conn.execute("DELETE FROM history WHERE id < ?", (first + deleted,))
+        conn.commit()
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    finally:
+        conn.close()
+    return marker
+
+
+def _free_pages(database: Path) -> int:
+    conn = sqlite3.connect(database)
+    try:
+        return int(conn.execute("PRAGMA freelist_count").fetchone()[0])
+    finally:
+        conn.close()
+
+
 def _open(paths: Paths) -> Store:
-    return Store.open(paths.database_file, PlainCipher(), backups_dir=paths.backups_dir, keep=0)
+    return Store.open(paths.database_file, PlainCipher(), backups_dir=paths.backups_dir)
 
 
 def _sealed(paths: Paths) -> Store:
     """The store over an encrypted database."""
-    return Store.open(paths.database_file, Cipher(FILES_KEY), backups_dir=paths.backups_dir, keep=0)
+    return Store.open(paths.database_file, Cipher(FILES_KEY), backups_dir=paths.backups_dir)
 
 
 def _state(tmp_path) -> Paths:

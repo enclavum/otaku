@@ -6,13 +6,17 @@ session cipher opens — which catches a plaintext database opened with
 encryption configured, an encrypted one opened without it, AND a wrong
 or replaced key, all before any content is touched. A daily
 `VACUUM INTO` snapshot lands in the backups dir on the first open of the
-day. Administrative facts (a migration ran, a backup was written or
-failed) are RETURNED as `Database.notes` for the caller to log — the
-store writes no log itself. A note marked `show` is one the user has to
-be TOLD, not merely have recorded for them.
+day, and the snapshots there, the ladder's too, are pruned to the newest
+`keep`. A delete overwrites what it removes (`secure_delete`), and the
+launch vacuums a file whose free pages pass a quarter of it (`vacuum`).
+Administrative facts (a migration ran, a backup was written or failed)
+are RETURNED as `Database.notes` for the caller to log, and `vacuum`
+returns its own — the store writes no log itself. A note marked `show` is one
+the user has to be TOLD, not merely have recorded for them.
 """
 
 import base64
+import contextlib
 import re
 import sqlite3
 from dataclasses import dataclass
@@ -23,12 +27,16 @@ from typing import Self
 from cryptography.exceptions import InvalidTag
 
 from otaku.encryption import Cipher, PlainCipher
+from otaku.formatting import format_megabytes
 
 _DECRYPT_ERRORS = (InvalidTag, ValueError)
 
 _VERSION_KEY = "schema_version"
 _CHECK_KEY = "check"
 _CANARY = b"otaku"
+_BUSY_TIMEOUT_MS = 5000
+# The share of free pages past which the launch vacuums the file.
+_VACUUM_FREE_SHARE = 0.25
 
 
 class DatabaseError(Exception):
@@ -62,12 +70,14 @@ class Database:
         # thread (`backend.app.thread`), whose queue keeps it to one.
         conn = sqlite3.connect(path, check_same_thread=False)
         # journal_mode=WAL persists in the file header; the rest are
-        # per-connection and must be set on every open.
+        # per-connection and must be set on every open. secure_delete: a
+        # deleted row's text is overwritten, never left in a free page.
         try:
             conn.execute("PRAGMA journal_mode = WAL")
             conn.execute("PRAGMA synchronous = NORMAL")
-            conn.execute("PRAGMA busy_timeout = 5000")
+            conn.execute(f"PRAGMA busy_timeout = {_BUSY_TIMEOUT_MS}")
             conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute("PRAGMA secure_delete = ON")
         except sqlite3.DatabaseError as e:
             # The first PRAGMA reads the file header: a file that is not
             # SQLite at all is refused here, curated, never a traceback.
@@ -78,8 +88,12 @@ class Database:
         return conn
 
     @classmethod
-    def open(cls, db_path: Path, cipher: Cipher, *, backups_dir: Path, keep: int) -> Self:
-        """Open (or create) the story database with the session cipher."""
+    def open(
+        cls, db_path: Path, cipher: Cipher, *, backups_dir: Path, keep: int | None = None
+    ) -> Self:
+        """Open (or create) the story database with the session cipher.
+        `keep` is the snapshots kept (`[database] backups`); None, an open
+        beside the launch's, neither takes nor prunes one."""
         from otaku.store.schema import SCHEMA_DDL, SCHEMA_VERSION
 
         db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -133,12 +147,41 @@ class Database:
                 conn.execute("PRAGMA foreign_keys = ON")
                 db.conn = conn
             cls._guard(db.conn, db_path, cipher)
-        if keep > 0:
-            db._daily_backup(db_path, backups_dir, keep=keep)
+        if keep is not None:
+            if keep > 0:
+                db._daily_backup(db_path, backups_dir)
+            db._prune_backups(db_path, backups_dir, keep=keep)
         return db
 
     def close(self) -> None:
         self.conn.close()
+
+    def vacuum(self) -> Note | None:
+        """The launch's (`Store.cleanup`): rewrite the file once its free
+        pages pass `_VACUUM_FREE_SHARE` of it — what deletes left before
+        `secure_delete`, and the space — and say so; None below it.
+        Best-effort and never waiting: another otaku writing skips it
+        until the next launch, said to the log alone."""
+        (free,) = self.conn.execute("PRAGMA freelist_count").fetchone()
+        (pages,) = self.conn.execute("PRAGMA page_count").fetchone()
+        if not pages or free / pages <= _VACUUM_FREE_SHARE:
+            return None
+        (page_size,) = self.conn.execute("PRAGMA page_size").fetchone()
+        self.conn.execute("PRAGMA busy_timeout = 0")
+        try:
+            self.conn.execute("VACUUM")
+            (left,) = self.conn.execute("PRAGMA page_count").fetchone()
+            # The rewrite went through the WAL: empty it, or it stays the
+            # size of the database for as long as otaku runs.
+            self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        except sqlite3.Error as e:
+            return Note(f"database vacuum skipped: {e}")
+        finally:
+            self.conn.execute(f"PRAGMA busy_timeout = {_BUSY_TIMEOUT_MS}")
+        return Note(
+            f"database vacuumed: {free} of {pages} pages were free",
+            show=f"Database vacuumed ({format_megabytes((pages - left) * page_size)} freed)",
+        )
 
     @staticmethod
     def now() -> str:
@@ -221,11 +264,10 @@ class Database:
             "KEK does not match this database; restore the ones it was created with"
         )
 
-    def _daily_backup(self, db_path: Path, backups_dir: Path, *, keep: int) -> None:
-        """Once-a-day snapshot, then prune to the newest `keep` files
-        matching this function's own naming pattern. `VACUUM INTO` yields
-        a consistent, compacted copy even mid-WAL. Best-effort: a failure
-        joins `notes` and never blocks opening."""
+    def _daily_backup(self, db_path: Path, backups_dir: Path) -> None:
+        """Once-a-day snapshot. `VACUUM INTO` yields a consistent,
+        compacted copy even mid-WAL. Best-effort: a failure joins `notes`
+        and never blocks opening."""
         stem, suffix = db_path.stem, db_path.suffix
         stamp = datetime.now().astimezone().strftime("%Y%m%d")
         dest = backups_dir / f"{stem}-{stamp}{suffix}"
@@ -234,19 +276,36 @@ class Database:
         try:
             backups_dir.mkdir(parents=True, exist_ok=True)
             self.conn.execute("VACUUM INTO ?", (str(dest),))
-            pattern = re.compile(rf"^{re.escape(stem)}-\d{{8}}{re.escape(suffix)}$")
-            dated = sorted(p for p in backups_dir.iterdir() if pattern.match(p.name))
-            pruned = dated[:-keep]
-            for old in pruned:
-                old.unlink()
-            extra = f", {len(pruned)} old pruned" if pruned else ""
-            self.notes.append(Note(f"daily database backup written at {dest.name}{extra}"))
+            self.notes.append(Note(f"daily database backup written at {dest.name}"))
         except (sqlite3.Error, OSError) as e:
             # A backup that did not happen is the user's business, not the
             # log's alone: they are one crash away from needing it.
             self.notes.append(
                 Note(f"daily backup failed: {e}", show=f"The daily database backup failed: {e}")
             )
+
+    def _prune_backups(self, db_path: Path, backups_dir: Path, *, keep: int) -> None:
+        """Every snapshot — the daily ones and the ladder's
+        (`migrations._backup`) — but the newest `keep`, by modification
+        time, deleted: all of them at 0. Best-effort, a file that will
+        not go is passed over; what went joins `notes`."""
+        stem, suffix = db_path.stem, db_path.suffix
+        pattern = re.compile(
+            rf"^{re.escape(stem)}-(\d{{8}}|schema-v\d+(-\d+)?){re.escape(suffix)}$"
+        )
+        try:
+            snapshots = sorted(
+                (p.stat().st_mtime, p) for p in backups_dir.iterdir() if pattern.match(p.name)
+            )
+        except OSError:
+            return
+        pruned = 0
+        for _, old in snapshots[: max(0, len(snapshots) - keep)]:
+            with contextlib.suppress(OSError):
+                old.unlink()
+                pruned += 1
+        if pruned:
+            self.notes.append(Note(f"database backups pruned: {pruned} removed"))
 
 
 def check_value(cipher: Cipher) -> str:

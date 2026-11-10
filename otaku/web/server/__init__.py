@@ -41,7 +41,7 @@ will; the fonts are immutable and long-lived, which is why they carry
 version numbers in their names instead.
 
 `custom.css` is the one asset that is NOT packaged: it comes from the
-state dir (`web/custom.css`), is absent by default, and is loaded last so
+home folder (`web/custom.css`), is absent by default, and is loaded last so
 that anything in it wins. The token contract it writes against is
 `docs/web_tokens.md`, and the HTTP surface is `otaku/web/api.yaml`.
 

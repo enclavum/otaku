@@ -37,6 +37,11 @@ too, as it came (`cards.original_file`): a raw file, its name marked so
 it is never served as a picture. The daily snapshot
 is of the database file alone: the folder is not backed up.
 
+A delete overwrites what it removes (`secure_delete`, set in
+`Database.connect`, which every connection goes through), and the launch
+vacuums a file a quarter free (`Store.cleanup`), after the day's backup
+and before the worker connects.
+
 ## Store conventions
 
 Method order in every ops class: CRUD first, in order — add, get, list,

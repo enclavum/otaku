@@ -1,4 +1,4 @@
-"""The launch: one state dir becomes a live App — as functions, not a
+"""The launch: one home folder becomes a live App — as functions, not a
 class; the app itself is the product.
 
 `open_app` is the whole composition — paths, config (first-run write
@@ -50,6 +50,9 @@ from otaku.settings.state import ModelRole
 from otaku.store import DatabaseError as DatabaseError
 from otaku.store import Store, is_encrypted
 
+# The error log's days while `[logs] days = 0` has the other logs off.
+_ERROR_LOG_DAYS = 7
+
 # What a launch says of a model pinned for a role whose provider is no
 # longer configured, the pin dropped.
 _STALE_MODEL_PIN = {
@@ -66,8 +69,8 @@ _STALE_MODEL_PIN = {
 
 
 def open_app(root: str | Path | None = None, *, ask_secret: AskSecret | None = None) -> App:
-    """The launch over `root` (default the standard state dir — but the
-    OTAKU_CONFIG_DIR env var is cli's business: a non-cli caller that
+    """The launch over `root` (default the standard home folder — but the
+    env vars that move it are cli's business: a non-cli caller that
     wants it must resolve it itself and pass the root in).
     `ask_secret` answers the passphrase provider — a frontend passes its
     own prompt; None refuses a passphrase-encrypted store rather than
@@ -99,10 +102,13 @@ def open_app(root: str | Path | None = None, *, ask_secret: AskSecret | None = N
     # edited there is visible everywhere at once. The invariant: names
     # are the stable handle — a config may swap under a running pass,
     # which resolves its client by name.
-    errors = ErrorLog(paths.logs_dir)
+    # `[logs] days = 0` turns the request and system logs off; the error
+    # log is always written, and keeps its own days then.
+    errors = ErrorLog(paths.logs_dir, keep_days=config.log_days or _ERROR_LOG_DAYS)
+    requests = RequestLog(paths.logs_dir, cipher, keep_days=config.log_days)
     registry = Registry(
         providers,
-        request_sink=RequestLog(paths.logs_dir, cipher),
+        request_sink=requests,
         error_sink=errors,
         smooth=config.smooth_streaming,
     )
@@ -131,26 +137,27 @@ def open_app(root: str | Path | None = None, *, ask_secret: AskSecret | None = N
     store = Store.open(
         paths.database_file, cipher, backups_dir=paths.backups_dir, keep=config.backups
     )
+    # After the day's backup, before the worker's connection.
+    store.cleanup()
     # The store's admin facts are the system log's — except the ones it
-    # marks `show`: a ladder that ran, a backup that failed. Those the
-    # user is told, before the banner, with the launch's other reports.
-    system_log = SystemLog(paths.logs_dir)
+    # marks `show`: a ladder that ran, a backup that failed, a vacuum.
+    # Those the user is told, before the banner, with the launch's other
+    # reports.
+    system_log = SystemLog(paths.logs_dir, keep_days=config.log_days)
     for note in store.notes:
         system_log.record(note.text)
         if note.show:
             notices.append(note.show)
-    # The files folder, swept against what the rows still name — what a
-    # crash between a delete's rows and its files left behind.
-    swept = store.sweep_files()
-    if swept:
-        system_log.record(f"files folder swept: {swept} unreferenced file(s) removed")
+    pruned = sum(log.prune() for log in (requests, system_log, errors))
+    if pruned:
+        system_log.record(f"logs pruned: {pruned} old file(s) removed")
     # The worker's own store connection (WAL makes the concurrent write
-    # safe), opened lazily on its thread; keep=0 — the store's open
-    # above owns the daily snapshot. It exists whatever [lore_extraction]
+    # safe), opened lazily on its thread, with no `keep` — the store's
+    # open above owns the snapshots. It exists whatever [lore_extraction]
     # says: `enabled` only gates the idle scheduling, so a forced pass
     # always has its one path.
     worker = Worker(
-        lambda: Store.open(paths.database_file, cipher, backups_dir=paths.backups_dir, keep=0),
+        lambda: Store.open(paths.database_file, cipher, backups_dir=paths.backups_dir),
         registry,
         system_log,
         errors=errors,
@@ -199,8 +206,20 @@ def request_log(
     return RequestLog(paths.logs_dir, _unlock_cipher(config, paths, ask_secret=ask_secret))
 
 
+def config_path(root: str | Path | None = None) -> Path:
+    """config.toml, in the home folder `root` names or the one resolved."""
+    return Paths.resolve(root).config_file
+
+
 def system_log(root: str | Path | None = None) -> SystemLog:
-    return SystemLog(Paths.resolve(root).logs_dir)
+    """The system log, which `otaku update` writes too: off by `[logs]
+    days` where config.toml can be read."""
+    paths = Paths.resolve(root)
+    try:
+        days: int | None = config_file.load(paths.config_file).log_days
+    except ConfigError:
+        days = None
+    return SystemLog(paths.logs_dir, keep_days=days)
 
 
 def error_log(root: str | Path | None = None) -> ErrorLog:
@@ -211,10 +230,10 @@ def error_log(root: str | Path | None = None) -> ErrorLog:
 
 
 def purge(root: str | Path | None = None) -> Path:
-    """Delete the state dir — every story, picture, backup, setting and log
+    """Delete the home folder — every story, picture, backup, setting and log
     in it — and its keys in the OS keychain; the dir purged. Only otaku's
     own folders go, and the dir itself only where they were all it held:
-    one OTAKU_CONFIG_DIR points at keeps whatever else is in it."""
+    one an env var points at keeps whatever else is in it."""
     paths = Paths.resolve(root)
     encryption.purge_keychain_items(paths.keychain_service)
     for folder in (

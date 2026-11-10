@@ -70,8 +70,11 @@ through it too.
 - **A port outside 1–65535 never reaches the bind**, whichever source
   names it: the file's is clamped at load (`settings.config`),
   `OTAKU_WEB_PORT`'s is passed over (`settings.services.get_web_settings`)
-  and the launch says so — the address is printed before the bind.
-- **The state dir's `web/`** (`custom.css`, `fonts/`) is the reader's
+  and the launch says so, and `serve --port` refuses one outright — the
+  address is printed before the bind. `serve --host` (`--any-host` for
+  `0.0.0.0`) and `--port` set those two variables for their run
+  (`otaku.envvars`), so every reader of the address agrees.
+- **`web/` in otaku's home folder** (`custom.css`, `fonts/`) is the reader's
   alone, never written by the app; the `--otk-*` tokens and documented
   hooks are a public contract (`docs/web_tokens.md`), a rename a
   breaking change.

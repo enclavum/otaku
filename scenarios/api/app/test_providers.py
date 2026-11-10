@@ -2365,7 +2365,7 @@ def _panel_walk(app: App, provider: str, attr: str) -> str:
 
 
 def _unsealed(app: App, value: str) -> str:
-    """A sealed providers.toml value opened over the state dir's file
+    """A sealed providers.toml value opened over the home folder's file
     key — the way the launch opens it."""
     return unseal(value, key_file=app.paths.config_key_file, service="scenario:none")
 

@@ -51,8 +51,11 @@ adaptive color falls back). `conda activate` first, or pass
 `--no-capture-output`. Lint, typecheck and the test suites are unaffected;
 only what talks to the terminal is.
 
-The state dir defaults to `~/.otaku`, relocatable via the
-`OTAKU_CONFIG_DIR` env var.
+otaku's home folder is the first set of `OTAKU_HOME`, `OTAKU_DATA_DIR` and
+`OTAKU_CONFIG_DIR` (the older name); else
+a git checkout's own `data/` once it has one, `~/.otaku` where it
+exists, a checkout's `data/`, `~/.otaku` — in that order
+(`backend.app.paths`). This checkout runs on `~/.otaku`, which exists.
 
 ## Architecture
 

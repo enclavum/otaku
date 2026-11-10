@@ -66,7 +66,7 @@ class TestServing:
         assert page.get("/custom.css") == b""
 
     def test_a_typeface_of_the_reader_s_own_is_served(self, page: Page) -> None:
-        """`web/fonts/` in the state dir, so `custom.css` can be a whole
+        """`web/fonts/` in the home folder, so `custom.css` can be a whole
         theme and not only a palette. Their directory, their files — and
         the name is looked up in a LISTING of it, never joined onto it."""
         theirs = page.root / "web" / "fonts"

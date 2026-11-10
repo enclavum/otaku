@@ -4,15 +4,15 @@
 The three migration frameworks — settings, database schema, export format —
 are only ever exercised against synthetic fixtures by the suites. This drives
 the real thing: an old release from PyPI plays a real story through a pty,
-then the local build launches on that state dir and every promise is checked.
+then the local build launches on that home folder and every promise is checked.
 
     python scripts/rehearse_migration.py                # the whole matrix
     python scripts/rehearse_migration.py 0.2.2          # one version, plain
     python scripts/rehearse_migration.py 0.2.2 --encrypted
 
 Needs `uv` on PATH and a network connection (PyPI, once per version). Nothing
-touches the developer's own state dir or model servers: every run gets a
-throwaway OTAKU_CONFIG_DIR, and every provider url in the seeded config is
+touches the developer's own otaku home folder or model servers: every run
+gets a throwaway OTAKU_HOME, and every provider url in the seeded config is
 dead-ended except the scripted server the suites already use.
 
 What it proves, per release and per encryption mode: the ladder migrates the
@@ -77,11 +77,11 @@ class Otaku:
     """One otaku run in a pty — any binary, so an old release and this build
     are driven the same way."""
 
-    def __init__(self, binary: str, state_dir: str, *, rows: int = 40, cols: int = 100) -> None:
+    def __init__(self, binary: str, home_folder: str, *, rows: int = 40, cols: int = 100) -> None:
         self._master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
         env = os.environ | {
-            "OTAKU_CONFIG_DIR": state_dir,
+            "OTAKU_HOME": home_folder,
             "TERM": "xterm-256color",
             "COLORFGBG": "",
         }
@@ -314,7 +314,7 @@ def read_through_app(current: str, root: Path) -> dict:
         "cfg = config_file.load(p.config_file);"
         "c = unlock(cfg.encryption.provider, keys_file=p.keys_file, kek_file=p.kek_file,"
         " service=p.keychain_service, retrieve_command=cfg.encryption.retrieve_command);"
-        "s = Store.open(p.database_file, c, backups_dir=p.backups_dir, keep=0);"
+        "s = Store.open(p.database_file, c, backups_dir=p.backups_dir);"
         "st = s.stories.get(1);"
         "ms = s.stories.get_messages(1);"
         "ids = s.stories.get_messages_ids(1);"

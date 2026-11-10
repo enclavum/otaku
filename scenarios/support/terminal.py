@@ -57,7 +57,7 @@ class Terminal:
 
     def __init__(
         self,
-        state_dir: str,
+        home_folder: str,
         *,
         args: tuple[str, ...] = (),
         env: dict[str, str] | None = None,
@@ -70,7 +70,7 @@ class Terminal:
         run_env = (
             os.environ
             | {
-                "OTAKU_CONFIG_DIR": state_dir,
+                "OTAKU_HOME": home_folder,
                 "TERM": "xterm-256color",
                 # Neutralized so the background is whatever a story ARMS
                 # (OSC 11), never the developer terminal's own answer.

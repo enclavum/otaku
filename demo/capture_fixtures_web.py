@@ -2,7 +2,7 @@
 """Regenerate demo/web/fixtures/ from the real server over the shipped
 sample stories.
 
-The app is opened over a THROWAWAY state dir this script creates and
+The app is opened over a THROWAWAY home folder this script creates and
 deletes — never anyone's real ~/.otaku — so a regeneration can never
 capture personal library content into a committed file. The scenario
 suite's scripted server stands in for an engine, so the app has a real

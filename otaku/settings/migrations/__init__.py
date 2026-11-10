@@ -188,6 +188,13 @@ _CONFIG_MIGRATIONS: list[Migration] = [
         ),
         after="show_banner",
     ),
+    # 0.10.0 — the logs are pruned by age, a week unless set.
+    ensure_section(
+        "logs",
+        "[logs]\n"
+        + row("days = 7", "days of logs kept in logs/ (0 disables logging except for error logs)"),
+        after="database",
+    ),
 ]
 
 

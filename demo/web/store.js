@@ -725,7 +725,7 @@ export function info(storyId = null) {
   rows.push(["Extraction", state.pinned ? `${PROVIDER}/${state.pinned}` : "the story model"]);
   return {
     sections: [
-      { rows: [["State dir", "(this browser tab — nothing leaves it)"]], note: "" },
+      { rows: [["Home folder", "(this browser tab — nothing leaves it)"]], note: "" },
       {
         rows: [
           ["Backend", "demo (a model that lives in the page)"],

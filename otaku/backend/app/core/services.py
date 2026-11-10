@@ -1,4 +1,4 @@
-"""The app: otaku opened over one state dir — what one launch is made of
+"""The app: otaku opened over one home folder — what one launch is made of
 (the paths, the store, the providers, the integrations, the worker, the
 extraction runs asked for), the channels a frontend holds (the worker's,
 the crash log, the idle hook), and the backend's own reads of the
@@ -69,7 +69,7 @@ E = TypeVar("E")
 
 
 class App:
-    """otaku opened over one state dir: the handles every backend call
+    """otaku opened over one home folder: the handles every backend call
     reads through, and the channels a frontend holds. A plain class on
     purpose: `start` is the ONE constructor, and it owns the invariants a
     generated `__init__` would skip. Ends with `close()`."""
@@ -113,7 +113,7 @@ class App:
         integrations: Integrations,
         worker: Worker,
     ) -> Self:
-        """The app over one state dir. `config` is config.toml as the
+        """The app over one home folder. `config` is config.toml as the
         launch read it — a web password hashed where the file could not
         take the hash — standing until the file changes. Nothing is asked
         of a provider here: the launch makes the remembered model current

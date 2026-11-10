@@ -37,7 +37,7 @@ def server() -> Iterator[ModelServer]:
 
 @pytest.fixture
 def app(server: ModelServer, tmp_path: Path) -> Iterator[App]:
-    """A freshly launched application over a throwaway state dir."""
+    """A freshly launched application over a throwaway home folder."""
     application = launch(tmp_path / "state", server)
     yield application
     application.close()

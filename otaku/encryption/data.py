@@ -178,7 +178,7 @@ class KekProvider(ABC):
 
 
 class KeychainKek(KekProvider):
-    """KEK in the OS keychain, the item named per state dir so parallel
+    """KEK in the OS keychain, the item named per home folder so parallel
     setups never share — or clobber — each other's key."""
 
     name = "keychain"

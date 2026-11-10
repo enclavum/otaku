@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from otaku import __version__
 from otaku.backend.api import Api
 from otaku.backend.app.paths import Paths
 from otaku.backend.launch import open_app
@@ -34,7 +35,7 @@ _PLACEHOLDER = "".join(text for _, text in CHAT_PLACEHOLDER)
 class TestFirstRun:
     def test_first_launch_without_a_model_opens_the_sample(self, tmp_path: Path) -> None:
         """The very first launch on a machine with nothing running: the
-        state dir and configs appear, the picker has nothing to offer —
+        home folder and configs appear, the picker has nothing to offer —
         and the app opens anyway, landing mid-story in the sample with no
         model selected. A turn explains itself instead of failing. The
         premise is an empty machine: a real engine on a fixed default
@@ -117,6 +118,18 @@ class TestServe:
         _expect_count(terminal, "Running on", 2, timeout=20.0)
         _pressed_until(terminal, CTRL_D, "Shutting down", timeout=20.0)
         assert terminal.wait() == 0
+
+    def test_any_host_beside_a_host_is_refused_before_anything_opens(self, tmp_path: Path) -> None:
+        state = tmp_path / "state"
+        result = run_otaku(state, "serve", "--any-host", "--host", "127.0.0.1")
+        assert result.returncode == 2
+        assert not state.exists()
+
+    def test_a_port_out_of_range_is_refused_before_anything_opens(self, tmp_path: Path) -> None:
+        state = tmp_path / "state"
+        result = run_otaku(state, "serve", "--port", "70000")
+        assert result.returncode == 2
+        assert not state.exists()
 
     def test_the_old_name_still_serves(self, server: ModelServer, tmp_path: Path) -> None:
         """`otaku web`, the command's name before 0.9.0, still serves."""
@@ -227,7 +240,7 @@ class TestUninstall:
         assert terminal.wait() == 0
         assert (state / "configs").is_dir()
 
-    def test_a_purge_confirmed_deletes_the_state_dir(
+    def test_a_purge_confirmed_deletes_the_home_folder(
         self, server: ModelServer, tmp_path: Path
     ) -> None:
         state = tmp_path / "state"
@@ -245,9 +258,10 @@ class TestUninstall:
 
 class TestHelpVersion:
     def test_version_prints_and_exits(self, tmp_path: Path) -> None:
+        # `<program> <version>`, the line a script reads the version from.
         result = run_otaku(tmp_path / "state", "--version")
         assert result.returncode == 0
-        assert "otaku" in result.stdout
+        assert result.stdout == f"otaku {__version__}\n"
 
     def test_help_names_serve_and_keeps_its_old_name_out(self, tmp_path: Path) -> None:
         listing = run_otaku(tmp_path / "state", "--help").stdout.split("Commands:", 1)[1]
