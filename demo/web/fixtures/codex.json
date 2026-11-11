@@ -15,7 +15,8 @@
      "name": ""
     }
    ],
-   "story_count": 1
+   "story_count": 1,
+   "is_blank": false
   },
   {
    "id": 2,
@@ -34,7 +35,8 @@
      "name": ""
     }
    ],
-   "story_count": 1
+   "story_count": 1,
+   "is_blank": false
   },
   {
    "id": 3,
@@ -55,7 +57,8 @@
      "name": ""
     }
    ],
-   "story_count": 1
+   "story_count": 1,
+   "is_blank": false
   },
   {
    "id": 4,
@@ -72,7 +75,8 @@
      "name": ""
     }
    ],
-   "story_count": 1
+   "story_count": 1,
+   "is_blank": false
   },
   {
    "id": 5,
@@ -89,7 +93,8 @@
      "name": ""
     }
    ],
-   "story_count": 1
+   "story_count": 1,
+   "is_blank": false
   },
   {
    "id": 6,
@@ -106,7 +111,8 @@
      "name": ""
     }
    ],
-   "story_count": 1
+   "story_count": 1,
+   "is_blank": false
   },
   {
    "id": 7,
@@ -123,7 +129,8 @@
      "name": ""
     }
    ],
-   "story_count": 1
+   "story_count": 1,
+   "is_blank": false
   }
  ],
  "card": {
@@ -166,6 +173,14 @@
      "journal_count": 2
     }
    ],
+   "is_blank": false,
+   "default_export_format": "png",
+   "available_export_formats": [
+    "png",
+    "json",
+    "charx"
+   ],
+   "original_format": null,
    "updated_at": "2026-01-01T00:00:00+00:00"
   },
   "2": {
@@ -211,6 +226,14 @@
      "journal_count": 2
     }
    ],
+   "is_blank": false,
+   "default_export_format": "png",
+   "available_export_formats": [
+    "png",
+    "json",
+    "charx"
+   ],
+   "original_format": null,
    "updated_at": "2026-01-01T00:00:00+00:00"
   },
   "3": {
@@ -260,6 +283,14 @@
      "journal_count": 15
     }
    ],
+   "is_blank": false,
+   "default_export_format": "png",
+   "available_export_formats": [
+    "png",
+    "json",
+    "charx"
+   ],
+   "original_format": null,
    "updated_at": "2026-01-01T00:00:00+00:00"
   },
   "4": {
@@ -301,6 +332,14 @@
      "journal_count": 15
     }
    ],
+   "is_blank": false,
+   "default_export_format": "png",
+   "available_export_formats": [
+    "png",
+    "json",
+    "charx"
+   ],
+   "original_format": null,
    "updated_at": "2026-01-01T00:00:00+00:00"
   },
   "5": {
@@ -342,6 +381,14 @@
      "journal_count": 15
     }
    ],
+   "is_blank": false,
+   "default_export_format": "png",
+   "available_export_formats": [
+    "png",
+    "json",
+    "charx"
+   ],
+   "original_format": null,
    "updated_at": "2026-01-01T00:00:00+00:00"
   },
   "6": {
@@ -383,6 +430,14 @@
      "journal_count": 15
     }
    ],
+   "is_blank": false,
+   "default_export_format": "png",
+   "available_export_formats": [
+    "png",
+    "json",
+    "charx"
+   ],
+   "original_format": null,
    "updated_at": "2026-01-01T00:00:00+00:00"
   },
   "7": {
@@ -424,6 +479,14 @@
      "journal_count": 15
     }
    ],
+   "is_blank": false,
+   "default_export_format": "png",
+   "available_export_formats": [
+    "png",
+    "json",
+    "charx"
+   ],
+   "original_format": null,
    "updated_at": "2026-01-01T00:00:00+00:00"
   }
  },

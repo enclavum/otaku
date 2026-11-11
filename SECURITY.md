@@ -34,7 +34,7 @@ otaku stores itself lands on disk instead — Windows' own credential store (DPA
 Manager) is not yet used. And the `0600` and `0700` modes otaku sets are POSIX permissions, which
 Windows does not enforce: the key files and the directory holding them are readable by other
 accounts on the machine. If that matters to you on Windows, use `passphrase` (which stores
-nothing) or `command` (which hands custody to a tool you trust), and keep the state dir on a
+nothing) or `command` (which hands custody to a tool you trust), and keep the home folder on a
 volume only you can reach.
 
 It does **not** protect against:
@@ -45,8 +45,8 @@ It does **not** protect against:
   is sent to the model you point otaku at.
 
 The request log seals its entries with the same cipher; with encryption off, it is plain
-text too: every prompt as sent, kept indefinitely — deleting a story does not delete its wire
-history. The log directory is yours to prune.
+text too: every prompt as sent, kept for 7 days (adjustable in the settings file) — deleting a
+story leaves its wire history until then.
 
 ## What leaves the machine
 
@@ -124,7 +124,7 @@ Cloud provider API keys never sit in a config file as plain text. They are store
 `configs/providers.toml` sealed (AES-256-GCM) — a plane fully separate from the story encryption
 above, with its own key, and independent of `[encryption]` being enabled at all. The web search key
 is kept the same way, sealed in `configs/integrations.toml`. The sealing key lives in the OS
-keychain (macOS `security`, Linux `secret-tool`), one item per state dir; on a machine without a
+keychain (macOS `security`, Linux `secret-tool`), one item per home folder; on a machine without a
 keychain tool — every Windows machine, as above — it falls back to `configs/config.key` at mode
 `0600`, which Windows does not enforce. A key pasted into either file as plain text is sealed
 automatically at the next launch, and the dated backup that edit leaves in `configs/backups/` has

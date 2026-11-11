@@ -1716,8 +1716,9 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 .otk-detail__scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
 .otk-detail__head { display: flex; align-items: baseline; gap: 10px; }
 /* the open message's pin, at the end of the reader's header, in step
-   with the number-pin in the list */
-.otk-detail__pin { margin-left: auto; display: flex; padding: 2px; line-height: 0; color: var(--otk-faint); cursor: pointer; transform: translateY(3px); }
+   with the number-pin in the list; centred on the header's line and
+   taking none of its height, so a message without one heads the same */
+.otk-detail__pin { align-self: center; margin: -10.5px 0 -10.5px auto; display: flex; padding: 2px; line-height: 0; color: var(--otk-faint); cursor: pointer; }
 .otk-detail__pin .otk-pin { display: block; fill: none; stroke: currentColor; stroke-width: 1.2; stroke-linejoin: round; }
 .otk-detail__pin[data-pinned="true"] .otk-pin { fill: var(--otk-accent); stroke: var(--otk-accent); }
 .otk-detail__pin:hover { color: var(--otk-ink); }
@@ -2284,8 +2285,8 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
    in its top corner, boxed alike — each 6px off the picture's edge,
    measured inside its hairline */
 .otk-tick, .otk-pics__remove, .otk-tile__remove { position: absolute; z-index: 1; right: calc(6px - var(--otk-hair)); width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; border: var(--otk-hair) solid var(--otk-line); background: var(--otk-paper); font-size: 13px; line-height: 1; color: var(--otk-ink); }
-.otk-tick, .otk-tile__remove { right: calc(7px - var(--otk-hair)); }
-.otk-tick { bottom: calc(7px - var(--otk-hair)); }
+.otk-tick, .otk-tile__remove { right: calc(8px - var(--otk-hair)); }
+.otk-tick { bottom: calc(8px - var(--otk-hair)); }
 .otk-tick[aria-checked="true"]::after { content: "\2713"; }
 .otk-tick--inline { position: static; flex: none; width: 16px; height: 16px; font-size: 12px; }
 /* a card no story takes has no tick: in a row, its room alone */
@@ -2472,7 +2473,7 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
    keys, and always on a screen with no hover */
 .otk-pics__remove { top: calc(6px - var(--otk-hair)); opacity: 0; }
 .otk-pics__main:hover > .otk-pics__remove, .otk-pics__remove:focus-visible { opacity: 1; }
-.otk-tile__remove { top: calc(7px - var(--otk-hair)); }
+.otk-tile__remove { top: calc(8px - var(--otk-hair)); }
 /* a tile's delete fades in over its picture under the pointer, and out
    after it; on a touch screen it stays */
 .otk-tile__remove { opacity: 0; transition: opacity 0.12s; }
@@ -2539,8 +2540,8 @@ button.otk-ruler__cell:not(:disabled):hover .otk-ruler__mark { background: var(-
 
 /* three tile sizes, mid the one above; list is the fourth view */
 .otk-chars[data-view="small"] .otk-chars__gallery { grid-template-columns: repeat(auto-fill, 112px); gap: 12px; }
-.otk-chars[data-view="small"] .otk-tick { right: calc(5px - var(--otk-hair)); bottom: calc(5px - var(--otk-hair)); }
-.otk-chars[data-view="small"] .otk-tile__remove { right: calc(5px - var(--otk-hair)); top: calc(5px - var(--otk-hair)); }
+.otk-chars[data-view="small"] .otk-tick { right: calc(6px - var(--otk-hair)); bottom: calc(6px - var(--otk-hair)); }
+.otk-chars[data-view="small"] .otk-tile__remove { right: calc(6px - var(--otk-hair)); top: calc(6px - var(--otk-hair)); }
 .otk-chars[data-view="small"] .otk-tile { gap: 5px; padding: 5px; }
 .otk-chars[data-view="small"] .otk-tile__tag,
 .otk-chars[data-view="small"] .otk-tile__meta,

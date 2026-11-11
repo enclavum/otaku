@@ -12,8 +12,10 @@ then the local build launches on that home folder and every promise is checked.
 
 Needs `uv` on PATH and a network connection (PyPI, once per version). Nothing
 touches the developer's own otaku home folder or model servers: every run
-gets a throwaway OTAKU_HOME, and every provider url in the seeded config is
-dead-ended except the scripted server the suites already use.
+gets a throwaway home folder — named by OTAKU_HOME for this build and by
+OTAKU_CONFIG_DIR, the one name a release before 0.10.0 reads — and every
+provider url in the seeded config is dead-ended except the scripted server
+the suites already use.
 
 What it proves, per release and per encryption mode: the ladder migrates the
 database it finds and says so, the result passes its integrity and foreign-key
@@ -64,6 +66,7 @@ VERSIONS = (
     "0.6.0",
     "0.7.0",
     "0.8.0",
+    "0.9.0",
 )
 PROVIDER, MODEL = "generic", "test-model"
 WORK = Path(os.environ.get("REHEARSAL_DIR", "/tmp/otaku-rehearsal"))
@@ -81,7 +84,9 @@ class Otaku:
         self._master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
         env = os.environ | {
+            # this build reads the first; a release before 0.10.0 the second alone
             "OTAKU_HOME": home_folder,
+            "OTAKU_CONFIG_DIR": home_folder,
             "TERM": "xterm-256color",
             "COLORFGBG": "",
         }
@@ -237,7 +242,7 @@ def seed_config(python: str, root: Path, server_url: str, *, version: str, encry
     then every provider url is dead-ended and the scripted one added. The
     snippet is the OLD release's api — never this build's: `otaku.app`
     up to 0.3.0, the backend's launch module from 0.4.0 on, its paths in
-    the domain package from 0.8.0."""
+    the domain package from 0.8.0, in the app's folder from 0.9.0."""
     released = tuple(int(n) for n in version.split("."))
     if released < (0, 4, 0):
         code = (
@@ -246,7 +251,12 @@ def seed_config(python: str, root: Path, server_url: str, *, version: str, encry
             f"load_config(Paths.resolve({str(root)!r}))"
         )
     else:
-        paths = "otaku.backend.domain.app._paths" if released >= (0, 8, 0) else "otaku.backend.paths"
+        if released >= (0, 9, 0):
+            paths = "otaku.backend.app.paths"
+        elif released >= (0, 8, 0):
+            paths = "otaku.backend.domain.app._paths"
+        else:
+            paths = "otaku.backend.paths"
         code = (
             f"from {paths} import Paths;"
             "from otaku.backend.launch import _load_config;"
